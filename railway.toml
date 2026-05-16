@@ -5,6 +5,3 @@ buildCommand = "npm run build"
 [deploy]
 startCommand = "npm run start"
 restartPolicyType = "ON_FAILURE"
-
-[phases.setup]
-nixPkgs = ["libreoffice"]
