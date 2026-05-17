@@ -135,6 +135,410 @@ function ScoreGate({ label, value, options, onChange }) {
   );
 }
 
+const QUALIFY_LABELS = {
+  qualify_budget:        ["No budget", "Unsure", "Yes — clear budget"],
+  qualify_timeframe:     ["18+ months", "6–18 months", "< 6 months"],
+  qualify_site:          ["No site", "Under contract", "Owns site"],
+  qualify_decision_maker:["Not DM", "One of two", "Sole DM"],
+};
+
+function fmt(key, val) {
+  if (val == null) return "—";
+  if (key === "estimated_value" || key === "preconstruction_fee")
+    return `$${Number(val).toLocaleString("en-AU")}`;
+  if (key === "floor_area_m2") return `${val} m²`;
+  if (key === "desired_start_date" || key === "next_action_date")
+    return new Date(val).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  if (QUALIFY_LABELS[key]) return `${QUALIFY_LABELS[key][Number(val)]} (${val}/2)`;
+  return String(val);
+}
+
+function SuggestionRow({ label, fieldKey, val, currentVal, checked, onChange }) {
+  if (val == null) return null;
+  return (
+    <label className="flex items-start gap-3 py-1.5 cursor-pointer group">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="mt-0.5 rounded border-hairline text-primary focus-ring flex-shrink-0"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className="text-xs font-medium text-ink">{label}</span>
+          <span className="text-xs font-semibold text-accent">{fmt(fieldKey, val)}</span>
+          {currentVal != null && currentVal !== "" && (
+            <span className="text-xs text-muted line-through">{fmt(fieldKey, currentVal)}</span>
+          )}
+        </div>
+      </div>
+    </label>
+  );
+}
+
+function SuggestionSection({ title, children }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : [children].filter(Boolean);
+  if (!items.length) return null;
+  return (
+    <div className="border border-hairline rounded-lg p-3 space-y-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">{title}</p>
+      {items}
+    </div>
+  );
+}
+
+function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations, onViewConv }) {
+  const [step, setStep] = useState("input");
+  const [title, setTitle] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [suggestions, setSuggestions] = useState(null);
+  const [selected, setSelected] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef();
+
+  function reset() {
+    setStep("input"); setTitle(""); setTranscript(""); setFileName("");
+    setSuggestions(null); setSelected({}); setErr("");
+  }
+  function close() { reset(); onClose(); }
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = ev => setTranscript(String(ev.target.result || ""));
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  async function analyse() {
+    if (!transcript.trim()) return;
+    setStep("analysing"); setErr("");
+    try {
+      const r = await fetch(`/api/sales/leads/${leadId}/conversations/analyse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: transcript.trim() })
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Analysis failed");
+      const s = j.suggestions;
+      setSuggestions(s);
+      // Pre-select all non-null found values
+      const init = {};
+      [["lead", Object.keys(s?.lead || {})], ["project", Object.keys(s?.project || {})],
+       ["qualifying", Object.keys(s?.qualifying || {})], ["winning_offer", Object.keys(s?.winning_offer || {})]
+      ].forEach(([sec, keys]) => {
+        keys.forEach(k => { if (s[sec][k] != null) init[`${sec}.${k}`] = true; });
+      });
+      if (s?.next_action != null) init.next_action = true;
+      if (s?.next_action_date != null) init.next_action_date = true;
+      init.activity = true;
+      setSelected(init);
+      setStep("review");
+    } catch (e2) {
+      setErr(e2.message); setStep("input");
+    }
+  }
+
+  function toggleSec(sec, fields, on) {
+    setSelected(prev => {
+      const next = { ...prev };
+      fields.forEach(k => { if (suggestions?.[sec]?.[k] != null) next[`${sec}.${k}`] = on; });
+      return next;
+    });
+  }
+
+  async function apply() {
+    setSaving(true); setErr("");
+    try {
+      const applied = {};
+      const s = suggestions || {};
+      [["lead","first_name"],["lead","last_name"],["lead","email"],["lead","phone"],["lead","suburb"],
+       ["project","project_type"],["project","estimated_value"],["project","floor_area_m2"],
+       ["project","design_stage"],["project","desired_start_date"],["project","discovery_notes"],
+       ["qualifying","qualify_budget"],["qualifying","qualify_timeframe"],
+       ["qualifying","qualify_site"],["qualifying","qualify_decision_maker"],
+       ["winning_offer","preconstruction_fee"],["winning_offer","inclusions_summary"]
+      ].forEach(([sec, k]) => {
+        if (selected[`${sec}.${k}`] && s[sec]?.[k] != null) applied[k] = s[sec][k];
+      });
+      if (selected.next_action && s.next_action) applied.next_action = s.next_action;
+      if (selected.next_action_date && s.next_action_date) applied.next_action_date = s.next_action_date;
+
+      const r = await fetch(`/api/sales/leads/${leadId}/conversations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim() || null,
+          transcript: transcript.trim(),
+          bp_suggestions: selected.activity ? suggestions : null,
+          applied_fields: applied
+        })
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Save failed");
+      onSaved();
+      close();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) return null;
+  const s = suggestions || {};
+  const leadFields  = Object.keys(s?.lead || {}).filter(k => s.lead[k] != null);
+  const projFields  = Object.keys(s?.project || {}).filter(k => s.project[k] != null);
+  const qualFields  = Object.keys(s?.qualifying || {}).filter(k => s.qualifying[k] != null);
+  const woFields    = Object.keys(s?.winning_offer || {}).filter(k => s.winning_offer[k] != null);
+  const hasAnySugg  = leadFields.length || projFields.length || qualFields.length || woFields.length;
+  const PROJECT_TYPE_LABEL = t => ({ new_build:"New Build", extension:"Extension", renovation:"Renovation", knockdown_rebuild:"Knockdown Rebuild" })[t] || t;
+  const DESIGN_STAGE_LABEL = t => ({ concept:"Concept", da_approved:"DA Approved", construction_drawings:"Construction Drawings" })[t] || t;
+  const fieldLabel = k => ({
+    first_name:"First name", last_name:"Last name", email:"Email", phone:"Phone", suburb:"Suburb",
+    project_type:"Project type", estimated_value:"Est. value", floor_area_m2:"Floor area",
+    design_stage:"Design stage", desired_start_date:"Desired start", discovery_notes:"Discovery notes",
+    qualify_budget:"Budget", qualify_timeframe:"Timeframe", qualify_site:"Site", qualify_decision_maker:"Decision maker",
+    preconstruction_fee:"Pre-construction fee", inclusions_summary:"Inclusions", next_action:"Next action", next_action_date:"Next action date"
+  })[k] || k;
+  const displayVal = (sec, k, v) => {
+    if (k === "project_type") return PROJECT_TYPE_LABEL(v);
+    if (k === "design_stage") return DESIGN_STAGE_LABEL(v);
+    return fmt(k, v);
+  };
+  const currentVal = (sec, k) => {
+    const map = { lead: lead, project: lead, qualifying: lead, winning_offer: lead };
+    return map[sec]?.[k];
+  };
+  const anySelected = Object.values(selected).some(Boolean);
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/40" onClick={close} />
+      <div className="w-full max-w-lg bg-surface shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline flex-shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-ink">
+              {step === "review" ? "Review Suggestions" : "Add Meeting Transcript"}
+            </h2>
+            {step === "review" && s.summary && (
+              <p className="text-xs text-muted mt-0.5 line-clamp-2">{s.summary}</p>
+            )}
+          </div>
+          <button onClick={close} className="text-muted hover:text-ink text-2xl leading-none ml-4">×</button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {step === "input" && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">Title (optional)</label>
+                <input
+                  className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring"
+                  placeholder="e.g. Initial discovery meeting"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-muted">Transcript</label>
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="text-xs text-primary hover:opacity-70"
+                  >
+                    {fileName ? `📎 ${fileName}` : "Upload .txt file"}
+                  </button>
+                  <input ref={fileRef} type="file" accept=".txt,.md" className="hidden" onChange={handleFile} />
+                </div>
+                <textarea
+                  className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring resize-none"
+                  rows={14}
+                  placeholder={"Paste transcript here…\n\nWorks with Plaud exports, Otter.ai, Fireflies, or any plain text transcript. You can also type notes from memory."}
+                  value={transcript}
+                  onChange={e => setTranscript(e.target.value)}
+                />
+                <p className="text-xs text-muted mt-1">{transcript.length} characters</p>
+              </div>
+              {err && <p className="text-sm text-red-600">{err}</p>}
+            </div>
+          )}
+
+          {step === "analysing" && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <div className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+              <p className="text-sm text-muted">Blueprint is reading your transcript…</p>
+              <p className="text-xs text-muted/60">Extracting lead details, project info & qualifying scores</p>
+            </div>
+          )}
+
+          {step === "review" && (
+            <div className="space-y-4">
+              {!hasAnySugg && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                  Blueprint couldn&apos;t extract specific details from this transcript. You can still save it to the conversation log.
+                </div>
+              )}
+
+              {leadFields.length > 0 && (
+                <SuggestionSection title={
+                  <span className="flex items-center gap-2">Contact
+                    <button className="text-xs font-normal text-primary hover:opacity-70" onClick={() => toggleSec("lead", leadFields, !leadFields.every(k => selected[`lead.${k}`]))}>
+                      {leadFields.every(k => selected[`lead.${k}`]) ? "deselect all" : "select all"}
+                    </button>
+                  </span>
+                }>
+                  {leadFields.map(k => (
+                    <SuggestionRow key={k} label={fieldLabel(k)} fieldKey={k}
+                      val={s.lead[k]} currentVal={currentVal("lead", k)}
+                      checked={!!selected[`lead.${k}`]}
+                      onChange={v => setSelected(p => ({ ...p, [`lead.${k}`]: v }))} />
+                  ))}
+                </SuggestionSection>
+              )}
+
+              {projFields.length > 0 && (
+                <SuggestionSection title={
+                  <span className="flex items-center gap-2">Project
+                    <button className="text-xs font-normal text-primary hover:opacity-70" onClick={() => toggleSec("project", projFields, !projFields.every(k => selected[`project.${k}`]))}>
+                      {projFields.every(k => selected[`project.${k}`]) ? "deselect all" : "select all"}
+                    </button>
+                  </span>
+                }>
+                  {projFields.map(k => (
+                    <SuggestionRow key={k} label={fieldLabel(k)} fieldKey={k}
+                      val={displayVal("project", k, s.project[k])} currentVal={currentVal("project", k)}
+                      checked={!!selected[`project.${k}`]}
+                      onChange={v => setSelected(p => ({ ...p, [`project.${k}`]: v }))} />
+                  ))}
+                </SuggestionSection>
+              )}
+
+              {qualFields.length > 0 && (
+                <SuggestionSection title={
+                  <span className="flex items-center gap-2">Qualifying Score
+                    <button className="text-xs font-normal text-primary hover:opacity-70" onClick={() => toggleSec("qualifying", qualFields, !qualFields.every(k => selected[`qualifying.${k}`]))}>
+                      {qualFields.every(k => selected[`qualifying.${k}`]) ? "deselect all" : "select all"}
+                    </button>
+                  </span>
+                }>
+                  {qualFields.map(k => (
+                    <SuggestionRow key={k} label={fieldLabel(k)} fieldKey={k}
+                      val={s.qualifying[k]} currentVal={currentVal("qualifying", k)}
+                      checked={!!selected[`qualifying.${k}`]}
+                      onChange={v => setSelected(p => ({ ...p, [`qualifying.${k}`]: v }))} />
+                  ))}
+                </SuggestionSection>
+              )}
+
+              {woFields.length > 0 && (
+                <SuggestionSection title="Winning Offer">
+                  {woFields.map(k => (
+                    <SuggestionRow key={k} label={fieldLabel(k)} fieldKey={k}
+                      val={s.winning_offer[k]} currentVal={currentVal("winning_offer", k)}
+                      checked={!!selected[`winning_offer.${k}`]}
+                      onChange={v => setSelected(p => ({ ...p, [`winning_offer.${k}`]: v }))} />
+                  ))}
+                </SuggestionSection>
+              )}
+
+              {(s.next_action || s.next_action_date) && (
+                <SuggestionSection title="Next Action">
+                  {s.next_action && (
+                    <SuggestionRow label="Next action" fieldKey="next_action"
+                      val={s.next_action} currentVal={lead.next_action}
+                      checked={!!selected.next_action}
+                      onChange={v => setSelected(p => ({ ...p, next_action: v }))} />
+                  )}
+                  {s.next_action_date && (
+                    <SuggestionRow label="Due date" fieldKey="next_action_date"
+                      val={s.next_action_date} currentVal={lead.next_action_date}
+                      checked={!!selected.next_action_date}
+                      onChange={v => setSelected(p => ({ ...p, next_action_date: v }))} />
+                  )}
+                </SuggestionSection>
+              )}
+
+              <SuggestionSection title="Activity Log">
+                <label className="flex items-start gap-3 py-1 cursor-pointer">
+                  <input type="checkbox" checked={!!selected.activity}
+                    onChange={e => setSelected(p => ({ ...p, activity: e.target.checked }))}
+                    className="mt-0.5 rounded border-hairline text-primary focus-ring flex-shrink-0" />
+                  <div>
+                    <span className="text-xs font-medium text-ink">🤝 Log meeting to timeline</span>
+                    {s.activity?.summary && <p className="text-xs text-muted mt-0.5">{s.activity.summary}</p>}
+                  </div>
+                </label>
+              </SuggestionSection>
+
+              {err && <p className="text-sm text-red-600">{err}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex-shrink-0 border-t border-hairline px-6 py-4 flex gap-3">
+          {step === "input" && (
+            <>
+              <button type="button" onClick={close} className="flex-1 rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
+              <button
+                type="button"
+                onClick={analyse}
+                disabled={!transcript.trim()}
+                className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                Analyse with Blueprint ✦
+              </button>
+            </>
+          )}
+          {step === "review" && (
+            <>
+              <button type="button" onClick={() => setStep("input")} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">← Edit</button>
+              <button
+                type="button"
+                onClick={apply}
+                disabled={saving || !anySelected}
+                className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? "Applying…" : `Apply & Save`}
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Past conversations list */}
+        {conversations.length > 0 && step === "input" && (
+          <div className="flex-shrink-0 border-t border-hairline px-6 pb-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted my-3">Previous conversations</p>
+            <div className="space-y-2">
+              {conversations.map(c => (
+                <button key={c.id} onClick={() => onViewConv(c)} className="w-full text-left rounded-lg border border-hairline bg-page px-3 py-2 hover:bg-surface text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-ink truncate">{c.title || "Meeting"}</span>
+                    <span className="text-xs text-muted flex-shrink-0">{relativeTime(c.created_at)}</span>
+                  </div>
+                  {c.bp_suggestions?.summary && (
+                    <p className="text-xs text-muted mt-0.5 line-clamp-1">{c.bp_suggestions.summary}</p>
+                  )}
+                  {c.applied_at && <span className="text-xs text-green-600 font-medium">✓ Applied</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
@@ -153,17 +557,22 @@ export default function LeadDetail() {
 
   const [bpInsight, setBpInsight] = useState("");
   const [bpLoading, setBpLoading] = useState(false);
+  const [convOpen, setConvOpen] = useState(false);
+  const [conversations, setConversations] = useState([]);
 
   const bpFetchedFor = useRef(null);
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/sales/leads/${leadId}`);
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error);
-      setLead(j.lead);
-      setActivities(j.activities || []);
-      setScreenContext?.({ page: "lead_detail", leadId, stage: j.lead.stage, name: `${j.lead.first_name} ${j.lead.last_name || ""}` });
+      const [lr, cr] = await Promise.all([
+        fetch(`/api/sales/leads/${leadId}`).then(r => r.json()),
+        fetch(`/api/sales/leads/${leadId}/conversations`).then(r => r.json()).catch(() => ({ ok: true, conversations: [] }))
+      ]);
+      if (!lr.ok) throw new Error(lr.error);
+      setLead(lr.lead);
+      setActivities(lr.activities || []);
+      setConversations(cr.conversations || []);
+      setScreenContext?.({ page: "lead_detail", leadId, stage: lr.lead.stage, name: `${lr.lead.first_name} ${lr.lead.last_name || ""}` });
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -333,8 +742,54 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {/* CENTRE — Activities */}
+          {/* CENTRE — Conversations + Activities */}
           <div className="p-5 flex flex-col gap-4">
+
+            {/* Conversations */}
+            <div className="rounded-card border border-primary/20 bg-primary/[0.03] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-primary">Conversations</h3>
+                  {conversations.length > 0 && (
+                    <p className="text-xs text-muted mt-0.5">{conversations.length} transcript{conversations.length !== 1 ? "s" : ""} stored</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setConvOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                >
+                  <span className="text-sm leading-none">+</span> Add Transcript
+                </button>
+              </div>
+              {conversations.length === 0 ? (
+                <p className="text-xs text-muted italic">Upload a Plaud transcript or paste meeting notes to auto-fill lead details with Blueprint.</p>
+              ) : (
+                <div className="space-y-2">
+                  {conversations.slice(0, 3).map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => setConvOpen(true)}
+                      className="w-full text-left rounded-lg border border-hairline bg-surface px-3 py-2 hover:bg-page text-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-ink truncate">{c.title || "Meeting"}</span>
+                        <span className="text-xs text-muted flex-shrink-0">{relativeTime(c.created_at)}</span>
+                      </div>
+                      {c.bp_suggestions?.summary && (
+                        <p className="text-xs text-muted mt-0.5 line-clamp-1">{c.bp_suggestions.summary}</p>
+                      )}
+                      {c.applied_at && <span className="text-xs text-green-600">✓ Applied</span>}
+                    </button>
+                  ))}
+                  {conversations.length > 3 && (
+                    <button onClick={() => setConvOpen(true)} className="text-xs text-primary hover:opacity-70">
+                      +{conversations.length - 3} more…
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="rounded-card border border-hairline bg-surface p-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Log Activity</h3>
               <form onSubmit={logActivity} className="space-y-2">
@@ -490,6 +945,16 @@ export default function LeadDetail() {
             )}
           </div>
         </div>
+
+      <ConversationPanel
+        leadId={leadId}
+        lead={lead}
+        open={convOpen}
+        onClose={() => setConvOpen(false)}
+        onSaved={() => { setConvOpen(false); load(); }}
+        conversations={conversations}
+        onViewConv={() => {}}
+      />
     </div>
   );
 }

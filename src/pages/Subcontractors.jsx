@@ -63,6 +63,97 @@ const EMPTY_FORM = {
   postcode: ""
 };
 
+const CSV_TEMPLATE_HEADERS = [
+  "business_name",
+  "email",
+  "trade",
+  "contact",
+  "mobile",
+  "abn",
+  "address",
+  "suburb",
+  "state",
+  "postcode"
+];
+
+const CSV_TEMPLATE_ROWS = [
+  {
+    business_name: "Example Plumbing Co",
+    email: "admin@exampleplumbing.com.au",
+    trade: "plumbing",
+    contact: "Alex Smith",
+    mobile: "0400 000 000",
+    abn: "12 345 678 901",
+    address: "12 Example Street",
+    suburb: "Norwood",
+    state: "SA",
+    postcode: "5067"
+  },
+  {
+    business_name: "Example Electrical",
+    email: "quotes@exampleelectrical.com.au",
+    trade: "electrical",
+    contact: "Jamie Brown",
+    mobile: "0400 111 111",
+    abn: "",
+    address: "",
+    suburb: "Adelaide",
+    state: "SA",
+    postcode: "5000"
+  }
+];
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function rowsToCsv(rows) {
+  return [CSV_TEMPLATE_HEADERS, ...rows.map((row) => CSV_TEMPLATE_HEADERS.map((h) => row[h] ?? ""))]
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\n");
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (ch !== "\r") {
+      cell += ch;
+    }
+  }
+  row.push(cell);
+  rows.push(row);
+  return rows.filter((r) => r.some((v) => String(v || "").trim()));
+}
+
+function normaliseCsvHeader(header) {
+  return String(header || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
 function TradeBadge({ trade, colourMap }) {
   const color = colourMap[trade] || TRADE_COLORS[trade] || "#374151";
   return (
@@ -631,6 +722,217 @@ function AddModal({ onClose, onSaved, tradesList, colourMap }) {
   );
 }
 
+function BulkImportModal({ onClose, onSaved }) {
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const templateCsv = rowsToCsv(CSV_TEMPLATE_ROWS);
+
+  const downloadTemplate = () => {
+    const blob = new Blob([templateCsv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "blue-leaf-subcontractors-template.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const openGoogleSheetsTemplate = async () => {
+    try {
+      const res = await fetch("/api/subcontractors/csv-template-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: templateCsv })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Could not create Google Sheet.");
+      window.open(data.editUrl || data.webViewLink, "_blank", "noopener,noreferrer");
+      setError("Google Sheet template created. Fill the rows, then download as CSV and upload it below.");
+    } catch (err) {
+      try {
+        await navigator.clipboard.writeText(templateCsv);
+        window.open("https://docs.google.com/spreadsheets/create", "_blank", "noopener,noreferrer");
+        setError(`${err?.message || "Drive template unavailable"} Template copied. Paste into cell A1 in the new Google Sheet.`);
+      } catch {
+        window.open("https://docs.google.com/spreadsheets/create", "_blank", "noopener,noreferrer");
+        setError(`${err?.message || "Drive template unavailable"} Use Download CSV Template if clipboard access is blocked.`);
+      }
+    }
+  };
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setError("");
+    const text = await file.text();
+    const parsed = parseCsv(text);
+    if (parsed.length < 2) {
+      setRows([]);
+      setError("CSV must include a header row and at least one subcontractor row.");
+      return;
+    }
+    const headers = parsed[0].map(normaliseCsvHeader);
+    const required = ["business_name", "email", "trade"];
+    const missing = required.filter((h) => !headers.includes(h));
+    if (missing.length) {
+      setRows([]);
+      setError(`Missing required columns: ${missing.join(", ")}.`);
+      return;
+    }
+    const mapped = parsed.slice(1).map((cells, idx) => {
+      const row = {};
+      headers.forEach((h, i) => {
+        if (CSV_TEMPLATE_HEADERS.includes(h)) row[h] = String(cells[i] || "").trim();
+      });
+      return { ...EMPTY_FORM, ...row, state: row.state || "SA", _row: idx + 2 };
+    });
+    const valid = mapped.filter((r) => r.business_name && r.email && r.trade);
+    const skipped = mapped.length - valid.length;
+    setRows(valid);
+    setError(skipped ? `${skipped} row${skipped === 1 ? "" : "s"} skipped because Business Name, Email or Trade was blank.` : "");
+  };
+
+  const saveRows = async () => {
+    if (!rows.length) {
+      setError("Upload a CSV with at least one valid subcontractor.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const payload = rows.map(({ _row, ...row }) => ({
+      ...row,
+      abn: row.abn || null,
+      address: row.address || null,
+      suburb: row.suburb || null,
+      postcode: row.postcode || null,
+      contact: row.contact || null,
+      mobile: row.mobile || null
+    }));
+    const { error: err } = await supabase.from("subcontractors").insert(payload);
+    setSaving(false);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 55,
+        background: "rgba(15,23,42,0.55)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 16,
+          width: "100%",
+          maxWidth: 680,
+          boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
+          overflow: "hidden"
+        }}
+      >
+        <div style={{ background: "#006c9b", padding: "18px 24px", display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Import Subcontractors from CSV</div>
+            <div style={{ color: "#cbd5e1", fontSize: 12, marginTop: 2 }}>Use the Google Sheets template to add multiple rows at once.</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#cbd5e1", fontSize: 24, cursor: "pointer", lineHeight: 1, padding: 0 }}>
+            x
+          </button>
+        </div>
+
+        <div style={{ padding: 24, maxHeight: "74vh", overflowY: "auto" }}>
+          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
+              Columns are pre-formatted for Blue Leaf Hub:
+              <strong> business_name, email, trade, contact, mobile, abn, address, suburb, state, postcode</strong>.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+              <button type="button" onClick={openGoogleSheetsTemplate} style={btnPrimary}>
+                Open Template in Google Sheets
+              </button>
+              <button type="button" onClick={downloadTemplate} style={btnSecondary}>
+                Download CSV Template
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <label style={labelStyle}>Upload completed CSV</label>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) handleFile(file);
+              }}
+              style={{ ...inputStyle, padding: 8 }}
+            />
+          </div>
+
+          {error ? (
+            <div style={{ marginTop: 12, color: "#b45309", fontSize: 13, background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "9px 12px" }}>
+              {error}
+            </div>
+          ) : null}
+
+          {rows.length ? (
+            <div style={{ marginTop: 16, border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ background: "#f8fafc", padding: "10px 12px", fontSize: 12, fontWeight: 800, color: "#006c9b" }}>
+                Preview: {rows.length} subcontractor{rows.length === 1 ? "" : "s"} ready to import
+              </div>
+              <div style={{ overflowX: "auto", maxHeight: 240 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {["Business", "Email", "Trade", "Contact", "Suburb"].map((h) => (
+                        <th key={h} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", color: "#64748b" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 8).map((row) => (
+                      <tr key={`${row._row}-${row.email}`}>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 700 }}>{row.business_name}</td>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.email}</td>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.trade}</td>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.contact}</td>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.suburb}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length > 8 ? <div style={{ padding: "8px 10px", fontSize: 12, color: "#64748b" }}>Only first 8 rows shown.</div> : null}
+            </div>
+          ) : null}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button type="button" onClick={onClose} style={btnSecondary}>
+              Cancel
+            </button>
+            <button type="button" onClick={saveRows} disabled={saving || !rows.length} style={{ ...btnPrimary, flex: 1, opacity: !rows.length ? 0.5 : 1 }}>
+              {saving ? "Importing..." : `Import ${rows.length || ""} subcontractors`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubCard({ sub, colourMap }) {
   return (
     <div
@@ -678,6 +980,157 @@ function SubCard({ sub, colourMap }) {
   );
 }
 
+function formatCurrency(n) {
+  const value = Number(n);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
+}
+
+function quoteAmount(row) {
+  const amount = Number(row?.quote_amount ?? row?.quoted_amount);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+function buildSubStats(sub, rfqs) {
+  const rows = (rfqs || []).filter((r) => r.subcontractor_id === sub.id);
+  const received = rows.filter((r) => ["received", "accepted"].includes(r.status));
+  const accepted = rows.filter((r) => r.status === "accepted");
+  const quotedAmounts = rows.map(quoteAmount).filter((n) => n != null);
+  const totalQuoted = quotedAmounts.reduce((sum, n) => sum + n, 0);
+  const avgQuote = quotedAmounts.length ? totalQuoted / quotedAmounts.length : 0;
+  const quoteUploads = rows.filter((r) => r.quote_pdf_path || r.quote_pdf_url || r.dropbox_pdf_url).length;
+  return {
+    rows,
+    rfqCount: rows.length,
+    receivedCount: received.length,
+    acceptedCount: accepted.length,
+    quoteUploads,
+    totalQuoted,
+    avgQuote,
+    winRate: rows.length ? Math.round((accepted.length / rows.length) * 100) : 0,
+    responseRate: rows.length ? Math.round((received.length / rows.length) * 100) : 0,
+    lastUsed: rows
+      .map((r) => r.sent_at || r.created_at)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null
+  };
+}
+
+function SubcontractorDashboard({ sub, rfqs, colourMap, onClose }) {
+  const stats = buildSubStats(sub, rfqs);
+  const recent = stats.rows
+    .slice()
+    .sort((a, b) => new Date(b.sent_at || b.created_at || 0) - new Date(a.sent_at || a.created_at || 0))
+    .slice(0, 8);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 55,
+        background: "rgba(15,23,42,0.55)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 860, boxShadow: "0 24px 64px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+        <div style={{ background: "#006c9b", padding: "18px 24px", display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>{sub.business_name}</div>
+            <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <TradeBadge trade={sub.trade || "unknown"} colourMap={colourMap} />
+              <span style={{ color: "#cbd5e1", fontSize: 12 }}>{sub.contact || "No contact"} {sub.mobile ? `- ${sub.mobile}` : ""}</span>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#cbd5e1", fontSize: 24, cursor: "pointer", lineHeight: 1, padding: 0 }}>
+            x
+          </button>
+        </div>
+
+        <div style={{ padding: 24, maxHeight: "76vh", overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10 }}>
+            {[
+              ["RFQs sent", stats.rfqCount],
+              ["Quotes uploaded", stats.quoteUploads],
+              ["Accepted", stats.acceptedCount],
+              ["Response rate", `${stats.responseRate}%`],
+              ["Win rate", `${stats.winRate}%`],
+              ["Avg quote", formatCurrency(stats.avgQuote)]
+            ].map(([label, value]) => (
+              <div key={label} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", background: "#f8fafc" }}>
+                <div style={{ color: "#006c9b", fontSize: 20, fontWeight: 800 }}>{value}</div>
+                <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800, textTransform: "uppercase" }}>Contact</div>
+              <div style={{ marginTop: 8, fontSize: 13, color: "#334155", lineHeight: 1.7 }}>
+                <div>Email: {sub.email || "-"}</div>
+                <div>Mobile: {sub.mobile || "-"}</div>
+                <div>ABN: {sub.abn || "-"}</div>
+                <div>Location: {[sub.suburb, sub.state, sub.postcode].filter(Boolean).join(" ") || "-"}</div>
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800, textTransform: "uppercase" }}>Useful metrics</div>
+              <div style={{ marginTop: 8, fontSize: 13, color: "#334155", lineHeight: 1.7 }}>
+                <div>Total quoted: {formatCurrency(stats.totalQuoted)}</div>
+                <div>Last used: {stats.lastUsed ? new Date(stats.lastUsed).toLocaleDateString("en-AU") : "-"}</div>
+                <div>Missing fields: {["contact", "mobile", "abn", "address"].filter((f) => !sub[f]).length}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18, border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ background: "#f8fafc", padding: "10px 12px", fontSize: 12, fontWeight: 800, color: "#006c9b" }}>Recent quotes and RFQs</div>
+            {recent.length ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {["Job", "Trade", "Status", "Amount", "PDF", "Sent"].map((h) => (
+                        <th key={h} style={tableHeadCell}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recent.map((r) => {
+                      const pdf = r.quote_pdf_url || r.dropbox_pdf_url || "";
+                      return (
+                        <tr key={r.id}>
+                          <td style={tableCell}>{r.jobs?.address || "-"}</td>
+                          <td style={tableCell}>{r.trade || "-"}</td>
+                          <td style={tableCell}>{r.status || "-"}</td>
+                          <td style={tableCell}>{formatCurrency(quoteAmount(r))}</td>
+                          <td style={tableCell}>
+                            {pdf ? <a href={pdf} target="_blank" rel="noopener noreferrer" style={{ color: "#006c9b", fontWeight: 700 }}>Open</a> : r.quote_pdf_path ? "Saved" : "-"}
+                          </td>
+                          <td style={tableCell}>{r.sent_at ? new Date(r.sent_at).toLocaleDateString("en-AU") : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ padding: 18, color: "#94a3b8", fontSize: 13 }}>No RFQs or quote uploads found for this subcontractor yet.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SORT_OPTIONS = [
   { id: "az", label: "A to Z" },
   { id: "za", label: "Z to A" },
@@ -687,14 +1140,18 @@ const SORT_OPTIONS = [
 
 export default function Subcontractors() {
   const [subs, setSubs] = useState([]);
+  const [rfqs, setRfqs] = useState([]);
   const [customTrades, setCustomTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [tradeFilter, setTradeFilter] = useState("all");
   const [sortBy, setSortBy] = useState("az");
+  const [viewMode, setViewMode] = useState("cards");
+  const [selectedSub, setSelectedSub] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTradeModal, setShowTradeModal] = useState(false);
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuRef = useRef(null);
 
@@ -714,6 +1171,13 @@ export default function Subcontractors() {
     const sRes = await supabase.from("subcontractors").select("*").order("business_name");
     if (sRes.error) setError(sRes.error.message);
     else setSubs(sRes.data || []);
+
+    const rRes = await supabase
+      .from("rfqs")
+      .select("id, subcontractor_id, job_id, trade, status, quote_amount, quoted_amount, quote_pdf_path, quote_pdf_url, dropbox_pdf_url, sent_at, received_at, created_at, jobs(address)")
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    setRfqs(rRes.error ? [] : rRes.data || []);
 
     const cRes = await supabase.from("custom_trades").select("*").order("name");
     setCustomTrades(cRes.error ? [] : cRes.data || []);
@@ -862,6 +1326,30 @@ export default function Subcontractors() {
               >
                 Add Trade Category
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setShowBulkImportModal(true);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "12px 16px",
+                  border: "none",
+                  borderTop: "1px solid #e2e8f0",
+                  background: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer"
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ border: "1px solid #cbd5e1", borderRadius: 5, padding: "1px 5px", fontSize: 10, color: "#006c9b" }}>CSV</span>
+                  Import from CSV
+                </span>
+              </button>
             </div>
           )}
         </div>
@@ -883,27 +1371,53 @@ export default function Subcontractors() {
         </select>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginRight: 4 }}>Sort:</span>
-        {SORT_OPTIONS.map((opt) => (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => setSortBy(opt.id)}
-            style={{
-              borderRadius: 8,
-              padding: "8px 14px",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              border: sortBy === opt.id ? "2px solid #006c9b" : "1px solid #cbd5e1",
-              background: sortBy === opt.id ? "#006c9b" : "#fff",
-              color: sortBy === opt.id ? "#fff" : "#334155"
-            }}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginRight: 4 }}>Sort:</span>
+          {SORT_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setSortBy(opt.id)}
+              style={{
+                borderRadius: 8,
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: sortBy === opt.id ? "2px solid #006c9b" : "1px solid #cbd5e1",
+                background: sortBy === opt.id ? "#006c9b" : "#fff",
+                color: sortBy === opt.id ? "#fff" : "#334155"
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "inline-flex", border: "1px solid #cbd5e1", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+          {[
+            ["cards", "Cards"],
+            ["sheet", "Spreadsheet"]
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setViewMode(id)}
+              style={{
+                border: "none",
+                borderLeft: id === "sheet" ? "1px solid #cbd5e1" : "none",
+                background: viewMode === id ? "#006c9b" : "#fff",
+                color: viewMode === id ? "#fff" : "#334155",
+                padding: "8px 12px",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: "pointer"
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10 }}>
@@ -930,7 +1444,7 @@ export default function Subcontractors() {
         </div>
       )}
 
-      {!loading && !error && sorted.length > 0 && sortBy !== "trade" && (
+      {!loading && !error && sorted.length > 0 && viewMode === "cards" && sortBy !== "trade" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
           {sorted.map((sub) => (
             <SubCard key={sub.id} sub={sub} colourMap={colourMap} />
@@ -938,7 +1452,7 @@ export default function Subcontractors() {
         </div>
       )}
 
-      {!loading && !error && sortBy === "trade" && (
+      {!loading && !error && viewMode === "cards" && sortBy === "trade" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {tradeKeys.map((tk) => (
             <div key={tk}>
@@ -969,6 +1483,54 @@ export default function Subcontractors() {
         </div>
       )}
 
+      {!loading && !error && sorted.length > 0 && viewMode === "sheet" && (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", boxShadow: "0 8px 24px rgba(15,23,42,0.04)" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {["Business", "Trade", "Contact", "Email", "Mobile", "Suburb", "RFQs", "Uploaded", "Accepted", "Avg quote", "Missing"].map((h) => (
+                    <th key={h} style={tableHeadCell}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((sub) => {
+                  const stats = buildSubStats(sub, rfqs);
+                  const missing = ["contact", "mobile", "abn", "address"].filter((f) => !sub[f]).length;
+                  return (
+                    <tr key={sub.id} style={{ background: selectedSub?.id === sub.id ? "#f0f9ff" : "#fff" }}>
+                      <td style={{ ...tableCell, minWidth: 220 }}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSub(sub)}
+                          style={{ border: "none", background: "transparent", color: "#006c9b", fontWeight: 800, cursor: "pointer", padding: 0, textAlign: "left", font: "inherit" }}
+                        >
+                          {sub.business_name}
+                        </button>
+                      </td>
+                      <td style={tableCell}><TradeBadge trade={sub.trade || "unknown"} colourMap={colourMap} /></td>
+                      <td style={tableCell}>{sub.contact || "-"}</td>
+                      <td style={tableCell}>{sub.email || "-"}</td>
+                      <td style={tableCell}>{sub.mobile || "-"}</td>
+                      <td style={tableCell}>{[sub.suburb, sub.state].filter(Boolean).join(", ") || "-"}</td>
+                      <td style={tableCell}>{stats.rfqCount}</td>
+                      <td style={tableCell}>{stats.quoteUploads}</td>
+                      <td style={tableCell}>{stats.acceptedCount}</td>
+                      <td style={tableCell}>{formatCurrency(stats.avgQuote)}</td>
+                      <td style={tableCell}>{missing ? <MissingCount sub={sub} /> : "Complete"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ borderTop: "1px solid #e2e8f0", padding: "9px 12px", fontSize: 12, color: "#64748b", background: "#f8fafc" }}>
+            Click a business name to open quote history and usage stats.
+          </div>
+        </div>
+      )}
+
       {showAddModal && (
         <AddModal onClose={() => setShowAddModal(false)} onSaved={loadAll} tradesList={tradesList} colourMap={colourMap} />
       )}
@@ -979,6 +1541,12 @@ export default function Subcontractors() {
             loadAll();
           }}
         />
+      )}
+      {showBulkImportModal && (
+        <BulkImportModal onClose={() => setShowBulkImportModal(false)} onSaved={loadAll} />
+      )}
+      {selectedSub && (
+        <SubcontractorDashboard sub={selectedSub} rfqs={rfqs} colourMap={colourMap} onClose={() => setSelectedSub(null)} />
       )}
     </div>
   );
@@ -1004,6 +1572,25 @@ const inputStyle = {
   boxSizing: "border-box",
   background: "#fff",
   fontFamily: "inherit"
+};
+const tableHeadCell = {
+  textAlign: "left",
+  padding: "9px 10px",
+  borderBottom: "1px solid #e2e8f0",
+  background: "#f8fafc",
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  whiteSpace: "nowrap"
+};
+const tableCell = {
+  padding: "9px 10px",
+  borderBottom: "1px solid #f1f5f9",
+  color: "#334155",
+  verticalAlign: "middle",
+  whiteSpace: "nowrap"
 };
 const btnPrimary = {
   background: "#006c9b",

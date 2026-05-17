@@ -18,6 +18,7 @@ import {
   uploadReceivedQuotePdfToJob,
   uploadImapReplyQuotePdfToSharedQuotes
 } from "./lib/dropboxClient.mjs";
+import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
 import { buildexactConfigured } from "./lib/buildexactClient.mjs";
@@ -614,6 +615,22 @@ registerSalesRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
+});
+
+app.post("/api/subcontractors/csv-template-sheet", async (req, res) => {
+  if (!driveConfigured()) {
+    return res.status(503).json({ ok: false, error: "Google Drive not configured." });
+  }
+  try {
+    const csv = String(req.body?.csv || "").trim();
+    if (!csv) return res.status(400).json({ ok: false, error: "csv required." });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const sheet = await uploadCsvToSheet(`Blue Leaf subcontractors import template ${stamp}.csv`, csv);
+    return res.json({ ok: true, ...sheet });
+  } catch (err) {
+    console.error("[subcontractors/csv-template-sheet]", err);
+    return res.status(502).json({ ok: false, error: err?.message || "Could not create Google Sheet template." });
+  }
 });
 
 app.post("/api/subcontractor/lookup", async (req, res) => {

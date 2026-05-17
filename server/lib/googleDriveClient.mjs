@@ -54,6 +54,34 @@ export async function uploadDocxToDrive(filename, docxBuffer) {
 }
 
 /**
+ * Upload CSV and convert it into an editable Google Sheet.
+ * Returns { fileId, editUrl }.
+ */
+export async function uploadCsvToSheet(filename, csvText) {
+  const auth = driveOAuth2Client();
+  if (!auth) throw new Error("Google Drive not configured (missing GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN). Run: npm run auth:drive");
+  const drive = google.drive({ version: "v3", auth });
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || null;
+  const fileMetadata = {
+    name: filename.replace(/\.csv$/i, ""),
+    mimeType: "application/vnd.google-apps.spreadsheet",
+    ...(folderId ? { parents: [folderId] } : {})
+  };
+  const media = {
+    mimeType: "text/csv",
+    body: bufferToStream(Buffer.from(csvText, "utf8"))
+  };
+  const res = await drive.files.create({
+    requestBody: fileMetadata,
+    media,
+    fields: "id,webViewLink"
+  });
+  const fileId = res.data.id;
+  const editUrl = `https://docs.google.com/spreadsheets/d/${fileId}/edit`;
+  return { fileId, editUrl, webViewLink: res.data.webViewLink || editUrl };
+}
+
+/**
  * Export a Google Drive file as a PDF buffer.
  */
 export async function exportDriveFileAsPdf(fileId) {
