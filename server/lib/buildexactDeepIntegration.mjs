@@ -110,9 +110,7 @@ export async function syncAcceptedQuoteToBuildexact({ buildexactJobId, trade, ac
 
   await updateEstimateItem(buildexactJobId, id, {
     unit_cost: amount,
-    unitCost: amount,
-    total: amount,
-    Total: amount
+    total: amount
   });
   return { ok: true, itemId: id, amount, category: target.category.name };
 }

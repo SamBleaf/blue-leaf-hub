@@ -354,7 +354,7 @@ function StagePill({ stageId }) {
   );
 }
 
-function ListView({ leads, onQuickNote, onMoveStage, onNav }) {
+function ListView({ leads, onQuickNote, onNav }) {
   const [sortCol, setSortCol] = useState("last_activity_at");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -554,7 +554,6 @@ export default function SalesPipeline() {
             <ListView
               leads={leads.filter(l => !["lost"].includes(l.stage))}
               onQuickNote={setQuickNoteLead}
-              onMoveStage={moveStage}
               onNav={id => nav(`/sales/${id}`)}
             />
           )}

@@ -371,9 +371,14 @@ export default function FeeProposalWizard() {
       setBuildexactJobId(beJobId);
       if (j.buildexact_estimate_id) setBuildexactEstimateId(String(j.buildexact_estimate_id));
       if (j.job_id && !jobId) setJobId(j.job_id);
-      const sb = getSupabase();
-      const { data: seq, error: sErr } = await sb.rpc("alloc_proposal_sequence");
-      if (sErr) throw new Error(sErr.message);
+      // Only allocate a new sequence number for brand-new proposals
+      let seq = null;
+      if (isNew) {
+        const sb = getSupabase();
+        const { data: seqData, error: sErr } = await sb.rpc("alloc_proposal_sequence");
+        if (sErr) throw new Error(sErr.message);
+        seq = seqData;
+      }
       setProposal((p) => ({
         ...mergeParsedToProposal(j.estimate, seq),
         architect_name: p.architect_name || "",

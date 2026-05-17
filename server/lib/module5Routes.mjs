@@ -6,7 +6,7 @@ import { exec } from "child_process";
 import { mkdtemp, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parsePDF, parseXLSX } from "./buildexactParser.mjs";
+import { parseCostMetrics, parsePDF, parseSchedItems, parseXLSX } from "./buildexactParser.mjs";
 import { proposalToDocxData } from "./feeProposalTransform.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { resolveJobIdByAddress, upsertJobKnowledge } from "./jobResolver.mjs";
@@ -115,6 +115,8 @@ export function registerModule5Routes(app) {
       const buf = Buffer.from(b64, "base64");
       const filenameHint = String(req.body?.filename || "").trim();
       const parsed = parseXLSX(buf, filenameHint);
+      const scheduleHints = parseSchedItems(parsed.categories);
+      const costMetrics = parseCostMetrics(parsed.categories);
       // Resolve job and persist estimate
       const resolved = await resolveJobIdByAddress(parsed.address);
       const job_id = resolved?.job_id || null;
@@ -136,6 +138,8 @@ export function registerModule5Routes(app) {
             tax: parsed.tax,
             estimate_total: parsed.estimate_total,
             categories: parsed.categories,
+            schedule_hints: scheduleHints.length ? scheduleHints : null,
+            cost_metrics: Object.keys(costMetrics).length ? costMetrics : null,
             source: "xlsx"
           })
           .select("id")
@@ -194,6 +198,8 @@ export function registerModule5Routes(app) {
           .trim();
       };
       const parsed = await parsePDF(buf, runClaudeJson);
+      const scheduleHintsPdf = parseSchedItems(parsed.categories);
+      const costMetricsPdf = parseCostMetrics(parsed.categories);
       const resolved = await resolveJobIdByAddress(parsed.address);
       const job_id = resolved?.job_id || null;
       const sb2 = getServiceSupabase();
@@ -214,6 +220,8 @@ export function registerModule5Routes(app) {
             tax: parsed.tax,
             estimate_total: parsed.estimate_total,
             categories: parsed.categories,
+            schedule_hints: scheduleHintsPdf.length ? scheduleHintsPdf : null,
+            cost_metrics: Object.keys(costMetricsPdf).length ? costMetricsPdf : null,
             source: "pdf"
           })
           .select("id")

@@ -369,7 +369,9 @@ export function parseXLSX(buffer, filenameHint = "") {
       };
     } else if (current && isLineItemRow(row)) {
       const total = parseMoney(row[COL_ITEM_TOT]);
-      if (total == null || total <= 0) continue;
+      const rawDesc = cellStr(row[COL_ITEM_DESC]);
+      const isMetaItem = /\bSCHED\b/i.test(rawDesc) || /COST\s+METRIC/i.test(rawDesc);
+      if (!isMetaItem && (total == null || total <= 0)) continue;
       const code = cellStr(row[COL_ITEM_CODE]);
       const description = cellStr(row[COL_ITEM_DESC]);
       const type = cellStr(row[COL_ITEM_TYPE]) || "";
