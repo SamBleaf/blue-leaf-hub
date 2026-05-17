@@ -32,6 +32,80 @@ async function callClaude(mode, messages, extras = {}) {
   });
 }
 
+const MAX_CHAT_ATTACHMENTS = 4;
+const MAX_CHAT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+function sanitizeMessages(messages) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+}
+
+function chatAttachmentToBlocks(attachment) {
+  const name = String(attachment?.name || 'uploaded-document').trim();
+  const size = Number(attachment?.size || 0);
+  if (!name || !Number.isFinite(size) || size < 0 || size > MAX_CHAT_ATTACHMENT_BYTES) {
+    throw new Error(`${name || 'Attachment'} is too large or invalid.`);
+  }
+
+  if (attachment?.kind === 'pdf') {
+    const data = String(attachment?.dataBase64 || '').trim();
+    if (!data) throw new Error(`${name}: missing PDF data.`);
+    return [{
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: 'application/pdf',
+        data,
+      },
+      citations: { enabled: false },
+    }];
+  }
+
+  if (attachment?.kind === 'text') {
+    const text = String(attachment?.text || '').trim();
+    if (!text) throw new Error(`${name}: text file is empty.`);
+    return [{
+      type: 'text',
+      text: `\n\n━━━━━━━━ ATTACHED DOCUMENT: ${name} ━━━━━━━━\n${text.slice(0, 60000)}\n━━━━━━━━ END ATTACHED DOCUMENT ━━━━━━━━`,
+    }];
+  }
+
+  throw new Error(`${name}: unsupported attachment type.`);
+}
+
+function attachDocumentsToLastUserMessage(messages, attachments) {
+  const cleaned = sanitizeMessages(messages);
+  const docs = Array.isArray(attachments) ? attachments.slice(0, MAX_CHAT_ATTACHMENTS) : [];
+  if (!docs.length) return cleaned;
+
+  const lastUserIndex = cleaned.map((m) => m.role).lastIndexOf('user');
+  if (lastUserIndex === -1) return cleaned;
+
+  const current = cleaned[lastUserIndex];
+  const existingText =
+    typeof current.content === 'string'
+      ? current.content
+      : Array.isArray(current.content)
+        ? current.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
+        : '';
+
+  const blocks = docs.flatMap(chatAttachmentToBlocks);
+  cleaned[lastUserIndex] = {
+    role: 'user',
+    content: [
+      ...blocks.filter((b) => b.type === 'document'),
+      { type: 'text', text: existingText || 'Please review the uploaded document(s).' },
+      ...blocks.filter((b) => b.type === 'text'),
+    ],
+  };
+
+  return cleaned;
+}
+
 export function registerBlueprintRoutes(app) {
   app.get('/api/blueprint/health', (_req, res) => {
     res.json({
@@ -45,8 +119,9 @@ export function registerBlueprintRoutes(app) {
 
   app.post('/api/blueprint/chat', async (req, res) => {
     try {
-      const { messages, jobContext, hubContext } = req.body;
-      const reply = await callClaude('chat', messages, { jobContext, hubContext });
+      const { messages, jobContext, hubContext, attachments } = req.body;
+      const chatMessages = attachDocumentsToLastUserMessage(messages, attachments);
+      const reply = await callClaude('chat', chatMessages, { jobContext, hubContext });
       res.json({ reply });
     } catch (err) {
       console.error('[blueprint/chat]', err.message);

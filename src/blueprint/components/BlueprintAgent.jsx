@@ -36,6 +36,8 @@ const Icon = ({ name, size = 16, className = '' }) => {
     copy: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z',
     check: 'M5 13l4 4L19 7',
     warn: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+    plus: 'M12 5v14m-7-7h14',
+    file: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6',
   };
   return (
     <svg
@@ -226,15 +228,77 @@ const TabBtn = ({ icon, label, active, onClick }) => (
 
 // ─── Chat Tab ─────────────────────────────────────────────────────────────────
 
+const MAX_CHAT_UPLOAD_BYTES = 8 * 1024 * 1024;
+const TEXT_UPLOAD_TYPES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+]);
+
+function isTextUpload(file) {
+  return TEXT_UPLOAD_TYPES.has(file.type) || /\.(txt|md|markdown|csv|json)$/i.test(file.name);
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    reader.readAsText(file);
+  });
+}
+
+async function readChatAttachment(file) {
+  if (file.size > MAX_CHAT_UPLOAD_BYTES) {
+    throw new Error(`${file.name} is over 8 MB. Use a smaller file or paste the key section.`);
+  }
+
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    const dataUrl = await fileToDataUrl(file);
+    return {
+      name: file.name,
+      mimeType: 'application/pdf',
+      size: file.size,
+      kind: 'pdf',
+      dataBase64: dataUrl.split(',')[1] || '',
+    };
+  }
+
+  if (isTextUpload(file)) {
+    return {
+      name: file.name,
+      mimeType: file.type || 'text/plain',
+      size: file.size,
+      kind: 'text',
+      text: await fileToText(file),
+    };
+  }
+
+  throw new Error(`${file.name} is not supported yet. Upload PDF, TXT, MD, CSV, or JSON files.`);
+}
+
 const ChatTab = ({ jobContext, hubContext }) => {
   const [messages, setMessages] = useState([{
     role: 'assistant',
     content: "G'day Sam. I'm Blueprint — your operations manager inside Blue Leaf Hub.\n\nI know the APB framework and I'm here to help you systematise the business, review documents, create SOPs, and diagnose problems.\n\nWhat are you working on?",
   }]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [uploadError, setUploadError] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -242,18 +306,40 @@ const ChatTab = ({ jobContext, hubContext }) => {
 
   const send = async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && attachments.length === 0) || loading) return;
     setInput('');
-    const newMessages = [...messages, { role: 'user', content: text }];
+    const sentAttachments = attachments;
+    setAttachments([]);
+    setUploadError('');
+    const attachmentNames = sentAttachments.map((f) => f.name).join(', ');
+    const content = [
+      text || 'Please review the uploaded document(s).',
+      attachmentNames ? `\n\nAttached: ${attachmentNames}` : '',
+    ].join('');
+    const newMessages = [...messages, { role: 'user', content, attachments: sentAttachments.map(({ name, size, kind }) => ({ name, size, kind })) }];
     setMessages(newMessages);
     setLoading(true);
     try {
-      const reply = await chat(newMessages, { jobContext, hubContext });
+      const reply = await chat(newMessages, { jobContext, hubContext, attachments: sentAttachments });
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Sorry, something went wrong: ${err.message}` }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+
+    setUploadError('');
+    try {
+      const next = await Promise.all(files.map(readChatAttachment));
+      setAttachments((prev) => [...prev, ...next].slice(0, 4));
+    } catch (err) {
+      setUploadError(err.message || 'Could not upload file');
     }
   };
 
@@ -302,14 +388,96 @@ const ChatTab = ({ jobContext, hubContext }) => {
       )}
 
       {/* Input */}
+      {(attachments.length > 0 || uploadError) && (
+        <div style={{
+          padding: '8px 12px 0',
+          borderTop: '1px solid #E2E8F0',
+          background: '#fff',
+        }}>
+          {attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {attachments.map((file, index) => (
+                <div key={`${file.name}-${index}`} style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  maxWidth: '100%',
+                  padding: '5px 8px',
+                  borderRadius: '8px',
+                  border: '1px solid #CDE3D9',
+                  background: '#2E6B4F0D',
+                  color: '#1B3A5C',
+                  fontSize: '11px',
+                }}>
+                  <Icon name="file" size={12} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '230px' }}>
+                    {file.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== index))}
+                    style={{
+                      border: 'none',
+                      background: 'none',
+                      color: '#64748B',
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontSize: '14px',
+                      lineHeight: 1,
+                    }}
+                    title={`Remove ${file.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {uploadError && (
+            <div style={{ marginTop: attachments.length ? '6px' : 0, color: '#DC2626', fontSize: '12px' }}>
+              {uploadError}
+            </div>
+          )}
+        </div>
+      )}
       <div style={{
         padding: '10px 12px 12px',
-        borderTop: '1px solid #E2E8F0',
+        borderTop: attachments.length > 0 || uploadError ? 'none' : '1px solid #E2E8F0',
         display: 'flex',
         gap: '8px',
         alignItems: 'flex-end',
         background: '#fff',
       }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.txt,.md,.markdown,.csv,.json,application/pdf,text/plain,text/markdown,text/csv,application/json"
+          onChange={handleFiles}
+          style={{ display: 'none' }}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={loading}
+          style={{
+            width: '36px', height: '36px', borderRadius: '999px',
+            border: 'none', cursor: loading ? 'not-allowed' : 'pointer',
+            background: loading ? '#E2E8F0' : '#2E6B4F',
+            color: loading ? '#94A3B8' : '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.15s',
+            flexShrink: 0,
+            fontSize: '22px',
+            fontWeight: 600,
+            lineHeight: 1,
+            boxShadow: loading ? 'none' : '0 2px 8px rgba(46, 107, 79, 0.24)',
+          }}
+          title="Upload documents"
+          aria-label="Upload documents to Blueprint"
+        >
+          +
+        </button>
         <textarea
           ref={textareaRef}
           value={input}
@@ -341,12 +509,12 @@ const ChatTab = ({ jobContext, hubContext }) => {
         />
         <button
           onClick={send}
-          disabled={!input.trim() || loading}
+          disabled={(!input.trim() && attachments.length === 0) || loading}
           style={{
             width: '36px', height: '36px', borderRadius: '8px',
             border: 'none', cursor: 'pointer',
-            background: input.trim() && !loading ? '#2E6B4F' : '#E2E8F0',
-            color: input.trim() && !loading ? '#fff' : '#94A3B8',
+            background: (input.trim() || attachments.length > 0) && !loading ? '#2E6B4F' : '#E2E8F0',
+            color: (input.trim() || attachments.length > 0) && !loading ? '#fff' : '#94A3B8',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             transition: 'all 0.15s',
             flexShrink: 0,

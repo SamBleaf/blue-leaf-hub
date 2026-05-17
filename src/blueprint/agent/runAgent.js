@@ -20,6 +20,13 @@ function extractText(content) {
     .trim();
 }
 
+function messageText(message) {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return extractText(content);
+  return '';
+}
+
 function hubToolUses(content) {
   return (content || []).filter((b) => b.type === 'tool_use' && isHubTool(b.name));
 }
@@ -75,7 +82,7 @@ async function appendSubcontractorSnapshot(systemPrompt) {
  * @param {object} [opts.extras] - jobContext, hubContext, enableTools
  */
 export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {} }) {
-  const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+  const lastUser = messageText([...messages].reverse().find((m) => m.role === 'user'));
   const jobId = extras.jobContext?.id ?? null;
   const ragContext = await getRelevantContext(lastUser, { jobId });
 
