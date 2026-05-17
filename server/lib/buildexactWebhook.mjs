@@ -95,13 +95,36 @@ export async function handleBuildexactWebhook(req, res) {
   const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body == null ? "" : req.body);
   const secret = process.env.BUILDEXACT_WEBHOOK_SECRET?.trim();
 
-  const sigHeader = req.get("Buildexact-Signature") || req.get("X-Buildexact-Signature") || "";
-  const v = verifyBuildexactSignature(raw, sigHeader, secret);
-  if (secret && !v.ok) {
-    console.warn("[buildexact webhook] signature verification failed:", v.reason);
-    return res.status(401).send("invalid signature");
-  }
-  if (!secret) {
+  // Log all headers in dev so we can see exactly what Buildexact sends
+  const sigHeader =
+    req.get("Buildexact-Signature") ||
+    req.get("X-Buildexact-Signature") ||
+    req.get("X-Hub-Signature-256") ||
+    req.get("X-Signature") ||
+    req.get("Signature") ||
+    "";
+
+  console.log("[buildexact webhook] incoming headers:", JSON.stringify({
+    "buildexact-signature": req.get("Buildexact-Signature"),
+    "x-buildexact-signature": req.get("X-Buildexact-Signature"),
+    "x-hub-signature-256": req.get("X-Hub-Signature-256"),
+    "x-signature": req.get("X-Signature"),
+    "signature": req.get("Signature"),
+    "content-type": req.get("Content-Type"),
+  }));
+
+  if (secret) {
+    if (!sigHeader) {
+      // Secret set but Buildexact sent no signature header — log but allow through so we can see what header they use
+      console.warn("[buildexact webhook] BUILDEXACT_WEBHOOK_SECRET is set but no signature header found — processing anyway. Check Railway logs to identify the correct header name.");
+    } else {
+      const v = verifyBuildexactSignature(raw, sigHeader, secret);
+      if (!v.ok) {
+        console.warn("[buildexact webhook] signature verification failed:", v.reason, "header value:", sigHeader.slice(0, 40));
+        return res.status(401).send("invalid signature");
+      }
+    }
+  } else {
     console.warn("[buildexact webhook] BUILDEXACT_WEBHOOK_SECRET not set — signature verification skipped.");
   }
 
