@@ -590,7 +590,16 @@ app.post(
   }
 );
 
-app.use(express.json({ limit: "80mb" }));
+const JSON_BODY_LIMIT = process.env.BLUEPRINT_BODY_LIMIT || "100mb";
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use((err, _req, res, next) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({
+      error: `Upload too large for Blueprint API. Limit is ${JSON_BODY_LIMIT}. Try a smaller PDF or paste the key section.`
+    });
+  }
+  return next(err);
+});
 
 registerModule4Routes(app);
 registerModule5Routes(app);

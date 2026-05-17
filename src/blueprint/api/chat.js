@@ -6,7 +6,24 @@ async function post(endpoint, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const raw = await res.text();
+    let message = raw;
+    try {
+      message = JSON.parse(raw)?.error || raw;
+    } catch {
+      message = raw
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    if (/PayloadTooLargeError|request entity too large/i.test(message)) {
+      message = 'Upload too large for Blueprint. Try a smaller PDF or paste the key section.';
+    }
+    throw new Error(message || `Request failed (${res.status})`);
+  }
   return res.json();
 }
 

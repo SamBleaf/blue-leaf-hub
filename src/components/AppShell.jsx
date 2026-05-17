@@ -4,12 +4,74 @@ import BlueprintAgent from "../blueprint/components/BlueprintAgent";
 import { useAuth } from "../lib/useAuth.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 
+// ── SVG icon set ────────────────────────────────────────────────────────────
+const ICONS = {
+  tender: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 12h6M9 16h4" />
+    </svg>
+  ),
+  operations: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ),
+  finance: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  ),
+  sales: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" />
+      <rect x="2" y="9" width="4" height="12" />
+      <circle cx="4" cy="4" r="2" />
+    </svg>
+  ),
+  client: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  ),
+  settings: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  ),
+  chevronLeft: (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  ),
+  chevronRight: (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  ),
+  hamburger: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      <path d="M3 12h18M3 6h18M3 18h18" />
+    </svg>
+  ),
+  close: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  ),
+};
+
 const TENDER_MODULES = [
   { to: "/tender-manager/home", label: "Home", end: true },
   { to: "/tender-manager/rfq-engine", label: "RFQ Engine" },
   { to: "/tender-manager/subcontractors", label: "Subcontractors" },
   { to: "/tender-manager/quote-tracker", label: "Quote Tracker" },
-  { to: "/tender-manager/board", label: "Tender Manager" },
+  { to: "/tender-manager/board", label: "Tender Board" },
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" }
 ];
 
@@ -18,87 +80,29 @@ const OPS_MODULES = [
 ];
 
 const DEPARTMENTS = [
-  {
-    id: "tender",
-    label: "Tender Manager",
-    tabShort: "Tender",
-    icon: "📋",
-    comingSoon: false,
-    modules: TENDER_MODULES,
-    defaultTo: "/tender-manager/home"
-  },
-  {
-    id: "operations_manager",
-    label: "Operations Manager",
-    tabShort: "Ops",
-    icon: "⚙️",
-    comingSoon: false,
-    modules: OPS_MODULES,
-    defaultTo: "/operations"
-  },
-  {
-    id: "finance_manager",
-    label: "Finance Manager",
-    tabShort: "Finance",
-    icon: "💼",
-    comingSoon: true,
-    modules: []
-  },
-  {
-    id: "sales_marketing",
-    label: "Sales & Marketing",
-    tabShort: "Sales",
-    icon: "📣",
-    comingSoon: true,
-    modules: []
-  },
-  {
-    id: "client_portal",
-    label: "Client Portal",
-    tabShort: "Client",
-    icon: "👤",
-    comingSoon: true,
-    modules: []
-  }
+  { id: "tender",           label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/home" },
+  { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",   icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
+  { id: "finance_manager",  label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: true,  modules: [] },
+  { id: "sales_marketing",  label: "Sales & Marketing",  tabShort: "Sales",   icon: "sales",      comingSoon: true,  modules: [] },
+  { id: "client_portal",    label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
 ];
 
-function ComingSoonBadge() {
-  return (
-    <span className="ml-auto shrink-0 rounded border border-warning/50 bg-warning/15 px-2 py-0.5 text-[9px] font-bold uppercase leading-tight tracking-wide text-amber-900">
-      Coming soon
-    </span>
-  );
-}
-
-function HamburgerIcon({ open }) {
-  return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-      {open ? (
-        <>
-          <path d="M18 6 6 18" />
-          <path d="M6 6l12 12" />
-        </>
-      ) : (
-        <>
-          <path d="M3 12h18" />
-          <path d="M3 6h18" />
-          <path d="M3 18h18" />
-        </>
-      )}
-    </svg>
-  );
-}
+const SIDEBAR_EXPANDED_W = 256;
+const SIDEBAR_COLLAPSED_W = 64;
 
 export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
-  const [expandedDesktop, setExpandedDesktop] = useState("tender");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
   const { screenContext } = useBlueprintContext() || {};
 
-  // Touch swipe state
+  const [minimized, setMinimized] = useState(() => {
+    try { return localStorage.getItem("sidebar_minimized") === "true"; } catch { return false; }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
+
+  // Touch swipe refs
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
 
@@ -108,259 +112,149 @@ export default function AppShell() {
     return null;
   }, [location.pathname]);
 
-  useEffect(() => {
-    if (location.pathname.startsWith("/tender-manager")) setExpandedDesktop("tender");
-    if (location.pathname.startsWith("/operations")) setExpandedDesktop("operations_manager");
-  }, [location.pathname]);
+  const activeDept = DEPARTMENTS.find((d) => d.id === activeDeptId);
 
-  // Close sidebar on navigation
-  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+  // Close mobile sidebar on navigation
+  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
+
+  useEffect(() => {
+    try { localStorage.setItem("sidebar_minimized", minimized); } catch {}
+  }, [minimized]);
 
   useEffect(() => {
     let stop = false;
-    async function refreshUnmatchedCount() {
+    async function refresh() {
       try {
         const res = await fetch("/api/quote-tracker/unmatched");
         const j = await res.json().catch(() => null);
-        if (stop) return;
-        if (!res.ok || !j?.ok || !Array.isArray(j.items)) { setUnmatchedQuoteCount(0); return; }
+        if (stop || !res.ok || !j?.ok || !Array.isArray(j.items)) { setUnmatchedQuoteCount(0); return; }
         setUnmatchedQuoteCount(j.items.length);
       } catch { if (!stop) setUnmatchedQuoteCount(0); }
     }
-    refreshUnmatchedCount();
-    const id = setInterval(refreshUnmatchedCount, 60_000);
+    refresh();
+    const id = setInterval(refresh, 60_000);
     return () => { stop = true; clearInterval(id); };
   }, []);
 
-  // Swipe-to-open from left edge, swipe-to-close
   function handleTouchStart(e) {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
   }
-
   function handleTouchEnd(e) {
     if (touchStartX.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     const dy = Math.abs(e.changedTouches[0].clientY - touchStartY.current);
-    // Only trigger for mostly-horizontal swipes
     if (dy > 60) { touchStartX.current = null; return; }
-    if (!sidebarOpen && touchStartX.current < 24 && dx > 50) setSidebarOpen(true);
-    if (sidebarOpen && dx < -50) setSidebarOpen(false);
+    if (!mobileOpen && touchStartX.current < 24 && dx > 50) setMobileOpen(true);
+    if (mobileOpen && dx < -50) setMobileOpen(false);
     touchStartX.current = null;
   }
 
-  const activeDept = DEPARTMENTS.find((d) => d.id === activeDeptId);
+  const sidebarW = minimized ? SIDEBAR_COLLAPSED_W : SIDEBAR_EXPANDED_W;
 
-  return (
-    <div
-      className="min-h-screen pb-24 md:pb-10 md:pl-72"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
-      {/* ── Desktop sidebar ──────────────────────────────────────── */}
-      <aside className="hidden md:fixed md:inset-y-0 md:left-0 md:z-30 md:flex md:w-72 md:flex-col md:border-r md:border-hairline md:bg-surface">
-        <div className="border-b border-hairline px-5 py-5">
-          <div className="text-lg font-semibold text-primary tracking-tight">Blue Leaf Hub</div>
-          <div className="mt-1 text-xs text-muted">Blue Leaf Building · Adelaide</div>
-          {user?.email ? (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3">
-              <span className="truncate text-[11px] text-muted">{user.email}</span>
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="shrink-0 text-[11px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline"
-              >
-                Log out
-              </button>
+  // ── Sidebar inner content (shared between desktop + mobile overlay) ────────
+  function SidebarContent({ isMobileOverlay = false }) {
+    const showFull = isMobileOverlay || !minimized;
+
+    return (
+      <div className="flex h-full flex-col bg-[#1B2A3B]">
+        {/* Header */}
+        <div className={`flex items-center border-b border-white/10 ${showFull ? "justify-between px-4 py-4" : "justify-center px-0 py-4"}`}>
+          {showFull && (
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-white tracking-tight leading-tight">Blue Leaf Hub</div>
+              <div className="text-[10px] text-white/50 leading-tight">Blue Leaf Building</div>
             </div>
-          ) : null}
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-2 py-4 text-sm">
-          {DEPARTMENTS.map((dept) => {
-            const deptActive = activeDeptId === dept.id;
-            if (dept.comingSoon) {
-              return (
-                <div key={dept.id} title={`${dept.label} — coming soon`}
-                  className="mb-1 flex items-center gap-2 rounded-lg px-3 py-2.5 text-muted opacity-80">
-                  <span className="text-base leading-none opacity-70" aria-hidden>{dept.icon}</span>
-                  <span className="min-w-0 flex-1 font-semibold leading-snug">{dept.label}</span>
-                  <ComingSoonBadge />
-                </div>
-              );
-            }
-            return (
-              <div key={dept.id} className="mb-2">
-                <button
-                  type="button"
-                  onClick={() => setExpandedDesktop(dept.id)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left font-semibold transition ${
-                    deptActive ? "bg-primary text-white shadow-sm" : "text-ink hover:bg-page"
-                  }`}
-                >
-                  <span className="text-base leading-none" aria-hidden>{dept.icon}</span>
-                  <span className="min-w-0 flex-1 leading-snug">{dept.label}</span>
-                </button>
-                {expandedDesktop === dept.id && dept.modules?.length ? (
-                  <div className="mt-1 space-y-0.5 border-l-2 border-hairline pl-3 ml-3">
-                    {dept.modules.map((m) => (
-                      <NavLink key={m.to} to={m.to} end={m.end}
-                        className={({ isActive }) =>
-                          `block rounded-md px-3 py-2 text-[13px] font-medium transition focus-ring ${
-                            isActive ? "bg-accent/15 text-accent ring-1 ring-accent/30" : "text-ink hover:bg-page"
-                          }`
-                        }
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <span>{m.label}</span>
-                          {m.to === "/tender-manager/quote-tracker" && unmatchedQuoteCount > 0 ? (
-                            <span className="rounded-full bg-danger px-2 py-0.5 text-[10px] font-bold text-white">
-                              {unmatchedQuoteCount}
-                            </span>
-                          ) : null}
-                        </span>
-                      </NavLink>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-hairline px-3 py-2">
-          <NavLink to="/tender-manager/settings"
-            className={({ isActive }) =>
-              `flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition focus-ring ${
-                isActive ? "bg-accent/15 text-accent ring-1 ring-accent/30" : "text-ink hover:bg-page"
-              }`
-            }
-          >
-            <span aria-hidden>⚙️</span> Settings
-          </NavLink>
-        </div>
-        <div className="border-t border-hairline px-4 py-3 text-[11px] text-muted">
-          PWA install available on supported browsers.
-        </div>
-      </aside>
-
-      {/* ── Mobile header ────────────────────────────────────────── */}
-      <header className="sticky top-0 z-20 border-b border-hairline bg-surface/95 backdrop-blur md:hidden">
-        <div className="flex items-center gap-3 px-3 py-3">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((o) => !o)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-ink hover:bg-page"
-            aria-label="Open menu"
-          >
-            <HamburgerIcon open={sidebarOpen} />
-          </button>
-          <div className="flex-1 min-w-0">
-            <div className="text-base font-semibold text-primary leading-tight">Blue Leaf Hub</div>
-            {activeDept && (
-              <div className="text-[11px] text-muted leading-tight truncate">{activeDept.label}</div>
-            )}
-          </div>
-          {user?.email ? (
+          )}
+          {isMobileOverlay ? (
             <button
               type="button"
-              onClick={() => void signOut()}
-              className="shrink-0 text-[11px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline"
+              onClick={() => setMobileOpen(false)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white transition"
             >
-              Log out
+              {ICONS.close}
             </button>
-          ) : null}
-        </div>
-      </header>
-
-      {/* ── Mobile swipeable sidebar overlay ─────────────────────── */}
-      {/* Backdrop */}
-      <div
-        className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 md:hidden ${
-          sidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-        onClick={() => setSidebarOpen(false)}
-        aria-hidden
-      />
-
-      {/* Sidebar panel */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-surface shadow-2xl transition-transform duration-300 md:hidden ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        {/* Sidebar header */}
-        <div className="border-b border-hairline px-5 py-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-lg font-semibold text-primary tracking-tight">Blue Leaf Hub</div>
-              <div className="text-xs text-muted">Blue Leaf Building · Adelaide</div>
-            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-page"
+              onClick={() => setMinimized((m) => !m)}
+              title={minimized ? "Expand sidebar" : "Collapse sidebar"}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white transition ${minimized ? "mx-auto" : ""}`}
             >
-              <HamburgerIcon open={true} />
+              {minimized ? ICONS.chevronRight : ICONS.chevronLeft}
             </button>
-          </div>
-          {user?.email && (
-            <div className="mt-3 border-t border-hairline pt-3 text-[11px] text-muted truncate">
-              {user.email}
-            </div>
           )}
         </div>
 
-        {/* Sidebar nav */}
-        <nav className="flex-1 overflow-y-auto px-2 py-4 text-sm">
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto py-3">
           {DEPARTMENTS.map((dept) => {
             const deptActive = activeDeptId === dept.id;
-            if (dept.comingSoon) {
-              return (
-                <div key={dept.id}
-                  className="mb-1 flex items-center gap-2 rounded-lg px-3 py-3 text-muted opacity-60">
-                  <span className="text-lg leading-none" aria-hidden>{dept.icon}</span>
-                  <span className="min-w-0 flex-1 font-semibold">{dept.label}</span>
-                  <ComingSoonBadge />
-                </div>
-              );
-            }
+            const hasSubModules = dept.modules.length > 1;
+
             return (
-              <div key={dept.id} className="mb-2">
+              <div key={dept.id}>
                 <button
                   type="button"
+                  disabled={dept.comingSoon}
+                  title={!showFull ? dept.label : undefined}
                   onClick={() => {
-                    if (dept.modules.length === 1) {
-                      navigate(dept.modules[0].to);
-                    } else {
-                      navigate(dept.defaultTo);
-                    }
+                    if (dept.comingSoon) return;
+                    if (dept.defaultTo) navigate(dept.defaultTo);
                   }}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left font-semibold transition ${
-                    deptActive ? "bg-primary text-white shadow-sm" : "text-ink hover:bg-page"
+                  className={`group relative flex w-full items-center transition ${
+                    showFull ? "gap-3 px-3 py-2.5 mx-0" : "justify-center px-0 py-3"
+                  } ${
+                    dept.comingSoon
+                      ? "cursor-not-allowed opacity-40"
+                      : deptActive
+                      ? "text-white"
+                      : "text-white/60 hover:text-white"
                   }`}
                 >
-                  <span className="text-lg leading-none" aria-hidden>{dept.icon}</span>
-                  <span className="min-w-0 flex-1">{dept.label}</span>
+                  {/* Active indicator bar */}
+                  {deptActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r bg-accent" />
+                  )}
+
+                  <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                    deptActive ? "bg-accent/20 text-accent" : dept.comingSoon ? "" : "group-hover:bg-white/10"
+                  }`}>
+                    {ICONS[dept.icon]}
+                  </span>
+
+                  {showFull && (
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="block text-[13px] font-semibold leading-tight truncate">{dept.label}</span>
+                      {dept.comingSoon && (
+                        <span className="block text-[10px] text-warning/80 font-semibold uppercase tracking-wide leading-tight">Coming soon</span>
+                      )}
+                    </span>
+                  )}
                 </button>
-                {deptActive && dept.modules.length > 1 && (
-                  <div className="mt-1 space-y-0.5 border-l-2 border-hairline ml-4 pl-3">
+
+                {/* Sub-modules */}
+                {showFull && deptActive && hasSubModules && (
+                  <div className="mb-1 ml-12 mr-2 space-y-0.5">
                     {dept.modules.map((m) => (
-                      <NavLink key={m.to} to={m.to} end={m.end}
+                      <NavLink
+                        key={m.to}
+                        to={m.to}
+                        end={m.end}
                         className={({ isActive }) =>
-                          `block rounded-md px-3 py-3 text-[14px] font-medium transition ${
-                            isActive ? "bg-accent/15 text-accent" : "text-ink hover:bg-page"
+                          `flex items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] font-medium transition ${
+                            isActive
+                              ? "bg-white/10 text-white"
+                              : "text-white/50 hover:bg-white/5 hover:text-white/80"
                           }`
                         }
                       >
-                        <span className="inline-flex items-center gap-2">
-                          <span>{m.label}</span>
-                          {m.to === "/tender-manager/quote-tracker" && unmatchedQuoteCount > 0 ? (
-                            <span className="rounded-full bg-danger px-2 py-0.5 text-[10px] font-bold text-white">
-                              {unmatchedQuoteCount}
-                            </span>
-                          ) : null}
-                        </span>
+                        <span className="flex-1 truncate">{m.label}</span>
+                        {m.to === "/tender-manager/quote-tracker" && unmatchedQuoteCount > 0 && (
+                          <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
+                            {unmatchedQuoteCount}
+                          </span>
+                        )}
                       </NavLink>
                     ))}
                   </div>
@@ -370,25 +264,111 @@ export default function AppShell() {
           })}
         </nav>
 
-        <div className="border-t border-hairline px-3 py-3">
-          <NavLink to="/tender-manager/settings" onClick={() => setSidebarOpen(false)}
+        {/* Footer: settings + user */}
+        <div className="border-t border-white/10 py-2">
+          <NavLink
+            to="/tender-manager/settings"
+            title={!showFull ? "Settings" : undefined}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
-                isActive ? "bg-accent/15 text-accent" : "text-ink hover:bg-page"
+              `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
+                isActive ? "text-white" : "text-white/50 hover:text-white"
               }`
             }
           >
-            <span aria-hidden>⚙️</span> Settings
+            <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition group-hover:bg-white/10`}>
+              {ICONS.settings}
+            </span>
+            {showFull && <span className="text-[13px] font-semibold">Settings</span>}
           </NavLink>
+
+          {showFull && user?.email && (
+            <div className="px-4 pt-2 pb-1">
+              <div className="text-[11px] text-white/40 truncate">{user.email}</div>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="mt-0.5 text-[11px] font-semibold text-white/40 hover:text-white/80 transition"
+              >
+                Log out
+              </button>
+            </div>
+          )}
         </div>
       </div>
+    );
+  }
 
-      {/* ── Main content ─────────────────────────────────────────── */}
-      <main className="mx-auto max-w-6xl px-4 py-6 md:py-10">
+  return (
+    <div
+      className="min-h-screen bg-page"
+      style={{ paddingLeft: `${sidebarW}px` }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* ── Desktop sidebar (always visible, collapsible) ───────────── */}
+      <aside
+        className="fixed inset-y-0 left-0 z-30 hidden md:block overflow-hidden transition-all duration-200"
+        style={{ width: `${sidebarW}px` }}
+      >
+        <SidebarContent />
+      </aside>
+
+      {/* ── Mobile: overlay backdrop ──────────────────────────────────── */}
+      <div
+        className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 md:hidden ${
+          mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setMobileOpen(false)}
+        aria-hidden
+      />
+
+      {/* ── Mobile: sliding sidebar overlay ──────────────────────────── */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-300 md:hidden ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <SidebarContent isMobileOverlay />
+      </div>
+
+      {/* ── Mobile header ─────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-20 border-b border-hairline bg-surface/95 backdrop-blur md:hidden"
+        style={{ marginLeft: `-${sidebarW}px`, paddingLeft: `${sidebarW}px` }}
+      >
+        <div className="flex items-center gap-3 px-3 py-3" style={{ marginLeft: `-${sidebarW}px` }}>
+          <button
+            type="button"
+            onClick={() => setMobileOpen((o) => !o)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-ink hover:bg-page"
+            aria-label="Open menu"
+          >
+            {ICONS.hamburger}
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-base font-semibold text-primary leading-tight">Blue Leaf Hub</div>
+            {activeDept && (
+              <div className="text-[11px] text-muted leading-tight truncate">{activeDept.label}</div>
+            )}
+          </div>
+          {user?.email && (
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="shrink-0 text-[11px] font-semibold text-muted hover:text-ink"
+            >
+              Log out
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main content ──────────────────────────────────────────────── */}
+      <main className="mx-auto max-w-6xl px-4 py-6 md:py-10 pb-24 md:pb-10">
         <Outlet />
       </main>
 
-      {/* ── Mobile bottom nav ────────────────────────────────────── */}
+      {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-surface md:hidden">
         <div className="flex justify-around px-1 py-2">
           {DEPARTMENTS.map((dept) => {
@@ -402,25 +382,19 @@ export default function AppShell() {
                 disabled={dept.comingSoon}
                 onClick={() => {
                   if (dept.comingSoon) return;
-                  setSidebarOpen(true);
-                  if (!active) navigate(dept.defaultTo);
+                  setMobileOpen(true);
+                  if (!active && dept.defaultTo) navigate(dept.defaultTo);
                 }}
-                className={`flex min-w-[56px] flex-col items-center gap-0.5 rounded-lg px-2 py-1 text-[10px] font-semibold transition ${
-                  dept.comingSoon
-                    ? "cursor-not-allowed text-muted opacity-40"
-                    : active
-                    ? "text-primary"
-                    : "text-ink"
+                className={`flex min-w-[52px] flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] font-semibold transition ${
+                  dept.comingSoon ? "cursor-not-allowed opacity-40 text-muted" : active ? "text-primary" : "text-ink"
                 }`}
               >
-                <span className={`flex h-9 w-9 items-center justify-center rounded-full text-lg ${
-                  active ? "bg-primary/10" : "bg-page"
-                }`}>
-                  {dept.icon}
+                <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${active ? "bg-primary/10 text-primary" : "text-muted"}`}>
+                  {ICONS[dept.icon]}
                 </span>
-                <span className="max-w-[68px] truncate text-center leading-tight">{dept.tabShort}</span>
+                <span className="leading-tight truncate max-w-[60px] text-center">{dept.tabShort}</span>
                 {dept.comingSoon && (
-                  <span className="text-[8px] font-semibold uppercase text-warning leading-tight">Soon</span>
+                  <span className="text-[8px] font-bold uppercase text-warning leading-none">Soon</span>
                 )}
               </button>
             );
