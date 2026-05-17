@@ -232,7 +232,7 @@ export function buildGanttSvg(tasks, range, options = {}) {
         const cx = sxBar + barW / 2;
         const cy = cyCenter;
         const fill = t.status === "delayed" ? "#f59e0b" : t.status === "blocked" ? "#dc2626" : col;
-        body += `<g data-task-id="${t.id || ""}">`;
+        body += `<g data-task-id="${t.id || ""}" data-task-start="${escapeXml(t.start_date || "")}" style="cursor:grab">`;
         body += `<polygon points="${cx},${cy - 9} ${cx + 9},${cy} ${cx},${cy + 9} ${cx - 9},${cy}" fill="${fill}" fill-opacity="${op}"${strokeCrit}><title>${fullTip}</title></polygon>`;
         body += `<text x="${cx}" y="${cy + 22}" text-anchor="middle" font-size="9" fill="#333" font-weight="600">${truncateText(escapeXml(t.name), 24)}</text>`;
         body += `</g>`;
@@ -242,7 +242,7 @@ export function buildGanttSvg(tasks, range, options = {}) {
         if (t.status === "complete") fillAttr = `fill="url(#pat-complete)" fill-opacity="1"`;
         if (t.status === "delayed") fillAttr = `fill="#f59e0b" fill-opacity="${0.85}"`;
         if (t.status === "blocked") fillAttr = `fill="#dc2626" fill-opacity="${0.9}"`;
-        body += `<rect data-task-id="${t.id || ""}" x="${sxBar}" y="${ys + 6}" width="${barW}" height="${rowH - 12}" rx="3" ${fillAttr}${strokeCrit}><title>${fullTip}</title></rect>`;
+        body += `<rect data-task-id="${t.id || ""}" data-task-start="${escapeXml(t.start_date || "")}" x="${sxBar}" y="${ys + 6}" width="${barW}" height="${rowH - 12}" rx="3" ${fillAttr}${strokeCrit} style="cursor:grab"><title>${fullTip}</title></rect>`;
         if (barW >= 120) {
           const pad = 6;
           const clipId = `c-${String(t.id || "x").replace(/[^a-z0-9-]/gi, "")}`;
@@ -285,7 +285,7 @@ export function buildGanttSvg(tasks, range, options = {}) {
     }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" style="min-width:${width}px"><defs>${defs}</defs>${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" style="min-width:${width}px" data-gantt-day-w="${dayW}" data-gantt-left-pad="${leftPad}" data-gantt-range-start="${range.start}"><defs>${defs}</defs>${body}</svg>`;
 }
 
 export const PHASE_COLORS = new Proxy(LEGACY_PHASE_COLORS, {

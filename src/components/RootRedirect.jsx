@@ -7,7 +7,7 @@ export default function RootRedirect() {
   const { session, loading } = useAuth();
 
   if (!supabaseConfigured) {
-    return <Navigate to="/tender-manager/home" replace />;
+    return <Navigate to="/home" replace />;
   }
 
   if (loading) {
@@ -22,6 +22,6 @@ export default function RootRedirect() {
     );
   }
 
-  if (session) return <Navigate to="/tender-manager/home" replace />;
+  if (session) return <Navigate to="/home" replace />;
   return <Navigate to="/login" replace />;
 }

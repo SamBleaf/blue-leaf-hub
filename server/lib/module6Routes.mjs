@@ -54,6 +54,276 @@ function safeFileSegment(s, max = 80) {
     .slice(0, max);
 }
 
+function clampPercent(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function statusFromPercent(percent, fallback = "planned") {
+  const p = clampPercent(percent);
+  if (p >= 100) return "complete";
+  if (p > 0) return "in_progress";
+  return fallback && fallback !== "complete" && fallback !== "in_progress" ? fallback : "planned";
+}
+
+function normaliseTask(t = {}) {
+  let c = t.can_run_concurrent_with;
+  if (typeof c === "string") {
+    try {
+      c = JSON.parse(c);
+    } catch {
+      c = [];
+    }
+  }
+  let bx = t.buildexact_match;
+  if (typeof bx === "string") {
+    try {
+      bx = JSON.parse(bx);
+    } catch {
+      bx = null;
+    }
+  }
+  const taskType = t.task_type || (t.is_hold_point || Number(t.duration_days) === 0 ? "milestone" : "standard");
+  const percent = t.percent_complete != null ? clampPercent(t.percent_complete) : t.status === "complete" ? 100 : t.status === "in_progress" ? 50 : 0;
+  return {
+    ...t,
+    task_type: taskType,
+    percent_complete: percent,
+    depends_on: Array.isArray(t.depends_on) ? t.depends_on : [],
+    can_run_concurrent_with: Array.isArray(c) ? c : [],
+    procurement_order_by: toYmd(t.procurement_order_by) || toYmd(t.order_by_date) || null,
+    order_by_date: toYmd(t.order_by_date) || toYmd(t.procurement_order_by) || null,
+    procurement_order_status: t.procurement_order_status || "not_ordered",
+    assignee_trade: t.assignee_trade || t.trade || "",
+    priority: t.priority || "medium",
+    buildexact_match: bx || null
+  };
+}
+
+function addMaybeDays(ymd, n) {
+  const d = toYmd(ymd);
+  if (!d) return null;
+  return addDaysYmd(d, Number(n) || 0);
+}
+
+function computeOrderBy(task) {
+  const start = toYmd(task.start_date);
+  if (!start) return null;
+  if (task.procurement_lead_days != null && Number(task.procurement_lead_days) > 0) return addDaysYmd(start, -Number(task.procurement_lead_days));
+  if (task.lead_time_weeks != null && Number(task.lead_time_weeks) > 0) return addDaysYmd(start, -Math.round(Number(task.lead_time_weeks) * 7));
+  return toYmd(task.procurement_order_by || task.order_by_date) || null;
+}
+
+function daysBetween(a, b) {
+  const aa = toYmd(a);
+  const bb = toYmd(b);
+  if (!aa || !bb) return 0;
+  return Math.round((new Date(`${bb}T12:00:00`) - new Date(`${aa}T12:00:00`)) / 86400000);
+}
+
+function procurementStatus(task, today = new Date().toISOString().slice(0, 10)) {
+  const orderBy = toYmd(task.procurement_order_by || task.order_by_date) || computeOrderBy(task);
+  if (!orderBy) return { tone: "muted", label: "No order date", daysUntil: null, orderBy: null };
+  const daysUntil = daysBetween(today, orderBy);
+  if (task.procurement_order_status === "delivered") return { tone: "green", label: "Delivered", daysUntil, orderBy };
+  if (daysUntil < 0) return { tone: "red", label: `${Math.abs(daysUntil)}d overdue`, daysUntil, orderBy };
+  if (daysUntil <= 7) return { tone: "amber", label: `${daysUntil}d to order`, daysUntil, orderBy };
+  return { tone: "green", label: `${daysUntil}d to order`, daysUntil, orderBy };
+}
+
+function scheduleDashboard(tasksInput, phaseLabels = {}, webhookEvents = []) {
+  const tasks = (tasksInput || []).map(normaliseTask);
+  const today = new Date().toISOString().slice(0, 10);
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === "complete" || t.percent_complete >= 100).length;
+  const inProgress = tasks.filter((t) => t.status === "in_progress" || (t.percent_complete > 0 && t.percent_complete < 100)).length;
+  const notStarted = Math.max(0, total - done - inProgress);
+  const incomplete = tasks.filter((t) => t.percent_complete < 100 && t.status !== "complete");
+  const overdue = incomplete.filter((t) => toYmd(t.end_date) && toYmd(t.end_date) < today).length;
+  const overallPercent = total ? Math.round(tasks.reduce((sum, t) => sum + clampPercent(t.percent_complete), 0) / total) : 0;
+  const dated = tasks.filter((t) => toYmd(t.start_date) && toYmd(t.end_date));
+  const projectStart = dated.map((t) => toYmd(t.start_date)).sort()[0] || today;
+  const projectEnd = dated.map((t) => toYmd(t.end_date)).sort().at(-1) || today;
+  const plannedSpan = Math.max(1, daysBetween(projectStart, projectEnd));
+  const plannedPercentByDate = Math.max(0, Math.min(100, Math.round((Math.max(0, daysBetween(projectStart, today)) / plannedSpan) * 100)));
+  const daysOffset = Math.round(((overallPercent - plannedPercentByDate) / 100) * plannedSpan);
+  const groups = new Map();
+  for (const t of tasks) {
+    const phase = t.phase || "general";
+    if (!groups.has(phase)) groups.set(phase, []);
+    groups.get(phase).push(t);
+  }
+  const phaseRows = [...groups.entries()].map(([phase, list]) => ({
+    phase,
+    label: phaseLabels[phase] || phase.replace(/_/g, " "),
+    count: list.length,
+    progress: list.length ? Math.round(list.reduce((sum, t) => sum + clampPercent(t.percent_complete), 0) / list.length) : 0,
+    planned_hours: list.reduce((sum, t) => sum + (Number(t.planned_hours) || 0), 0),
+    planned_cost: list.reduce((sum, t) => sum + (Number(t.planned_cost) || 0), 0),
+    overdue: list.filter((t) => t.percent_complete < 100 && toYmd(t.end_date) && toYmd(t.end_date) < today).length
+  }));
+  const procurement = tasks
+    .filter((t) => t.task_type === "procurement" || t.procurement_item || t.procurement_order_by || t.order_by_date)
+    .map((t) => ({ ...t, procurement_status: procurementStatus(t, today) }))
+    .sort((a, b) => String(a.procurement_order_by || a.order_by_date || "9999-12-31").localeCompare(String(b.procurement_order_by || b.order_by_date || "9999-12-31")));
+  const workloadMap = new Map();
+  for (const t of tasks) {
+    const key = t.assignee_trade || t.trade || "Unassigned";
+    if (!workloadMap.has(key)) workloadMap.set(key, { trade: key, count: 0, hours: 0, overdue: 0 });
+    const row = workloadMap.get(key);
+    row.count += 1;
+    row.hours += Number(t.planned_hours) || 0;
+    if (t.percent_complete < 100 && toYmd(t.end_date) && toYmd(t.end_date) < today) row.overdue += 1;
+  }
+  const plannedCost = tasks.reduce((sum, t) => sum + (Number(t.planned_cost) || 0), 0);
+  const buildexactCost = tasks.reduce((sum, t) => sum + (Number(t.buildexact_match?.amount) || 0), 0);
+  return {
+    total,
+    done,
+    inProgress,
+    notStarted,
+    incomplete: incomplete.length,
+    overdue,
+    overallPercent,
+    plannedPercentByDate,
+    daysOffset,
+    projectStart,
+    projectEnd,
+    phaseRows,
+    procurement,
+    workload: [...workloadMap.values()].sort((a, b) => b.hours - a.hours || b.count - a.count),
+    cost: { plannedCost, buildexactCost, hasBuildexact: buildexactCost > 0 },
+    buildexactAlerts: (webhookEvents || []).map((e) => ({
+      id: e.id,
+      event_type: e.event_type,
+      received_at: e.received_at,
+      message: `${e.event_type || "Buildexact update"} received — review linked schedule costs.`
+    }))
+  };
+}
+
+function ripplePreview(tasksInput, taskId, newStartDate) {
+  const tasks = (tasksInput || []).map(normaliseTask);
+  const byId = new Map(tasks.map((t) => [t.id, { ...t }]));
+  const root = byId.get(taskId);
+  const start = toYmd(newStartDate);
+  if (!root || !start) return { affected: [], updatedTasks: tasks };
+  const original = new Map(tasks.map((t) => [t.id, { ...t }]));
+  root.start_date = start;
+  root.end_date = computeTaskEnd(root.start_date, root.duration_days, root.is_hold_point || root.task_type === "milestone");
+  root.order_by_date = computeOrderBy(root);
+  root.procurement_order_by = root.order_by_date;
+  byId.set(root.id, root);
+  const affected = [];
+  const pushAffected = (row) => {
+    const old = original.get(row.id) || {};
+    affected.push({ id: row.id, name: row.name, old_start_date: old.start_date || null, new_start_date: row.start_date || null, old_end_date: old.end_date || null, new_end_date: row.end_date || null });
+  };
+  pushAffected(root);
+  const queue = [root.id];
+  while (queue.length) {
+    const cid = queue.shift();
+    const parent = byId.get(cid);
+    if (!parent?.end_date) continue;
+    for (const t of byId.values()) {
+      if (!(t.depends_on || []).includes(cid)) continue;
+      const predEnds = (t.depends_on || []).map((id) => byId.get(id)?.end_date).filter(Boolean);
+      if (!predEnds.length) continue;
+      const requiredStart = addDaysYmd(predEnds.sort().at(-1), 1);
+      if (!t.start_date || t.start_date < requiredStart) {
+        t.start_date = requiredStart;
+        t.end_date = computeTaskEnd(t.start_date, t.duration_days, t.is_hold_point || t.task_type === "milestone");
+        t.order_by_date = computeOrderBy(t);
+        t.procurement_order_by = t.order_by_date;
+        byId.set(t.id, t);
+        pushAffected(t);
+        queue.push(t.id);
+      }
+    }
+  }
+  return { affected, updatedTasks: tasks.map((t) => byId.get(t.id) || t) };
+}
+
+function flattenEstimateLines(estimate) {
+  const out = [];
+  for (const cat of estimate?.categories || []) {
+    const categoryName = cat.name || "";
+    for (const item of cat.active_items || []) {
+      out.push({
+        id: `${estimate.id}:${cat.number || categoryName}:${item.code || item.description}`,
+        category: categoryName,
+        code: item.code || "",
+        description: item.description || categoryName,
+        amount: Number(item.total ?? item.subtotal ?? 0) || 0,
+        estimate_id: estimate.id
+      });
+    }
+    if (!Array.isArray(cat.active_items) || !cat.active_items.length) {
+      out.push({
+        id: `${estimate.id}:${cat.number || categoryName}`,
+        category: categoryName,
+        code: String(cat.number || ""),
+        description: categoryName,
+        amount: Number(cat.subtotal_inc_gst ?? cat.subtotal_ex_gst ?? cat.subtotal ?? 0) || 0,
+        estimate_id: estimate.id
+      });
+    }
+  }
+  return out;
+}
+
+function wordSet(s) {
+  return new Set(String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2));
+}
+
+function matchScore(a, b) {
+  const aa = wordSet(a);
+  const bb = wordSet(b);
+  if (!aa.size || !bb.size) return 0;
+  let hits = 0;
+  for (const w of aa) if (bb.has(w)) hits += 1;
+  return Math.round((hits / Math.max(aa.size, bb.size)) * 100);
+}
+
+function templateTaskRow(templateTask, projectId, startDate, templateId) {
+  const tempId = templateTask.temp_id || templateTask.id || templateTask.name;
+  const start = addMaybeDays(startDate, Number(templateTask.offset_from_project_start) || 0);
+  const taskType = templateTask.task_type || "standard";
+  const duration = Math.max(0, Number(templateTask.duration_days) || 0);
+  const proc = templateTask.procurement || null;
+  const orderBy = proc?.lead_days ? addMaybeDays(start, -Number(proc.lead_days)) : null;
+  return {
+    project_id: projectId,
+    template_id: templateId,
+    name: templateTask.name,
+    trade: templateTask.assignee_trade || "general",
+    phase: templateTask.phase || "general",
+    start_date: start,
+    end_date: computeTaskEnd(start, duration, taskType === "milestone"),
+    duration_days: duration,
+    depends_on: [],
+    status: "planned",
+    is_hold_point: taskType === "milestone",
+    task_type: taskType,
+    percent_complete: 0,
+    procurement_item: proc?.item || null,
+    procurement_supplier: proc?.supplier || null,
+    procurement_lead_days: proc?.lead_days || null,
+    procurement_order_by: orderBy,
+    order_by_date: orderBy,
+    procurement_order_status: proc?.order_status || "not_ordered",
+    planned_hours: templateTask.planned_hours ?? null,
+    planned_cost: templateTask.planned_cost ?? null,
+    assignee_trade: templateTask.assignee_trade || null,
+    priority: templateTask.priority || "medium",
+    notes: templateTask.notes || null,
+    updated_at: new Date().toISOString(),
+    _temp_id: tempId,
+    _depends_temp: Array.isArray(templateTask.depends_on) ? templateTask.depends_on : []
+  };
+}
+
 async function claudeText(prompt) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
@@ -99,8 +369,10 @@ async function cascadeScheduleForward(sb, projectId, rootTaskId) {
         t.end_date = computeTaskEnd(t.start_date, t.duration_days, t.is_hold_point);
         if (t.procurement_lead_days && t.procurement_lead_days > 0) {
           t.order_by_date = addDays(t.start_date, -t.procurement_lead_days);
+          t.procurement_order_by = t.order_by_date;
         } else if (t.lead_time_weeks != null && Number(t.lead_time_weeks) > 0) {
           t.order_by_date = addDays(t.start_date, -Math.round(Number(t.lead_time_weeks) * 7));
+          t.procurement_order_by = t.order_by_date;
         }
         byId.set(t.id, t);
         if (!updated.has(t.id)) {
@@ -120,12 +392,33 @@ async function cascadeScheduleForward(sb, projectId, rootTaskId) {
         start_date: row.start_date,
         end_date: row.end_date,
         order_by_date: row.order_by_date ?? null,
+        procurement_order_by: row.procurement_order_by ?? row.order_by_date ?? null,
         updated_at: nowIso
       })
       .eq("id", id);
     if (uerr) throw uerr;
   }
   return [...updated];
+}
+
+async function loadBuildexactScheduleHints(sb, project) {
+  if (!sb || !project) return [];
+  const filters = [];
+  if (project.buildexact_job_id) filters.push(["buildexact_job_id", project.buildexact_job_id]);
+  if (project.job_id) filters.push(["job_id", project.job_id]);
+  for (const [col, value] of filters) {
+    const { data } = await sb
+      .from("buildexact_estimates")
+      .select("schedule_hints")
+      .eq(col, value)
+      .not("schedule_hints", "is", null)
+      .order("imported_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const hints = Array.isArray(data?.schedule_hints) ? data.schedule_hints : [];
+    if (hints.length) return hints;
+  }
+  return [];
 }
 
 /**
@@ -162,6 +455,7 @@ export function registerModule6Routes(app) {
       let rows;
       let categorySource = "legacy";
       let plannedVia = "legacy";
+      const scheduleHints = await loadBuildexactScheduleHints(sb, proj);
 
       if (useLegacy) {
         rows = buildScheduleRowsForInsert(projectId, startDate, proj.accepted_trades || [], { excludeNames });
@@ -171,15 +465,15 @@ export function registerModule6Routes(app) {
         try {
           if (process.env.ANTHROPIC_API_KEY?.trim()) {
             const { tasks: aiTasks } = await generateSchedulePlanWithClaude({ categoryBlocks: catCtx.categories });
-            rows = buildRowsFromClaudePlan(projectId, startDate, aiTasks, catCtx.categories);
+            rows = buildRowsFromClaudePlan(projectId, startDate, aiTasks, catCtx.categories, { scheduleHints });
             plannedVia = "claude";
           } else {
-            rows = buildFallbackRowsFromCategories(projectId, startDate, catCtx.categories);
+            rows = buildFallbackRowsFromCategories(projectId, startDate, catCtx.categories, { scheduleHints });
             plannedVia = "fallback_no_api_key";
           }
         } catch (err) {
           console.warn("[schedule/generate] planner", err?.message || err);
-          rows = buildFallbackRowsFromCategories(projectId, startDate, catCtx.categories);
+          rows = buildFallbackRowsFromCategories(projectId, startDate, catCtx.categories, { scheduleHints });
           plannedVia = "fallback_error";
         }
       }
@@ -283,6 +577,330 @@ export function registerModule6Routes(app) {
     }
   });
 
+  app.get("/api/schedule/templates", async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const { data, error } = await sb.from("schedule_templates").select("*").order("is_default", { ascending: false }).order("name");
+      if (error) throw error;
+      return res.json({ ok: true, templates: data || [] });
+    } catch (e) {
+      console.error("[schedule/templates list]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/schedule/templates/:id", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const id = String(req.params.id || "").trim();
+      const { data, error } = await sb.from("schedule_templates").select("*").eq("id", id).single();
+      if (error) throw error;
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error("[schedule/templates get]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/templates", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const name = String(body.name || "").trim();
+      if (!name) return res.status(400).json({ ok: false, error: "name required." });
+      const row = {
+        name,
+        description: body.description != null ? String(body.description) : null,
+        project_type: String(body.project_type || "new_build"),
+        tasks: Array.isArray(body.tasks) ? body.tasks : [],
+        is_default: Boolean(body.is_default),
+        updated_at: new Date().toISOString()
+      };
+      const { data, error } = await sb.from("schedule_templates").insert(row).select("*").single();
+      if (error) throw error;
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error("[schedule/templates post]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.put("/api/schedule/templates/:id", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const id = String(req.params.id || "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const patch = { updated_at: new Date().toISOString() };
+      if (body.name != null) patch.name = String(body.name).trim();
+      if (body.description !== undefined) patch.description = body.description == null ? null : String(body.description);
+      if (body.project_type != null) patch.project_type = String(body.project_type);
+      if (Array.isArray(body.tasks)) patch.tasks = body.tasks;
+      if (body.is_default != null) patch.is_default = Boolean(body.is_default);
+      const { data, error } = await sb.from("schedule_templates").update(patch).eq("id", id).select("*").single();
+      if (error) throw error;
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error("[schedule/templates put]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.delete("/api/schedule/templates/:id", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const id = String(req.params.id || "").trim();
+      const { error } = await sb.from("schedule_templates").delete().eq("id", id);
+      if (error) throw error;
+      return res.json({ ok: true, deleted: id });
+    } catch (e) {
+      console.error("[schedule/templates delete]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/schedule/:projectId/dashboard", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      let phaseLabels = {};
+      try {
+        const { data: proj } = await sb.from("projects").select("id, address, job_id, buildexact_job_id").eq("id", projectId).single();
+        if (proj) {
+          const catCtx = await resolveScheduleCategoryBlocks(sb, proj);
+          for (const b of catCtx.categories || []) phaseLabels[b.phase] = b.phaseLabel;
+        }
+      } catch {
+        phaseLabels = {};
+      }
+      const { data: events } = await sb
+        .from("buildexact_webhook_events")
+        .select("id,event_type,payload,received_at")
+        .eq("matched_project_id", projectId)
+        .order("received_at", { ascending: false })
+        .limit(8);
+      return res.json({ ok: true, dashboard: scheduleDashboard(tasks || [], phaseLabels, events || []) });
+    } catch (e) {
+      console.error("[schedule/dashboard]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/schedule/:projectId/procurement", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("procurement_order_by", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      const today = new Date().toISOString().slice(0, 10);
+      const tasks = (data || [])
+        .map(normaliseTask)
+        .filter((t) => t.task_type === "procurement" || t.procurement_item || t.procurement_order_by || t.order_by_date)
+        .map((t) => ({ ...t, procurement_status: procurementStatus(t, today) }));
+      return res.json({ ok: true, tasks });
+    } catch (e) {
+      console.error("[schedule/procurement]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/ripple-check", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const taskId = String(req.body?.taskId || "").trim();
+      const newStartDate = toYmd(req.body?.newStartDate);
+      if (!taskId || !newStartDate) return res.status(400).json({ ok: false, error: "taskId and newStartDate required." });
+      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId);
+      if (error) throw error;
+      const preview = ripplePreview(data || [], taskId, newStartDate);
+      return res.json({ ok: true, downstream_tasks: preview.affected.slice(1), affected: preview.affected, updatedTasks: preview.updatedTasks });
+    } catch (e) {
+      console.error("[schedule/ripple-check]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/task", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const name = String(body.name || "").trim();
+      if (!name) return res.status(400).json({ ok: false, error: "name required." });
+      const taskType = String(body.task_type || "standard");
+      const duration = Math.max(0, Number(body.duration_days ?? (taskType === "milestone" ? 0 : 1)) || 0);
+      const start = toYmd(body.start_date) || new Date().toISOString().slice(0, 10);
+      const orderBy = body.procurement_order_by ? toYmd(body.procurement_order_by) : computeOrderBy({ ...body, start_date: start });
+      const row = {
+        project_id: projectId,
+        name,
+        trade: String(body.trade || body.assignee_trade || "general"),
+        phase: String(body.phase || "general"),
+        start_date: start,
+        end_date: computeTaskEnd(start, duration, taskType === "milestone"),
+        duration_days: duration,
+        depends_on: Array.isArray(body.depends_on) ? body.depends_on.filter(Boolean) : [],
+        status: statusFromPercent(body.percent_complete, String(body.status || "planned")),
+        is_hold_point: Boolean(body.is_hold_point || taskType === "milestone"),
+        task_type: taskType,
+        percent_complete: clampPercent(body.percent_complete),
+        procurement_item: body.procurement_item || null,
+        procurement_supplier: body.procurement_supplier || null,
+        procurement_lead_days: body.procurement_lead_days == null || body.procurement_lead_days === "" ? null : Number(body.procurement_lead_days),
+        procurement_order_by: orderBy,
+        order_by_date: orderBy,
+        procurement_order_status: body.procurement_order_status || "not_ordered",
+        planned_hours: body.planned_hours == null || body.planned_hours === "" ? null : Number(body.planned_hours),
+        planned_cost: body.planned_cost == null || body.planned_cost === "" ? null : Number(body.planned_cost),
+        assignee_trade: body.assignee_trade || body.trade || null,
+        priority: body.priority || "medium",
+        notes: body.notes || null,
+        updated_at: new Date().toISOString()
+      };
+      const { data, error } = await sb.from("schedule_tasks").insert(row).select("*").single();
+      if (error) throw error;
+      return res.json({ ok: true, task: data });
+    } catch (e) {
+      console.error("[schedule/task create]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/load-template", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const templateId = String(req.body?.templateId || "").trim();
+      const startDate = toYmd(req.body?.startDate);
+      if (!projectId || !templateId || !startDate) return res.status(400).json({ ok: false, error: "projectId, templateId and startDate required." });
+      const { data: template, error: te } = await sb.from("schedule_templates").select("*").eq("id", templateId).single();
+      if (te || !template) return res.status(404).json({ ok: false, error: te?.message || "Template not found." });
+      const templateTasks = Array.isArray(template.tasks) ? template.tasks : [];
+      await sb.from("schedule_tasks").delete().eq("project_id", projectId);
+      const rows = templateTasks.map((t) => templateTaskRow(t, projectId, startDate, template.id));
+      const insertPayload = rows.map(({ _temp_id, _depends_temp, ...r }) => r);
+      const { data: inserted, error: ie } = await sb.from("schedule_tasks").insert(insertPayload).select("id,name");
+      if (ie) throw ie;
+      const idByTemp = new Map();
+      rows.forEach((r, i) => idByTemp.set(r._temp_id, inserted?.[i]?.id));
+      for (const r of rows) {
+        const id = idByTemp.get(r._temp_id);
+        if (!id) continue;
+        const deps = (r._depends_temp || []).map((tempId) => idByTemp.get(tempId)).filter(Boolean);
+        if (deps.length) await sb.from("schedule_tasks").update({ depends_on: deps, updated_at: new Date().toISOString() }).eq("id", id);
+      }
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return res.json({ ok: true, template, tasks: tasks || [] });
+    } catch (e) {
+      console.error("[schedule/load-template]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/save-as-template", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const name = String(req.body?.name || "").trim();
+      if (!name) return res.status(400).json({ ok: false, error: "name required." });
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      const start = (tasks || []).map((t) => toYmd(t.start_date)).filter(Boolean).sort()[0] || new Date().toISOString().slice(0, 10);
+      const tempById = new Map((tasks || []).map((t, i) => [t.id, `task_${i + 1}`]));
+      const templateTasks = (tasks || []).map((t, i) => ({
+        id: tempById.get(t.id) || `task_${i + 1}`,
+        phase: t.phase,
+        name: t.name,
+        task_type: t.task_type || (t.is_hold_point ? "milestone" : "standard"),
+        duration_days: Number(t.duration_days) || 0,
+        offset_from_project_start: daysBetween(start, t.start_date),
+        depends_on: (t.depends_on || []).map((id) => tempById.get(id)).filter(Boolean),
+        planned_hours: t.planned_hours,
+        planned_cost: t.planned_cost,
+        procurement: t.task_type === "procurement" || t.procurement_item ? {
+          item: t.procurement_item || t.name,
+          supplier: t.procurement_supplier || "",
+          lead_days: t.procurement_lead_days || null,
+          order_status: t.procurement_order_status || "not_ordered"
+        } : null,
+        assignee_trade: t.assignee_trade || t.trade,
+        priority: t.priority || "medium"
+      }));
+      const { data: template, error: ie } = await sb
+        .from("schedule_templates")
+        .insert({
+          name,
+          description: req.body?.description != null ? String(req.body.description) : `Saved from project ${projectId}`,
+          project_type: String(req.body?.project_type || "custom"),
+          tasks: templateTasks,
+          is_default: false,
+          updated_at: new Date().toISOString()
+        })
+        .select("*")
+        .single();
+      if (ie) throw ie;
+      return res.json({ ok: true, template });
+    } catch (e) {
+      console.error("[schedule/save-as-template]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/buildexact-match", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const { data: proj, error: pe } = await sb.from("projects").select("id, job_id").eq("id", projectId).single();
+      if (pe || !proj) return res.status(404).json({ ok: false, error: pe?.message || "Project not found." });
+      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId);
+      if (te) throw te;
+      const { data: estimates, error: ee } = await sb
+        .from("buildexact_estimates")
+        .select("id,job_id,quote_number,address,categories,estimate_total,imported_at")
+        .eq("job_id", proj.job_id)
+        .order("imported_at", { ascending: false })
+        .limit(3);
+      if (ee) throw ee;
+      const lines = (estimates || []).flatMap(flattenEstimateLines);
+      const matches = [];
+      for (const task of tasks || []) {
+        let best = null;
+        for (const line of lines) {
+          const score = Math.max(matchScore(task.name, line.description), matchScore(task.assignee_trade || task.trade, `${line.category} ${line.description}`));
+          if (score >= 45 && (!best || score > best.score)) best = { ...line, score };
+        }
+        if (best && best.score >= 70) {
+          const match = { line_item_id: best.id, description: best.description, category: best.category, amount: best.amount, score: best.score, estimate_id: best.estimate_id };
+          const { error } = await sb
+            .from("schedule_tasks")
+            .update({ buildexact_line_item_id: best.id, buildexact_match: match, planned_cost: best.amount || null, updated_at: new Date().toISOString() })
+            .eq("id", task.id);
+          if (error) throw error;
+          matches.push({ task_id: task.id, task_name: task.name, match });
+        }
+      }
+      return res.json({ ok: true, matches, estimateCount: (estimates || []).length });
+    } catch (e) {
+      console.error("[schedule/buildexact-match]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   app.get("/api/schedule/:projectId", async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
@@ -313,8 +931,10 @@ export function registerModule6Routes(app) {
       const patch = {};
       if (body.status != null) patch.status = String(body.status);
       if (body.name != null) patch.name = String(body.name).slice(0, 500);
+      if (body.trade != null) patch.trade = String(body.trade).slice(0, 200);
       if (body.phase != null) patch.phase = String(body.phase).slice(0, 200);
       if (body.start_date != null) patch.start_date = String(body.start_date);
+      if (body.end_date != null) patch.end_date = String(body.end_date);
       if (body.duration_days != null) patch.duration_days = Number(body.duration_days);
       if (body.notes !== undefined) patch.notes = body.notes;
       if (body.assigned_subcontractor_id !== undefined) patch.assigned_subcontractor_id = body.assigned_subcontractor_id || null;
@@ -329,13 +949,31 @@ export function registerModule6Routes(app) {
       if (body.hold_point_description !== undefined) patch.hold_point_description = body.hold_point_description;
       if (body.hold_notify !== undefined) patch.hold_notify = Boolean(body.hold_notify);
       if (body.is_critical_path != null) patch.is_critical_path = Boolean(body.is_critical_path);
+      if (body.task_type != null) patch.task_type = String(body.task_type);
+      if (body.percent_complete != null) {
+        patch.percent_complete = clampPercent(body.percent_complete);
+        if (body.status == null) patch.status = statusFromPercent(patch.percent_complete, cur.status);
+      }
+      if (body.priority != null) patch.priority = String(body.priority);
+      if (body.planned_hours !== undefined) patch.planned_hours = body.planned_hours == null || body.planned_hours === "" ? null : Number(body.planned_hours);
+      if (body.planned_cost !== undefined) patch.planned_cost = body.planned_cost == null || body.planned_cost === "" ? null : Number(body.planned_cost);
+      if (body.assignee_trade !== undefined) patch.assignee_trade = body.assignee_trade == null ? null : String(body.assignee_trade);
+      if (body.procurement_item !== undefined) patch.procurement_item = body.procurement_item == null ? null : String(body.procurement_item);
+      if (body.procurement_supplier !== undefined) patch.procurement_supplier = body.procurement_supplier == null ? null : String(body.procurement_supplier);
+      if (body.procurement_lead_days !== undefined) patch.procurement_lead_days = body.procurement_lead_days == null || body.procurement_lead_days === "" ? null : Number(body.procurement_lead_days);
+      if (body.procurement_order_by !== undefined) patch.procurement_order_by = body.procurement_order_by ? String(body.procurement_order_by) : null;
+      if (body.procurement_order_status !== undefined) patch.procurement_order_status = body.procurement_order_status == null ? "not_ordered" : String(body.procurement_order_status);
+      if (body.buildexact_line_item_id !== undefined) patch.buildexact_line_item_id = body.buildexact_line_item_id == null ? null : String(body.buildexact_line_item_id);
+      if (body.buildexact_match !== undefined) patch.buildexact_match = body.buildexact_match || null;
+      if (body.float_days !== undefined) patch.float_days = body.float_days == null || body.float_days === "" ? null : Number(body.float_days);
+      if (body.template_id !== undefined) patch.template_id = body.template_id || null;
 
       const merged = { ...cur, ...patch };
-      merged.end_date = computeTaskEnd(merged.start_date, merged.duration_days, merged.is_hold_point);
-      if (merged.lead_time_weeks != null && Number(merged.lead_time_weeks) > 0 && merged.start_date) {
-        merged.order_by_date = addDays(merged.start_date, -Math.round(Number(merged.lead_time_weeks) * 7));
-      } else if (merged.procurement_lead_days && merged.procurement_lead_days > 0 && merged.start_date) {
-        merged.order_by_date = addDays(merged.start_date, -merged.procurement_lead_days);
+      merged.end_date = body.end_date != null ? toYmd(body.end_date) : computeTaskEnd(merged.start_date, merged.duration_days, merged.is_hold_point || merged.task_type === "milestone");
+      const computedOrderBy = computeOrderBy(merged);
+      if (computedOrderBy) {
+        merged.order_by_date = computedOrderBy;
+        merged.procurement_order_by = computedOrderBy;
       }
       merged.updated_at = new Date().toISOString();
 
@@ -343,6 +981,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .update({
           name: merged.name,
+          trade: merged.trade,
           phase: merged.phase,
           status: merged.status,
           start_date: merged.start_date,
@@ -359,13 +998,28 @@ export function registerModule6Routes(app) {
           hold_point_description: merged.hold_point_description,
           hold_notify: merged.hold_notify,
           is_critical_path: merged.is_critical_path,
+          task_type: merged.task_type,
+          percent_complete: merged.percent_complete,
+          procurement_item: merged.procurement_item,
+          procurement_supplier: merged.procurement_supplier,
+          procurement_lead_days: merged.procurement_lead_days,
+          procurement_order_by: merged.procurement_order_by,
+          procurement_order_status: merged.procurement_order_status,
+          buildexact_line_item_id: merged.buildexact_line_item_id,
+          buildexact_match: merged.buildexact_match,
+          planned_cost: merged.planned_cost,
+          planned_hours: merged.planned_hours,
+          assignee_trade: merged.assignee_trade,
+          priority: merged.priority,
+          float_days: merged.float_days,
+          template_id: merged.template_id,
           updated_at: merged.updated_at
         })
         .eq("id", id);
       if (ue) throw ue;
 
       let updatedIds = [id];
-      if (body.start_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on)) {
+      if (!body.no_cascade && (body.start_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on))) {
         const more = await cascadeScheduleForward(sb, cur.project_id, id);
         updatedIds = [...new Set([...updatedIds, ...more])];
       }

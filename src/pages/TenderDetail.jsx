@@ -264,9 +264,13 @@ export default function TenderDetail() {
 
   async function updateRfq(id, patch) {
     if (readOnly) return;
-    const sb = getSupabase();
-    const { error: u } = await sb.from("rfqs").update(patch).eq("id", id);
-    if (u) setError(u.message);
+    const res = await fetch(`/api/rfq/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) setError(data.error || "Could not update RFQ.");
     else await load();
   }
 

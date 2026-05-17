@@ -258,13 +258,43 @@ function phaseForCategory(catLabel, categoryBlocks) {
   return slugPhase(catLabel);
 }
 
+function normWords(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fuzzyNameScore(a, b) {
+  const aa = new Set(normWords(a).split(" ").filter((w) => w.length > 2));
+  const bb = new Set(normWords(b).split(" ").filter((w) => w.length > 2));
+  if (!aa.size || !bb.size) return 0;
+  let hits = 0;
+  for (const w of aa) if (bb.has(w)) hits += 1;
+  return hits / Math.max(aa.size, bb.size);
+}
+
+function findScheduleHint(taskName, phase, scheduleHints = []) {
+  let best = null;
+  for (const hint of scheduleHints || []) {
+    const dur = Number(hint?.duration_days);
+    if (!Number.isFinite(dur) || dur <= 0) continue;
+    const phaseScore = phase && hint?.phase && normWords(phase) === normWords(hint.phase) ? 0.35 : 0;
+    const score = phaseScore + fuzzyNameScore(taskName, hint.task_name);
+    if (score >= 0.45 && (!best || score > best.score)) best = { hint, score };
+  }
+  return best?.hint || null;
+}
+
 /**
  * Build insert rows from Claude JSON tasks (with temp ids + _depends_temp).
  */
-export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categoryBlocks) {
+export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categoryBlocks, opts = {}) {
   const sorted = topoSortClaudeTasks(claudeTasks);
   const tempToEnd = new Map();
   const rows = [];
+  const scheduleHints = Array.isArray(opts.scheduleHints) ? opts.scheduleHints : [];
   for (const t of sorted) {
     const tid = String(t.id);
     const preds = (t.depends_on || []).map(String).filter((id) => tempToEnd.has(id));
@@ -277,9 +307,17 @@ export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categ
       }
       start = addDaysYmd(maxEnd, 1);
     }
+    const phase = phaseForCategory(t.category, categoryBlocks);
+    const matchedHint = findScheduleHint(t.name, phase, scheduleHints);
+    if (matchedHint) {
+      console.log(`[schedule] using Buildexact duration for ${t.name}: ${matchedHint.duration_days} days`);
+    }
     const durW = Number(t.duration_weeks);
     const isHp = Boolean(t.is_hold_point);
     const duration_days =
+      matchedHint
+        ? Math.max(1, Math.round(Number(matchedHint.duration_days)))
+        :
       isHp && (!Number.isFinite(durW) || durW <= 0)
         ? 0
         : Math.max(1, Math.ceil(Math.max(Number.isFinite(durW) ? durW : 1, 0.1) * 7));
@@ -298,7 +336,7 @@ export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categ
       trade: String(t.category || "General")
         .split(/[/,&]/)[0]
         ?.trim() || "General",
-      phase: phaseForCategory(t.category, categoryBlocks),
+      phase,
       start_date: start,
       end_date: end,
       duration_days,
@@ -323,18 +361,23 @@ export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categ
 }
 
 /** Sequential fallback when Claude is unavailable: one short task per line item. */
-export function buildFallbackRowsFromCategories(projectId, startDate, categoryBlocks) {
+export function buildFallbackRowsFromCategories(projectId, startDate, categoryBlocks, opts = {}) {
   const sortedBlocks = categoryBlocks || [];
   let chainCursor = startDate;
   const out = [];
   let idx = 0;
+  const scheduleHints = Array.isArray(opts.scheduleHints) ? opts.scheduleHints : [];
   for (const block of sortedBlocks) {
     const items = block.lineItems?.length ? block.lineItems : [block.phaseLabel];
     for (const line of items) {
       idx += 1;
       const tid = `fb_${idx}`;
       const start = chainCursor;
-      const duration_days = 3;
+      const matchedHint = findScheduleHint(line, block.phase, scheduleHints);
+      if (matchedHint) {
+        console.log(`[schedule] using Buildexact duration for ${line}: ${matchedHint.duration_days} days`);
+      }
+      const duration_days = matchedHint ? Math.max(1, Math.round(Number(matchedHint.duration_days))) : 3;
       const end = addDaysYmd(start, duration_days - 1);
       chainCursor = addDaysYmd(end, 1);
       out.push({

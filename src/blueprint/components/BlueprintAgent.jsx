@@ -200,6 +200,7 @@ const TypingIndicator = () => (
 
 // ─── Tab Button ───────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line no-unused-vars
 const TabBtn = ({ icon, label, active, onClick }) => (
   <button
     onClick={onClick}
@@ -651,7 +652,7 @@ export function QCResultView({ result, onUseDraft }) {
 
 // ─── QC Tab ───────────────────────────────────────────────────────────────────
 
-const QCTab = ({ initialDocument = '', initialType = 'rfq', onUseDraft }) => {
+const QCTab = ({ initialDocument = '', initialType = 'rfq', _onUseDraft }) => {
   const [docText, setDocText] = useState(initialDocument);
   const [docType, setDocType] = useState(initialType);
   const [result, setResult] = useState(null);
@@ -937,7 +938,7 @@ const BlueprintPanel = ({
   documentContext,
   documentType,
   onSOPGenerated,
-  onIssueFound,
+  _onIssueFound,
   onClose,
   onMinimize,
   onHeaderMouseDown,
@@ -1132,7 +1133,7 @@ export default function BlueprintAgent({
       } catch { /* silent fail in inline mode */ }
     }, 800);
     return () => clearTimeout(timer);
-  }, [mode, documentContext, documentType]);
+  }, [mode, documentContext, documentType, onIssueFound, onScoreReady]);
 
   if (mode === 'inline-qc') return null;
 

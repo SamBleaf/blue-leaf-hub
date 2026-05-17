@@ -28,8 +28,10 @@ import { registerModule5Routes } from "./lib/module5Routes.mjs";
 import { registerModule6Routes } from "./lib/module6Routes.mjs";
 import { registerInductionRoutes } from "./lib/inductionRoutes.mjs";
 import { registerJobsApiRoutes } from "./lib/jobsApiRoutes.mjs";
+import { registerBuildexactIntegrationRoutes } from "./lib/buildexactIntegrationRoutes.mjs";
 import { resolveInboundRfqMatch, generateOutboundMessageId } from "./lib/imapQuoteMatch.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
+import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 
 console.log("[blue-leaf-api] booting…");
@@ -603,10 +605,12 @@ app.use((err, _req, res, next) => {
 
 registerModule4Routes(app);
 registerModule5Routes(app);
+registerBuildexactIntegrationRoutes(app);
 registerModule6Routes(app);
 registerBlueprintRoutes(app);
 registerInductionRoutes(app);
 registerJobsApiRoutes(app);
+registerSalesRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });

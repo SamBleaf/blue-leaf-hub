@@ -23,6 +23,8 @@ import CostIntelligence from "./pages/CostIntelligence.jsx";
 import FeeProposalList from "./pages/FeeProposalList.jsx";
 import FeeProposalWizard from "./pages/FeeProposalWizard.jsx";
 import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
+import SalesPipeline from "./pages/SalesPipeline.jsx";
+import LeadDetail from "./pages/LeadDetail.jsx";
 
 export default function App() {
   return (
@@ -37,9 +39,9 @@ export default function App() {
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
+                <Route path="/home" element={<Home />} />
                 <Route path="/tender-manager">
-                  <Route index element={<Navigate to="home" replace />} />
-                  <Route path="home" element={<Home />} />
+                  <Route index element={<Navigate to="/home" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
                   <Route path="subcontractors" element={<Subcontractors />} />
                   <Route path="quote-tracker" element={<QuoteTracker />} />
@@ -58,6 +60,9 @@ export default function App() {
                 <Route path="/operations/:projectId/schedule" element={<ScheduleManager />} />
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />
                 <Route path="/operations/:projectId/diary" element={<SiteDiary />} />
+
+                <Route path="/sales" element={<SalesPipeline />} />
+                <Route path="/sales/:leadId" element={<LeadDetail />} />
 
                 <Route path="/rfq-engine" element={<Navigate to="/tender-manager/rfq-engine" replace />} />
                 <Route path="/subcontractors" element={<Navigate to="/tender-manager/subcontractors" replace />} />

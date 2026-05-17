@@ -1,5 +1,78 @@
 import * as XLSX from "xlsx";
 
+const CATEGORY_MAPPING = [
+  ["Preliminaries", "site_prep", "", false],
+  ["Site Establishment", "site_prep", "", false],
+  ["Earthworks", "site_prep", "earthworks", true],
+  ["Footings & Slabs", "foundations", "concrete", true],
+  ["Concrete", "foundations", "concrete", true],
+  ["Slab", "foundations", "concrete", true],
+  ["Hydraulics — Sub-Slab", "foundations", "plumbing", true],
+  ["Hydraulics - Sub Slab", "foundations", "plumbing", true],
+  ["Steel Work", "frame", "steel", true],
+  ["Framing", "frame", "framing", true],
+  ["Hire Items", "frame", "hire", true],
+  ["Scaffolding", "frame", "scaffolding", true],
+  ["Windows & External Doors", "lock_up", "windows", true],
+  ["Brickwork", "lock_up", "brickwork", true],
+  ["Roofing", "lock_up", "roofing", true],
+  ["External Cladding", "lock_up", "", false],
+  ["Garage Door", "lock_up", "garage_door", true],
+  ["Hydraulics — Rough-in", "fix_out", "plumbing", true],
+  ["Hydraulics - Rough in", "fix_out", "plumbing", true],
+  ["Electrical — Rough-in", "fix_out", "electrical", true],
+  ["Electrical - Rough in", "fix_out", "electrical", true],
+  ["Insulation", "fix_out", "insulation", true],
+  ["Plasterboard", "fix_out", "plasterboard", true],
+  ["Carpentry", "fix_out", "", false],
+  ["Painting", "fix_out", "painting", true],
+  ["Tiling", "fix_out", "tiling", true],
+  ["Flooring", "fix_out", "flooring", true],
+  ["Hydraulics — Fit-off", "fix_out", "plumbing", true],
+  ["Hydraulics - Fit off", "fix_out", "plumbing", true],
+  ["Electrical — Fit-off", "fix_out", "electrical", true],
+  ["Electrical - Fit off", "fix_out", "electrical", true],
+  ["Kitchen", "fix_out", "kitchen", true],
+  ["Cabinetry", "fix_out", "cabinetry", true],
+  ["Stone Benchtops", "fix_out", "stone", true],
+  ["Shower Screens & Mirrors", "fix_out", "shower_screens", true],
+  ["Blinds", "fix_out", "blinds", true],
+  ["Appliances", "fix_out", "appliances", true],
+  ["Air Conditioning", "fix_out", "hvac", true],
+  ["Waterproofing", "fix_out", "waterproofing", true],
+  ["Landscaping", "external", "landscaping", true],
+  ["External Works", "external", "landscaping", true],
+  ["Concrete — Driveways & Paths", "external", "concrete_ext", true],
+  ["Concrete - Driveways & Paths", "external", "concrete_ext", true],
+  ["Fencing", "external", "fencing", true],
+  ["Pool", "external", "pool", true],
+  ["Termite Protection", "foundations", "termite", true]
+];
+
+function normCategoryName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[—–-]/g, " ")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function getBuildexactCategoryMapping(categoryName) {
+  const norm = normCategoryName(categoryName);
+  let best = null;
+  for (const [name, phase, tradeKey, hasQuoteLine] of CATEGORY_MAPPING) {
+    const n = normCategoryName(name);
+    if (!n) continue;
+    if (norm === n || norm.includes(n) || n.includes(norm)) {
+      const score = Math.min(norm.length, n.length);
+      if (!best || score > best.score) best = { name, phase, tradeKey, hasQuoteLine, score };
+    }
+  }
+  return best ? { name: best.name, phase: best.phase, tradeKey: best.tradeKey, hasQuoteLine: best.hasQuoteLine } : null;
+}
+
 function cellStr(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
@@ -405,4 +478,144 @@ Only include line items with dollar total > 0. Use 0 for unknown numerics.`;
     estimate_total: Number(parsed.estimate_total) || 0,
     categories
   };
+}
+
+function firstArrayPayload(json) {
+  if (Array.isArray(json)) return json;
+  return json?.items || json?.estimateItems || json?.EstimateItems || json?.lineItems || json?.data || json?.value || [];
+}
+
+function pick(obj, keys, fallback = "") {
+  for (const key of keys) {
+    const v = obj?.[key];
+    if (v != null && v !== "") return v;
+  }
+  return fallback;
+}
+
+function itemAmount(item) {
+  const n = Number(pick(item, ["total", "Total", "amount", "Amount", "lineTotal", "LineTotal", "subtotal", "Subtotal"], 0));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Normalise Buildxact estimateitems / estimates API payloads into parseXLSX-compatible categories.
+ * API shape varies by account/version, so this accepts both flat line arrays and category arrays.
+ */
+export function normaliseBuildexactEstimatePayload(payload, opts = {}) {
+  const source = Array.isArray(payload?.categories) ? payload.categories : firstArrayPayload(payload);
+  const categoryMap = new Map();
+
+  const addItem = (catNameRaw, catNumberRaw, rawItem = {}) => {
+    const catName = String(catNameRaw || "Buildexact").trim() || "Buildexact";
+    const catNumber = Number(catNumberRaw);
+    const key = `${Number.isFinite(catNumber) ? catNumber : ""}:${catName.toLowerCase()}`;
+    if (!categoryMap.has(key)) {
+      categoryMap.set(key, {
+        number: Number.isFinite(catNumber) ? catNumber : categoryMap.size + 1,
+        name: catName,
+        subtotal: 0,
+        subtotal_ex_gst: 0,
+        subtotal_inc_gst: 0,
+        active_items: []
+      });
+    }
+    const cat = categoryMap.get(key);
+    const total = itemAmount(rawItem);
+    const description = String(pick(rawItem, ["description", "Description", "name", "Name", "itemName", "ItemName", "title", "Title"], catName)).trim();
+    const line = {
+      id: String(pick(rawItem, ["id", "Id", "itemId", "ItemId", "estimateItemId", "EstimateItemId"], "")),
+      code: String(pick(rawItem, ["code", "Code", "itemCode", "ItemCode", "number", "Number"], "")),
+      description,
+      type: String(pick(rawItem, ["type", "Type", "itemType", "ItemType"], "")),
+      units: Number(pick(rawItem, ["units", "Units", "quantity", "Quantity", "qty", "Qty"], 0)) || null,
+      uom: String(pick(rawItem, ["uom", "Uom", "unit", "Unit", "unitOfMeasure", "UnitOfMeasure"], "")),
+      unit_cost: Number(pick(rawItem, ["unit_cost", "unitCost", "UnitCost", "rate", "Rate"], 0)) || null,
+      total
+    };
+    cat.active_items.push(line);
+    cat.subtotal += total;
+    cat.subtotal_ex_gst += total;
+    cat.subtotal_inc_gst += Math.round(total * 1.1 * 100) / 100;
+  };
+
+  for (const row of source || []) {
+    const nested = row?.active_items || row?.lineItems || row?.items || row?.estimateItems || row?.costs || row?.children;
+    const categoryName = pick(row, ["categoryName", "CategoryName", "category", "Category", "name", "Name", "title", "Title"], "");
+    const categoryNumber = pick(row, ["categoryNumber", "CategoryNumber", "categoryNo", "number", "Number"], "");
+    if (Array.isArray(nested)) {
+      for (const item of nested) addItem(categoryName, categoryNumber, item);
+    } else {
+      addItem(
+        pick(row, ["categoryName", "CategoryName", "category", "Category", "sectionName", "SectionName"], categoryName || "Buildexact"),
+        categoryNumber,
+        row
+      );
+    }
+  }
+
+  const categories = [...categoryMap.values()].map((cat) => ({
+    ...cat,
+    subtotal: Math.round(cat.subtotal * 100) / 100,
+    subtotal_ex_gst: Math.round(cat.subtotal_ex_gst * 100) / 100,
+    subtotal_inc_gst: Math.round(cat.subtotal_inc_gst * 100) / 100
+  }));
+  const estimateTotal = Number(pick(payload, ["estimate_total", "estimateTotal", "EstimateTotal", "total", "Total"], 0)) || categories.reduce((s, c) => s + Number(c.subtotal_inc_gst || 0), 0);
+  return {
+    quote_number: String(opts.quoteNumber || pick(payload, ["quote_number", "quoteNumber", "QuoteNumber", "number", "Number"], "")),
+    address: String(opts.address || pick(payload, ["address", "Address", "jobAddress", "JobAddress"], "")),
+    client_name: String(opts.clientName || pick(payload, ["client_name", "clientName", "ClientName", "customerName", "CustomerName"], "")),
+    arch_ref: "",
+    eng_ref: "",
+    building_type: String(pick(payload, ["building_type", "buildingType", "BuildingType"], "")),
+    date_prepared: String(pick(payload, ["date_prepared", "datePrepared", "DatePrepared", "createdAt", "CreatedAt"], "")),
+    net_total: categories.reduce((s, c) => s + Number(c.subtotal_ex_gst || 0), 0),
+    markup_amount: 0,
+    markup_percent: 0,
+    tax: Math.max(0, estimateTotal - categories.reduce((s, c) => s + Number(c.subtotal_ex_gst || 0), 0)),
+    estimate_total: Math.round(estimateTotal * 100) / 100,
+    categories
+  };
+}
+
+export function parseSchedItems(categories = []) {
+  const out = [];
+  for (const cat of categories || []) {
+    const mapping = getBuildexactCategoryMapping(cat.name);
+    for (const item of cat.active_items || []) {
+      const desc = String(item.description || "");
+      if (!/\bSCHED\b/i.test(desc)) continue;
+      const taskName = desc.split(/SCHED/i)[0].trim() || cat.name || "Schedule task";
+      const durationValue = Number(item.units) || 0;
+      const uom = String(item.uom || "").toLowerCase();
+      const durationDays = uom.includes("week") ? durationValue * 7 : durationValue;
+      out.push({
+        task_name: taskName,
+        duration_days: Math.max(0, Math.round(durationDays)),
+        phase: mapping?.phase || normCategoryName(cat.name).replace(/\s+/g, "_") || "general",
+        trade_key: mapping?.tradeKey || "",
+        buildexact_item_code: item.code || item.id || "",
+        buildexact_item_id: item.id || "",
+        category_name: cat.name || ""
+      });
+    }
+  }
+  return out;
+}
+
+export function parseCostMetrics(categories = []) {
+  const metrics = {};
+  for (const cat of categories || []) {
+    for (const item of cat.active_items || []) {
+      const desc = String(item.description || "");
+      if (!/COST\s+METRIC/i.test(desc)) continue;
+      const m = desc.match(/\[([^\]]+)\]/);
+      if (!m?.[1]) continue;
+      const key = m[1].toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      if (!key) continue;
+      const value = Number(item.units);
+      if (Number.isFinite(value)) metrics[key] = value;
+    }
+  }
+  return metrics;
 }

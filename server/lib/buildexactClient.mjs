@@ -223,7 +223,7 @@ export function getBuildexactTokenStatus() {
   };
 }
 
-async function beFetch(path, { method = "GET", body, query } = {}) {
+export async function beFetch(path, { method = "GET", body, query } = {}) {
   const token = await getBuildexactToken();
   const apiKey = getApiKey();
   const base = apiBase().replace(/\/$/, "");
@@ -284,5 +284,33 @@ export async function syncQuotesToJob(buildexactJobId, acceptedTrades) {
   return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/costs/sync`, {
     method: "POST",
     body: { accepted_trades: acceptedTrades }
+  });
+}
+
+export async function getJobEstimateItems(buildexactJobId) {
+  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimateitems`);
+}
+
+export async function getJobEstimates(buildexactJobId) {
+  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates`);
+}
+
+export async function updateEstimateItem(buildexactJobId, itemId, updates) {
+  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimateitems/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    body: updates
+  });
+}
+
+export async function acceptEstimate(buildexactJobId, estimateId) {
+  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates/${encodeURIComponent(estimateId)}/accept`, {
+    method: "POST"
+  });
+}
+
+export async function updateEstimateStatus(buildexactJobId, estimateId, status) {
+  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates/${encodeURIComponent(estimateId)}`, {
+    method: "PATCH",
+    body: { status }
   });
 }

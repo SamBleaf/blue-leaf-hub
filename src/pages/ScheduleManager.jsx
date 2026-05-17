@@ -1,15 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import ScheduleCalendar from "../components/schedule/ScheduleCalendar.jsx";
+import ScheduleDashboard from "../components/schedule/ScheduleDashboard.jsx";
+import ScheduleGantt from "../components/schedule/ScheduleGantt.jsx";
+import ScheduleSheet from "../components/schedule/ScheduleSheet.jsx";
+import ScheduleTemplateModal from "../components/schedule/ScheduleTemplateModal.jsx";
+import ScheduleToolbar from "../components/schedule/ScheduleToolbar.jsx";
+import TaskDetailPanel from "../components/schedule/TaskDetailPanel.jsx";
+import RippleWarningModal from "../components/schedule/RippleWarningModal.jsx";
+import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
-import { buildGanttSvg, PHASE_COLORS } from "../lib/ganttRenderer.js";
-import { toYmd, addDaysYmd } from "../lib/dateYmd.js";
+import {
+  VIEW_DASHBOARD,
+  VIEW_GANTT,
+  computeEndDate,
+  normalizeTask,
+  phaseLabel,
+  previewRipple,
+  taskStatusFromPercent
+} from "../lib/scheduleUtils.js";
 
 async function readApiJson(res) {
   const text = await res.text();
-  if (!text) {
-    if (!res.ok) throw new Error(`HTTP ${res.status}: empty response`);
-    return {};
-  }
+  if (!text) return {};
   try {
     return JSON.parse(text);
   } catch {
@@ -17,71 +30,110 @@ async function readApiJson(res) {
   }
 }
 
-function addDays(iso, n) {
-  return addDaysYmd(iso, n);
+function blankTask(projectId, phase = "general") {
+  const today = new Date().toISOString().slice(0, 10);
+  return normalizeTask({
+    id: "",
+    project_id: projectId,
+    name: "New task",
+    trade: "general",
+    phase,
+    task_type: "standard",
+    start_date: today,
+    end_date: today,
+    duration_days: 1,
+    status: "planned",
+    percent_complete: 0,
+    priority: "medium",
+    procurement_order_status: "not_ordered",
+    depends_on: []
+  });
 }
 
-function computeEnd(start, durationDays, isHold) {
-  const sd = toYmd(start);
-  if (!sd) return "";
-  if (Number(durationDays) <= 0 || isHold) return sd;
-  return addDaysYmd(sd, Number(durationDays) - 1);
-}
-
-function normalizeScheduleTask(t) {
-  let c = t.can_run_concurrent_with;
-  if (typeof c === "string") {
-    try {
-      c = JSON.parse(c);
-    } catch {
-      c = [];
-    }
-  }
-  return { ...t, depends_on: Array.isArray(t.depends_on) ? t.depends_on : [], can_run_concurrent_with: Array.isArray(c) ? c : [] };
+function analysisToCards(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•\d.\s]+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((body, i) => ({ id: `${i}-${body.slice(0, 32)}`, title: body.startsWith("⚠") ? "Risk flag" : "Schedule insight", body }));
 }
 
 export default function ScheduleManager() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
+  const { setScreenContext } = useBlueprintContext() || {};
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [dashboard, setDashboard] = useState(null);
+  const [templates, setTemplates] = useState([]);
+  const [subcontractors, setSubcontractors] = useState([]);
+  const [phaseLabels, setPhaseLabels] = useState({});
+  const [currentView, setCurrentView] = useState(VIEW_DASHBOARD);
+  const [zoom, setZoom] = useState("Month");
+  const [showCritical, setShowCritical] = useState(true);
+  const [lookahead, setLookahead] = useState(false);
+  const [filterTrade, setFilterTrade] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [editTask, setEditTask] = useState(null);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [useLegacyGen, setUseLegacyGen] = useState(false);
+  const [excludeDemo, setExcludeDemo] = useState(false);
+  const [analysisCards, setAnalysisCards] = useState([]);
+  const [dismissedCards, setDismissedCards] = useState([]);
+  const [taskAdvice, setTaskAdvice] = useState("");
+  const [ripple, setRipple] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [genOpen, setGenOpen] = useState(false);
-  const [startDate, setStartDate] = useState("");
-  const [excludeDemo, setExcludeDemo] = useState(false);
-  const [useLegacyGen, setUseLegacyGen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [collapsed, setCollapsed] = useState({});
-  const [editTask, setEditTask] = useState(null);
-  const [subQuery, setSubQuery] = useState("");
-  const [subHits, setSubHits] = useState([]);
-  const [analysis, setAnalysis] = useState("");
-  const [analysisOpen, setAnalysisOpen] = useState(false);
-  const [analysisBusy, setAnalysisBusy] = useState(false);
-  const [savePdfBusy, setSavePdfBusy] = useState(false);
-  const [phaseLabels, setPhaseLabels] = useState({});
-  const [genSummary, setGenSummary] = useState("");
-  const [exportPdfBusy, setExportPdfBusy] = useState(false);
-  const [adviceBusy, setAdviceBusy] = useState(false);
-  const [taskAdvice, setTaskAdvice] = useState("");
+  const [busy, setBusy] = useState({});
 
-  const loadMeta = useCallback(async () => {
-    if (!projectId) return;
+  const selectedTaskId = editTask?.id || null;
+
+  useEffect(() => {
+    setScreenContext?.({
+      page: "schedule",
+      projectId,
+      projectName: project?.address || "",
+      currentView,
+      selectedTaskId
+    });
+    return () => setScreenContext?.(null);
+  }, [setScreenContext, projectId, project?.address, currentView, selectedTaskId]);
+
+  useEffect(() => {
+    const key = `blhub_schedule_analysis_dismissed_${projectId}`;
     try {
-      const res = await fetch(`/api/schedule/meta/${projectId}`);
-      const j = await readApiJson(res);
-      if (res.ok && j.ok) setPhaseLabels(j.phaseLabels || {});
+      setDismissedCards(JSON.parse(localStorage.getItem(key) || "[]"));
     } catch {
-      /* non-fatal */
+      setDismissedCards([]);
     }
   }, [projectId]);
 
   const loadProject = useCallback(async () => {
     if (!supabaseConfigured || !projectId) return;
     const sb = getSupabase();
-    const { data, error: e } = await sb.from("projects").select("id, address").eq("id", projectId).single();
+    const { data, error: e } = await sb.from("projects").select("id, address, job_id, buildexact_job_id").eq("id", projectId).single();
     if (e) setError(e.message);
     else setProject(data);
+  }, [projectId]);
+
+  const loadSubcontractors = useCallback(async () => {
+    if (!supabaseConfigured) return;
+    const sb = getSupabase();
+    const { data } = await sb.from("subcontractors").select("id,business_name,trade").order("business_name").limit(500);
+    setSubcontractors(data || []);
+  }, []);
+
+  const loadMeta = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/schedule/meta/${projectId}`);
+      const j = await readApiJson(res);
+      if (res.ok && j.ok) setPhaseLabels(j.phaseLabels || {});
+    } catch {
+      setPhaseLabels({});
+    }
   }, [projectId]);
 
   const loadTasks = useCallback(async () => {
@@ -91,7 +143,7 @@ export default function ScheduleManager() {
       const res = await fetch(`/api/schedule/${projectId}`);
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Failed to load schedule");
-      setTasks((j.tasks || []).map(normalizeScheduleTask));
+      setTasks((j.tasks || []).map(normalizeTask));
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -99,98 +151,181 @@ export default function ScheduleManager() {
     }
   }, [projectId]);
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/dashboard`);
+      const j = await readApiJson(res);
+      if (res.ok && j.ok) setDashboard(j.dashboard || null);
+    } catch {
+      setDashboard(null);
+    }
+  }, [projectId]);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/schedule/templates");
+      const j = await readApiJson(res);
+      if (res.ok && j.ok) setTemplates(j.templates || []);
+    } catch {
+      setTemplates([]);
+    }
+  }, []);
+
+  const reloadAll = useCallback(async () => {
+    await Promise.all([loadProject(), loadMeta(), loadTasks(), loadDashboard(), loadTemplates(), loadSubcontractors()]);
+  }, [loadProject, loadMeta, loadTasks, loadDashboard, loadTemplates, loadSubcontractors]);
+
   useEffect(() => {
-    loadProject();
-  }, [loadProject]);
+    reloadAll();
+  }, [reloadAll]);
 
-  useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
-
-  useEffect(() => {
-    loadMeta();
-  }, [loadMeta]);
-
-  const range = useMemo(() => {
-    if (!tasks.length) {
-      const t = new Date().toISOString().slice(0, 10);
-      return { start: t, end: addDays(t, 120) };
-    }
-    let min = "";
-    let max = "";
-    for (const tk of tasks) {
-      const s = toYmd(tk.start_date);
-      const e = toYmd(tk.end_date || tk.start_date) || s;
-      if (s) {
-        if (!min || s < min) min = s;
-        if (e && (!max || e > max)) max = e;
-      }
-    }
-    if (!min) {
-      const t = new Date().toISOString().slice(0, 10);
-      return { start: t, end: addDays(t, 120) };
-    }
-    if (!max) max = min;
-    return { start: addDays(min, -7), end: addDays(max, 21) };
-  }, [tasks]);
-
-  const svgMarkup = useMemo(
-    () => buildGanttSvg(tasks, range, { phaseLabels, weekColWidth: 100 }),
-    [tasks, range, phaseLabels]
-  );
-
-  const phaseOrder = useMemo(() => {
-    const o = [];
-    const seen = new Set();
-    for (const t of tasks) {
-      const p = t.phase || "general";
-      if (!seen.has(p)) {
-        seen.add(p);
-        o.push(p);
-      }
-    }
-    return o;
+  const tradeOptions = useMemo(() => {
+    const s = new Set(tasks.map((t) => t.assignee_trade || t.trade).filter(Boolean));
+    return [...s].sort();
   }, [tasks]);
 
   const phaseOptions = useMemo(() => {
-    const s = new Set(phaseOrder);
-    Object.keys(phaseLabels || {}).forEach((k) => s.add(k));
+    const s = new Set(tasks.map((t) => t.phase).filter(Boolean));
+    Object.keys(phaseLabels || {}).forEach((p) => s.add(p));
     if (editTask?.phase) s.add(editTask.phase);
-    return [...s].sort();
-  }, [phaseOrder, phaseLabels, editTask?.phase]);
+    return [...s].sort().map((phase) => ({ value: phase, label: phaseLabel(phase, phaseLabels) }));
+  }, [tasks, phaseLabels, editTask?.phase]);
 
-  async function generateSchedule() {
-    const normalized = toYmd(startDate);
-    if (!normalized) {
-      setError("Pick a valid start date (use the calendar — YYYY-MM-DD).");
+  async function patchTask(id, patch, options = {}) {
+    const res = await fetch(`/api/schedule/task/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    const j = await readApiJson(res);
+    if (!res.ok || !j.ok) throw new Error(j.error || "Save failed");
+    if (!options.skipReload) {
+      await loadTasks();
+      await loadDashboard();
+    }
+    return j;
+  }
+
+  async function saveTask() {
+    if (!editTask) return;
+    setBusy((b) => ({ ...b, save: true }));
+    setError("");
+    try {
+      const payload = {
+        name: editTask.name,
+        trade: editTask.trade || editTask.assignee_trade || "general",
+        phase: editTask.phase,
+        task_type: editTask.task_type,
+        status: editTask.status,
+        percent_complete: editTask.percent_complete,
+        start_date: editTask.start_date,
+        end_date: editTask.end_date || computeEndDate(editTask.start_date, editTask.duration_days, editTask.task_type === "milestone"),
+        duration_days: editTask.duration_days,
+        depends_on: Array.isArray(editTask.depends_on) ? editTask.depends_on : [],
+        notes: editTask.notes,
+        assigned_subcontractor_id: editTask.assigned_subcontractor_id,
+        planned_hours: editTask.planned_hours,
+        planned_cost: editTask.planned_cost,
+        assignee_trade: editTask.assignee_trade,
+        priority: editTask.priority,
+        procurement_item: editTask.procurement_item,
+        procurement_supplier: editTask.procurement_supplier,
+        procurement_lead_days: editTask.procurement_lead_days,
+        procurement_order_by: editTask.procurement_order_by,
+        procurement_order_status: editTask.procurement_order_status,
+        is_hold_point: editTask.task_type === "milestone" || editTask.is_hold_point,
+        buildexact_line_item_id: editTask.buildexact_line_item_id,
+        buildexact_match: editTask.buildexact_match
+      };
+      if (editTask.id) {
+        await patchTask(editTask.id, payload);
+      } else {
+        const res = await fetch(`/api/schedule/${projectId}/task`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const j = await readApiJson(res);
+        if (!res.ok || !j.ok) throw new Error(j.error || "Create failed");
+        await loadTasks();
+        await loadDashboard();
+      }
+      setEditTask(null);
+      setTaskAdvice("");
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, save: false }));
+    }
+  }
+
+  async function deleteTask() {
+    if (!editTask?.id) {
+      setEditTask(null);
       return;
     }
-    setBusy(true);
+    if (!window.confirm("Delete this task from the schedule?")) return;
+    setBusy((b) => ({ ...b, save: true }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/task/${editTask.id}`, { method: "DELETE" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
+      setEditTask(null);
+      await loadTasks();
+      await loadDashboard();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, save: false }));
+    }
+  }
+
+  async function bulkDelete() {
+    if (!selectedIds.length || !window.confirm(`Delete ${selectedIds.length} selected tasks?`)) return;
+    setBusy((b) => ({ ...b, save: true }));
+    try {
+      for (const id of selectedIds) {
+        const res = await fetch(`/api/schedule/task/${id}`, { method: "DELETE" });
+        const j = await readApiJson(res);
+        if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
+      }
+      setSelectedIds([]);
+      await loadTasks();
+      await loadDashboard();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, save: false }));
+    }
+  }
+
+  async function generateSchedule() {
+    setBusy((b) => ({ ...b, generate: true }));
     setError("");
     try {
       const excludeNames = excludeDemo ? ["Demolition (if applicable)"] : [];
       const res = await fetch("/api/schedule/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, startDate: normalized, overrides: { excludeNames, useLegacyTemplate: useLegacyGen } })
+        body: JSON.stringify({ projectId, startDate, overrides: { excludeNames, useLegacyTemplate: useLegacyGen } })
       });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Generate failed");
-      setTasks((j.tasks || []).map(normalizeScheduleTask));
-      setGenSummary(j.summaryLine || "");
+      setTasks((j.tasks || []).map(normalizeTask));
+      setGenerateOpen(false);
+      setCurrentView(VIEW_GANTT);
       await loadMeta();
-      setGenOpen(false);
+      await loadDashboard();
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setBusy(false);
+      setBusy((b) => ({ ...b, generate: false }));
     }
   }
 
   async function runAnalysis() {
-    setAnalysisBusy(true);
-    setAnalysis("");
-    setAnalysisOpen(true);
+    setBusy((b) => ({ ...b, analysis: true }));
     setError("");
     try {
       const res = await fetch("/api/schedule/analyse", {
@@ -200,71 +335,19 @@ export default function ScheduleManager() {
       });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Analysis failed");
-      setAnalysis(j.analysis || "");
+      setAnalysisCards(analysisToCards(j.analysis || ""));
+      setCurrentView(VIEW_DASHBOARD);
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setAnalysisBusy(false);
-    }
-  }
-
-  async function saveAnalysisPdf() {
-    if (!analysis.trim()) return;
-    setSavePdfBusy(true);
-    setError("");
-    try {
-      const res = await fetch("/api/schedule/save-analysis-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, analysisText: analysis })
-      });
-      const j = await readApiJson(res);
-      if (!res.ok || !j.ok) throw new Error(j.error || "Save failed");
-    } catch (e) {
-      setError(e?.message || String(e));
-    } finally {
-      setSavePdfBusy(false);
+      setBusy((b) => ({ ...b, analysis: false }));
     }
   }
 
   function exportCsv() {
-    const headers = [
-      "Phase",
-      "Trade",
-      "Task",
-      "Start Date",
-      "End Date",
-      "Duration (days)",
-      "Status",
-      "Dependencies",
-      "Lead Time (weeks)",
-      "Hold Point",
-      "Hold Description",
-      "Notes"
-    ];
-    const depNames = (ids) =>
-      (ids || [])
-        .map((id) => tasks.find((x) => x.id === id)?.name || id)
-        .join("; ");
-    const rows = tasks.map((t) =>
-      [
-        t.phase,
-        t.trade,
-        t.name,
-        t.start_date || "",
-        t.end_date || "",
-        t.duration_days,
-        t.status,
-        depNames(t.depends_on),
-        t.lead_time_weeks ?? "",
-        t.is_hold_point ? "Yes" : "No",
-        String(t.hold_point_description || "").replace(/"/g, '""'),
-        String(t.notes || "").replace(/"/g, '""')
-      ]
-        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-        .join(",")
-    );
-    const blob = new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
+    const headers = ["Phase", "Trade", "Task", "Start Date", "End Date", "Duration", "Status", "% Complete", "Priority", "Planned Hours", "Planned Cost", "Dependencies", "Notes"];
+    const rows = tasks.map((t) => [t.phase, t.trade, t.name, t.start_date || "", t.end_date || "", t.duration_days, t.status, t.percent_complete, t.priority, t.planned_hours ?? "", t.planned_cost ?? "", (t.depends_on || []).join("; "), String(t.notes || "").replace(/"/g, '""')]);
+    const blob = new Blob([[headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `schedule-${projectId}.csv`;
@@ -273,7 +356,7 @@ export default function ScheduleManager() {
   }
 
   async function exportGanttPdf() {
-    setExportPdfBusy(true);
+    setBusy((b) => ({ ...b, pdf: true }));
     setError("");
     try {
       const res = await fetch("/api/schedule/export-gantt-pdf", {
@@ -281,17 +364,7 @@ export default function ScheduleManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId })
       });
-      if (!res.ok) {
-        const errText = await res.text();
-        let msg = errText.slice(0, 200);
-        try {
-          const j = JSON.parse(errText);
-          if (j.error) msg = j.error;
-        } catch {
-          /* keep msg */
-        }
-        throw new Error(msg || "Export failed");
-      }
+      if (!res.ok) throw new Error((await res.text()).slice(0, 200) || "Export failed");
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -301,111 +374,78 @@ export default function ScheduleManager() {
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setExportPdfBusy(false);
+      setBusy((b) => ({ ...b, pdf: false }));
     }
   }
 
-  async function searchSubs(q) {
-    setSubQuery(q);
-    if (!supabaseConfigured || q.length < 2) {
-      setSubHits([]);
-      return;
-    }
-    const sb = getSupabase();
-    const { data } = await sb.from("subcontractors").select("id,business_name,trade").ilike("business_name", `%${q}%`).limit(25);
-    setSubHits(data || []);
-  }
-
-  async function saveTask() {
-    if (!editTask) return;
-    setBusy(true);
+  async function loadTemplate(templateId, templateStartDate) {
+    setBusy((b) => ({ ...b, template: true }));
     setError("");
     try {
-      const payload = {
-        name: editTask.name,
-        phase: editTask.phase,
-        status: editTask.status,
-        start_date: toYmd(editTask.start_date) || editTask.start_date,
-        duration_days: editTask.duration_days,
-        notes: editTask.notes,
-        assigned_subcontractor_id: editTask.assigned_subcontractor_id,
-        is_hold_point: editTask.is_hold_point,
-        depends_on: Array.isArray(editTask.depends_on) ? editTask.depends_on : [],
-        can_run_concurrent_with: Array.isArray(editTask.can_run_concurrent_with) ? editTask.can_run_concurrent_with : [],
-        lead_time_weeks: editTask.lead_time_weeks === "" || editTask.lead_time_weeks == null ? null : Number(editTask.lead_time_weeks),
-        hold_point_description: editTask.hold_point_description || null,
-        hold_notify: Boolean(editTask.hold_notify)
-      };
-      if (editTask.ai_flag_cleared) payload.ai_flag = null;
-      const res = await fetch(`/api/schedule/task/${editTask.id}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/schedule/${projectId}/load-template`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ templateId, startDate: templateStartDate })
       });
       const j = await readApiJson(res);
-      if (!res.ok || !j.ok) throw new Error(j.error || "Save failed");
-      setEditTask(null);
-      await loadTasks();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Template load failed");
+      setTasks((j.tasks || []).map(normalizeTask));
+      setTemplateOpen(false);
+      setCurrentView(VIEW_GANTT);
+      await loadDashboard();
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setBusy(false);
+      setBusy((b) => ({ ...b, template: false }));
     }
   }
 
-  function onSvgClick(e) {
-    const id = e.target?.getAttribute?.("data-task-id");
-    if (!id) return;
-    const t = tasks.find((x) => x.id === id);
-    if (t) setEditTask({ ...t, ai_flag_cleared: false });
-  }
-
-  const byPhase = useMemo(() => {
-    const m = {};
-    for (const t of tasks) {
-      const p = t.phase || "general";
-      if (!m[p]) m[p] = [];
-      m[p].push(t);
-    }
-    return m;
-  }, [tasks]);
-
-  async function deleteTask() {
-    if (!editTask?.id) return;
-    if (!window.confirm("Delete this task from the schedule?")) return;
-    setBusy(true);
-    setError("");
+  async function saveAsTemplate() {
+    const name = window.prompt("Template name", `${project?.address || "Project"} schedule`);
+    if (!name) return;
+    setBusy((b) => ({ ...b, template: true }));
     try {
-      const res = await fetch(`/api/schedule/task/${editTask.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/schedule/${projectId}/save-as-template`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
       const j = await readApiJson(res);
-      if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
-      setEditTask(null);
-      await loadTasks();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Save template failed");
+      await loadTemplates();
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setBusy(false);
+      setBusy((b) => ({ ...b, template: false }));
     }
   }
 
-  async function askAiAdvice() {
-    if (!editTask) return;
-    setAdviceBusy(true);
-    setTaskAdvice("");
+  async function buildexactMatch() {
+    setBusy((b) => ({ ...b, buildexact: true }));
     setError("");
     try {
-      const ctx = [
-        `Phase: ${editTask.phase}`,
-        `Duration days: ${editTask.duration_days}`,
-        `Depends on: ${(editTask.depends_on || []).join(", ")}`,
-        editTask.notes ? `Notes: ${editTask.notes}` : ""
-      ]
-        .filter(Boolean)
-        .join("\n");
+      const res = await fetch(`/api/schedule/${projectId}/buildexact-match`, { method: "POST" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Buildexact match failed");
+      await loadTasks();
+      await loadDashboard();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, buildexact: false }));
+    }
+  }
+
+  async function askBlueprintTaskAdvice() {
+    if (!editTask) return;
+    setBusy((b) => ({ ...b, advice: true }));
+    setTaskAdvice("");
+    try {
+      const context = [`Phase: ${editTask.phase}`, `Progress: ${editTask.percent_complete || 0}%`, `Dates: ${editTask.start_date || "-"} to ${editTask.end_date || "-"}`, editTask.notes ? `Notes: ${editTask.notes}` : ""].filter(Boolean).join("\n");
       const res = await fetch("/api/schedule/task-advice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskName: editTask.name, context: ctx })
+        body: JSON.stringify({ taskName: editTask.name, context })
       });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Advice failed");
@@ -413,387 +453,169 @@ export default function ScheduleManager() {
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
-      setAdviceBusy(false);
+      setBusy((b) => ({ ...b, advice: false }));
     }
   }
 
-  function toggleDep(id) {
-    setEditTask((x) => {
-      const cur = Array.isArray(x.depends_on) ? [...x.depends_on] : [];
-      const i = cur.indexOf(id);
-      if (i >= 0) cur.splice(i, 1);
-      else cur.push(id);
-      return { ...x, depends_on: cur };
-    });
+  async function onGanttDateChange(id, newStartDate, newEndDate) {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/ripple-check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: id, newStartDate })
+      });
+      const j = await readApiJson(res);
+      if (res.ok && j.ok && j.downstream_tasks?.length) {
+        setRipple({ taskId: id, newStartDate, newEndDate, affected: j.affected || [] });
+        return;
+      }
+    } catch {
+      const local = previewRipple(tasks, id, newStartDate);
+      if (local.affected.length > 1) {
+        setRipple({ taskId: id, newStartDate, newEndDate, affected: local.affected });
+        return;
+      }
+    }
+    await patchTask(id, { start_date: newStartDate, end_date: newEndDate });
   }
 
-  function toggleConcurrent(id) {
-    setEditTask((x) => {
-      const cur = Array.isArray(x.can_run_concurrent_with) ? [...x.can_run_concurrent_with] : [];
-      const i = cur.indexOf(id);
-      if (i >= 0) cur.splice(i, 1);
-      else cur.push(id);
-      return { ...x, can_run_concurrent_with: cur };
-    });
+  async function confirmRipple(noCascade = false) {
+    if (!ripple) return;
+    setBusy((b) => ({ ...b, ripple: true }));
+    try {
+      await patchTask(ripple.taskId, { start_date: ripple.newStartDate, end_date: ripple.newEndDate, no_cascade: noCascade });
+      setRipple(null);
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, ripple: false }));
+    }
   }
 
-  if (!project && !error) {
-    return <p className="text-sm text-muted">Loading…</p>;
+  function dismissAnalysisCard(id) {
+    const next = [...new Set([...dismissedCards, id])];
+    setDismissedCards(next);
+    localStorage.setItem(`blhub_schedule_analysis_dismissed_${projectId}`, JSON.stringify(next));
+  }
+
+  function openTask(taskOrId) {
+    const task = typeof taskOrId === "string" ? tasks.find((t) => t.id === taskOrId) : taskOrId;
+    if (task) {
+      setTaskAdvice("");
+      setEditTask(normalizeTask(task));
+    }
+  }
+
+  function addTask(phase) {
+    setTaskAdvice("");
+    setEditTask(blankTask(projectId, phase || tasks[0]?.phase || "general"));
+  }
+
+  function orderNow(task) {
+    const params = new URLSearchParams();
+    if (task.procurement_supplier) params.set("trade", task.procurement_supplier);
+    if (task.procurement_item) params.set("scope", task.procurement_item);
+    navigate(`/tender-manager/rfq-engine?${params.toString()}`);
   }
 
   return (
-    <div className="space-y-6 pb-24">
+    <div className="space-y-5 pb-24">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to={`/operations/${projectId}`} className="text-sm font-semibold text-accent underline">
-          ← Back to project
-        </Link>
+        <Link to={`/operations/${projectId}`} className="text-sm font-semibold text-accent underline">Back to project</Link>
       </div>
+
       <header className="rounded-card border border-hairline bg-surface p-4 shadow-sm">
-        <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
-        <p className="text-sm text-muted">Schedule</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setGenOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">
-            Generate schedule
-          </button>
-          <button type="button" onClick={runAnalysis} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
-            AI Analyse
-          </button>
-          <button type="button" onClick={exportCsv} disabled={!tasks.length} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
-            Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={exportGanttPdf}
-            disabled={!tasks.length || exportPdfBusy}
-            className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
-          >
-            {exportPdfBusy ? "PDF…" : "Export PDF"}
-          </button>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
+            <p className="text-sm text-muted">Schedule Manager</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Generate with AI</button>
+            <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Load from template</button>
+            <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Start blank</button>
+          </div>
         </div>
       </header>
 
-      {error ? <div className="text-sm text-danger">{error}</div> : null}
+      <ScheduleToolbar
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        onAddTask={() => addTask()}
+        onAnalyse={runAnalysis}
+        onExportPdf={exportGanttPdf}
+        onExportCsv={exportCsv}
+        onBuildexactMatch={buildexactMatch}
+        onSaveTemplate={saveAsTemplate}
+        zoom={zoom}
+        onZoomChange={setZoom}
+        showCritical={showCritical}
+        onToggleCritical={() => setShowCritical((v) => !v)}
+        lookahead={lookahead}
+        onToggleLookahead={() => setLookahead((v) => !v)}
+        filterTrade={filterTrade}
+        onFilterTradeChange={setFilterTrade}
+        tradeOptions={tradeOptions}
+        busy={busy}
+      />
 
-      {loading ? <p className="text-sm text-muted">Loading…</p> : null}
+      {error ? <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div> : null}
+      {loading ? <p className="text-sm text-muted">Loading schedule...</p> : null}
 
       {!loading && !tasks.length ? (
         <div className="rounded-card border border-dashed border-hairline bg-page p-8 text-center">
-          <p className="text-muted">No schedule tasks yet.</p>
-          <button type="button" onClick={() => setGenOpen(true)} className="mt-4 rounded-lg bg-accent px-4 py-3 text-sm font-semibold text-white">
-            Generate schedule
-          </button>
-        </div>
-      ) : null}
-
-      {!loading && tasks.length ? (
-        <div className="flex flex-col gap-4 lg:flex-row">
-          <div className="lg:w-[35%] lg:min-w-[280px] lg:max-h-[70vh] lg:overflow-y-auto">
-            {phaseOrder.map((ph) => {
-              const list = byPhase[ph] || [];
-              if (!list.length) return null;
-              const open = !collapsed[ph];
-              const phTitle = phaseLabels[ph] || ph.replace(/_/g, " ");
-              return (
-                <div key={ph} className="mb-3 rounded-lg border border-hairline overflow-hidden">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-bold text-white"
-                    style={{ backgroundColor: PHASE_COLORS[ph] || "#64748b" }}
-                    onClick={() => setCollapsed((c) => ({ ...c, [ph]: !c[ph] }))}
-                  >
-                    {phTitle}
-                    <span>{open ? "▼" : "▶"}</span>
-                  </button>
-                  {open ? (
-                    <ul className="divide-y divide-hairline bg-surface text-sm">
-                      {list.map((t) => (
-                        <li key={t.id} className="flex items-stretch gap-0">
-                          <button
-                            type="button"
-                            className="shrink-0 px-2 py-2 text-lg text-muted hover:bg-page"
-                            title="Options"
-                            aria-label="Task options"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditTask({ ...t, ai_flag_cleared: false });
-                            }}
-                          >
-                            ⋯
-                          </button>
-                          <button
-                            type="button"
-                            className="min-w-0 flex-1 flex flex-col items-start gap-1 px-2 py-2 text-left hover:bg-page"
-                            onClick={() => setEditTask({ ...t, ai_flag_cleared: false })}
-                          >
-                            <span className="flex items-center gap-2 font-semibold text-ink">
-                              {(t.can_run_concurrent_with || []).length ? (
-                                <span className="text-xs font-normal text-accent" title="May run in parallel with other tasks">
-                                  ⧉
-                                </span>
-                              ) : null}
-                              {t.is_hold_point ? "◆ " : ""}
-                              {t.name}
-                            </span>
-                            <span className="text-xs text-muted">
-                              <span className="rounded bg-page px-1.5 py-0.5">{t.trade}</span>{" "}
-                              {t.start_date}–{t.end_date} · {t.duration_days}d · {t.status}
-                              {t.is_critical_path ? <span className="ml-1 text-orange-600 font-semibold">● critical</span> : null}
-                              {t.hold_notify ? <span className="ml-1 text-danger font-bold" title="Hold notify">!</span> : null}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-          <div className="lg:w-[65%] lg:max-h-[70vh] overflow-x-auto overflow-y-auto rounded-card border border-hairline bg-surface p-2">
-            <p className="mb-2 text-xs text-muted">Orange outline ≈ critical path. Grey curves = dependencies. Scroll horizontally for the full programme.</p>
-            <div dangerouslySetInnerHTML={{ __html: svgMarkup }} onClick={onSvgClick} role="presentation" />
+          <p className="text-lg font-semibold text-ink">No schedule tasks yet.</p>
+          <p className="mt-1 text-sm text-muted">Generate with AI, load the Blue Leaf template, or start with a blank task.</p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white">Generate with AI</button>
+            <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg bg-accent px-4 py-3 text-sm font-semibold text-white">Load from template</button>
+            <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-4 py-3 text-sm font-semibold text-ink">Start blank</button>
           </div>
         </div>
       ) : null}
 
-      {genOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={(e) => e.target === e.currentTarget && setGenOpen(false)}>
-          <div className="w-full max-w-md rounded-card border border-hairline bg-surface p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      {!loading && tasks.length && currentView === VIEW_DASHBOARD ? (
+        <ScheduleDashboard tasks={tasks} dashboard={dashboard} phaseLabels={phaseLabels} analysisCards={analysisCards} dismissedCards={dismissedCards} onDismissAnalysis={dismissAnalysisCard} onOpenTask={openTask} onOrderNow={orderNow} />
+      ) : null}
+      {!loading && tasks.length && currentView === VIEW_GANTT ? (
+        <ScheduleGantt tasks={tasks} phaseLabels={phaseLabels} zoom={zoom} showCritical={showCritical} lookahead={lookahead} filterTrade={filterTrade} onOpenTask={openTask} onDateChange={onGanttDateChange} onProgressChange={(id, progress) => patchTask(id, { percent_complete: progress, status: taskStatusFromPercent(progress) })} onAddTask={addTask} />
+      ) : null}
+      {!loading && tasks.length && currentView === "sheet" ? (
+        <ScheduleSheet tasks={tasks} phaseLabels={phaseLabels} selectedIds={selectedIds} onSelectIds={setSelectedIds} onPatchTask={(id, patch) => patchTask(id, patch)} onOpenTask={openTask} onAddTask={addTask} onBulkDelete={bulkDelete} />
+      ) : null}
+      {!loading && tasks.length && currentView === "calendar" ? (
+        <ScheduleCalendar tasks={tasks} filterTrade={filterTrade} onOpenTask={openTask} />
+      ) : null}
+
+      {generateOpen ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onClick={(e) => e.target === e.currentTarget && setGenerateOpen(false)}>
+          <div className="w-full max-w-md rounded-card border border-hairline bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-bold text-primary">Generate schedule</h2>
-            <p className="mt-1 text-xs text-muted">
-              Uses fee proposal / Buildxact categories when linked, then Claude for dependencies. Tick below for the older fixed template instead.
-            </p>
-            {genSummary ? (
-              <p className="mt-3 rounded border border-accent/30 bg-page px-3 py-2 text-sm text-ink" role="status">
-                {genSummary}
-              </p>
-            ) : null}
             <label className="mt-4 block text-xs font-semibold text-muted">
-              Start date *
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v)) setStartDate(v);
-                }}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              />
+              Start date
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm" />
             </label>
-            <label className="mt-3 flex items-center gap-2 text-sm">
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink">
               <input type="checkbox" checked={excludeDemo} onChange={(e) => setExcludeDemo(e.target.checked)} />
               Exclude demolition (legacy template only)
             </label>
-            <label className="mt-3 flex items-center gap-2 text-sm">
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink">
               <input type="checkbox" checked={useLegacyGen} onChange={(e) => setUseLegacyGen(e.target.checked)} />
-              Use legacy fixed-phase template (no Claude / fee categories)
+              Use legacy fixed-phase template
             </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-2 text-sm text-muted" onClick={() => setGenOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" disabled={busy} onClick={generateSchedule} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white">
-                {busy ? "Working…" : "Submit"}
-              </button>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setGenerateOpen(false)} className="rounded-lg px-3 py-2 text-sm text-muted">Cancel</button>
+              <button type="button" onClick={generateSchedule} disabled={busy.generate || !startDate} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy.generate ? "Working..." : "Generate"}</button>
             </div>
           </div>
         </div>
       ) : null}
 
-      {analysisOpen ? (
-        <div className="fixed inset-0 z-[95] flex justify-end bg-black/40" onClick={(e) => e.target === e.currentTarget && setAnalysisOpen(false)}>
-          <div className="h-full w-full max-w-md overflow-y-auto border-l border-hairline bg-surface p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-primary">AI analysis</h2>
-              <button type="button" className="text-sm text-muted" onClick={() => setAnalysisOpen(false)}>
-                Close
-              </button>
-            </div>
-            {analysisBusy ? <p className="mt-6 text-sm text-muted">Loading…</p> : null}
-            {!analysisBusy ? <pre className="mt-4 whitespace-pre-wrap font-sans text-sm text-ink">{analysis || "—"}</pre> : null}
-            <button
-              type="button"
-              disabled={savePdfBusy || !analysis.trim()}
-              onClick={saveAnalysisPdf}
-              className="mt-6 w-full rounded-lg bg-primary py-3 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {savePdfBusy ? "Saving…" : "Save to Dropbox"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {editTask ? (
-        <div className="fixed inset-0 z-[100] flex justify-end bg-black/40" onClick={(e) => e.target === e.currentTarget && setEditTask(null)}>
-          <div className="h-full w-full max-w-lg overflow-y-auto border-l border-hairline bg-surface p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-primary">Task options</h2>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Task name
-              <input
-                value={editTask.name || ""}
-                onChange={(e) => setEditTask((x) => ({ ...x, name: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              />
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Category / phase
-              <select
-                value={editTask.phase || ""}
-                onChange={(e) => setEditTask((x) => ({ ...x, phase: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              >
-                {phaseOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {phaseLabels[p] || p.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Duration (days) — ≈ {((Number(editTask.duration_days) || 0) / 7).toFixed(1)} weeks
-              <input
-                type="number"
-                min={0}
-                value={editTask.duration_days}
-                onChange={(e) =>
-                  setEditTask((x) => ({
-                    ...x,
-                    duration_days: Number(e.target.value),
-                    end_date: computeEnd(x.start_date, Number(e.target.value), x.is_hold_point)
-                  }))
-                }
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              />
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Lead time (weeks before work — procurement)
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={editTask.lead_time_weeks ?? ""}
-                onChange={(e) => setEditTask((x) => ({ ...x, lead_time_weeks: e.target.value === "" ? "" : Number(e.target.value) }))}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              />
-            </label>
-            <p className="mt-3 text-xs font-semibold text-muted">Depends on (must finish before this task)</p>
-            <ul className="mt-1 max-h-28 overflow-y-auto rounded border border-hairline bg-page text-xs">
-              {tasks
-                .filter((o) => o.id !== editTask.id)
-                .map((o) => (
-                  <li key={o.id} className="flex items-center gap-2 border-b border-hairline px-2 py-1">
-                    <input type="checkbox" checked={(editTask.depends_on || []).includes(o.id)} onChange={() => toggleDep(o.id)} />
-                    <span className="truncate">{o.name}</span>
-                  </li>
-                ))}
-            </ul>
-            <p className="mt-3 text-xs font-semibold text-muted">Can run concurrent with</p>
-            <ul className="mt-1 max-h-28 overflow-y-auto rounded border border-hairline bg-page text-xs">
-              {tasks
-                .filter((o) => o.id !== editTask.id)
-                .map((o) => (
-                  <li key={`c-${o.id}`} className="flex items-center gap-2 border-b border-hairline px-2 py-1">
-                    <input type="checkbox" checked={(editTask.can_run_concurrent_with || []).includes(o.id)} onChange={() => toggleConcurrent(o.id)} />
-                    <span className="truncate">{o.name}</span>
-                  </li>
-                ))}
-            </ul>
-            <label className="mt-4 block text-xs font-semibold text-muted">
-              Status
-              <select value={editTask.status} onChange={(e) => setEditTask((x) => ({ ...x, status: e.target.value }))} className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm">
-                <option value="planned">planned</option>
-                <option value="in_progress">in_progress</option>
-                <option value="complete">complete</option>
-                <option value="delayed">delayed</option>
-                <option value="blocked">blocked</option>
-              </select>
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Start date
-              <input
-                type="date"
-                value={editTask.start_date || ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-                  setEditTask((x) => ({ ...x, start_date: v, end_date: computeEnd(v, x.duration_days, x.is_hold_point) }));
-                }}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-              />
-            </label>
-            <p className="mt-3 text-xs text-muted">
-              End date (computed, read-only): <span className="font-mono text-ink">{computeEnd(editTask.start_date, editTask.duration_days, editTask.is_hold_point)}</span>
-            </p>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Notes
-              <textarea value={editTask.notes || ""} onChange={(e) => setEditTask((x) => ({ ...x, notes: e.target.value }))} rows={3} className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm" />
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Assigned subcontractor (search)
-              <input type="search" value={subQuery} onChange={(e) => searchSubs(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm" placeholder="Type name…" />
-            </label>
-            {subHits.length ? (
-              <ul className="mt-1 max-h-32 overflow-y-auto rounded border border-hairline bg-page text-xs">
-                {subHits.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      className="w-full px-2 py-1 text-left hover:bg-surface"
-                      onClick={() => {
-                        setEditTask((x) => ({ ...x, assigned_subcontractor_id: s.id }));
-                        setSubQuery(s.business_name);
-                      }}
-                    >
-                      {s.business_name} ({s.trade})
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <label className="mt-3 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={editTask.is_hold_point} onChange={(e) => setEditTask((x) => ({ ...x, is_hold_point: e.target.checked }))} />
-              Hold point / inspection
-            </label>
-            <label className="mt-3 block text-xs font-semibold text-muted">
-              Hold point description
-              <textarea
-                value={editTask.hold_point_description || ""}
-                onChange={(e) => setEditTask((x) => ({ ...x, hold_point_description: e.target.value }))}
-                rows={2}
-                className="mt-1 w-full rounded-lg border border-hairline px-2 py-2 text-sm"
-                placeholder="e.g. Frame inspection — council sign-off before cladding"
-              />
-            </label>
-            <label className="mt-3 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={Boolean(editTask.hold_notify)} onChange={(e) => setEditTask((x) => ({ ...x, hold_notify: e.target.checked }))} />
-              Flag this hold on the schedule
-            </label>
-            <button type="button" disabled={adviceBusy} onClick={askAiAdvice} className="mt-4 w-full rounded-lg border border-primary py-2 text-sm font-semibold text-primary">
-              {adviceBusy ? "Asking…" : "Ask AI — scheduling tips for this task"}
-            </button>
-            {taskAdvice ? <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-hairline bg-page p-2 text-xs text-ink">{taskAdvice}</pre> : null}
-            {editTask.ai_flag ? (
-              <div className="mt-3 text-xs text-muted">
-                AI flag: <span className="text-ink">{editTask.ai_flag}</span>
-                <button type="button" className="ml-2 text-primary underline" onClick={() => setEditTask((x) => ({ ...x, ai_flag_cleared: true, ai_flag: null }))}>
-                  Clear
-                </button>
-              </div>
-            ) : null}
-            <div className="mt-6 flex flex-wrap gap-2">
-              <button type="button" className="rounded-lg border border-danger/50 px-3 py-2 text-sm text-danger" onClick={deleteTask} disabled={busy}>
-                Delete task
-              </button>
-              <button type="button" className="flex-1 rounded-lg border border-hairline py-2 text-sm" onClick={() => setEditTask(null)}>
-                Cancel
-              </button>
-              <button type="button" disabled={busy} className="flex-1 rounded-lg bg-accent py-2 text-sm font-semibold text-white" onClick={saveTask}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {templateOpen ? <ScheduleTemplateModal templates={templates} onClose={() => setTemplateOpen(false)} onLoad={loadTemplate} busy={busy.template} /> : null}
+      <TaskDetailPanel task={editTask} tasks={tasks} phaseOptions={phaseOptions} subcontractors={subcontractors} onChange={setEditTask} onClose={() => setEditTask(null)} onSave={saveTask} onDelete={deleteTask} onAskBlueprint={askBlueprintTaskAdvice} advice={taskAdvice} busy={busy} />
+      <RippleWarningModal preview={ripple} onConfirm={() => confirmRipple(false)} onBreakDependency={() => confirmRipple(true)} onCancel={() => setRipple(null)} busy={busy.ripple} />
     </div>
   );
 }

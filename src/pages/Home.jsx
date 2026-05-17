@@ -26,10 +26,11 @@ const SECTIONS = [
   },
   {
     id: "sales_marketing",
-    title: "Sales & Marketing",
-    description: "Pipeline, proposals, campaigns, and lead tracking — coming soon.",
-    href: null,
-    comingSoon: true
+    title: "Sales Manager",
+    description: "APB-coached pipeline with qualifying scorecard, activity timeline, and Blueprint insights at every stage.",
+    href: "/sales",
+    active: true,
+    modules: ["Pipeline", "Lead Detail", "Qualifying Scorecard", "Blueprint Coaching"]
   },
   {
     id: "client_portal",

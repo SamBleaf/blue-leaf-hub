@@ -7,6 +7,13 @@ import globals from "globals";
 export default [
   { ignores: ["dist", "public/sw*", "server", "api", "dev-dist"] },
   {
+    files: ["src/blueprint/agent/**/*.js", "src/blueprint/lib/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.node
+    }
+  },
+  {
     files: ["vite.config.js"],
     languageOptions: {
       ecmaVersion: 2020,

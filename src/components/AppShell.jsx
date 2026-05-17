@@ -6,6 +6,11 @@ import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 
 // ── SVG icon set ────────────────────────────────────────────────────────────
 const ICONS = {
+  home: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+    </svg>
+  ),
   tender: (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
@@ -67,7 +72,6 @@ const ICONS = {
 };
 
 const TENDER_MODULES = [
-  { to: "/tender-manager/home", label: "Home", end: true },
   { to: "/tender-manager/rfq-engine", label: "RFQ Engine" },
   { to: "/tender-manager/subcontractors", label: "Subcontractors" },
   { to: "/tender-manager/quote-tracker", label: "Quote Tracker" },
@@ -80,10 +84,10 @@ const OPS_MODULES = [
 ];
 
 const DEPARTMENTS = [
-  { id: "tender",           label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/home" },
+  { id: "tender",           label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",   icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
   { id: "finance_manager",  label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: true,  modules: [] },
-  { id: "sales_marketing",  label: "Sales & Marketing",  tabShort: "Sales",   icon: "sales",      comingSoon: true,  modules: [] },
+  { id: "sales_marketing", label: "Sales Manager", tabShort: "Sales", icon: "sales", comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
   { id: "client_portal",    label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
 ];
 
@@ -109,6 +113,7 @@ export default function AppShell() {
   const activeDeptId = useMemo(() => {
     if (location.pathname.startsWith("/tender-manager")) return "tender";
     if (location.pathname.startsWith("/operations")) return "operations_manager";
+    if (location.pathname.startsWith("/sales")) return "sales_marketing";
     return null;
   }, [location.pathname]);
 
@@ -118,7 +123,7 @@ export default function AppShell() {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   useEffect(() => {
-    try { localStorage.setItem("sidebar_minimized", minimized); } catch {}
+    try { localStorage.setItem("sidebar_minimized", minimized); } catch { /* ignore */ }
   }, [minimized]);
 
   useEffect(() => {
@@ -188,6 +193,29 @@ export default function AppShell() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3">
+          {/* Home — top-level, above all departments */}
+          <NavLink
+            to="/home"
+            title={!showFull ? "Home" : undefined}
+            className={({ isActive }) =>
+              `group relative flex w-full items-center transition ${
+                showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"
+              } ${isActive ? "text-white" : "text-white/60 hover:text-white"}`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r bg-accent" />}
+                <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-accent/20 text-accent" : "group-hover:bg-white/10"}`}>
+                  {ICONS.home}
+                </span>
+                {showFull && <span className="text-[13px] font-semibold">Home</span>}
+              </>
+            )}
+          </NavLink>
+
+          <div className="mx-3 my-2 border-t border-white/10" />
+
           {DEPARTMENTS.map((dept) => {
             const deptActive = activeDeptId === dept.id;
             const hasSubModules = dept.modules.length > 1;

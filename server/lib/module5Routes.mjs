@@ -14,6 +14,7 @@ import { mailTransportName, sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { dropboxConfigured, uploadFeeProposalPdfToPresaleDocs } from "./dropboxClient.mjs";
 import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf } from "./googleDriveClient.mjs";
+import { syncFeeProposalSentToBuildexact } from "./buildexactDeepIntegration.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -396,13 +397,17 @@ export function registerModule5Routes(app) {
       const sb = getServiceSupabase();
 
       // Update fee_proposal status
+      let proposalForBuildexact = null;
       if (proposalId && sb) {
-        await sb.from("fee_proposals").update({
+        const { data: updatedProposal } = await sb.from("fee_proposals").update({
           status: "sent",
           sent_at: new Date().toISOString(),
           sent_to_email: to,
+          buildexact_status: "sent",
+          buildexact_synced_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        }).eq("id", proposalId);
+        }).eq("id", proposalId).select("job_id, buildexact_job_id, buildexact_estimate_id").single();
+        proposalForBuildexact = updatedProposal || null;
       }
 
       // Log to correspondence
@@ -415,6 +420,17 @@ export function registerModule5Routes(app) {
           sent_at: new Date().toISOString(),
           logged_by: "fee-proposal-send"
         }).then(() => {}).catch(() => {});
+      }
+
+      let buildexactJobId = proposalForBuildexact?.buildexact_job_id;
+      if (!buildexactJobId && sb && proposalForBuildexact?.job_id) {
+        const { data: jobRow } = await sb.from("jobs").select("buildexact_job_id").eq("id", proposalForBuildexact.job_id).maybeSingle();
+        buildexactJobId = jobRow?.buildexact_job_id || "";
+      }
+      const buildexactEstimateId = proposalForBuildexact?.buildexact_estimate_id;
+      if (buildexactJobId && buildexactEstimateId) {
+        syncFeeProposalSentToBuildexact({ buildexactJobId, estimateId: buildexactEstimateId })
+          .catch((err) => console.warn("[buildexact] fee proposal sent sync:", err?.message || err));
       }
 
       return res.json({ ok: true });

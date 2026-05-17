@@ -10,7 +10,6 @@ import {
   mergeParsedToProposal,
   TEMPLATE_STORAGE_KEY
 } from "../lib/feeProposalDefaults.js";
-import { loadCompanySettings } from "../lib/companySettings.js";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
 
 const TABS = [
@@ -143,7 +142,8 @@ function dbToProposal(row) {
       Array.isArray(row.exclusions) && row.exclusions.length > 0 ? row.exclusions : cloneDefaultExclusions(),
     fee_schedule: row.fee_schedule?.length ? row.fee_schedule : DEFAULT_FEE_SCHEDULE.map((r) => ({ ...r })),
     dropbox_pdf_path: row.dropbox_pdf_path || "",
-    floor_area_m2: ""
+    floor_area_m2: "",
+    buildexact_status: row.buildexact_status || ""
   };
 }
 
@@ -164,6 +164,8 @@ export default function FeeProposalWizard() {
   const [driveFileId, setDriveFileId] = useState(null);
   const [driveEditUrl, setDriveEditUrl] = useState(null);
   const [estimateId, setEstimateId] = useState(null);
+  const [buildexactJobId, setBuildexactJobId] = useState("");
+  const [buildexactEstimateId, setBuildexactEstimateId] = useState("");
   const { setScreenContext } = useBlueprintContext() || {};
   const [templateLoaded, setTemplateLoaded] = useState(() => Boolean(localStorage.getItem(TEMPLATE_STORAGE_KEY)));
 
@@ -212,6 +214,8 @@ export default function FeeProposalWizard() {
     }
     setProposal(dbToProposal(data));
     setJobId(data.job_id || "");
+    setBuildexactJobId(String(data.buildexact_job_id || "").trim());
+    setBuildexactEstimateId(String(data.buildexact_estimate_id || "").trim());
     setStep(2);
     setScreenContext?.({
       page: "fee-proposal",
@@ -245,6 +249,7 @@ export default function FeeProposalWizard() {
       const { data: proj } = await sb.from("projects").select("buildexact_job_id").eq("job_id", jid).maybeSingle();
       beId = String(proj?.buildexact_job_id || "").trim();
     }
+    setBuildexactJobId(beId);
     let buildexactClient = "";
     if (beId) {
       try {
@@ -287,6 +292,9 @@ export default function FeeProposalWizard() {
     setJobId(qJobId);
     void hydrateFromJob(qJobId);
   }, [isNew, searchParams, hydrateFromJob]);
+
+  const selectedJob = useMemo(() => jobs.find((j) => j.id === jobId) || null, [jobs, jobId]);
+  const selectedBuildexactJobId = String(buildexactJobId || selectedJob?.buildexact_job_id || "").trim();
 
   const summaryRows = useMemo(() => {
     const fmt = (n) =>
@@ -350,12 +358,47 @@ export default function FeeProposalWizard() {
     }
   }
 
+  async function pullFromBuildexact() {
+    const beJobId = selectedBuildexactJobId;
+    if (!beJobId) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/buildexact/job/${encodeURIComponent(beJobId)}/estimate`);
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Buildexact pull failed");
+      setParseSummary({ ...j.estimate, scheduleHints: j.scheduleHints, costMetrics: j.costMetrics });
+      if (j.estimate_id) setEstimateId(j.estimate_id);
+      setBuildexactJobId(beJobId);
+      if (j.buildexact_estimate_id) setBuildexactEstimateId(String(j.buildexact_estimate_id));
+      if (j.job_id && !jobId) setJobId(j.job_id);
+      const sb = getSupabase();
+      const { data: seq, error: sErr } = await sb.rpc("alloc_proposal_sequence");
+      if (sErr) throw new Error(sErr.message);
+      setProposal((p) => ({
+        ...mergeParsedToProposal(j.estimate, seq),
+        architect_name: p.architect_name || "",
+        arch_ref: p.arch_ref || "",
+        eng_ref: p.eng_ref || "",
+        spec_ref: p.spec_ref || "TENDER"
+      }));
+      alert(`Pulled Buildexact estimate: ${new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(j.estimate?.estimate_total || 0)}`);
+    } catch (e) {
+      alert(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveDraft() {
     if (!supabaseConfigured) return;
     const sb = getSupabase();
     setBusy(true);
     try {
-      let row = { ...proposalToDb({ ...proposal, SUMMARY_ROWS: summaryRows }, jobId), ...(estimateId ? { buildexact_estimate_id: estimateId } : {}) };
+      let row = {
+        ...proposalToDb({ ...proposal, SUMMARY_ROWS: summaryRows }, jobId),
+        ...(buildexactEstimateId || estimateId ? { buildexact_estimate_id: buildexactEstimateId || estimateId } : {}),
+        ...(selectedBuildexactJobId ? { buildexact_job_id: selectedBuildexactJobId } : {})
+      };
       if (isNew && !row.quote_number) {
         const { data: seq, error: sq } = await sb.rpc("alloc_proposal_sequence");
         if (sq) throw new Error(sq.message);
@@ -489,6 +532,26 @@ info@blueleafbuilding.com.au`;
     setEmailComposerOpen(true);
   }
 
+  async function markProposalAccepted() {
+    if (isNew) {
+      alert("Save the proposal before marking it accepted.");
+      return;
+    }
+    if (!window.confirm("Mark this fee proposal as accepted?")) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/fee-proposal/${encodeURIComponent(id)}/accept`, { method: "POST" });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Could not mark accepted");
+      setProposal((p) => ({ ...p, buildexact_status: "accepted" }));
+      alert("Fee proposal marked as accepted.");
+    } catch (e) {
+      alert(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doSendEmail(draft) {
     const tpl = localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
     if (!tpl) { alert("Template missing."); return; }
@@ -588,6 +651,17 @@ info@blueleafbuilding.com.au`;
         <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Import Buildexact</h2>
           <p className="mt-1 text-sm text-muted">Upload XLSX (preferred) or PDF. PDF uses Claude on the server.</p>
+          {selectedBuildexactJobId ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              onClick={pullFromBuildexact}
+            >
+              <span aria-hidden="true">Sync</span>
+              {busy ? "Pulling…" : "Pull from Buildexact"}
+            </button>
+          ) : null}
           <input
             type="file"
             accept=".xlsx,.xls,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"
@@ -725,6 +799,22 @@ info@blueleafbuilding.com.au`;
                   ))}
                 </select>
               </label>
+              {selectedBuildexactJobId ? (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm sm:col-span-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-primary">Buildexact job linked</p>
+                    <p className="truncate text-xs text-muted">{selectedBuildexactJobId}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={pullFromBuildexact}
+                  >
+                    {busy ? "Pulling…" : "Pull from Buildexact"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -1006,6 +1096,21 @@ info@blueleafbuilding.com.au`;
               onClick={openEmailComposer}
             >
               Send PDF to client…
+            </button>
+          </div>
+
+          <div className="border-t border-hairline pt-4">
+            <h3 className="text-sm font-bold text-primary">Proposal outcome</h3>
+            <p className="mt-1 text-xs text-muted">
+              Mark the fee proposal accepted once the client has approved it. If a Buildexact estimate is linked, the API sync runs in the background.
+            </p>
+            <button
+              type="button"
+              disabled={busy || isNew || proposal.buildexact_status === "accepted"}
+              className="mt-3 rounded-lg border border-accent bg-accent/10 px-4 py-2 text-sm font-semibold text-accent disabled:opacity-40"
+              onClick={markProposalAccepted}
+            >
+              {proposal.buildexact_status === "accepted" ? "Accepted" : "Mark as Accepted"}
             </button>
           </div>
         </section>

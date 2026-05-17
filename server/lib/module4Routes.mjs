@@ -21,6 +21,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { mailTransportName, sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
+import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -254,6 +255,15 @@ export function registerModule4Routes(app) {
         if (!Object.keys(patch).length) continue;
         const { error: uErr } = await sb.from("rfqs").update(patch).eq("id", id);
         if (uErr) throw new Error(uErr.message);
+        if (patch.status === "accepted") {
+          const row = acceptedTrades.find((r) => String(r?.rfq_id || r?.id || "") === id)
+            || rfqUpdates.find((r) => String(r?.id || "") === id);
+          syncAcceptedQuoteToBuildexact({
+            buildexactJobId: job.buildexact_job_id,
+            trade: row?.trade,
+            acceptedAmount: row?.quote_amount
+          }).catch((err) => console.warn("[buildexact] win-finalize quote sync:", err?.message || err));
+        }
       }
 
       if (dropboxConfigured() && addr) {
