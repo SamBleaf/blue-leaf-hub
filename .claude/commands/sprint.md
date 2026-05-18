@@ -2,9 +2,44 @@
 
 Plan, scope, and optionally build the next sprint for Blue Leaf Hub. Always scope before building.
 
-## Context
+## Project context
 
-Active sprint backlog (in priority order):
+**Blue Leaf Hub** — internal ops platform for Blue Leaf Building (residential construction builder, Australia). Four live modules:
+- **Sales Manager** — APB 8-stage lead pipeline, qualifying scorecard, meeting transcript → Blueprint AI analysis, Blueprint Insight chat coaching
+- **Tender Manager** — RFQ engine, Claude extraction, PO generation, Buildexact sync, fee proposal DOCX/PDF workflow
+- **Operations Manager** — Projects list, per-project schedule management, site diary, WHS, subcontractor compliance
+- **Subcontractors** — Trade directory, compliance tracking, sortable sheet view
+
+**Tech stack:** React + React Router v6, Vite, Tailwind CSS (custom tokens), Express API (Railway), Supabase (Postgres + Auth), Claude AI (Anthropic). Deploy: Vercel (SPA) + Railway (API).
+
+**Key conventions:**
+- ESLint zero warnings, Vite build must pass before any commit
+- No raw hex in JSX — use Tailwind tokens or `scheduleUtils` colour helpers
+- No DB migrations without noting them clearly for user to apply in Supabase dashboard
+- Blueprint API pattern: `POST /api/blueprint/chat` body `{ messages, hubContext }` → returns `{ reply }` (not `response` or `message`)
+- `dotenv.config()` won't override shell env vars — use: `const { parsed: _env = {} } = dotenvConfig(); const key = process.env.KEY?.trim() || _env.KEY?.trim()`
+- Commit message: imperative mood, co-authored by Claude Sonnet 4.6
+
+**Colour system (phase-semantic, construction-native):**
+All four schedule views (Dashboard, Gantt, Sheet, Calendar) use `PHASE_COLOR_MAP` from `src/lib/scheduleUtils.js`. Status layered on top via `getTaskGanttStyles()`. Never use hash-based or arbitrary colours for schedule tasks.
+
+**Schedule Manager — Sprint 1 features (built):**
+- Phase semantic colour coding (PHASE_COLOR_MAP + status modifiers)
+- Gantt column toggle (show/hide left panel, persisted in localStorage)
+- Right-click context menu on Gantt bars (complete / open / delete)
+- Right-edge drag resize (distinguished from move: start unchanged = resize, recompute duration_days)
+
+**gantt-task-react notes:**
+- Custom `TaskListHeader`/`TaskListTable` must be module-level stable functions (not inline)
+- `listCellWidth=""` hides the left panel entirely
+- `onDateChange` fires for both drag-move and right-edge resize
+- Context menu row: `Math.floor((clientY - containerTop - 52 - 50) / 40)` → `ganttTasks[rowIndex]`
+
+**Supabase migrations applied:** 001–017. Next is 018 (Sprint 2).
+
+---
+
+## Sprint backlog (in priority order)
 
 ### Sprint 2 — Schedule intelligence
 - **Baseline / ghost bars** — DB migration 018 (add `baseline_start_date`, `baseline_end_date` to `schedule_tasks`; `schedule_baseline_locked_at` to `projects`). "Lock Baseline" button snapshots current dates. Gantt renders semi-transparent SVG overlay for drifted tasks.
@@ -28,6 +63,8 @@ Active sprint backlog (in priority order):
 - Variation + EOT approval workflow with client sign-off
 - Site diary → client update pipeline
 
+---
+
 ## Steps when /sprint is called
 
 1. **Identify sprint** — ask which sprint number to work on, or default to the next unbuilt one.
@@ -36,7 +73,7 @@ Active sprint backlog (in priority order):
 
 3. **Pre-build check** — run `/check` to confirm the codebase is clean before starting.
 
-4. **Build** — implement the agreed scope. Follow the repo conventions:
+4. **Build** — implement the agreed scope. Follow the repo conventions above:
    - No DB migrations without noting them clearly for the user to apply in Supabase dashboard
    - ESLint zero warnings
    - Vite build must pass before committing

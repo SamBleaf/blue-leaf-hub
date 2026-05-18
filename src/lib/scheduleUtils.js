@@ -4,12 +4,16 @@ export const VIEW_DASHBOARD = "dashboard";
 export const VIEW_GANTT = "gantt";
 export const VIEW_SHEET = "sheet";
 export const VIEW_CALENDAR = "calendar";
+export const VIEW_DELAYS = "delays";
+export const VIEW_MAP = "map";
 
 export const SCHEDULE_VIEWS = [
   { id: VIEW_DASHBOARD, label: "Dashboard" },
   { id: VIEW_GANTT, label: "Gantt" },
   { id: VIEW_SHEET, label: "Sheet" },
-  { id: VIEW_CALENDAR, label: "Calendar" }
+  { id: VIEW_CALENDAR, label: "Calendar" },
+  { id: VIEW_DELAYS, label: "Delays" },
+  { id: VIEW_MAP, label: "Dep Map" },
 ];
 
 export const PHASE_LABELS = {
@@ -151,12 +155,16 @@ export function normalizeTask(task = {}) {
   const start = safeDate(task.start_date);
   const end = safeDate(task.end_date) || computeEndDate(start, task.duration_days, taskType === "milestone" || task.is_hold_point);
   const percent = task.percent_complete != null ? Number(task.percent_complete) : task.status === "complete" ? 100 : task.status === "in_progress" ? 50 : 0;
+  let taskDeps = task.task_dependencies;
+  if (typeof taskDeps === "string") { try { taskDeps = JSON.parse(taskDeps); } catch { taskDeps = []; } }
+
   return {
     ...task,
     task_type: taskType,
     start_date: start,
     end_date: end,
     depends_on: Array.isArray(task.depends_on) ? task.depends_on : [],
+    task_dependencies: Array.isArray(taskDeps) ? taskDeps : [],
     can_run_concurrent_with: Array.isArray(canRun) ? canRun : [],
     percent_complete: Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0)),
     priority: task.priority || "medium",

@@ -967,6 +967,7 @@ export function registerModule6Routes(app) {
       if (body.buildexact_match !== undefined) patch.buildexact_match = body.buildexact_match || null;
       if (body.float_days !== undefined) patch.float_days = body.float_days == null || body.float_days === "" ? null : Number(body.float_days);
       if (body.template_id !== undefined) patch.template_id = body.template_id || null;
+      if (Array.isArray(body.task_dependencies)) patch.task_dependencies = body.task_dependencies;
 
       const merged = { ...cur, ...patch };
       merged.end_date = body.end_date != null ? toYmd(body.end_date) : computeTaskEnd(merged.start_date, merged.duration_days, merged.is_hold_point || merged.task_type === "milestone");
@@ -1554,6 +1555,198 @@ ${transcript}`;
       return res.json({ ok: true, entries: data || [] });
     } catch (e) {
       console.error("[diary/get]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ─── Operations enriched projects list ───────────────────────────────────
+
+  app.get("/api/operations/projects", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { data: projects, error: pe } = await sb
+        .from("projects")
+        .select("id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)")
+        .order("created_at", { ascending: false });
+      if (pe) throw pe;
+
+      const projectIds = (projects || []).map((p) => p.id);
+      let tasks = [];
+      if (projectIds.length) {
+        const { data: td } = await sb
+          .from("schedule_tasks")
+          .select("id, project_id, name, start_date, end_date, percent_complete, task_type, is_hold_point, assignee_trade, trade")
+          .in("project_id", projectIds);
+        tasks = td || [];
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const byProject = {};
+      for (const t of tasks) {
+        if (!byProject[t.project_id]) byProject[t.project_id] = [];
+        byProject[t.project_id].push(t);
+      }
+
+      const enriched = (projects || []).map((p) => {
+        const pt = byProject[p.id] || [];
+        const total = pt.length;
+        const done = pt.filter((t) => (Number(t.percent_complete) || 0) >= 100).length;
+        const overdue = pt.filter((t) => (Number(t.percent_complete) || 0) < 100 && t.end_date && t.end_date < today).length;
+        const overall = total > 0 ? Math.round(pt.reduce((s, t) => s + (Number(t.percent_complete) || 0), 0) / total) : 0;
+
+        const nextMilestone = pt
+          .filter((t) => (t.task_type === "milestone" || t.is_hold_point) && (Number(t.percent_complete) || 0) < 100 && t.start_date >= today)
+          .sort((a, b) => a.start_date.localeCompare(b.start_date))[0] || null;
+
+        const activeTrades = [...new Set(
+          pt.filter((t) => { const pct = Number(t.percent_complete) || 0; return pct > 0 && pct < 100; })
+            .map((t) => t.assignee_trade || t.trade).filter(Boolean)
+        )];
+
+        const health = overdue >= 4 ? "red" : overdue >= 1 ? "amber" : "green";
+
+        return { ...p, schedule: { total, done, overdue, overall, nextMilestone, activeTrades, health } };
+      });
+
+      return res.json({ ok: true, projects: enriched });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/operations/global-tasks", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { data: projects } = await sb.from("projects").select("id, address");
+      const { data: tasks } = await sb
+        .from("schedule_tasks")
+        .select("id, project_id, name, phase, start_date, end_date, percent_complete, task_type, is_hold_point, assignee_trade, trade")
+        .order("start_date", { ascending: true, nullsFirst: false });
+      return res.json({ ok: true, projects: projects || [], tasks: tasks || [] });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ─── Baseline lock / reset ────────────────────────────────────────────────
+
+  app.post("/api/schedule/:projectId/baseline/lock", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { projectId } = req.params;
+      const { data: tasks, error: te } = await sb
+        .from("schedule_tasks")
+        .select("id, start_date, end_date")
+        .eq("project_id", projectId);
+      if (te) throw te;
+      for (const task of tasks || []) {
+        await sb.from("schedule_tasks")
+          .update({ baseline_start_date: task.start_date, baseline_end_date: task.end_date })
+          .eq("id", task.id);
+      }
+      const now = new Date().toISOString();
+      await sb.from("projects").update({ schedule_baseline_locked_at: now }).eq("id", projectId);
+      return res.json({ ok: true, locked_at: now, count: (tasks || []).length });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.delete("/api/schedule/:projectId/baseline", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { projectId } = req.params;
+      await sb.from("schedule_tasks")
+        .update({ baseline_start_date: null, baseline_end_date: null })
+        .eq("project_id", projectId);
+      await sb.from("projects").update({ schedule_baseline_locked_at: null }).eq("id", projectId);
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ─── EOT tracking ─────────────────────────────────────────────────────────
+
+  app.get("/api/schedule/:projectId/eot", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { data, error } = await sb
+        .from("schedule_eot")
+        .select("*")
+        .eq("project_id", req.params.projectId)
+        .order("raised_at", { ascending: false });
+      if (error) throw error;
+      return res.json({ ok: true, eots: data || [] });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/eot", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { projectId } = req.params;
+      const { reason_code, description, days_claimed } = req.body;
+      if (!reason_code || !days_claimed) return res.status(400).json({ ok: false, error: "reason_code and days_claimed required." });
+      const { data, error } = await sb.from("schedule_eot").insert({
+        project_id: projectId,
+        reason_code,
+        description: description || null,
+        days_claimed: Number(days_claimed),
+        status: "pending"
+      }).select("*").single();
+      if (error) throw error;
+      return res.json({ ok: true, eot: data });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.patch("/api/schedule/:projectId/eot/:eotId", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { eotId } = req.params;
+      const { status, days_approved } = req.body;
+      if (!["approved", "rejected"].includes(status)) return res.status(400).json({ ok: false, error: "status must be approved or rejected." });
+      const patch = { status, resolved_at: new Date().toISOString() };
+      if (status === "approved" && days_approved !== undefined) patch.days_approved = Number(days_approved);
+      const { data, error } = await sb.from("schedule_eot").update(patch).eq("id", eotId).select("*").single();
+      if (error) throw error;
+      return res.json({ ok: true, eot: data });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/schedule/:projectId/eot/:eotId/apply", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      const { projectId, eotId } = req.params;
+      const { data: eot, error: ee } = await sb.from("schedule_eot").select("*").eq("id", eotId).single();
+      if (ee || !eot) return res.status(404).json({ ok: false, error: "EOT not found." });
+      if (eot.status !== "approved") return res.status(400).json({ ok: false, error: "EOT must be approved before applying." });
+      if (!eot.days_approved) return res.status(400).json({ ok: false, error: "No approved days set." });
+      const days = Number(eot.days_approved);
+      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("id, start_date, end_date").eq("project_id", projectId);
+      if (te) throw te;
+      for (const task of tasks || []) {
+        await sb.from("schedule_tasks").update({
+          start_date: task.start_date ? addDays(task.start_date, days) : null,
+          end_date:   task.end_date   ? addDays(task.end_date, days)   : null,
+        }).eq("id", task.id);
+      }
+      await sb.from("schedule_eot").update({ applied_at: new Date().toISOString() }).eq("id", eotId);
+      return res.json({ ok: true, tasks_shifted: (tasks || []).length, days });
+    } catch (e) {
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
     }
   });

@@ -95,24 +95,98 @@ export default function TaskDetailPanel({ task, tasks = [], phaseOptions = [], s
         <ProcurementPanel task={task} onChange={(next) => patch(next)} />
 
         <section className="mt-4">
-          <p className="text-xs font-semibold text-muted">Predecessors</p>
-          <div className="mt-1 max-h-32 overflow-y-auto rounded-lg border border-hairline bg-page p-2">
-            {tasks.filter((t) => t.id !== task.id).map((other) => (
-              <label key={other.id} className="flex items-center gap-2 border-b border-hairline py-1 text-xs last:border-b-0">
-                <input
-                  type="checkbox"
-                  checked={(task.depends_on || []).includes(other.id)}
-                  onChange={(e) => {
-                    const cur = new Set(task.depends_on || []);
-                    if (e.target.checked) cur.add(other.id);
-                    else cur.delete(other.id);
-                    patch({ depends_on: [...cur] });
-                  }}
-                />
-                <span className="truncate">{other.name}</span>
-              </label>
-            ))}
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-muted">Dependencies</p>
+            <button
+              type="button"
+              onClick={() => {
+                const available = tasks.filter((t) => t.id !== task.id && !(task.task_dependencies || []).some((d) => d.taskId === t.id));
+                if (!available.length) return;
+                patch({ task_dependencies: [...(task.task_dependencies || []), { taskId: available[0].id, type: "FS", lag: 0 }] });
+              }}
+              className="rounded px-2 py-0.5 text-xs text-accent hover:bg-page"
+            >
+              + Add
+            </button>
           </div>
+          {(task.task_dependencies || []).length === 0 ? (
+            <p className="mt-1 text-xs text-muted italic">No dependencies set.</p>
+          ) : (
+            <div className="mt-1 overflow-hidden rounded-lg border border-hairline">
+              <table className="w-full text-xs">
+                <thead className="bg-page text-muted">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left font-semibold">Predecessor task</th>
+                    <th className="w-16 px-2 py-1.5 text-left font-semibold">Type</th>
+                    <th className="w-14 px-2 py-1.5 text-left font-semibold">Lag (d)</th>
+                    <th className="w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(task.task_dependencies || []).map((dep, i) => {
+                    const predecessor = tasks.find((t) => t.id === dep.taskId);
+                    return (
+                      <tr key={dep.taskId} className="border-t border-hairline">
+                        <td className="px-2 py-1">
+                          <select
+                            value={dep.taskId}
+                            onChange={(e) => {
+                              const next = [...(task.task_dependencies || [])];
+                              next[i] = { ...dep, taskId: e.target.value };
+                              patch({ task_dependencies: next });
+                            }}
+                            className="w-full rounded border border-hairline bg-surface px-1 py-0.5 text-xs text-ink"
+                          >
+                            {predecessor && <option value={predecessor.id}>{predecessor.name}</option>}
+                            {tasks.filter((t) => t.id !== task.id && (t.id === dep.taskId || !(task.task_dependencies || []).some((d) => d.taskId === t.id))).map((t) => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-1">
+                          <select
+                            value={dep.type || "FS"}
+                            onChange={(e) => {
+                              const next = [...(task.task_dependencies || [])];
+                              next[i] = { ...dep, type: e.target.value };
+                              patch({ task_dependencies: next });
+                            }}
+                            className="w-full rounded border border-hairline bg-surface px-1 py-0.5 text-xs text-ink"
+                          >
+                            <option value="FS">FS</option>
+                            <option value="SS">SS</option>
+                            <option value="FF">FF</option>
+                            <option value="SF">SF</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-1">
+                          <input
+                            type="number"
+                            value={dep.lag ?? 0}
+                            onChange={(e) => {
+                              const next = [...(task.task_dependencies || [])];
+                              next[i] = { ...dep, lag: Number(e.target.value) };
+                              patch({ task_dependencies: next });
+                            }}
+                            className="w-full rounded border border-hairline bg-surface px-1 py-0.5 text-xs text-ink"
+                          />
+                        </td>
+                        <td className="px-2 py-1 text-center">
+                          <button
+                            type="button"
+                            onClick={() => patch({ task_dependencies: (task.task_dependencies || []).filter((_, j) => j !== i) })}
+                            className="text-danger hover:text-red-700"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <label className="mt-4 block text-xs font-semibold text-muted">

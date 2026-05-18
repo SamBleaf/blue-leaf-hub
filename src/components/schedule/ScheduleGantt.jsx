@@ -9,6 +9,79 @@ import {
   tasksActiveInWindow,
 } from "../../lib/scheduleUtils.js";
 
+// ─── Ghost bar helpers ────────────────────────────────────────────────────────
+
+function getChartStartDate(ganttTasks, viewMode) {
+  if (!ganttTasks.length) return new Date();
+  const earliest = new Date(Math.min(...ganttTasks.map((t) => t.start.getTime())));
+  if (viewMode === ViewMode.Day) {
+    const d = new Date(earliest);
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+  const d = new Date(earliest);
+  d.setMonth(d.getMonth() - 1);
+  if (viewMode === ViewMode.Week) {
+    const day = d.getDay();
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  } else {
+    d.setDate(1);
+  }
+  return d;
+}
+
+function getPxPerDay(viewMode, colWidth) {
+  if (viewMode === ViewMode.Day) return colWidth;
+  if (viewMode === ViewMode.Week) return colWidth / 7;
+  return colWidth / 30;
+}
+
+function GhostBars({ tasks, ganttTasks, showColumns, viewMode, colWidth }) {
+  const drifted = tasks.filter(
+    (t) =>
+      t.baseline_start_date &&
+      t.baseline_end_date &&
+      (t.start_date !== t.baseline_start_date || t.end_date !== t.baseline_end_date)
+  );
+  if (!drifted.length) return null;
+
+  const chartStart = getChartStartDate(ganttTasks, viewMode);
+  const pxPerDay   = getPxPerDay(viewMode, colWidth);
+  const leftOffset = showColumns ? COLUMNS_PX : 0;
+
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0"
+      style={{ left: leftOffset, top: 0, width: `calc(100% - ${leftOffset}px)`, height: "100%", overflow: "visible", zIndex: 5 }}
+    >
+      {drifted.map((task) => {
+        const rowIdx = ganttTasks.findIndex((gt) => gt.id === task.id);
+        if (rowIdx < 0) return null;
+        const bStart = new Date(`${task.baseline_start_date}T12:00:00`);
+        const bEnd   = new Date(`${task.baseline_end_date}T12:00:00`);
+        const ghostX = Math.round((bStart - chartStart) / 86400000 * pxPerDay);
+        const ghostW = Math.max(4, Math.round((bEnd - bStart) / 86400000 * pxPerDay + pxPerDay));
+        const ghostY = HEADER_HEIGHT + rowIdx * ROW_HEIGHT + Math.round((ROW_HEIGHT - 8) / 2);
+        return (
+          <rect
+            key={task.id}
+            x={ghostX}
+            y={ghostY}
+            width={ghostW}
+            height={8}
+            rx={3}
+            fill="#64748b"
+            fillOpacity={0.25}
+            stroke="#64748b"
+            strokeOpacity={0.45}
+            strokeWidth={1}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 const COLUMNS_WIDTH = "330px";
 const COLUMNS_PX    = 330;
 const ROW_HEIGHT    = 50;
@@ -187,6 +260,9 @@ export default function ScheduleGantt({
   onToggleColumns,
   onQuickPatch,
   onContextDelete,
+  baselineLocked = null,
+  onLockBaseline,
+  onResetBaseline,
 }) {
   const [ctxMenu, setCtxMenu] = useState(null);
   const containerRef = useRef(null);
@@ -226,8 +302,18 @@ export default function ScheduleGantt({
     );
   }
 
+  const driftedCount = baselineLocked
+    ? tasks.filter(
+        (t) =>
+          t.baseline_start_date &&
+          t.baseline_end_date &&
+          (t.start_date !== t.baseline_start_date || t.end_date !== t.baseline_end_date)
+      ).length
+    : 0;
+
   // Vertical position of the toggle button (aligns with the Gantt header row)
-  const toggleBtnTop = (lookahead ? 52 : 0) + 9; // lookahead banner + p-2 + 1px
+  const baselineBarH = 44; // height of baseline control strip
+  const toggleBtnTop = (lookahead ? 52 : 0) + baselineBarH + 9;
   const toggleBtnLeft = showColumns ? COLUMNS_PX - 16 : 8;
 
   return (
@@ -236,6 +322,41 @@ export default function ScheduleGantt({
         <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
           3-week lookahead active: today → {lookaheadEnd.toISOString().slice(0, 10)}
         </p>
+      )}
+
+      {/* Baseline control bar */}
+      {baselineLocked ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+          <span className="font-semibold text-primary">
+            Baseline locked {new Date(baselineLocked).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+          </span>
+          {driftedCount > 0 && (
+            <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
+              {driftedCount} task{driftedCount !== 1 ? "s" : ""} drifted
+            </span>
+          )}
+          {driftedCount === 0 && (
+            <span className="text-xs text-muted">No drift — on baseline</span>
+          )}
+          <button
+            type="button"
+            onClick={onResetBaseline}
+            className="ml-auto rounded-lg border border-hairline px-2 py-1 text-xs text-muted hover:border-danger/40 hover:text-danger"
+          >
+            Reset baseline
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-lg border border-hairline bg-surface px-3 py-2 text-sm">
+          <span className="text-muted">No baseline set</span>
+          <button
+            type="button"
+            onClick={onLockBaseline}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            Lock Baseline
+          </button>
+        </div>
       )}
 
       {/* Gantt wrapper — relative so the toggle button can be absolutely positioned */}
@@ -253,9 +374,18 @@ export default function ScheduleGantt({
 
         <div
           ref={containerRef}
-          className="overflow-x-auto rounded-card border border-hairline bg-surface p-2"
+          className="relative overflow-x-auto rounded-card border border-hairline bg-surface p-2"
           onContextMenu={handleContextMenu}
         >
+          {baselineLocked && (
+            <GhostBars
+              tasks={tasks}
+              ganttTasks={ganttTasks}
+              showColumns={showColumns}
+              viewMode={viewMode}
+              colWidth={colWidth}
+            />
+          )}
           <Gantt
             tasks={ganttTasks}
             viewMode={viewMode}

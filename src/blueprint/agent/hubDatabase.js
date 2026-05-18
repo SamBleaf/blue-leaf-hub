@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 const SUB_REQUIRED_FIELDS = ['contact', 'mobile', 'abn', 'address'];
 const SUB_UPDATABLE_FIELDS = [
@@ -30,7 +31,7 @@ export function getHubSupabase() {
   const url = resolveSupabaseUrl();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key || isPlaceholderSupabaseUrl(url)) return null;
-  return createClient(url, key);
+  return createClient(url, key, { realtime: { transport: WebSocket } });
 }
 
 /** Quick check for /api/blueprint/health */

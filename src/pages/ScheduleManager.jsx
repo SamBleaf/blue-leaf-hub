@@ -8,11 +8,15 @@ import ScheduleTemplateModal from "../components/schedule/ScheduleTemplateModal.
 import ScheduleToolbar from "../components/schedule/ScheduleToolbar.jsx";
 import TaskDetailPanel from "../components/schedule/TaskDetailPanel.jsx";
 import RippleWarningModal from "../components/schedule/RippleWarningModal.jsx";
+import DelaysTab from "../components/schedule/DelaysTab.jsx";
+import DependencyMap from "../components/schedule/DependencyMap.jsx";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import {
   VIEW_DASHBOARD,
   VIEW_GANTT,
+  VIEW_DELAYS,
+  VIEW_MAP,
   computeEndDate,
   daysBetween,
   normalizeTask,
@@ -92,6 +96,7 @@ export default function ScheduleManager() {
   const [showGanttColumns, setShowGanttColumns] = useState(() => {
     try { return localStorage.getItem("blhub_gantt_columns") === "true"; } catch { return false; }
   });
+  const [eots, setEots] = useState([]);
 
   const toggleGanttColumns = useCallback(() => {
     setShowGanttColumns((v) => {
@@ -126,7 +131,7 @@ export default function ScheduleManager() {
   const loadProject = useCallback(async () => {
     if (!supabaseConfigured || !projectId) return;
     const sb = getSupabase();
-    const { data, error: e } = await sb.from("projects").select("id, address, job_id, buildexact_job_id").eq("id", projectId).single();
+    const { data, error: e } = await sb.from("projects").select("id, address, job_id, buildexact_job_id, schedule_baseline_locked_at").eq("id", projectId).single();
     if (e) setError(e.message);
     else setProject(data);
   }, [projectId]);
@@ -137,6 +142,17 @@ export default function ScheduleManager() {
     const { data } = await sb.from("subcontractors").select("id,business_name,trade").order("business_name").limit(500);
     setSubcontractors(data || []);
   }, []);
+
+  const loadEots = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/eot`);
+      const j = await readApiJson(res);
+      if (res.ok && j.ok) setEots(j.eots || []);
+    } catch {
+      setEots([]);
+    }
+  }, [projectId]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -184,8 +200,8 @@ export default function ScheduleManager() {
   }, []);
 
   const reloadAll = useCallback(async () => {
-    await Promise.all([loadProject(), loadMeta(), loadTasks(), loadDashboard(), loadTemplates(), loadSubcontractors()]);
-  }, [loadProject, loadMeta, loadTasks, loadDashboard, loadTemplates, loadSubcontractors]);
+    await Promise.all([loadProject(), loadMeta(), loadTasks(), loadDashboard(), loadTemplates(), loadSubcontractors(), loadEots()]);
+  }, [loadProject, loadMeta, loadTasks, loadDashboard, loadTemplates, loadSubcontractors, loadEots]);
 
   useEffect(() => {
     reloadAll();
@@ -234,6 +250,7 @@ export default function ScheduleManager() {
         end_date: editTask.end_date || computeEndDate(editTask.start_date, editTask.duration_days, editTask.task_type === "milestone"),
         duration_days: editTask.duration_days,
         depends_on: Array.isArray(editTask.depends_on) ? editTask.depends_on : [],
+        task_dependencies: Array.isArray(editTask.task_dependencies) ? editTask.task_dependencies : [],
         notes: editTask.notes,
         assigned_subcontractor_id: editTask.assigned_subcontractor_id,
         planned_hours: editTask.planned_hours,
@@ -539,6 +556,93 @@ export default function ScheduleManager() {
     }
   }
 
+  async function lockBaseline() {
+    setBusy((b) => ({ ...b, baseline: true }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/baseline/lock`, { method: "POST" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Lock failed");
+      await loadProject();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, baseline: false }));
+    }
+  }
+
+  async function resetBaseline() {
+    if (!window.confirm("Reset baseline? Ghost bars will be cleared.")) return;
+    setBusy((b) => ({ ...b, baseline: true }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/baseline`, { method: "DELETE" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Reset failed");
+      await loadProject();
+      await loadTasks();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, baseline: false }));
+    }
+  }
+
+  async function raiseEot(payload) {
+    setBusy((b) => ({ ...b, raise: true }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/eot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Raise failed");
+      await loadEots();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, raise: false }));
+    }
+  }
+
+  async function approveEot(eotId, patch) {
+    setBusy((b) => ({ ...b, approve: true }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/eot/${eotId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Update failed");
+      await loadEots();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, approve: false }));
+    }
+  }
+
+  async function applyEot(eotId) {
+    setBusy((b) => ({ ...b, apply: eotId }));
+    setError("");
+    try {
+      const res = await fetch(`/api/schedule/${projectId}/eot/${eotId}/apply`, { method: "POST" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Apply failed");
+      await loadTasks();
+      await loadDashboard();
+      await loadEots();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, apply: null }));
+    }
+  }
+
   function dismissAnalysisCard(id) {
     const next = [...new Set([...dismissedCards, id])];
     setDismissedCards(next);
@@ -640,6 +744,9 @@ export default function ScheduleManager() {
           onToggleColumns={toggleGanttColumns}
           onQuickPatch={quickPatchTask}
           onContextDelete={directDeleteTask}
+          baselineLocked={project?.schedule_baseline_locked_at || null}
+          onLockBaseline={lockBaseline}
+          onResetBaseline={resetBaseline}
         />
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (
@@ -647,6 +754,18 @@ export default function ScheduleManager() {
       ) : null}
       {!loading && tasks.length && currentView === "calendar" ? (
         <ScheduleCalendar tasks={tasks} filterTrade={filterTrade} onOpenTask={openTask} />
+      ) : null}
+      {!loading && currentView === VIEW_DELAYS ? (
+        <DelaysTab
+          eots={eots}
+          onRaise={raiseEot}
+          onApprove={approveEot}
+          onApply={applyEot}
+          busy={busy}
+        />
+      ) : null}
+      {!loading && tasks.length && currentView === VIEW_MAP ? (
+        <DependencyMap tasks={tasks} phaseLabels={phaseLabels} onOpenTask={openTask} />
       ) : null}
 
       {generateOpen ? (
