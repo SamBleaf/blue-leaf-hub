@@ -125,11 +125,12 @@ export function coerceExtraction(raw) {
     site_area_m2: numOrNull(siteRaw),
     building_specs,
     trade_notes,
-    coverage_gaps: Array.isArray(raw.coverage_gaps)
-      ? raw.coverage_gaps.map(String)
+    coverage_gaps: (Array.isArray(raw.coverage_gaps)
+      ? raw.coverage_gaps
       : Array.isArray(raw.missing_critical)
-        ? raw.missing_critical.map(String)
-        : [],
+        ? raw.missing_critical
+        : []
+    ).map(String).filter(Boolean).slice(0, 6),
     key_project_notes: String(raw.key_project_notes ?? "").trim(),
     client_name: String(raw.client_name ?? "").trim(),
     architect_name: String(raw.architect_name ?? "").trim()
@@ -180,14 +181,30 @@ export function mergeExtractions(rawParts) {
     merged.building_specs[k] = firstNonEmptyString((x) => x.building_specs?.[k]);
   }
 
-  const gapSet = new Set();
+  // Fuzzy-dedup coverage gaps: normalise to first ~6 words for near-duplicate detection
+  function gapKey(s) {
+    return s.toLowerCase()
+      .replace(/\b(not\s+)?(included|provided|present|attached|available|in\s+this\s+document)\b.*$/i, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ").slice(0, 6).join(" ");
+  }
+  const gapKeySeen = new Set();
+  const gapList = [];
   for (const x of list) {
     for (const g of x.coverage_gaps || []) {
       const s = String(g).trim();
-      if (s) gapSet.add(s);
+      if (!s) continue;
+      const key = gapKey(s);
+      if (gapKeySeen.has(key)) continue;
+      gapKeySeen.add(key);
+      gapList.push(s);
+      if (gapList.length >= 6) break;
     }
+    if (gapList.length >= 6) break;
   }
-  merged.coverage_gaps = [...gapSet];
+  merged.coverage_gaps = gapList;
 
   const kpnSeen = new Set();
   const kpnParts = [];

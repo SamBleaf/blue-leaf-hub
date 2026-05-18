@@ -23,21 +23,25 @@ function stripEnsureThatPrefix(s) {
   return String(s).replace(/^Ensure that\s+/i, "").trim();
 }
 
-/** Project blurb (e.g. dwelling count + site size) — not an actionable trade line. */
+/** Project blurb or site context — not an actionable pricing line. */
 function isProjectOverviewBullet(t) {
   const s = String(t).trim();
   if (!s) return true;
   if (OVERVIEW_PATTERNS.test(s)) return true;
   const lower = s.toLowerCase();
-  if (/\bdwellings?\b/.test(lower) && (/\d+\s*m[²2]/.test(lower) || /\b(on|at)\b[^.]{0,40}\bsite\b/i.test(lower))) {
-    return true;
-  }
-  if (/^(two|dual|multiple|single)\s+dwellings?\b/i.test(s) && /site|lot|m[²2]|\/\s*\d+/i.test(s)) {
-    return true;
-  }
-  if (/\b(site|lot)\s+(is|of|area)\b/i.test(lower) && /\d+\s*m[²2]/i.test(lower) && !/\b(excavat|concret|plumb|electr|roof|tile|lin)/i.test(lower)) {
-    return true;
-  }
+  // Dwelling count + site area blurbs
+  if (/\bdwellings?\b/.test(lower) && (/\d+\s*m[²2]/.test(lower) || /\b(on|at)\b[^.]{0,40}\bsite\b/i.test(lower))) return true;
+  if (/^(two|dual|multiple|single)\s+dwellings?\b/i.test(s) && /site|lot|m[²2]|\/\s*\d+/i.test(s)) return true;
+  if (/\b(site|lot)\s+(is|of|area)\b/i.test(lower) && /\d+\s*m[²2]/i.test(lower) && !/\b(excavat|concret|plumb|electr|roof|tile|lin)/i.test(lower)) return true;
+  // RL / reduced level data lines
+  if (/\brl\s*[~≈]?\s*\d+[\d.]*\b/i.test(s)) return true;
+  // Site conditions / existing levels that aren't pricing actions
+  if (/\bexisting\s+ground\s+levels?\b/i.test(lower)) return true;
+  if (/\bsite\s+falls?\b/i.test(lower) && !/\bexcavat|cut|fill|retaining\b/i.test(lower)) return true;
+  // Administrative instructions
+  if (/\bvisit\s+site\b|\bsite\s+visit\b|\bsite\s+inspect/i.test(lower)) return true;
+  if (/\battached\s+for\s+information\b|\bfor\s+information\s+only\b/i.test(lower)) return true;
+  if (/\ballowance\s+to\s+be\s+made\s+for\s+unspecified\b/i.test(lower)) return true;
   return false;
 }
 
@@ -232,14 +236,14 @@ export function composeRfqEmail({
     const parts = [];
     parts.push(greetingLine(contactName));
     parts.push("");
-    parts.push(`Please price the following scope for our tender at ${addr}.`);
+    parts.push(`We are seeking your price for the ${label} package at ${addr}.`);
     parts.push("");
-    parts.push(`Tender documents are available here: ${docs}`);
+    parts.push(`Tender documents: ${docs}`);
     parts.push("");
-    parts.push("Works include but are not limited to:");
+    parts.push("Please include the following in your price:");
     bullets.forEach((b) => parts.push(`• ${b}`));
     parts.push("");
-    parts.push(`Please provide your price by ${deadline}.`);
+    parts.push(`Please return your lump sum price by ${deadline}.`);
     parts.push("Feel free to reach out with any questions.");
     parts.push("");
     parts.push(...sigLines);

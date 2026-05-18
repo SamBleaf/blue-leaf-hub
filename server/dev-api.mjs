@@ -500,11 +500,11 @@ const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attac
 
 Output rules:
 - building_specs: one short factual line per field from docs; empty string if absent.
-- trade_notes: every key above required. scope_summary = short dot-point lines only (max ~6 lines), trade-specific facts from docs — no paragraphs, no generic filler across trades.
+- trade_notes: every key above required. scope_summary = what the subcontractor must include in their price. Action-oriented dot-points only (max ~8 lines). Each line is a specific pricing item or allowance drawn directly from the documents — write as instructions to price (e.g. "Excavate slab and setdown to structural drawings", "Allow for relocation of existing sewer and stormwater services", "Supply and install termite barrier to perimeter"). Do NOT include: site conditions, RL/level data, project overview stats, floor areas, administrative instructions, site visit notes, or standards references. Standards go in the last line only.
 - Last line of scope_summary must be one line only: standard code + short title (e.g. AS 3660.1 — Termite management; AS/NZS 3000 — Wiring rules). No extra sentence on that line.
-- specific_items: brief extra bullets if needed; else [].
+- specific_items: additional document-backed pricing items not captured in scope_summary; else [].
 - missing_info: critical gap for quoting that trade; else "".
-- coverage_gaps: short strings for missing docs/info only.
+- coverage_gaps: ONLY list items that the uploaded documents themselves explicitly cross-reference but do not include in this submission (e.g. the text says "refer to geotechnical report" but no such report is present). Do NOT speculate or list documents that would typically be expected — only flag what the document text itself says is referenced but absent. Do NOT flag architectural drawings, structural drawings, services drawings, specifications, schedules, or survey as missing unless the document explicitly states they are excluded from this package. Assume standard documents may be available in a linked portal. Max 5 items; else [].
 - key_project_notes: max 2 short sentences, Australian English, from docs only.
 - Only document-backed facts; else "", [], or null.`;
 

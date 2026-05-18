@@ -84,11 +84,11 @@ const OPS_MODULES = [
 ];
 
 const DEPARTMENTS = [
-  { id: "tender",           label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/rfq-engine" },
-  { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",   icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
-  { id: "finance_manager",  label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: true,  modules: [] },
-  { id: "sales_marketing", label: "Sales Manager", tabShort: "Sales", icon: "sales", comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
-  { id: "client_portal",    label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
+  { id: "sales_marketing",    label: "Sales Manager",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
+  { id: "tender",             label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/rfq-engine" },
+  { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
+  { id: "finance_manager",    label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: true,  modules: [] },
+  { id: "client_portal",      label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
 ];
 
 const SIDEBAR_EXPANDED_W = 256;
@@ -401,6 +401,7 @@ export default function AppShell() {
         <div className="flex justify-around px-1 py-2">
           {DEPARTMENTS.map((dept) => {
             const active =
+              (dept.id === "sales_marketing" && location.pathname.startsWith("/sales")) ||
               (dept.id === "tender" && location.pathname.startsWith("/tender-manager")) ||
               (dept.id === "operations_manager" && location.pathname.startsWith("/operations"));
             return (
