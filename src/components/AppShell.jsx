@@ -87,7 +87,7 @@ const DEPARTMENTS = [
   { id: "sales_marketing",    label: "Sales Manager",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
   { id: "tender",             label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
-  { id: "finance_manager",    label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: true,  modules: [] },
+  { id: "finance_manager",    label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: false, modules: [{ to: "/finance", label: "Inbox", end: true }, { to: "/finance/approvals", label: "Approvals" }, { to: "/finance/jobs", label: "Job View" }], defaultTo: "/finance" },
   { id: "client_portal",      label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
 ];
 
@@ -114,6 +114,7 @@ export default function AppShell() {
     if (location.pathname.startsWith("/tender-manager")) return "tender";
     if (location.pathname.startsWith("/operations")) return "operations_manager";
     if (location.pathname.startsWith("/sales")) return "sales_marketing";
+    if (location.pathname.startsWith("/finance")) return "finance_manager";
     return null;
   }, [location.pathname]);
 
@@ -403,7 +404,8 @@ export default function AppShell() {
             const active =
               (dept.id === "sales_marketing" && location.pathname.startsWith("/sales")) ||
               (dept.id === "tender" && location.pathname.startsWith("/tender-manager")) ||
-              (dept.id === "operations_manager" && location.pathname.startsWith("/operations"));
+              (dept.id === "operations_manager" && location.pathname.startsWith("/operations")) ||
+              (dept.id === "finance_manager" && location.pathname.startsWith("/finance"));
             return (
               <button
                 key={dept.id}

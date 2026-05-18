@@ -25,6 +25,7 @@ import FeeProposalWizard from "./pages/FeeProposalWizard.jsx";
 import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
 import SalesPipeline from "./pages/SalesPipeline.jsx";
 import LeadDetail from "./pages/LeadDetail.jsx";
+import FinanceManager from "./pages/FinanceManager.jsx";
 
 export default function App() {
   return (
@@ -63,6 +64,9 @@ export default function App() {
 
                 <Route path="/sales" element={<SalesPipeline />} />
                 <Route path="/sales/:leadId" element={<LeadDetail />} />
+
+                <Route path="/finance" element={<FinanceManager />} />
+                <Route path="/finance/:tab" element={<FinanceManager />} />
 
                 <Route path="/rfq-engine" element={<Navigate to="/tender-manager/rfq-engine" replace />} />
                 <Route path="/subcontractors" element={<Navigate to="/tender-manager/subcontractors" replace />} />

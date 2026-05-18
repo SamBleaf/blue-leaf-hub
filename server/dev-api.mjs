@@ -33,6 +33,7 @@ import { registerBuildexactIntegrationRoutes } from "./lib/buildexactIntegration
 import { resolveInboundRfqMatch, generateOutboundMessageId } from "./lib/imapQuoteMatch.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
+import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 
 console.log("[blue-leaf-api] booting…");
@@ -612,6 +613,7 @@ registerBlueprintRoutes(app);
 registerInductionRoutes(app);
 registerJobsApiRoutes(app);
 registerSalesRoutes(app);
+registerFinanceRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
