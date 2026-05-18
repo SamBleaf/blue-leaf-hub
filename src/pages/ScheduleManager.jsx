@@ -14,6 +14,7 @@ import {
   VIEW_DASHBOARD,
   VIEW_GANTT,
   computeEndDate,
+  daysBetween,
   normalizeTask,
   phaseLabel,
   previewRipple,
@@ -88,6 +89,17 @@ export default function ScheduleManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState({});
+  const [showGanttColumns, setShowGanttColumns] = useState(() => {
+    try { return localStorage.getItem("blhub_gantt_columns") === "true"; } catch { return false; }
+  });
+
+  const toggleGanttColumns = useCallback(() => {
+    setShowGanttColumns((v) => {
+      const next = !v;
+      try { localStorage.setItem("blhub_gantt_columns", String(next)); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
 
   const selectedTaskId = editTask?.id || null;
 
@@ -460,6 +472,11 @@ export default function ScheduleManager() {
   async function onGanttDateChange(id, newStartDate, newEndDate) {
     const task = tasks.find((t) => t.id === id);
     if (!task) return;
+    // Detect resize (start unchanged) vs move (start shifted)
+    const isResize   = task.start_date === newStartDate;
+    const newDuration = isResize
+      ? Math.max(1, daysBetween(newStartDate, newEndDate) + 1)
+      : task.duration_days;
     try {
       const res = await fetch(`/api/schedule/${projectId}/ripple-check`, {
         method: "POST",
@@ -468,29 +485,57 @@ export default function ScheduleManager() {
       });
       const j = await readApiJson(res);
       if (res.ok && j.ok && j.downstream_tasks?.length) {
-        setRipple({ taskId: id, newStartDate, newEndDate, affected: j.affected || [] });
+        setRipple({ taskId: id, newStartDate, newEndDate, newDuration, affected: j.affected || [] });
         return;
       }
     } catch {
       const local = previewRipple(tasks, id, newStartDate);
       if (local.affected.length > 1) {
-        setRipple({ taskId: id, newStartDate, newEndDate, affected: local.affected });
+        setRipple({ taskId: id, newStartDate, newEndDate, newDuration, affected: local.affected });
         return;
       }
     }
-    await patchTask(id, { start_date: newStartDate, end_date: newEndDate });
+    await patchTask(id, { start_date: newStartDate, end_date: newEndDate, duration_days: newDuration });
   }
 
   async function confirmRipple(noCascade = false) {
     if (!ripple) return;
     setBusy((b) => ({ ...b, ripple: true }));
     try {
-      await patchTask(ripple.taskId, { start_date: ripple.newStartDate, end_date: ripple.newEndDate, no_cascade: noCascade });
+      await patchTask(ripple.taskId, {
+        start_date:    ripple.newStartDate,
+        end_date:      ripple.newEndDate,
+        duration_days: ripple.newDuration,
+        no_cascade:    noCascade,
+      });
       setRipple(null);
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
       setBusy((b) => ({ ...b, ripple: false }));
+    }
+  }
+
+  async function quickPatchTask(id, updates) {
+    try {
+      await patchTask(id, updates);
+    } catch (e) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  async function directDeleteTask(id) {
+    setBusy((b) => ({ ...b, save: true }));
+    try {
+      const res = await fetch(`/api/schedule/task/${id}`, { method: "DELETE" });
+      const j = await readApiJson(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
+      await loadTasks();
+      await loadDashboard();
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy((b) => ({ ...b, save: false }));
     }
   }
 
@@ -580,7 +625,22 @@ export default function ScheduleManager() {
         <ScheduleDashboard tasks={tasks} dashboard={dashboard} phaseLabels={phaseLabels} analysisCards={analysisCards} dismissedCards={dismissedCards} onDismissAnalysis={dismissAnalysisCard} onOpenTask={openTask} onOrderNow={orderNow} />
       ) : null}
       {!loading && tasks.length && currentView === VIEW_GANTT ? (
-        <ScheduleGantt tasks={tasks} phaseLabels={phaseLabels} zoom={zoom} showCritical={showCritical} lookahead={lookahead} filterTrade={filterTrade} onOpenTask={openTask} onDateChange={onGanttDateChange} onProgressChange={(id, progress) => patchTask(id, { percent_complete: progress, status: taskStatusFromPercent(progress) })} onAddTask={addTask} />
+        <ScheduleGantt
+          tasks={tasks}
+          phaseLabels={phaseLabels}
+          zoom={zoom}
+          showCritical={showCritical}
+          lookahead={lookahead}
+          filterTrade={filterTrade}
+          onOpenTask={openTask}
+          onDateChange={onGanttDateChange}
+          onProgressChange={(id, progress) => patchTask(id, { percent_complete: progress, status: taskStatusFromPercent(progress) })}
+          onAddTask={addTask}
+          showColumns={showGanttColumns}
+          onToggleColumns={toggleGanttColumns}
+          onQuickPatch={quickPatchTask}
+          onContextDelete={directDeleteTask}
+        />
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (
         <ScheduleSheet tasks={tasks} phaseLabels={phaseLabels} selectedIds={selectedIds} onSelectIds={setSelectedIds} onPatchTask={(id, patch) => patchTask(id, patch)} onOpenTask={openTask} onAddTask={addTask} onBulkDelete={bulkDelete} />

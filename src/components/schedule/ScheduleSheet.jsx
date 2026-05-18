@@ -20,6 +20,7 @@ function EditableCell({ value, type = "text", onCommit, options }) {
 }
 
 export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedIds = [], onSelectIds, onPatchTask, onOpenTask, onAddTask, onBulkDelete }) {
+  const today = new Date().toISOString().slice(0, 10);
   const { order, groups } = groupTasksByPhase(tasks);
   const selected = new Set(selectedIds);
   const toggle = (id) => {
@@ -71,7 +72,14 @@ export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedId
                       </td>
                       <td className="border-b border-hairline px-2 py-1">{phaseLabel(task.phase, phaseLabels)}</td>
                       <td className="border-b border-hairline px-2 py-1">
-                        <button type="button" onClick={() => onOpenTask(task)} className="font-semibold text-ink hover:text-primary">{task.name}</button>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`flex-shrink-0 w-2 h-2 rounded-full ${
+                            (task.percent_complete||0) >= 100 ? "bg-green-400" :
+                            (task.end_date && task.end_date < today) ? "bg-red-400" :
+                            (task.percent_complete||0) > 0 ? "bg-blue-400" : "bg-slate-300"
+                          }`} />
+                          <button type="button" onClick={() => onOpenTask(task)} className="font-semibold text-ink hover:text-primary">{task.name}</button>
+                        </div>
                       </td>
                       <td className="border-b border-hairline px-2 py-1"><EditableCell type="number" value={task.duration_days} onCommit={(v) => onPatchTask(task.id, { duration_days: v })} /></td>
                       <td className="border-b border-hairline px-2 py-1"><EditableCell type="date" value={task.start_date || ""} onCommit={(v) => onPatchTask(task.id, { start_date: v })} /></td>

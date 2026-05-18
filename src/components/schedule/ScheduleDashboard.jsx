@@ -69,11 +69,14 @@ export default function ScheduleDashboard({ tasks = [], dashboard, phaseLabels =
             {(data.phaseRows || []).map((row) => (
               <div key={row.phase}>
                 <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-ink">{row.label}</span>
+                  <span className="flex items-center gap-1.5 font-semibold text-ink">
+                    <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", backgroundColor:row.color, flexShrink:0 }} />
+                    {row.label}
+                  </span>
                   <span className="text-muted">{row.progress}%</span>
                 </div>
                 <div className="mt-1 h-2 overflow-hidden rounded bg-hairline">
-                  <div className="h-full rounded" style={{ width: `${row.progress}%`, backgroundColor: row.progress > 80 ? "#16a34a" : row.progress >= 40 ? "#d97706" : "#dc2626" }} />
+                  <div className="h-full rounded" style={{ width: `${row.progress}%`, backgroundColor: row.color }} />
                 </div>
               </div>
             ))}

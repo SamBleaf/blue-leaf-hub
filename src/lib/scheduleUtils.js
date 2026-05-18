@@ -26,7 +26,72 @@ export const PHASE_LABELS = {
   general: "General"
 };
 
-export const PHASE_PALETTE = ["#64748b", "#78716c", "#d97706", "#2563eb", "#16a34a", "#9333ea", "#0d9488", "#0ea5e9", "#db2777", "#65a30d"];
+// Semantic phase colours — each phase maps to a meaningful construction colour
+export const PHASE_COLOR_MAP = {
+  pre_construction:  "#64748b", // slate    — admin / planning
+  site_prep:         "#92400e", // brown    — dirt / earthworks
+  site_slab:         "#78716c", // stone    — concrete / slab
+  substructure:      "#78716c", // stone    — footings / concrete
+  excavation:        "#92400e", // brown    — excavation
+  frame:             "#ea580c", // orange   — structure rising
+  roofing:           "#1e40af", // deep blue — sky / roof
+  roof:              "#1e40af", // deep blue
+  lock_up:           "#0d9488", // teal     — sealing the envelope
+  rough_in:          "#d97706", // amber    — electrical / services
+  first_fix:         "#d97706", // amber
+  insulation:        "#65a30d", // lime     — green product
+  wall_lining:       "#7c3aed", // violet   — finishes begin
+  painting:          "#e11d48", // rose     — colour / surface
+  fitout:            "#0284c7", // sky blue — fixtures going in
+  second_fix:        "#0284c7", // sky blue
+  floor_coverings:   "#b45309", // warm brown — floors
+  tiling:            "#b45309", // warm brown
+  external_works:    "#0369a1", // blue     — external
+  landscaping:       "#15803d", // green    — gardens
+  completion:        "#059669", // emerald  — done
+  post_construction: "#059669", // emerald
+  handover:          "#059669", // emerald
+  general:           "#94a3b8", // cool grey — fallback
+};
+
+const FALLBACK_PALETTE = ["#2563eb","#9333ea","#0ea5e9","#db2777","#16a34a","#d97706","#0d9488","#ea580c"];
+
+// Colour helpers — used by Gantt for status-based styling
+export function hexToTint(hex, opacity) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  const tr = Math.round(r+(255-r)*(1-opacity));
+  const tg = Math.round(g+(255-g)*(1-opacity));
+  const tb = Math.round(b+(255-b)*(1-opacity));
+  return `#${tr.toString(16).padStart(2,"0")}${tg.toString(16).padStart(2,"0")}${tb.toString(16).padStart(2,"0")}`;
+}
+
+export function darkenHex(hex, amount=20) {
+  const r = Math.max(0, parseInt(hex.slice(1,3),16)-amount);
+  const g = Math.max(0, parseInt(hex.slice(3,5),16)-amount);
+  const b = Math.max(0, parseInt(hex.slice(5,7),16)-amount);
+  return `#${r.toString(16).padStart(2,"0")}${g.toString(16).padStart(2,"0")}${b.toString(16).padStart(2,"0")}`;
+}
+
+/** Returns gantt-task-react styles object based on task status + phase colour */
+export function getTaskGanttStyles(task, phaseColorHex, showCritical, todayStr) {
+  const today = todayStr || new Date().toISOString().slice(0,10);
+  const isComplete = (Number(task.percent_complete)||0) >= 100 || task.status === "complete";
+  const isOverdue   = !isComplete && task.end_date && task.end_date < today;
+  const isCritical  = showCritical && task.is_critical_path;
+  const isProc      = task.task_type === "procurement";
+  if (isComplete) return { backgroundColor:"#e5e7eb", backgroundSelectedColor:"#d1d5db", progressColor:"#86efac", progressSelectedColor:"#4ade80" };
+  if (isOverdue)  return { backgroundColor:"#fee2e2", backgroundSelectedColor:"#fecaca", progressColor:"#ef4444", progressSelectedColor:"#dc2626" };
+  if (isCritical) return { backgroundColor:"#fed7aa", backgroundSelectedColor:"#fdba74", progressColor:"#fb923c", progressSelectedColor:"#f97316" };
+  if (isProc)     return { backgroundColor:"#fef3c7", backgroundSelectedColor:"#fde68a", progressColor:"#d97706", progressSelectedColor:"#b45309" };
+  return {
+    backgroundColor:         hexToTint(phaseColorHex, 0.25),
+    backgroundSelectedColor: hexToTint(phaseColorHex, 0.38),
+    progressColor:           phaseColorHex,
+    progressSelectedColor:   darkenHex(phaseColorHex, 15),
+  };
+}
 
 export function safeDate(value) {
   return toYmd(value) || "";
@@ -126,9 +191,10 @@ export function phaseLabel(phase, labels = {}) {
 
 export function phaseColor(phase) {
   const p = String(phase || "general");
+  if (PHASE_COLOR_MAP[p]) return PHASE_COLOR_MAP[p];
   let hash = 0;
   for (let i = 0; i < p.length; i += 1) hash = (hash * 31 + p.charCodeAt(i)) >>> 0;
-  return PHASE_PALETTE[hash % PHASE_PALETTE.length];
+  return FALLBACK_PALETTE[hash % FALLBACK_PALETTE.length];
 }
 
 export function taskStatusFromPercent(percent) {
