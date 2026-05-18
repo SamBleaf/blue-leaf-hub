@@ -227,20 +227,52 @@ function UploadZone({ onUploaded }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
 
+  async function convertHeicToJpeg(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        canvas.toBlob(blob => {
+          URL.revokeObjectURL(url);
+          if (!blob) return reject(new Error("HEIC conversion failed"));
+          const reader = new FileReader();
+          reader.onload = e => resolve({ base64: e.target.result.split(",")[1], mime: "image/jpeg" });
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        }, "image/jpeg", 0.88);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Browser cannot decode this HEIC file")); };
+      img.src = url;
+    });
+  }
+
   async function processFile(file) {
     setUploading(true);
     setResult(null);
     try {
-      const base64 = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = e => res(e.target.result.split(",")[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
+      const isHeic = /image\/hei[cf]/i.test(file.type) || /\.heic$/i.test(file.name);
+      let base64, mimeType;
+      if (isHeic) {
+        const converted = await convertHeicToJpeg(file);
+        base64 = converted.base64;
+        mimeType = converted.mime;
+      } else {
+        base64 = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = e => res(e.target.result.split(",")[1]);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+        mimeType = file.type;
+      }
       const r = await fetch("/api/finance/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, mimeType: file.type, data: base64 })
+        body: JSON.stringify({ filename: file.name.replace(/\.heic$/i, ".jpg"), mimeType, data: base64 })
       });
       const j = await r.json();
       if (j.ok) {
@@ -275,7 +307,7 @@ function UploadZone({ onUploaded }) {
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,image/jpeg,image/png,image/webp"
+          accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
           className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ""; }}
         />
@@ -286,7 +318,7 @@ function UploadZone({ onUploaded }) {
             <div className="text-3xl text-muted">⬆</div>
             <div className="text-center">
               <p className="text-sm font-semibold text-ink">Drop invoice or receipt here</p>
-              <p className="text-xs text-muted mt-0.5">PDF, JPEG, PNG · Claude will extract and match automatically</p>
+              <p className="text-xs text-muted mt-0.5">PDF, JPEG, PNG, HEIC · extracts automatically</p>
             </div>
           </>
         )}
@@ -376,7 +408,7 @@ export default function FinancialInbox({ onUploaded }) {
                   {doc.is_duplicate && <span className="text-[10px] font-bold text-warning">DUPE?</span>}
                 </div>
                 <div className="mt-0.5 text-xs text-muted">
-                  {doc.jobs?.address || "No job matched"} · {fmtDate(doc.invoice_date)}
+                  {jobs.find(j => j.id === doc.job_id)?.address || "No job matched"} · {fmtDate(doc.invoice_date)}
                 </div>
                 {doc.description && <div className="mt-0.5 text-xs text-muted truncate">{doc.description}</div>}
               </div>

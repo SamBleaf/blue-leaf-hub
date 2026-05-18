@@ -105,18 +105,16 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
         <div className="p-4">
           <p className="text-[10px] font-bold uppercase tracking-wide text-muted mb-2">Matched job</p>
 
-          {doc.jobs?.address ? (
+          {(() => { const job = jobs.find(j => j.id === doc.job_id); return job ? (
             <div className="space-y-2">
-              <p className="text-base font-bold text-primary leading-tight">{doc.jobs.address}</p>
-              {doc.jobs.job_reference && <p className="text-xs text-muted">Ref: {doc.jobs.job_reference}</p>}
+              <p className="text-base font-bold text-primary leading-tight">{job.address}</p>
+              {job.job_reference && <p className="text-xs text-muted">Ref: {job.job_reference}</p>}
               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${matchClass}`}>
                 {METHOD_LABELS[doc.match_method] || doc.match_method}
                 {doc.match_confidence < 100 && ` · ${doc.match_confidence}%`}
               </span>
             </div>
-          ) : (
-            <p className="text-sm text-warning font-semibold">No job matched — reassign before approving</p>
-          )}
+          ) : <p className="text-sm text-warning font-semibold">No job matched — reassign before approving</p>; })()}
 
           {doc.is_duplicate && (
             <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-1.5 text-xs text-warning font-semibold">
