@@ -738,6 +738,11 @@ function BulkImportModal({ onClose, onSaved }) {
   };
 
   const openGoogleSheetsTemplate = async () => {
+    const sheetWindow = window.open("about:blank", "_blank");
+    if (sheetWindow) {
+      sheetWindow.opener = null;
+      sheetWindow.document.write("<p style=\"font-family:sans-serif;padding:24px\">Creating Blue Leaf subcontractor template...</p>");
+    }
     try {
       const res = await fetch("/api/subcontractors/csv-template-sheet", {
         method: "POST",
@@ -746,16 +751,19 @@ function BulkImportModal({ onClose, onSaved }) {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Could not create Google Sheet.");
-      window.open(data.editUrl || data.webViewLink, "_blank", "noopener,noreferrer");
+      if (sheetWindow) sheetWindow.location.href = data.editUrl || data.webViewLink;
+      else window.open(data.editUrl || data.webViewLink, "_blank", "noopener,noreferrer");
       setError("Google Sheet template created. Fill the rows, then download as CSV and upload it below.");
     } catch (err) {
+      if (sheetWindow) sheetWindow.close();
+      downloadTemplate();
       try {
         await navigator.clipboard.writeText(templateCsv);
         window.open("https://docs.google.com/spreadsheets/create", "_blank", "noopener,noreferrer");
-        setError(`${err?.message || "Drive template unavailable"} Template copied. Paste into cell A1 in the new Google Sheet.`);
+        setError(`${err?.message || "Drive template unavailable"} CSV template downloaded and copied. Open the downloaded CSV in Google Sheets, or paste into cell A1.`);
       } catch {
         window.open("https://docs.google.com/spreadsheets/create", "_blank", "noopener,noreferrer");
-        setError(`${err?.message || "Drive template unavailable"} Use Download CSV Template if clipboard access is blocked.`);
+        setError(`${err?.message || "Drive template unavailable"} CSV template downloaded. Open that file in Google Sheets to continue.`);
       }
     }
   };
@@ -1017,6 +1025,51 @@ function buildSubStats(sub, rfqs) {
   };
 }
 
+function sheetSortValue(sub, stats, key) {
+  if (key === "business") return sub.business_name || "";
+  if (key === "trade") return sub.trade || "";
+  if (key === "contact") return sub.contact || "";
+  if (key === "email") return sub.email || "";
+  if (key === "mobile") return sub.mobile || "";
+  if (key === "suburb") return `${sub.suburb || ""} ${sub.state || ""}`;
+  if (key === "rfqs") return stats.rfqCount;
+  if (key === "uploaded") return stats.quoteUploads;
+  if (key === "accepted") return stats.acceptedCount;
+  if (key === "avg_quote") return stats.avgQuote;
+  if (key === "missing") return ["contact", "mobile", "abn", "address"].filter((f) => !sub[f]).length;
+  return "";
+}
+
+function SortableTableHead({ label, sortKey, activeSort, onSort }) {
+  const active = activeSort?.key === sortKey;
+  const icon = active ? (activeSort.direction === "asc" ? "▲" : "▼") : "↕";
+  return (
+    <th style={tableHeadCell}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        title={`Sort by ${label}`}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          border: "none",
+          background: "transparent",
+          color: active ? "#006c9b" : "#64748b",
+          cursor: "pointer",
+          padding: 0,
+          font: "inherit",
+          textTransform: "inherit",
+          letterSpacing: "inherit"
+        }}
+      >
+        <span>{label}</span>
+        <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1 }}>{icon}</span>
+      </button>
+    </th>
+  );
+}
+
 function SubcontractorDashboard({ sub, rfqs, colourMap, onClose }) {
   const stats = buildSubStats(sub, rfqs);
   const recent = stats.rows
@@ -1148,6 +1201,7 @@ export default function Subcontractors() {
   const [tradeFilter, setTradeFilter] = useState("all");
   const [sortBy, setSortBy] = useState("az");
   const [viewMode, setViewMode] = useState("cards");
+  const [sheetSort, setSheetSort] = useState({ key: "business", direction: "asc" });
   const [selectedSub, setSelectedSub] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTradeModal, setShowTradeModal] = useState(false);
@@ -1216,6 +1270,37 @@ export default function Subcontractors() {
       return new Date(b.created_at || 0) - new Date(a.created_at || 0);
     }
     return 0;
+  });
+
+  const sheetColumns = [
+    ["business", "Business"],
+    ["trade", "Trade"],
+    ["contact", "Contact"],
+    ["email", "Email"],
+    ["mobile", "Mobile"],
+    ["suburb", "Suburb"],
+    ["rfqs", "RFQs"],
+    ["uploaded", "Uploaded"],
+    ["accepted", "Accepted"],
+    ["avg_quote", "Avg quote"],
+    ["missing", "Missing"]
+  ];
+
+  const toggleSheetSort = (key) => {
+    setSheetSort((cur) => ({
+      key,
+      direction: cur.key === key && cur.direction === "asc" ? "desc" : "asc"
+    }));
+  };
+
+  const sheetSorted = [...filtered].sort((a, b) => {
+    const aStats = buildSubStats(a, rfqs);
+    const bStats = buildSubStats(b, rfqs);
+    const av = sheetSortValue(a, aStats, sheetSort.key);
+    const bv = sheetSortValue(b, bStats, sheetSort.key);
+    const dir = sheetSort.direction === "asc" ? 1 : -1;
+    if (typeof av === "number" || typeof bv === "number") return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
+    return String(av || "").localeCompare(String(bv || ""), undefined, { sensitivity: "base", numeric: true }) * dir;
   });
 
   const grouped =
@@ -1489,13 +1574,13 @@ export default function Subcontractors() {
             <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["Business", "Trade", "Contact", "Email", "Mobile", "Suburb", "RFQs", "Uploaded", "Accepted", "Avg quote", "Missing"].map((h) => (
-                    <th key={h} style={tableHeadCell}>{h}</th>
+                  {sheetColumns.map(([key, label]) => (
+                    <SortableTableHead key={key} label={label} sortKey={key} activeSort={sheetSort} onSort={toggleSheetSort} />
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((sub) => {
+                {sheetSorted.map((sub) => {
                   const stats = buildSubStats(sub, rfqs);
                   const missing = ["contact", "mobile", "abn", "address"].filter((f) => !sub[f]).length;
                   return (
