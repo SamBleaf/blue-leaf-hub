@@ -1,5 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
+import { config as dotenvConfig } from "dotenv";
 import { getServiceSupabase } from "./supabaseService.mjs";
+
+const { parsed: _dotenv = {} } = dotenvConfig();
+function anthropicApiKey() {
+  return process.env.ANTHROPIC_API_KEY?.trim() || _dotenv.ANTHROPIC_API_KEY?.trim();
+}
 import {
   dropboxConfigured,
   getDropboxAccessToken,
@@ -66,30 +74,50 @@ async function matchDocument(extracted, { jobs, subcontractors }) {
   // Tier 1 — Exact deterministic matches (free, instant, auditable)
   if (extracted_job_ref) {
     const ref = normRef(extracted_job_ref);
-    const job = jobs.find(j => normRef(j.job_reference) === ref || normRef(j.id) === ref);
-    if (job) return { job_id: job.id, method: "exact_job_ref", confidence: 100 };
+    const job = jobs.find(j => normRef(j.arch_ref) === ref || normRef(j.id) === ref);
+    if (job) return { job_id: job.id, match_method: "exact_job_ref", match_confidence: 100 };
   }
 
   if (extracted_address) {
     const na = normAddr(extracted_address);
     const exact = jobs.find(j => normAddr(j.address) === na);
-    if (exact) return { job_id: exact.id, method: "exact_address", confidence: 100 };
+    if (exact) return { job_id: exact.id, match_method: "exact_address", match_confidence: 100 };
   }
 
   // Tier 1.5 — Supplier default (sub has only ever worked on one active job)
   if (supplier_name && subcontractors.length) {
     const sup = subcontractors.find(s => similarity(s.business_name, supplier_name) > 0.82);
-    if (sup?.default_job_id) return { job_id: sup.default_job_id, method: "supplier_default", confidence: 90 };
+    if (sup?.default_job_id) return { job_id: sup.default_job_id, match_method: "supplier_default", match_confidence: 90 };
   }
 
-  // Tier 2 — Fuzzy (pg_trgm equivalent in JS; small dataset so this is fast)
+  // Tier 1b — Token overlap: street number + meaningful tokens must all appear in job address
+  // Catches "110 Coach Rd" matching "110 Coach Road, Skye VIC" even with abbreviation differences
+  if (extracted_address) {
+    const tokens = normAddr(extracted_address).split(" ").filter(t => t.length > 2);
+    if (tokens.length >= 2) {
+      // Score = proportion of extracted tokens found in the normalised job address
+      let best = null, bestScore = 0;
+      for (const job of jobs) {
+        const jn = normAddr(job.address);
+        const matched = tokens.filter(t => jn.includes(t)).length;
+        const score = matched / tokens.length;
+        if (score > bestScore) { bestScore = score; best = job; }
+      }
+      // Street number always present in extracted tokens → require high overlap
+      if (bestScore >= 0.65) {
+        return { job_id: best.id, match_method: "fuzzy_address", match_confidence: Math.round(bestScore * 100) };
+      }
+    }
+  }
+
+  // Tier 2 — Fuzzy (Levenshtein; catches typos and partial abbreviations)
   if (extracted_address) {
     let best = null, bestScore = 0;
     for (const job of jobs) {
       const score = addrSimilarity(job.address, extracted_address);
       if (score > bestScore) { bestScore = score; best = job; }
     }
-    if (bestScore >= 0.78) return { job_id: best.id, method: "fuzzy_address", confidence: Math.round(bestScore * 100) };
+    if (bestScore >= 0.78) return { job_id: best.id, match_method: "fuzzy_address", match_confidence: Math.round(bestScore * 100) };
   }
 
   if (supplier_name) {
@@ -99,15 +127,15 @@ async function matchDocument(extracted, { jobs, subcontractors }) {
       if (score > bestScore) { bestScore = score; best = sub; }
     }
     if (bestScore >= 0.78 && best?.default_job_id) {
-      return { job_id: best.default_job_id, method: "fuzzy_supplier", confidence: Math.round(bestScore * 100) };
+      return { job_id: best.default_job_id, match_method: "fuzzy_supplier", match_confidence: Math.round(bestScore * 100) };
     }
   }
 
   // Tier 3 — AI (only when fuzzy can't decide; costs money, use sparingly)
   if ((extracted_address || supplier_name) && jobs.length) {
     try {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      const jobList = jobs.slice(0, 30).map(j => `ID:${j.id} | ${j.address} | ref:${j.job_reference || ""}`).join("\n");
+      const client = new Anthropic({ apiKey: anthropicApiKey() });
+      const jobList = jobs.slice(0, 30).map(j => `ID:${j.id} | ${j.address} | ref:${j.arch_ref || ""}`).join("\n");
       const msg = await client.messages.create({
         model: MODEL,
         max_tokens: 256,
@@ -133,7 +161,7 @@ If no reasonable match exists, return job_id: null.`
         const parsed = JSON.parse(m[0]);
         if (parsed.job_id && parsed.confidence >= 65) {
           const found = jobs.find(j => j.id === parsed.job_id);
-          if (found) return { job_id: found.id, method: "ai", confidence: parsed.confidence };
+          if (found) return { job_id: found.id, match_method: "ai", match_confidence: parsed.confidence };
         }
       }
     } catch {
@@ -141,7 +169,7 @@ If no reasonable match exists, return job_id: null.`
     }
   }
 
-  return { job_id: null, method: null, confidence: 0 };
+  return { job_id: null, match_method: null, match_confidence: 0 };
 }
 
 // HEIC is converted to JPEG client-side before upload (browser canvas API on Safari/iOS).
@@ -251,14 +279,14 @@ const EXTRACT_PROMPT = `Extract structured data from this invoice or receipt. Re
   "gst_amount": number or null,
   "amount_total": number or null,
   "payment_terms": "e.g. 30 days, COD, or null",
-  "extracted_address": "project/site address in document else null",
+  "extracted_address": "the DELIVERY or SITE address where materials/services were delivered — look for fields labelled 'Deliver To', 'Site', 'Job Address', 'Ship To', 'Delivery Address'. This is NOT the supplier's own address. Return null if no delivery address found.",
   "extracted_job_ref": "job number or reference code else null",
   "extracted_po_number": "PO or purchase order number else null",
   "description": "one sentence: what was invoiced"
 }`;
 
 async function claudeExtract(base64, mime, model) {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({ apiKey: anthropicApiKey() });
   const isImage = mime?.startsWith("image/");
   const contentBlock = isImage
     ? { type: "image", source: { type: "base64", media_type: mime, data: base64 } }
@@ -366,7 +394,7 @@ export function registerFinanceRoutes(app) {
 
     // Load context for matching
     const [jobsRes, subsRes] = await Promise.all([
-      sb.from("jobs").select("id, address, job_reference").not("address", "is", null),
+      sb.from("jobs").select("id, address, arch_ref").not("address", "is", null),
       sb.from("subcontractors").select("id, business_name, default_job_id")
     ]);
     const jobs = jobsRes.data || [];
@@ -408,7 +436,7 @@ export function registerFinanceRoutes(app) {
 
     // Auto-approve if below threshold and match is exact
     const total = extracted.amount_total || 0;
-    const autoApprove = AUTO_APPROVE_THRESHOLD > 0 && total <= AUTO_APPROVE_THRESHOLD && match.confidence === 100;
+    const autoApprove = AUTO_APPROVE_THRESHOLD > 0 && total <= AUTO_APPROVE_THRESHOLD && match.match_confidence === 100;
     const status = match.job_id
       ? (autoApprove ? "approved" : "pending_approval")
       : "unmatched";
@@ -418,8 +446,8 @@ export function registerFinanceRoutes(app) {
       original_filename: filename,
       dropbox_path,
       job_id: match.job_id,
-      match_method: match.method,
-      match_confidence: match.confidence,
+      match_method: match.match_method,
+      match_confidence: match.match_confidence,
       status,
       is_duplicate,
       duplicate_of,
@@ -523,25 +551,38 @@ export function registerFinanceRoutes(app) {
     let newDropboxPath = doc.dropbox_path;
     let newStatus = "approved";
 
-    // Fetch job address for Dropbox filing
-    let jobAddress = null;
+    // Fetch job for Dropbox filing
+    let jobAddress = null, isGeneralJob = false;
     if (doc.job_id) {
       const { data: job } = await sb.from("jobs").select("address").eq("id", doc.job_id).single();
       jobAddress = job?.address || null;
+      isGeneralJob = jobAddress?.toLowerCase() === "blue leaf building";
     }
 
-    // Move to correct job folder on Dropbox
+    // AU financial year: July 1 – June 30. Determine correct receipts folder.
+    function auFinancialYear() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth() + 1; // 1-based
+      return m >= 7 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+    }
+
+    // Move to correct Dropbox folder on approval
     if (doc.dropbox_path && jobAddress && dropboxConfigured()) {
       try {
         const token = await getDropboxAccessToken();
-        const jobAddr = jobAddress;
-        const invoiceFolder = `${sharedJobRootPath(jobAddr)}/INTERNAL/INVOICES`;
         const fname = doc.dropbox_path.split("/").pop();
-        newDropboxPath = await moveDropboxFile(token, doc.dropbox_path, `${invoiceFolder}/${fname}`);
+        let targetFolder;
+        if (isGeneralJob) {
+          // General business receipts → /BLUE LEAF BUILDING/RECEIPTS/YYYY-YYYY
+          targetFolder = `/BLUE LEAF BUILDING/RECEIPTS/${auFinancialYear()}`;
+        } else {
+          targetFolder = `${sharedJobRootPath(jobAddress)}/INTERNAL/INVOICES`;
+        }
+        newDropboxPath = await moveDropboxFile(token, doc.dropbox_path, `${targetFolder}/${fname}`);
         newStatus = "filed";
       } catch (e) {
         console.error("[finance] Dropbox move error", e?.message);
-        // Approval still succeeds, just flag filing failed
       }
     }
 
@@ -574,11 +615,67 @@ export function registerFinanceRoutes(app) {
   app.get("/api/finance/jobs", async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("jobs")
-      .select("id, address, job_reference, status")
+      .select("id, address, arch_ref, status, contract_value, estimated_total_cost, progress_billed")
       .not("address", "is", null)
       .order("created_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, jobs: data || [] });
+  });
+
+  // ── Update job WIP fields ─────────────────────────────────────────────────
+  app.patch("/api/finance/jobs/:id", async (req, res) => {
+    const sb = getServiceSupabase();
+    const allowed = ["contract_value", "estimated_total_cost", "progress_billed"];
+    const updates = {};
+    for (const k of allowed) {
+      if (k in req.body) updates[k] = req.body[k] === "" ? null : Number(req.body[k]) || null;
+    }
+    if (!Object.keys(updates).length) return res.json({ ok: true });
+    const { data, error } = await sb.from("jobs").update(updates).eq("id", req.params.id).select(
+      "id, address, arch_ref, status, contract_value, estimated_total_cost, progress_billed"
+    ).single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, job: data });
+  });
+
+  // ── WIPAA calculation for a job ───────────────────────────────────────────
+  // cost_to_date = sum of approved/filed invoices; no Xero needed
+  app.get("/api/finance/jobs/:id/wipaa", async (req, res) => {
+    const sb = getServiceSupabase();
+    const [jobRes, docsRes] = await Promise.all([
+      sb.from("jobs").select("id, address, arch_ref, contract_value, estimated_total_cost, progress_billed").eq("id", req.params.id).single(),
+      sb.from("financial_documents").select("amount_ex_gst, amount_total, status").eq("job_id", req.params.id).in("status", ["approved", "filed", "xero_synced"]),
+    ]);
+    if (jobRes.error) return res.status(500).json({ ok: false, error: jobRes.error.message });
+    const job = jobRes.data;
+    const cost_to_date = (docsRes.data || []).reduce((s, d) => s + Number(d.amount_ex_gst || d.amount_total || 0), 0);
+    const invoice_count = (docsRes.data || []).length;
+
+    const estimated_total_cost = Number(job.estimated_total_cost) || null;
+    const contract_value = Number(job.contract_value) || null;
+    const progress_billed = Number(job.progress_billed) || 0;
+
+    let pct_complete = null, earned_revenue = null, wipaa = null;
+    if (estimated_total_cost && estimated_total_cost > 0 && contract_value) {
+      pct_complete = Math.min(cost_to_date / estimated_total_cost, 1);
+      earned_revenue = pct_complete * contract_value;
+      wipaa = earned_revenue - progress_billed;
+    }
+
+    res.json({
+      ok: true,
+      job,
+      wipaa: {
+        cost_to_date,
+        invoice_count,
+        estimated_total_cost,
+        contract_value,
+        progress_billed,
+        pct_complete,
+        earned_revenue,
+        wipaa,
+      }
+    });
   });
 
   // ── Xero status (Phase 2 stub) ────────────────────────────────────────────
@@ -587,4 +684,205 @@ export function registerFinanceRoutes(app) {
     const { data } = await sb.from("xero_credentials").select("tenant_name, expires_at").limit(1).single();
     res.json({ ok: true, connected: !!data, tenant: data?.tenant_name || null });
   });
+
+  // ── Invoice email poller ──────────────────────────────────────────────────
+  const INVOICE_SUBJECT_RE = /invoice|receipt|statement|remittance|bill|tax\s+invoice/i;
+  const INVOICE_ATTACHMENT_MIMES = new Set([
+    "application/pdf",
+    "image/jpeg", "image/jpg", "image/png", "image/heic", "image/webp", "image/gif",
+  ]);
+
+  function invoiceImapConfigs() {
+    const host = process.env.IMAP_HOST?.trim();
+    if (!host) return [];
+    const port = Number(process.env.IMAP_PORT) || 993;
+    const tls = process.env.IMAP_SECURE !== "false";
+    const base = { host, port, secure: tls, logger: false };
+    const candidates = [
+      { ...base, auth: { user: process.env.IMAP_USER?.trim(), pass: process.env.IMAP_PASS?.trim() }, cursorKey: "imap_invoice_last_uid" },
+      { ...base, auth: { user: process.env.IMAP2_USER?.trim(), pass: process.env.IMAP2_PASS?.trim() }, cursorKey: "imap_invoice_last_uid_2" },
+    ];
+    return candidates.filter(c => c.auth.user && c.auth.pass);
+  }
+
+  async function loadInvoiceUid(sb, cursorKey) {
+    const { data } = await sb.from("user_settings").select("value").eq("key", cursorKey).maybeSingle();
+    const n = Number(data?.value);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  }
+
+  async function saveInvoiceUid(sb, cursorKey, uid) {
+    const v = Math.floor(Number(uid));
+    if (!Number.isFinite(v) || v < 0) return;
+    await sb.from("user_settings").upsert(
+      { key: cursorKey, value: String(v), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+  }
+
+  let invoicePollBusy = false;
+  let lastInvoicePollResults = [];
+
+  async function pollOneAccount(cfg, sb, jobs, subcontractors) {
+    const client = new ImapFlow(cfg);
+    let processed = 0, skipped = 0, failed = 0;
+    try {
+      await client.connect();
+      await client.mailboxOpen("INBOX");
+
+      let lastUid = await loadInvoiceUid(sb, cfg.cursorKey);
+      if (lastUid == null) {
+        const uidNext = Number(client.mailbox?.uidNext || 0);
+        await saveInvoiceUid(sb, cfg.cursorKey, uidNext > 0 ? uidNext - 1 : Number(client.mailbox?.exists || 0));
+        await client.logout();
+        return { account: cfg.auth.user, ok: true, initialized: true, at: new Date().toISOString() };
+      }
+
+      const msgs = [];
+      for await (const msg of client.fetch(`${lastUid + 1}:*`, { uid: true, envelope: true, source: true }, { uid: true })) {
+        const parsed = await simpleParser(msg.source);
+        msgs.push({ uid: msg.uid, parsed });
+        if (msgs.length >= 50) break;
+      }
+
+      let highestUid = lastUid;
+      for (const msg of msgs) {
+        highestUid = Math.max(highestUid, Number(msg.uid) || 0);
+        try {
+          const parsed = msg.parsed;
+          const subject = parsed.subject || "";
+          const from = parsed.from?.text || "";
+          const messageId = (parsed.messageId || `imap-inv-uid-${msg.uid}`).trim();
+          const receivedAt = (parsed.date || new Date()).toISOString();
+
+          const attachments = (parsed.attachments || []).filter(a => {
+            const mime = (a.contentType || "").toLowerCase().split(";")[0].trim();
+            const fname = (a.filename || "").toLowerCase();
+            return INVOICE_ATTACHMENT_MIMES.has(mime) ||
+              fname.endsWith(".pdf") || fname.endsWith(".jpg") || fname.endsWith(".jpeg") ||
+              fname.endsWith(".png") || fname.endsWith(".heic");
+          });
+
+          if (!attachments.length && !INVOICE_SUBJECT_RE.test(subject)) { skipped++; continue; }
+          if (!attachments.length) { skipped++; continue; }
+
+          for (const att of attachments) {
+            const mime = att.contentType?.split(";")[0]?.trim() || "application/octet-stream";
+            const filename = att.filename || `attachment-${msg.uid}.pdf`;
+
+            const { data: existing } = await sb.from("financial_documents")
+              .select("id").eq("email_message_id", messageId).eq("original_filename", filename).maybeSingle();
+            if (existing) { skipped++; continue; }
+
+            const base64 = att.content.toString("base64");
+            const extracted = await extractDocument(base64, mime);
+            const match = await matchDocument(extracted, { jobs, subcontractors });
+
+            let is_duplicate = false;
+            if (extracted.invoice_number && extracted.supplier_name) {
+              const { data: dup } = await sb.from("financial_documents")
+                .select("id").ilike("invoice_number", extracted.invoice_number.trim())
+                .ilike("supplier_name", extracted.supplier_name.trim())
+                .maybeSingle();
+              if (dup) is_duplicate = true;
+            }
+
+            const { error: insertErr } = await sb.from("financial_documents").insert({
+              source: "email",
+              original_filename: filename,
+              email_message_id: messageId,
+              email_from: from,
+              email_subject: subject,
+              email_received_at: receivedAt,
+              ...extracted,
+              job_id: match.job_id || null,
+              match_method: match.match_method,
+              match_confidence: match.match_confidence,
+              is_duplicate,
+              status: match.job_id ? "pending_approval" : "unmatched",
+            });
+
+            if (insertErr) {
+              if (insertErr.code === "23505") { skipped++; }
+              else { console.error("[invoice-imap] insert error:", insertErr.message); failed++; }
+            } else {
+              processed++;
+              console.log(`[invoice-imap] stored: ${filename} from ${from} (${match.match_method}) [${cfg.auth.user}]`);
+            }
+          }
+        } catch (e) {
+          console.error("[invoice-imap] msg error uid", msg.uid, e?.message);
+          failed++;
+        }
+      }
+
+      if (highestUid > lastUid) await saveInvoiceUid(sb, cfg.cursorKey, highestUid);
+      await client.logout();
+      return { account: cfg.auth.user, ok: true, processed, skipped, failed, at: new Date().toISOString() };
+    } catch (err) {
+      try { await client.logout(); } catch { /* ignore */ }
+      console.error(`[invoice-imap] poll error [${cfg.auth.user}]:`, err?.message);
+      return { account: cfg.auth.user, ok: false, error: err?.message, at: new Date().toISOString() };
+    }
+  }
+
+  async function pollInvoiceEmails() {
+    if (invoicePollBusy) return { ok: true, skipped: "busy" };
+    const configs = invoiceImapConfigs();
+    if (!configs.length) return { ok: true, skipped: "imap_not_configured" };
+    const sb = getServiceSupabase();
+    if (!sb) return { ok: true, skipped: "supabase_not_configured" };
+
+    invoicePollBusy = true;
+    try {
+      const [jobsRes, subsRes] = await Promise.all([
+        sb.from("jobs").select("id, address, arch_ref").not("address", "is", null),
+        sb.from("subcontractors").select("id, business_name, email").not("business_name", "is", null),
+      ]);
+      const jobs = jobsRes.data || [];
+      const subcontractors = subsRes.data || [];
+
+      const results = [];
+      for (const cfg of configs) {
+        const r = await pollOneAccount(cfg, sb, jobs, subcontractors);
+        results.push(r);
+      }
+      lastInvoicePollResults = results;
+      const totals = results.reduce((a, r) => ({ processed: a.processed + (r.processed || 0), skipped: a.skipped + (r.skipped || 0), failed: a.failed + (r.failed || 0) }), { processed: 0, skipped: 0, failed: 0 });
+      return { ok: true, accounts: results, ...totals, at: new Date().toISOString() };
+    } finally {
+      invoicePollBusy = false;
+    }
+  }
+
+  app.post("/api/finance/imap/poll", async (_req, res) => {
+    try {
+      const out = await pollInvoiceEmails();
+      return res.json(out);
+    } catch (err) {
+      return res.status(502).json({ ok: false, error: err?.message });
+    }
+  });
+
+  app.get("/api/finance/imap/status", (_req, res) => {
+    const cfgs = invoiceImapConfigs();
+    res.json({
+      ok: true,
+      configured: cfgs.length > 0,
+      accounts: cfgs.map(c => c.auth.user),
+      busy: invoicePollBusy,
+      last: lastInvoicePollResults,
+    });
+  });
+
+  // Auto-poll every 15 minutes
+  if (invoiceImapConfigs().length) {
+    console.log("[blue-leaf-api] IMAP_POLL_ENABLED: polling inbox every 15 min.");
+    setTimeout(async () => {
+      try { await pollInvoiceEmails(); } catch { /* ignore */ }
+      setInterval(async () => {
+        try { await pollInvoiceEmails(); } catch { /* ignore */ }
+      }, 15 * 60 * 1000);
+    }, 10_000);
+  }
 }

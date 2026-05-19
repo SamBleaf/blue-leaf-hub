@@ -11,6 +11,27 @@ import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactC
  * @param {import('express').Express} app
  */
 export function registerJobsApiRoutes(app) {
+  // Create a new job (minimal fields, used from Sales Manager lead → job)
+  app.post("/api/jobs", async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+      const { address, client_name, project_type, arch_ref } = req.body || {};
+      if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
+      const { data, error } = await sb.from("jobs").insert({
+        address: address.trim(),
+        client_name: client_name?.trim() || null,
+        project_type: project_type || null,
+        arch_ref: arch_ref?.trim() || null,
+        status: "tendering",
+      }).select().single();
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true, job: data });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.post("/api/jobs/merge-job-data-json", async (req, res) => {
     try {
       if (!dropboxConfigured()) {

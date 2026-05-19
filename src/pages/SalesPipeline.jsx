@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
+import SalesScorecard from "../components/sales/SalesScorecard.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700",    dot: "bg-slate-400" },
@@ -83,6 +84,7 @@ function LeadCard({ lead, onMoveStage, onQuickNote, onClick }) {
   return (
     <div
       className="group relative rounded-lg border border-hairline bg-surface p-3 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+      style={lead.lead_type === 'architect_tender' ? { borderTopColor: '#0d9488', borderTopWidth: 3 } : undefined}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => { setHovering(false); setMoveOpen(false); }}
       onClick={onClick}
@@ -101,6 +103,11 @@ function LeadCard({ lead, onMoveStage, onQuickNote, onClick }) {
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1 items-center">
+        {lead.lead_type === 'architect_tender' && (
+          <span className="text-xs font-semibold rounded px-1.5 py-0.5" style={{ background: '#0d948815', color: '#0d9488', border: '1px solid #0d948835' }}>
+            Arch Tender
+          </span>
+        )}
         {lead.project_type && (
           <span className="text-xs bg-page border border-hairline rounded px-1.5 py-0.5 text-muted">
             {projectTypeLabel(lead.project_type)}
@@ -257,6 +264,103 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
             <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
             <button type="submit" disabled={busy} className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
               {busy ? "Adding…" : "Add Lead"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
+  const EMPTY = { first_name: "", last_name: "", site_address: "", architect_name: "", project_type: "", estimated_value: "" };
+  const [form, setForm] = useState(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.first_name.trim()) { setErr("Client first name is required."); return; }
+    if (!form.site_address.trim()) { setErr("Site address is required."); return; }
+    setBusy(true); setErr("");
+    try {
+      const body = {
+        ...form,
+        lead_type: "architect_tender",
+        stage: "accepted",
+        lead_source: "referral",
+      };
+      if (body.estimated_value) body.estimated_value = parseFloat(body.estimated_value) || null;
+      else delete body.estimated_value;
+      const r = await fetch("/api/sales/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Failed to create lead");
+      setForm(EMPTY);
+      onCreated(j.lead);
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="w-full max-w-md bg-surface shadow-2xl flex flex-col overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Architect Tender</h2>
+            <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — skips qualifying & fee proposal</p>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-ink text-2xl leading-none">×</button>
+        </div>
+        <form onSubmit={submit} className="flex-1 px-6 py-5 space-y-4">
+          <div className="rounded-lg border border-primary/20 bg-primary/[0.03] px-4 py-3 text-xs text-primary">
+            Use this for architect-issued tenders where the client has been pre-qualified by the architect.
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1">Client first name *</label>
+              <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.first_name} onChange={e => set("first_name", e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1">Client last name</label>
+              <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.last_name} onChange={e => set("last_name", e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Site address *</label>
+            <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.site_address} onChange={e => set("site_address", e.target.value)} placeholder="e.g. 25 Nilpinna Street, Burnside SA" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Architect / practice name</label>
+            <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.architect_name} onChange={e => set("architect_name", e.target.value)} placeholder="e.g. Studio X Architects" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Project type</label>
+            <select className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.project_type} onChange={e => set("project_type", e.target.value)}>
+              <option value="">Select…</option>
+              {PROJECT_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Estimated value ($)</label>
+            <input type="number" min="0" step="1000" className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page focus-ring" value={form.estimated_value} onChange={e => set("estimated_value", e.target.value)} placeholder="e.g. 1200000" />
+          </div>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
+            <button type="submit" disabled={busy} className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {busy ? "Creating…" : "Create Architect Tender"}
             </button>
           </div>
         </form>
@@ -459,9 +563,10 @@ export default function SalesPipeline() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [archTenderOpen, setArchTenderOpen] = useState(false);
   const [quickNoteLead, setQuickNoteLead] = useState(null);
   const [nurtureExpanded, setNurtureExpanded] = useState(false);
-  const [view, setView] = useState("kanban");
+  const [view, setView] = useState("kanban"); // "kanban" | "list" | "scorecard"
 
   useEffect(() => {
     setScreenContext?.({ page: "sales_pipeline", description: "Sales pipeline board — all active leads by stage" });
@@ -517,7 +622,6 @@ export default function SalesPipeline() {
               title="Kanban board"
               className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === "kanban" ? "bg-primary text-white" : "text-muted hover:text-ink hover:bg-surface"}`}
             >
-              {/* grid icon */}
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
                 <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
@@ -528,19 +632,36 @@ export default function SalesPipeline() {
               title="List view"
               className={`px-3 py-1.5 text-xs font-medium border-l border-hairline transition-colors ${view === "list" ? "bg-primary text-white" : "text-muted hover:text-ink hover:bg-surface"}`}
             >
-              {/* list icon */}
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="1" y="2" width="14" height="2" rx="1"/><rect x="1" y="7" width="14" height="2" rx="1"/>
                 <rect x="1" y="12" width="14" height="2" rx="1"/>
               </svg>
             </button>
+            <button
+              onClick={() => setView("scorecard")}
+              title="APB Scorecard"
+              className={`px-3 py-1.5 text-xs font-medium border-l border-hairline transition-colors ${view === "scorecard" ? "bg-primary text-white" : "text-muted hover:text-ink hover:bg-surface"}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="1" y="9" width="3" height="6" rx="1"/><rect x="6" y="6" width="3" height="9" rx="1"/>
+                <rect x="11" y="2" width="3" height="13" rx="1"/>
+              </svg>
+            </button>
           </div>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 shadow-sm"
-          >
-            <span className="text-lg leading-none">+</span> Add Lead
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setArchTenderOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-primary text-primary px-4 py-2 text-sm font-semibold hover:bg-primary hover:text-white transition-colors shadow-sm"
+            >
+              <span className="text-lg leading-none">+</span> Architect Tender
+            </button>
+            <button
+              onClick={() => setAddOpen(true)}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 shadow-sm"
+            >
+              <span className="text-lg leading-none">+</span> Add Lead
+            </button>
+          </div>
         </div>
       </div>
 
@@ -557,6 +678,12 @@ export default function SalesPipeline() {
               onNav={id => nav(`/sales/${id}`)}
             />
           )}
+        </div>
+      )}
+
+      {view === "scorecard" && (
+        <div className="flex-1 overflow-y-auto">
+          <SalesScorecard />
         </div>
       )}
 
@@ -618,6 +745,7 @@ export default function SalesPipeline() {
       </div>}
 
       <AddLeadDrawer open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); load(); }} />
+      <AddArchitectTenderDrawer open={archTenderOpen} onClose={() => setArchTenderOpen(false)} onCreated={() => { setArchTenderOpen(false); load(); }} />
       <QuickNoteModal lead={quickNoteLead} onClose={() => setQuickNoteLead(null)} onSaved={() => { setQuickNoteLead(null); load(); }} />
     </div>
   );

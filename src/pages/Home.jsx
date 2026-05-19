@@ -20,9 +20,10 @@ const SECTIONS = [
   {
     id: "finance_manager",
     title: "Finance Manager",
-    description: "Job costing, invoices, cashflow, and margin reporting — coming soon.",
-    href: null,
-    comingSoon: true
+    description: "Invoice inbox, approval queue, WIPAA calculator, and job financials.",
+    href: "/finance",
+    active: true,
+    modules: ["Financial Inbox", "Approval Queue", "WIPAA Calculator", "Job Financials"]
   },
   {
     id: "sales_marketing",
@@ -48,10 +49,10 @@ export default function Home() {
         <h1 className="text-3xl font-semibold tracking-tight">Blue Leaf Hub</h1>
         <p className="mt-3 max-w-2xl text-sm text-white/85">
           Central operating system organised by department.{" "}
-          <span className="font-semibold text-accent">Tender Manager</span> and{" "}
-          <span className="font-semibold text-accent">Operations Manager</span> are live today;{" "}
-          <span className="whitespace-nowrap">Finance Manager</span>,{" "}
-          <span className="whitespace-nowrap">Sales &amp; Marketing</span>, and{" "}
+          <span className="font-semibold text-accent">Tender Manager</span>,{" "}
+          <span className="font-semibold text-accent">Operations Manager</span>, and{" "}
+          <span className="font-semibold text-accent">Finance Manager</span> are live today;{" "}
+          <span className="whitespace-nowrap">Sales Manager</span> and{" "}
           <span className="whitespace-nowrap">Client Portal</span> are on the roadmap.
         </p>
       </div>

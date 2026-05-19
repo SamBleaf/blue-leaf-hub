@@ -162,7 +162,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
             >
               <option value="">— No job matched —</option>
               {jobs.map(j => (
-                <option key={j.id} value={j.id}>{j.address}{j.job_reference ? ` (${j.job_reference})` : ""}</option>
+                <option key={j.id} value={j.id}>{j.address}{j.arch_ref ? ` (${j.arch_ref})` : ""}</option>
               ))}
             </select>
           </section>
@@ -341,20 +341,35 @@ export default function FinancialInbox({ onUploaded }) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [imapStatus, setImapStatus] = useState(null);
+  const [imapPolling, setImapPolling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dr, jr] = await Promise.all([
+      const [dr, jr, ir] = await Promise.all([
         fetch(`/api/finance/documents?status=${filter}&limit=100`).then(r => r.json()),
-        fetch("/api/finance/jobs").then(r => r.json())
+        fetch("/api/finance/jobs").then(r => r.json()),
+        fetch("/api/finance/imap/status").then(r => r.json()).catch(() => null),
       ]);
       if (dr.ok) setDocuments(dr.documents);
       if (jr.ok) setJobs(jr.jobs);
+      if (ir?.ok) setImapStatus(ir);
     } finally { setLoading(false); }
   }, [filter]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function triggerImapPoll() {
+    setImapPolling(true);
+    try {
+      const r = await fetch("/api/finance/imap/poll", { method: "POST" }).then(r => r.json());
+      setImapStatus(prev => ({ ...prev, last: r, busy: false }));
+      if (r.processed > 0) load();
+    } finally {
+      setImapPolling(false);
+    }
+  }
 
   function handleUpdate(updated) {
     setDocuments(prev => prev.map(d => d.id === updated.id ? { ...d, ...updated } : d));
@@ -370,6 +385,44 @@ export default function FinancialInbox({ onUploaded }) {
   return (
     <div className="space-y-4">
       <UploadZone onUploaded={handleUploaded} />
+
+      {/* Email inbox poller status */}
+      {imapStatus && (
+        <div className="flex items-center justify-between rounded-lg border border-hairline bg-page px-4 py-2.5 text-xs gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-muted flex-wrap">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${imapStatus.configured ? "bg-green-400" : "bg-slate-300"}`} />
+            {imapStatus.configured ? (
+              <span>
+                {(imapStatus.accounts || []).join(", ")} connected
+              </span>
+            ) : (
+              <span>Email inbox not configured</span>
+            )}
+            {(() => {
+              const lastResults = Array.isArray(imapStatus.last) ? imapStatus.last : (imapStatus.last ? [imapStatus.last] : []);
+              const latest = lastResults.filter(r => r.at && !r.initialized).sort((a, b) => b.at.localeCompare(a.at))[0];
+              if (!latest) return null;
+              const totalNew = lastResults.reduce((s, r) => s + (r.processed || 0), 0);
+              return (
+                <span className="text-muted">
+                  · last check {new Date(latest.at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                  {totalNew > 0 && <span className="text-accent font-semibold"> · {totalNew} new</span>}
+                </span>
+              );
+            })()}
+          </div>
+          {imapStatus.configured && (
+            <button
+              type="button"
+              onClick={triggerImapPoll}
+              disabled={imapPolling || imapStatus.busy}
+              className="rounded border border-hairline bg-surface px-2.5 py-1 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40 transition"
+            >
+              {imapPolling ? "Checking…" : "Check now"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Status filter */}
       <div className="flex flex-wrap gap-2">
@@ -406,9 +459,13 @@ export default function FinancialInbox({ onUploaded }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-semibold text-ink truncate">{doc.supplier_name || doc.original_filename}</span>
                   {doc.is_duplicate && <span className="text-[10px] font-bold text-warning">DUPE?</span>}
+                  {doc.source === "email" && (
+                    <span className="text-[10px] font-semibold rounded bg-blue-50 border border-blue-200 text-blue-700 px-1.5 py-0.5">Email</span>
+                  )}
                 </div>
                 <div className="mt-0.5 text-xs text-muted">
                   {jobs.find(j => j.id === doc.job_id)?.address || "No job matched"} · {fmtDate(doc.invoice_date)}
+                  {doc.email_from && <span className="ml-1">· {doc.email_from}</span>}
                 </div>
                 {doc.description && <div className="mt-0.5 text-xs text-muted truncate">{doc.description}</div>}
               </div>

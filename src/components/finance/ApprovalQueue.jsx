@@ -108,7 +108,7 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
           {(() => { const job = jobs.find(j => j.id === doc.job_id); return job ? (
             <div className="space-y-2">
               <p className="text-base font-bold text-primary leading-tight">{job.address}</p>
-              {job.job_reference && <p className="text-xs text-muted">Ref: {job.job_reference}</p>}
+              {job.arch_ref && <p className="text-xs text-muted">Ref: {job.arch_ref}</p>}
               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${matchClass}`}>
                 {METHOD_LABELS[doc.match_method] || doc.match_method}
                 {doc.match_confidence < 100 && ` · ${doc.match_confidence}%`}
@@ -139,7 +139,7 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
               >
                 <option value="">— Select job —</option>
                 {jobs.map(j => (
-                  <option key={j.id} value={j.id}>{j.address}{j.job_reference ? ` (${j.job_reference})` : ""}</option>
+                  <option key={j.id} value={j.id}>{j.address}{j.arch_ref ? ` (${j.arch_ref})` : ""}</option>
                 ))}
               </select>
               <button

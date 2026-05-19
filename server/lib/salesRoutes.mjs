@@ -1,6 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
+// Blueprint-agent knowledge directory (sibling project)
+const KNOWLEDGE_DIR = join(__dirname, "../../../blueprint-agent/src/blueprint/knowledge");
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -93,7 +101,147 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
   }
 }
 
+// ── APB stage probability weights ────────────────────────────────────────────
+const STAGE_PROB = {
+  enquiry: 0.05, qualify: 0.10, discovery: 0.20,
+  winning_offer: 0.40, fee_proposal: 0.60,
+  accepted: 0.80, tender: 0.90, won: 1.00
+};
+
+// ── APB benchmarks (from Pricing 4 Profit + presales knowledge) ──────────────
+const APB_BENCHMARKS = {
+  close_rate_min: 0.25,
+  close_rate_max: 0.33,
+  min_margin_pct: 33,       // minimum gross margin % (NOT markup)
+  target_margin_pct: 40,    // APB ideal margin
+  fp_hit_rate_min: 0.33,    // fee proposals → won
+};
+
 export function registerSalesRoutes(app) {
+
+  // ── Sales Scorecard ─────────────────────────────────────────────────────────
+  app.get("/api/sales/scorecard", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+
+    const { data: leads, error } = await sb
+      .from("leads")
+      .select("id,stage,estimated_value,target_gp_pct,lead_source,won_at,created_at,stage_entered_at")
+      .eq("archived", false);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const now = new Date();
+    const cutoff12m = new Date(now);
+    cutoff12m.setFullYear(cutoff12m.getFullYear() - 1);
+
+    // Per-stage breakdown (excludes lost)
+    const stageMap = {};
+    for (const l of leads) {
+      if (l.stage === "lost") continue;
+      if (!stageMap[l.stage]) stageMap[l.stage] = { count: 0, value: 0, weighted: 0 };
+      const val = Number(l.estimated_value) || 0;
+      const prob = STAGE_PROB[l.stage] || 0;
+      stageMap[l.stage].count++;
+      stageMap[l.stage].value += val;
+      stageMap[l.stage].weighted += val * prob;
+    }
+
+    const stageOrder = Object.keys(STAGE_PROB);
+    const pipeline = stageOrder
+      .filter(s => s !== "won" && stageMap[s])
+      .map(s => ({ stage: s, ...stageMap[s] }));
+
+    const total_pipeline_value = pipeline.reduce((s, p) => s + p.value, 0);
+    const weighted_pipeline_value = pipeline.reduce((s, p) => s + p.weighted, 0);
+    const active_lead_count = pipeline.reduce((s, p) => s + p.count, 0);
+
+    // Won in last 12m
+    const wonLeads = leads.filter(l => l.stage === "won" && l.won_at && new Date(l.won_at) >= cutoff12m);
+    const wonFallback = leads.filter(l => l.stage === "won" && (!l.won_at) && new Date(l.stage_entered_at) >= cutoff12m);
+    const allWon12m = wonLeads.length ? wonLeads : wonFallback;
+    const won_count = allWon12m.length;
+    const won_total = allWon12m.reduce((s, l) => s + (Number(l.estimated_value) || 0), 0);
+    const avg_value = won_count ? Math.round(won_total / won_count) : 0;
+
+    // Enquiries in last 12m (denominator for close rate)
+    const enquiries_12m = leads.filter(l => new Date(l.created_at) >= cutoff12m).length;
+    const close_rate = enquiries_12m > 0 ? won_count / enquiries_12m : 0;
+
+    // Fee proposals → won (last 12m)
+    const fp_stages = new Set(["fee_proposal", "accepted", "tender", "won"]);
+    const fp_12m = leads.filter(l => fp_stages.has(l.stage) && new Date(l.stage_entered_at) >= cutoff12m).length;
+    const fp_hit_rate = fp_12m > 0 ? won_count / fp_12m : 0;
+
+    // By lead source (active pipeline)
+    const sourceMap = {};
+    for (const l of leads) {
+      if (l.stage === "lost") continue;
+      const src = l.lead_source || "unknown";
+      if (!sourceMap[src]) sourceMap[src] = { count: 0, value: 0 };
+      sourceMap[src].count++;
+      sourceMap[src].value += Number(l.estimated_value) || 0;
+    }
+    const by_source = Object.entries(sourceMap)
+      .map(([source, d]) => ({ source, ...d }))
+      .sort((a, b) => b.value - a.value);
+
+    // Margin health across leads with target_gp_pct set
+    const pricedLeads = leads.filter(l => l.target_gp_pct != null && !["lost", "won"].includes(l.stage));
+    const below_min_margin = pricedLeads.filter(l => l.target_gp_pct < APB_BENCHMARKS.min_margin_pct).length;
+
+    res.json({
+      ok: true,
+      pipeline,
+      total_pipeline_value,
+      weighted_pipeline_value,
+      active_lead_count,
+      won_last_12m: { count: won_count, total_value: won_total, avg_value },
+      enquiries_last_12m: enquiries_12m,
+      close_rate,
+      fp_last_12m: fp_12m,
+      fp_hit_rate,
+      by_source,
+      margin_health: { priced_count: pricedLeads.length, below_min_margin },
+      apb_benchmarks: APB_BENCHMARKS,
+    });
+  });
+
+  // ── APB knowledge updates (surfaces new content from blueprint-agent) ────────
+  app.get("/api/sales/knowledge-updates", (req, res) => {
+    if (!existsSync(KNOWLEDGE_DIR)) return res.json({ ok: true, updates: [] });
+
+    const cutoffDays = Number(req.query.days || 14);
+    const cutoff = Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
+    const updates = [];
+
+    for (const file of readdirSync(KNOWLEDGE_DIR).filter(f => f.endsWith(".md"))) {
+      const fpath = join(KNOWLEDGE_DIR, file);
+      const stat = statSync(fpath);
+      if (stat.mtimeMs < cutoff) continue;
+
+      const content = readFileSync(fpath, "utf8");
+      // Extract each H2 block as a course entry
+      const sections = content.split(/^## /m).slice(1);
+      const courses = sections.map(s => {
+        const firstLine = s.split("\n")[0].trim();
+        // Title | Category: X | Level: Y | Course: Z
+        const catM = firstLine.match(/Category:\s*([^|]+)/i);
+        const courseM = firstLine.match(/Course:\s*([^|]+)/i);
+        const title = firstLine.split("|")[0].trim().split(" — ")[0].trim();
+        return {
+          title,
+          category: catM?.[1]?.trim() || "general",
+          course: courseM?.[1]?.trim() || title,
+        };
+      }).filter(c => c.title);
+
+      updates.push({ file, modified: stat.mtime, courses });
+    }
+
+    updates.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+    res.json({ ok: true, updates });
+  });
 
   app.get("/api/sales/leads", async (req, res) => {
     const sb = getServiceSupabase();

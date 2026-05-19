@@ -1630,6 +1630,74 @@ ${transcript}`;
     }
   });
 
+  // ─── Trade conflict detection ─────────────────────────────────────────────
+
+  app.get("/api/operations/trade-conflicts", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    try {
+      // Fetch all incomplete tasks with a trade assigned and valid date range
+      const { data: tasks, error } = await sb
+        .from("schedule_tasks")
+        .select("id, project_id, name, assignee_trade, trade, start_date, end_date, percent_complete, projects(id, address, status)")
+        .not("start_date", "is", null)
+        .not("end_date", "is", null)
+        .lt("percent_complete", 100);
+      if (error) throw error;
+
+      // Filter to active projects only; use assignee_trade ?? trade
+      const activeTasks = (tasks || []).filter(
+        t => t.projects?.status === "active" && (t.assignee_trade || t.trade)
+      ).map(t => ({
+        id: t.id,
+        project_id: t.project_id,
+        address: t.projects?.address || "Unknown",
+        tradeName: (t.assignee_trade || t.trade).trim(),
+        taskName: t.name,
+        start: t.start_date,
+        end: t.end_date,
+      }));
+
+      // Group by trade name
+      const byTrade = {};
+      for (const t of activeTasks) {
+        if (!byTrade[t.tradeName]) byTrade[t.tradeName] = [];
+        byTrade[t.tradeName].push(t);
+      }
+
+      // Find overlapping date ranges across different projects
+      const conflicts = [];
+      for (const [tradeName, tradeTasks] of Object.entries(byTrade)) {
+        const conflictingProjects = new Map(); // projectId → {address, taskName, startDate, endDate}
+
+        for (let i = 0; i < tradeTasks.length; i++) {
+          for (let j = i + 1; j < tradeTasks.length; j++) {
+            const a = tradeTasks[i];
+            const b = tradeTasks[j];
+            if (a.project_id === b.project_id) continue; // same project = fine
+            // Date range overlap: a.start <= b.end AND b.start <= a.end
+            if (a.start <= b.end && b.start <= a.end) {
+              if (!conflictingProjects.has(a.project_id)) {
+                conflictingProjects.set(a.project_id, { id: a.project_id, address: a.address, taskName: a.taskName, startDate: a.start, endDate: a.end });
+              }
+              if (!conflictingProjects.has(b.project_id)) {
+                conflictingProjects.set(b.project_id, { id: b.project_id, address: b.address, taskName: b.taskName, startDate: b.start, endDate: b.end });
+              }
+            }
+          }
+        }
+
+        if (conflictingProjects.size >= 2) {
+          conflicts.push({ trade: tradeName, projects: [...conflictingProjects.values()] });
+        }
+      }
+
+      return res.json({ ok: true, conflicts });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   // ─── Baseline lock / reset ────────────────────────────────────────────────
 
   app.post("/api/schedule/:projectId/baseline/lock", async (req, res) => {

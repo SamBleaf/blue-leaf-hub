@@ -44,7 +44,7 @@ const GATE_REQUIREMENTS = {
     { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date },
   ],
   fee_proposal:  [{ field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null }],
-  accepted:      [{ field: "fee_proposal_id",     label: "Fee proposal linked",      check: l => !!l.fee_proposal_id }],
+  accepted:      [],
   tender:        [{ field: "job_id",              label: "Job created from this lead",check: l => !!l.job_id }],
   won:           [],
 };
@@ -539,6 +539,96 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
   );
 }
 
+// APB Pricing 4 Profit: margin % not markup.
+// 33% margin on $100k cost = $149k sell price (cost ÷ (1 − margin))
+function marginToMarkup(marginPct) {
+  if (!marginPct || marginPct >= 100) return null;
+  return (marginPct / (100 - marginPct)) * 100;
+}
+
+
+function MarginPanel({ lead, onSave }) {
+  const gp = lead.target_gp_pct;
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(gp != null ? String(gp) : "");
+
+  function handleSave() {
+    const n = parseFloat(val);
+    onSave(isNaN(n) ? null : n);
+    setEditing(false);
+  }
+
+  const marginColor = gp == null ? "text-muted" : gp >= 40 ? "text-green-600" : gp >= 33 ? "text-amber-600" : "text-red-500";
+  const markup = gp != null ? marginToMarkup(gp) : null;
+  const estimatedCost = lead.estimated_value && gp != null ? lead.estimated_value * (1 - gp / 100) : null;
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Target Margin</h3>
+        {gp != null && (
+          <span className={`text-sm font-bold ${marginColor}`}>{gp}%</span>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            type="number"
+            min="0"
+            max="99"
+            step="0.5"
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }}
+            className="flex-1 rounded-lg border border-hairline px-3 py-1.5 text-sm bg-page text-ink focus-ring"
+            placeholder="e.g. 40"
+          />
+          <span className="text-sm text-muted">%</span>
+          <button onClick={handleSave} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white">Set</button>
+          <button onClick={() => setEditing(false)} className="text-xs text-muted hover:text-ink">✕</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => { setVal(gp != null ? String(gp) : ""); setEditing(true); }}
+          className="w-full text-left text-sm text-muted hover:text-ink"
+        >
+          {gp == null ? "Set target margin…" : `${gp}% gross margin`}
+        </button>
+      )}
+
+      {gp != null && (
+        <div className="mt-3 space-y-1 text-xs">
+          <div className="flex justify-between text-muted">
+            <span>Equivalent markup</span>
+            <span className="font-medium text-ink">{markup != null ? `${markup.toFixed(1)}%` : "—"}</span>
+          </div>
+          {lead.estimated_value && (
+            <div className="flex justify-between text-muted">
+              <span>Implied cost (at {gp}% margin)</span>
+              <span className="font-medium text-ink">
+                {estimatedCost != null ? `$${Math.round(estimatedCost).toLocaleString()}` : "—"}
+              </span>
+            </div>
+          )}
+          <div className={`mt-2 rounded-lg px-3 py-2 text-xs font-medium ${gp >= 40 ? "bg-green-50 text-green-700" : gp >= 33 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-600"}`}>
+            {gp >= 40
+              ? `✓ At or above APB target (40%)`
+              : gp >= 33
+              ? `⚠ Above APB minimum (33%) but below 40% target`
+              : `✗ Below APB minimum margin (33%) — review pricing`}
+          </div>
+        </div>
+      )}
+
+      {gp == null && (
+        <p className="mt-2 text-xs text-muted">APB minimum 33%, target 40%. Always use margin %, not markup.</p>
+      )}
+    </div>
+  );
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
@@ -642,6 +732,31 @@ export default function LeadDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id, lead?.stage]);
 
+  const [creatingJob, setCreatingJob] = useState(false);
+  async function createJobFromLead() {
+    if (creatingJob || lead.job_id) return;
+    setCreatingJob(true);
+    try {
+      const r = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: lead.site_address || `${lead.first_name} ${lead.last_name} — ${lead.suburb || ""}`.trim(),
+          client_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+          project_type: lead.project_type || null,
+        }),
+      }).then(r => r.json());
+      if (r.ok) {
+        await patch({ job_id: r.job.id });
+        await load();
+      } else {
+        alert("Failed to create job: " + r.error);
+      }
+    } finally {
+      setCreatingJob(false);
+    }
+  }
+
   async function advanceStage() {
     const next = nextStage(lead.stage);
     if (!next) return;
@@ -662,8 +777,10 @@ export default function LeadDetail() {
   const gateChecks = next ? (GATE_REQUIREMENTS[next] || []) : [];
   const gatePass = gateChecks.every(g => g.check(lead));
   const nextLabel = STAGES.find(s => s.id === next)?.label;
-  const showDiscovery = ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
-  const showWinningOffer = ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const isArchTender = lead.lead_type === "architect_tender";
+  const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const showWinningOffer = !isArchTender && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const showPreTender = ["winning_offer","accepted","tender","won"].includes(lead.stage);
 
   return (
     <div>
@@ -705,7 +822,9 @@ export default function LeadDetail() {
               <InlineField label="Desired start" value={lead.desired_start_date || ""} type="date" onSave={v => patch({ desired_start_date: v })} />
             </div>
 
-            <div className="rounded-card border border-hairline bg-surface p-4">
+            <MarginPanel lead={lead} onSave={v => patch({ target_gp_pct: v })} />
+
+            {!isArchTender && <div className="rounded-card border border-hairline bg-surface p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Qualifying Scorecard</h3>
                 <span className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
@@ -723,7 +842,7 @@ export default function LeadDetail() {
                   Score under 5 — APB recommends nurturing this lead rather than investing discovery time.
                 </p>
               )}
-            </div>
+            </div>}
 
             <div className="rounded-card border border-primary/20 bg-primary/5 p-4">
               <div className="flex items-center justify-between mb-2">
@@ -839,6 +958,12 @@ export default function LeadDetail() {
 
           {/* RIGHT — Stage checklist + advance */}
           <div className="p-5 space-y-5">
+            {isArchTender && (
+              <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
+                <p className="text-xs font-bold text-primary uppercase tracking-wide">Architect Tender</p>
+                <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — qualifying and fee proposal skipped.</p>
+              </div>
+            )}
             {showDiscovery && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Discovery</h3>
@@ -886,6 +1011,38 @@ export default function LeadDetail() {
               </div>
             )}
 
+            {showPreTender && (
+              <div className="rounded-card border border-hairline bg-surface p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Pre-Tender Agreement</h3>
+                <InlineField
+                  label="Tender deposit amount ($)"
+                  value={lead.pretender_deposit_amount ? String(lead.pretender_deposit_amount) : ""}
+                  type="number"
+                  onSave={v => patch({ pretender_deposit_amount: v ? parseFloat(v) : null })}
+                  placeholder="e.g. 5000"
+                />
+                <div className="flex items-center justify-between py-1.5 border-b border-hairline last:border-0">
+                  <span className="text-sm text-muted">Signed date</span>
+                  <input
+                    type="date"
+                    className="rounded-lg border border-hairline px-2 py-1 text-sm bg-page text-ink focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    value={lead.pretender_signed_date || ""}
+                    onChange={e => patch({ pretender_signed_date: e.target.value || null })}
+                  />
+                </div>
+                <div className="mt-2">
+                  <label className="block text-xs text-muted mb-1">Notes</label>
+                  <textarea
+                    className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                    rows={2}
+                    placeholder="Agreement notes, special conditions…"
+                    defaultValue={lead.pretender_notes || ""}
+                    onBlur={e => { if (e.target.value !== (lead.pretender_notes || "")) patch({ pretender_notes: e.target.value }); }}
+                  />
+                </div>
+              </div>
+            )}
+
             {next && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">
@@ -896,11 +1053,11 @@ export default function LeadDetail() {
                     {gateChecks.map((g, i) => {
                       const pass = g.check(lead);
                       return (
-                        <li key={i} className={`flex items-center gap-2 text-sm ${pass ? "text-green-700" : "text-muted"}`}>
-                          <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${pass ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"}`}>
-                            {pass ? "✓" : "○"}
+                        <li key={i} className={`flex items-center gap-2 text-sm ${pass ? "text-green-700" : "text-danger"}`}>
+                          <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${pass ? "bg-green-100 text-green-600" : "bg-red-50 text-danger"}`}>
+                            {pass ? "✓" : "✗"}
                           </span>
-                          {g.label}
+                          <span className={pass ? "" : "font-medium"}>{g.label}</span>
                         </li>
                       );
                     })}
@@ -913,6 +1070,18 @@ export default function LeadDetail() {
                   >
                     Create Fee Proposal →
                   </Link>
+                )}
+                {next === "tender" && !lead.job_id && (
+                  <button
+                    onClick={createJobFromLead}
+                    disabled={creatingJob}
+                    className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3 disabled:opacity-50"
+                  >
+                    {creatingJob ? "Creating…" : "Create Job from Lead →"}
+                  </button>
+                )}
+                {next === "tender" && lead.job_id && (
+                  <p className="text-xs text-green-700 text-center mb-3">Job linked — ready to advance</p>
                 )}
                 <button
                   onClick={advanceStage}

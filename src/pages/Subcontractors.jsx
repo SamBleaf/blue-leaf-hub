@@ -359,6 +359,121 @@ function AddTradeCategoryModal({ onClose, onSaved }) {
   );
 }
 
+function EditModal({ sub, onClose, onSaved, tradesList, colourMap }) {
+  const [form, setForm] = useState({
+    business_name: sub.business_name || "",
+    email: sub.email || "",
+    trade: sub.trade || "",
+    contact: sub.contact || "",
+    mobile: sub.mobile || "",
+    abn: sub.abn || "",
+    address: sub.address || "",
+    suburb: sub.suburb || "",
+    state: sub.state || "SA",
+    postcode: sub.postcode || ""
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const bind = (field) => ({
+    value: form[field],
+    onChange: (e) => { setForm((p) => ({ ...p, [field]: e.target.value })); setError(""); }
+  });
+
+  const handleSave = async () => {
+    if (!form.business_name.trim() || !form.email.trim() || !form.trade) {
+      setError("Business Name, Email and Trade are required.");
+      return;
+    }
+    setSaving(true);
+    const { error: err } = await supabase.from("subcontractors").update({
+      business_name: form.business_name.trim(),
+      email: form.email.trim(),
+      trade: form.trade,
+      contact: form.contact.trim() || null,
+      mobile: form.mobile.trim() || null,
+      abn: form.abn.trim() || null,
+      address: form.address.trim() || null,
+      suburb: form.suburb.trim() || null,
+      state: form.state || "SA",
+      postcode: form.postcode.trim() || null,
+    }).eq("id", sub.id);
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 520, boxShadow: "0 24px 64px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+        <div style={{ background: "#006c9b", padding: "18px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Edit Subcontractor</div>
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 2 }}>{sub.business_name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 24, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+
+        <div style={{ padding: 24, maxHeight: "72vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#006c9b", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>Required</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label style={labelStyle}>Business Name <span style={{ color: "#dc2626" }}>*</span></label>
+                <input {...bind("business_name")} placeholder="e.g. Andrew Evans Plumbing" style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Email <span style={{ color: "#dc2626" }}>*</span></label>
+                <input {...bind("email")} type="email" placeholder="e.g. admin@business.com.au" style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Trade <span style={{ color: "#dc2626" }}>*</span></label>
+                <select {...bind("trade")} style={inputStyle}>
+                  <option value="">Select trade...</option>
+                  {tradesList.map((t) => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#64748b", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>Contact Details</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                ["contact", "Contact Name", "First name"],
+                ["mobile", "Mobile", "04xx xxx xxx"],
+                ["abn", "ABN", "xx xxx xxx xxx"],
+                ["address", "Address", "Street address"],
+                ["suburb", "Suburb", "e.g. Norwood"],
+                ["postcode", "Postcode", "5000"],
+                ["state", "State", "SA"]
+              ].map(([field, label, ph]) => (
+                <div key={field}>
+                  <label style={labelStyle}>{label}</label>
+                  <input {...bind(field)} placeholder={ph} style={inputStyle} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {error && <div style={{ color: "#dc2626", fontSize: 13, background: "#fee2e2", borderRadius: 8, padding: "8px 12px" }}>{error}</div>}
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={btnSecondary}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} style={{ ...btnPrimary, flex: 1 }}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddModal({ onClose, onSaved, tradesList, colourMap }) {
   const [step, setStep] = useState("form");
   const [form, setForm] = useState(EMPTY_FORM);
@@ -941,7 +1056,7 @@ function BulkImportModal({ onClose, onSaved }) {
   );
 }
 
-function SubCard({ sub, colourMap }) {
+function SubCard({ sub, colourMap, onEdit }) {
   return (
     <div
       style={{
@@ -963,6 +1078,14 @@ function SubCard({ sub, colourMap }) {
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <MissingCount sub={sub} />
           <TradeBadge trade={sub.trade || "unknown"} colourMap={colourMap} />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit(sub); }}
+            title="Edit"
+            style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "3px 7px", cursor: "pointer", fontSize: 12, color: "#64748b", lineHeight: 1 }}
+          >
+            ✎
+          </button>
         </div>
       </div>
 
@@ -1203,6 +1326,7 @@ export default function Subcontractors() {
   const [viewMode, setViewMode] = useState("cards");
   const [sheetSort, setSheetSort] = useState({ key: "business", direction: "asc" });
   const [selectedSub, setSelectedSub] = useState(null);
+  const [editingSub, setEditingSub] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
@@ -1532,7 +1656,7 @@ export default function Subcontractors() {
       {!loading && !error && sorted.length > 0 && viewMode === "cards" && sortBy !== "trade" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
           {sorted.map((sub) => (
-            <SubCard key={sub.id} sub={sub} colourMap={colourMap} />
+            <SubCard key={sub.id} sub={sub} colourMap={colourMap} onEdit={setEditingSub} />
           ))}
         </div>
       )}
@@ -1560,7 +1684,7 @@ export default function Subcontractors() {
                   .slice()
                   .sort((a, b) => (a.business_name || "").localeCompare(b.business_name || "", undefined, { sensitivity: "base" }))
                   .map((sub) => (
-                    <SubCard key={sub.id} sub={sub} colourMap={colourMap} />
+                    <SubCard key={sub.id} sub={sub} colourMap={colourMap} onEdit={setEditingSub} />
                   ))}
               </div>
             </div>
@@ -1577,6 +1701,7 @@ export default function Subcontractors() {
                   {sheetColumns.map(([key, label]) => (
                     <SortableTableHead key={key} label={label} sortKey={key} activeSort={sheetSort} onSort={toggleSheetSort} />
                   ))}
+                  <th style={tableHeadCell} />
                 </tr>
               </thead>
               <tbody>
@@ -1604,6 +1729,15 @@ export default function Subcontractors() {
                       <td style={tableCell}>{stats.acceptedCount}</td>
                       <td style={tableCell}>{formatCurrency(stats.avgQuote)}</td>
                       <td style={tableCell}>{missing ? <MissingCount sub={sub} /> : "Complete"}</td>
+                      <td style={tableCell}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSub(sub)}
+                          style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontSize: 12, color: "#64748b", fontWeight: 600, fontFamily: "inherit" }}
+                        >
+                          Edit
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -1616,6 +1750,9 @@ export default function Subcontractors() {
         </div>
       )}
 
+      {editingSub && (
+        <EditModal sub={editingSub} onClose={() => setEditingSub(null)} onSaved={() => { loadAll(); setEditingSub(null); }} tradesList={tradesList} colourMap={colourMap} />
+      )}
       {showAddModal && (
         <AddModal onClose={() => setShowAddModal(false)} onSaved={loadAll} tradesList={tradesList} colourMap={colourMap} />
       )}

@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
@@ -159,7 +158,7 @@ function getSupabaseForLearn() {
   const url = supabaseUrl();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
-  return createClient(url, key, { realtime: { transport: WebSocket } });
+  return createClient(url, key);
 }
 
 function detectTargetFile(content) {
@@ -260,7 +259,7 @@ async function formatKnowledge(content) {
 async function embedKnowledgeEntry({ formattedText, fileName }) {
   const supabase = getSupabaseForLearn();
   const rows = [];
-  let chunkIndex = Date.now();
+  let chunkIndex = 0;
 
   for (const section of knowledgeSections(formattedText)) {
     const courseName = courseNameFromMarkdown(section);

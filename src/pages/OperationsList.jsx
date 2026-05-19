@@ -116,7 +116,7 @@ function ProjectRow({ project, colorIdx }) {
   );
 }
 
-function GlobalGantt({ projects, tasks, filterTrade }) {
+function GlobalGantt({ projects, tasks, filterTrade, onFilterTrade }) {
   const [zoom, setZoom] = useState("Month");
   const viewMode = zoom === "Week" ? ViewMode.Day : zoom === "Project" ? ViewMode.Month : ViewMode.Week;
   const colWidth  = zoom === "Week" ? 46 : zoom === "Project" ? 90 : 70;
@@ -197,7 +197,7 @@ function GlobalGantt({ projects, tasks, filterTrade }) {
         </label>
         <label className="flex items-center gap-2 text-muted">
           Trade
-          <select value={filterTrade} className="rounded-lg border border-hairline bg-surface px-2 py-1 text-ink" onChange={() => {}}>
+          <select value={filterTrade} className="rounded-lg border border-hairline bg-surface px-2 py-1 text-ink" onChange={e => onFilterTrade?.(e.target.value)}>
             <option value="">All trades</option>
             {tradeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
@@ -230,11 +230,14 @@ export default function OperationsList() {
   const [projects, setProjects] = useState([]);
   const [globalTasks, setGlobalTasks] = useState([]);
   const [globalProjects, setGlobalProjects] = useState([]);
+  const [tradeConflicts, setTradeConflicts] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("projects"); // "projects" | "gantt"
   const [cardMode, setCardMode] = useState("card"); // "card" | "list"
-  const [filterTrade] = useState("");
+  const [filterTrade, setFilterTrade] = useState("");
+  const [ganttOpen, setGanttOpen] = useState(() => {
+    try { return localStorage.getItem("blhub_global_gantt_open") !== "false"; } catch { return true; }
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -264,11 +267,27 @@ export default function OperationsList() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadConflicts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/operations/trade-conflicts");
+      const j = await res.json();
+      if (res.ok && j.ok) setTradeConflicts(j.conflicts || []);
+    } catch {
+      // non-fatal
+    }
+  }, []);
 
-  useEffect(() => {
-    if (view === "gantt") loadGlobal();
-  }, [view, loadGlobal]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadGlobal(); }, [loadGlobal]);
+  useEffect(() => { loadConflicts(); }, [loadConflicts]);
+
+  function toggleGantt() {
+    setGanttOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem("blhub_global_gantt_open", String(next)); } catch { /* noop */ }
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-6 pb-24">
@@ -280,32 +299,79 @@ export default function OperationsList() {
 
       {error && <div className="text-sm text-danger">{error}</div>}
 
-      {/* Tab + view toggles */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 rounded-lg bg-page p-1">
-          {[{ id: "projects", label: "Projects" }, { id: "gantt", label: "Global Gantt" }].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setView(tab.id)}
-              className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${view === tab.id ? "bg-primary text-white" : "text-muted hover:bg-surface hover:text-ink"}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {view === "projects" && (
-          <div className="flex items-center gap-1 rounded-lg border border-hairline bg-surface p-1">
-            <button type="button" onClick={() => setCardMode("card")} title="Card view" className={`rounded px-2 py-1 text-sm ${cardMode === "card" ? "bg-primary text-white" : "text-muted"}`}>⊞</button>
-            <button type="button" onClick={() => setCardMode("list")} title="List view" className={`rounded px-2 py-1 text-sm ${cardMode === "list" ? "bg-primary text-white" : "text-muted"}`}>☰</button>
+      {/* Pinned Global Gantt */}
+      <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+        <button
+          type="button"
+          onClick={toggleGantt}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-ink hover:bg-page transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-muted">All Projects — Schedule</span>
+            {globalTasks.length > 0 && (
+              <span className="rounded-full bg-page border border-hairline px-2 py-0.5 text-xs text-muted font-normal">
+                {globalProjects.length} projects · {globalTasks.length} tasks
+              </span>
+            )}
+            {tradeConflicts.length > 0 && (
+              <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
+                {tradeConflicts.length} trade conflict{tradeConflicts.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </span>
+          <span className={`text-muted transition-transform ${ganttOpen ? "rotate-180" : ""}`}>▾</span>
+        </button>
+        {ganttOpen && (
+          <div className="border-t border-hairline px-4 pb-4 pt-3 space-y-4">
+            {tradeConflicts.length > 0 && (
+              <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-warning">Trade scheduling conflicts</p>
+                {tradeConflicts.map((c) => (
+                  <div key={c.trade} className="text-xs text-ink">
+                    <span className="font-semibold">{c.trade}</span>
+                    {" is booked across "}
+                    {c.projects.map((p, i) => (
+                      <span key={p.id}>
+                        {i > 0 && " and "}
+                        <span className="font-semibold">{p.address}</span>
+                        {" ("}
+                        {new Date(p.startDate).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                        {"–"}
+                        {new Date(p.endDate).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                        {")"}
+                      </span>
+                    ))}
+                    {" on overlapping dates"}
+                  </div>
+                ))}
+              </div>
+            )}
+            {globalTasks.length === 0 ? (
+              <p className="text-sm text-muted py-2">No scheduled tasks found — add a schedule to a project to see it here.</p>
+            ) : (
+              <GlobalGantt
+                projects={globalProjects.length ? globalProjects : projects.map((p) => ({ id: p.id, address: p.address }))}
+                tasks={globalTasks}
+                filterTrade={filterTrade}
+                onFilterTrade={setFilterTrade}
+              />
+            )}
           </div>
         )}
       </div>
 
+      {/* Projects section */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-ink">Active projects</h2>
+        <div className="flex items-center gap-1 rounded-lg border border-hairline bg-surface p-1">
+          <button type="button" onClick={() => setCardMode("card")} title="Card view" className={`rounded px-2 py-1 text-sm ${cardMode === "card" ? "bg-primary text-white" : "text-muted"}`}>⊞</button>
+          <button type="button" onClick={() => setCardMode("list")} title="List view" className={`rounded px-2 py-1 text-sm ${cardMode === "list" ? "bg-primary text-white" : "text-muted"}`}>☰</button>
+        </div>
+      </div>
+
       {loading && <p className="text-sm text-muted">Loading…</p>}
 
-      {!loading && view === "projects" && (
+      {!loading && (
         <>
           {!projects.length ? (
             <p className="text-sm text-muted">No projects yet — mark a tender as won in Tender Manager.</p>
@@ -330,14 +396,6 @@ export default function OperationsList() {
             </div>
           )}
         </>
-      )}
-
-      {!loading && view === "gantt" && (
-        <GlobalGantt
-          projects={globalProjects.length ? globalProjects : projects.map((p) => ({ id: p.id, address: p.address }))}
-          tasks={globalTasks}
-          filterTrade={filterTrade}
-        />
       )}
     </div>
   );
