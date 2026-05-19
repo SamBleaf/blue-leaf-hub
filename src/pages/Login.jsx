@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/useAuth.js";
 import {
   configureSupabaseAuthStorage,
@@ -43,7 +43,7 @@ export default function Login() {
 
   useEffect(() => {
     if (!supabaseConfigured || authLoading || !session) return;
-    navigate("/tender-manager/home", { replace: true });
+    navigate("/", { replace: true });
   }, [session, authLoading, navigate]);
 
   async function submit(e) {
@@ -63,7 +63,7 @@ export default function Login() {
         setErrorMsg("Invalid email or password");
         return;
       }
-      navigate("/tender-manager/home", { replace: true });
+      navigate("/", { replace: true });
     } finally {
       setBusy(false);
     }
@@ -102,7 +102,7 @@ export default function Login() {
 
           <form onSubmit={submit} className="mt-6 space-y-4">
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Email</span>
+              <span className="section-label">Email</span>
               <input
                 type="email"
                 autoComplete="email"
@@ -114,7 +114,7 @@ export default function Login() {
             </label>
 
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Password</span>
+              <span className="section-label">Password</span>
               <div className="relative mt-1">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -175,10 +175,10 @@ export default function Login() {
           </form>
 
           <p className="mt-6 text-center text-sm text-muted">
-            New user?{" "}
-            <Link to="/signup" className="font-semibold text-primary underline">
-              Request access
-            </Link>
+            Access is by invitation only.{" "}
+            <a href="mailto:sam@blueleafbuilding.com.au" className="font-semibold text-primary underline">
+              Contact admin
+            </a>
           </p>
         </div>
       </div>

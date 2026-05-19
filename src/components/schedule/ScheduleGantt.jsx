@@ -153,7 +153,7 @@ function GanttListTable({ rowHeight, tasks: ganttTasks, onExpanderClick }) {
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
-function ContextMenu({ x, y, task, onMarkComplete, onMarkInProgress, onEdit, onDelete, onClose }) {
+function ContextMenu({ x, y, task, onMarkComplete, onMarkInProgress, onEdit, onDelete, onClose, readOnly = false }) {
   useEffect(() => {
     const onKey   = (e) => { if (e.key === "Escape") onClose(); };
     const onClick = () => onClose();
@@ -181,25 +181,44 @@ function ContextMenu({ x, y, task, onMarkComplete, onMarkInProgress, onEdit, onD
         <p className="text-xs text-muted capitalize">{String(task.phase || "").replace(/_/g, " ")}</p>
       </div>
 
-      {!isComplete && (
+      {!readOnly && !isComplete && (
         <button type="button" onClick={() => { onMarkComplete(); onClose(); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-page text-ink">
           <span className="text-green-500 text-base leading-none">✓</span> Mark complete
         </button>
       )}
-      {!isComplete && !isInProgress && (
+      {!readOnly && !isComplete && !isInProgress && (
         <button type="button" onClick={() => { onMarkInProgress(); onClose(); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-page text-ink">
           <span className="text-blue-500 text-base leading-none">▷</span> Mark in progress
         </button>
       )}
       <button type="button" onClick={() => { onEdit(); onClose(); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-page text-ink">
-        <span className="text-muted">✎</span> Edit task
+        <span className="text-muted">✎</span> {readOnly ? "View task" : "Edit task"}
       </button>
-      <div className="my-1 border-t border-hairline" />
-      <button type="button" onClick={() => { onDelete(); onClose(); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-page text-red-600">
-        <span>✕</span> Delete task
-      </button>
+      {!readOnly ? (
+        <>
+          <div className="my-1 border-t border-hairline" />
+          <button type="button" onClick={() => { onDelete(); onClose(); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-page text-red-600">
+            <span>✕</span> Delete task
+          </button>
+        </>
+      ) : null}
     </div>
   );
+}
+
+// ─── Gantt task indicators ────────────────────────────────────────────────────
+
+const OUTDOOR_PHASES = new Set(["site_prep", "site_slab", "substructure", "frame", "roofing", "roof", "lock_up"]);
+const OUTDOOR_TRADES = new Set(["framing", "roofing", "concreting", "excavation", "bricklaying", "external cladding", "rendering"]);
+
+function taskIndicators(task) {
+  const prefix = [];
+  if (task.task_type === "procurement") prefix.push("🛒");
+  if (task.task_type === "inspection" || task.task_type === "approval" || task.is_hold_point) prefix.push("🔒");
+  const phase = (task.phase || "").toLowerCase();
+  const trade = (task.assignee_trade || task.trade || "").toLowerCase();
+  if (OUTDOOR_PHASES.has(phase) || OUTDOOR_TRADES.has(trade)) prefix.push("⛅");
+  return prefix.length ? `${prefix.join("")} ` : "";
 }
 
 // ─── Gantt task conversion ────────────────────────────────────────────────────
@@ -227,11 +246,11 @@ function toGanttTasks(tasks, phaseLabels, showCritical, criticalIds) {
     }
     for (const t of list) {
       const isMilestone = t.task_type === "milestone" || Number(t.duration_days) === 0 || t.is_hold_point;
-      const isProcurement = t.task_type === "procurement";
+      const isCritical  = showCritical && criticalIds?.has(t.id);
       out.push({
         id: t.id,
         project: starts.length ? `phase:${phase}` : undefined,
-        name: `${isProcurement ? "PROC " : ""}${t.name}`,
+        name: `${taskIndicators(t)}${t.name}`,
         type: isMilestone ? "milestone" : "task",
         start: toDate(t.start_date),
         end: toDate(t.end_date || t.start_date),
@@ -240,7 +259,7 @@ function toGanttTasks(tasks, phaseLabels, showCritical, criticalIds) {
           ...(t.task_dependencies || []).map((d) => d.taskId),
           ...(t.depends_on || []).filter((id) => !(t.task_dependencies || []).some((d) => d.taskId === id))
         ],
-        styles: getTaskGanttStyles(t, color, showCritical && criticalIds?.has(t.id), today),
+        styles: getTaskGanttStyles(t, color, isCritical, today),
       });
     }
   }
@@ -267,6 +286,7 @@ export default function ScheduleGantt({
   baselineLocked = null,
   onLockBaseline,
   onResetBaseline,
+  canEdit = true,
 }) {
   const [ctxMenu, setCtxMenu] = useState(null);
   const containerRef = useRef(null);
@@ -302,7 +322,9 @@ export default function ScheduleGantt({
     return (
       <div className="rounded-card border border-dashed border-hairline bg-page p-8 text-center">
         <p className="text-muted">No tasks match this view.</p>
-        <button type="button" onClick={() => onAddTask?.()} className="mt-3 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white">Add task</button>
+        {canEdit ? (
+          <button type="button" onClick={() => onAddTask?.()} className="mt-3 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white">Add task</button>
+        ) : null}
       </div>
     );
   }
@@ -343,15 +365,17 @@ export default function ScheduleGantt({
           {driftedCount === 0 && (
             <span className="text-xs text-muted">No drift — on baseline</span>
           )}
-          <button
-            type="button"
-            onClick={onResetBaseline}
-            className="ml-auto rounded-lg border border-hairline px-2 py-1 text-xs text-muted hover:border-danger/40 hover:text-danger"
-          >
-            Reset baseline
-          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={onResetBaseline}
+              className="ml-auto rounded-lg border border-hairline px-2 py-1 text-xs text-muted hover:border-danger/40 hover:text-danger"
+            >
+              Reset baseline
+            </button>
+          ) : null}
         </div>
-      ) : (
+      ) : canEdit ? (
         <div className="flex items-center gap-3 rounded-lg border border-hairline bg-surface px-3 py-2 text-sm">
           <span className="text-muted">No baseline set</span>
           <button
@@ -362,7 +386,7 @@ export default function ScheduleGantt({
             Lock Baseline
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Gantt wrapper — relative so the toggle button can be absolutely positioned */}
       <div className="relative">
@@ -405,12 +429,13 @@ export default function ScheduleGantt({
               if (String(task.id).startsWith("phase:")) onAddTask?.(String(task.id).replace("phase:", ""));
             }}
             onDateChange={(task) => {
-              if (!String(task.id).startsWith("phase:"))
-                onDateChange?.(task.id, toYmdFromDate(task.start), toYmdFromDate(task.end));
+              if (!canEdit || String(task.id).startsWith("phase:")) return false;
+              onDateChange?.(task.id, toYmdFromDate(task.start), toYmdFromDate(task.end));
               return true;
             }}
             onProgressChange={(task) => {
-              if (!String(task.id).startsWith("phase:")) onProgressChange?.(task.id, task.progress);
+              if (!canEdit || String(task.id).startsWith("phase:")) return false;
+              onProgressChange?.(task.id, task.progress);
               return true;
             }}
           />
@@ -447,6 +472,7 @@ export default function ScheduleGantt({
             if (window.confirm(`Delete "${ctxMenu.task.name}"?`)) onContextDelete?.(ctxMenu.task.id);
           }}
           onClose={() => setCtxMenu(null)}
+          readOnly={!canEdit}
         />
       )}
     </div>

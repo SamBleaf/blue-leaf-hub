@@ -181,7 +181,7 @@ function SuggestionSection({ title, children }) {
   if (!items.length) return null;
   return (
     <div className="border border-hairline rounded-lg p-3 space-y-1">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">{title}</p>
+      <p className="section-label mb-2">{title}</p>
       {items}
     </div>
   );
@@ -517,7 +517,7 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
         {/* Past conversations list */}
         {conversations.length > 0 && step === "input" && (
           <div className="flex-shrink-0 border-t border-hairline px-6 pb-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted my-3">Previous conversations</p>
+            <p className="section-label my-3">Previous conversations</p>
             <div className="space-y-2">
               {conversations.map(c => (
                 <button key={c.id} onClick={() => onViewConv(c)} className="w-full text-left rounded-lg border border-hairline bg-page px-3 py-2 hover:bg-surface text-sm">
@@ -565,7 +565,7 @@ function MarginPanel({ lead, onSave }) {
   return (
     <div className="rounded-card border border-hairline bg-surface p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Target Margin</h3>
+        <h3 className="section-label">Target Margin</h3>
         {gp != null && (
           <span className={`text-sm font-bold ${marginColor}`}>{gp}%</span>
         )}
@@ -804,7 +804,7 @@ export default function LeadDetail() {
           {/* LEFT */}
           <div className="p-5 space-y-5">
             <div className="rounded-card border border-hairline bg-surface p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Contact</h3>
+              <h3 className="section-label mb-3">Contact</h3>
               <InlineField label="First name" value={lead.first_name} onSave={v => patch({ first_name: v || "Unnamed" })} />
               <InlineField label="Last name" value={lead.last_name} onSave={v => patch({ last_name: v })} />
               <InlineField label="Email" value={lead.email} type="email" onSave={v => patch({ email: v })} />
@@ -812,7 +812,7 @@ export default function LeadDetail() {
             </div>
 
             <div className="rounded-card border border-hairline bg-surface p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Project</h3>
+              <h3 className="section-label mb-3">Project</h3>
               <InlineField label="Project type" value={lead.project_type} options={PROJECT_TYPES} onSave={v => patch({ project_type: v })} />
               <InlineField label="Suburb" value={lead.suburb} onSave={v => patch({ suburb: v })} />
               <InlineField label="Site address" value={lead.site_address} onSave={v => patch({ site_address: v })} placeholder="Once known" />
@@ -826,7 +826,7 @@ export default function LeadDetail() {
 
             {!isArchTender && <div className="rounded-card border border-hairline bg-surface p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Qualifying Scorecard</h3>
+                <h3 className="section-label">Qualifying Scorecard</h3>
                 <span className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
                   {lead.qualify_score ?? 0}/8
                 </span>
@@ -910,7 +910,7 @@ export default function LeadDetail() {
             </div>
 
             <div className="rounded-card border border-hairline bg-surface p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Log Activity</h3>
+              <h3 className="section-label mb-3">Log Activity</h3>
               <form onSubmit={logActivity} className="space-y-2">
                 <select className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink" value={actType} onChange={e => setActType(e.target.value)}>
                   <option value="note">Note</option>
@@ -930,7 +930,7 @@ export default function LeadDetail() {
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Activity Timeline</h3>
+              <h3 className="section-label">Activity Timeline</h3>
               {activities.length === 0 ? (
                 <p className="text-sm text-muted italic">No activities yet.</p>
               ) : activities.map(act => (
@@ -966,7 +966,7 @@ export default function LeadDetail() {
             )}
             {showDiscovery && (
               <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Discovery</h3>
+                <h3 className="section-label mb-3">Discovery</h3>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs text-muted mb-1">Notes</label>
@@ -994,7 +994,7 @@ export default function LeadDetail() {
 
             {showWinningOffer && (
               <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Winning Offer</h3>
+                <h3 className="section-label mb-3">Winning Offer</h3>
                 <InlineField label="Pre-construction fee" value={lead.preconstruction_fee ? String(lead.preconstruction_fee) : ""} type="number" onSave={v => patch({ preconstruction_fee: v ? parseFloat(v) : null })} placeholder="e.g. 15000" />
                 <InlineField label="Budget min ($)" value={lead.construction_budget_min ? String(lead.construction_budget_min) : ""} type="number" onSave={v => patch({ construction_budget_min: v ? parseFloat(v) : null })} />
                 <InlineField label="Budget max ($)" value={lead.construction_budget_max ? String(lead.construction_budget_max) : ""} type="number" onSave={v => patch({ construction_budget_max: v ? parseFloat(v) : null })} />
@@ -1013,7 +1013,7 @@ export default function LeadDetail() {
 
             {showPreTender && (
               <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Pre-Tender Agreement</h3>
+                <h3 className="section-label mb-3">Pre-Tender Agreement</h3>
                 <InlineField
                   label="Tender deposit amount ($)"
                   value={lead.pretender_deposit_amount ? String(lead.pretender_deposit_amount) : ""}
@@ -1045,7 +1045,7 @@ export default function LeadDetail() {
 
             {next && (
               <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">
+                <h3 className="section-label mb-3">
                   Advance to {nextLabel}
                 </h3>
                 {gateChecks.length > 0 && (
@@ -1098,7 +1098,7 @@ export default function LeadDetail() {
 
             {!["won","lost"].includes(lead.stage) && (
               <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">Nurture</h3>
+                <h3 className="section-label mb-3">Nurture</h3>
                 <InlineField label="Follow-up date" value={lead.nurture_follow_up_date || ""} type="date" onSave={v => patch({ nurture_follow_up_date: v })} />
                 <div className="mt-2">
                   <label className="block text-xs text-muted mb-1">Nurture notes</label>

@@ -3,7 +3,7 @@ import { calculateDashboard, phaseColor, procurementStatus } from "../../lib/sch
 function Stat({ label, value, hint }) {
   return (
     <div className="rounded-lg border border-hairline bg-surface p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="section-label">{label}</p>
       <p className="mt-1 text-2xl font-bold text-primary">{value}</p>
       {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
     </div>

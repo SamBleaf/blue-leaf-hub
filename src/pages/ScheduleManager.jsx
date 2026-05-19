@@ -9,6 +9,8 @@ import RippleWarningModal from "../components/schedule/RippleWarningModal.jsx";
 import DelaysTab from "../components/schedule/DelaysTab.jsx";
 import DependencyMap from "../components/schedule/DependencyMap.jsx";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
+import { useAuth } from "../lib/useAuth.js";
+import { can } from "../lib/roles.js";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import {
   VIEW_GANTT,
@@ -54,6 +56,8 @@ function blankTask(projectId, phase = "general") {
 
 export default function ScheduleManager() {
   const { projectId } = useParams();
+  const { role } = useAuth();
+  const canEdit = can.editSchedule(role);
   const { setScreenContext } = useBlueprintContext() || {};
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -81,6 +85,9 @@ export default function ScheduleManager() {
     try { return localStorage.getItem("blhub_gantt_columns") === "true"; } catch { return false; }
   });
   const [eots, setEots] = useState([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState(() => new Set());
+  const [intelligenceOpen, setIntelligenceOpen] = useState(true);
+  const [generationInsights, setGenerationInsights] = useState(null);
 
   const toggleGanttColumns = useCallback(() => {
     setShowGanttColumns((v) => {
@@ -189,6 +196,64 @@ export default function ScheduleManager() {
     if (editTask?.phase) s.add(editTask.phase);
     return [...s].sort().map((phase) => ({ value: phase, label: phaseLabel(phase, phaseLabels) }));
   }, [tasks, phaseLabels, editTask?.phase]);
+
+  const intelligenceAlerts = useMemo(() => {
+    if (!tasks.length) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    const soon = new Date();
+    soon.setDate(soon.getDate() + 14);
+    const soonStr = soon.toISOString().slice(0, 10);
+    const alerts = [];
+
+    const overdueProcurement = tasks.filter(
+      (t) => t.task_type === "procurement" && t.end_date < today && t.status !== "complete"
+    );
+    if (overdueProcurement.length) {
+      const names = overdueProcurement.slice(0, 3).map((t) => t.name).join(", ");
+      const extra = overdueProcurement.length > 3 ? ` +${overdueProcurement.length - 3} more` : "";
+      alerts.push({ id: "overdue-procurement", severity: "danger", icon: "🛒", title: `${overdueProcurement.length} procurement item${overdueProcurement.length > 1 ? "s" : ""} overdue`, detail: names + extra });
+    }
+
+    const overdueBuild = tasks.filter(
+      (t) => t.task_type !== "procurement" && t.end_date < today && t.status !== "complete"
+    );
+    if (overdueBuild.length) {
+      const names = overdueBuild.slice(0, 3).map((t) => t.name).join(", ");
+      const extra = overdueBuild.length > 3 ? ` +${overdueBuild.length - 3} more` : "";
+      alerts.push({ id: "overdue-build", severity: "warning", icon: "⏰", title: `${overdueBuild.length} task${overdueBuild.length > 1 ? "s" : ""} behind schedule`, detail: names + extra });
+    }
+
+    const upcomingHoldPoints = tasks.filter(
+      (t) => (t.is_hold_point || t.task_type === "inspection" || t.task_type === "approval") &&
+        t.start_date >= today && t.start_date <= soonStr && t.status !== "complete"
+    );
+    if (upcomingHoldPoints.length) {
+      const names = upcomingHoldPoints.slice(0, 3).map((t) => `${t.name} (${t.start_date})`).join(", ");
+      alerts.push({ id: "upcoming-hold-points", severity: "info", icon: "🔒", title: `${upcomingHoldPoints.length} hold point${upcomingHoldPoints.length > 1 ? "s" : ""} in the next 14 days`, detail: names });
+    }
+
+    const stalledTasks = tasks.filter(
+      (t) => t.percent_complete === 0 && t.start_date < today && t.status === "in_progress"
+    );
+    if (stalledTasks.length) {
+      const names = stalledTasks.slice(0, 3).map((t) => t.name).join(", ");
+      const extra = stalledTasks.length > 3 ? ` +${stalledTasks.length - 3} more` : "";
+      alerts.push({ id: "stalled-tasks", severity: "warning", icon: "⚠️", title: `${stalledTasks.length} in-progress task${stalledTasks.length > 1 ? "s" : ""} with no progress logged`, detail: names + extra });
+    }
+
+    const unorderedProcurement = tasks.filter(
+      (t) => t.task_type === "procurement" &&
+        t.procurement_order_status === "not_ordered" &&
+        t.start_date <= soonStr && t.status !== "complete"
+    );
+    if (unorderedProcurement.length) {
+      const names = unorderedProcurement.slice(0, 3).map((t) => t.name).join(", ");
+      const extra = unorderedProcurement.length > 3 ? ` +${unorderedProcurement.length - 3} more` : "";
+      alerts.push({ id: "unordered-procurement", severity: "warning", icon: "📦", title: `${unorderedProcurement.length} order${unorderedProcurement.length > 1 ? "s" : ""} not yet placed (due within 14 days)`, detail: names + extra });
+    }
+
+    return alerts;
+  }, [tasks]);
 
   async function patchTask(id, patch, options = {}) {
     const res = await fetch(`/api/schedule/task/${id}`, {
@@ -312,34 +377,28 @@ export default function ScheduleManager() {
       });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Generate failed");
-      setTasks((j.tasks || []).map(normalizeTask));
+      const generatedTasks = (j.tasks || []).map(normalizeTask);
+      setTasks(generatedTasks);
       setGenerateOpen(false);
       setCurrentView(VIEW_GANTT);
       await loadMeta();
       await loadDashboard();
+      // Compute post-generation insights
+      const procItems = generatedTasks.filter((t) => t.task_type === "procurement");
+      const allDates = generatedTasks.map((t) => t.end_date).filter(Boolean).sort();
+      const startDates = generatedTasks.map((t) => t.start_date).filter(Boolean).sort();
+      const spanDays = allDates.length && startDates.length
+        ? Math.round((new Date(allDates[allDates.length - 1]) - new Date(startDates[0])) / 86400000)
+        : 0;
+      setGenerationInsights({
+        taskCount: generatedTasks.length,
+        spanDays,
+        procurementCount: procItems.length,
+      });
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
       setBusy((b) => ({ ...b, generate: false }));
-    }
-  }
-
-  async function runAnalysis() {
-    setBusy((b) => ({ ...b, analysis: true }));
-    setError("");
-    try {
-      const res = await fetch("/api/schedule/analyse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId })
-      });
-      const j = await readApiJson(res);
-      if (!res.ok || !j.ok) throw new Error(j.error || "Analysis failed");
-      setCurrentView(VIEW_GANTT);
-    } catch (e) {
-      setError(e?.message || String(e));
-    } finally {
-      setBusy((b) => ({ ...b, analysis: false }));
     }
   }
 
@@ -638,19 +697,40 @@ export default function ScheduleManager() {
             <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
             <p className="text-sm text-muted">Schedule Manager</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Generate with AI</button>
-            <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Load from template</button>
-            <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Start blank</button>
-          </div>
+          {canEdit ? (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Generate with AI</button>
+              <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Load from template</button>
+              <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Start blank</button>
+            </div>
+          ) : (
+            <p className="text-xs text-muted">View only — schedule editing requires supervisor access.</p>
+          )}
         </div>
       </header>
+
+      {/* Post-generation insights */}
+      {generationInsights ? (
+        <div className="flex items-start gap-3 rounded-card border border-accent/30 bg-accent/5 px-4 py-3">
+          <span className="mt-0.5 text-lg leading-none">✨</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-accent">Schedule generated — {generationInsights.taskCount} tasks across {generationInsights.spanDays} days</p>
+            <p className="mt-0.5 text-xs text-muted">
+              {generationInsights.procurementCount > 0
+                ? `${generationInsights.procurementCount} procurement item${generationInsights.procurementCount !== 1 ? "s" : ""} need ordering — check the Alerts panel for deadlines. `
+                : ""}
+              Review the Gantt, then lock the baseline to start tracking progress.
+            </p>
+          </div>
+          <button type="button" onClick={() => setGenerationInsights(null)} className="flex-shrink-0 text-xs text-muted hover:text-ink">✕</button>
+        </div>
+      ) : null}
 
       <ScheduleToolbar
         currentView={currentView}
         onViewChange={setCurrentView}
+        canEdit={canEdit}
         onAddTask={() => addTask()}
-        onAnalyse={runAnalysis}
         onExportPdf={exportGanttPdf}
         onExportCsv={exportCsv}
         onBuildexactMatch={buildexactMatch}
@@ -664,8 +744,62 @@ export default function ScheduleManager() {
         filterTrade={filterTrade}
         onFilterTradeChange={setFilterTrade}
         tradeOptions={tradeOptions}
+        alertCount={intelligenceAlerts.filter((a) => !dismissedAlerts.has(a.id)).length}
+        onToggleAlerts={() => setIntelligenceOpen((v) => !v)}
         busy={busy}
       />
+
+      {/* Intelligence panel */}
+      {(() => {
+        const visible = intelligenceAlerts.filter((a) => !dismissedAlerts.has(a.id));
+        if (!visible.length) return null;
+        const severityClasses = {
+          danger:  "border-danger/30 bg-danger/5",
+          warning: "border-warning/30 bg-warning/5",
+          info:    "border-primary/30 bg-primary/5",
+        };
+        const textClasses = {
+          danger:  "text-danger",
+          warning: "text-warning",
+          info:    "text-primary",
+        };
+        return (
+          <div className="rounded-card border border-hairline bg-surface shadow-sm overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIntelligenceOpen((v) => !v)}
+              className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-page transition"
+            >
+              <span className="flex items-center gap-2 section-label">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning/20 text-warning text-[10px] font-bold">{visible.length}</span>
+                Schedule alerts
+              </span>
+              <span className="text-xs text-muted">{intelligenceOpen ? "▲" : "▼"}</span>
+            </button>
+            {intelligenceOpen ? (
+              <div className="divide-y divide-hairline border-t border-hairline">
+                {visible.map((alert) => (
+                  <div key={alert.id} className={`flex items-start gap-3 px-4 py-3 ${severityClasses[alert.severity] || ""}`}>
+                    <span className="mt-0.5 flex-shrink-0 text-base leading-none">{alert.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-xs font-semibold ${textClasses[alert.severity] || "text-ink"}`}>{alert.title}</p>
+                      {alert.detail ? <p className="mt-0.5 text-xs text-muted truncate">{alert.detail}</p> : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDismissedAlerts((prev) => new Set([...prev, alert.id]))}
+                      className="flex-shrink-0 text-xs text-muted hover:text-ink"
+                      aria-label="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
 
       {error ? <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div> : null}
       {loading ? <p className="text-sm text-muted">Loading schedule...</p> : null}
@@ -674,11 +808,13 @@ export default function ScheduleManager() {
         <div className="rounded-card border border-dashed border-hairline bg-page p-8 text-center">
           <p className="text-lg font-semibold text-ink">No schedule tasks yet.</p>
           <p className="mt-1 text-sm text-muted">Generate with AI, load the Blue Leaf template, or start with a blank task.</p>
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white">Generate with AI</button>
-            <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg bg-accent px-4 py-3 text-sm font-semibold text-white">Load from template</button>
-            <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-4 py-3 text-sm font-semibold text-ink">Start blank</button>
-          </div>
+          {canEdit ? (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white">Generate with AI</button>
+              <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg bg-accent px-4 py-3 text-sm font-semibold text-white">Load from template</button>
+              <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-4 py-3 text-sm font-semibold text-ink">Start blank</button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -701,6 +837,7 @@ export default function ScheduleManager() {
           baselineLocked={project?.schedule_baseline_locked_at || null}
           onLockBaseline={lockBaseline}
           onResetBaseline={resetBaseline}
+          canEdit={canEdit}
         />
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (

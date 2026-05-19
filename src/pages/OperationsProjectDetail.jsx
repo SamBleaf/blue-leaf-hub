@@ -61,7 +61,7 @@ function ModuleCard({ to, title, description, stat, statLabel, icon }) {
     <Link to={to} className="group block rounded-lg border border-hairline bg-surface p-4 shadow-sm transition hover:border-primary hover:shadow-md">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</p>
+          <p className="section-label">{title}</p>
           {stat != null ? (
             <p className="mt-1 text-2xl font-bold text-ink">{stat}</p>
           ) : null}
@@ -289,7 +289,7 @@ export default function OperationsProjectDetail() {
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-hairline pb-5 pt-1">
         <div className="min-w-0">
           <Link to="/operations" className="text-xs font-semibold text-muted hover:text-primary">← Projects</Link>
-          <h1 className="mt-1 text-xl font-bold text-ink leading-tight">{project.address}</h1>
+          <h1 className="mt-1 page-title">{project.address}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {summary.currentPhase ? (
               <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{summary.currentPhase}</span>
@@ -311,6 +311,16 @@ export default function OperationsProjectDetail() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
+          {project.portal_token && project.portal_enabled ? (
+            <a
+              href={`/portal/${project.portal_token}`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary hover:text-white"
+            >
+              View as client
+            </a>
+          ) : null}
           {drop ? (
             <a href={drop} target="_blank" rel="noreferrer" className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-semibold text-primary hover:bg-page">
               Dropbox
@@ -323,7 +333,7 @@ export default function OperationsProjectDetail() {
 
       {/* ── Insights Panel ── */}
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Insights</h2>
+        <h2 className="mb-2 section-label">Insights</h2>
         <div className="space-y-2">
           {insights.map((alert, i) => (
             <InsightAlert key={i} {...alert} />
@@ -335,7 +345,7 @@ export default function OperationsProjectDetail() {
       {summary.total > 0 ? (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Schedule</h2>
+            <h2 className="section-label">Schedule</h2>
             <Link to={`/operations/${projectId}/schedule`} className="text-xs font-semibold text-primary hover:underline">
               Open full schedule →
             </Link>
@@ -375,7 +385,7 @@ export default function OperationsProjectDetail() {
 
       {/* ── Module cards ── */}
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Manage</h2>
+        <h2 className="mb-2 section-label">Manage</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <ModuleCard
             to={`/operations/${projectId}/schedule`}
@@ -407,7 +417,7 @@ export default function OperationsProjectDetail() {
       {diaryPreview.length > 0 ? (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Recent diary</h2>
+            <h2 className="section-label">Recent diary</h2>
             <Link to={`/operations/${projectId}/diary`} className="text-xs font-semibold text-primary hover:underline">View all →</Link>
           </div>
           <div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
@@ -432,7 +442,7 @@ export default function OperationsProjectDetail() {
           onClick={() => setShowFinancials((v) => !v)}
           className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
         >
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Financials &amp; POs</h2>
+          <h2 className="section-label">Financials &amp; POs</h2>
           <span className="text-xs text-muted">{showFinancials ? "Hide ▲" : "Show ▼"}</span>
         </button>
         {showFinancials ? (

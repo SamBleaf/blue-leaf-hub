@@ -30,7 +30,7 @@ export default function ScheduleCalendar({ tasks = [], filterTrade, onOpenTask }
         <h2 className="text-lg font-bold text-primary">{cursor.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2>
         <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))} className="rounded-lg border border-hairline px-3 py-2 text-sm text-ink">Next</button>
       </div>
-      <div className="mt-3 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-wide text-muted">
+      <div className="mt-3 grid grid-cols-7 text-center section-label">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-2">{d}</div>)}
       </div>
       <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-hairline">

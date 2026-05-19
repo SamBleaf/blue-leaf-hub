@@ -294,7 +294,7 @@ export default function OperationsList() {
   return (
     <div className="space-y-6 pb-24">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-ink">Active projects</h1>
+        <h1 className="page-title text-2xl">Active projects</h1>
         <p className="mt-0.5 text-sm text-muted">Won tenders appear here. Click any project to open its hub.</p>
       </header>
 
@@ -383,7 +383,7 @@ export default function OperationsList() {
           ) : (
             <div className="overflow-x-auto rounded-card border border-hairline bg-surface">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-hairline bg-page text-xs font-semibold uppercase tracking-wide text-muted">
+                <thead className="border-b border-hairline bg-page section-label">
                   <tr>
                     {["Project", "Status", "Progress", "Next milestone", "Overdue", "Trades", "Won", "BX"].map((h) => (
                       <th key={h} className="px-3 py-2.5">{h}</th>

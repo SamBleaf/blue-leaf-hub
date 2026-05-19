@@ -77,11 +77,11 @@ export function darkenHex(hex, amount=20) {
 }
 
 /** Returns gantt-task-react styles object based on task status + phase colour */
-export function getTaskGanttStyles(task, phaseColorHex, showCritical, todayStr) {
+export function getTaskGanttStyles(task, phaseColorHex, isCriticalTask, todayStr) {
   const today = todayStr || new Date().toISOString().slice(0,10);
   const isComplete = (Number(task.percent_complete)||0) >= 100 || task.status === "complete";
   const isOverdue   = !isComplete && task.end_date && task.end_date < today;
-  const isCritical  = showCritical && task.is_critical_path;
+  const isCritical  = Boolean(isCriticalTask);
   const isProc      = task.task_type === "procurement";
   if (isComplete) return { backgroundColor:"#e5e7eb", backgroundSelectedColor:"#d1d5db", progressColor:"#86efac", progressSelectedColor:"#4ade80" };
   if (isOverdue)  return { backgroundColor:"#fee2e2", backgroundSelectedColor:"#fecaca", progressColor:"#ef4444", progressSelectedColor:"#dc2626" };

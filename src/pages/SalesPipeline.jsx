@@ -482,7 +482,7 @@ function ListView({ leads, onQuickNote, onNav }) {
     const active = sortCol === col;
     return (
       <th
-        className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted cursor-pointer select-none hover:text-ink whitespace-nowrap"
+        className="px-4 py-2.5 text-left section-label cursor-pointer select-none hover:text-ink whitespace-nowrap"
         onClick={() => toggleSort(col)}
       >
         {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -503,9 +503,9 @@ function ListView({ leads, onQuickNote, onNav }) {
             <Th col="stage" label="Stage" />
             <Th col="estimated_value" label="Value" />
             <Th col="qualify_score" label="Score" />
-            <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted whitespace-nowrap">Suburb</th>
+            <th className="px-4 py-2.5 text-left section-label whitespace-nowrap">Suburb</th>
             <Th col="last_activity_at" label="Last Activity" />
-            <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted whitespace-nowrap">Next Action</th>
+            <th className="px-4 py-2.5 text-left section-label whitespace-nowrap">Next Action</th>
             <th className="px-4 py-2.5" />
           </tr>
         </thead>
@@ -607,7 +607,7 @@ export default function SalesPipeline() {
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-hairline bg-surface">
         <div>
-          <h1 className="text-xl font-bold text-ink">Sales Pipeline</h1>
+          <h1 className="page-title">Sales Pipeline</h1>
           <p className="text-sm text-muted mt-0.5">
             {activeLeads.length} active lead{activeLeads.length !== 1 ? "s" : ""}
             {totalValue > 0 && <span> · {formatValue(totalValue)} pipeline value</span>}

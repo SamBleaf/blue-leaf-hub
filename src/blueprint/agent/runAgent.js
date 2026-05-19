@@ -81,10 +81,26 @@ async function appendSubcontractorSnapshot(systemPrompt) {
  * @param {Array<{role:string, content:string}>} opts.messages
  * @param {object} [opts.extras] - jobContext, hubContext, enableTools
  */
+function messageHasDocumentBlock(messages) {
+  return (messages || []).some((m) => {
+    const c = m?.content;
+    return Array.isArray(c) && c.some((b) => b?.type === 'document');
+  });
+}
+
+function trimChatHistory(messages, maxTurns = 8) {
+  const cleaned = (messages || []).filter((m) => m?.role === 'user' || m?.role === 'assistant');
+  if (cleaned.length <= maxTurns) return cleaned;
+  return cleaned.slice(-maxTurns);
+}
+
 export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {} }) {
-  const lastUser = messageText([...messages].reverse().find((m) => m.role === 'user'));
+  const compact = extras.compactContext === true || messageHasDocumentBlock(messages);
+  const workingMessages = compact ? trimChatHistory(messages, 6) : messages;
+  const lastUser = messageText([...workingMessages].reverse().find((m) => m.role === 'user'));
   const jobId = extras.jobContext?.id ?? null;
-  const ragContext = await getRelevantContext(lastUser, { jobId });
+  const ragLimit = compact ? 2 : 5;
+  const ragContext = await getRelevantContext(lastUser, { jobId, limit: ragLimit });
 
   let systemPrompt = buildSystemPrompt(mode, ragContext, extras.jobContext || null);
 
@@ -100,7 +116,7 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
   const useTools = extras.enableTools !== false;
   const tools = useTools ? getAgentTools() : undefined;
 
-  let currentMessages = messages;
+  let currentMessages = workingMessages;
   let lastResponse = null;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {

@@ -21,3 +21,4 @@ CREATE POLICY "anon_all_lead_conversations" ON lead_conversations
 
 CREATE POLICY "auth_all_lead_conversations" ON lead_conversations
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
+ 

@@ -8,12 +8,15 @@ export const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [clientNonce, setClientNonce] = useState(0);
 
   const signOut = useCallback(async () => {
     const sb = getSupabase();
     if (sb) await sb.auth.signOut().catch(() => {});
+    setProfile(null);
     navigate("/login", { replace: true });
   }, [navigate]);
 
@@ -26,6 +29,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!supabaseConfigured) {
       setSession(null);
+      setProfile(null);
       setLoading(false);
       return undefined;
     }
@@ -33,6 +37,7 @@ export function AuthProvider({ children }) {
     const sb = getSupabase();
     if (!sb) {
       setSession(null);
+      setProfile(null);
       setLoading(false);
       return undefined;
     }
@@ -62,14 +67,53 @@ export function AuthProvider({ children }) {
     };
   }, [clientNonce]);
 
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setProfile(null);
+      setProfileLoading(false);
+      return;
+    }
+    const sb = getSupabase();
+    if (!sb) return;
+
+    let cancelled = false;
+    setProfileLoading(true);
+
+    sb.from("user_profiles")
+      .select("id, email, full_name, role, is_active")
+      .eq("id", session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data && !data.is_active) {
+          signOut();
+          return;
+        }
+        setProfile(data || null);
+        setProfileLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProfile(null);
+          setProfileLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, signOut]);
+
   const value = useMemo(
     () => ({
       user: session?.user ?? null,
       session,
-      loading,
-      signOut,
+      loading: loading || (!!session && profileLoading),
+      profile,
+      role: profile?.role ?? null,
+      signOut
     }),
-    [session, loading, signOut]
+    [session, loading, profileLoading, profile, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

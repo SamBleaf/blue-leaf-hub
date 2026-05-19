@@ -34,6 +34,9 @@ import { resolveInboundRfqMatch, generateOutboundMessageId } from "./lib/imapQuo
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
+import { registerPortalRoutes } from "./lib/portalRoutes.mjs";
+import { registerAuthRoutes } from "./lib/authRoutes.mjs";
+import { registerSupervisorRoutes } from "./lib/supervisorRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 
 console.log("[blue-leaf-api] booting…");
@@ -575,7 +578,7 @@ const app = express();
 app.use(
   cors({
     origin: true,
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept", "Buildexact-Signature", "X-Buildexact-Signature"],
     optionsSuccessStatus: 204,
     credentials: false
@@ -614,6 +617,9 @@ registerInductionRoutes(app);
 registerJobsApiRoutes(app);
 registerSalesRoutes(app);
 registerFinanceRoutes(app);
+registerPortalRoutes(app);
+registerAuthRoutes(app);
+registerSupervisorRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });

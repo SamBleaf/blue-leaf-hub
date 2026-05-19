@@ -1,7 +1,7 @@
 import { useState } from "react";
 import BuildexactCostBadge from "./BuildexactCostBadge.jsx";
 import ProcurementPanel from "./ProcurementPanel.jsx";
-import { computeEndDate, taskStatusFromPercent } from "../../lib/scheduleUtils.js";
+import { computeEndDate, previewRipple, taskStatusFromPercent } from "../../lib/scheduleUtils.js";
 
 function Field({ label, children }) {
   return (
@@ -17,9 +17,18 @@ const selectCls = "mt-0.5 w-full rounded border border-hairline bg-surface px-2 
 
 export default function TaskDetailPanel({ task, tasks = [], phaseOptions = [], subcontractors = [], onChange, onClose, onSave, onDelete, onAskBlueprint, advice, busy }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [ripplePreview, setRipplePreview] = useState(null);
 
   if (!task) return null;
   const patch = (next) => onChange({ ...task, ...next });
+
+  function handleStartDateChange(newDate) {
+    patch({ start_date: newDate, end_date: computeEndDate(newDate, task.duration_days, task.task_type === "milestone" || task.is_hold_point) });
+    if (task.id && tasks.length) {
+      const preview = previewRipple(tasks, task.id, newDate);
+      setRipplePreview(preview.affected.length > 1 ? preview : null);
+    }
+  }
   const setPercent = (value) => {
     const percent = Math.max(0, Math.min(100, Number(value) || 0));
     patch({ percent_complete: percent, status: taskStatusFromPercent(percent) });
@@ -54,7 +63,7 @@ export default function TaskDetailPanel({ task, tasks = [], phaseOptions = [], s
               <input
                 type="date"
                 value={task.start_date || ""}
-                onChange={(e) => patch({ start_date: e.target.value, end_date: computeEndDate(e.target.value, task.duration_days, task.task_type === "milestone" || task.is_hold_point) })}
+                onChange={(e) => handleStartDateChange(e.target.value)}
                 className={inputCls}
               />
             </Field>
@@ -84,6 +93,20 @@ export default function TaskDetailPanel({ task, tasks = [], phaseOptions = [], s
               />
             </Field>
           </div>
+
+          {/* Ripple preview */}
+          {ripplePreview && ripplePreview.affected.length > 1 ? (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2">
+              <span className="mt-0.5 text-warning text-sm">⚠</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-warning">Cascade preview</p>
+                <p className="text-xs text-muted mt-0.5">
+                  Changing this date will shift <strong>{ripplePreview.affected.length - 1}</strong> downstream task{ripplePreview.affected.length - 1 !== 1 ? "s" : ""}. Save to confirm.
+                </p>
+              </div>
+              <button type="button" onClick={() => setRipplePreview(null)} className="text-xs text-muted hover:text-ink flex-shrink-0">✕</button>
+            </div>
+          ) : null}
 
           {/* Progress slider */}
           <div className="rounded-lg border border-hairline bg-page p-3">

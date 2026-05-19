@@ -4,7 +4,6 @@ export default function ScheduleToolbar({
   currentView,
   onViewChange,
   onAddTask,
-  onAnalyse,
   onExportPdf,
   onExportCsv,
   onBuildexactMatch,
@@ -18,7 +17,10 @@ export default function ScheduleToolbar({
   filterTrade,
   onFilterTradeChange,
   tradeOptions = [],
-  busy = {}
+  alertCount = 0,
+  onToggleAlerts,
+  busy = {},
+  canEdit = true
 }) {
   return (
     <div className="rounded-card border border-hairline bg-surface p-3 shadow-sm">
@@ -37,12 +39,19 @@ export default function ScheduleToolbar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={onAddTask} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white">
-            + Add task
-          </button>
-          <button type="button" onClick={onAnalyse} disabled={busy.analysis} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
-            {busy.analysis ? "Analysing..." : "AI Analyse"}
-          </button>
+          {canEdit ? (
+            <button type="button" onClick={onAddTask} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white">
+              + Add task
+            </button>
+          ) : null}
+          {onToggleAlerts ? (
+            <button type="button" onClick={onToggleAlerts} className={`relative rounded-lg border px-3 py-2 text-sm font-semibold transition ${alertCount > 0 ? "border-warning/50 bg-warning/10 text-ink" : "border-hairline text-muted"}`}>
+              Alerts
+              {alertCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-warning text-[10px] font-bold text-white">{alertCount}</span>
+              )}
+            </button>
+          ) : null}
           <button type="button" onClick={onExportPdf} disabled={busy.pdf} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
             {busy.pdf ? "PDF..." : "Export PDF"}
           </button>

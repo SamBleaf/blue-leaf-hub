@@ -4,7 +4,9 @@ import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
 import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus } from '../../src/blueprint/agent/runAgent.js';
-import { voyageEmbedBatch } from '../../src/blueprint/lib/voyageEmbeddings.js';
+import { courseNameFromMarkdown } from '../../../blueprint-agent/src/blueprint/lib/knowledgeChunking.js';
+import { indexLearnedKnowledge } from '../../../blueprint-agent/src/blueprint/lib/knowledgeIndex.js';
+import { runAttachmentDocumentReview } from '../../../blueprint-agent/src/blueprint/lib/documentReview.js';
 import { QC_REVIEW_SYSTEM_PROMPT, parseQCReviewJson } from './blueprintQc.js';
 
 const { parsed: _env = {} } = dotenvConfig();
@@ -214,31 +216,6 @@ function safeKnowledgeFileName(value) {
   return file;
 }
 
-function courseNameFromMarkdown(markdown, fallback = 'Direct Input') {
-  const match = markdown.match(/## COURSE:\s*(.+)/);
-  return (match ? match[1] : fallback).trim();
-}
-
-function chunkText(text) {
-  const chunks = [];
-  const max = 2000;
-  const overlap = 200;
-  let start = 0;
-  while (start < text.length) {
-    let chunk = text.slice(start, Math.min(start + max, text.length));
-    const lastBreak = Math.max(chunk.lastIndexOf('\n\n'), chunk.lastIndexOf('. '));
-    if (start + max < text.length && lastBreak > max * 0.5) chunk = chunk.slice(0, lastBreak + 1);
-    if (chunk.trim().length > 50) chunks.push(chunk.trim());
-    start += Math.max(1, chunk.length - overlap);
-  }
-  return chunks;
-}
-
-function knowledgeSections(markdown) {
-  const sections = markdown.split(/(?=## COURSE:)/).filter((s) => s.trim().length > 50);
-  return sections.length ? sections : [markdown];
-}
-
 async function formatKnowledge(content) {
   const response = await getAnthropic().messages.create({
     model: MODEL,
@@ -254,30 +231,6 @@ async function formatKnowledge(content) {
   const text = response.content.find((b) => b.type === 'text')?.text?.trim();
   if (!text) throw new Error('Claude returned no formatted knowledge text');
   return text;
-}
-
-async function embedKnowledgeEntry({ formattedText, fileName }) {
-  const supabase = getSupabaseForLearn();
-  const rows = [];
-  let chunkIndex = 0;
-
-  for (const section of knowledgeSections(formattedText)) {
-    const courseName = courseNameFromMarkdown(section);
-    for (const chunk of chunkText(section)) {
-      rows.push({
-        source_file: fileName,
-        course_name: courseName,
-        chunk_index: chunkIndex++,
-        chunk_text: chunk,
-      });
-    }
-  }
-
-  const embeddings = await voyageEmbedBatch(rows.map((r) => r.chunk_text.slice(0, 32000)), 'document');
-  const records = rows.map((row, index) => ({ ...row, embedding: embeddings[index] }));
-  const { error } = await supabase.from('blueprint_knowledge').insert(records);
-  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
-  return records.length;
 }
 
 function requireLearnAccess(req, res) {
@@ -308,12 +261,32 @@ export function registerBlueprintRoutes(app) {
   app.post('/api/blueprint/chat', async (req, res) => {
     try {
       const { messages, jobContext, hubContext, attachments } = req.body;
+      const hasReviewableAttachment = Array.isArray(attachments) && attachments.some(
+        (a) => a?.kind === 'pdf' || a?.kind === 'text',
+      );
+
+      if (hasReviewableAttachment) {
+        const reply = await runAttachmentDocumentReview({
+          anthropic: getAnthropic(),
+          attachments,
+          messages,
+          jobContext,
+          maxTokens: Math.min(MAX_TOKENS, 4096),
+        });
+        return res.json({ reply });
+      }
+
       const chatMessages = attachDocumentsToLastUserMessage(messages, attachments);
       const reply = await callClaude('chat', chatMessages, { jobContext, hubContext });
       res.json({ reply });
     } catch (err) {
       console.error('[blueprint/chat]', err.message);
-      res.status(500).json({ error: err.message });
+      const msg = err?.message || 'Request failed';
+      const status = /rate_limit/i.test(msg) ? 429 : 500;
+      const friendly = /rate_limit/i.test(msg)
+        ? 'Anthropic rate limit — wait ~30 seconds and try again. Large PDFs are now reviewed as extracted text (smaller request). Restart Hub after updating if this persists.'
+        : msg;
+      res.status(status).json({ error: friendly });
     }
   });
 
@@ -352,13 +325,15 @@ export function registerBlueprintRoutes(app) {
       }
       fs.appendFileSync(filePath, `\n\n${formattedText}\n`, 'utf8');
 
-      const embeddedChunks = await embedKnowledgeEntry({ formattedText, fileName });
+      const supabase = getSupabaseForLearn();
+      const indexed = await indexLearnedKnowledge(supabase, { formattedText, fileName });
       res.json({
         success: true,
         message: `Blueprint has learned: ${courseName}`,
         saved_to: filePath,
-        embedded: true,
-        embedded_chunks: embeddedChunks,
+        embedded: indexed.count > 0,
+        index_mode: indexed.mode,
+        embedded_chunks: indexed.count,
       });
     } catch (err) {
       console.error('[blueprint/learn]', err.message);

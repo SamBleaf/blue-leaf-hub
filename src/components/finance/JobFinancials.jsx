@@ -326,7 +326,7 @@ export default function JobFinancials() {
           {!loading && documents.length > 0 && (
             <div className="overflow-x-auto rounded-card border border-hairline bg-surface">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-hairline bg-page text-xs font-semibold uppercase tracking-wide text-muted">
+                <thead className="border-b border-hairline bg-page section-label">
                   <tr>
                     {["Supplier", "Invoice #", "Date", "Amount (inc GST)", "Status", "Filed at"].map(h => (
                       <th key={h} className="px-3 py-2.5">{h}</th>

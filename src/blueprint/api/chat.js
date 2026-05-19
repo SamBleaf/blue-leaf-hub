@@ -22,6 +22,9 @@ async function post(endpoint, body) {
     if (/PayloadTooLargeError|request entity too large/i.test(message)) {
       message = 'Upload too large for Blueprint. Try a smaller PDF or paste the key section.';
     }
+    if (/rate_limit|rate limit/i.test(message)) {
+      message = 'Rate limit hit — wait 30 seconds and try again. If you just uploaded a PDF, restart Hub (npm run dev) so the lighter document review path is active.';
+    }
     throw new Error(message || `Request failed (${res.status})`);
   }
   return res.json();

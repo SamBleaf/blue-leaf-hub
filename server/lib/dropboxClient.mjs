@@ -880,3 +880,31 @@ export async function uploadFeeProposalPdfToPresaleDocs(jobAddress, fileName, bu
   const safe = sanitizeOriginalPdfFileNameUpper(fileName);
   return dropboxUploadBuffer(token, `${base}/${safe}`, buffer, { autorename: true });
 }
+
+/** Client portal photos folder under shared job tree. */
+export function portalPhotosFolderPath(jobAddress) {
+  return `${sharedJobRootPath(jobAddress)}/INTERNAL/PORTAL`;
+}
+
+function safePortalFileName(fileName) {
+  const base = String(fileName || "photo.jpg").replace(/[^\w.\-]+/g, "_").slice(0, 120);
+  return base || "photo.jpg";
+}
+
+/**
+ * Upload a portal photo to Dropbox INTERNAL/PORTAL.
+ * @returns {{ storagePath: string, id?: string }}
+ */
+export async function uploadPortalPhoto({ jobAddress, buffer, fileName }) {
+  const token = await getDropboxAccessToken();
+  const folder = portalPhotosFolderPath(jobAddress);
+  await createFolderIfNotExists(token, `${sharedJobRootPath(jobAddress)}/INTERNAL`);
+  await createFolderIfNotExists(token, folder);
+  const safe = safePortalFileName(fileName);
+  const storagePath = `${folder}/${safe}`;
+  const meta = await dropboxUploadBuffer(token, storagePath, buffer, { autorename: true });
+  return {
+    storagePath: meta?.path_display || meta?.path_lower || storagePath,
+    id: meta?.id
+  };
+}

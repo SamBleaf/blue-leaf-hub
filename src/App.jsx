@@ -1,6 +1,8 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import React, { Suspense } from "react";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import RoleRoute from "./components/RoleRoute.jsx";
 import RootRedirect from "./components/RootRedirect.jsx";
 import { AuthProvider } from "./lib/AuthContext.jsx";
 import { BlueprintProvider } from "./lib/BlueprintContext.jsx";
@@ -9,6 +11,9 @@ import Login from "./pages/Login.jsx";
 import QuoteTracker from "./pages/QuoteTracker.jsx";
 import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
+import AcceptInvite from "./pages/AcceptInvite.jsx";
+import UserManagement from "./pages/UserManagement.jsx";
+import MyPortal from "./pages/MyPortal.jsx";
 import Settings from "./pages/Settings.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
 import TenderBoard from "./pages/TenderBoard.jsx";
@@ -26,6 +31,10 @@ import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
 import SalesPipeline from "./pages/SalesPipeline.jsx";
 import LeadDetail from "./pages/LeadDetail.jsx";
 import FinanceManager from "./pages/FinanceManager.jsx";
+import SupervisorHome from "./pages/SupervisorHome.jsx";
+import PortalAdmin from "./pages/PortalAdmin.jsx";
+
+const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
 export default function App() {
   return (
@@ -34,14 +43,40 @@ export default function App() {
         <BlueprintProvider>
           <Routes>
             <Route path="/induct/:projectId" element={<SiteInduction />} />
+            <Route
+              path="/portal/:token/*"
+              element={
+                <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                  <PortalApp />
+                </Suspense>
+              }
+            />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/accept-invite/:token" element={<AcceptInvite />} />
             <Route path="/" element={<RootRedirect />} />
 
             <Route element={<ProtectedRoute />}>
+              <Route
+                path="/my-portal"
+                element={<RoleRoute element={<MyPortal />} allowed={["client"]} redirectTo="/login" />}
+              />
+              <Route path="/supervisor" element={<SupervisorHome />} />
               <Route element={<AppShell />}>
-                <Route path="/home" element={<Home />} />
-                <Route path="/tender-manager">
+                <Route
+                  path="/settings/users"
+                  element={<RoleRoute element={<UserManagement />} allowed={["admin"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/home"
+                  element={
+                    <RoleRoute element={<Home />} allowed={["admin", "supervisor", "employee"]} redirectTo="/operations" />
+                  }
+                />
+                <Route
+                  path="/tender-manager"
+                  element={<RoleRoute element={<Outlet />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                >
                   <Route index element={<Navigate to="/home" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
                   <Route path="subcontractors" element={<Subcontractors />} />
@@ -64,11 +99,32 @@ export default function App() {
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />
                 <Route path="/operations/:projectId/diary" element={<SiteDiary />} />
 
-                <Route path="/sales" element={<SalesPipeline />} />
-                <Route path="/sales/:leadId" element={<LeadDetail />} />
+                <Route
+                  path="/sales"
+                  element={<RoleRoute element={<SalesPipeline />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/sales/:leadId"
+                  element={<RoleRoute element={<LeadDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
 
-                <Route path="/finance" element={<FinanceManager />} />
-                <Route path="/finance/:tab" element={<FinanceManager />} />
+                <Route
+                  path="/finance"
+                  element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/finance/:tab"
+                  element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+
+                <Route
+                  path="/portal-admin"
+                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/portal-admin/:projectId"
+                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
 
                 <Route path="/rfq-engine" element={<Navigate to="/tender-manager/rfq-engine" replace />} />
                 <Route path="/subcontractors" element={<Navigate to="/tender-manager/subcontractors" replace />} />

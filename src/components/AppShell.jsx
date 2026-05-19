@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-route
 import BlueprintAgent from "../blueprint/components/BlueprintAgent";
 import { useAuth } from "../lib/useAuth.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
+import { can } from "../lib/roles.js";
 
 // ── SVG icon set ────────────────────────────────────────────────────────────
 const ICONS = {
@@ -96,7 +97,7 @@ const DEPARTMENTS = [
   { id: "tender",             label: "Tendering",  tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES,  defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,     defaultTo: "/operations" },
   { id: "finance_manager",    label: "Financials", tabShort: "Finance", icon: "finance",    comingSoon: false, modules: FINANCE_MODULES, defaultTo: "/finance" },
-  { id: "client_portal",      label: "Clients",    tabShort: "Clients", icon: "client",     comingSoon: true,  modules: [] },
+  { id: "client_portal",      label: "Clients",    tabShort: "Clients", icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
 ];
 
 const SIDEBAR_EXPANDED_W = 256;
@@ -113,8 +114,30 @@ const QUICK_ADD_ITEMS = [
 export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { user, signOut, role } = useAuth();
   const { screenContext } = useBlueprintContext() || {};
+
+  const visibleDepts = useMemo(
+    () =>
+      DEPARTMENTS.filter((dept) => {
+        if (dept.id === "sales_marketing") return can.accessSales(role);
+        if (dept.id === "tender") return can.accessTender(role);
+        if (dept.id === "operations_manager") return can.accessOperations(role);
+        if (dept.id === "finance_manager") return can.accessFinance(role);
+        if (dept.id === "client_portal") return can.accessPortalAdmin(role);
+        return true;
+      }),
+    [role]
+  );
+
+  const visibleQuickAdd = useMemo(
+    () =>
+      QUICK_ADD_ITEMS.filter((item) => {
+        if (item.label === "RFQ" || item.label === "PO") return can.accessTender(role);
+        return true;
+      }),
+    [role]
+  );
 
   const [minimized, setMinimized] = useState(() => {
     try { return localStorage.getItem("sidebar_minimized") === "true"; } catch { return false; }
@@ -133,6 +156,7 @@ export default function AppShell() {
     if (location.pathname.startsWith("/operations")) return "operations_manager";
     if (location.pathname.startsWith("/sales")) return "sales_marketing";
     if (location.pathname.startsWith("/finance")) return "finance_manager";
+    if (location.pathname.startsWith("/portal-admin")) return "client_portal";
     return null;
   }, [location.pathname]);
 
@@ -235,30 +259,31 @@ export default function AppShell() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3">
-          {/* Home — top-level, above all departments */}
-          <NavLink
-            to="/home"
-            title={!showFull ? "Home" : undefined}
-            className={({ isActive }) =>
-              `group relative flex w-full items-center transition ${
-                showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"
-              } ${isActive ? "text-white" : "text-white/60 hover:text-white"}`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r bg-accent" />}
-                <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-white/15 text-white" : "group-hover:bg-white/10 text-white/70"}`}>
-                  {ICONS.home}
-                </span>
-                {showFull && <span className="text-[13px] font-semibold">Home</span>}
-              </>
-            )}
-          </NavLink>
+          {can.accessHome(role) ? (
+            <NavLink
+              to="/home"
+              title={!showFull ? "Home" : undefined}
+              className={({ isActive }) =>
+                `group relative flex w-full items-center transition ${
+                  showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"
+                } ${isActive ? "text-white" : "text-white/60 hover:text-white"}`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r bg-accent" />}
+                  <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-white/15 text-white" : "group-hover:bg-white/10 text-white/70"}`}>
+                    {ICONS.home}
+                  </span>
+                  {showFull && <span className="text-[13px] font-semibold">Home</span>}
+                </>
+              )}
+            </NavLink>
+          ) : null}
 
-          <div className="mx-3 my-2 border-t border-white/10" />
+          {visibleDepts.length > 0 ? <div className="mx-3 my-2 border-t border-white/10" /> : null}
 
-          {DEPARTMENTS.map((dept) => {
+          {visibleDepts.map((dept) => {
             const deptActive = activeDeptId === dept.id;
             const hasSubModules = dept.modules.length > 1;
 
@@ -336,6 +361,26 @@ export default function AppShell() {
 
         {/* Footer: settings + user */}
         <div className="border-t border-white/10 py-2">
+          {role === "admin" ? (
+            <NavLink
+              to="/settings/users"
+              title={!showFull ? "Users" : undefined}
+              className={({ isActive }) =>
+                `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
+                  isActive ? "text-white" : "text-white/50 hover:text-white"
+                }`
+              }
+            >
+              <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg group-hover:bg-white/10">
+                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+                </svg>
+              </span>
+              {showFull && <span className="text-[13px] font-semibold">Users</span>}
+            </NavLink>
+          ) : null}
           <NavLink
             to="/tender-manager/settings"
             title={!showFull ? "Settings" : undefined}
@@ -460,7 +505,7 @@ export default function AppShell() {
           <>
             <div className="fixed inset-0 z-[-1]" onClick={() => setQuickAddOpen(false)} />
             <div className="absolute bottom-14 right-0 w-44 rounded-lg border border-hairline bg-surface shadow-xl overflow-hidden">
-              {QUICK_ADD_ITEMS.map((item) => (
+              {visibleQuickAdd.map((item) => (
                 <button
                   key={item.label}
                   type="button"
@@ -487,7 +532,7 @@ export default function AppShell() {
       {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-surface md:hidden">
         <div className="flex justify-around px-1 py-2">
-          {DEPARTMENTS.map((dept) => {
+          {visibleDepts.map((dept) => {
             const active =
               (dept.id === "sales_marketing" && location.pathname.startsWith("/sales")) ||
               (dept.id === "tender" && location.pathname.startsWith("/tender-manager")) ||

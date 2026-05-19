@@ -116,7 +116,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
           )}
 
           <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Extracted data</h4>
+            <h4 className="section-label mb-2">Extracted data</h4>
             <dl className="space-y-1.5 text-sm">
               {[
                 ["Supplier", doc.supplier_name],
@@ -140,7 +140,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
 
           {(doc.extracted_address || doc.extracted_job_ref || doc.extracted_po_number) && (
             <section>
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Signals found in document</h4>
+              <h4 className="section-label mb-2">Signals found in document</h4>
               <dl className="space-y-1.5 text-sm">
                 {doc.extracted_address && <div className="flex gap-2"><dt className="w-28 text-muted">Address</dt><dd className="text-ink">{doc.extracted_address}</dd></div>}
                 {doc.extracted_job_ref && <div className="flex gap-2"><dt className="w-28 text-muted">Job ref</dt><dd className="text-ink">{doc.extracted_job_ref}</dd></div>}
@@ -150,7 +150,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
           )}
 
           <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Job match</h4>
+            <h4 className="section-label mb-2">Job match</h4>
             <div className="flex items-center gap-2 mb-3">
               <StatusChip status={doc.status} />
               <ConfidencePill method={doc.match_method} confidence={doc.match_confidence} />
@@ -168,7 +168,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
           </section>
 
           <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Notes</h4>
+            <h4 className="section-label mb-2">Notes</h4>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
