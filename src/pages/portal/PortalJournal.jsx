@@ -18,8 +18,7 @@ export default function PortalJournal() {
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
         <PortalEmptyState
-          icon="📷"
-          title="Your story starts soon"
+          title="No photos yet"
           message="Milestone moments and photos will appear here as your build progresses."
         />
       </div>

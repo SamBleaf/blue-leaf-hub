@@ -75,9 +75,8 @@ const ICONS = {
 
 const TENDER_MODULES = [
   { to: "/tender-manager/rfq-engine",        label: "RFQ Engine" },
-  { to: "/tender-manager/rfq-packages",      label: "RFQ Packages" },
+  { to: "/tender-manager/rfq-packages",      label: "Quote Tracker" },
   { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
-  { to: "/tender-manager/quote-tracker",     label: "Quote Tracker" },
   { to: "/tender-manager/board",             label: "Tender Board" },
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
 ];
@@ -252,12 +251,9 @@ export default function AppShell() {
         {/* Header */}
         <div className={`flex items-center border-b border-white/10 ${showFull ? "justify-between px-4 py-4" : "justify-center px-0 py-4"}`}>
           {showFull ? (
-            <div className="min-w-0">
-              <BrandLogo variant="primary" size="sm" />
-              <div className="mt-1 text-[10px] text-white/50 leading-tight">Blue Leaf Building</div>
-            </div>
+            <BrandLogo variant="primary-white" size="sidebar" alt="Blue Leaf Hub" />
           ) : (
-            <BrandLogo variant="icon" size="xs" alt="Blue Leaf Hub" />
+            <BrandLogo variant="icon-white" className="h-8 w-auto" alt="" />
           )}
           {isMobileOverlay ? (
             <button
@@ -483,7 +479,6 @@ export default function AppShell() {
             {ICONS.hamburger}
           </button>
           <div className="flex-1 min-w-0">
-            <BrandLogo variant="icon" size="xs" className="mb-0.5" alt="Blue Leaf Hub" />
             {activeDept && (
               <div className="text-[11px] text-muted leading-tight truncate">{activeDept.label}</div>
             )}

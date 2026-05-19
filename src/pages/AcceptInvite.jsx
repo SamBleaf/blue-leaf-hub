@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import AuthBrandScreen from "../components/brand/AuthBrandScreen.jsx";
+import BrandLoading from "../components/brand/BrandLoading.jsx";
 import { ROLE_LABELS, getRoleBadgeStyle } from "../lib/roles.js";
 
 export default function AcceptInvite() {
@@ -75,17 +77,13 @@ export default function AcceptInvite() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-page">
-        <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-hairline border-t-accent" role="status" />
-      </div>
-    );
+    return <BrandLoading message="Validating invitation…" />;
   }
 
   if (invalid) {
     return (
-      <div className="min-h-screen bg-page flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-surface rounded-card border border-hairline p-8 text-center shadow-md">
+      <AuthBrandScreen>
+        <div className="w-full bg-surface rounded-card border border-hairline p-8 text-center shadow-md">
           <div className="text-4xl mb-4">🔒</div>
           <h1 className="text-lg font-semibold text-ink mb-2">Invitation not valid</h1>
           <p className="text-sm text-muted">{invalid.message}</p>
@@ -93,14 +91,14 @@ export default function AcceptInvite() {
             Back to login
           </Link>
         </div>
-      </div>
+      </AuthBrandScreen>
     );
   }
 
   if (success) {
     return (
-      <div className="min-h-screen bg-page flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-surface rounded-card border border-hairline p-8 text-center shadow-md">
+      <AuthBrandScreen>
+        <div className="w-full bg-surface rounded-card border border-hairline p-8 text-center shadow-md">
           <div className="text-4xl mb-4">✅</div>
           <h1 className="text-lg font-semibold text-ink mb-2">Account created</h1>
           <p className="text-sm text-muted mb-6">Welcome to Blue Leaf Hub. You can now sign in.</p>
@@ -111,19 +109,14 @@ export default function AcceptInvite() {
             Sign in
           </Link>
         </div>
-      </div>
+      </AuthBrandScreen>
     );
   }
 
   return (
-    <div className="min-h-screen bg-page flex flex-col px-4 py-10 font-sans">
-      <div className="mx-auto w-full max-w-md">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-primary">Blue Leaf Hub</h1>
-          <p className="mt-1 text-sm text-muted">Set up your account</p>
-        </div>
-
-        <div className="bg-surface rounded-card border border-hairline px-6 py-8 shadow-md">
+    <AuthBrandScreen>
+        <p className="mb-6 text-center text-sm text-muted">Set up your account</p>
+        <div className="w-full bg-surface rounded-card border border-hairline px-6 py-8 shadow-md">
           <div className="mb-6 flex items-center gap-3 rounded-xl bg-page p-4 border border-hairline">
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-muted uppercase tracking-wide mb-0.5">
@@ -203,7 +196,6 @@ export default function AcceptInvite() {
             </button>
           </form>
         </div>
-      </div>
-    </div>
+    </AuthBrandScreen>
   );
 }

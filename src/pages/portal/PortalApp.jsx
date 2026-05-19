@@ -1,8 +1,12 @@
 import React, { Suspense, useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { verifyPortal, getPortalHome } from "../../lib/portalApi.js";
+import { PORTAL_CHROME } from "../../lib/portalUtils.js";
 import { PortalContext } from "./portalContext.js";
 import PortalPageSkeleton from "../../components/portal/PortalPageSkeleton.jsx";
+import BrandLoading from "../../components/brand/BrandLoading.jsx";
+import LeafWatermark from "../../components/brand/LeafWatermark.jsx";
+import PortalSidebarBrand from "../../components/brand/PortalSidebarBrand.jsx";
 
 const PortalHome = React.lazy(() => import("./PortalHome.jsx"));
 const PortalTimeline = React.lazy(() => import("./PortalTimeline.jsx"));
@@ -95,23 +99,20 @@ export default function PortalApp() {
   }, [token]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-[#F6F4F0] flex items-center justify-center">
-        <p className="text-[#2C3A2A] font-bold animate-pulse">Blue Leaf Building</p>
-      </div>
-    );
+    return <BrandLoading message="Preparing your project portal…" className="bg-[#F6F4F0]" />;
   }
 
   if (notFound || !project) {
     return (
-      <div className="min-h-screen bg-[#F6F4F0] flex flex-col items-center justify-center px-4 text-center">
-        <div className="text-5xl mb-6">🏗️</div>
-        <h1 className="text-2xl font-bold text-ink mb-2">Portal not found</h1>
-        <p className="text-muted text-base max-w-sm">
-          This link may have expired or the portal isn&apos;t active yet. Contact your builder for a
-          new link.
-        </p>
-        <p className="mt-6 text-sm text-muted">Blue Leaf Building</p>
+      <div className="relative min-h-screen bg-[#F6F4F0] flex flex-col items-center justify-center px-4 text-center overflow-hidden">
+        <div className="relative z-10 flex flex-col items-center">
+          <PortalSidebarBrand address={null} />
+          <h1 className="text-2xl font-bold text-ink mb-2">Portal not found</h1>
+          <p className="text-muted text-base max-w-sm">
+            This link may have expired or the portal isn&apos;t active yet. Contact your builder for a
+            new link.
+          </p>
+        </div>
       </div>
     );
   }
@@ -132,15 +133,28 @@ export default function PortalApp() {
   return (
     <PortalContext.Provider value={ctx}>
       <div className="min-h-screen bg-[#F6F4F0] md:flex">
-        <aside className="hidden md:flex md:flex-col md:w-56 md:fixed md:inset-y-0 bg-[#2C3A2A] text-white">
+        <aside
+          className="hidden md:flex md:flex-col md:w-56 md:fixed md:inset-y-0 text-white"
+          style={{ backgroundColor: PORTAL_CHROME.base }}
+        >
           <div className="p-5 border-b border-white/10">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/50 mb-1">Blue Leaf Building</p>
-            <p className="font-bold text-white leading-snug truncate">{project.address}</p>
+            <PortalSidebarBrand address={project.address} />
           </div>
           <SidebarNav token={token} pendingCount={pendingCount} />
         </aside>
 
-        <main className="flex-1 md:ml-56 min-h-screen bg-[#F6F4F0]">
+        <header
+          className="md:hidden sticky top-0 z-30 text-white shadow-sm"
+          style={{ backgroundColor: PORTAL_CHROME.base }}
+        >
+          <div className="border-b border-white/10 px-4 py-3">
+            <PortalSidebarBrand address={project.address} />
+          </div>
+        </header>
+
+        <main className="relative flex-1 md:ml-56 min-h-screen bg-[#F6F4F0] overflow-hidden">
+          <LeafWatermark position="bottom-right" />
+          <div className="relative z-10">
           <Suspense fallback={<PortalPageSkeleton />}>
             <Routes>
               <Route index element={<Navigate to="home" replace />} />
@@ -154,6 +168,7 @@ export default function PortalApp() {
               <Route path="conversations" element={<PortalConversations />} />
             </Routes>
           </Suspense>
+          </div>
         </main>
 
         <nav className="fixed bottom-0 left-0 right-0 bg-surface border-t border-hairline z-40 md:hidden flex justify-around">

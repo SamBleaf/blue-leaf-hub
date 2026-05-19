@@ -35,3 +35,41 @@ body {
 .badge-warning { @apply inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning; }
 .badge-success { @apply inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success; }
 .badge-muted   { @apply inline-flex items-center gap-1 rounded-full bg-page px-2 py-0.5 text-xs font-semibold text-muted; }
+
+/* Blue Leaf brand watermark — subtle breathe (no spin/bounce) */
+@keyframes brand-watermark-breathe {
+  0%,
+  100% {
+    opacity: 0.02;
+  }
+  50% {
+    opacity: 0.04;
+  }
+}
+
+.brand-watermark-breathe {
+  animation: brand-watermark-breathe 9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-watermark-breathe {
+    animation: none;
+  }
+}
+
+/* Brand PNGs ship on black — knock out the matte on light / tinted surfaces */
+.brand-knockout {
+  mix-blend-mode: screen;
+}
+
+/* Portal background leaf — cream / white page */
+.brand-mark-on-light {
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 6px 28px rgba(0, 108, 155, 0.38));
+}
+
+/* Portal background leaf — primary blue hero band */
+.brand-mark-on-blue {
+  mix-blend-mode: soft-light;
+  filter: drop-shadow(0 6px 28px rgba(255, 255, 255, 0.35));
+}

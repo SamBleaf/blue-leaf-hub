@@ -6,6 +6,8 @@ import {
   getSupabase,
   supabaseConfigured,
 } from "../lib/supabaseClient.js";
+import AuthBrandScreen from "../components/brand/AuthBrandScreen.jsx";
+import BrandLoading from "../components/brand/BrandLoading.jsx";
 
 /** Supabase redirects after confirm with `#access_token=…&type=signup` (etc.) — surface success then clean URL */
 function migrateAuthHashToQuery() {
@@ -72,21 +74,11 @@ export default function Login() {
   const showSkeleton = supabaseConfigured && authLoading && !session;
 
   if (showSkeleton) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-page">
-        <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-hairline border-t-accent" />
-      </div>
-    );
+    return <BrandLoading message="Loading session…" />;
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-page px-4 py-10 font-sans">
-      <div className="mx-auto flex w-full max-w-md flex-col items-center">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-primary">Blue Leaf Hub</h1>
-          <p className="mt-1 text-sm text-muted">Blue Leaf Building · Adelaide</p>
-        </div>
-
+    <AuthBrandScreen>
         {showVerified ? (
           <div
             role="status"
@@ -181,7 +173,6 @@ export default function Login() {
             </a>
           </p>
         </div>
-      </div>
-    </div>
+    </AuthBrandScreen>
   );
 }

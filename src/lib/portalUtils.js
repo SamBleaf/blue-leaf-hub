@@ -1,3 +1,10 @@
+/** Client portal chrome — Blue Leaf primary blue and darker steps (same relationship as former green palette). */
+export const PORTAL_CHROME = {
+  base: "#006c9b",
+  mid: "#005a82",
+  dark: "#004a6b"
+};
+
 const AUD = new Intl.NumberFormat("en-AU", {
   style: "currency",
   currency: "AUD",

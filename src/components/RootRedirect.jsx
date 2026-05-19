@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
+import BrandLoading from "./brand/BrandLoading.jsx";
 import { useAuth } from "../lib/useAuth.js";
 import { getDefaultRoute } from "../lib/roles.js";
 import { supabaseConfigured } from "../lib/supabaseClient.js";
@@ -7,7 +8,8 @@ import { useRole } from "../lib/useRole.js";
 
 function RolePicker({ onPick }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-page px-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-10">
+      <div className="flex w-full max-w-sm flex-col items-center gap-6">
       <div className="text-center">
         <h1 className="text-xl font-bold text-ink">How are you using Blue Leaf Hub today?</h1>
         <p className="mt-2 text-sm text-muted">Choose your view — you can switch any time.</p>
@@ -30,6 +32,7 @@ function RolePicker({ onPick }) {
           <p className="mt-1 text-sm text-muted">Field-first view — today&apos;s tasks, quick diary entries, and voice memos. Optimised for mobile.</p>
         </button>
       </div>
+      </div>
     </div>
   );
 }
@@ -42,12 +45,7 @@ export default function RootRedirect() {
   if (!supabaseConfigured) return <Navigate to="/home" replace />;
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-page">
-        <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-hairline border-t-accent" aria-hidden />
-        <p className="text-sm text-muted">Loading…</p>
-      </div>
-    );
+    return <BrandLoading message="Loading…" />;
   }
 
   if (!session) return <Navigate to="/login" replace />;

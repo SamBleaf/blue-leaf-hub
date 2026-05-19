@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
 import { getPortalHome } from "../../lib/portalApi.js";
-import { greetingByHour, formatPortalDate } from "../../lib/portalUtils.js";
+import { formatPortalDate } from "../../lib/portalUtils.js";
 import { usePortalData } from "../../hooks/usePortalData.js";
 import { usePortal } from "./portalContext.js";
 import PortalPageSkeleton from "../../components/portal/PortalPageSkeleton.jsx";
 import PortalEmptyState from "../../components/portal/PortalEmptyState.jsx";
-import ProgressBar from "../../components/portal/ProgressBar.jsx";
+import PortalHomeHero from "../../components/portal/PortalHomeHero.jsx";
 import WeeklyUpdateCard from "../../components/portal/WeeklyUpdateCard.jsx";
 import PhotoGrid from "../../components/portal/PhotoGrid.jsx";
 import TodaySummaryCard from "../../components/portal/TodaySummaryCard.jsx";
@@ -22,7 +22,6 @@ export default function PortalHome() {
     );
   }
 
-  const name = project?.clientName || "there";
   const pct = data.completionPercent ?? data.completionPct ?? 0;
   const scheduleStatus =
     data.scheduleStatus ||
@@ -30,17 +29,24 @@ export default function PortalHome() {
   const showSummary =
     data.currentPhase != null || data.daysToCompletion != null || data.nextMilestone;
 
+  const hasWeek = Boolean(data.weekUpdate);
+  const hasDecisions = (data.pendingDecisions?.length || 0) > 0;
+  const hasUpcoming =
+    (data.upcomingMilestones?.length || 0) > 0 || (data.upcomingSiteWalks?.length || 0) > 0;
+  const hasPhotos = (data.recentPhotos?.length || 0) > 0;
+  const hasFeed = hasWeek || hasDecisions || hasUpcoming || hasPhotos;
+
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4 pb-24 md:pb-8">
-      <h1 className="text-2xl font-bold text-ink">
-        {greetingByHour()}, {name}.
-      </h1>
-      <p className="text-base text-muted mt-1">{pct}% complete</p>
-      <div className="mt-3">
-        <ProgressBar percent={pct} />
-      </div>
+    <div className="max-w-2xl mx-auto py-6 px-4 pb-24 md:py-8 md:pb-8">
+      <PortalHomeHero
+        clientName={project?.clientName}
+        address={project?.address}
+        percent={pct}
+        completionDateEst={project?.completionDateEst}
+      />
 
       <ConfidenceCard status={scheduleStatus} />
+
       {showSummary ? (
         <TodaySummaryCard
           currentPhase={data.currentPhase}
@@ -48,6 +54,16 @@ export default function PortalHome() {
           nextMilestoneLabel={data.nextMilestone}
           scheduleStatus={scheduleStatus}
         />
+      ) : null}
+
+      {!hasFeed ? (
+        <section className="mt-8 rounded-2xl border border-dashed border-hairline bg-surface/80 px-5 py-6 text-center">
+          <p className="text-sm font-semibold text-ink">Your portal is live</p>
+          <p className="mt-2 text-sm text-muted leading-relaxed max-w-md mx-auto">
+            Sam and the team will add weekly site updates, photos, and milestones here as your build
+            progresses. Check back after the next site visit.
+          </p>
+        </section>
       ) : null}
 
       {data.weekUpdate && (

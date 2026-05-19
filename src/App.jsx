@@ -8,7 +8,6 @@ import { AuthProvider } from "./lib/AuthContext.jsx";
 import { BlueprintProvider } from "./lib/BlueprintContext.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
-import QuoteTracker from "./pages/QuoteTracker.jsx";
 import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
@@ -84,7 +83,7 @@ export default function App() {
                   <Route path="rfq-packages" element={<RfqPackageList />} />
                   <Route path="rfq-packages/:packageId" element={<RfqPackageDetail />} />
                   <Route path="subcontractors" element={<Subcontractors />} />
-                  <Route path="quote-tracker" element={<QuoteTracker />} />
+                  <Route path="quote-tracker" element={<Navigate to="/tender-manager/rfq-packages" replace />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="board" element={<TenderBoard />} />
                   <Route path="board/:jobId" element={<TenderDetail />} />
