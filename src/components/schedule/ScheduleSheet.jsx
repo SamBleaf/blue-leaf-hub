@@ -19,7 +19,7 @@ function EditableCell({ value, type = "text", onCommit, options }) {
   );
 }
 
-export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedIds = [], onSelectIds, onPatchTask, onOpenTask, onAddTask, onBulkDelete }) {
+export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedIds = [], onSelectIds, onPatchTask, _onOpenTask, onAddTask, onBulkDelete }) {
   const today = new Date().toISOString().slice(0, 10);
   const { order, groups } = groupTasksByPhase(tasks);
   const selected = new Set(selectedIds);
@@ -78,7 +78,7 @@ export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedId
                             (task.end_date && task.end_date < today) ? "bg-red-400" :
                             (task.percent_complete||0) > 0 ? "bg-blue-400" : "bg-slate-300"
                           }`} />
-                          <button type="button" onClick={() => onOpenTask(task)} className="font-semibold text-ink hover:text-primary">{task.name}</button>
+                          <EditableCell value={task.name} onCommit={(v) => v.trim() && onPatchTask(task.id, { name: v.trim() })} />
                         </div>
                       </td>
                       <td className="border-b border-hairline px-2 py-1"><EditableCell type="number" value={task.duration_days} onCommit={(v) => onPatchTask(task.id, { duration_days: v })} /></td>

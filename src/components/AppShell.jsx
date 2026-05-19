@@ -146,6 +146,7 @@ export default function AppShell() {
   const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [projectCtx, setProjectCtx] = useState(null);
+  const [allProjects, setAllProjects] = useState([]);
 
   // Touch swipe refs
   const touchStartX = useRef(null);
@@ -181,6 +182,23 @@ export default function AppShell() {
     fetchCtx();
     return () => { cancelled = true; };
   }, [activeProjectId]);
+
+  // Fetch all projects for the switcher dropdown
+  useEffect(() => {
+    if (!activeDeptId || activeDeptId !== "operations_manager") return;
+    let cancelled = false;
+    async function fetchAll() {
+      try {
+        const { getSupabase, supabaseConfigured } = await import("../lib/supabaseClient.js");
+        if (!supabaseConfigured) return;
+        const sb = getSupabase();
+        const { data } = await sb.from("projects").select("id, address").order("address");
+        if (!cancelled && data) setAllProjects(data);
+      } catch { /* non-fatal */ }
+    }
+    fetchAll();
+    return () => { cancelled = true; };
+  }, [activeDeptId]);
 
   // Close quick-add on navigation
   useEffect(() => { setQuickAddOpen(false); }, [location.pathname]);
@@ -481,11 +499,23 @@ export default function AppShell() {
       {/* ── Project context banner (desktop only, inside project routes) ── */}
       {activeProjectId && projectCtx ? (
         <div className="hidden md:flex sticky top-0 z-10 items-center gap-3 border-b border-hairline bg-surface/95 backdrop-blur px-6 py-2">
-          <NavLink to="/operations" className="text-xs font-semibold text-muted hover:text-primary">Operations</NavLink>
-          <span className="text-xs text-hairline">/</span>
-          <NavLink to={`/operations/${activeProjectId}`} className="text-xs font-semibold text-ink truncate max-w-xs hover:text-primary">
-            {projectCtx.address}
-          </NavLink>
+          <NavLink to="/operations" className="text-xs font-semibold text-muted hover:text-primary shrink-0">Operations</NavLink>
+          <span className="text-xs text-hairline shrink-0">/</span>
+          {allProjects.length > 1 ? (
+            <select
+              value={activeProjectId}
+              onChange={(e) => navigate(`/operations/${e.target.value}`)}
+              className="max-w-xs truncate rounded border border-transparent bg-transparent text-xs font-semibold text-ink hover:border-hairline focus:border-primary focus:outline-none px-1 py-0.5 cursor-pointer"
+            >
+              {allProjects.map((p) => (
+                <option key={p.id} value={p.id}>{p.address}</option>
+              ))}
+            </select>
+          ) : (
+            <NavLink to={`/operations/${activeProjectId}`} className="text-xs font-semibold text-ink truncate max-w-xs hover:text-primary">
+              {projectCtx.address}
+            </NavLink>
+          )}
           <div className="ml-auto flex items-center gap-2">
             <NavLink to={`/operations/${activeProjectId}/schedule`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>Schedule</NavLink>
             <NavLink to={`/operations/${activeProjectId}/whs`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>WHS</NavLink>

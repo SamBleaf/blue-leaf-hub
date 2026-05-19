@@ -385,7 +385,7 @@ export default function OperationsList() {
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-hairline bg-page section-label">
                   <tr>
-                    {["Project", "Status", "Progress", "Next milestone", "Overdue", "Trades", "Won", "BX"].map((h) => (
+                    {["Address", "Stage", "Progress", "Next Milestone", "Risk", "Trades", "Won", "BX"].map((h) => (
                       <th key={h} className="px-3 py-2.5">{h}</th>
                     ))}
                   </tr>

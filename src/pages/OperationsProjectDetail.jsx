@@ -241,6 +241,24 @@ export default function OperationsProjectDetail() {
       alerts.push({ level: "warning", title: `${overdueTasks.length} tasks past their end date`, detail: "Schedule may need rebaselining", linkTo: `/operations/${projectId}/schedule`, linkLabel: "Schedule" });
     }
 
+    const OUTDOOR_PHASES = new Set(["site_prep", "site_slab", "substructure", "frame", "roofing", "roof", "lock_up"]);
+    const OUTDOOR_TRADES = new Set(["framing", "roofing", "concreting", "excavation", "bricklaying", "external cladding", "rendering"]);
+    const thisWeek = new Date(); thisWeek.setDate(thisWeek.getDate() + 7);
+    const thisWeekStr = thisWeek.toISOString().slice(0, 10);
+    const outdoorThisWeek = tasks.filter((t) => {
+      const phase = (t.phase || "").toLowerCase();
+      const trade = (t.assignee_trade || t.trade || "").toLowerCase();
+      return (OUTDOOR_PHASES.has(phase) || OUTDOOR_TRADES.has(trade)) && t.status !== "complete" && t.start_date && t.start_date <= thisWeekStr && t.end_date && t.end_date >= today;
+    });
+    if (outdoorThisWeek.length > 0) {
+      alerts.push({ level: "info", title: `${outdoorThisWeek.length} outdoor task${outdoorThisWeek.length !== 1 ? "s" : ""} scheduled this week`, detail: "Check BOM forecast — rain may affect frame, roofing and external works" });
+    }
+
+    const idleLabour = tasks.filter((t) => t.start_date && t.start_date < today && t.status === "in_progress" && (t.percent_complete || 0) === 0);
+    if (idleLabour.length > 0) {
+      alerts.push({ level: "warning", title: `${idleLabour.length} in-progress task${idleLabour.length !== 1 ? "s" : ""} with no logged progress`, detail: "Possible idle labour — update task completion or status", linkTo: `/operations/${projectId}/schedule`, linkLabel: "Schedule" });
+    }
+
     if (alerts.length === 0) {
       alerts.push({ level: "success", title: "No active alerts", detail: "Schedule, procurement and compliance look good" });
     }

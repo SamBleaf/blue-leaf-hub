@@ -344,7 +344,7 @@ export default function UserManagement() {
 
       {tab === "invitations" && !loading ? (
         <>
-          <div className="bg-surface rounded-2xl border border-hairline p-6 mb-6">
+          <div className="bg-surface rounded-card border border-hairline p-6 mb-6">
             <h3 className="text-sm font-semibold text-ink mb-4">Send invitation</h3>
             <form onSubmit={handleInvite} className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="flex-1">
