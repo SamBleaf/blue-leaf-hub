@@ -4,14 +4,13 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
 import { embedQueryVector } from '../lib/voyageEmbeddings.js';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) return null;
-  return createClient(url, key, { realtime: { transport: WebSocket } });
+  return createClient(url, key);
 }
 
 function formatVectorRows(rows) {
@@ -26,8 +25,14 @@ function formatVectorRows(rows) {
     .join('\n\n---\n\n');
 }
 
+function isVectorSearchEnabled() {
+  const optIn =
+    process.env.BLUEPRINT_USE_VOYAGE === 'true' || process.env.BLUEPRINT_USE_VOYAGE === '1';
+  return optIn && Boolean(process.env.VOYAGE_API_KEY?.trim());
+}
+
 async function vectorSimilaritySearch(supabase, query, limit) {
-  if (!process.env.VOYAGE_API_KEY?.trim()) return [];
+  if (!isVectorSearchEnabled()) return [];
 
   try {
     const embedding = await embedQueryVector(query);
@@ -160,6 +165,7 @@ export async function checkKnowledgeBase() {
     available: true,
     chunkCount: fts.count ?? 0,
     vectorChunkCount: vecOk ? vec.count ?? 0 : null,
-    vectorEnabled: Boolean(process.env.VOYAGE_API_KEY?.trim() && vecOk && (vec.count ?? 0) > 0),
+    vectorEnabled: Boolean(isVectorSearchEnabled() && vecOk && (vec.count ?? 0) > 0),
+    ftsEnabled: ftsOk,
   };
 }

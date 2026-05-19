@@ -359,7 +359,7 @@ function AddTradeCategoryModal({ onClose, onSaved }) {
   );
 }
 
-function EditModal({ sub, onClose, onSaved, tradesList, colourMap }) {
+function EditModal({ sub, onClose, onSaved, tradesList }) {
   const [form, setForm] = useState({
     business_name: sub.business_name || "",
     email: sub.email || "",

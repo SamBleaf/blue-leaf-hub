@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import ScheduleCalendar from "../components/schedule/ScheduleCalendar.jsx";
-import ScheduleDashboard from "../components/schedule/ScheduleDashboard.jsx";
+import { Link, useParams } from "react-router-dom";
 import ScheduleGantt from "../components/schedule/ScheduleGantt.jsx";
 import ScheduleSheet from "../components/schedule/ScheduleSheet.jsx";
 import ScheduleTemplateModal from "../components/schedule/ScheduleTemplateModal.jsx";
@@ -13,7 +11,6 @@ import DependencyMap from "../components/schedule/DependencyMap.jsx";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import {
-  VIEW_DASHBOARD,
   VIEW_GANTT,
   VIEW_DELAYS,
   VIEW_MAP,
@@ -55,26 +52,15 @@ function blankTask(projectId, phase = "general") {
   });
 }
 
-function analysisToCards(text) {
-  return String(text || "")
-    .split(/\n+/)
-    .map((line) => line.replace(/^[-*•\d.\s]+/, "").trim())
-    .filter(Boolean)
-    .slice(0, 8)
-    .map((body, i) => ({ id: `${i}-${body.slice(0, 32)}`, title: body.startsWith("⚠") ? "Risk flag" : "Schedule insight", body }));
-}
-
 export default function ScheduleManager() {
   const { projectId } = useParams();
-  const navigate = useNavigate();
   const { setScreenContext } = useBlueprintContext() || {};
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [dashboard, setDashboard] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [subcontractors, setSubcontractors] = useState([]);
   const [phaseLabels, setPhaseLabels] = useState({});
-  const [currentView, setCurrentView] = useState(VIEW_DASHBOARD);
+  const [currentView, setCurrentView] = useState(VIEW_GANTT);
   const [zoom, setZoom] = useState("Month");
   const [showCritical, setShowCritical] = useState(true);
   const [lookahead, setLookahead] = useState(false);
@@ -86,8 +72,6 @@ export default function ScheduleManager() {
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [useLegacyGen, setUseLegacyGen] = useState(false);
   const [excludeDemo, setExcludeDemo] = useState(false);
-  const [analysisCards, setAnalysisCards] = useState([]);
-  const [dismissedCards, setDismissedCards] = useState([]);
   const [taskAdvice, setTaskAdvice] = useState("");
   const [ripple, setRipple] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -118,15 +102,6 @@ export default function ScheduleManager() {
     });
     return () => setScreenContext?.(null);
   }, [setScreenContext, projectId, project?.address, currentView, selectedTaskId]);
-
-  useEffect(() => {
-    const key = `blhub_schedule_analysis_dismissed_${projectId}`;
-    try {
-      setDismissedCards(JSON.parse(localStorage.getItem(key) || "[]"));
-    } catch {
-      setDismissedCards([]);
-    }
-  }, [projectId]);
 
   const loadProject = useCallback(async () => {
     if (!supabaseConfigured || !projectId) return;
@@ -181,12 +156,8 @@ export default function ScheduleManager() {
 
   const loadDashboard = useCallback(async () => {
     try {
-      const res = await fetch(`/api/schedule/${projectId}/dashboard`);
-      const j = await readApiJson(res);
-      if (res.ok && j.ok) setDashboard(j.dashboard || null);
-    } catch {
-      setDashboard(null);
-    }
+      await fetch(`/api/schedule/${projectId}/dashboard`);
+    } catch { /* non-fatal */ }
   }, [projectId]);
 
   const loadTemplates = useCallback(async () => {
@@ -364,8 +335,7 @@ export default function ScheduleManager() {
       });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Analysis failed");
-      setAnalysisCards(analysisToCards(j.analysis || ""));
-      setCurrentView(VIEW_DASHBOARD);
+      setCurrentView(VIEW_GANTT);
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -643,12 +613,6 @@ export default function ScheduleManager() {
     }
   }
 
-  function dismissAnalysisCard(id) {
-    const next = [...new Set([...dismissedCards, id])];
-    setDismissedCards(next);
-    localStorage.setItem(`blhub_schedule_analysis_dismissed_${projectId}`, JSON.stringify(next));
-  }
-
   function openTask(taskOrId) {
     const task = typeof taskOrId === "string" ? tasks.find((t) => t.id === taskOrId) : taskOrId;
     if (task) {
@@ -660,13 +624,6 @@ export default function ScheduleManager() {
   function addTask(phase) {
     setTaskAdvice("");
     setEditTask(blankTask(projectId, phase || tasks[0]?.phase || "general"));
-  }
-
-  function orderNow(task) {
-    const params = new URLSearchParams();
-    if (task.procurement_supplier) params.set("trade", task.procurement_supplier);
-    if (task.procurement_item) params.set("scope", task.procurement_item);
-    navigate(`/tender-manager/rfq-engine?${params.toString()}`);
   }
 
   return (
@@ -725,9 +682,6 @@ export default function ScheduleManager() {
         </div>
       ) : null}
 
-      {!loading && tasks.length && currentView === VIEW_DASHBOARD ? (
-        <ScheduleDashboard tasks={tasks} dashboard={dashboard} phaseLabels={phaseLabels} analysisCards={analysisCards} dismissedCards={dismissedCards} onDismissAnalysis={dismissAnalysisCard} onOpenTask={openTask} onOrderNow={orderNow} />
-      ) : null}
       {!loading && tasks.length && currentView === VIEW_GANTT ? (
         <ScheduleGantt
           tasks={tasks}
@@ -751,9 +705,6 @@ export default function ScheduleManager() {
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (
         <ScheduleSheet tasks={tasks} phaseLabels={phaseLabels} selectedIds={selectedIds} onSelectIds={setSelectedIds} onPatchTask={(id, patch) => patchTask(id, patch)} onOpenTask={openTask} onAddTask={addTask} onBulkDelete={bulkDelete} />
-      ) : null}
-      {!loading && tasks.length && currentView === "calendar" ? (
-        <ScheduleCalendar tasks={tasks} filterTrade={filterTrade} onOpenTask={openTask} />
       ) : null}
       {!loading && currentView === VIEW_DELAYS ? (
         <DelaysTab

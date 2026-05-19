@@ -8,10 +8,8 @@ export const VIEW_DELAYS = "delays";
 export const VIEW_MAP = "map";
 
 export const SCHEDULE_VIEWS = [
-  { id: VIEW_DASHBOARD, label: "Dashboard" },
   { id: VIEW_GANTT, label: "Gantt" },
   { id: VIEW_SHEET, label: "Sheet" },
-  { id: VIEW_CALENDAR, label: "Calendar" },
   { id: VIEW_DELAYS, label: "Delays" },
   { id: VIEW_MAP, label: "Dep Map" },
 ];
@@ -321,6 +319,22 @@ export function tasksActiveInWindow(tasks, start, end) {
   });
 }
 
+// Returns true if task B depends on predecessor A (checks both task_dependencies and legacy depends_on)
+function hasDependencyOn(task, predId) {
+  if ((task.depends_on || []).includes(predId)) return true;
+  return (task.task_dependencies || []).some((d) => d.taskId === predId);
+}
+
+// Compute minStart / minEnd for a single typed dependency given the predecessor's current dates
+function getConstraint(dep, pred) {
+  const lag = Number(dep.lag) || 0;
+  switch (dep.type) {
+    case "SS": return { minStart: addDaysSafe(pred.start_date, lag), minEnd: null };
+    case "FF": return { minStart: null, minEnd: addDaysSafe(pred.end_date, lag) };
+    default:   return { minStart: addDaysSafe(pred.end_date, 1 + lag), minEnd: null }; // FS
+  }
+}
+
 export function downstreamTaskIds(tasksInput, rootId) {
   const tasks = (tasksInput || []).map(normalizeTask);
   const downstream = new Set();
@@ -329,7 +343,7 @@ export function downstreamTaskIds(tasksInput, rootId) {
     const id = queue.shift();
     for (const task of tasks) {
       if (downstream.has(task.id)) continue;
-      if ((task.depends_on || []).includes(id)) {
+      if (hasDependencyOn(task, id)) {
         downstream.add(task.id);
         queue.push(task.id);
       }
@@ -351,17 +365,34 @@ export function previewRipple(tasksInput, taskId, newStartDate) {
   root.order_by_date = root.procurement_order_by || root.order_by_date;
   byId.set(root.id, root);
 
-  const affected = [{ id: root.id, name: root.name, old_start_date: tasks.find((t) => t.id === root.id)?.start_date || "", new_start_date: root.start_date, old_end_date: tasks.find((t) => t.id === root.id)?.end_date || "", new_end_date: root.end_date }];
+  const origById = new Map(tasks.map((t) => [t.id, t]));
+  const affected = [{ id: root.id, name: root.name, old_start_date: origById.get(root.id)?.start_date || "", new_start_date: root.start_date, old_end_date: origById.get(root.id)?.end_date || "", new_end_date: root.end_date }];
   const queue = [root.id];
   while (queue.length) {
     const cid = queue.shift();
-    const parent = byId.get(cid);
-    if (!parent?.end_date) continue;
     for (const task of byId.values()) {
-      if (task.id === cid || !(task.depends_on || []).includes(cid)) continue;
-      const predEnds = (task.depends_on || []).map((id) => byId.get(id)?.end_date).filter(Boolean);
-      if (!predEnds.length) continue;
-      const requiredStart = addDaysSafe(predEnds.sort().at(-1), 1);
+      if (task.id === cid || !hasDependencyOn(task, cid)) continue;
+
+      // Collect constraints from task_dependencies (typed); fall back to depends_on as FS+0
+      const deps = (task.task_dependencies || []).length > 0
+        ? task.task_dependencies
+        : (task.depends_on || []).map((id) => ({ taskId: id, type: "FS", lag: 0 }));
+
+      const minStarts = [];
+      for (const dep of deps) {
+        const pred = byId.get(dep.taskId);
+        if (!pred) continue;
+        const { minStart, minEnd } = getConstraint(dep, pred);
+        if (minStart) minStarts.push(minStart);
+        if (minEnd) {
+          // FF/SF: convert minEnd to minStart using task duration
+          const dur = Math.max(0, Number(task.duration_days) || 0);
+          minStarts.push(addDaysSafe(minEnd, -(dur - 1)));
+        }
+      }
+      if (!minStarts.length) continue;
+
+      const requiredStart = minStarts.sort().at(-1);
       if (!task.start_date || task.start_date < requiredStart) {
         const old = { ...task };
         task.start_date = requiredStart;
@@ -376,6 +407,73 @@ export function previewRipple(tasksInput, taskId, newStartDate) {
   }
 
   return { affected, updatedTasks: tasks.map((t) => byId.get(t.id) || t) };
+}
+
+// Returns a Set of task IDs on the critical path (float === 0).
+// Uses task_dependencies (typed) with fallback to depends_on (FS).
+export function computeCriticalPath(tasksInput) {
+  const tasks = (tasksInput || []).map(normalizeTask).filter((t) => t.start_date && t.end_date);
+  if (!tasks.length) return new Set();
+
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const dur = (t) => Math.max(0, Number(t.duration_days) || 0);
+
+  // Forward pass: earliest finish
+  const ef = new Map();
+  const es = new Map();
+  for (const t of tasks) {
+    const deps = (t.task_dependencies || []).length > 0
+      ? t.task_dependencies
+      : (t.depends_on || []).map((id) => ({ taskId: id, type: "FS", lag: 0 }));
+    let earliest = t.start_date;
+    for (const dep of deps) {
+      const pred = byId.get(dep.taskId);
+      if (!pred) continue;
+      const { minStart } = getConstraint(dep, pred);
+      if (minStart && minStart > earliest) earliest = minStart;
+    }
+    es.set(t.id, earliest);
+    ef.set(t.id, addDaysSafe(earliest, dur(t) - 1) || earliest);
+  }
+
+  // Project end = max of all earliest finishes
+  const projectEnd = [...ef.values()].filter(Boolean).sort().at(-1);
+  if (!projectEnd) return new Set();
+
+  // Backward pass: latest start
+  const lf = new Map();
+  const ls = new Map();
+  for (const t of [...tasks].reverse()) {
+    // Latest finish = projectEnd unless a successor constrains it
+    let latest = projectEnd;
+    for (const succ of tasks) {
+      const deps = (succ.task_dependencies || []).length > 0
+        ? succ.task_dependencies
+        : (succ.depends_on || []).map((id) => ({ taskId: id, type: "FS", lag: 0 }));
+      for (const dep of deps) {
+        if (dep.taskId !== t.id) continue;
+        const succLS = ls.get(succ.id);
+        if (!succLS) continue;
+        getConstraint(dep, t);
+        // Constrain our LF: our EF must allow succ to start at succLS
+        // FS: LF = succLS - 1 - lag; SS: LF unconstrained by this type
+        if (dep.type === "FS" || !dep.type) {
+          const bound = addDaysSafe(succLS, -1 - (Number(dep.lag) || 0));
+          if (bound && bound < latest) latest = bound;
+        }
+      }
+    }
+    lf.set(t.id, latest);
+    ls.set(t.id, addDaysSafe(latest, -(dur(t) - 1)) || latest);
+  }
+
+  // Float = LS - ES; critical if float === 0
+  const critical = new Set();
+  for (const t of tasks) {
+    const float = es.get(t.id) && ls.get(t.id) && ls.get(t.id) <= es.get(t.id) ? 0 : 1;
+    if (float === 0) critical.add(t.id);
+  }
+  return critical;
 }
 
 export function templateTaskToScheduleRow(templateTask, projectId, startDate) {

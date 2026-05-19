@@ -101,9 +101,11 @@ function ProjectRow({ project, colorIdx }) {
           <span className="text-xs text-muted">{schedule?.overall || 0}%</span>
         </div>
       </td>
-      <td className="px-3 py-2.5 text-xs text-muted">{schedule?.done || 0}/{schedule?.total || 0}</td>
+      <td className="px-3 py-2.5 text-xs text-muted truncate max-w-[160px]">
+        {schedule?.nextMilestone ? <span className="font-medium text-ink">{schedule.nextMilestone.name}</span> : <span className="text-muted">—</span>}
+      </td>
       <td className="px-3 py-2.5 text-xs text-muted">
-        {schedule?.overdue > 0 ? <span className="text-danger font-semibold">{schedule.overdue}</span> : "—"}
+        {schedule?.overdue > 0 ? <span className="text-danger font-semibold">{schedule.overdue}</span> : <span className="text-green-600">—</span>}
       </td>
       <td className="px-3 py-2.5 text-xs text-muted">{schedule?.activeTrades?.length || 0}</td>
       <td className="px-3 py-2.5 text-xs text-muted">{won}</td>
@@ -233,7 +235,7 @@ export default function OperationsList() {
   const [tradeConflicts, setTradeConflicts] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [cardMode, setCardMode] = useState("card"); // "card" | "list"
+  const [cardMode, setCardMode] = useState("list"); // "card" | "list"
   const [filterTrade, setFilterTrade] = useState("");
   const [ganttOpen, setGanttOpen] = useState(() => {
     try { return localStorage.getItem("blhub_global_gantt_open") !== "false"; } catch { return true; }
@@ -292,9 +294,8 @@ export default function OperationsList() {
   return (
     <div className="space-y-6 pb-24">
       <header>
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Operations Manager</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-primary">Active projects</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted">Won tenders appear here. Click any project to manage its schedule, site diary, and compliance.</p>
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Active projects</h1>
+        <p className="mt-0.5 text-sm text-muted">Won tenders appear here. Click any project to open its hub.</p>
       </header>
 
       {error && <div className="text-sm text-danger">{error}</div>}
@@ -384,7 +385,7 @@ export default function OperationsList() {
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-hairline bg-page text-xs font-semibold uppercase tracking-wide text-muted">
                   <tr>
-                    {["Project", "Health", "Progress", "Tasks", "Overdue", "Trades", "Won", "BX"].map((h) => (
+                    {["Project", "Status", "Progress", "Next milestone", "Overdue", "Trades", "Won", "BX"].map((h) => (
                       <th key={h} className="px-3 py-2.5">{h}</th>
                     ))}
                   </tr>

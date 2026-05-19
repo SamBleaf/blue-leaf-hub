@@ -7,6 +7,7 @@ import {
   phaseColor,
   phaseLabel,
   tasksActiveInWindow,
+  computeCriticalPath,
 } from "../../lib/scheduleUtils.js";
 
 // ─── Ghost bar helpers ────────────────────────────────────────────────────────
@@ -203,7 +204,7 @@ function ContextMenu({ x, y, task, onMarkComplete, onMarkInProgress, onEdit, onD
 
 // ─── Gantt task conversion ────────────────────────────────────────────────────
 
-function toGanttTasks(tasks, phaseLabels, showCritical) {
+function toGanttTasks(tasks, phaseLabels, showCritical, criticalIds) {
   const today = new Date().toISOString().slice(0, 10);
   const { order, groups } = groupTasksByPhase(tasks);
   const out = [];
@@ -235,8 +236,11 @@ function toGanttTasks(tasks, phaseLabels, showCritical) {
         start: toDate(t.start_date),
         end: toDate(t.end_date || t.start_date),
         progress: Number(t.percent_complete) || 0,
-        dependencies: Array.isArray(t.depends_on) ? t.depends_on : [],
-        styles: getTaskGanttStyles(t, color, showCritical, today),
+        dependencies: [
+          ...(t.task_dependencies || []).map((d) => d.taskId),
+          ...(t.depends_on || []).filter((id) => !(t.task_dependencies || []).some((d) => d.taskId === id))
+        ],
+        styles: getTaskGanttStyles(t, color, showCritical && criticalIds?.has(t.id), today),
       });
     }
   }
@@ -271,9 +275,10 @@ export default function ScheduleGantt({
   const lookaheadEnd = new Date();
   lookaheadEnd.setDate(lookaheadEnd.getDate() + 21);
 
-  const windowed  = lookahead ? tasksActiveInWindow(tasks, today, lookaheadEnd.toISOString().slice(0, 10)) : tasks;
-  const filtered  = filterTrade ? windowed.filter((t) => (t.assignee_trade || t.trade || "").toLowerCase() === filterTrade.toLowerCase()) : windowed;
-  const ganttTasks = toGanttTasks(filtered, phaseLabels, showCritical);
+  const windowed    = lookahead ? tasksActiveInWindow(tasks, today, lookaheadEnd.toISOString().slice(0, 10)) : tasks;
+  const filtered    = filterTrade ? windowed.filter((t) => (t.assignee_trade || t.trade || "").toLowerCase() === filterTrade.toLowerCase()) : windowed;
+  const criticalIds = showCritical ? computeCriticalPath(tasks) : new Set();
+  const ganttTasks  = toGanttTasks(filtered, phaseLabels, showCritical, criticalIds);
   const viewMode  = zoom === "Week" ? ViewMode.Day : zoom === "Project" ? ViewMode.Month : ViewMode.Week;
   const colWidth  = zoom === "Week" ? 46 : zoom === "Project" ? 90 : 70;
 

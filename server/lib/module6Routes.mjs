@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { buildScheduleRowsForInsert, attachDependsOnUuids, stripDynamicScheduleRow, buildRowsFromClaudePlan, buildFallbackRowsFromCategories, attachDependsOnTempIds, buildConcurrentUuidUpdates } from "./scheduleGenerate.mjs";
+import { buildScheduleRowsForInsert, attachDependsOnUuids, stripDynamicScheduleRow, buildRowsFromClaudePlan, buildFallbackRowsFromCategories, attachDependsOnTempIds, buildConcurrentUuidUpdates, attachTaskDependenciesUuids } from "./scheduleGenerate.mjs";
 import { resolveScheduleCategoryBlocks } from "./scheduleCategories.mjs";
 import { generateSchedulePlanWithClaude } from "./scheduleClaudePlan.mjs";
 import { attachCriticalPathFlags } from "./scheduleCriticalPath.mjs";
@@ -502,9 +502,14 @@ export function registerModule6Routes(app) {
           await sb.from("schedule_tasks").update({ depends_on: u.depends_on, updated_at: new Date().toISOString() }).eq("id", u.id);
         }
       } else {
-        const depUpdates = attachDependsOnTempIds(rows, insertedIdsOrdered);
-        for (const u of depUpdates) {
-          await sb.from("schedule_tasks").update({ depends_on: u.depends_on, updated_at: new Date().toISOString() }).eq("id", u.id);
+        const taskDepUpdates = attachTaskDependenciesUuids(rows, insertedIdsOrdered);
+        for (const u of taskDepUpdates) {
+          const patch = { updated_at: new Date().toISOString() };
+          if (u.task_dependencies.length) patch.task_dependencies = u.task_dependencies;
+          if (u.depends_on.length) patch.depends_on = u.depends_on;
+          if (patch.task_dependencies || patch.depends_on) {
+            await sb.from("schedule_tasks").update(patch).eq("id", u.id);
+          }
         }
         const concUpdates = buildConcurrentUuidUpdates(rows, insertedIdsOrdered);
         for (const u of concUpdates) {
@@ -751,13 +756,15 @@ export function registerModule6Routes(app) {
         end_date: computeTaskEnd(start, duration, taskType === "milestone"),
         duration_days: duration,
         depends_on: Array.isArray(body.depends_on) ? body.depends_on.filter(Boolean) : [],
+        task_dependencies: Array.isArray(body.task_dependencies) ? body.task_dependencies : [],
         status: statusFromPercent(body.percent_complete, String(body.status || "planned")),
-        is_hold_point: Boolean(body.is_hold_point || taskType === "milestone"),
+        is_hold_point: Boolean(body.is_hold_point || taskType === "milestone" || taskType === "inspection" || taskType === "approval"),
         task_type: taskType,
         percent_complete: clampPercent(body.percent_complete),
         procurement_item: body.procurement_item || null,
         procurement_supplier: body.procurement_supplier || null,
         procurement_lead_days: body.procurement_lead_days == null || body.procurement_lead_days === "" ? null : Number(body.procurement_lead_days),
+        lead_time_days: body.lead_time_days == null || body.lead_time_days === "" ? null : Number(body.lead_time_days),
         procurement_order_by: orderBy,
         order_by_date: orderBy,
         procurement_order_status: body.procurement_order_status || "not_ordered",
@@ -968,6 +975,7 @@ export function registerModule6Routes(app) {
       if (body.float_days !== undefined) patch.float_days = body.float_days == null || body.float_days === "" ? null : Number(body.float_days);
       if (body.template_id !== undefined) patch.template_id = body.template_id || null;
       if (Array.isArray(body.task_dependencies)) patch.task_dependencies = body.task_dependencies;
+      if (body.lead_time_days !== undefined) patch.lead_time_days = body.lead_time_days == null || body.lead_time_days === "" ? null : Number(body.lead_time_days);
 
       const merged = { ...cur, ...patch };
       merged.end_date = body.end_date != null ? toYmd(body.end_date) : computeTaskEnd(merged.start_date, merged.duration_days, merged.is_hold_point || merged.task_type === "milestone");
@@ -1014,6 +1022,8 @@ export function registerModule6Routes(app) {
           priority: merged.priority,
           float_days: merged.float_days,
           template_id: merged.template_id,
+          task_dependencies: merged.task_dependencies ?? [],
+          lead_time_days: merged.lead_time_days ?? null,
           updated_at: merged.updated_at
         })
         .eq("id", id);

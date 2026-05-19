@@ -226,7 +226,7 @@ export function attachDependsOnUuids(insertedRows, insertedWithIds) {
   });
 }
 
-/** Topological order for Claude temp task ids. */
+/** Topological order for Claude temp task ids. Supports both task_dependencies and legacy depends_on. */
 export function topoSortClaudeTasks(tasks) {
   const list = Array.isArray(tasks) ? tasks : [];
   const byId = new Map(list.map((t) => [String(t.id), t]));
@@ -238,7 +238,11 @@ export function topoSortClaudeTasks(tasks) {
     visited.add(sid);
     const node = byId.get(sid);
     if (!node) return;
-    for (const d of node.depends_on || []) visit(String(d));
+    // Support new task_dependencies format and legacy depends_on
+    const predIds = Array.isArray(node.task_dependencies) && node.task_dependencies.length > 0
+      ? node.task_dependencies.map((d) => String(d.taskId))
+      : (node.depends_on || []).map(String);
+    for (const d of predIds) visit(d);
     out.push(node);
   }
   for (const t of list) visit(String(t.id));
@@ -297,11 +301,15 @@ export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categ
   const scheduleHints = Array.isArray(opts.scheduleHints) ? opts.scheduleHints : [];
   for (const t of sorted) {
     const tid = String(t.id);
-    const preds = (t.depends_on || []).map(String).filter((id) => tempToEnd.has(id));
+    // Support both new task_dependencies and legacy depends_on for scheduling
+    const predTempIds = Array.isArray(t.task_dependencies) && t.task_dependencies.length > 0
+      ? t.task_dependencies.map((d) => String(d.taskId)).filter((id) => tempToEnd.has(id))
+      : (t.depends_on || []).map(String).filter((id) => tempToEnd.has(id));
+
     let start = startDate;
-    if (preds.length) {
+    if (predTempIds.length) {
       let maxEnd = startDate;
-      for (const p of preds) {
+      for (const p of predTempIds) {
         const e = tempToEnd.get(p);
         if (e && e > maxEnd) maxEnd = e;
       }
@@ -312,52 +320,82 @@ export function buildRowsFromClaudePlan(projectId, startDate, claudeTasks, categ
     if (matchedHint) {
       console.log(`[schedule] using Buildexact duration for ${t.name}: ${matchedHint.duration_days} days`);
     }
-    const durW = Number(t.duration_weeks);
-    const isHp = Boolean(t.is_hold_point);
-    const duration_days =
-      matchedHint
-        ? Math.max(1, Math.round(Number(matchedHint.duration_days)))
-        :
-      isHp && (!Number.isFinite(durW) || durW <= 0)
+
+    // New schema uses duration_days directly; fall back to duration_weeks for backward compat
+    const taskType = String(t.task_type || "build");
+    const isGate = taskType === "approval" || taskType === "inspection" || taskType === "milestone";
+    let duration_days;
+    if (matchedHint) {
+      duration_days = Math.max(1, Math.round(Number(matchedHint.duration_days)));
+    } else if (Number.isFinite(Number(t.duration_days)) && Number(t.duration_days) >= 0) {
+      duration_days = isGate ? 0 : Math.max(1, Math.round(Number(t.duration_days)));
+    } else {
+      const durW = Number(t.duration_weeks);
+      const isHp = Boolean(t.is_hold_point);
+      duration_days = (isHp || isGate) && (!Number.isFinite(durW) || durW <= 0)
         ? 0
         : Math.max(1, Math.ceil(Math.max(Number.isFinite(durW) ? durW : 1, 0.1) * 7));
+    }
+
     let end;
-    if (duration_days <= 0 || (isHp && (!Number.isFinite(durW) || durW <= 0))) end = start;
+    if (duration_days <= 0) end = start;
     else end = addDaysYmd(start, duration_days - 1);
     tempToEnd.set(tid, end);
-    const leadW = Number(t.lead_time_weeks) || 0;
-    const procurement_lead_days = leadW > 0 ? Math.round(leadW * 7) : null;
-    const order_by_date =
-      procurement_lead_days && duration_days > 0 ? addDaysYmd(start, -procurement_lead_days) : null;
+
+    // lead_time_days (new) or fall back to lead_time_weeks (old)
+    const leadDays = Number(t.lead_time_days) || Math.round((Number(t.lead_time_weeks) || 0) * 7);
+    const procurement_lead_days = leadDays > 0 ? leadDays : null;
+    const order_by_date = procurement_lead_days && duration_days > 0 ? addDaysYmd(start, -procurement_lead_days) : null;
 
     rows.push({
       project_id: projectId,
       name: String(t.name || "Task").slice(0, 500),
-      trade: String(t.category || "General")
-        .split(/[/,&]/)[0]
-        ?.trim() || "General",
+      trade: String(t.category || "General").split(/[/,&]/)[0]?.trim() || "General",
       phase,
+      task_type: taskType,
       start_date: start,
       end_date: end,
       duration_days,
       depends_on: [],
+      task_dependencies: [],
       status: "planned",
-      is_hold_point: isHp,
+      is_hold_point: isGate || Boolean(t.is_hold_point),
       procurement_lead_days,
-      lead_time_weeks: leadW > 0 ? Math.round(leadW) : null,
+      lead_time_weeks: null,
+      lead_time_days: procurement_lead_days,
       order_by_date,
       hold_point_description: t.hold_point_description ? String(t.hold_point_description).slice(0, 2000) : null,
       notes: t.notes ? String(t.notes).slice(0, 4000) : null,
       can_run_concurrent_with: [],
       is_critical_path: false,
       hold_notify: false,
+      // Temp-ID arrays for post-insert UUID mapping
       _depends_temp: (t.depends_on || []).map(String),
+      _task_dependencies_temp: Array.isArray(t.task_dependencies)
+        ? t.task_dependencies.map((d) => ({ taskId: String(d.taskId), type: String(d.type || "FS"), lag: Number(d.lag) || 0 }))
+        : [],
       _concurrent_temp: (t.can_run_concurrent_with || []).map(String),
       _temp_id: tid,
       _depends_names: []
     });
   }
   return rows;
+}
+
+/** Map temp IDs in task_dependencies to real UUIDs after insert. */
+export function attachTaskDependenciesUuids(rows, insertedIdsOrdered) {
+  const tempToUuid = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i]._temp_id) tempToUuid.set(rows[i]._temp_id, insertedIdsOrdered[i]);
+  }
+  return rows.map((r, i) => {
+    const taskDeps = (r._task_dependencies_temp || [])
+      .map((d) => ({ taskId: tempToUuid.get(d.taskId), type: d.type, lag: d.lag }))
+      .filter((d) => d.taskId);
+    // Also resolve legacy depends_on temp IDs
+    const deps = (r._depends_temp || []).map((x) => tempToUuid.get(String(x))).filter(Boolean);
+    return { id: insertedIdsOrdered[i], task_dependencies: taskDeps, depends_on: deps };
+  });
 }
 
 /** Sequential fallback when Claude is unavailable: one short task per line item. */
@@ -410,7 +448,7 @@ export function buildFallbackRowsFromCategories(projectId, startDate, categoryBl
 }
 
 export function stripDynamicScheduleRow(r) {
-  const { _depends_temp, _concurrent_temp, _temp_id, _depends_names, ...rest } = r;
+  const { _depends_temp, _task_dependencies_temp, _concurrent_temp, _temp_id, _depends_names, ...rest } = r;
   return {
     ...rest,
     can_run_concurrent_with: Array.isArray(rest.can_run_concurrent_with) ? rest.can_run_concurrent_with : []

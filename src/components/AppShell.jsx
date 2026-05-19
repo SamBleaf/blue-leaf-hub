@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import BlueprintAgent from "../blueprint/components/BlueprintAgent";
 import { useAuth } from "../lib/useAuth.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
@@ -72,27 +72,43 @@ const ICONS = {
 };
 
 const TENDER_MODULES = [
-  { to: "/tender-manager/rfq-engine", label: "RFQ Engine" },
-  { to: "/tender-manager/subcontractors", label: "Subcontractors" },
-  { to: "/tender-manager/quote-tracker", label: "Quote Tracker" },
-  { to: "/tender-manager/board", label: "Tender Board" },
-  { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" }
+  { to: "/tender-manager/rfq-engine",        label: "RFQ Engine" },
+  { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
+  { to: "/tender-manager/quote-tracker",     label: "Quote Tracker" },
+  { to: "/tender-manager/board",             label: "Tender Board" },
+  { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
 ];
 
 const OPS_MODULES = [
-  { to: "/operations", label: "Projects", end: true }
+  { to: "/operations",             label: "Projects",    end: true },
+  { to: "/operations/site",        label: "Site",        end: true },
+  { to: "/operations/procurement", label: "Procurement", end: true },
+];
+
+const FINANCE_MODULES = [
+  { to: "/finance",           label: "Inbox",    end: true },
+  { to: "/finance/approvals", label: "Approvals"           },
+  { to: "/finance/jobs",      label: "Job View"            },
 ];
 
 const DEPARTMENTS = [
-  { id: "sales_marketing",    label: "Sales Manager",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
-  { id: "tender",             label: "Tender Manager",     tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES, defaultTo: "/tender-manager/rfq-engine" },
-  { id: "operations_manager", label: "Operations Manager", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,    defaultTo: "/operations" },
-  { id: "finance_manager",    label: "Finance Manager",    tabShort: "Finance", icon: "finance",    comingSoon: false, modules: [{ to: "/finance", label: "Inbox", end: true }, { to: "/finance/approvals", label: "Approvals" }, { to: "/finance/jobs", label: "Job View" }], defaultTo: "/finance" },
-  { id: "client_portal",      label: "Client Portal",      tabShort: "Client",  icon: "client",     comingSoon: true,  modules: [] },
+  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
+  { id: "tender",             label: "Tendering",  tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES,  defaultTo: "/tender-manager/rfq-engine" },
+  { id: "operations_manager", label: "Operations", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,     defaultTo: "/operations" },
+  { id: "finance_manager",    label: "Financials", tabShort: "Finance", icon: "finance",    comingSoon: false, modules: FINANCE_MODULES, defaultTo: "/finance" },
+  { id: "client_portal",      label: "Clients",    tabShort: "Clients", icon: "client",     comingSoon: true,  modules: [] },
 ];
 
 const SIDEBAR_EXPANDED_W = 256;
 const SIDEBAR_COLLAPSED_W = 64;
+
+const QUICK_ADD_ITEMS = [
+  { label: "Task",       icon: "✅", path: (pid) => pid ? `/operations/${pid}/schedule` : "/operations" },
+  { label: "Site note",  icon: "📋", path: (pid) => pid ? `/operations/${pid}/diary` : "/operations" },
+  { label: "RFQ",        icon: "📄", path: () => "/tender-manager/rfq-engine" },
+  { label: "PO",         icon: "📦", path: (pid) => pid ? `/operations/${pid}` : "/operations" },
+  { label: "WHS report", icon: "🦺", path: (pid) => pid ? `/operations/${pid}/whs` : "/operations" },
+];
 
 export default function AppShell() {
   const location = useLocation();
@@ -105,6 +121,8 @@ export default function AppShell() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [projectCtx, setProjectCtx] = useState(null);
 
   // Touch swipe refs
   const touchStartX = useRef(null);
@@ -119,6 +137,29 @@ export default function AppShell() {
   }, [location.pathname]);
 
   const activeDept = DEPARTMENTS.find((d) => d.id === activeDeptId);
+
+  const projectMatch = useMatch("/operations/:projectId/*");
+  const activeProjectId = projectMatch?.params?.projectId || null;
+
+  // Fetch slim project context when entering a project route
+  useEffect(() => {
+    if (!activeProjectId) { setProjectCtx(null); return; }
+    let cancelled = false;
+    async function fetchCtx() {
+      try {
+        const { getSupabase, supabaseConfigured } = await import("../lib/supabaseClient.js");
+        if (!supabaseConfigured) return;
+        const sb = getSupabase();
+        const { data } = await sb.from("projects").select("id, address").eq("id", activeProjectId).single();
+        if (!cancelled && data) setProjectCtx(data);
+      } catch { /* non-fatal */ }
+    }
+    fetchCtx();
+    return () => { cancelled = true; };
+  }, [activeProjectId]);
+
+  // Close quick-add on navigation
+  useEffect(() => { setQuickAddOpen(false); }, [location.pathname]);
 
   // Close mobile sidebar on navigation
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -206,8 +247,8 @@ export default function AppShell() {
           >
             {({ isActive }) => (
               <>
-                {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r bg-accent" />}
-                <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-accent/20 text-accent" : "group-hover:bg-white/10"}`}>
+                {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r bg-accent" />}
+                <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-white/15 text-white" : "group-hover:bg-white/10 text-white/70"}`}>
                   {ICONS.home}
                 </span>
                 {showFull && <span className="text-[13px] font-semibold">Home</span>}
@@ -243,11 +284,11 @@ export default function AppShell() {
                 >
                   {/* Active indicator bar */}
                   {deptActive && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r bg-accent" />
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r bg-accent" />
                   )}
 
                   <span className={`shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${
-                    deptActive ? "bg-accent/20 text-accent" : dept.comingSoon ? "" : "group-hover:bg-white/10"
+                    deptActive ? "bg-white/15 text-white" : dept.comingSoon ? "text-white/40" : "text-white/70 group-hover:bg-white/10 group-hover:text-white"
                   }`}>
                     {ICONS[dept.icon]}
                   </span>
@@ -392,10 +433,56 @@ export default function AppShell() {
         </div>
       </header>
 
+      {/* ── Project context banner (desktop only, inside project routes) ── */}
+      {activeProjectId && projectCtx ? (
+        <div className="hidden md:flex sticky top-0 z-10 items-center gap-3 border-b border-hairline bg-surface/95 backdrop-blur px-6 py-2">
+          <NavLink to="/operations" className="text-xs font-semibold text-muted hover:text-primary">Operations</NavLink>
+          <span className="text-xs text-hairline">/</span>
+          <NavLink to={`/operations/${activeProjectId}`} className="text-xs font-semibold text-ink truncate max-w-xs hover:text-primary">
+            {projectCtx.address}
+          </NavLink>
+          <div className="ml-auto flex items-center gap-2">
+            <NavLink to={`/operations/${activeProjectId}/schedule`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>Schedule</NavLink>
+            <NavLink to={`/operations/${activeProjectId}/whs`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>WHS</NavLink>
+            <NavLink to={`/operations/${activeProjectId}/diary`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>Diary</NavLink>
+          </div>
+        </div>
+      ) : null}
+
       {/* ── Main content ──────────────────────────────────────────────── */}
       <main className="mx-auto max-w-6xl px-4 py-6 md:py-10 pb-24 md:pb-10">
         <Outlet />
       </main>
+
+      {/* ── Quick Add FAB ─────────────────────────────────────────────── */}
+      <div className="fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6">
+        {quickAddOpen ? (
+          <>
+            <div className="fixed inset-0 z-[-1]" onClick={() => setQuickAddOpen(false)} />
+            <div className="absolute bottom-14 right-0 w-44 rounded-lg border border-hairline bg-surface shadow-xl overflow-hidden">
+              {QUICK_ADD_ITEMS.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => { navigate(item.path(activeProjectId)); setQuickAddOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-page transition"
+                >
+                  <span>{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setQuickAddOpen((v) => !v)}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition text-xl font-light"
+          aria-label="Quick add"
+        >
+          {quickAddOpen ? "×" : "+"}
+        </button>
+      </div>
 
       {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-surface md:hidden">
@@ -413,8 +500,7 @@ export default function AppShell() {
                 disabled={dept.comingSoon}
                 onClick={() => {
                   if (dept.comingSoon) return;
-                  setMobileOpen(true);
-                  if (!active && dept.defaultTo) navigate(dept.defaultTo);
+                  if (dept.defaultTo) navigate(dept.defaultTo);
                 }}
                 className={`flex min-w-[52px] flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] font-semibold transition ${
                   dept.comingSoon ? "cursor-not-allowed opacity-40 text-muted" : active ? "text-primary" : "text-ink"

@@ -57,6 +57,8 @@ export default function App() {
                 </Route>
 
                 <Route path="/operations" element={<OperationsList />} />
+                <Route path="/operations/site" element={<Navigate to="/operations" replace />} />
+                <Route path="/operations/procurement" element={<Navigate to="/operations" replace />} />
                 <Route path="/operations/:projectId" element={<OperationsProjectDetail />} />
                 <Route path="/operations/:projectId/schedule" element={<ScheduleManager />} />
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />
