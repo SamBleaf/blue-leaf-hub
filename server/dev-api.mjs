@@ -37,6 +37,7 @@ import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
 import { registerPortalRoutes } from "./lib/portalRoutes.mjs";
 import { registerAuthRoutes } from "./lib/authRoutes.mjs";
 import { registerSupervisorRoutes } from "./lib/supervisorRoutes.mjs";
+import { registerRfqPackageRoutes } from "./lib/rfqPackageRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 
 console.log("[blue-leaf-api] booting…");
@@ -620,6 +621,7 @@ registerFinanceRoutes(app);
 registerPortalRoutes(app);
 registerAuthRoutes(app);
 registerSupervisorRoutes(app);
+registerRfqPackageRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });

@@ -33,6 +33,8 @@ import LeadDetail from "./pages/LeadDetail.jsx";
 import FinanceManager from "./pages/FinanceManager.jsx";
 import SupervisorHome from "./pages/SupervisorHome.jsx";
 import PortalAdmin from "./pages/PortalAdmin.jsx";
+import RfqPackageList from "./pages/RfqPackageList.jsx";
+import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
@@ -79,6 +81,8 @@ export default function App() {
                 >
                   <Route index element={<Navigate to="/home" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
+                  <Route path="rfq-packages" element={<RfqPackageList />} />
+                  <Route path="rfq-packages/:packageId" element={<RfqPackageDetail />} />
                   <Route path="subcontractors" element={<Subcontractors />} />
                   <Route path="quote-tracker" element={<QuoteTracker />} />
                   <Route path="settings" element={<Settings />} />

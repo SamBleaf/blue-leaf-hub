@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { composeRfqEmail } from "../lib/rfqComposer";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { TRADE_LABEL, TRADE_ORDER, subcontractorsForTrade } from "../lib/tradeTemplates";
@@ -338,6 +338,7 @@ function buildOutboundRows({
 }
 
 export default function RfqEngine() {
+  const navigate = useNavigate();
   const skipNextAutoRebuildRef = useRef(false);
   /** After restoring saved email drafts, skip one rebuild when the subcontractor list finishes loading so drafts are not overwritten. */
   const suppressNextSubsRebuildRef = useRef(false);
@@ -1522,6 +1523,58 @@ export default function RfqEngine() {
 
       const sentCount = messages.length;
       const transport = json.transport || "mail";
+
+      // Build RFQ package and navigate to it
+      try {
+        const tradeGroups = {};
+        for (let i = 0; i < messages.length; i++) {
+          const msg = messages[i];
+          if (!tradeGroups[msg.tradeId]) {
+            const note = extraction.trade_notes?.[msg.tradeId] || emptyTradeNote();
+            tradeGroups[msg.tradeId] = {
+              trade_id: msg.tradeId,
+              trade_label: TRADE_LABEL[msg.tradeId] || msg.tradeId,
+              scope_bullets: bulletsFromTradeNote(note),
+              due_date: deadline || "",
+              recipients: []
+            };
+          }
+          tradeGroups[msg.tradeId].recipients.push({
+            subcontractor_id: msg.subcontractor_id || null,
+            business_name: msg.businessName || msg.to,
+            email: msg.to,
+            status: "sent",
+            sent_at: new Date().toISOString(),
+            email_subject: String(msg.subject || ""),
+            email_body: String(msg.body || ""),
+            rfq_id: persistence.rfqIds[i] || null
+          });
+        }
+        const pkgRes = await fetch("/api/rfq-packages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            job_id: persistence.job.id,
+            project_address: extraction.project_address || persistence.job.address || "",
+            project_type: extraction.project_type || "",
+            tender_deadline: deadline || "",
+            architect_client: extraction.architect_name || extraction.client_name || "",
+            dropbox_url: sharedJobDropboxUrl || "",
+            extraction_data: extraction,
+            pdf_meta: pdfItems.map((p) => ({ name: p.name, docType: p.docType })),
+            trade_scopes: Object.values(tradeGroups)
+          })
+        });
+        const pkgJson = await pkgRes.json().catch(() => null);
+        resetRfqSession();
+        if (pkgJson?.packageId) {
+          navigate(`/tender-manager/rfq-packages/${pkgJson.packageId}`);
+          return;
+        }
+      } catch (pkgErr) {
+        console.warn("[rfq-package] create failed, continuing", pkgErr);
+      }
+
       resetRfqSession();
       setBanner({
         variant: "success",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import BlueprintAgent from "../blueprint/components/BlueprintAgent";
+import BrandLogo from "./brand/BrandLogo.jsx";
 import { useAuth } from "../lib/useAuth.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { can } from "../lib/roles.js";
@@ -74,6 +75,7 @@ const ICONS = {
 
 const TENDER_MODULES = [
   { to: "/tender-manager/rfq-engine",        label: "RFQ Engine" },
+  { to: "/tender-manager/rfq-packages",      label: "RFQ Packages" },
   { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
   { to: "/tender-manager/quote-tracker",     label: "Quote Tracker" },
   { to: "/tender-manager/board",             label: "Tender Board" },
@@ -249,11 +251,13 @@ export default function AppShell() {
       <div className="flex h-full flex-col bg-[#1B2A3B]">
         {/* Header */}
         <div className={`flex items-center border-b border-white/10 ${showFull ? "justify-between px-4 py-4" : "justify-center px-0 py-4"}`}>
-          {showFull && (
+          {showFull ? (
             <div className="min-w-0">
-              <div className="text-sm font-bold text-white tracking-tight leading-tight">Blue Leaf Hub</div>
-              <div className="text-[10px] text-white/50 leading-tight">Blue Leaf Building</div>
+              <BrandLogo variant="primary" size="sm" />
+              <div className="mt-1 text-[10px] text-white/50 leading-tight">Blue Leaf Building</div>
             </div>
+          ) : (
+            <BrandLogo variant="icon" size="xs" alt="Blue Leaf Hub" />
           )}
           {isMobileOverlay ? (
             <button
@@ -479,7 +483,7 @@ export default function AppShell() {
             {ICONS.hamburger}
           </button>
           <div className="flex-1 min-w-0">
-            <div className="text-base font-semibold text-primary leading-tight">Blue Leaf Hub</div>
+            <BrandLogo variant="icon" size="xs" className="mb-0.5" alt="Blue Leaf Hub" />
             {activeDept && (
               <div className="text-[11px] text-muted leading-tight truncate">{activeDept.label}</div>
             )}
