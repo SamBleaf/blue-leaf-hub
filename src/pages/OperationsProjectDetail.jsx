@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
+import { useProject } from "../lib/ProjectContext.jsx";
 import { loadCompanySettings } from "../lib/companySettings.js";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
 
@@ -76,6 +77,7 @@ function ModuleCard({ to, title, description, stat, statLabel, icon }) {
 
 export default function OperationsProjectDetail() {
   const { projectId } = useParams();
+  const { selectProject } = useProject();
 
   const [project, setProject] = useState(null);
   const [pos, setPos] = useState([]);
@@ -101,10 +103,11 @@ export default function OperationsProjectDetail() {
       .single();
     if (e1) { setError(e1.message); return; }
     setProject(p);
+    if (p) selectProject({ id: p.id, address: p.address, status: p.status ?? null, job_id: p.job_id ?? null });
     setBeId(p?.buildexact_job_id || "");
     const { data: po } = await sb.from("purchase_orders").select("*").eq("project_id", projectId);
     setPos(po || []);
-  }, [projectId]);
+  }, [projectId, selectProject]);
 
   const loadDashboardData = useCallback(async () => {
     if (!projectId) return;

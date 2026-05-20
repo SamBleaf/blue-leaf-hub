@@ -5,6 +5,8 @@ import BrandLogo from "./brand/BrandLogo.jsx";
 import { useAuth } from "../lib/useAuth.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { can } from "../lib/roles.js";
+import { useProject } from "../lib/ProjectContext.jsx";
+import ProjectBar from "./ProjectBar.jsx";
 
 // ── SVG icon set ────────────────────────────────────────────────────────────
 const ICONS = {
@@ -81,22 +83,16 @@ const TENDER_MODULES = [
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
 ];
 
-const OPS_MODULES = [
-  { to: "/operations",             label: "Projects",    end: true },
-  { to: "/operations/site",        label: "Site",        end: true },
-  { to: "/operations/procurement", label: "Procurement", end: true },
-];
-
 const FINANCE_MODULES = [
   { to: "/finance",           label: "Inbox",    end: true },
   { to: "/finance/approvals", label: "Approvals"           },
   { to: "/finance/jobs",      label: "Job View"            },
 ];
 
-const DEPARTMENTS = [
+const BASE_DEPARTMENTS = [
   { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
   { id: "tender",             label: "Tendering",  tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES,  defaultTo: "/tender-manager/rfq-engine" },
-  { id: "operations_manager", label: "Operations", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: OPS_MODULES,     defaultTo: "/operations" },
+  { id: "operations_manager", label: "Operations", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: null /* computed */ },
   { id: "finance_manager",    label: "Financials", tabShort: "Finance", icon: "finance",    comingSoon: false, modules: FINANCE_MODULES, defaultTo: "/finance" },
   { id: "client_portal",      label: "Clients",    tabShort: "Clients", icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
 ];
@@ -117,6 +113,32 @@ export default function AppShell() {
   const navigate = useNavigate();
   const { user, signOut, role } = useAuth();
   const { screenContext } = useBlueprintContext() || {};
+  const { project } = useProject();
+
+  const opsModules = useMemo(() => {
+    if (project) {
+      return [
+        { to: `/operations/${project.id}`,          label: "Overview",   end: true },
+        { to: `/operations/${project.id}/schedule`, label: "Schedule" },
+        { to: `/operations/${project.id}/diary`,    label: "Site Diary" },
+        { to: `/operations/${project.id}/whs`,      label: "WHS" },
+      ];
+    }
+    return [{ to: "/operations", label: "Projects", end: true }];
+  }, [project]);
+
+  const DEPARTMENTS = useMemo(() =>
+    BASE_DEPARTMENTS.map((dept) => {
+      if (dept.id === "operations_manager") {
+        return {
+          ...dept,
+          modules: opsModules,
+          defaultTo: project ? `/operations/${project.id}` : "/operations",
+        };
+      }
+      return dept;
+    }),
+  [opsModules, project]);
 
   const visibleDepts = useMemo(
     () =>
@@ -128,7 +150,7 @@ export default function AppShell() {
         if (dept.id === "client_portal") return can.accessPortalAdmin(role);
         return true;
       }),
-    [role]
+    [DEPARTMENTS, role]
   );
 
   const visibleQuickAdd = useMemo(
@@ -146,8 +168,6 @@ export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
-  const [projectCtx, setProjectCtx] = useState(null);
-  const [allProjects, setAllProjects] = useState([]);
 
   // Touch swipe refs
   const touchStartX = useRef(null);
@@ -166,40 +186,6 @@ export default function AppShell() {
 
   const projectMatch = useMatch("/operations/:projectId/*");
   const activeProjectId = projectMatch?.params?.projectId || null;
-
-  // Fetch slim project context when entering a project route
-  useEffect(() => {
-    if (!activeProjectId) { setProjectCtx(null); return; }
-    let cancelled = false;
-    async function fetchCtx() {
-      try {
-        const { getSupabase, supabaseConfigured } = await import("../lib/supabaseClient.js");
-        if (!supabaseConfigured) return;
-        const sb = getSupabase();
-        const { data } = await sb.from("projects").select("id, address").eq("id", activeProjectId).single();
-        if (!cancelled && data) setProjectCtx(data);
-      } catch { /* non-fatal */ }
-    }
-    fetchCtx();
-    return () => { cancelled = true; };
-  }, [activeProjectId]);
-
-  // Fetch all projects for the switcher dropdown
-  useEffect(() => {
-    if (!activeDeptId || activeDeptId !== "operations_manager") return;
-    let cancelled = false;
-    async function fetchAll() {
-      try {
-        const { getSupabase, supabaseConfigured } = await import("../lib/supabaseClient.js");
-        if (!supabaseConfigured) return;
-        const sb = getSupabase();
-        const { data } = await sb.from("projects").select("id, address").order("address");
-        if (!cancelled && data) setAllProjects(data);
-      } catch { /* non-fatal */ }
-    }
-    fetchAll();
-    return () => { cancelled = true; };
-  }, [activeDeptId]);
 
   // Close quick-add on navigation
   useEffect(() => { setQuickAddOpen(false); }, [location.pathname]);
@@ -363,7 +349,7 @@ export default function AppShell() {
                         }
                       >
                         <span className="flex-1 truncate">{m.label}</span>
-                        {m.to === "/tender-manager/quote-tracker" && unmatchedQuoteCount > 0 && (
+                        {m.to === "/tender-manager/rfq-packages" && unmatchedQuoteCount > 0 && (
                           <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
                             {unmatchedQuoteCount}
                           </span>
@@ -495,33 +481,8 @@ export default function AppShell() {
         </div>
       </header>
 
-      {/* ── Project context banner (desktop only, inside project routes) ── */}
-      {activeProjectId && projectCtx ? (
-        <div className="hidden md:flex sticky top-0 z-10 items-center gap-3 border-b border-hairline bg-surface/95 backdrop-blur px-6 py-2">
-          <NavLink to="/operations" className="text-xs font-semibold text-muted hover:text-primary shrink-0">Operations</NavLink>
-          <span className="text-xs text-hairline shrink-0">/</span>
-          {allProjects.length > 1 ? (
-            <select
-              value={activeProjectId}
-              onChange={(e) => navigate(`/operations/${e.target.value}`)}
-              className="max-w-xs truncate rounded border border-transparent bg-transparent text-xs font-semibold text-ink hover:border-hairline focus:border-primary focus:outline-none px-1 py-0.5 cursor-pointer"
-            >
-              {allProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.address}</option>
-              ))}
-            </select>
-          ) : (
-            <NavLink to={`/operations/${activeProjectId}`} className="text-xs font-semibold text-ink truncate max-w-xs hover:text-primary">
-              {projectCtx.address}
-            </NavLink>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <NavLink to={`/operations/${activeProjectId}/schedule`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>Schedule</NavLink>
-            <NavLink to={`/operations/${activeProjectId}/whs`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>WHS</NavLink>
-            <NavLink to={`/operations/${activeProjectId}/diary`} className={({ isActive }) => `text-xs font-semibold px-2 py-1 rounded ${isActive ? "bg-primary/10 text-primary" : "text-muted hover:text-ink"}`}>Diary</NavLink>
-          </div>
-        </div>
-      ) : null}
+      {/* ── Project context bar (all departments) ── */}
+      <ProjectBar />
 
       {/* ── Main content ──────────────────────────────────────────────── */}
       <main className="mx-auto max-w-6xl px-4 py-6 md:py-10 pb-24 md:pb-10">
@@ -538,7 +499,7 @@ export default function AppShell() {
                 <button
                   key={item.label}
                   type="button"
-                  onClick={() => { navigate(item.path(activeProjectId)); setQuickAddOpen(false); }}
+                  onClick={() => { navigate(item.path(project?.id || activeProjectId)); setQuickAddOpen(false); }}
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-page transition"
                 >
                   <span>{item.icon}</span>

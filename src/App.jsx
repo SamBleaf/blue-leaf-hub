@@ -6,6 +6,7 @@ import RoleRoute from "./components/RoleRoute.jsx";
 import RootRedirect from "./components/RootRedirect.jsx";
 import { AuthProvider } from "./lib/AuthContext.jsx";
 import { BlueprintProvider } from "./lib/BlueprintContext.jsx";
+import { ProjectProvider } from "./lib/ProjectContext.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
 import RfqEngine from "./pages/RfqEngine.jsx";
@@ -42,6 +43,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <BlueprintProvider>
+          <ProjectProvider>
           <Routes>
             <Route path="/induct/:projectId" element={<SiteInduction />} />
             <Route
@@ -139,6 +141,7 @@ export default function App() {
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </ProjectProvider>
         </BlueprintProvider>
       </AuthProvider>
     </BrowserRouter>
