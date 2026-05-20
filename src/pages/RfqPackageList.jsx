@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
+import { useProject } from "../lib/ProjectContext.jsx";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,11 +99,12 @@ function FollowUpAlert({ scopes }) {
 
 // ── packages tab ─────────────────────────────────────────────────────────────
 
-function PackagesTab({ packages, loading, error }) {
+function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState("active");
 
-  const filtered = filter === "all" ? packages : packages.filter((p) => p.status === filter);
+  const jobFiltered = activeJobId ? packages.filter((p) => p.job_id === activeJobId) : packages;
+  const filtered = filter === "all" ? jobFiltered : jobFiltered.filter((p) => p.status === filter);
 
   if (loading) return (
     <div className="flex min-h-[30vh] items-center justify-center">
@@ -112,7 +114,7 @@ function PackagesTab({ packages, loading, error }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {["active", "archived", "all"].map((f) => (
           <button
             key={f}
@@ -125,6 +127,12 @@ function PackagesTab({ packages, loading, error }) {
             {f}
           </button>
         ))}
+        {activeJobId && projectAddress && (
+          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-primary/8 border border-primary/20 px-3 py-1 text-xs font-semibold text-primary">
+            <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+            {projectAddress}
+          </span>
+        )}
       </div>
 
       {error && (
@@ -197,7 +205,7 @@ function PackagesTab({ packages, loading, error }) {
 
 // ── direct rfqs tab (legacy) ─────────────────────────────────────────────────
 
-function DirectRfqsTab() {
+function DirectRfqsTab({ activeJobId, projectAddress }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
@@ -230,15 +238,19 @@ function DirectRfqsTab() {
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
+  const visibleJobs = useMemo(() =>
+    activeJobId ? jobs.filter((j) => j.id === activeJobId) : jobs,
+  [jobs, activeJobId]);
+
   const overdueList = useMemo(() => {
     const rows = [];
-    for (const job of jobs) {
+    for (const job of visibleJobs) {
       for (const rfq of job.rfqs || []) {
         if (isOverdueLegacy(rfq.deadline, rfq.status)) rows.push({ job, rfq });
       }
     }
     return rows;
-  }, [jobs]);
+  }, [visibleJobs]);
 
   function toggle(id) {
     setOpenJobMenu(null);
@@ -314,10 +326,16 @@ function DirectRfqsTab() {
         <div className="rounded-lg border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div>
       )}
 
-      {jobs.length === 0 ? (
+      {activeJobId && projectAddress && (
+        <span className="flex items-center gap-1.5 self-start rounded-full bg-primary/8 border border-primary/20 px-3 py-1 text-xs font-semibold text-primary">
+          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+          {projectAddress}
+        </span>
+      )}
+      {visibleJobs.length === 0 ? (
         <p className="text-sm text-muted">No direct RFQs found. Use the RFQ Engine to send — a package is created automatically.</p>
       ) : (
-        jobs.map((job) => {
+        visibleJobs.map((job) => {
           const rfqs = job.rfqs || [];
           const pct = completionPct(rfqs);
           const open = expanded[job.id];
@@ -614,6 +632,10 @@ const TABS = [
 ];
 
 export default function RfqPackageList() {
+  const { project } = useProject();
+  const activeJobId = project?.job_id || null;
+  const projectAddress = project?.address || null;
+
   const [tab, setTab] = useState("packages");
   const [packages, setPackages] = useState([]);
   const [pkgLoading, setPkgLoading] = useState(true);
@@ -662,8 +684,8 @@ export default function RfqPackageList() {
         ))}
       </div>
 
-      {tab === "packages"  && <PackagesTab packages={packages} loading={pkgLoading} error={pkgError} onReload={loadPackages} />}
-      {tab === "direct"    && <DirectRfqsTab />}
+      {tab === "packages"  && <PackagesTab packages={packages} loading={pkgLoading} error={pkgError} activeJobId={activeJobId} projectAddress={projectAddress} />}
+      {tab === "direct"    && <DirectRfqsTab activeJobId={activeJobId} projectAddress={projectAddress} />}
       {tab === "unmatched" && <UnmatchedTab />}
     </div>
   );

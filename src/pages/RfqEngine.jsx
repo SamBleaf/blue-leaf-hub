@@ -19,6 +19,7 @@ import {
 import RfqSettingsModal from "../components/RfqSettingsModal.jsx";
 import { reviewDocument } from "../blueprint/api/chat";
 import { QCBadge, QCResultView } from "../blueprint/components/BlueprintAgent";
+import { useProject } from "../lib/ProjectContext.jsx";
 
 /** Split Claude revised RFQ text into subject + body when Subject: line is present. */
 function parseRevisedEmailDraft(revisedDocument) {
@@ -339,6 +340,7 @@ function buildOutboundRows({
 
 export default function RfqEngine() {
   const navigate = useNavigate();
+  const { project } = useProject();
   const skipNextAutoRebuildRef = useRef(false);
   /** After restoring saved email drafts, skip one rebuild when the subcontractor list finishes loading so drafts are not overwritten. */
   const suppressNextSubsRebuildRef = useRef(false);
@@ -582,6 +584,15 @@ export default function RfqEngine() {
 
     loadSubs();
   }, []);
+
+  // Pre-fill project address from global context when the extraction field is blank
+  useEffect(() => {
+    if (!project?.address) return;
+    setExtraction((prev) => {
+      if (prev.project_address) return prev;
+      return { ...prev, project_address: project.address };
+    });
+  }, [project]);
 
   useEffect(() => {
     if (activeStep !== 3) return;
