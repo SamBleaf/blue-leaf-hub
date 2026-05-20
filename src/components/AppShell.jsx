@@ -83,17 +83,11 @@ const TENDER_MODULES = [
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
 ];
 
-const FINANCE_MODULES = [
-  { to: "/finance",           label: "Inbox",    end: true },
-  { to: "/finance/approvals", label: "Approvals"           },
-  { to: "/finance/jobs",      label: "Job View"            },
-];
-
 const BASE_DEPARTMENTS = [
   { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",   icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
   { id: "tender",             label: "Tendering",  tabShort: "Tender",  icon: "tender",     comingSoon: false, modules: TENDER_MODULES,  defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations", tabShort: "Ops",     icon: "operations", comingSoon: false, modules: null /* computed */ },
-  { id: "finance_manager",    label: "Financials", tabShort: "Finance", icon: "finance",    comingSoon: false, modules: FINANCE_MODULES, defaultTo: "/finance" },
+  { id: "finance_manager",    label: "Financials", tabShort: "Finance", icon: "finance",    comingSoon: false, modules: null /* computed */, defaultTo: "/finance" },
   { id: "client_portal",      label: "Clients",    tabShort: "Clients", icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
 ];
 
@@ -127,6 +121,12 @@ export default function AppShell() {
     return [{ to: "/operations", label: "Projects", end: true }];
   }, [project]);
 
+  const financeModules = useMemo(() => [
+    { to: "/finance",           label: "Inbox",      end: true },
+    { to: "/finance/approvals", label: "Approvals"             },
+    { to: project?.job_id ? `/finance/jobs/${project.job_id}` : "/finance/jobs", label: "Job Dashboard" },
+  ], [project]);
+
   const DEPARTMENTS = useMemo(() =>
     BASE_DEPARTMENTS.map((dept) => {
       if (dept.id === "operations_manager") {
@@ -136,9 +136,15 @@ export default function AppShell() {
           defaultTo: project ? `/operations/${project.id}` : "/operations",
         };
       }
+      if (dept.id === "finance_manager") {
+        return {
+          ...dept,
+          modules: financeModules,
+        };
+      }
       return dept;
     }),
-  [opsModules, project]);
+  [opsModules, financeModules, project]);
 
   const visibleDepts = useMemo(
     () =>
@@ -167,6 +173,7 @@ export default function AppShell() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
+  const [unmatchedDocCount, setUnmatchedDocCount] = useState(0);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // Touch swipe refs
@@ -206,6 +213,21 @@ export default function AppShell() {
         if (stop || !res.ok || !j?.ok || !Array.isArray(j.items)) { setUnmatchedQuoteCount(0); return; }
         setUnmatchedQuoteCount(j.items.length);
       } catch { if (!stop) setUnmatchedQuoteCount(0); }
+    }
+    refresh();
+    const id = setInterval(refresh, 60_000);
+    return () => { stop = true; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+    async function refresh() {
+      try {
+        const res = await fetch("/api/finance/documents/unmatched-count");
+        const j = await res.json().catch(() => null);
+        if (stop || !res.ok || !j?.ok) { setUnmatchedDocCount(0); return; }
+        setUnmatchedDocCount(j.count ?? 0);
+      } catch { if (!stop) setUnmatchedDocCount(0); }
     }
     refresh();
     const id = setInterval(refresh, 60_000);
@@ -352,6 +374,11 @@ export default function AppShell() {
                         {m.to === "/tender-manager/rfq-packages" && unmatchedQuoteCount > 0 && (
                           <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
                             {unmatchedQuoteCount}
+                          </span>
+                        )}
+                        {m.to === "/finance" && unmatchedDocCount > 0 && (
+                          <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
+                            {unmatchedDocCount}
                           </span>
                         )}
                       </NavLink>

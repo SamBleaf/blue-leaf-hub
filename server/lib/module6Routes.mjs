@@ -342,7 +342,7 @@ async function claudeText(prompt) {
 }
 
 async function cascadeScheduleForward(sb, projectId, rootTaskId) {
-  const { data: all, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId);
+  const { data: all, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null);
   if (error) throw error;
   const byId = new Map((all || []).map((t) => [t.id, { ...t }]));
   const root = byId.get(rootTaskId);
@@ -447,7 +447,10 @@ export function registerModule6Routes(app) {
         .single();
       if (pe || !proj) return res.status(404).json({ ok: false, error: pe?.message || "Project not found." });
 
-      await sb.from("schedule_tasks").delete().eq("project_id", projectId);
+      // Soft-delete: get current max version, then mark existing rows deleted
+      const { data: vRows } = await sb.from("schedule_tasks").select("schedule_version").eq("project_id", projectId).is("deleted_at", null).order("schedule_version", { ascending: false }).limit(1);
+      const nextVersion = ((vRows?.[0]?.schedule_version) || 0) + 1;
+      await sb.from("schedule_tasks").update({ deleted_at: new Date().toISOString() }).eq("project_id", projectId).is("deleted_at", null);
 
       const excludeNames = Array.isArray(overrides.excludeNames) ? overrides.excludeNames : [];
       const useLegacy = Boolean(overrides.useLegacyTemplate);
@@ -482,11 +485,13 @@ export function registerModule6Routes(app) {
         ? rows.map(({ _depends_names, ...rest }) => ({
             ...rest,
             depends_on: [],
+            schedule_version: nextVersion,
             updated_at: new Date().toISOString()
           }))
         : rows.map((r) => ({
             ...stripDynamicScheduleRow(r),
             depends_on: [],
+            schedule_version: nextVersion,
             updated_at: new Date().toISOString()
           }));
 
@@ -524,6 +529,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .select("*")
         .eq("project_id", projectId)
+        .is("deleted_at", null)
         .order("start_date", { ascending: true, nullsFirst: false });
       if (te) throw te;
       const flagged = attachCriticalPathFlags(tasks || []);
@@ -534,6 +540,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .select("*")
         .eq("project_id", projectId)
+        .is("deleted_at", null)
         .order("start_date", { ascending: true, nullsFirst: false }));
       if (te) throw te;
 
@@ -673,7 +680,7 @@ export function registerModule6Routes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
       const projectId = String(req.params.projectId || "").trim();
-      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null).order("start_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       let phaseLabels = {};
       try {
@@ -703,7 +710,7 @@ export function registerModule6Routes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
       const projectId = String(req.params.projectId || "").trim();
-      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("procurement_order_by", { ascending: true, nullsFirst: false });
+      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null).order("procurement_order_by", { ascending: true, nullsFirst: false });
       if (error) throw error;
       const today = new Date().toISOString().slice(0, 10);
       const tasks = (data || [])
@@ -725,7 +732,7 @@ export function registerModule6Routes(app) {
       const taskId = String(req.body?.taskId || "").trim();
       const newStartDate = toYmd(req.body?.newStartDate);
       if (!taskId || !newStartDate) return res.status(400).json({ ok: false, error: "taskId and newStartDate required." });
-      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId);
+      const { data, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null);
       if (error) throw error;
       const preview = ripplePreview(data || [], taskId, newStartDate);
       return res.json({ ok: true, downstream_tasks: preview.affected.slice(1), affected: preview.affected, updatedTasks: preview.updatedTasks });
@@ -795,9 +802,11 @@ export function registerModule6Routes(app) {
       const { data: template, error: te } = await sb.from("schedule_templates").select("*").eq("id", templateId).single();
       if (te || !template) return res.status(404).json({ ok: false, error: te?.message || "Template not found." });
       const templateTasks = Array.isArray(template.tasks) ? template.tasks : [];
-      await sb.from("schedule_tasks").delete().eq("project_id", projectId);
+      const { data: tvRows } = await sb.from("schedule_tasks").select("schedule_version").eq("project_id", projectId).is("deleted_at", null).order("schedule_version", { ascending: false }).limit(1);
+      const templateNextVersion = ((tvRows?.[0]?.schedule_version) || 0) + 1;
+      await sb.from("schedule_tasks").update({ deleted_at: new Date().toISOString() }).eq("project_id", projectId).is("deleted_at", null);
       const rows = templateTasks.map((t) => templateTaskRow(t, projectId, startDate, template.id));
-      const insertPayload = rows.map(({ _temp_id, _depends_temp, ...r }) => r);
+      const insertPayload = rows.map(({ _temp_id, _depends_temp, ...r }) => ({ ...r, schedule_version: templateNextVersion }));
       const { data: inserted, error: ie } = await sb.from("schedule_tasks").insert(insertPayload).select("id,name");
       if (ie) throw ie;
       const idByTemp = new Map();
@@ -808,7 +817,7 @@ export function registerModule6Routes(app) {
         const deps = (r._depends_temp || []).map((tempId) => idByTemp.get(tempId)).filter(Boolean);
         if (deps.length) await sb.from("schedule_tasks").update({ depends_on: deps, updated_at: new Date().toISOString() }).eq("id", id);
       }
-      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null).order("start_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return res.json({ ok: true, template, tasks: tasks || [] });
     } catch (e) {
@@ -824,7 +833,7 @@ export function registerModule6Routes(app) {
       const projectId = String(req.params.projectId || "").trim();
       const name = String(req.body?.name || "").trim();
       if (!name) return res.status(400).json({ ok: false, error: "name required." });
-      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).order("start_date", { ascending: true, nullsFirst: false });
+      const { data: tasks, error } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null).order("start_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       const start = (tasks || []).map((t) => toYmd(t.start_date)).filter(Boolean).sort()[0] || new Date().toISOString().slice(0, 10);
       const tempById = new Map((tasks || []).map((t, i) => [t.id, `task_${i + 1}`]));
@@ -874,7 +883,7 @@ export function registerModule6Routes(app) {
       const projectId = String(req.params.projectId || "").trim();
       const { data: proj, error: pe } = await sb.from("projects").select("id, job_id").eq("id", projectId).single();
       if (pe || !proj) return res.status(404).json({ ok: false, error: pe?.message || "Project not found." });
-      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId);
+      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("*").eq("project_id", projectId).is("deleted_at", null);
       if (te) throw te;
       const { data: estimates, error: ee } = await sb
         .from("buildexact_estimates")
@@ -917,6 +926,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .select("*")
         .eq("project_id", projectId)
+        .is("deleted_at", null)
         .order("start_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return res.json({ ok: true, tasks: data || [] });
@@ -1049,7 +1059,7 @@ export function registerModule6Routes(app) {
       const id = String(req.params.id || "").trim();
       const { data: cur, error: fe } = await sb.from("schedule_tasks").select("id, project_id").eq("id", id).single();
       if (fe || !cur) return res.status(404).json({ ok: false, error: "Task not found." });
-      const { error: de } = await sb.from("schedule_tasks").delete().eq("id", id);
+      const { error: de } = await sb.from("schedule_tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (de) throw de;
       return res.json({ ok: true, deleted: id });
     } catch (e) {
@@ -1068,6 +1078,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .select("*")
         .eq("project_id", projectId)
+        .is("deleted_at", null)
         .neq("status", "complete");
       if (error) throw error;
       const scheduleJson = JSON.stringify(tasks || [], null, 0);
@@ -1127,6 +1138,7 @@ export function registerModule6Routes(app) {
         .from("schedule_tasks")
         .select("*")
         .eq("project_id", projectId)
+        .is("deleted_at", null)
         .order("start_date", { ascending: true, nullsFirst: false });
       if (te) throw te;
       const phases = new Set((tasks || []).map((t) => t.phase));
@@ -1587,7 +1599,8 @@ ${transcript}`;
         const { data: td } = await sb
           .from("schedule_tasks")
           .select("id, project_id, name, start_date, end_date, percent_complete, task_type, is_hold_point, assignee_trade, trade")
-          .in("project_id", projectIds);
+          .in("project_id", projectIds)
+          .is("deleted_at", null);
         tasks = td || [];
       }
 
@@ -1633,6 +1646,7 @@ ${transcript}`;
       const { data: tasks } = await sb
         .from("schedule_tasks")
         .select("id, project_id, name, phase, start_date, end_date, percent_complete, task_type, is_hold_point, assignee_trade, trade")
+        .is("deleted_at", null)
         .order("start_date", { ascending: true, nullsFirst: false });
       return res.json({ ok: true, projects: projects || [], tasks: tasks || [] });
     } catch (e) {
@@ -1650,6 +1664,7 @@ ${transcript}`;
       const { data: tasks, error } = await sb
         .from("schedule_tasks")
         .select("id, project_id, name, assignee_trade, trade, start_date, end_date, percent_complete, projects(id, address, status)")
+        .is("deleted_at", null)
         .not("start_date", "is", null)
         .not("end_date", "is", null)
         .lt("percent_complete", 100);
@@ -1718,7 +1733,8 @@ ${transcript}`;
       const { data: tasks, error: te } = await sb
         .from("schedule_tasks")
         .select("id, start_date, end_date")
-        .eq("project_id", projectId);
+        .eq("project_id", projectId)
+        .is("deleted_at", null);
       if (te) throw te;
       for (const task of tasks || []) {
         await sb.from("schedule_tasks")
@@ -1814,7 +1830,7 @@ ${transcript}`;
       if (eot.status !== "approved") return res.status(400).json({ ok: false, error: "EOT must be approved before applying." });
       if (!eot.days_approved) return res.status(400).json({ ok: false, error: "No approved days set." });
       const days = Number(eot.days_approved);
-      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("id, start_date, end_date").eq("project_id", projectId);
+      const { data: tasks, error: te } = await sb.from("schedule_tasks").select("id, start_date, end_date").eq("project_id", projectId).is("deleted_at", null);
       if (te) throw te;
       for (const task of tasks || []) {
         await sb.from("schedule_tasks").update({

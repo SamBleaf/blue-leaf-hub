@@ -3,6 +3,8 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { config as dotenvConfig } from "dotenv";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { requireAuth } from "./requireAuth.mjs";
+import { upsertNormalizedCost } from "./normalizedCosts.mjs";
 
 const { parsed: _dotenv = {} } = dotenvConfig();
 function anthropicApiKey() {
@@ -20,6 +22,101 @@ const MODEL_FAST = "claude-haiku-4-5-20251001";   // Tier 2: OCR + gaps
 const MODEL_SLOW = process.env.CLAUDE_MODEL || "claude-sonnet-4-6"; // Tier 3: ambiguous only
 const FINANCE_INBOX_PATH = `${DROPBOX_PRIVATE_INTERNAL_BASE}/FINANCE INBOX`;
 const AUTO_APPROVE_THRESHOLD = Number(process.env.FINANCE_AUTO_APPROVE_BELOW ?? 0);
+
+// ── Trade inference ───────────────────────────────────────────────────────────
+
+/**
+ * Infer trade_category_id for a document.
+ * 1. Check supplier_trade_defaults (if auto_tag=true, return immediately)
+ * 2. Otherwise, ask Claude to classify based on supplier name + description
+ * Returns { trade_category_id, ai_trade_confidence, source }
+ */
+async function inferTradeCategory(sb, { supplierAbn, supplierName, description }, tradeCategories) {
+  // Step 1: Check supplier defaults (auto-tag path)
+  if (supplierAbn) {
+    const { data: def } = await sb.from("supplier_trade_defaults")
+      .select("trade_category_id, auto_tag")
+      .eq("supplier_abn", supplierAbn.replace(/\s/g, ""))
+      .maybeSingle();
+    if (def?.auto_tag && def.trade_category_id) {
+      return { trade_category_id: def.trade_category_id, ai_trade_confidence: 100, source: "supplier_default" };
+    }
+  }
+
+  // Step 2: AI inference (Haiku — cheap, fast)
+  if (!supplierName) return { trade_category_id: null, ai_trade_confidence: null, source: null };
+  try {
+    const categoryList = tradeCategories
+      .filter(c => c.is_active !== false)
+      .map(c => `${c.id}: ${c.name}`)
+      .join("\n");
+    const client = new Anthropic({ apiKey: anthropicApiKey() });
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 128,
+      messages: [{
+        role: "user",
+        content: `You are classifying a construction invoice into a trade category for a residential builder.
+
+Supplier name: ${supplierName}
+Invoice description: ${description || "not provided"}
+
+Trade categories:
+${categoryList}
+
+Return JSON only: {"trade_category_id": "<uuid from the list above>", "confidence": <0-100>}
+Pick the single best matching category. If genuinely unclear, return confidence below 50.`
+      }]
+    });
+    const text = msg.content[0]?.text || "";
+    const m = text.match(/\{[\s\S]*?\}/);
+    if (m) {
+      const p = JSON.parse(m[0]);
+      if (p.trade_category_id && tradeCategories.find(c => c.id === p.trade_category_id)) {
+        return { trade_category_id: p.trade_category_id, ai_trade_confidence: p.confidence, source: "ai" };
+      }
+    }
+  } catch (e) {
+    console.error("[finance] Trade inference error", e?.message);
+  }
+  return { trade_category_id: null, ai_trade_confidence: null, source: null };
+}
+
+/**
+ * On document approval: increment confirmed_count for the supplier's trade assignment.
+ * Sets auto_tag=true when confirmed_count reaches 3.
+ */
+async function recordTradeConfirmation(sb, { supplierAbn, supplierName, tradeCategoryId }) {
+  if (!supplierAbn || !tradeCategoryId) return;
+  const abn = supplierAbn.replace(/\s/g, "");
+  const { data: existing } = await sb.from("supplier_trade_defaults")
+    .select("id, confirmed_count, trade_category_id")
+    .eq("supplier_abn", abn)
+    .maybeSingle();
+
+  if (existing) {
+    // Only increment if the confirmed trade matches (or update if it changed)
+    const newCount = existing.trade_category_id === tradeCategoryId
+      ? (existing.confirmed_count || 0) + 1
+      : 1; // supplier changed trade — reset count
+    await sb.from("supplier_trade_defaults").update({
+      trade_category_id: tradeCategoryId,
+      confirmed_count: newCount,
+      auto_tag: newCount >= 3,
+      last_confirmed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq("id", existing.id);
+  } else {
+    await sb.from("supplier_trade_defaults").insert({
+      supplier_abn: abn,
+      supplier_name: supplierName || "",
+      trade_category_id: tradeCategoryId,
+      confirmed_count: 1,
+      auto_tag: false,
+      last_confirmed_at: new Date().toISOString()
+    });
+  }
+}
 
 // ── Matching helpers ──────────────────────────────────────────────────────────
 
@@ -385,6 +482,31 @@ async function moveDropboxFile(token, fromPath, toPath) {
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerFinanceRoutes(app) {
+  app.use("/api/finance", requireAuth);
+
+  // ── Trade categories ──────────────────────────────────────────────────────
+  app.get("/api/finance/trade-categories", async (_req, res) => {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("trade_categories")
+      .select("id, name, sort_order, category_type")
+      .eq("is_active", true)
+      .order("sort_order");
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, categories: data || [] });
+  });
+
+  // ── Assign trade to document (manual override) ───────────────────────────
+  app.put("/api/finance/documents/:id/trade", async (req, res) => {
+    const { trade_category_id } = req.body || {};
+    if (!trade_category_id) return res.status(400).json({ ok: false, error: "trade_category_id required" });
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("financial_documents")
+      .update({ trade_category_id, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id).select().single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, document: data });
+  });
+
   // ── Upload + extract + match ──────────────────────────────────────────────
   app.post("/api/finance/documents", async (req, res) => {
     const { filename, mimeType, data: fileBase64, source = "upload" } = req.body || {};
@@ -392,13 +514,15 @@ export function registerFinanceRoutes(app) {
 
     const sb = getServiceSupabase();
 
-    // Load context for matching
-    const [jobsRes, subsRes] = await Promise.all([
+    // Load context for matching + trade inference
+    const [jobsRes, subsRes, tradeCatsRes] = await Promise.all([
       sb.from("jobs").select("id, address, arch_ref").not("address", "is", null),
-      sb.from("subcontractors").select("id, business_name, default_job_id")
+      sb.from("subcontractors").select("id, business_name, default_job_id"),
+      sb.from("trade_categories").select("id, name, is_active").eq("is_active", true).order("sort_order")
     ]);
     const jobs = jobsRes.data || [];
     const subcontractors = subsRes.data || [];
+    const tradeCategories = tradeCatsRes.data || [];
 
     // 3-tier extraction (regex → Haiku → Sonnet fallback)
     let extracted = {};
@@ -419,8 +543,17 @@ export function registerFinanceRoutes(app) {
       if (dups?.length) { is_duplicate = true; duplicate_of = dups[0].id; }
     }
 
-    // Matching cascade
-    const match = await matchDocument(extracted, { jobs, subcontractors });
+    // Matching cascade + trade inference (run in parallel)
+    const [match, tradeInference] = await Promise.all([
+      matchDocument(extracted, { jobs, subcontractors }),
+      tradeCategories.length
+        ? inferTradeCategory(sb, {
+            supplierAbn: extracted.supplier_abn,
+            supplierName: extracted.supplier_name,
+            description: extracted.description
+          }, tradeCategories)
+        : Promise.resolve({ trade_category_id: null, ai_trade_confidence: null })
+    ]);
 
     // File to Dropbox inbox
     let dropbox_path = null;
@@ -448,6 +581,9 @@ export function registerFinanceRoutes(app) {
       job_id: match.job_id,
       match_method: match.match_method,
       match_confidence: match.match_confidence,
+      trade_category_id: tradeInference.trade_category_id,
+      ai_trade_confidence: tradeInference.ai_trade_confidence,
+      ai_job_match_confidence: match.match_confidence,
       status,
       is_duplicate,
       duplicate_of,
@@ -470,7 +606,8 @@ export function registerFinanceRoutes(app) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     if (autoApprove) {
-      await sb.from("financial_approvals").insert({ document_id: doc.id, action: "auto_approved" });
+      const { error: auditErr } = await sb.from("financial_approvals").insert({ document_id: doc.id, action: "auto_approved" });
+      if (auditErr) console.error("[finance] auto-approval audit insert failed:", auditErr.message);
     }
 
     res.json({ ok: true, document: doc });
@@ -503,6 +640,17 @@ export function registerFinanceRoutes(app) {
       if (row.status === "filed" || row.status === "approved") totalValue += Number(row.amount_total || 0);
     }
     res.json({ ok: true, counts, totalApprovedValue: totalValue });
+  });
+
+  app.get("/api/finance/documents/unmatched-count", async (_req, res) => {
+    const sb = getServiceSupabase();
+    const { count, error } = await sb
+      .from("financial_documents")
+      .select("id", { count: "exact", head: true })
+      .is("job_id", null)
+      .not("status", "in", '("rejected","void")');
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, count: count ?? 0 });
   });
 
   // ── Update (rematch / notes) ──────────────────────────────────────────────
@@ -539,7 +687,7 @@ export function registerFinanceRoutes(app) {
   // ── Approve → file to Dropbox ─────────────────────────────────────────────
   app.post("/api/finance/documents/:id/approve", async (req, res) => {
     const { id } = req.params;
-    const { comment } = req.body || {};
+    const { comment, trade_category_id: bodyTrade } = req.body || {};
     const sb = getServiceSupabase();
 
     const { data: doc } = await sb.from("financial_documents")
@@ -547,6 +695,20 @@ export function registerFinanceRoutes(app) {
       .eq("id", id).single();
     if (!doc) return res.status(404).json({ ok: false, error: "Not found" });
     if (!doc.job_id) return res.status(400).json({ ok: false, error: "Document must be matched to a job before approval" });
+
+    // Allow trade to be patched in the approval payload (UI sends it)
+    const finalTradeId = bodyTrade || doc.trade_category_id;
+    if (!finalTradeId) {
+      return res.status(400).json({ ok: false, error: "Trade category is required before approval. Select the trade this invoice belongs to." });
+    }
+
+    // Persist trade if it was supplied in the request (override AI suggestion)
+    if (bodyTrade && bodyTrade !== doc.trade_category_id) {
+      await sb.from("financial_documents")
+        .update({ trade_category_id: bodyTrade, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      doc.trade_category_id = bodyTrade;
+    }
 
     let newDropboxPath = doc.dropbox_path;
     let newStatus = "approved";
@@ -592,6 +754,36 @@ export function registerFinanceRoutes(app) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     await sb.from("financial_approvals").insert({ document_id: id, action: "approved", comment });
+
+    // Update supplier trade learning (increment confirmed_count, auto_tag at ≥ 3)
+    await recordTradeConfirmation(sb, {
+      supplierAbn: doc.supplier_abn,
+      supplierName: doc.supplier_name,
+      tradeCategoryId: finalTradeId
+    });
+
+    // Update normalized_costs with actual amount
+    if (doc.job_id && doc.trade_category_id) {
+      const sb2 = getServiceSupabase();
+      // Re-fetch total approved amount for this job + trade (sum, not just this invoice)
+      const { data: approved } = await sb2.from("financial_documents")
+        .select("amount_ex_gst")
+        .eq("job_id", doc.job_id)
+        .eq("trade_category_id", doc.trade_category_id)
+        .in("status", ["approved", "filed", "xero_synced"]);
+      const totalActual = (approved || []).reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0);
+
+      // Get trade name
+      const { data: tradeCat } = await sb2.from("trade_categories").select("name").eq("id", doc.trade_category_id).maybeSingle();
+
+      await upsertNormalizedCost(sb2, {
+        jobId: doc.job_id,
+        tradeCategoryId: doc.trade_category_id,
+        tradeCategoryName: tradeCat?.name,
+        field: "actual",
+        amount: totalActual,
+      }).catch(e => console.warn("[approval] normalized_costs:", e.message));
+    }
 
     res.json({ ok: true, document: updated });
   });
@@ -641,6 +833,7 @@ export function registerFinanceRoutes(app) {
   // ── WIPAA calculation for a job ───────────────────────────────────────────
   // cost_to_date = sum of approved/filed invoices; no Xero needed
   app.get("/api/finance/jobs/:id/wipaa", async (req, res) => {
+    return res.redirect(307, `/api/finance/jobs/${req.params.id}/wipaa/current`);
     const sb = getServiceSupabase();
     const [jobRes, docsRes] = await Promise.all([
       sb.from("jobs").select("id, address, arch_ref, contract_value, estimated_total_cost, progress_billed").eq("id", req.params.id).single(),
@@ -723,7 +916,7 @@ export function registerFinanceRoutes(app) {
   let invoicePollBusy = false;
   let lastInvoicePollResults = [];
 
-  async function pollOneAccount(cfg, sb, jobs, subcontractors) {
+  async function pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories = []) {
     const client = new ImapFlow(cfg);
     let processed = 0, skipped = 0, failed = 0;
     try {
@@ -776,7 +969,16 @@ export function registerFinanceRoutes(app) {
 
             const base64 = att.content.toString("base64");
             const extracted = await extractDocument(base64, mime);
-            const match = await matchDocument(extracted, { jobs, subcontractors });
+            const [match, tradeInference] = await Promise.all([
+              matchDocument(extracted, { jobs, subcontractors }),
+              tradeCategories.length
+                ? inferTradeCategory(sb, {
+                    supplierAbn: extracted.supplier_abn,
+                    supplierName: extracted.supplier_name,
+                    description: extracted.description
+                  }, tradeCategories)
+                : Promise.resolve({ trade_category_id: null, ai_trade_confidence: null })
+            ]);
 
             let is_duplicate = false;
             if (extracted.invoice_number && extracted.supplier_name) {
@@ -798,6 +1000,9 @@ export function registerFinanceRoutes(app) {
               job_id: match.job_id || null,
               match_method: match.match_method,
               match_confidence: match.match_confidence,
+              trade_category_id: tradeInference.trade_category_id,
+              ai_trade_confidence: tradeInference.ai_trade_confidence,
+              ai_job_match_confidence: match.match_confidence,
               is_duplicate,
               status: match.job_id ? "pending_approval" : "unmatched",
             });
@@ -835,16 +1040,18 @@ export function registerFinanceRoutes(app) {
 
     invoicePollBusy = true;
     try {
-      const [jobsRes, subsRes] = await Promise.all([
+      const [jobsRes, subsRes, tradeCatsRes] = await Promise.all([
         sb.from("jobs").select("id, address, arch_ref").not("address", "is", null),
         sb.from("subcontractors").select("id, business_name, email").not("business_name", "is", null),
+        sb.from("trade_categories").select("id, name, is_active").eq("is_active", true).order("sort_order")
       ]);
       const jobs = jobsRes.data || [];
       const subcontractors = subsRes.data || [];
+      const tradeCategories = tradeCatsRes.data || [];
 
       const results = [];
       for (const cfg of configs) {
-        const r = await pollOneAccount(cfg, sb, jobs, subcontractors);
+        const r = await pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories);
         results.push(r);
       }
       lastInvoicePollResults = results;
@@ -885,4 +1092,42 @@ export function registerFinanceRoutes(app) {
       }, 15 * 60 * 1000);
     }, 10_000);
   }
+
+  // ── Fee proposal accepted → auto-set original_contract_value on job ─────────
+  app.post("/api/finance/fee-proposals/:proposalId/accept", async (req, res) => {
+    const { proposalId } = req.params;
+    const sb = getServiceSupabase();
+    const { data: proposal, error: pErr } = await sb.from("fee_proposals")
+      .select("id, job_id, data, status, fee_schedule")
+      .eq("id", proposalId).single();
+    if (pErr || !proposal) return res.status(404).json({ ok: false, error: "Proposal not found" });
+
+    await sb.from("fee_proposals")
+      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .eq("id", proposalId);
+
+    let contractValue = null;
+    if (proposal.job_id) {
+      const totalExGst = Number(
+        proposal.data?.total_ex_gst ||
+        proposal.data?.totalExGst ||
+        proposal.data?.contract_value_ex_gst ||
+        0
+      );
+      if (totalExGst > 0) {
+        const { data: job } = await sb.from("jobs")
+          .select("original_contract_value").eq("id", proposal.job_id).single();
+        if (!job?.original_contract_value) {
+          await sb.from("jobs").update({
+            original_contract_value: totalExGst,
+            contract_value: totalExGst,
+            updated_at: new Date().toISOString()
+          }).eq("id", proposal.job_id);
+          contractValue = totalExGst;
+        }
+      }
+    }
+
+    res.json({ ok: true, proposalId, job_id: proposal.job_id, contract_value_set: contractValue });
+  });
 }

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Bar,
@@ -20,18 +20,352 @@ import {
   tradeChartColor,
   trendFromQuotes
 } from "../lib/costIntelUtils.js";
+import {
+  fetchBuildxactTemplate,
+  fetchJobEstimateBreakdown,
+  syncJobEstimateFromBuildxact
+} from "../lib/costIntelEstimateApi.js";
 
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
+function MetricsForm({ metrics, onSave }) {
+  const SLOPES = ["flat", "gentle", "moderate", "steep", "very_steep"];
+  const [form, setForm] = useState(() => ({
+    floor_area_m2: metrics?.floor_area_m2 ?? "",
+    roof_area_m2:  metrics?.roof_area_m2  ?? "",
+    wall_area_m2:  metrics?.wall_area_m2  ?? "",
+    storeys:       metrics?.storeys       ?? "",
+    wet_areas:     metrics?.wet_areas     ?? "",
+    site_slope:    metrics?.site_slope    ?? "",
+    wall_type:     metrics?.wall_type     ?? "",
+    roof_type:     metrics?.roof_type     ?? "",
+    bal_rating:    metrics?.bal_rating    ?? "",
+    has_raked_ceilings:  metrics?.has_raked_ceilings  ?? false,
+    has_skillion_roof:   metrics?.has_skillion_roof   ?? false,
+    has_suspended_slab:  metrics?.has_suspended_slab  ?? false,
+    has_retaining_walls: metrics?.has_retaining_walls ?? false,
+    architectural_complexity_score: metrics?.architectural_complexity_score ?? "",
+  }));
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function save() {
+    setSaving(true);
+    await onSave(form);
+    setSaving(false);
+  }
+
+  const numField = (label, key) => (
+    <div key={key}>
+      <label className="text-xs font-bold text-ink mb-1 block">{label}</label>
+      <input type="number" value={form[key]} onChange={e => set(key, e.target.value)}
+        className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {numField("Floor area (m²)", "floor_area_m2")}
+        {numField("Roof area (m²)", "roof_area_m2")}
+        {numField("Wall area (m²)", "wall_area_m2")}
+        {numField("Storeys", "storeys")}
+        {numField("Wet areas (count)", "wet_areas")}
+        <div>
+          <label className="text-xs font-bold text-ink mb-1 block">Site slope</label>
+          <select value={form.site_slope} onChange={e => set("site_slope", e.target.value)}
+            className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none">
+            <option value="">— select —</option>
+            {SLOPES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold text-ink mb-1 block">Wall type</label>
+          <input value={form.wall_type} onChange={e => set("wall_type", e.target.value)}
+            className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none" placeholder="e.g. brick veneer" />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-ink mb-1 block">Roof type</label>
+          <input value={form.roof_type} onChange={e => set("roof_type", e.target.value)}
+            className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none" placeholder="e.g. colorbond hip" />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-ink mb-1 block">BAL rating</label>
+          <input value={form.bal_rating} onChange={e => set("bal_rating", e.target.value)}
+            className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none" placeholder="e.g. BAL-12.5" />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-ink mb-1 block">Complexity (1–10)</label>
+          <input type="number" min={1} max={10} value={form.architectural_complexity_score} onChange={e => set("architectural_complexity_score", e.target.value)}
+            className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none" />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-4">
+        {[
+          ["has_raked_ceilings",  "Raked ceilings"],
+          ["has_skillion_roof",   "Skillion roof"],
+          ["has_suspended_slab",  "Suspended slab"],
+          ["has_retaining_walls", "Retaining walls"],
+        ].map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2 text-sm text-ink cursor-pointer">
+            <input type="checkbox" checked={!!form[key]} onChange={e => set(key, e.target.checked)}
+              className="rounded border-hairline" />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className="flex justify-end">
+        <button type="button" onClick={save} disabled={saving}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+          {saving ? "Saving…" : "Save metrics"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IntelligenceTab() {
+  const [jobs, setJobs] = useState([]);
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [metrics, setMetrics] = useState(null);
+  const [normCosts, setNormCosts] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [editingMetrics, setEditingMetrics] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractResult, setExtractResult] = useState(null);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    fetch("/api/jobs").then(r => r.json()).then(j => { if (j.ok || Array.isArray(j.jobs)) setJobs(j.jobs || j || []); }).catch(() => {});
+  }, []);
+
+  const loadJobData = useCallback(async (jobId) => {
+    if (!jobId) return;
+    setLoading(true); setMetrics(null); setNormCosts(null); setExtractResult(null);
+    const [mRes, ncRes] = await Promise.all([
+      fetch(`/api/cost-intelligence/jobs/${jobId}/metrics`).then(r => r.json()).catch(() => null),
+      fetch(`/api/cost-intelligence/jobs/${jobId}/normalized-costs`).then(r => r.json()).catch(() => null),
+    ]);
+    if (mRes?.ok) setMetrics(mRes.metrics);
+    if (ncRes?.ok) setNormCosts(ncRes);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (selectedJobId) loadJobData(selectedJobId); }, [selectedJobId, loadJobData]);
+
+  async function syncMetrics() {
+    if (!selectedJobId) return;
+    setSyncing(true);
+    const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/sync`, { method: "POST" });
+    const j = await r.json();
+    if (j.ok) setMetrics(j.metrics);
+    setSyncing(false);
+  }
+
+  async function saveMetrics(form) {
+    const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
+    });
+    const j = await r.json();
+    if (j.ok) { setMetrics(j.metrics); setEditingMetrics(false); }
+  }
+
+  async function handleExtract(e) {
+    const file = e.target.files?.[0];
+    if (!file || !selectedJobId) return;
+    setExtracting(true); setExtractResult(null);
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const b64 = ev.target.result.split(",")[1];
+      const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/extract`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_base64: b64, filename: file.name }),
+      });
+      const j = await r.json();
+      setExtracting(false);
+      if (j.ok) { setMetrics(j.metrics); setExtractResult(j); }
+      else setExtractResult({ error: j.error });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const fmt = n => n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+  const fmtRate = n => n == null ? "—" : `$${Number(n).toFixed(0)}/m²`;
+  const fmtPct = n => n == null ? "—" : `${n > 0 ? "+" : ""}${Number(n).toFixed(1)}%`;
+
+  return (
+    <div className="space-y-6">
+      {/* Job selector */}
+      <div className="flex items-center gap-3">
+        <select value={selectedJobId} onChange={e => setSelectedJobId(e.target.value)}
+          className="flex-1 max-w-sm rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <option value="">Select a job…</option>
+          {jobs.map(j => <option key={j.id} value={j.id}>{j.address || j.id}</option>)}
+        </select>
+      </div>
+
+      {!selectedJobId && (
+        <div className="py-16 text-center text-muted text-sm">
+          Select a job to view its project metrics and normalised cost rates.
+        </div>
+      )}
+
+      {selectedJobId && loading && (
+        <div className="py-12 text-center text-sm text-muted">Loading…</div>
+      )}
+
+      {selectedJobId && !loading && (
+        <>
+          {/* Project Metrics card */}
+          <div className="rounded-card border border-hairline bg-surface p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-ink">Project Metrics</h2>
+                {metrics?.extraction_source && (
+                  <p className="text-xs text-muted mt-0.5">
+                    Source: {metrics.extraction_source}
+                    {metrics.extraction_confidence != null && ` · Confidence: ${metrics.extraction_confidence}%`}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={syncMetrics} disabled={syncing}
+                  className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted hover:text-ink disabled:opacity-40">
+                  {syncing ? "Syncing…" : "↻ Sync from sources"}
+                </button>
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={extracting}
+                  className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted hover:text-ink disabled:opacity-40">
+                  {extracting ? "Extracting…" : "⬆ Extract from plans PDF"}
+                </button>
+                <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleExtract} />
+                <button type="button" onClick={() => setEditingMetrics(v => !v)}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white">
+                  {editingMetrics ? "Cancel" : "Edit"}
+                </button>
+              </div>
+            </div>
+
+            {extractResult?.error && (
+              <p className="text-xs text-danger font-medium">Extraction failed: {extractResult.error}</p>
+            )}
+            {extractResult?.low_confidence_fields?.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <span className="font-bold">Low-confidence fields not saved:</span>{" "}
+                {extractResult.low_confidence_fields.map(f => `${f.field} (${f.confidence}%)`).join(", ")}
+                {" — "}please enter these manually.
+              </div>
+            )}
+            {extractResult?.ok && (
+              <p className="text-xs text-green-700 font-medium">
+                ✓ Extracted {Object.keys(extractResult.metrics || {}).length} fields — overall confidence {extractResult.overall_confidence}%
+                {extractResult.notes && ` · ${extractResult.notes}`}
+              </p>
+            )}
+
+            {!editingMetrics && (
+              <div className="grid grid-cols-3 gap-x-6 gap-y-2 text-sm">
+                {[
+                  ["Floor area", metrics?.floor_area_m2 != null ? `${metrics.floor_area_m2} m²` : "—"],
+                  ["Roof area",  metrics?.roof_area_m2  != null ? `${metrics.roof_area_m2} m²` : "—"],
+                  ["Wall area",  metrics?.wall_area_m2  != null ? `${metrics.wall_area_m2} m²` : "—"],
+                  ["Storeys",    metrics?.storeys ?? "—"],
+                  ["Wet areas",  metrics?.wet_areas ?? "—"],
+                  ["Site slope", metrics?.site_slope?.replace("_", " ") || "—"],
+                  ["Wall type",  metrics?.wall_type || "—"],
+                  ["Roof type",  metrics?.roof_type || "—"],
+                  ["BAL rating", metrics?.bal_rating || "—"],
+                  ["Complexity score", metrics?.architectural_complexity_score ?? "—"],
+                  ["Raked ceilings",  metrics?.has_raked_ceilings ? "Yes" : metrics?.has_raked_ceilings === false ? "No" : "—"],
+                  ["Suspended slab",  metrics?.has_suspended_slab ? "Yes" : metrics?.has_suspended_slab === false ? "No" : "—"],
+                  ["Retaining walls", metrics?.has_retaining_walls ? "Yes" : metrics?.has_retaining_walls === false ? "No" : "—"],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <span className="text-xs text-muted">{label}</span>
+                    <div className="font-semibold text-ink">{value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editingMetrics && <MetricsForm metrics={metrics} onSave={saveMetrics} />}
+          </div>
+
+          {/* Normalized Costs table */}
+          <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+            <div className="px-5 py-4 border-b border-hairline flex items-center justify-between">
+              <h2 className="text-sm font-bold text-ink">Normalised Cost Rates</h2>
+              {!normCosts?.metrics?.floor_area_m2 && (
+                <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                  Add floor area above to enable $/m² rates
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-page">
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-muted">Trade</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Budget</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Actual</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Variation</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Final</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">$/m² floor</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">vs budget</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {(normCosts?.rows || [])
+                    .filter(r => r.budget_amount || r.actual_amount || r.final_amount)
+                    .map(r => {
+                      const over = r.budget_vs_actual_pct;
+                      return (
+                        <tr key={r.trade_category_id} className="hover:bg-page/50">
+                          <td className="px-4 py-2.5 font-medium text-ink">{r.trade_category_name}</td>
+                          <td className="px-4 py-2.5 text-right text-muted">{fmt(r.budget_amount)}</td>
+                          <td className="px-4 py-2.5 text-right text-muted">{fmt(r.actual_amount)}</td>
+                          <td className="px-4 py-2.5 text-right text-muted">{fmt(r.variation_amount)}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-ink">{fmt(r.final_amount || r.actual_amount || r.budget_amount)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-xs">{fmtRate(r.rate_per_m2_floor)}</td>
+                          <td className={`px-4 py-2.5 text-right text-xs font-semibold ${over == null ? "text-muted" : over > 5 ? "text-red-700" : over > 0 ? "text-amber-700" : "text-green-700"}`}>
+                            {fmtPct(over)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+              {(normCosts?.rows || []).filter(r => r.budget_amount || r.actual_amount).length === 0 && (
+                <div className="px-4 py-10 text-center text-sm text-muted">
+                  No cost data yet. Seed the budget from Buildxact or approve invoices to populate.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function CostIntelligence() {
+  const [activeTab, setActiveTab] = useState("benchmarks");
   const [rows, setRows] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [template, setTemplate] = useState(null);
+  const [templateBusy, setTemplateBusy] = useState(true);
+  const [estimateJobId, setEstimateJobId] = useState("");
+  const [estimateData, setEstimateData] = useState(null);
+  const [estimateBusy, setEstimateBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [estimateError, setEstimateError] = useState("");
+
   const [manual, setManual] = useState({
     job_id: "",
     project_type: "",
@@ -68,6 +402,57 @@ export default function CostIntelligence() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTemplateBusy(true);
+      try {
+        const json = await fetchBuildxactTemplate();
+        if (!cancelled) setTemplate(json);
+      } catch (e) {
+        if (!cancelled) setTemplate({ categories: [], error: e.message });
+      } finally {
+        if (!cancelled) setTemplateBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function loadJobEstimate(jobId) {
+    if (!jobId) {
+      setEstimateData(null);
+      return;
+    }
+    setEstimateBusy(true);
+    setEstimateError("");
+    try {
+      const json = await fetchJobEstimateBreakdown(jobId);
+      setEstimateData(json);
+    } catch (e) {
+      setEstimateData(null);
+      setEstimateError(e.message);
+    } finally {
+      setEstimateBusy(false);
+    }
+  }
+
+  async function handleSyncEstimate() {
+    if (!estimateJobId) return;
+    setSyncBusy(true);
+    setEstimateError("");
+    try {
+      await syncJobEstimateFromBuildxact(estimateJobId);
+      await loadJobEstimate(estimateJobId);
+      await load();
+    } catch (e) {
+      setEstimateError(e.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  }
 
   const byJob = useMemo(() => {
     const m = new Map();
@@ -246,7 +631,9 @@ export default function CostIntelligence() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Module 5</p>
           <h1 className="text-3xl font-semibold text-primary tracking-tight">Cost Intelligence</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">Rolling quote analytics, $/m² by trade, and manual imports. Data feeds from won tenders and manual entry.</p>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            Buildxact estimate template (37 categories), per-job budget sync, quote benchmarks, and manual imports. RFQ Engine reads quote-capable trades from here.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={exportCsv} className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold text-ink">
@@ -258,7 +645,147 @@ export default function CostIntelligence() {
         </div>
       </header>
 
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-hairline mb-6">
+        {[
+          { id: "benchmarks",   label: "Benchmarks" },
+          { id: "intelligence", label: "Intelligence" },
+          { id: "trends",       label: "Trends" },
+          { id: "pretender",    label: "Pre-Tender" },
+        ].map(tab => (
+          <button key={tab.id} type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition -mb-px ${
+              activeTab === tab.id
+                ? "border-primary text-primary"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "benchmarks" && (<>
+
       {error ? <div className="rounded-lg border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div> : null}
+
+      <section className="rounded-card border border-primary/25 bg-primary/5 p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-primary">Buildxact estimate template</h2>
+        <p className="mt-1 text-xs text-muted">
+          Canonical category list from <code className="text-[10px]">trade_categories</code> (migration 031), enriched with
+          quote-line flags and RFQ trade mapping. This is the baseline for budgets, normalized costs, and RFQ packages.
+        </p>
+        {templateBusy ? (
+          <p className="mt-4 text-sm text-muted">Loading template…</p>
+        ) : template?.error ? (
+          <p className="mt-4 text-sm text-danger">{template.error}</p>
+        ) : (
+          <>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
+              <span>
+                <strong className="text-ink">{template?.category_count ?? 0}</strong> categories
+              </span>
+              <span>
+                <strong className="text-ink">{template?.quote_capable_count ?? 0}</strong> quote-capable → RFQ
+              </span>
+              <span>Source: {template?.source || "—"}</span>
+            </div>
+            <div className="mt-4 max-h-64 overflow-y-auto rounded-lg border border-hairline bg-surface">
+              <table className="min-w-full text-left text-xs">
+                <thead className="sticky top-0 bg-page">
+                  <tr className="border-b border-hairline uppercase text-muted">
+                    <th className="py-2 pl-3 pr-2">#</th>
+                    <th className="py-2 pr-2">Category</th>
+                    <th className="py-2 pr-2">Type</th>
+                    <th className="py-2 pr-2">Quote?</th>
+                    <th className="py-2 pr-3">RFQ trade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(template?.categories || []).map((c) => (
+                    <tr key={c.id || c.name} className="border-b border-hairline/60">
+                      <td className="py-1.5 pl-3 pr-2 text-muted">{c.sort_order}</td>
+                      <td className="py-1.5 pr-2 font-medium text-ink">{c.name}</td>
+                      <td className="py-1.5 pr-2 text-muted">{c.category_type}</td>
+                      <td className="py-1.5 pr-2">{c.has_quote_line ? "Yes" : "—"}</td>
+                      <td className="py-1.5 pr-3 text-muted">{c.rfq_trade_label || c.rfq_trade_id || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div className="mt-6 border-t border-hairline pt-4">
+          <h3 className="text-sm font-semibold text-ink">Job estimate from Buildxact</h3>
+          <p className="mt-1 text-xs text-muted">Select a job with a linked Buildxact ID to view or sync budget lines into Cost Intelligence.</p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="text-xs font-semibold text-ink">
+              Job
+              <select
+                className="mt-1 block min-w-[220px] rounded-lg border border-hairline bg-surface px-3 py-2 text-sm"
+                value={estimateJobId}
+                onChange={(e) => {
+                  setEstimateJobId(e.target.value);
+                  loadJobEstimate(e.target.value);
+                }}
+              >
+                <option value="">Select job…</option>
+                {jobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.address || j.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!estimateJobId || syncBusy}
+              onClick={handleSyncEstimate}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {syncBusy ? "Syncing…" : "Sync estimate → budgets"}
+            </button>
+          </div>
+          {estimateError ? <p className="mt-2 text-sm text-danger">{estimateError}</p> : null}
+          {estimateBusy ? <p className="mt-2 text-sm text-muted">Loading estimate…</p> : null}
+          {estimateData?.parsed?.categories?.length ? (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-hairline bg-surface">
+              <table className="min-w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-hairline uppercase text-muted">
+                    <th className="py-2 pl-3 pr-2">Buildxact category</th>
+                    <th className="py-2 pr-2">Mapped to</th>
+                    <th className="py-2 pr-2 text-right">Budget ex GST</th>
+                    <th className="py-2 pr-3">RFQ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {estimateData.parsed.categories
+                    .filter((c) => c.amount_ex_gst > 0)
+                    .map((c) => (
+                      <tr key={c.buildxact_category_name} className="border-b border-hairline/50">
+                        <td className="py-1.5 pl-3 pr-2 font-medium text-ink">{c.buildxact_category_name}</td>
+                        <td className="py-1.5 pr-2 text-muted">{c.trade_category_name || "—"}</td>
+                        <td className="py-1.5 pr-2 text-right">{formatAud(c.amount_ex_gst)}</td>
+                        <td className="py-1.5 pr-3 text-muted">{c.rfq_trade_label || "—"}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              <p className="border-t border-hairline px-3 py-2 text-xs text-muted">
+                Total {formatAud(estimateData.parsed.total_ex_gst)} · Quote-capable{" "}
+                {formatAud(estimateData.parsed.quote_capable_total)}
+                {estimateData.summary?.unmatched_count > 0
+                  ? ` · ${estimateData.summary.unmatched_count} unmatched categories`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-card border border-hairline bg-surface p-4 shadow-sm">
@@ -522,6 +1049,22 @@ export default function CostIntelligence() {
           </div>
         </div>
       ) : null}
+
+      </>)}
+
+      {activeTab === "intelligence" && (
+        <IntelligenceTab />
+      )}
+      {activeTab === "trends" && (
+        <div className="py-16 text-center text-muted text-sm">
+          Trends analysis coming in the next phase. Once enough normalized cost data is collected, this tab will show rolling 3/6/12-month rate trends per trade.
+        </div>
+      )}
+      {activeTab === "pretender" && (
+        <div className="py-16 text-center text-muted text-sm">
+          Pre-Tender estimator coming in the next phase. Once benchmarks are computed from completed projects, you will be able to generate trade-by-trade cost ranges before starting a Buildxact estimate.
+        </div>
+      )}
     </div>
   );
 }

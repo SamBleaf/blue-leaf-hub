@@ -5,6 +5,8 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
+import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqTradeIntelligence.mjs";
+import { tradeLabel } from "./tradeMasterLibrary.mjs";
 
 const STANDARD_TRADES = [
   "excavation", "demolition", "termite_protection", "footings_concrete_formwork",
@@ -158,15 +160,18 @@ export function registerRfqPackageRoutes(app) {
       } = req.body;
 
       if (!project_address) return res.status(400).json({ error: "project_address required" });
+      if (!job_id) return res.status(400).json({ error: "job_id required — every RFQ package must be linked to a job" });
 
-      const coveredIds = (trade_scopes || []).map((t) => t.trade_id);
-      const suggested = computeSuggestedTrades(coveredIds);
-      const score = computeCoverageScore(coveredIds.length);
+      const intel = await buildRfqTradeIntelligence({
+        db,
+        extraction: extraction_data || {},
+        jobId: job_id
+      });
 
       const { data: pkg, error: pkgErr } = await db
         .from("rfq_packages")
         .insert({
-          job_id: job_id || null,
+          job_id,
           project_address,
           project_type: project_type || "",
           tender_deadline: tender_deadline || "",
@@ -174,8 +179,11 @@ export function registerRfqPackageRoutes(app) {
           dropbox_url: dropbox_url || "",
           extraction_data: extraction_data || {},
           pdf_meta: pdf_meta || [],
-          coverage_score: score,
-          suggested_trades: suggested,
+          coverage_score: 0,
+          suggested_trades: [],
+          estimate_baseline: intel.estimate_baseline,
+          missing_trade_analysis: intel.missing_trade_analysis,
+          trade_coverage: intel.trade_coverage,
           status: "active"
         })
         .select("id")
@@ -189,7 +197,7 @@ export function registerRfqPackageRoutes(app) {
           .insert({
             package_id: pkg.id,
             trade_id: scope.trade_id,
-            trade_label: scope.trade_label || TRADE_LABEL_MAP[scope.trade_id] || scope.trade_id,
+            trade_label: scope.trade_label || TRADE_LABEL_MAP[scope.trade_id] || tradeLabel(scope.trade_id),
             scope_bullets: scope.scope_bullets || [],
             exclusions: scope.exclusions || [],
             questions: scope.questions || [],
@@ -197,7 +205,10 @@ export function registerRfqPackageRoutes(app) {
             due_date: scope.due_date || tender_deadline || "",
             attachments: scope.attachments || [],
             status: scope.recipients?.length ? "sent" : "draft",
-            estimate_category: ESTIMATE_CATEGORY[scope.trade_id] || ""
+            estimate_category: ESTIMATE_CATEGORY[scope.trade_id] || "",
+            source: scope.source || "manual",
+            ai_enrichment: scope.ai_enrichment || [],
+            estimate_line_refs: scope.estimate_line_refs || []
           })
           .select("id")
           .single();
@@ -218,6 +229,8 @@ export function registerRfqPackageRoutes(app) {
           });
         }
       }
+
+      await reconcilePackageTradeCoverage(db, pkg.id);
 
       res.json({ ok: true, packageId: pkg.id });
     } catch (e) {
@@ -245,6 +258,24 @@ export function registerRfqPackageRoutes(app) {
         .single();
       if (error) throw error;
       if (!pkg) return res.status(404).json({ error: "Package not found" });
+      try {
+        await reconcilePackageTradeCoverage(db, req.params.id);
+        const { data: refreshed } = await db
+          .from("rfq_packages")
+          .select(`
+            *,
+            rfq_trade_scopes (
+              *,
+              rfq_recipients (*)
+            ),
+            rfq_addenda (*)
+          `)
+          .eq("id", req.params.id)
+          .single();
+        return res.json({ ok: true, package: refreshed || pkg });
+      } catch (reconcileErr) {
+        console.warn("[rfq-packages] reconcile on GET", reconcileErr?.message || reconcileErr);
+      }
       res.json({ ok: true, package: pkg });
     } catch (e) {
       res.status(500).json({ error: e.message });

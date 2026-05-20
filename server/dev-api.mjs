@@ -34,11 +34,16 @@ import { resolveInboundRfqMatch, generateOutboundMessageId } from "./lib/imapQuo
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
+import { registerFinanceCCRoutes } from "./lib/financeCCRoutes.mjs";
+import { registerJobFinanceRoutes } from "./lib/jobFinanceRoutes.mjs";
 import { registerPortalRoutes } from "./lib/portalRoutes.mjs";
 import { registerAuthRoutes } from "./lib/authRoutes.mjs";
 import { registerSupervisorRoutes } from "./lib/supervisorRoutes.mjs";
 import { registerRfqPackageRoutes } from "./lib/rfqPackageRoutes.mjs";
+import { registerRfqTradeRoutes } from "./lib/rfqTradeRoutes.mjs";
+import { registerCostIntelligenceRoutes } from "./lib/costIntelligenceRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
+import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 
 console.log("[blue-leaf-api] booting…");
 
@@ -410,15 +415,31 @@ function emptyTradeBlock() {
 function normalizeTradeBlock(v) {
   if (v == null) return emptyTradeBlock();
   if (typeof v === "string") {
-    return { scope_summary: v.trim(), specific_items: [], missing_info: "" };
+    return { scope_summary: v.trim(), specific_items: [], missing_info: "", scope_of_works: [] };
   }
   if (typeof v === "object") {
+    const arr = (k) =>
+      Array.isArray(v[k]) ? v[k].map((x) => String(x).trim()).filter(Boolean) : [];
+    const scope_of_works = arr("scope_of_works");
+    const scope_summary =
+      String(v.scope_summary ?? "").trim() ||
+      scope_of_works.join("\n");
     return {
-      scope_summary: String(v.scope_summary ?? "").trim(),
+      project_information: arr("project_information"),
+      scope_of_works: scope_of_works.length ? scope_of_works : [],
+      assumptions: arr("assumptions"),
+      tender_requirements: arr("tender_requirements"),
+      submission_requirements: arr("submission_requirements"),
+      standards: arr("standards").slice(0, 1),
+      missing_items: arr("missing_items"),
+      scope_summary,
       specific_items: Array.isArray(v.specific_items)
         ? v.specific_items.map((x) => String(x).trim()).filter(Boolean)
-        : [],
-      missing_info: v.missing_info == null ? "" : String(v.missing_info).trim()
+        : scope_of_works,
+      missing_info:
+        v.missing_info == null
+          ? arr("missing_items").join("; ")
+          : String(v.missing_info).trim()
     };
   }
   return emptyTradeBlock();
@@ -452,13 +473,30 @@ function normalizeExtractionResponse(parsed) {
     return Number.isFinite(n) ? n : null;
   };
 
-  return {
+  const project_context = {
+    project_information: [],
+    assumptions_site_conditions: []
+  };
+  const pc = parsed?.project_context;
+  if (pc && typeof pc === "object") {
+    if (Array.isArray(pc.project_information)) {
+      project_context.project_information = pc.project_information.map(String).filter(Boolean);
+    }
+    if (Array.isArray(pc.assumptions_site_conditions)) {
+      project_context.assumptions_site_conditions = pc.assumptions_site_conditions
+        .map(String)
+        .filter(Boolean);
+    }
+  }
+
+  const base = {
     project_address: String(parsed?.project_address ?? parsed?.address ?? "").trim(),
     project_type: String(parsed?.project_type ?? "unknown").trim() || "unknown",
     storeys: String(parsed?.storeys ?? "").trim(),
     floor_area_m2: numOrNull(parsed?.floor_area_m2),
     site_area_m2: numOrNull(parsed?.site_area_m2),
     building_specs,
+    project_context,
     trade_notes,
     coverage_gaps: Array.isArray(parsed?.coverage_gaps)
       ? parsed.coverage_gaps.map(String)
@@ -467,7 +505,19 @@ function normalizeExtractionResponse(parsed) {
     client_name: String(parsed?.client_name ?? "").trim(),
     architect_name: String(parsed?.architect_name ?? "").trim()
   };
+
+  return processExtraction(base, EXTRACTION_TRADE_KEYS);
 }
+
+const TRADE_NOTE_SHAPE = `{
+      "project_information": [],
+      "scope_of_works": [],
+      "assumptions": [],
+      "tender_requirements": [],
+      "submission_requirements": [],
+      "standards": [],
+      "missing_items": []
+    }`;
 
 const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attached tender PDF. Output JSON only — no markdown, no prose outside JSON.
 
@@ -486,18 +536,22 @@ const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attac
     "facade_features": "",
     "energy_rating": ""
   },
+  "project_context": {
+    "project_information": [],
+    "assumptions_site_conditions": []
+  },
   "trade_notes": {
-    "excavation": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "demolition": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "termite_protection": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "footings_concrete_formwork": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "plumbing": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "electrical": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "internal_linings": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "stairs": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "tiling": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "flooring": { "scope_summary": "", "specific_items": [], "missing_info": "" },
-    "metal_roofing": { "scope_summary": "", "specific_items": [], "missing_info": "" }
+    "excavation": ${TRADE_NOTE_SHAPE},
+    "demolition": ${TRADE_NOTE_SHAPE},
+    "termite_protection": ${TRADE_NOTE_SHAPE},
+    "footings_concrete_formwork": ${TRADE_NOTE_SHAPE},
+    "plumbing": ${TRADE_NOTE_SHAPE},
+    "electrical": ${TRADE_NOTE_SHAPE},
+    "internal_linings": ${TRADE_NOTE_SHAPE},
+    "stairs": ${TRADE_NOTE_SHAPE},
+    "tiling": ${TRADE_NOTE_SHAPE},
+    "flooring": ${TRADE_NOTE_SHAPE},
+    "metal_roofing": ${TRADE_NOTE_SHAPE}
   },
   "coverage_gaps": [],
   "key_project_notes": ""
@@ -505,12 +559,16 @@ const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attac
 
 Output rules:
 - building_specs: one short factual line per field from docs; empty string if absent.
-- trade_notes: every key above required. scope_summary = what the subcontractor must include in their price. Action-oriented dot-points only (max ~8 lines). Each line is a specific pricing item or allowance drawn directly from the documents — write as instructions to price (e.g. "Excavate slab and setdown to structural drawings", "Allow for relocation of existing sewer and stormwater services", "Supply and install termite barrier to perimeter"). Do NOT include: site conditions, RL/level data, project overview stats, floor areas, administrative instructions, site visit notes, or standards references. Standards go in the last line only.
-- Last line of scope_summary must be one line only: standard code + short title (e.g. AS 3660.1 — Termite management; AS/NZS 3000 — Wiring rules). No extra sentence on that line.
-- specific_items: additional document-backed pricing items not captured in scope_summary; else [].
-- missing_info: critical gap for quoting that trade; else "".
-- coverage_gaps: ONLY list items that the uploaded documents themselves explicitly cross-reference but do not include in this submission (e.g. the text says "refer to geotechnical report" but no such report is present). Do NOT speculate or list documents that would typically be expected — only flag what the document text itself says is referenced but absent. Do NOT flag architectural drawings, structural drawings, services drawings, specifications, schedules, or survey as missing unless the document explicitly states they are excluded from this package. Assume standard documents may be available in a linked portal. Max 5 items; else [].
-- key_project_notes: max 2 short sentences, Australian English, from docs only.
+- project_context.assumptions_site_conditions: site-wide context ONLY (demolition status, slope, access, retaining, benchmarks, geotech ref, neighbour constraints, existing services, working hours). Never put pricing actions here.
+- trade_notes: TRADE-SPECIFIC only. Each trade gets pricing lines that trade would quote — ignore unrelated trades (e.g. excavation: no kitchen/tile/lighting notes; electrical: no excavation/plaster notes).
+- scope_of_works: max 8 concise action lines per trade. One idea per line. No duplicates. No run-on paragraphs. Price instructions only (e.g. "Excavate slab and setdown to structural drawings").
+- assumptions: trade-specific site/condition notes for that subcontractor (not duplicated in scope_of_works).
+- standards: at most ONE line per trade in standards[] (e.g. "AS 3660.1 — Termite management"). Do NOT repeat the same standard in scope_of_works.
+- tender_requirements / submission_requirements: short bullet lists (lump sum ex GST, exclusions in writing) — only if doc-backed or standard tender practice.
+- missing_items: only critical gaps preventing a quote for THAT trade (e.g. "site classification", "geotech report"). Do not invent. Empty [] if none.
+- Leave scope_of_works [] if that trade is not evidenced in the PDFs. Do not invent trades outside the 11 keys.
+- coverage_gaps: ONLY cross-references in the document text to missing attachments (max 5). No speculation.
+- key_project_notes: max 2 short sentences from docs only.
 - Only document-backed facts; else "", [], or null.`;
 
 /** After a 429, wait and retry at most this many times (so up to 3 total API calls). */
@@ -618,10 +676,14 @@ registerInductionRoutes(app);
 registerJobsApiRoutes(app);
 registerSalesRoutes(app);
 registerFinanceRoutes(app);
+registerFinanceCCRoutes(app);
+registerJobFinanceRoutes(app);
 registerPortalRoutes(app);
 registerAuthRoutes(app);
 registerSupervisorRoutes(app);
 registerRfqPackageRoutes(app);
+registerRfqTradeRoutes(app);
+registerCostIntelligenceRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
