@@ -4,9 +4,9 @@ import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
 import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus } from '../../src/blueprint/agent/runAgent.js';
-import { courseNameFromMarkdown } from '../../../blueprint-agent/src/blueprint/lib/knowledgeChunking.js';
-import { indexLearnedKnowledge } from '../../../blueprint-agent/src/blueprint/lib/knowledgeIndex.js';
-import { runAttachmentDocumentReview } from '../../../blueprint-agent/src/blueprint/lib/documentReview.js';
+import { courseNameFromMarkdown } from '../../src/blueprint/lib/knowledgeChunking.js';
+import { indexLearnedKnowledge } from '../../src/blueprint/lib/knowledgeIndex.js';
+import { runAttachmentDocumentReview } from '../../src/blueprint/lib/documentReview.js';
 import { QC_REVIEW_SYSTEM_PROMPT, parseQCReviewJson } from './blueprintQc.js';
 
 const { parsed: _env = {} } = dotenvConfig();
