@@ -92,7 +92,7 @@ function workingMarginPct(job) {
 }
 
 function KpiSkeleton() {
-  return <motionless className="rounded-card bg-page animate-pulse h-16" />;
+  return <div className="rounded-card bg-page animate-pulse h-16" />;
 }
 
 function KpiTile({ icon, label, value, sub }) {
