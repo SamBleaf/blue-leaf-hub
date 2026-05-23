@@ -42,6 +42,7 @@ import { registerSupervisorRoutes } from "./lib/supervisorRoutes.mjs";
 import { registerRfqPackageRoutes } from "./lib/rfqPackageRoutes.mjs";
 import { registerRfqTradeRoutes } from "./lib/rfqTradeRoutes.mjs";
 import { registerCostIntelligenceRoutes } from "./lib/costIntelligenceRoutes.mjs";
+import { registerMarketingRoutes } from "./lib/marketingRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 
@@ -49,7 +50,8 @@ console.log("[blue-leaf-api] booting…");
 
 /** Railway/cloud pass PORT; local dev uses PORT_API or 8787. */
 const PORT = Number(process.env.PORT ?? process.env.PORT_API ?? 8787);
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+const MODEL       = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+const MODEL_FAST  = "claude-haiku-4-5-20251001"; // simple structured extractions
 
 function requireEnv(keys) {
   const missing = keys.filter((k) => !process.env[k]?.trim?.());
@@ -201,7 +203,7 @@ async function extractQuoteFromPdf(pdfBuffer, label = "") {
     const client = new Anthropic({ apiKey: key, maxRetries: 0 });
     const b64 = pdfBuffer.toString("base64");
     const completion = await client.messages.create({
-      model: MODEL,
+      model: MODEL_FAST, // simple structured extraction — haiku is sufficient
       max_tokens: 1024,
       temperature: 0,
       messages: [{
@@ -395,17 +397,51 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
 }
 
 const EXTRACTION_TRADE_KEYS = [
+  // Site & civil
+  "site_establishment",
   "excavation",
   "demolition",
   "termite_protection",
-  "footings_concrete_formwork",
+  // Structure
+  "concrete_footings",
+  "footings_concrete_formwork", // legacy alias — kept for backwards compat
+  "structural_steel",
+  "carpentry",
+  // Envelope
+  "external_cladding",
+  "windows_skylights",
+  "roof_plumber",
+  "metal_roofing", // legacy alias — kept for backwards compat
+  "masonry",
+  "glazing",
+  // Mechanical / electrical
+  "electrical_data",
+  "electrical", // legacy alias
+  "lighting_automation",
   "plumbing",
-  "electrical",
+  "sanitary_ware",
+  "heating_cooling",
+  "solar_batteries",
+  // Interior fit-out
+  "insulation",
   "internal_linings",
+  "plastering_rendering",
+  "painting",
   "stairs",
+  "joinery",
   "tiling",
   "flooring",
-  "metal_roofing"
+  "window_furnishings",
+  "garage_door",
+  "appliances",
+  "door_hardware",
+  "fixtures_fittings",
+  // External
+  "landscaping",
+  "paving",
+  "fencing",
+  "pool_works",
+  "site_cleaner"
 ];
 
 function emptyTradeBlock() {
@@ -427,6 +463,7 @@ function normalizeTradeBlock(v) {
     return {
       project_information: arr("project_information"),
       scope_of_works: scope_of_works.length ? scope_of_works : [],
+      confirm_items: arr("confirm_items"),
       assumptions: arr("assumptions"),
       tender_requirements: arr("tender_requirements"),
       submission_requirements: arr("submission_requirements"),
@@ -465,6 +502,16 @@ function normalizeExtractionResponse(parsed) {
   const trade_notes = {};
   for (const k of EXTRACTION_TRADE_KEYS) {
     trade_notes[k] = normalizeTradeBlock(parsed?.trade_notes?.[k]);
+  }
+  // Merge legacy aliases so both old and new keys are populated
+  if (!trade_notes.footings_concrete_formwork?.scope_of_works?.length && trade_notes.concrete_footings?.scope_of_works?.length) {
+    trade_notes.footings_concrete_formwork = trade_notes.concrete_footings;
+  }
+  if (!trade_notes.metal_roofing?.scope_of_works?.length && trade_notes.roof_plumber?.scope_of_works?.length) {
+    trade_notes.metal_roofing = trade_notes.roof_plumber;
+  }
+  if (!trade_notes.electrical?.scope_of_works?.length && trade_notes.electrical_data?.scope_of_works?.length) {
+    trade_notes.electrical = trade_notes.electrical_data;
   }
 
   const numOrNull = (v) => {
@@ -512,6 +559,7 @@ function normalizeExtractionResponse(parsed) {
 const TRADE_NOTE_SHAPE = `{
       "project_information": [],
       "scope_of_works": [],
+      "confirm_items": [],
       "assumptions": [],
       "tender_requirements": [],
       "submission_requirements": [],
@@ -541,17 +589,42 @@ const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attac
     "assumptions_site_conditions": []
   },
   "trade_notes": {
+    "site_establishment": ${TRADE_NOTE_SHAPE},
     "excavation": ${TRADE_NOTE_SHAPE},
     "demolition": ${TRADE_NOTE_SHAPE},
     "termite_protection": ${TRADE_NOTE_SHAPE},
-    "footings_concrete_formwork": ${TRADE_NOTE_SHAPE},
+    "concrete_footings": ${TRADE_NOTE_SHAPE},
+    "structural_steel": ${TRADE_NOTE_SHAPE},
+    "carpentry": ${TRADE_NOTE_SHAPE},
+    "external_cladding": ${TRADE_NOTE_SHAPE},
+    "windows_skylights": ${TRADE_NOTE_SHAPE},
+    "roof_plumber": ${TRADE_NOTE_SHAPE},
+    "masonry": ${TRADE_NOTE_SHAPE},
+    "glazing": ${TRADE_NOTE_SHAPE},
+    "electrical_data": ${TRADE_NOTE_SHAPE},
+    "lighting_automation": ${TRADE_NOTE_SHAPE},
     "plumbing": ${TRADE_NOTE_SHAPE},
-    "electrical": ${TRADE_NOTE_SHAPE},
+    "sanitary_ware": ${TRADE_NOTE_SHAPE},
+    "heating_cooling": ${TRADE_NOTE_SHAPE},
+    "solar_batteries": ${TRADE_NOTE_SHAPE},
+    "insulation": ${TRADE_NOTE_SHAPE},
     "internal_linings": ${TRADE_NOTE_SHAPE},
+    "plastering_rendering": ${TRADE_NOTE_SHAPE},
+    "painting": ${TRADE_NOTE_SHAPE},
     "stairs": ${TRADE_NOTE_SHAPE},
+    "joinery": ${TRADE_NOTE_SHAPE},
     "tiling": ${TRADE_NOTE_SHAPE},
     "flooring": ${TRADE_NOTE_SHAPE},
-    "metal_roofing": ${TRADE_NOTE_SHAPE}
+    "window_furnishings": ${TRADE_NOTE_SHAPE},
+    "garage_door": ${TRADE_NOTE_SHAPE},
+    "appliances": ${TRADE_NOTE_SHAPE},
+    "door_hardware": ${TRADE_NOTE_SHAPE},
+    "fixtures_fittings": ${TRADE_NOTE_SHAPE},
+    "landscaping": ${TRADE_NOTE_SHAPE},
+    "paving": ${TRADE_NOTE_SHAPE},
+    "fencing": ${TRADE_NOTE_SHAPE},
+    "pool_works": ${TRADE_NOTE_SHAPE},
+    "site_cleaner": ${TRADE_NOTE_SHAPE}
   },
   "coverage_gaps": [],
   "key_project_notes": ""
@@ -560,16 +633,30 @@ const extractionMasterPrompt = `Blue Leaf Building (Adelaide SA). Read the attac
 Output rules:
 - building_specs: one short factual line per field from docs; empty string if absent.
 - project_context.assumptions_site_conditions: site-wide context ONLY (demolition status, slope, access, retaining, benchmarks, geotech ref, neighbour constraints, existing services, working hours). Never put pricing actions here.
-- trade_notes: TRADE-SPECIFIC only. Each trade gets pricing lines that trade would quote — ignore unrelated trades (e.g. excavation: no kitchen/tile/lighting notes; electrical: no excavation/plaster notes).
-- scope_of_works: max 8 concise action lines per trade. One idea per line. No duplicates. No run-on paragraphs. Price instructions only (e.g. "Excavate slab and setdown to structural drawings").
-- assumptions: trade-specific site/condition notes for that subcontractor (not duplicated in scope_of_works).
-- standards: at most ONE line per trade in standards[] (e.g. "AS 3660.1 — Termite management"). Do NOT repeat the same standard in scope_of_works.
-- tender_requirements / submission_requirements: short bullet lists (lump sum ex GST, exclusions in writing) — only if doc-backed or standard tender practice.
-- missing_items: only critical gaps preventing a quote for THAT trade (e.g. "site classification", "geotech report"). Do not invent. Empty [] if none.
-- Leave scope_of_works [] if that trade is not evidenced in the PDFs. Do not invent trades outside the 11 keys.
+- trade_notes: TRADE-SPECIFIC only. Each trade gets pricing lines that trade would quote.
+- scope_of_works: max 8 concise action lines per trade. One idea per line. Price instructions only (e.g. "Excavate slab and setdown to structural drawings"). No duplicates.
+- confirm_items: project-specific items that could easily be missed or assumed excluded — phrase as confirmations the subcontractor should explicitly include in their quote (e.g. "Off-form concrete retaining walls to drawings", "Raked ceiling framing to architect's details"). Max 4 per trade.
+- assumptions: trade-specific site/condition notes for that subcontractor only. Not duplicated in scope_of_works.
+- standards: at most ONE applicable Australian standard per trade (e.g. "AS 3660.1 — Termite management"). Do NOT repeat in scope_of_works.
+- tender_requirements / submission_requirements: short bullet lists (lump sum ex GST, exclusions in writing) — only if doc-backed or standard practice.
+- missing_items: only critical gaps preventing a quote for THAT trade. Do not invent. Empty [] if none.
+- Leave ALL arrays [] if that trade is not evidenced in the PDFs. Do not invent scope.
 - coverage_gaps: ONLY cross-references in the document text to missing attachments (max 5). No speculation.
 - key_project_notes: max 2 short sentences from docs only.
-- Only document-backed facts; else "", [], or null.`;
+- Only document-backed facts; else "", [], or null.
+
+Trade-specific notes to guide extraction:
+- carpentry: Watch for raked/vaulted ceilings, LVL specifications, exposed beams, complex roof geometry.
+- concrete_footings: Note if off-form concrete retaining walls, coloured slab, polished concrete, or suspended slab is specified.
+- excavation: Flag rock excavation risk if geotech report referenced. Note slope and site fall.
+- masonry: Distinguish face brick (external) vs feature internal masonry vs blockwork. Note brick tie requirements.
+- electrical_data: Separate rough-in from fit-off if possible. Note if EV charger, data points, security specified.
+- plumbing: Note hot water system type, gas lines, stormwater. Confirm if sanitary ware is separate trade.
+- joinery: Note kitchen, laundry, wardrobes, vanities. Confirm if stone benchtops are included or separate supply.
+- glazing: Note frameless shower screens, glass balustrades, feature glazing — distinguish from windows_skylights (frame + glass packages).
+- heating_cooling: Note ducted vs split system, number of zones or heads specified.
+- roof_plumber: Note custom box gutters, internal gutters, parapet flashings, skylights.
+- insulation: Note wall, ceiling, and underfloor requirements. Note BAL rating impact if specified.`;
 
 /** After a 429, wait and retry at most this many times (so up to 3 total API calls). */
 const RFQ_EXTRACT_429_MAX_RETRIES = 2;
@@ -684,6 +771,7 @@ registerSupervisorRoutes(app);
 registerRfqPackageRoutes(app);
 registerRfqTradeRoutes(app);
 registerCostIntelligenceRoutes(app);
+registerMarketingRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
@@ -935,7 +1023,7 @@ app.post("/api/rfq/extract", async (req, res) => {
         completion = await client.messages.create(
           {
             model: MODEL,
-            max_tokens: 4096,
+            max_tokens: 16000,
             temperature: 0.2,
             messages: [{ role: "user", content: userContent }]
           },
@@ -1588,6 +1676,44 @@ if (envBool(process.env.IMAP_POLL_ENABLED, true)) {
   setTimeout(tick, 20_000);
   console.log(`[blue-leaf-api] IMAP_POLL_ENABLED: polling inbox every ${Math.round(pollMs / 60000)} min.`);
 }
+
+// ── Email open tracking pixel ────────────────────────────────────────────────
+// Serves a 1×1 transparent GIF and records the open event in email_delivery_events.
+// URL is embedded in HTML emails as <img src="/api/track/email/{trackingId}" width="1" height="1">.
+const TRACKING_PIXEL = Buffer.from(
+  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+  "base64"
+);
+app.get("/api/track/email/:trackingId", async (req, res) => {
+  res.set({
+    "Content-Type": "image/gif",
+    "Content-Length": TRACKING_PIXEL.length,
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
+    "Pragma": "no-cache"
+  });
+  res.end(TRACKING_PIXEL);
+
+  // Async — don't block the response
+  const { trackingId } = req.params;
+  const sb = getServiceSupabase();
+  if (!sb || !trackingId) return;
+  try {
+    const now = new Date().toISOString();
+    const { data: existing } = await sb
+      .from("email_delivery_events")
+      .select("id, open_count, first_opened_at")
+      .eq("tracking_id", trackingId)
+      .maybeSingle();
+    if (existing) {
+      await sb.from("email_delivery_events").update({
+        first_opened_at: existing.first_opened_at || now,
+        open_count: (existing.open_count || 0) + 1
+      }).eq("id", existing.id);
+    }
+  } catch (e) {
+    console.error("[track/email]", e?.message);
+  }
+});
 
 // Serve built frontend in production (Railway). In local dev, Vite handles the frontend.
 const __dirname = dirname(fileURLToPath(import.meta.url));

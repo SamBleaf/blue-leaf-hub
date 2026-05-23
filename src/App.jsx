@@ -31,10 +31,13 @@ import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
 import SalesPipeline from "./pages/SalesPipeline.jsx";
 import LeadDetail from "./pages/LeadDetail.jsx";
 import FinanceManager from "./pages/FinanceManager.jsx";
+import JobCommandCentre from "./pages/JobCommandCentre.jsx";
+import JobDashboardSelector from "./pages/JobDashboardSelector.jsx";
 import SupervisorHome from "./pages/SupervisorHome.jsx";
 import PortalAdmin from "./pages/PortalAdmin.jsx";
 import RfqPackageList from "./pages/RfqPackageList.jsx";
 import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
+import Marketing from "./pages/Marketing.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
@@ -118,8 +121,25 @@ export default function App() {
                   element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
                 <Route
+                  path="/finance/jobs"
+                  element={<RoleRoute element={<JobDashboardSelector />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/finance/jobs/:jobId"
+                  element={<RoleRoute element={<JobCommandCentre />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
                   path="/finance/:tab"
                   element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+
+                <Route
+                  path="/marketing"
+                  element={<RoleRoute element={<Marketing />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/marketing/:tab"
+                  element={<RoleRoute element={<Marketing />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route

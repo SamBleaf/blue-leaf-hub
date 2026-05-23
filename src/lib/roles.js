@@ -24,6 +24,7 @@ export const can = {
   accessSiteDiary: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWHS: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessPortalAdmin: (r) => ["admin", "supervisor"].includes(r),
+  accessMarketing: (r) => ["admin", "supervisor"].includes(r),
   manageUsers: (r) => r === "admin",
   inviteUsers: (r) => r === "admin",
   accessClientPortal: (r) => r === "client"
