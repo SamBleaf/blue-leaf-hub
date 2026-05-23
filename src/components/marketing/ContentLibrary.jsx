@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { authFetch } from "../../lib/authFetch.js";
 
 const STATUS_COLOURS = {
   draft:     "bg-slate-100 text-slate-600",
@@ -56,7 +57,7 @@ export default function ContentLibrary() {
       const params = new URLSearchParams();
       if (filterChannel) params.set("channel", filterChannel);
       if (filterStatus) params.set("status", filterStatus);
-      const r = await fetch(`/api/marketing/content?${params}`);
+      const r = await authFetch(`/api/marketing/content?${params}`);
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Failed to load");
       setItems(j.items || j || []);
@@ -72,7 +73,7 @@ export default function ContentLibrary() {
   async function updateStatus(id, status) {
     setUpdating(true);
     try {
-      const r = await fetch(`/api/marketing/content/${id}`, {
+      const r = await authFetch(`/api/marketing/content/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),

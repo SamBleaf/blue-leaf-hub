@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import FinalAssembly from "./FinalAssembly.jsx";
 import { getSupabase } from "../../lib/supabaseClient.js";
+import { authFetch } from "../../lib/authFetch.js";
 
 const MEDIA_TYPE_LABELS = {
   photo:              "Photo",
@@ -44,7 +45,7 @@ export default function MediaUpload() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/marketing/media");
+      const r = await authFetch("/api/marketing/media");
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Failed to load");
       setAssets(j.assets || j || []);
@@ -92,7 +93,7 @@ export default function MediaUpload() {
       setUploadProgress(isVideo ? "Registering — video pipeline will run in background…" : "Registering…");
 
       // 2. Register the asset with the API (sends JSON, not FormData)
-      const r = await fetch("/api/marketing/media/upload", {
+      const r = await authFetch("/api/marketing/media/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -120,7 +121,7 @@ export default function MediaUpload() {
 
   async function grantConsent(assetId) {
     try {
-      const r = await fetch(`/api/marketing/media/${assetId}/consent`, {
+      const r = await authFetch(`/api/marketing/media/${assetId}/consent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ consent: true }),

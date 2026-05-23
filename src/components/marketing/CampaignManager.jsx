@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { authFetch } from "../../lib/authFetch.js";
 
 const STATUS_COLOURS = {
   active:   "bg-emerald-100 text-emerald-700",
@@ -20,7 +21,7 @@ export default function CampaignManager() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/marketing/campaigns");
+      const r = await authFetch("/api/marketing/campaigns");
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Failed to load");
       setCampaigns(j.campaigns || j || []);
@@ -46,7 +47,7 @@ export default function CampaignManager() {
     setCreating(true);
     setError("");
     try {
-      const r = await fetch("/api/marketing/campaigns", {
+      const r = await authFetch("/api/marketing/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

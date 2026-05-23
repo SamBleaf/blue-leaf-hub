@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { authFetch } from "../../lib/authFetch.js";
 
 const FORMAT_OPTIONS = [
   { value: "9x16",  label: "9×16 Reels / Stories",  hint: "Vertical, 1080×1920" },
@@ -28,7 +29,7 @@ export default function FinalAssembly({ asset, onDone }) {
 
   // Load music library
   useEffect(() => {
-    fetch("/api/marketing/music")
+    authFetch("/api/marketing/music")
       .then((r) => r.json())
       .then((j) => setMusicTracks(j.tracks || j || []))
       .catch(() => {});
@@ -39,7 +40,7 @@ export default function FinalAssembly({ asset, onDone }) {
     if (!exportId || exportStatus === "ready" || exportStatus === "failed") return;
     const timer = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/marketing/media/${asset.id}/status`);
+        const r = await authFetch(`/api/marketing/media/${asset.id}/status`);
         const j = await r.json();
         // Find this specific export
         const exp = j.exports?.find?.((e) => e.id === exportId);
@@ -62,7 +63,7 @@ export default function FinalAssembly({ asset, onDone }) {
     setExportStatus(null);
     try {
       // Step 1: Create an export record for this asset + format
-      const r1 = await fetch(`/api/marketing/media/${asset.id}/export`, {
+      const r1 = await authFetch(`/api/marketing/media/${asset.id}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ export_format: format, colour_preset: colourPreset }),
@@ -72,7 +73,7 @@ export default function FinalAssembly({ asset, onDone }) {
       const newExportId = j1.export_id || j1.id;
 
       // Step 2: Trigger final assembly with music via /api/marketing/assemble
-      const r2 = await fetch("/api/marketing/assemble", {
+      const r2 = await authFetch("/api/marketing/assemble", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

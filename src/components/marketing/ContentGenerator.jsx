@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ReviewPanel from "./ReviewPanel.jsx";
+import { authFetch } from "../../lib/authFetch.js";
 
 // Map frontend channel value → backend mode (MODE_PROMPTS keys)
 const CHANNEL_TO_MODE = {
@@ -58,7 +59,7 @@ export default function ContentGenerator() {
     setDraft(null);
     setSavedId(null);
     try {
-      const r = await fetch("/api/marketing/generate", {
+      const r = await authFetch("/api/marketing/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -86,7 +87,7 @@ export default function ContentGenerator() {
     setSaving(true);
     setError("");
     try {
-      const r = await fetch("/api/marketing/content", {
+      const r = await authFetch("/api/marketing/content", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
