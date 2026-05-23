@@ -1065,7 +1065,13 @@ export default function LeadDetail() {
                   <h3 className="section-label">Pre-Tender Service Agreement</h3>
                   <select
                     value={lead.ptsa_status || "draft"}
-                    onChange={e => patch({ ptsa_status: e.target.value })}
+                    onChange={e => {
+                      const updates = { ptsa_status: e.target.value };
+                      if (e.target.value === "sent" && !lead.ptsa_sent_date) {
+                        updates.ptsa_sent_date = new Date().toISOString().slice(0, 10);
+                      }
+                      patch(updates);
+                    }}
                     className={`text-xs font-semibold rounded-full px-2.5 py-0.5 border-0 cursor-pointer focus:outline-none ${PTSA_STATUS_COLORS[lead.ptsa_status || "draft"]}`}
                   >
                     {Object.entries(PTSA_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}

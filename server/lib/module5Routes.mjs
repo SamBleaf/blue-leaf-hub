@@ -15,6 +15,14 @@ import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { dropboxConfigured, uploadFeeProposalPdfToPresaleDocs } from "./dropboxClient.mjs";
 import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf } from "./googleDriveClient.mjs";
 import { syncFeeProposalSentToBuildexact } from "./buildexactDeepIntegration.mjs";
+import { seedJobBudgetsFromEstimateData } from "./costIntelligenceEstimate.mjs";
+import {
+  BRANDING_BUCKET,
+  BRANDING_EMAIL_LOGO_PATH,
+  BRANDING_PRIMARY_LOGO_PATH,
+  getBrandingEmailLogo,
+  invalidateBrandingLogoCache
+} from "./brandingAssets.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -156,6 +164,12 @@ export function registerModule5Routes(app) {
             source_id: estimate_id
           });
         }
+        // Seed job_budgets from parsed estimate categories (non-blocking, non-fatal)
+        if (job_id && parsed.categories?.length) {
+          seedJobBudgetsFromEstimateData({ db: sb, jobId: job_id, categories: parsed.categories })
+            .then((r) => console.log(`[fee-proposal/parse-xlsx] job_budgets seeded: ${r.budgets_seeded} rows`))
+            .catch((e) => console.warn("[fee-proposal/parse-xlsx] job_budgets seed failed:", e?.message || e));
+        }
       }
       return res.json({ ok: true, parsed, job_id, estimate_id });
     } catch (e) {
@@ -238,6 +252,12 @@ export function registerModule5Routes(app) {
             source_id: estimate_id
           });
         }
+        // Seed job_budgets from parsed estimate categories (non-blocking, non-fatal)
+        if (job_id && parsed.categories?.length) {
+          seedJobBudgetsFromEstimateData({ db: sb2, jobId: job_id, categories: parsed.categories })
+            .then((r) => console.log(`[fee-proposal/parse-pdf] job_budgets seeded: ${r.budgets_seeded} rows`))
+            .catch((e) => console.warn("[fee-proposal/parse-pdf] job_budgets seed failed:", e?.message || e));
+        }
       }
       return res.json({ ok: true, parsed, job_id, estimate_id });
     } catch (e) {
@@ -246,11 +266,127 @@ export function registerModule5Routes(app) {
     }
   });
 
+  // ── Template upload / fetch ───────────────────────────────────────────────
+  const TEMPLATE_BUCKET = "templates";
+  const TEMPLATE_PATH   = "fee-proposal-template.docx";
+
+  /** Upload DOCX template to Supabase Storage (+ optionally Dropbox). */
+  app.post("/api/settings/fee-proposal-template", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    const b64 = String(req.body?.dataBase64 || "").trim();
+    if (!b64) return res.status(400).json({ ok: false, error: "dataBase64 required" });
+    let buf;
+    try { buf = Buffer.from(b64, "base64"); } catch { return res.status(400).json({ ok: false, error: "Invalid base64" }); }
+    if (!buf.length) return res.status(400).json({ ok: false, error: "Empty file" });
+
+    // Supabase Storage upload
+    const { error: uploadErr } = await sb.storage
+      .from(TEMPLATE_BUCKET)
+      .upload(TEMPLATE_PATH, buf, {
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: true
+      });
+    if (uploadErr) return res.status(502).json({ ok: false, error: uploadErr.message });
+
+    // Dropbox backup (non-fatal)
+    if (dropboxConfigured()) {
+      try {
+        const { getDropboxAccessToken, dropboxUploadBuffer } = await import("./dropboxClient.mjs");
+        const token = await getDropboxAccessToken();
+        await dropboxUploadBuffer(token, "/BLUE LEAF BUILDING/INTERNAL/TEMPLATES/fee-proposal-template.docx", buf, { autorename: false });
+      } catch (e) {
+        console.warn("[fee-proposal-template] Dropbox backup failed:", e?.message || e);
+      }
+    }
+
+    console.log(`[fee-proposal-template] Uploaded ${buf.length} bytes to Supabase Storage`);
+    return res.json({ ok: true, size: buf.length });
+  });
+
+  /** Fetch DOCX template from Supabase Storage → returns base64. */
+  app.get("/api/settings/fee-proposal-template", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+
+    const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+    if (error) {
+      if (error.message?.includes("not found") || error.message?.includes("Object not found")) {
+        return res.status(404).json({ ok: false, error: "No template uploaded yet" });
+      }
+      return res.status(502).json({ ok: false, error: error.message });
+    }
+
+    const buf = Buffer.from(await data.arrayBuffer());
+    return res.json({ ok: true, dataBase64: buf.toString("base64"), size: buf.length });
+  });
+
+  // ── Branding logo upload / fetch ──────────────────────────────────────────
+
+  /**
+   * POST /api/settings/branding-logo
+   * Body: { filename: "BLB_Icon_Blue.png"|"BLB_Primary_Logo_White.png", dataBase64: string }
+   * Uploads a branding asset to Supabase Storage bucket "branding".
+   */
+  app.post("/api/settings/branding-logo", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    const filename = String(req.body?.filename || BRANDING_EMAIL_LOGO_PATH).trim();
+    const b64 = String(req.body?.dataBase64 || "").trim();
+    if (!b64) return res.status(400).json({ ok: false, error: "dataBase64 required" });
+    let buf;
+    try { buf = Buffer.from(b64, "base64"); } catch { return res.status(400).json({ ok: false, error: "Invalid base64" }); }
+    if (!buf.length) return res.status(400).json({ ok: false, error: "Empty file" });
+
+    const contentType = filename.endsWith(".svg") ? "image/svg+xml" : "image/png";
+    const { error } = await sb.storage.from(BRANDING_BUCKET).upload(filename, buf, { contentType, upsert: true });
+    if (error) return res.status(502).json({ ok: false, error: error.message });
+
+    invalidateBrandingLogoCache();
+    console.log(`[branding] Uploaded ${filename} (${buf.length} bytes) to Supabase Storage`);
+    return res.json({ ok: true, filename, size: buf.length });
+  });
+
+  /**
+   * GET /api/settings/branding-logo?file=BLB_Icon_Blue.png
+   * Returns { ok, dataBase64, size } for the requested brand asset.
+   * Defaults to BLB_Icon_Blue.png (email logo).
+   */
+  app.get("/api/settings/branding-logo", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    const filename = String(req.query?.file || BRANDING_EMAIL_LOGO_PATH).trim();
+
+    const { data, error } = await sb.storage.from(BRANDING_BUCKET).download(filename);
+    if (error) {
+      if (error.message?.includes("not found") || error.message?.includes("Object not found")) {
+        return res.status(404).json({ ok: false, error: "Logo not uploaded yet" });
+      }
+      return res.status(502).json({ ok: false, error: error.message });
+    }
+
+    const buf = Buffer.from(await data.arrayBuffer());
+    return res.json({ ok: true, filename, dataBase64: buf.toString("base64"), size: buf.length });
+  });
+
   app.post("/api/fee-proposal/generate-docx", async (req, res) => {
     try {
-      const templateBase64 = String(req.body?.templateBase64 || "").trim();
+      let templateBase64 = String(req.body?.templateBase64 || "").trim();
       const proposalData = req.body?.proposalData;
-      if (!templateBase64) return res.status(400).json({ ok: false, error: "templateBase64 required." });
+
+      // Auto-fetch template from Supabase Storage if not provided by client
+      if (!templateBase64) {
+        const sb = getServiceSupabase();
+        if (sb) {
+          const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+          if (!error && data) {
+            const buf = Buffer.from(await data.arrayBuffer());
+            templateBase64 = buf.toString("base64");
+          }
+        }
+      }
+
+      if (!templateBase64) return res.status(400).json({ ok: false, error: "No template available — upload a DOCX template in Settings first." });
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData object required." });
       }
@@ -279,10 +415,18 @@ export function registerModule5Routes(app) {
       return res.status(503).json({ ok: false, error: "Google Drive not configured. Add GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN to .env, then run: npm run auth:drive" });
     }
     try {
-      const templateBase64 = String(req.body?.templateBase64 || "").trim();
+      let templateBase64 = String(req.body?.templateBase64 || "").trim();
       const proposalData = req.body?.proposalData;
       const quoteNumber = String(req.body?.quoteNumber || "Draft").trim();
-      if (!templateBase64) return res.status(400).json({ ok: false, error: "templateBase64 required." });
+      // Auto-fetch template from Supabase Storage if not provided by client
+      if (!templateBase64) {
+        const sbStorage = getServiceSupabase();
+        if (sbStorage) {
+          const { data: tplData, error: tplErr } = await sbStorage.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+          if (!tplErr && tplData) templateBase64 = Buffer.from(await tplData.arrayBuffer()).toString("base64");
+        }
+      }
+      if (!templateBase64) return res.status(400).json({ ok: false, error: "No template available — upload a DOCX template in Settings first." });
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData required." });
       }
@@ -377,7 +521,9 @@ export function registerModule5Routes(app) {
       const isPdf = Boolean(pdfBase64);
       const baseText = String(req.body?.body || "Please find attached our fee proposal.").trim();
       const footer = String(req.body?.signatureFooter || "").trim();
-      const logo = String(req.body?.signatureLogoDataUrl || "").trim();
+      // Auto-fetch email logo from Supabase Storage if not provided by client
+      const logoFromClient = String(req.body?.signatureLogoDataUrl || "").trim();
+      const logo = logoFromClient || await getBrandingEmailLogo(getServiceSupabase()).catch(() => "");
       const text = footer ? `${baseText}\n\n${footer}` : baseText;
       const html = logo || footer ? wrapPlainTextEmailHtml(baseText, { footerText: footer, logoDataUrl: logo }) : undefined;
       const buf = Buffer.from(fileBase64, "base64");

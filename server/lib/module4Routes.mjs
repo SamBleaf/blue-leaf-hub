@@ -22,6 +22,7 @@ import { mailTransportName, sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -449,7 +450,9 @@ export function registerModule4Routes(app) {
     const trade = String(req.body?.trade || "").trim();
     const prefix = String(req.body?.poPrefix || "BLB").trim() || "BLB";
     const company = req.body?.company || {};
-    const logoDataUrl = String(req.body?.logoDataUrl || company.logoDataUrl || "").trim();
+    // Auto-fetch email logo from Supabase Storage if not provided by client
+    const logoFromClient = String(req.body?.logoDataUrl || company.logoDataUrl || "").trim();
+    const logoDataUrl = logoFromClient || await getBrandingEmailLogo(sb).catch(() => "");
     const vendor = req.body?.vendor || {};
     const lineItems = Array.isArray(req.body?.lineItems) ? req.body.lineItems : [];
     const scheduledCompletion = String(req.body?.scheduledCompletion || "").trim();

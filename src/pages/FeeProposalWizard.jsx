@@ -169,10 +169,24 @@ export default function FeeProposalWizard() {
   const { setScreenContext } = useBlueprintContext() || {};
   const [templateLoaded, setTemplateLoaded] = useState(() => Boolean(localStorage.getItem(TEMPLATE_STORAGE_KEY)));
 
-  // Auto-load bundled template on first use if not already in localStorage
+  // Load template: localStorage cache first, then server, then bundled fallback
   useEffect(() => {
-    if (localStorage.getItem(TEMPLATE_STORAGE_KEY)) return;
+    if (localStorage.getItem(TEMPLATE_STORAGE_KEY)) return; // already cached
     (async () => {
+      // 1. Try server (Supabase Storage)
+      try {
+        const r = await fetch("/api/settings/fee-proposal-template");
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.dataBase64) {
+            localStorage.setItem(TEMPLATE_STORAGE_KEY, j.dataBase64);
+            setTemplateLoaded(true);
+            return;
+          }
+        }
+      } catch { /* fall through */ }
+
+      // 2. Fall back to bundled public file
       try {
         const res = await fetch("/BLB_TENDER_TEMPLATE.docx");
         if (!res.ok) return;
@@ -1040,7 +1054,15 @@ info@blueleafbuilding.com.au`;
                 const b64 = await fileToBase64(f);
                 localStorage.setItem(TEMPLATE_STORAGE_KEY, b64);
                 setTemplateLoaded(true);
-                alert("Template updated.");
+                // Push to server so it persists across browsers / devices
+                try {
+                  await fetch("/api/settings/fee-proposal-template", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dataBase64: b64 })
+                  });
+                } catch { /* non-fatal — still saved locally */ }
+                alert("Template updated and saved to server.");
               }}
             />
           </div>

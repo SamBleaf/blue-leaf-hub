@@ -510,6 +510,7 @@ export default function Variations({ jobId, onUpdate }) {
   const [editing, setEditing] = useState(null);
   const [sending, setSending] = useState(null);
   const [confirming, setConfirming] = useState(null); // { type: 'sign'|'reject'|'void', variation }
+  const [actionError, setActionError] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -535,24 +536,30 @@ export default function Variations({ jobId, onUpdate }) {
   }
 
   async function handleSign(variation) {
+    setActionError(null);
     const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/sign`, { method: "POST" });
     const j = await r.json();
     if (j.ok) { applyVariation(j.variation); setConfirming(null); }
+    else setActionError(j.error || "Failed to mark as signed");
   }
 
   async function handleReject(variation, reason) {
+    setActionError(null);
     const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/reject`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason })
     });
     const j = await r.json();
     if (j.ok) { applyVariation(j.variation); setConfirming(null); }
+    else setActionError(j.error || "Failed to mark as rejected");
   }
 
   async function handleVoid(variation) {
+    setActionError(null);
     const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/void`, { method: "POST" });
     const j = await r.json();
     if (j.ok) { applyVariation(j.variation); setConfirming(null); }
+    else setActionError(j.error || "Failed to void variation");
   }
 
   const active = variations.filter(v => v.status !== "void");
@@ -703,6 +710,13 @@ export default function Variations({ jobId, onUpdate }) {
           onSent={v => { applyVariation(v); setSending(null); }}
           onClose={() => setSending(null)}
         />
+      )}
+
+      {actionError && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-danger text-white text-sm font-semibold px-4 py-2 shadow-lg">
+          {actionError}
+          <button type="button" onClick={() => setActionError(null)} className="ml-3 opacity-70 hover:opacity-100">✕</button>
+        </div>
       )}
 
       {confirming?.type === "sign" && (

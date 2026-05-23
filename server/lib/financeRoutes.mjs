@@ -482,8 +482,6 @@ async function moveDropboxFile(token, fromPath, toPath) {
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerFinanceRoutes(app) {
-  app.use("/api/finance", requireAuth);
-
   // ── Trade categories ──────────────────────────────────────────────────────
   app.get("/api/finance/trade-categories", async (_req, res) => {
     const sb = getServiceSupabase();

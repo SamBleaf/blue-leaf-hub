@@ -32,18 +32,67 @@ const METHOD_LABELS = {
   manual: "Manual",
 };
 
-function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
+function TradeSelector({ value, onChange, categories, aiConfidence }) {
+  const isAutoTagged = aiConfidence === 100;
+  const isAiSuggested = aiConfidence != null && aiConfidence < 100 && aiConfidence >= 50;
+  const isLowConfidence = aiConfidence != null && aiConfidence < 50;
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[10px] font-bold uppercase tracking-wide text-muted">
+          Trade category <span className="text-danger">*</span>
+        </label>
+        {isAutoTagged && (
+          <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+            Auto-tagged
+          </span>
+        )}
+        {isAiSuggested && (
+          <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5">
+            AI suggestion · {aiConfidence}%
+          </span>
+        )}
+        {isLowConfidence && (
+          <span className="text-[10px] font-semibold text-warning bg-warning/10 border border-warning/30 rounded-full px-2 py-0.5">
+            Low confidence — verify
+          </span>
+        )}
+      </div>
+      <select
+        value={value || ""}
+        onChange={e => onChange(e.target.value)}
+        className={`w-full rounded-lg border px-3 py-1.5 text-sm text-ink bg-surface focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+          !value ? "border-warning/60 ring-1 ring-warning/30" : "border-hairline"
+        }`}
+      >
+        <option value="">— Select trade —</option>
+        {categories.map(c => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+      {!value && (
+        <p className="mt-1 text-[10px] text-warning font-medium">Required before approving</p>
+      )}
+    </div>
+  );
+}
+
+function ApprovalCard({ doc, jobs, tradeCategories, onApprove, onReject, onRematch }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
   const [rematchJob, setRematchJob] = useState(doc.job_id || "");
   const [rematchOpen, setRematchOpen] = useState(false);
+  const [selectedTrade, setSelectedTrade] = useState(doc.trade_category_id || "");
   const [busy, setBusy] = useState(false);
 
   const matchClass = METHOD_COLOR[doc.match_method] || "text-muted bg-page border-hairline";
+  const canApprove = !!doc.job_id && !!selectedTrade;
 
   async function handleApprove() {
+    if (!canApprove) return;
     setBusy(true);
-    await onApprove(doc.id);
+    await onApprove(doc.id, selectedTrade);
     setBusy(false);
   }
 
@@ -99,6 +148,14 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
           </div>
 
           {doc.description && <p className="mt-3 text-xs text-muted italic">{doc.description}</p>}
+
+          {/* Trade category selector */}
+          <TradeSelector
+            value={selectedTrade}
+            onChange={setSelectedTrade}
+            categories={tradeCategories}
+            aiConfidence={doc.ai_trade_confidence}
+          />
         </div>
 
         {/* Right: job match */}
@@ -158,7 +215,8 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
             <button
               type="button"
               onClick={handleApprove}
-              disabled={busy || !doc.job_id}
+              disabled={busy || !canApprove}
+              title={!selectedTrade ? "Select a trade category before approving" : !doc.job_id ? "Match to a job before approving" : undefined}
               className="w-full rounded-lg bg-accent py-2.5 text-sm font-bold text-white hover:bg-accent/90 disabled:opacity-40 transition"
             >
               {busy ? "Processing…" : "Approve & File to Dropbox"}
@@ -197,30 +255,36 @@ function ApprovalCard({ doc, jobs, onApprove, onReject, onRematch }) {
 export default function ApprovalQueue({ onAction }) {
   const [documents, setDocuments] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [tradeCategories, setTradeCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dr, jr] = await Promise.all([
+      const [dr, jr, tr] = await Promise.all([
         fetch("/api/finance/documents?status=pending_approval&limit=50").then(r => r.json()),
-        fetch("/api/finance/jobs").then(r => r.json())
+        fetch("/api/finance/jobs").then(r => r.json()),
+        fetch("/api/finance/trade-categories").then(r => r.json())
       ]);
       if (dr.ok) setDocuments(dr.documents);
       if (jr.ok) setJobs(jr.jobs);
+      if (tr.ok) setTradeCategories(tr.categories);
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleApprove(id) {
+  async function handleApprove(id, trade_category_id) {
     const r = await fetch(`/api/finance/documents/${id}/approve`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trade_category_id })
     });
     const j = await r.json();
     if (j.ok) {
       setDocuments(prev => prev.filter(d => d.id !== id));
       onAction?.();
+    } else {
+      alert(j.error || "Approval failed");
     }
   }
 
@@ -266,6 +330,7 @@ export default function ApprovalQueue({ onAction }) {
           key={doc.id}
           doc={doc}
           jobs={jobs}
+          tradeCategories={tradeCategories}
           onApprove={handleApprove}
           onReject={handleReject}
           onRematch={handleRematch}

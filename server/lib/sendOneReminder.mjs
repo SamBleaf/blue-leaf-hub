@@ -1,6 +1,7 @@
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 
 function formatAuDate(isoDate) {
   if (!isoDate) return "";
@@ -38,7 +39,9 @@ export async function sendReminderForRfqId(rfqId, opts = {}) {
   }
 
   const footer = String(opts?.signatureFooter || "").trim();
-  const logo = String(opts?.signatureLogoDataUrl || "").trim();
+  // Auto-fetch email logo from Supabase Storage if not provided by caller
+  const logoFromCaller = String(opts?.signatureLogoDataUrl || "").trim();
+  const logo = logoFromCaller || await getBrandingEmailLogo(sb).catch(() => "");
 
   const sub = Array.isArray(row.subcontractors) ? row.subcontractors[0] : row.subcontractors;
   const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs;

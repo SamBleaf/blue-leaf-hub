@@ -45,7 +45,7 @@ Rules:
 
     try {
       const msg = await client.messages.create({
-        model: process.env.CLAUDE_MODEL || "claude-sonnet-4-6",
+        model: "claude-haiku-4-5-20251001", // small structured JSON parse — haiku is sufficient
         max_tokens: 512,
         messages: [{ role: "user", content: prompt }]
       });

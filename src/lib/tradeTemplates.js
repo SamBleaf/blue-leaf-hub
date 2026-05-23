@@ -1,12 +1,17 @@
 /**
- * RFQ trade keys (match Claude extraction + Supabase normalisation).
- * Re-exports RFQ_TRADE_ORDER as TRADE_ORDER for existing imports.
+ * RFQ trade keys — labels/aliases hydrate from trade master via rfqTradeRegistry.
  */
 
 import { RFQ_TRADE_ORDER } from "./rfqExtraction.js";
+import {
+  getTradeLabel,
+  getTradeRegistry,
+  normalizeTradeKeyFromRegistry
+} from "./rfqTradeRegistry.js";
 
 export const TRADE_ORDER = RFQ_TRADE_ORDER;
 
+/** @deprecated Prefer getTradeLabel(tradeId) after registry hydration */
 export const TRADE_LABEL = {
   excavation: "Excavation",
   demolition: "Demolition",
@@ -111,6 +116,8 @@ export const TRADE_TEMPLATES = {
 };
 
 export function normalizeTradeKey(text) {
+  const fromRegistry = normalizeTradeKeyFromRegistry(text);
+  if (fromRegistry) return fromRegistry;
   if (!text) return null;
   const s = String(text).toLowerCase().replace(/\s+/g, " ").trim();
   for (const [aliases, canon] of SUB_TRADE_ALIAS_TO_CANONICAL) {
@@ -119,11 +126,21 @@ export function normalizeTradeKey(text) {
   return null;
 }
 
+export function resolveTradeLabel(tradeId) {
+  return getTradeLabel(tradeId) || TRADE_LABEL[tradeId] || tradeId;
+}
+
+export function resolveTradeTemplates(tradeId) {
+  const reg = getTradeRegistry();
+  return reg.templates[tradeId] || TRADE_TEMPLATES[tradeId];
+}
+
 export function subcontractorsForTrade(canonicalTradeId, subcontractors, limit = 999) {
   if (!canonicalTradeId) return [];
-  const matches = subcontractors.filter(
-    (sub) => normalizeTradeKey(sub.trade) === canonicalTradeId
-  );
+  const matches = subcontractors.filter((sub) => {
+    const key = normalizeTradeKey(sub.trade);
+    return key === canonicalTradeId || sub.trade?.toLowerCase() === canonicalTradeId.replace(/_/g, " ");
+  });
   const sorted = matches.slice().sort((a, b) => {
     const ae = !!a.email?.trim();
     const be = !!b.email?.trim();

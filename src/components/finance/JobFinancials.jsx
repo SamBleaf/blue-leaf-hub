@@ -258,10 +258,7 @@ export default function JobFinancials() {
   const job = jobs.find(j => j.id === selectedJobId);
 
   const filed = documents.filter(d => ["filed", "approved", "xero_synced"].includes(d.status));
-  const pending = documents.filter(d => d.status === "pending_approval");
   const totalFiled = filed.reduce((s, d) => s + Number(d.amount_total || 0), 0);
-  const totalPending = pending.reduce((s, d) => s + Number(d.amount_total || 0), 0);
-  const totalGst = filed.reduce((s, d) => s + Number(d.gst_amount || 0), 0);
 
   return (
     <div className="space-y-5">
@@ -287,26 +284,6 @@ export default function JobFinancials() {
 
       {selectedJobId && (
         <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-card border border-hairline bg-surface p-4 text-center">
-              <div className="text-lg font-bold text-ink">{fmtAmount(totalFiled)}</div>
-              <div className="text-xs text-muted">Total filed</div>
-            </div>
-            <div className="rounded-card border border-hairline bg-surface p-4 text-center">
-              <div className="text-lg font-bold text-warning">{fmtAmount(totalPending)}</div>
-              <div className="text-xs text-muted">Pending approval</div>
-            </div>
-            <div className="rounded-card border border-hairline bg-surface p-4 text-center">
-              <div className="text-lg font-bold text-muted">{fmtAmount(totalGst)}</div>
-              <div className="text-xs text-muted">GST (filed)</div>
-            </div>
-            <div className="rounded-card border border-hairline bg-surface p-4 text-center">
-              <div className="text-lg font-bold text-ink">{documents.length}</div>
-              <div className="text-xs text-muted">Total documents</div>
-            </div>
-          </div>
-
           {/* WIPAA Calculator */}
           <WipaaPanel
             jobId={selectedJobId}

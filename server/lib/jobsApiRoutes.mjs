@@ -18,6 +18,14 @@ export function registerJobsApiRoutes(app) {
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
       const { address, client_name, project_type, arch_ref } = req.body || {};
       if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
+
+      // Dedup: return existing job if same address already exists
+      const { data: existing } = await sb.from("jobs")
+        .select("*")
+        .ilike("address", address.trim())
+        .maybeSingle();
+      if (existing) return res.json({ ok: true, job: existing, deduplicated: true });
+
       const { data, error } = await sb.from("jobs").insert({
         address: address.trim(),
         client_name: client_name?.trim() || null,

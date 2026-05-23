@@ -110,7 +110,17 @@ export default function FeeProposalTemplateGuide() {
               r.readAsDataURL(f);
             });
             localStorage.setItem(TEMPLATE_STORAGE_KEY, b64);
-            alert("Template saved in this browser.");
+            // Push to server so it persists across browsers / devices
+            try {
+              await fetch("/api/settings/fee-proposal-template", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dataBase64: b64 })
+              });
+              alert("Template saved to server and this browser.");
+            } catch {
+              alert("Template saved in this browser (server sync failed — will retry next upload).");
+            }
           }}
         />
       </section>

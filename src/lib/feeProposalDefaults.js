@@ -12,8 +12,7 @@ export const DEFAULT_FEE_SCHEDULE = [
   { STAGE_CLAIM: "Progress Payment 2", MILESTONE: "Wall and roof frames", PERCENTAGE: "30%" },
   { STAGE_CLAIM: "Progress Payment 3", MILESTONE: "Lock up", PERCENTAGE: "20%" },
   { STAGE_CLAIM: "Progress Payment 4", MILESTONE: "Internal linings", PERCENTAGE: "15%" },
-  { STAGE_CLAIM: "Progress Payment 5", MILESTONE: "Joinery", PERCENTAGE: "10%" },
-  { STAGE_CLAIM: "Progress Payment 6", MILESTONE: "Practical completion", PERCENTAGE: "10%" }
+  { STAGE_CLAIM: "Progress Payment 5", MILESTONE: "Practical completion", PERCENTAGE: "10%" }
 ];
 
 export const DEFAULT_NEXT_STEPS = `We will prepare contract documentation and coordinate consultant reviews. Please advise of any queries on this fee proposal within 14 days.`;

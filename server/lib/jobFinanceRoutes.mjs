@@ -3,6 +3,8 @@ import { requireAuth } from "./requireAuth.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { matchTradeCategoryRow, resolveBuildxactJobId } from "./costIntelligenceEstimate.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { randomUUID } from "crypto";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -368,7 +370,7 @@ async function sendClaim(req, res) {
 
     const { data: existing, error: fetchErr } = await sb
       .from("progress_claims")
-      .select("id, status, issued_date, job_id")
+      .select("id, status, issued_date, job_id, stage, description, amount_ex_gst, amount_inc_gst, claim_reference")
       .eq("id", cid)
       .eq("job_id", jobId)
       .maybeSingle();
@@ -391,7 +393,66 @@ async function sendClaim(req, res) {
       .single();
     if (error) throw error;
 
-    return res.json({ ok: true, claim: data, note: "email not yet implemented" });
+    // Fetch job for client contact details
+    const { data: job } = await sb.from("jobs")
+      .select("address, portal_client_email, portal_client_name, client_name")
+      .eq("id", jobId).maybeSingle();
+
+    let emailSent = false;
+    let emailError = null;
+    const trackingId = randomUUID();
+
+    if (job?.portal_client_email) {
+      const clientName = job.portal_client_name || job.client_name || "Client";
+      const amountDisplay = existing.amount_inc_gst
+        ? `$${Number(existing.amount_inc_gst).toLocaleString("en-AU", { minimumFractionDigits: 2 })} inc GST`
+        : existing.amount_ex_gst
+          ? `$${Number(existing.amount_ex_gst).toLocaleString("en-AU", { minimumFractionDigits: 2 })} ex GST`
+          : "see attached";
+      const ref = existing.claim_reference || `Claim #${cid.slice(0, 8)}`;
+      const pixelUrl = `${process.env.API_BASE_URL || "https://blueleafhub.com.au"}/api/track/email/${trackingId}`;
+      const subject = `Progress Claim — ${existing.stage || ref} — ${job.address}`;
+      const html = `
+<p>Dear ${clientName},</p>
+<p>Please find your progress claim details below for <strong>${job.address}</strong>.</p>
+<table style="border-collapse:collapse;width:100%;max-width:480px;font-family:sans-serif;font-size:14px;">
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Reference</td><td style="padding:8px;border:1px solid #e5e7eb;">${ref}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Stage</td><td style="padding:8px;border:1px solid #e5e7eb;">${existing.stage || "—"}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Amount</td><td style="padding:8px;border:1px solid #e5e7eb;font-weight:bold;">${amountDisplay}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Issued</td><td style="padding:8px;border:1px solid #e5e7eb;">${issuedDate}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Due</td><td style="padding:8px;border:1px solid #e5e7eb;">${dueDate}</td></tr>
+  ${existing.description ? `<tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Description</td><td style="padding:8px;border:1px solid #e5e7eb;">${existing.description}</td></tr>` : ""}
+</table>
+<p>Please arrange payment by <strong>${dueDate}</strong>. If you have any questions please don't hesitate to reach out.</p>
+<p>Kind regards,<br>Blue Leaf Building</p>
+<img src="${pixelUrl}" width="1" height="1" alt="" style="display:none;" />`;
+      const text = `Progress Claim — ${job.address}\n\nReference: ${ref}\nStage: ${existing.stage || "—"}\nAmount: ${amountDisplay}\nIssued: ${issuedDate}\nDue: ${dueDate}\n\nPlease arrange payment by ${dueDate}.`;
+      try {
+        await sendPlainMail({ to: job.portal_client_email, subject, text, html });
+        emailSent = true;
+        // Record tracking event (table may not exist yet if migration 040 not applied — suppress error)
+        try {
+          await sb.from("email_delivery_events").insert({
+            tracking_id: trackingId,
+            resource_type: "progress_claim",
+            resource_id: cid,
+            job_id: jobId,
+            sent_at: new Date().toISOString(),
+          });
+        } catch (_) { /* migration 040 not yet applied */ }
+      } catch (mailErr) {
+        emailError = mailErr?.message || String(mailErr);
+        console.warn("[sendClaim] email failed:", emailError);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      claim: data,
+      email_sent: emailSent,
+      email_to: job?.portal_client_email || null,
+      email_error: emailError,
+    });
   } catch (e) {
     return res.status(502).json({ ok: false, error: e?.message || String(e) });
   }
@@ -623,7 +684,7 @@ async function sendVariation(req, res) {
 
     const { data: existing, error: fetchErr } = await sb
       .from("job_variations")
-      .select("id, job_id")
+      .select("id, job_id, title, description, amount_ex_gst, variation_number")
       .eq("id", vid)
       .eq("job_id", jobId)
       .maybeSingle();
@@ -637,7 +698,62 @@ async function sendVariation(req, res) {
       .select()
       .single();
     if (error) throw error;
-    return res.json({ ok: true, variation: data, note: "email not yet implemented" });
+
+    // Fetch job for client contact details
+    const { data: job } = await sb.from("jobs")
+      .select("address, portal_client_email, portal_client_name, client_name")
+      .eq("id", jobId).maybeSingle();
+
+    let emailSent = false;
+    let emailError = null;
+    const trackingId = randomUUID();
+
+    if (job?.portal_client_email) {
+      const clientName = job.portal_client_name || job.client_name || "Client";
+      const amountDisplay = existing.amount_ex_gst != null
+        ? `$${Number(existing.amount_ex_gst).toLocaleString("en-AU", { minimumFractionDigits: 2 })} ex GST ($${(Number(existing.amount_ex_gst) * 1.1).toLocaleString("en-AU", { minimumFractionDigits: 2 })} inc GST)`
+        : "see attached";
+      const varNum = existing.variation_number ? `VO-${existing.variation_number}` : `Variation`;
+      const pixelUrl = `${process.env.API_BASE_URL || "https://blueleafhub.com.au"}/api/track/email/${trackingId}`;
+      const subject = `Variation Notice — ${varNum} — ${job.address}`;
+      const html = `
+<p>Dear ${clientName},</p>
+<p>Please review the following variation for <strong>${job.address}</strong>. Your written approval is required before work proceeds.</p>
+<table style="border-collapse:collapse;width:100%;max-width:480px;font-family:sans-serif;font-size:14px;">
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Reference</td><td style="padding:8px;border:1px solid #e5e7eb;">${varNum}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Title</td><td style="padding:8px;border:1px solid #e5e7eb;">${existing.title || "—"}</td></tr>
+  ${existing.description ? `<tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Description</td><td style="padding:8px;border:1px solid #e5e7eb;">${existing.description}</td></tr>` : ""}
+  <tr><td style="padding:8px;border:1px solid #e5e7eb;color:#6b7280;">Amount</td><td style="padding:8px;border:1px solid #e5e7eb;font-weight:bold;">${amountDisplay}</td></tr>
+</table>
+<p>Please reply to this email to confirm your approval, or contact us if you have questions.</p>
+<p>Kind regards,<br>Blue Leaf Building</p>
+<img src="${pixelUrl}" width="1" height="1" alt="" style="display:none;" />`;
+      const text = `Variation Notice — ${job.address}\n\nReference: ${varNum}\nTitle: ${existing.title || "—"}\nAmount: ${amountDisplay}\n\nPlease reply to this email to confirm your approval.`;
+      try {
+        await sendPlainMail({ to: job.portal_client_email, subject, text, html });
+        emailSent = true;
+        try {
+          await sb.from("email_delivery_events").insert({
+            tracking_id: trackingId,
+            resource_type: "variation",
+            resource_id: vid,
+            job_id: jobId,
+            sent_at: new Date().toISOString(),
+          });
+        } catch (_) { /* migration 040 not yet applied */ }
+      } catch (mailErr) {
+        emailError = mailErr?.message || String(mailErr);
+        console.warn("[sendVariation] email failed:", emailError);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      variation: data,
+      email_sent: emailSent,
+      email_to: job?.portal_client_email || null,
+      email_error: emailError,
+    });
   } catch (e) {
     return res.status(502).json({ ok: false, error: e?.message || String(e) });
   }
@@ -970,8 +1086,8 @@ async function getCommandCentre(req, res) {
       .reduce((s, v) => s + (v.amount_ex_gst || 0), 0);
     const draft_count = (variations || []).filter((v) => v.status === "draft").length;
 
-    // WIPAA
-    const contract_value = job.contract_value || 0;
+    // WIPAA — contract_value computed from original + signed variations (never trust jobs.contract_value directly)
+    const contract_value = (job.original_contract_value || 0) + signed_total;
     const forecast_total_cost = job.forecast_total_cost || 0;
     const pct_complete = forecast_total_cost > 0 ? actual_costs / forecast_total_cost : 0;
     const earned_revenue = pct_complete * contract_value;
@@ -1031,21 +1147,21 @@ async function getCommandCentre(req, res) {
 
 export function registerJobFinanceRoutes(app) {
   // Phase C — Budget
-  app.post("/api/finance/jobs/:id/budget/seed", requireAuth, seedBudget);
-  app.post("/api/finance/jobs/:id/budget/import", requireAuth, importBudgetCsv);
-  app.get("/api/finance/jobs/:id/budget/history", requireAuth, getBudgetHistory);
-  app.get("/api/finance/jobs/:id/budget", requireAuth, getBudget);
-  app.put("/api/finance/jobs/:id/budget/:cat_id", requireAuth, updateBudgetLine);
+  app.post("/api/finance/jobs/:id/budget/seed", seedBudget);
+  app.post("/api/finance/jobs/:id/budget/import", importBudgetCsv);
+  app.get("/api/finance/jobs/:id/budget/history", getBudgetHistory);
+  app.get("/api/finance/jobs/:id/budget", getBudget);
+  app.put("/api/finance/jobs/:id/budget/:cat_id", updateBudgetLine);
 
   // Phase D — Progress Claims
-  app.get("/api/finance/jobs/:id/claims", requireAuth, getClaims);
-  app.post("/api/finance/jobs/:id/claims", requireAuth, createClaim);
-  app.put("/api/finance/jobs/:id/claims/:cid", requireAuth, updateClaim);
-  app.post("/api/finance/jobs/:id/claims/:cid/send", requireAuth, sendClaim);
-  app.post("/api/finance/jobs/:id/claims/:cid/pay", requireAuth, payClaim);
-  app.post("/api/finance/jobs/:id/claims/:cid/void", requireAuth, voidClaim);
+  app.get("/api/finance/jobs/:id/claims", getClaims);
+  app.post("/api/finance/jobs/:id/claims", createClaim);
+  app.put("/api/finance/jobs/:id/claims/:cid", updateClaim);
+  app.post("/api/finance/jobs/:id/claims/:cid/send", sendClaim);
+  app.post("/api/finance/jobs/:id/claims/:cid/pay", payClaim);
+  app.post("/api/finance/jobs/:id/claims/:cid/void", voidClaim);
   // Claim schedule stub — used by ProgressClaims UI for APB stage timeline
-  app.get("/api/finance/jobs/:id/claims/schedule", requireAuth, async (req, res) => {
+  app.get("/api/finance/jobs/:id/claims/schedule", async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const stages = ["deposit","slab","frame","lock_up","fixing","practical_completion"];
@@ -1056,14 +1172,14 @@ export function registerJobFinanceRoutes(app) {
   });
 
   // Phase E — Variations
-  app.get("/api/finance/jobs/:id/variations/recipes", requireAuth, getVariationRecipes);
-  app.get("/api/finance/jobs/:id/variations", requireAuth, getVariations);
-  app.post("/api/finance/jobs/:id/variations", requireAuth, createVariation);
-  app.put("/api/finance/jobs/:id/variations/:vid", requireAuth, updateVariation);
-  app.post("/api/finance/jobs/:id/variations/:vid/send", requireAuth, sendVariation);
-  app.post("/api/finance/jobs/:id/variations/:vid/sign", requireAuth, signVariation);
-  app.post("/api/finance/jobs/:id/variations/:vid/reject", requireAuth, rejectVariation);
-  app.post("/api/finance/jobs/:id/variations/:vid/void", requireAuth, async (req, res) => {
+  app.get("/api/finance/jobs/:id/variations/recipes", getVariationRecipes);
+  app.get("/api/finance/jobs/:id/variations", getVariations);
+  app.post("/api/finance/jobs/:id/variations", createVariation);
+  app.put("/api/finance/jobs/:id/variations/:vid", updateVariation);
+  app.post("/api/finance/jobs/:id/variations/:vid/send", sendVariation);
+  app.post("/api/finance/jobs/:id/variations/:vid/sign", signVariation);
+  app.post("/api/finance/jobs/:id/variations/:vid/reject", rejectVariation);
+  app.post("/api/finance/jobs/:id/variations/:vid/void", async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     try {
@@ -1075,11 +1191,11 @@ export function registerJobFinanceRoutes(app) {
   });
 
   // Phase F — WIPAA
-  app.get("/api/finance/jobs/:id/wipaa/current", requireAuth, getWipaaCurrent);
-  app.post("/api/finance/jobs/:id/wipaa/review", requireAuth, postWipaaReview);
-  app.get("/api/finance/jobs/:id/wipaa/history", requireAuth, getWipaaHistory);
-  app.put("/api/finance/jobs/:id/wipaa/forecast", requireAuth, updateWipaaForecast);
+  app.get("/api/finance/jobs/:id/wipaa/current", getWipaaCurrent);
+  app.post("/api/finance/jobs/:id/wipaa/review", postWipaaReview);
+  app.get("/api/finance/jobs/:id/wipaa/history", getWipaaHistory);
+  app.put("/api/finance/jobs/:id/wipaa/forecast", updateWipaaForecast);
 
   // Phase G — Command Centre
-  app.get("/api/finance/jobs/:id/command-centre", requireAuth, getCommandCentre);
+  app.get("/api/finance/jobs/:id/command-centre", getCommandCentre);
 }
