@@ -1,39 +1,114 @@
 /** Canonical trade keys aligned with Claude extraction JSON + RFQ Engine. */
+import { processExtraction, bulletsFromStructuredNote } from "./rfqScopePipeline.js";
 
+// Canonical UI display order — no legacy aliases; used for trade checkboxes and email composer
 export const RFQ_TRADE_ORDER = [
+  // Site & civil
+  "site_establishment",
   "excavation",
   "demolition",
   "termite_protection",
-  "footings_concrete_formwork",
+  // Structure
+  "concrete_footings",
+  "structural_steel",
+  "carpentry",
+  // Envelope
+  "external_cladding",
+  "windows_skylights",
+  "roof_plumber",
+  "masonry",
+  "glazing",
+  // Mechanical / electrical
+  "electrical_data",
+  "lighting_automation",
   "plumbing",
-  "electrical",
+  "sanitary_ware",
+  "heating_cooling",
+  "solar_batteries",
+  // Interior fit-out
+  "insulation",
   "internal_linings",
+  "plastering_rendering",
+  "painting",
   "stairs",
+  "joinery",
   "tiling",
   "flooring",
-  "metal_roofing"
+  "window_furnishings",
+  "garage_door",
+  "appliances",
+  "door_hardware",
+  "fixtures_fittings",
+  // External
+  "landscaping",
+  "paving",
+  "fencing",
+  "pool_works",
+  "site_cleaner"
+];
+
+// All keys including legacy aliases — used only for normalizing stored extraction data
+export const RFQ_ALL_TRADE_KEYS = [
+  ...RFQ_TRADE_ORDER,
+  "footings_concrete_formwork", // legacy → concrete_footings
+  "metal_roofing",              // legacy → roof_plumber
+  "electrical"                  // legacy → electrical_data
 ];
 
 export function emptyTradeNote() {
-  return { scope_summary: "", specific_items: [], missing_info: "" };
+  return {
+    project_information: [],
+    scope_of_works: [],
+    confirm_items: [],
+    assumptions: [],
+    tender_requirements: [],
+    submission_requirements: [],
+    standards: [],
+    missing_items: [],
+    scope_summary: "",
+    specific_items: [],
+    missing_info: ""
+  };
 }
 
 function normalizeOneTradeNote(raw) {
   if (raw == null) return emptyTradeNote();
   if (typeof raw === "string") {
-    return { scope_summary: raw.trim(), specific_items: [], missing_info: "" };
+    return { ...emptyTradeNote(), scope_summary: raw.trim() };
   }
   if (typeof raw === "object") {
+    const arr = (k) =>
+      Array.isArray(raw[k]) ? raw[k].map((x) => String(x).trim()).filter(Boolean) : [];
+    const scope_of_works = arr("scope_of_works");
     return {
-      scope_summary: String(raw.scope_summary ?? "").trim(),
+      ...emptyTradeNote(),
+      project_information: arr("project_information"),
+      scope_of_works,
+      confirm_items: arr("confirm_items"),
+      assumptions: arr("assumptions"),
+      tender_requirements: arr("tender_requirements"),
+      submission_requirements: arr("submission_requirements"),
+      standards: arr("standards").slice(0, 1),
+      missing_items: arr("missing_items"),
+      scope_summary: String(raw.scope_summary ?? "").trim() || scope_of_works.join("\n"),
       specific_items: Array.isArray(raw.specific_items)
         ? raw.specific_items.map((x) => String(x).trim()).filter(Boolean)
-        : [],
-      missing_info: raw.missing_info == null ? "" : String(raw.missing_info).trim()
+        : scope_of_works,
+      missing_info:
+        raw.missing_info == null ? arr("missing_items").join("; ") : String(raw.missing_info).trim()
     };
   }
   return emptyTradeNote();
 }
+
+// Maps old extraction keys to canonical keys
+const LEGACY_KEY_MAP = {
+  concrete_formwork: "concrete_footings",
+  footings_concrete_formwork: "concrete_footings",
+  metal_roofing: "roof_plumber",
+  electrical: "electrical_data",
+  electrical_solar: "electrical_data"
+};
 
 function legacyTradeNotesToNew(flat) {
   const out = {};
@@ -41,12 +116,8 @@ function legacyTradeNotesToNew(flat) {
     out[id] = emptyTradeNote();
   }
   if (!flat || typeof flat !== "object") return out;
-  const mapLegacyKey = {
-    concrete_formwork: "footings_concrete_formwork",
-    electrical_solar: "electrical"
-  };
   for (const [k, v] of Object.entries(flat)) {
-    const key = mapLegacyKey[k] || k;
+    const key = LEGACY_KEY_MAP[k] || k;
     if (RFQ_TRADE_ORDER.includes(key)) {
       out[key] = normalizeOneTradeNote(v);
     }
@@ -117,13 +188,29 @@ export function coerceExtraction(raw) {
     raw.project_address ?? raw.address ?? ""
   ).trim();
 
-  return {
+  const project_context = {
+    project_information: [],
+    assumptions_site_conditions: []
+  };
+  if (raw.project_context && typeof raw.project_context === "object") {
+    if (Array.isArray(raw.project_context.project_information)) {
+      project_context.project_information = raw.project_context.project_information.map(String).filter(Boolean);
+    }
+    if (Array.isArray(raw.project_context.assumptions_site_conditions)) {
+      project_context.assumptions_site_conditions = raw.project_context.assumptions_site_conditions
+        .map(String)
+        .filter(Boolean);
+    }
+  }
+
+  const base = {
     project_address,
     project_type: String(raw.project_type ?? "unknown").trim() || "unknown",
     storeys: String(raw.storeys ?? "").trim(),
     floor_area_m2: numOrNull(floorRaw),
     site_area_m2: numOrNull(siteRaw),
     building_specs,
+    project_context,
     trade_notes,
     coverage_gaps: (Array.isArray(raw.coverage_gaps)
       ? raw.coverage_gaps
@@ -135,6 +222,8 @@ export function coerceExtraction(raw) {
     client_name: String(raw.client_name ?? "").trim(),
     architect_name: String(raw.architect_name ?? "").trim()
   };
+
+  return processExtraction(base, RFQ_TRADE_ORDER);
 }
 
 /**
@@ -259,7 +348,8 @@ export function mergeExtractions(rawParts) {
     };
   }
 
-  return merged;
+  const allIds = [...new Set(list.flatMap((x) => Object.keys(x.trade_notes || {})))];
+  return processExtraction(merged, allIds.length ? allIds : RFQ_TRADE_ORDER);
 }
 
 /** Split scope_summary into lines (newlines, or •-separated blocks). */
@@ -279,9 +369,10 @@ function linesFromScopeSummary(scopeSummary) {
     .filter(Boolean);
 }
 
-/** Turn scope_summary + specific_items into bullet lines for UI / email. */
+/** Turn structured scope into bullet lines for UI / email. */
 export function bulletsFromTradeNote(note) {
   const n = note && typeof note === "object" ? note : emptyTradeNote();
+  if (n.scope_of_works?.length) return bulletsFromStructuredNote(n);
   const fromSummary = linesFromScopeSummary(n.scope_summary);
   const items = (n.specific_items || []).map((l) => String(l).trim()).filter(Boolean);
   return [...fromSummary, ...items];

@@ -1,4 +1,5 @@
-import { TRADE_LABEL, TRADE_TEMPLATES } from "./tradeTemplates";
+import { resolveTradeLabel, resolveTradeTemplates } from "./tradeTemplates";
+import { getTradeRegistry } from "./rfqTradeRegistry.js";
 import { bulletsFromTradeNote, emptyTradeNote } from "./rfqExtraction.js";
 
 const MAX_BODY_LINES = 40;
@@ -185,6 +186,12 @@ export function plainBodyToHtml(plainBody, logoDataUrl) {
  * RFQ email — scope from trade_notes.scope_summary + specific_items (• lines).
  * AS standard as last scope bullet when applicable — no separate compliance block.
  */
+function sectionLines(title, lines, max = 8) {
+  const items = (lines || []).map((l) => String(l).trim()).filter(Boolean).slice(0, max);
+  if (!items.length) return [];
+  return [title, ...items.map((b) => `• ${b}`)];
+}
+
 export function composeRfqEmail({
   contactName,
   projectAddress,
@@ -195,62 +202,75 @@ export function composeRfqEmail({
   signatureFooter,
   logoDataUrl
 }) {
-  const label = TRADE_LABEL[tradeId] || tradeId;
+  const label = resolveTradeLabel(tradeId);
   const note = tradeNote && typeof tradeNote === "object" ? tradeNote : emptyTradeNote();
+  const tradeConfig = getTradeRegistry().byId[tradeId] || {};
 
-  const rawNoteText = [note.scope_summary, ...(note.specific_items || [])].join("\n");
-
-  let rawBullets = bulletsFromTradeNote(note);
-  if (rawBullets.length === 0) {
-    rawBullets = TRADE_TEMPLATES[tradeId]?.scopeBullets?.filter(Boolean) || [
-      `${label} package per tender drawings and schedules — price labour, materials, and allowances as usual.`
-    ];
+  let scopeBullets = uniqueBullets(bulletsFromTradeNote(note), 10);
+  if (scopeBullets.length === 0) {
+    scopeBullets =
+      resolveTradeTemplates(tradeId)?.scopeBullets?.filter(Boolean) ||
+      tradeConfig.scope_bullets ||
+      [`${label} package per tender drawings and specifications.`];
   }
 
-  rawBullets = uniqueBullets(rawBullets, 32);
-  const scopeBullets = [];
-  for (const b of rawBullets) {
-    const cleaned = stripFurthermore(stripEnsureThatPrefix(b)).trim();
-    if (!cleaned || isProjectOverviewBullet(cleaned)) continue;
-    scopeBullets.push(cleaned);
-  }
-
-  const withStandard = ensureStandardLastBullet(scopeBullets, rawNoteText);
-
-  const finalBullets =
-    withStandard.length > 0
-      ? withStandard
-      : [
-          `${label} package per tender drawings and schedules — price labour, materials, and allowances as usual.`
-        ];
+  const standards = note.standards?.length
+    ? note.standards.slice(0, 1)
+    : ensureStandardLastBullet([], [note.scope_summary, ...(note.specific_items || [])].join("\n")).slice(-1);
 
   const addr = projectAddress?.trim() || "[project address]";
   const docs = dropboxLink?.trim() || "[add Dropbox link]";
   const deadline = deadlineLabel?.trim() || "[deadline]";
+  const opener =
+    tradeConfig.email_opener || `We are seeking your price for the ${label} package`;
 
   const sig = (signatureFooter && signatureFooter.trim()) || defaultSignatureFallback();
   const sigLines = sig.split("\n");
 
   function assemble(bulletCount) {
-    const bullets = finalBullets.slice(0, bulletCount);
+    const bullets = scopeBullets.slice(0, bulletCount);
     const parts = [];
     parts.push(greetingLine(contactName));
     parts.push("");
-    parts.push(`We are seeking your price for the ${label} package at ${addr}.`);
+    parts.push(`${opener} at ${addr}.`);
     parts.push("");
     parts.push(`Tender documents: ${docs}`);
     parts.push("");
-    parts.push("Please include the following in your price:");
-    bullets.forEach((b) => parts.push(`• ${b}`));
+    parts.push(...sectionLines("Scope of works", bullets, bulletCount));
+    if (note.confirm_items?.length) {
+      parts.push("");
+      parts.push(...sectionLines("Please confirm inclusion of the following in your price", note.confirm_items, 4));
+    }
+    if (note.assumptions?.length) {
+      parts.push("");
+      parts.push(...sectionLines("Assumptions / site conditions", note.assumptions, 6));
+    }
+    if (standards.length) {
+      parts.push("");
+      parts.push(...sectionLines("General requirements", standards, 1));
+    }
+    if (note.tender_requirements?.length) {
+      parts.push("");
+      parts.push(...sectionLines("Tender requirements", note.tender_requirements, 4));
+    }
+    if (note.submission_requirements?.length) {
+      parts.push("");
+      parts.push(...sectionLines("Submission requirements", note.submission_requirements, 4));
+    }
+    if (note.missing_items?.length) {
+      parts.push("");
+      parts.push("⚠ Missing information (please confirm or allow in your price):");
+      note.missing_items.slice(0, 5).forEach((m) => parts.push(`• ${m}`));
+    }
     parts.push("");
-    parts.push(`Please return your lump sum price by ${deadline}.`);
+    parts.push(`Please return your lump sum price ex GST by ${deadline}.`);
     parts.push("Feel free to reach out with any questions.");
     parts.push("");
     parts.push(...sigLines);
     return parts.join("\n");
   }
 
-  let used = finalBullets.length;
+  let used = scopeBullets.length;
   let body = assemble(used);
 
   for (;;) {

@@ -1,9 +1,23 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { composeRfqEmail } from "../lib/rfqComposer";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
-import { TRADE_LABEL, TRADE_ORDER, subcontractorsForTrade } from "../lib/tradeTemplates";
+import {
+  normalizeTradeKey,
+  resolveTradeLabel,
+  TRADE_ORDER,
+  subcontractorsForTrade
+} from "../lib/tradeTemplates";
+import { fetchAndHydrateTradeRegistry, getTradeRegistry, registerAdHocTrade } from "../lib/rfqTradeRegistry.js";
+import { validateRfqReadiness } from "../lib/rfqScopePipeline.js";
 import { coerceExtraction, mergeExtractions, bulletsFromTradeNote, emptyTradeNote, RFQ_TRADE_ORDER } from "../lib/rfqExtraction.js";
+import {
+  defaultSelectedTradeIds,
+  fetchMergedTradePlan,
+  labelForTrade,
+  sourceBadgeClass,
+  sourceBadgeLabel
+} from "../lib/rfqTradeIntelligence.js";
 import { buildJobFieldsFromExtraction } from "../lib/extractionJobFields.js";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
 import { jobProjectsInternalPath } from "../lib/jobFolderPath.js";
@@ -377,10 +391,18 @@ export default function RfqEngine() {
   /** Draft job row created/updated when extraction completes (RFQs queued against it before send). */
   const [extractionJobId, setExtractionJobId] = useState("");
   const extractionJobIdRef = useRef("");
+  /** Merged trade plan (estimate baseline + AI enrichment). */
+  const [tradePlan, setTradePlan] = useState([]);
+  const [tradeIntelSummary, setTradeIntelSummary] = useState(null);
+  const [tradeIntelBusy, setTradeIntelBusy] = useState(false);
 
   useEffect(() => {
     extractionJobIdRef.current = extractionJobId;
   }, [extractionJobId]);
+
+  useEffect(() => {
+    fetchAndHydrateTradeRegistry().catch((err) => console.warn("[trade-config]", err));
+  }, []);
 
   useEffect(() => {
     if (!extractBusy) return;
@@ -569,7 +591,17 @@ export default function RfqEngine() {
           .select("*")
           .order("business_name", { ascending: true });
         if (error) throw error;
-        setSubcontractors(data || []);
+        const subs = data || [];
+        for (const sub of subs) {
+          const key = normalizeTradeKey(sub.trade);
+          if (!key && sub.trade?.trim()) {
+            registerAdHocTrade(
+              sub.trade.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""),
+              sub.trade
+            );
+          }
+        }
+        setSubcontractors(subs);
         setSubsLoadState("ready");
       } catch (err) {
         console.error("[subcontractors]", err);
@@ -718,6 +750,8 @@ export default function RfqEngine() {
     setCompletionLog(null);
     setExtractionJobId("");
     extractionJobIdRef.current = "";
+    setTradePlan([]);
+    setTradeIntelSummary(null);
     skipNextAutoRebuildRef.current = false;
     suppressNextSubsRebuildRef.current = false;
     void deletePdfs(RFQ_ENGINE_PDF_SCOPE).catch((err) =>
@@ -868,6 +902,49 @@ export default function RfqEngine() {
     }
   }, [pdfItems.length, pdfRestoreTask, legacyPdfQueueMeta.length]);
 
+  const loadTradeIntelligence = useCallback(async (ext, jobId) => {
+    setTradeIntelBusy(true);
+    try {
+      const json = await fetchMergedTradePlan({
+        extraction: coerceExtraction(ext),
+        job_id: jobId || extractionJobIdRef.current || undefined
+      });
+      if (json.extraction) setExtraction(coerceExtraction(json.extraction));
+      const plan = json.merged_plan || [];
+      setTradePlan(plan);
+      setTradeIntelSummary(json.estimate_summary || null);
+      setSelectedTrades(defaultSelectedTradeIds(plan));
+      for (const row of plan) {
+        if (row.trade_id) registerAdHocTrade(row.trade_id, row.trade_label);
+      }
+    } catch (err) {
+      console.warn("[trade-intel]", err);
+      setTradePlan([]);
+      setTradeIntelSummary(null);
+    } finally {
+      setTradeIntelBusy(false);
+    }
+  }, []);
+
+  const tradeIdsForUi =
+    tradePlan.length > 0 ? tradePlan.map((t) => t.trade_id) : TRADE_ORDER;
+  const tradeLabelUi = (tradeId) =>
+    labelForTrade(tradeId, tradePlan, getTradeRegistry().labels) || resolveTradeLabel(tradeId);
+  const tradePlanById = useMemo(
+    () => new Map(tradePlan.map((t) => [t.trade_id, t])),
+    [tradePlan]
+  );
+
+  const rfqReadiness = useMemo(() => {
+    if (selectedTrades.size === 0) return null;
+    return validateRfqReadiness({
+      selectedTradeIds: [...selectedTrades],
+      tradeRecipients,
+      tradeNotes: extraction.trade_notes,
+      tradeConfigById: getTradeRegistry().byId
+    });
+  }, [selectedTrades, tradeRecipients, extraction]);
+
   const persistJobFromExtraction = useCallback(
     async (extRaw) => {
       if (!supabaseConfigured) return;
@@ -882,20 +959,35 @@ export default function RfqEngine() {
           const { error } = await sb.from("jobs").update(fields).eq("id", jid);
           if (error) throw error;
         } else {
-          const { data, error } = await sb
-            .from("jobs")
-            .insert({
-              ...fields,
-              dropbox_shared_link: "",
-              dropbox_internal_path: "",
-              dropbox_link: "",
-              status: "tendering"
-            })
-            .select("*")
-            .single();
-          if (error) throw error;
-          extractionJobIdRef.current = data.id;
-          setExtractionJobId(data.id);
+          // Dedup: check for existing job at same address before creating
+          let existingId = null;
+          if (addr && addr !== "Address pending") {
+            const { data: existing } = await sb.from("jobs")
+              .select("id")
+              .ilike("address", addr)
+              .maybeSingle();
+            if (existing?.id) existingId = existing.id;
+          }
+          if (existingId) {
+            extractionJobIdRef.current = existingId;
+            setExtractionJobId(existingId);
+            await sb.from("jobs").update(fields).eq("id", existingId);
+          } else {
+            const { data, error } = await sb
+              .from("jobs")
+              .insert({
+                ...fields,
+                dropbox_shared_link: "",
+                dropbox_internal_path: "",
+                dropbox_link: "",
+                status: "tendering"
+              })
+              .select("*")
+              .single();
+            if (error) throw error;
+            extractionJobIdRef.current = data.id;
+            setExtractionJobId(data.id);
+          }
         }
         if (addr && addr !== "Address pending") {
           const jidNow = extractionJobIdRef.current;
@@ -1066,6 +1158,7 @@ export default function RfqEngine() {
       const merged = mergeExtractions(successes);
       setExtraction(merged);
       await persistJobFromExtraction(merged);
+      await loadTradeIntelligence(merged, extractionJobIdRef.current);
 
       const modelPart = models.size ? `${[...models].join(", ")} ` : "";
       const failedCount = resolved.length - successes.length;
@@ -1151,7 +1244,7 @@ export default function RfqEngine() {
       rows.push({
         job_id: job.id,
         subcontractor_id: msg.subcontractor_id,
-        trade: TRADE_LABEL[msg.tradeId] || msg.tradeId,
+        trade: resolveTradeLabel(msg.tradeId) || msg.tradeId,
         sent_at: null,
         deadline,
         status: "queued",
@@ -1178,7 +1271,7 @@ export default function RfqEngine() {
 
     if (!dropboxMeta) {
       try {
-        const trades = [...new Set(messages.map((m) => TRADE_LABEL[m.tradeId] || m.tradeId))];
+        const trades = [...new Set(messages.map((m) => resolveTradeLabel(m.tradeId) || m.tradeId))];
         await fetch("/api/dropbox/ensure-job-folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1206,8 +1299,8 @@ export default function RfqEngine() {
         try {
           const tradeLabels =
             selectedTrades.size > 0
-              ? Array.from(selectedTrades).map((tid) => TRADE_LABEL[tid] || tid)
-              : RFQ_TRADE_ORDER.map((tid) => TRADE_LABEL[tid] || tid);
+              ? Array.from(selectedTrades).map((tid) => tradeLabelUi(tid))
+              : tradeIdsForUi.map((tid) => tradeLabelUi(tid));
           const ensureRes = await fetch("/api/dropbox/ensure-job-folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1384,7 +1477,7 @@ export default function RfqEngine() {
       let ensureJson = null;
       if (!finalDropboxUrl) {
         try {
-          const tradeLabels = [...new Set(readyMessages.map((row) => TRADE_LABEL[row.tradeId] || row.tradeId))];
+          const tradeLabels = [...new Set(readyMessages.map((row) => resolveTradeLabel(row.tradeId) || row.tradeId))];
           const ensureRes = await fetch("/api/dropbox/ensure-job-folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1431,7 +1524,7 @@ export default function RfqEngine() {
         tradeId: row.tradeId,
         subcontractor_id: row.subcontractor_id,
         businessName: row.subcontractor?.business_name?.trim() || "",
-        tradeLabel: TRADE_LABEL[row.tradeId] || row.tradeId
+        tradeLabel: resolveTradeLabel(row.tradeId) || row.tradeId
       }));
 
       const privateRootGuess = jobProjectsInternalPath(addr);
@@ -1475,7 +1568,7 @@ export default function RfqEngine() {
       }
 
       for (let i = 0; i < messages.length; i++) {
-        const trade = TRADE_LABEL[messages[i].tradeId] || messages[i].tradeId;
+        const trade = resolveTradeLabel(messages[i].tradeId) || messages[i].tradeId;
         const subj = String(messages[i].subject || "").trim();
         const bodyText = typeof messages[i].body === "string" ? messages[i].body : "";
         const email_body = `Subject: ${subj}\n\n${bodyText}`.trim();
@@ -1542,10 +1635,15 @@ export default function RfqEngine() {
           const msg = messages[i];
           if (!tradeGroups[msg.tradeId]) {
             const note = extraction.trade_notes?.[msg.tradeId] || emptyTradeNote();
+            const planRow = tradePlanById.get(msg.tradeId);
+            const scopeFromPlan = planRow?.scope_bullets?.length ? planRow.scope_bullets : bulletsFromTradeNote(note);
             tradeGroups[msg.tradeId] = {
               trade_id: msg.tradeId,
-              trade_label: TRADE_LABEL[msg.tradeId] || msg.tradeId,
-              scope_bullets: bulletsFromTradeNote(note),
+              trade_label: tradeLabelUi(msg.tradeId),
+              scope_bullets: scopeFromPlan,
+              source: planRow?.source || "manual",
+              ai_enrichment: planRow?.ai_enrichment || [],
+              estimate_line_refs: planRow?.estimate_line_refs || [],
               due_date: deadline || "",
               recipients: []
             };
@@ -2023,33 +2121,71 @@ export default function RfqEngine() {
             </div>
           ) : null}
 
+          {tradeIntelBusy ? (
+            <p className="text-sm text-muted">Loading Buildxact estimate baseline and merging trades…</p>
+          ) : null}
+          {tradeIntelSummary?.quote_category_count > 0 ? (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-ink">
+              <span className="font-semibold text-primary">Estimate baseline:</span>{" "}
+              {tradeIntelSummary.quote_category_count} quote-capable Buildxact categories merged with plan extraction.
+              Trades from the estimate are pre-selected; AI only enriches scope.
+            </div>
+          ) : null}
+
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-primary">Trade scope (from documents)</h3>
+            <h3 className="text-lg font-semibold text-primary">Trade scopes (estimate + documents)</h3>
             <div className="grid gap-4 md:grid-cols-2">
-              {TRADE_ORDER.map((tradeId) => {
+              {tradeIdsForUi.map((tradeId) => {
+                const planRow = tradePlanById.get(tradeId);
                 const note = extraction.trade_notes[tradeId] || emptyTradeNote();
-                const bullets = bulletsFromTradeNote(note);
+                const bullets = planRow?.scope_bullets?.length
+                  ? planRow.scope_bullets
+                  : bulletsFromTradeNote(note);
                 const hex = TRADE_BADGE_HEX[tradeId] || "#374151";
                 return (
                   <div key={tradeId} className="rounded-card border border-hairline bg-surface p-4 shadow-sm">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
                         className="rounded-md px-2 py-0.5 text-[10px] font-bold uppercase text-white"
                         style={{ background: hex }}
                       >
-                        {TRADE_LABEL[tradeId]}
+                        {tradeLabelUi(tradeId)}
                       </span>
+                      {planRow?.source ? (
+                        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${sourceBadgeClass(planRow.source)}`}>
+                          {sourceBadgeLabel(planRow.source)}
+                        </span>
+                      ) : null}
                     </div>
-                    <ul className="mt-3 list-disc space-y-1 pl-4 text-sm text-ink">
+                    <p className="mt-2 text-[10px] font-bold uppercase text-muted">Scope of works</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-ink">
                       {bullets.length ? (
                         bullets.map((b) => <li key={b}>{b}</li>)
                       ) : (
                         <li className="text-muted">No scope extracted — edit below.</li>
                       )}
                     </ul>
-                    {note.missing_info ? (
-                      <div className="mt-3 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
-                        <span className="font-bold">Missing info:</span> {note.missing_info}
+                    {note.assumptions?.length ? (
+                      <>
+                        <p className="mt-3 text-[10px] font-bold uppercase text-muted">Assumptions / site</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-muted">
+                          {note.assumptions.map((a) => (
+                            <li key={a}>{a}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    {(note.missing_items?.length || note.missing_info) ? (
+                      <div className="mt-3 rounded-lg border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-ink">
+                        <span className="font-bold text-warning">⚠ Missing information:</span>
+                        <ul className="mt-1 list-disc pl-4">
+                          {(note.missing_items?.length
+                            ? note.missing_items
+                            : note.missing_info.split(/[;]+/)
+                          ).map((m) => (
+                            <li key={m}>{m.trim()}</li>
+                          ))}
+                        </ul>
                       </div>
                     ) : null}
                     <label className="mt-3 block text-[10px] font-bold uppercase text-muted">Edit scope summary</label>
@@ -2140,11 +2276,43 @@ export default function RfqEngine() {
             </label>
           </div>
 
+          {rfqReadiness ? (
+            <div
+              className={`mt-6 rounded-xl border px-4 py-3 ${
+                rfqReadiness.ready ? "border-green-200 bg-green-50" : "border-warning/50 bg-warning/10"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-ink">RFQ readiness</span>
+                <span
+                  className={`text-sm font-bold ${rfqReadiness.ready ? "text-green-700" : "text-amber-800"}`}
+                >
+                  {rfqReadiness.percent}%
+                </span>
+              </div>
+              {!rfqReadiness.ready && rfqReadiness.trades?.length ? (
+                <ul className="mt-2 space-y-1 text-xs text-ink">
+                  {rfqReadiness.trades
+                    .filter((t) => !t.ready)
+                    .map((t) => (
+                      <li key={t.trade_id}>
+                        <strong>{t.trade_label}</strong>: {t.missing.join(", ")}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-muted">All selected trades have scope, template, and recipients.</p>
+              )}
+            </div>
+          ) : null}
+
           <div className="mt-8">
             <h3 className="text-sm font-bold text-primary">Trades to RFQ</h3>
             <p className="mt-1 text-xs text-muted">Tick each trade you are sending this round.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {TRADE_ORDER.map((tradeId) => (
+              {tradeIdsForUi.map((tradeId) => {
+                const planRow = tradePlanById.get(tradeId);
+                return (
                 <label
                   key={tradeId}
                   className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
@@ -2157,9 +2325,13 @@ export default function RfqEngine() {
                     onChange={() => toggleTrade(tradeId)}
                     className="rounded border-hairline text-accent focus:ring-accent"
                   />
-                  {TRADE_LABEL[tradeId]}
+                  {tradeLabelUi(tradeId)}
+                  {planRow?.source?.includes("estimate") ? (
+                    <span className="text-[9px] font-normal text-primary">(est.)</span>
+                  ) : null}
                 </label>
-              ))}
+              );
+              })}
             </div>
             {selectedTrades.size === 0 ? (
               <p className="mt-3 text-sm text-warning">Select at least one trade to choose recipients.</p>
@@ -2167,7 +2339,7 @@ export default function RfqEngine() {
           </div>
 
           <div className="mt-10 space-y-8">
-            {TRADE_ORDER.map((tradeId) => {
+            {tradeIdsForUi.map((tradeId) => {
               if (!selectedTrades.has(tradeId)) return null;
               const pool = subcontractorsForTrade(tradeId, subcontractors, 9999);
               const selected = new Set(tradeRecipients[tradeId] || []);
@@ -2176,7 +2348,7 @@ export default function RfqEngine() {
               return (
                 <div key={tradeId} className="rounded-xl border border-hairline bg-page p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-primary">{TRADE_LABEL[tradeId]}</span>
+                    <span className="text-sm font-bold text-primary">{tradeLabelUi(tradeId)}</span>
                     <span className="text-xs text-muted">Send to</span>
                   </div>
                   {withEmail.length === 0 ? (
@@ -2272,7 +2444,7 @@ export default function RfqEngine() {
                   }`}
                 >
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                    {TRADE_LABEL[row.tradeId] || row.tradeId}
+                    {resolveTradeLabel(row.tradeId) || row.tradeId}
                   </div>
                   <div className="mt-2 text-lg font-semibold text-primary">
                     {row.subcontractor?.business_name || row.blockReason || "—"}

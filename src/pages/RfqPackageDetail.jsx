@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getSupabase } from "../lib/supabaseClient.js";
+import { generateMissingPackageScopes } from "../lib/rfqTradeIntelligence.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -754,7 +755,9 @@ export default function RfqPackageDetail() {
   const [metaDraft, setMetaDraft] = useState({});
   const [addTradeId, setAddTradeId] = useState("");
   const [addingTrade, setAddingTrade] = useState(false);
+  const [generatingMissing, setGeneratingMissing] = useState(false);
   const [banner, setBanner] = useState(null);
+  const [tradeMaster, setTradeMaster] = useState([]);
 
   async function load() {
     setLoading(true);
@@ -772,6 +775,16 @@ export default function RfqPackageDetail() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [packageId]);
+
+  useEffect(() => {
+    fetch("/api/trade-master")
+      .then((r) => r.json())
+      .then((j) => {
+        const list = j.trades || [];
+        setTradeMaster(list.filter((t) => t.quote_required !== false && t.is_active !== false));
+      })
+      .catch(() => {});
+  }, []);
 
   async function patchScope(tradeId, patch) {
     await fetch(`/api/rfq-packages/${packageId}/scopes/${tradeId}`, {
@@ -835,6 +848,14 @@ export default function RfqPackageDetail() {
   const scopes = (pkg.rfq_trade_scopes || []).sort((a, b) => a.trade_label.localeCompare(b.trade_label));
   const addenda = (pkg.rfq_addenda || []).sort((a, b) => a.number - b.number);
   const suggested = pkg.suggested_trades || [];
+  const tradeCoverage = pkg.trade_coverage || {};
+  const coveragePct = tradeCoverage.percent ?? pkg.coverage_score ?? 0;
+  const coveredTrades = tradeCoverage.covered || [];
+  const missingTrades =
+    (tradeCoverage.missing?.length ? tradeCoverage.missing : pkg.missing_trade_analysis) || [];
+  const missingToGenerate = missingTrades.filter((m) =>
+    (m.actions || []).includes("generate_rfq")
+  );
 
   const totalRecipients = scopes.reduce((n, s) => n + (s.rfq_recipients?.length || 0), 0);
   const totalSent = scopes.reduce((n, s) => n + (s.rfq_recipients || []).filter((r) => ["sent", "followed_up", "received", "accepted"].includes(r.status)).length, 0);
@@ -931,19 +952,69 @@ export default function RfqPackageDetail() {
           ))}
         </div>
 
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted">Trade coverage</span>
-            <span className={`text-xs font-bold ${pkg.coverage_score >= 75 ? "text-green-600" : pkg.coverage_score >= 50 ? "text-amber-600" : "text-red-500"}`}>
-              {pkg.coverage_score}%
+        <div className="mt-4 rounded-lg border border-hairline bg-page p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span className="text-sm font-semibold text-ink">Tender coverage</span>
+            <span className={`text-sm font-bold ${coveragePct >= 75 ? "text-green-600" : coveragePct >= 50 ? "text-amber-600" : "text-red-500"}`}>
+              {coveragePct}%
             </span>
           </div>
-          <div className="h-2 w-full rounded-full bg-hairline overflow-hidden">
+          <div className="h-2 w-full rounded-full bg-hairline overflow-hidden mb-3">
             <div
-              className={`h-full rounded-full transition-all ${pkg.coverage_score >= 75 ? "bg-green-500" : pkg.coverage_score >= 50 ? "bg-amber-400" : "bg-red-400"}`}
-              style={{ width: `${pkg.coverage_score}%` }}
+              className={`h-full rounded-full transition-all ${coveragePct >= 75 ? "bg-green-500" : coveragePct >= 50 ? "bg-amber-400" : "bg-red-400"}`}
+              style={{ width: `${coveragePct}%` }}
             />
           </div>
+          {coveredTrades.length > 0 ? (
+            <div className="mb-2">
+              <p className="text-[10px] font-bold uppercase text-muted mb-1">Covered</p>
+              <div className="flex flex-wrap gap-1">
+                {coveredTrades.map((t) => (
+                  <span key={t.trade_id} className="text-[10px] rounded bg-green-50 text-green-800 border border-green-200 px-1.5 py-0.5">
+                    ✓ {t.label || t.trade_id}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {missingToGenerate.length > 0 ? (
+            <div>
+              <p className="text-[10px] font-bold uppercase text-amber-800 mb-1">Missing from package</p>
+              <ul className="space-y-1 text-xs text-ink mb-2">
+                {missingToGenerate.slice(0, 12).map((m) => (
+                  <li key={m.trade_id} className="flex items-start gap-1">
+                    <span className="text-amber-600 shrink-0">⚠</span>
+                    <span>
+                      <strong>{m.trade_label || m.trade_id}</strong>
+                      {m.reason ? <span className="text-muted"> — {m.reason}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                disabled={generatingMissing}
+                onClick={async () => {
+                  setGeneratingMissing(true);
+                  try {
+                    const json = await generateMissingPackageScopes(packageId);
+                    setBanner({
+                      type: "success",
+                      text: `Created ${json.created_count || 0} draft scope(s) from Buildxact estimate baseline.`
+                    });
+                    await load();
+                  } catch (e) {
+                    setBanner({ type: "error", text: e.message });
+                  } finally {
+                    setGeneratingMissing(false);
+                  }
+                }}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
+              >
+                {generatingMissing ? "Generating…" : "Generate missing RFQs"}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1013,12 +1084,27 @@ export default function RfqPackageDetail() {
               className="rounded-lg border border-hairline bg-page px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
             >
               <option value="">Add trade…</option>
-              {["Scaffolding", "Waterproofing", "Stormwater / Drainage", "Painting", "Carpentry / Joinery",
-                "HVAC", "Balustrade", "Cabinetry", "Stone / Benchtops", "Rendering", "Insulation",
-                "Garage Doors", "Final Clean", "Site Safety / Fencing"].map((label) => {
-                const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_$/, "");
-                return <option key={id} value={`${id}::${label}`}>{label}</option>;
-              })}
+              {(tradeMaster.length > 0
+                ? tradeMaster.map((t) => ({ id: t.trade_id || t.id, label: t.trade_name || t.name || t.label }))
+                : [
+                    { id: "scaffolding", label: "Scaffolding" },
+                    { id: "waterproofing", label: "Waterproofing" },
+                    { id: "stormwater_drainage", label: "Stormwater / Drainage" },
+                    { id: "painting", label: "Painting" },
+                    { id: "carpentry", label: "Carpentry / Joinery" },
+                    { id: "heating_cooling", label: "HVAC" },
+                    { id: "balustrade", label: "Balustrade" },
+                    { id: "joinery", label: "Cabinetry" },
+                    { id: "stone_benchtops", label: "Stone / Benchtops" },
+                    { id: "plastering_rendering", label: "Rendering" },
+                    { id: "insulation", label: "Insulation" },
+                    { id: "garage_door", label: "Garage Doors" },
+                    { id: "site_cleaner", label: "Final Clean" },
+                    { id: "fencing", label: "Site Safety / Fencing" },
+                  ]
+              ).map(({ id, label }) => (
+                <option key={id} value={`${id}::${label}`}>{label}</option>
+              ))}
             </select>
             {addTradeId && (
               <button
