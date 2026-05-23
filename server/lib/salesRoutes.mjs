@@ -1,4 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
+import Docxtemplater from "docxtemplater";
+import PizZip from "pizzip";
+import expressions from "angular-expressions";
 import { config as dotenvConfig } from "dotenv";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
@@ -116,6 +119,59 @@ const APB_BENCHMARKS = {
   target_margin_pct: 40,    // APB ideal margin
   fp_hit_rate_min: 0.33,    // fee proposals → won
 };
+
+// ─── PTSA helpers ─────────────────────────────────────────────────────────────
+
+function _makeAngularParser(tag) {
+  if (tag === ".") return { get: (s) => s };
+  const expr = expressions.compile(tag.replace(/('|')/g, "'").replace(/("|")/g, '"'));
+  return {
+    get(scope, context) {
+      let obj = {};
+      const list = context.scopeList;
+      for (let i = 0; i <= context.num; i++) Object.assign(obj, list[i]);
+      return expr(scope, obj);
+    }
+  };
+}
+
+function _normaliseDocxTemplate(zip) {
+  const xmlFiles = Object.keys(zip.files).filter(
+    (n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n) && !zip.files[n].dir
+  );
+  for (const name of xmlFiles) {
+    let text = zip.files[name].asText();
+    text = text.replace(/\{\{([A-Z_][A-Z_0-9]*)\}\}/g, "{$1}");
+    zip.file(name, text);
+  }
+  return zip;
+}
+
+const PTSA_SERVICES = [
+  { value: "site_analysis",        label: "Site Analysis and Survey Review" },
+  { value: "cost_planning",        label: "Detailed Preliminary Cost Planning by Trade Category" },
+  { value: "design_coordination",  label: "Design Coordination and Architectural Review" },
+  { value: "engineering_review",   label: "Engineering Review and Certification Coordination" },
+  { value: "specification_prep",   label: "Specification Preparation and Inclusion Schedule" },
+  { value: "council_liaison",      label: "Council and Authority Liaison" },
+  { value: "tender_report",        label: "Comprehensive Tender Report" },
+];
+
+const PTSA_DEFAULT_SERVICES = [
+  "site_analysis", "cost_planning", "design_coordination",
+  "engineering_review", "specification_prep"
+];
+
+const PROJECT_TYPE_LABELS = {
+  new_build: "New Build",
+  extension: "Extension",
+  renovation: "Renovation",
+  knockdown_rebuild: "Knockdown Rebuild",
+};
+
+// Embedded minimal DOCX template with docxtemplater {VAR} placeholders.
+// Generated from /tmp/ptsa-template.docx via gen_ptsa_template.mjs
+const PTSA_TEMPLATE_B64 = "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";
 
 export function registerSalesRoutes(app) {
 
@@ -440,5 +496,80 @@ export function registerSalesRoutes(app) {
     }
 
     res.json({ ok: true, conversation: conv });
+  });
+
+  // ─── PTSA Document Generation ─────────────────────────────────────────────
+
+  app.post("/api/sales/leads/:id/ptsa/generate-docx", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return res.status(404).json({ ok: false, error: "Lead not found" });
+
+    const today = new Date();
+    const validDays = lead.ptsa_validity_days || 14;
+    const validUntil = new Date(today.getTime() + validDays * 86400000);
+
+    const fmtDate = (d) =>
+      d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+
+    const services = Array.isArray(lead.ptsa_services) && lead.ptsa_services.length > 0
+      ? lead.ptsa_services
+      : PTSA_DEFAULT_SERVICES;
+
+    const serviceLabels = Object.fromEntries(PTSA_SERVICES.map(s => [s.value, s.label]));
+    const servicesList = services.map(s => `• ${serviceLabels[s] || s}`).join("\n");
+
+    const fee = lead.preconstruction_fee ?? lead.pretender_deposit_amount;
+    const feeFormatted = fee != null
+      ? `$${Number(fee).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (inc. GST)`
+      : "[TO BE DETERMINED]";
+
+    const creditClause = lead.ptsa_credit_to_contract !== false
+      ? `This fee is credited in full against the construction contract if executed and returned to Blue Leaf Building within ${validDays} days of the tender price being issued.`
+      : "This fee is non-refundable.";
+
+    const agreementRef = `PTSA-${today.getFullYear()}-${String(lead.id).slice(0, 6).toUpperCase()}`;
+
+    const data = {
+      agreement_ref:    agreementRef,
+      date_issued:      fmtDate(today),
+      valid_until:      fmtDate(validUntil),
+      client_name:      [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "[CLIENT NAME]",
+      client_email:     lead.email || "—",
+      client_phone:     lead.phone || "—",
+      site_address:     lead.site_address || lead.suburb || "[SITE ADDRESS]",
+      project_type:     PROJECT_TYPE_LABELS[lead.project_type] || lead.project_type || "[PROJECT TYPE]",
+      services_list:    servicesList,
+      scope_notes:      lead.ptsa_scope_notes || lead.discovery_notes || lead.key_requirements || "[Scope to be confirmed with client]",
+      fee_formatted:    feeFormatted,
+      credit_clause:    creditClause,
+      builder_abn:      "XX XXX XXX XXX",
+      validity_days:    String(validDays),
+      extra_deliverables: "",
+      special_terms:    lead.ptsa_special_terms || "",
+    };
+
+    try {
+      const zip = _normaliseDocxTemplate(new PizZip(Buffer.from(PTSA_TEMPLATE_B64, "base64")));
+      const doc = new Docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+        parser: _makeAngularParser,
+        nullGetter: () => "",
+      });
+      doc.render(data);
+      const out = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+      const safeName = (lead.first_name || "client").replace(/[^\w]+/g, "-");
+      const filename = `PTSA-${safeName}-${today.toISOString().slice(0, 10)}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      return res.send(out);
+    } catch (e) {
+      console.error("[ptsa/generate-docx]", e);
+      const msg = e?.properties?.errors ? JSON.stringify(e.properties.errors) : e?.message || String(e);
+      return res.status(502).json({ ok: false, error: msg });
+    }
   });
 }

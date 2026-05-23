@@ -81,7 +81,6 @@ function parseBudgetCsv(csvText, tradeCategories) {
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerFinanceCCRoutes(app) {
-  app.use("/api/finance", requireAuth);
 
   // ── Budget: list ──────────────────────────────────────────────────────────
   // Returns all 37 trade categories with their job_budget row (or nulls if not seeded)
@@ -343,6 +342,140 @@ export function registerFinanceCCRoutes(app) {
     });
   });
 
+  // ── Command Centre aggregate (single round-trip for full page load) ────────
+  // Combines: summary KPIs + budget/actuals + wipaa + requires-action + claims/variations summary
+  app.get("/api/finance/jobs/:jobId/command-centre", async (req, res) => {
+    const { jobId } = req.params;
+    const sb = getServiceSupabase();
+
+    const [
+      jobRes, docsRes, variationsRes, claimsRes,
+      budgetsRes, wipaaReviewRes, pendingInvoicesRes
+    ] = await Promise.all([
+      sb.from("jobs")
+        .select("id, address, contract_value, original_contract_value, estimated_total_cost, forecast_total_cost, target_margin_pct, floor_margin_pct, financial_locked, last_wipaa_review_date")
+        .eq("id", jobId).single(),
+      // Approved docs for KPI actual_costs + budget actuals
+      sb.from("financial_documents")
+        .select("amount_ex_gst, status, trade_category_id")
+        .eq("job_id", jobId).in("status", ["approved", "filed", "xero_synced"]),
+      // All variations
+      sb.from("job_variations")
+        .select("id, amount_ex_gst, status").eq("job_id", jobId),
+      // Non-void claims with nested payments (avoids full-table scan on payments)
+      sb.from("progress_claims")
+        .select("id, claim_number, amount_ex_gst, status, due_date, issued_date, progress_claim_payments(payment_amount)")
+        .eq("job_id", jobId).neq("status", "void").order("claim_number", { ascending: true }),
+      // Budget rows (for budget_vs_actual)
+      sb.from("job_budgets")
+        .select("trade_category_id, budget_amount, original_budget, forecast_amount, forecast_notes, seeded_from, trade_categories(name, sort_order, category_type)")
+        .eq("job_id", jobId),
+      // Last WIPAA review (for days_since)
+      sb.from("wipaa_reviews")
+        .select("review_date").eq("job_id", jobId).order("review_date", { ascending: false }).limit(1).maybeSingle(),
+      // Pending approval invoices
+      sb.from("financial_documents")
+        .select("id, supplier_name, amount_ex_gst, ai_job_match_confidence, ai_trade_confidence, trade_category_id, status, created_at")
+        .eq("job_id", jobId).eq("status", "pending_approval")
+        .order("created_at", { ascending: true }).limit(5),
+    ]);
+
+    if (jobRes.error) return res.status(404).json({ ok: false, error: "Job not found" });
+    if (wipaaReviewRes.error) console.warn("[command-centre] wipaa_reviews:", wipaaReviewRes.error.message);
+
+    const job = jobRes.data;
+    const docs = docsRes.data || [];
+    const variations = variationsRes.data || [];
+    const claims = claimsRes.data || [];
+    const budgets = budgetsRes.data || [];
+
+    // ── KPIs ─────────────────────────────────────────────────────────────────
+    const signedTotal = variations.filter(v => v.status === "signed").reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
+    const sentTotal   = variations.filter(v => ["draft", "sent_to_client"].includes(v.status)).reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
+    const draftCount  = variations.filter(v => v.status === "draft").length;
+
+    const contractValue = Number(job.original_contract_value || job.contract_value || 0) + signedTotal;
+    // Spec: claims_issued = SUM(claims WHERE status NOT IN draft/void). Void already excluded by query.
+    const claimsIssued  = claims.filter(c => c.status !== "draft").reduce((s, c) => s + Number(c.amount_ex_gst || 0), 0);
+    // Payments nested in claims — no separate query needed
+    const claimsPaid    = claims.reduce((s, c) => s + (c.progress_claim_payments || []).reduce((ps, p) => ps + Number(p.payment_amount || 0), 0), 0);
+    const actualCosts   = docs.reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0);
+
+    const workingMarginPct = contractValue > 0 ? ((contractValue - actualCosts) / contractValue) * 100 : null;
+    const forecastTotal    = Number(job.forecast_total_cost || job.estimated_total_cost || 0);
+    const forecastMarginPct = contractValue > 0 && forecastTotal > 0 ? ((contractValue - forecastTotal) / contractValue) * 100 : null;
+
+    // ── Budget vs Actual ─────────────────────────────────────────────────────
+    const actualsByTrade = new Map();
+    for (const doc of docs) {
+      if (!doc.trade_category_id) continue;
+      actualsByTrade.set(doc.trade_category_id, (actualsByTrade.get(doc.trade_category_id) || 0) + Number(doc.amount_ex_gst || 0));
+    }
+    const budgetVsActual = budgets.map(b => {
+      const actual  = actualsByTrade.get(b.trade_category_id) || 0;
+      const budget  = Number(b.budget_amount || 0);
+      const forecast = Number(b.forecast_amount || b.budget_amount || 0);
+      const variance = actual - budget;
+      const variancePct = budget > 0 ? (variance / budget) * 100 : null;
+      return {
+        trade_category_id: b.trade_category_id,
+        name: b.trade_categories?.name || "",
+        sort_order: b.trade_categories?.sort_order || 99,
+        budget_amount: budget,
+        forecast_amount: forecast,
+        actual_amount: Math.round(actual * 100) / 100,
+        variance: Math.round(variance * 100) / 100,
+        variance_pct: variancePct != null ? Math.round(variancePct * 10) / 10 : null,
+        status: variancePct != null && variancePct > 10 ? "over" : variancePct != null && variancePct > 0 ? "watch" : "ok",
+      };
+    }).sort((a, b) => a.sort_order - b.sort_order);
+
+    // ── WIPAA ────────────────────────────────────────────────────────────────
+    const pct_complete = forecastTotal > 0 ? Math.min(actualCosts / forecastTotal, 1) : null;
+    const projectedMarginPct = contractValue > 0 && forecastTotal > 0 ? ((contractValue - forecastTotal) / contractValue) * 100 : null;
+
+    const lastReviewDate = job.last_wipaa_review_date || wipaaReviewRes.data?.review_date || null;
+    const daysSinceReview = lastReviewDate
+      ? Math.floor((Date.now() - new Date(lastReviewDate).getTime()) / 86400000)
+      : null;
+
+    res.json({
+      ok: true,
+      job: {
+        id: job.id,
+        address: job.address,
+        financial_locked: job.financial_locked,
+        target_margin_pct: Number(job.target_margin_pct || 40),
+        floor_margin_pct: Number(job.floor_margin_pct || 33),
+      },
+      kpis: {
+        contract_value: Math.round(contractValue * 100) / 100,
+        original_contract_value: Number(job.original_contract_value || job.contract_value || 0),
+        claims_issued: Math.round(claimsIssued * 100) / 100,
+        claims_paid: Math.round(claimsPaid * 100) / 100,
+        actual_costs: Math.round(actualCosts * 100) / 100,
+        working_margin_pct: workingMarginPct != null ? Math.round(workingMarginPct * 10) / 10 : null,
+        forecast_margin_pct: forecastMarginPct != null ? Math.round(forecastMarginPct * 10) / 10 : null,
+      },
+      budget_vs_actual: budgetVsActual,
+      wipaa: {
+        cost_to_date: Math.round(actualCosts * 100) / 100,
+        forecast_total_cost: forecastTotal || null,
+        estimated_total_cost: Number(job.estimated_total_cost || 0) || null,
+        pct_complete,
+        projected_margin_pct: projectedMarginPct != null ? Math.round(projectedMarginPct * 10) / 10 : null,
+      },
+      days_since_wipaa_review: daysSinceReview,
+      variations: {
+        signed_total: Math.round(signedTotal * 100) / 100,
+        sent_total: Math.round(sentTotal * 100) / 100,
+        draft_count: draftCount,
+      },
+      claims: claims.filter(c => c.status === "overdue"),
+      pending_approvals: pendingInvoicesRes.data || [],
+    });
+  });
+
   // ── Job: update financial fields (target margin, forecast cost, original contract) ──
   app.patch("/api/finance/jobs/:jobId/financials", async (req, res) => {
     const sb = getServiceSupabase();
@@ -382,11 +515,12 @@ export function registerFinanceCCRoutes(app) {
 
     const contract_value = Number(job.original_contract_value || job.contract_value || 0) + signedVariations;
     const estimated_total_cost = Number(job.estimated_total_cost) || null;
+    // Use forecast_total_cost (editable) when set; fall back to original estimate
     const forecast_total_cost = Number(job.forecast_total_cost) || estimated_total_cost;
 
     let pct_complete = null, earned_revenue = null, wipaa = null, projected_margin_pct = null;
-    if (estimated_total_cost && estimated_total_cost > 0 && contract_value > 0) {
-      pct_complete = Math.min(cost_to_date / estimated_total_cost, 1);
+    if (forecast_total_cost && forecast_total_cost > 0 && contract_value > 0) {
+      pct_complete = Math.min(cost_to_date / forecast_total_cost, 1);
       earned_revenue = pct_complete * contract_value;
       wipaa = earned_revenue - cost_to_date;
     }
@@ -799,7 +933,7 @@ export function registerFinanceCCRoutes(app) {
     };
 
     const issuedDate = new Date().toISOString().slice(0, 10);
-    const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10);
 
     // Build token map once — shared by both PDFs
     const tokens = buildProgressClaimTokens(claim, job, {
@@ -822,29 +956,36 @@ export function registerFinanceCCRoutes(app) {
 
     // Email client PDF if address provided
     let emailSent = false;
+    let trackingId = null;
     if (email_to) {
       const stageLabel = STAGE_LABELS[claim.stage] || claim.stage;
       const fmtAud = n => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n || 0);
       const amountEx = Number(claim.amount_ex_gst || 0);
       const safeAddr = (job.address || "").replace(/[^a-zA-Z0-9]/g, "-");
+      const { randomUUID } = await import("crypto");
+      trackingId = randomUUID();
+      const baseUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
+      const pixelUrl = `${baseUrl}/api/track/email/${trackingId}`;
       try {
+        const bodyText = [
+          `Please find attached Progress Claim ${claim.claim_number} for ${job.address}.`,
+          ``,
+          `Stage: ${stageLabel}`,
+          `Amount (ex GST): ${fmtAud(amountEx)}`,
+          `GST: ${fmtAud(amountEx * 0.1)}`,
+          `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
+          `Payment due: ${dueDate}`,
+          ``,
+          `Please direct all payment enquiries to accounts@blueleafbuilding.com.au.`,
+          ``,
+          `Blue Leaf Building`,
+        ].join("\n");
         await sendPlainMail({
           to: email_to,
           cc: email_cc || undefined,
           subject: `Progress Claim ${claim.claim_number} — ${job.address}`,
-          text: [
-            `Please find attached Progress Claim ${claim.claim_number} for ${job.address}.`,
-            ``,
-            `Stage: ${stageLabel}`,
-            `Amount (ex GST): ${fmtAud(amountEx)}`,
-            `GST: ${fmtAud(amountEx * 0.1)}`,
-            `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
-            `Payment due: ${dueDate}`,
-            ``,
-            `Please direct all payment enquiries to accounts@blueleafbuilding.com.au.`,
-            ``,
-            `Blue Leaf Building`,
-          ].join("\n"),
+          text: bodyText,
+          html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${bodyText}</pre><img src="${pixelUrl}" width="1" height="1" style="display:none" alt="">`,
           attachments: [{
             filename: `Progress-Claim-${claim.claim_number}-${safeAddr}.pdf`,
             content: clientPdf,
@@ -852,6 +993,16 @@ export function registerFinanceCCRoutes(app) {
           }]
         });
         emailSent = true;
+        // Record tracking event (fire and forget)
+        sb.from("email_delivery_events").insert({
+          tracking_id: trackingId,
+          resource_type: "claim",
+          resource_id: claimId,
+          job_id: jobId,
+          recipient_email: email_to,
+          sent_at: new Date().toISOString(),
+          open_count: 0
+        }).then().catch(e => console.error("[claims] tracking insert:", e?.message));
       } catch (e) {
         console.error("[claims] email error:", e?.message);
       }
@@ -861,6 +1012,7 @@ export function registerFinanceCCRoutes(app) {
       ok: true,
       claim: updated,
       emailSent,
+      tracking_id: trackingId,
       pdf_b64: clientPdf.toString("base64"),
       internal_pdf_b64: internalPdf.toString("base64")
     });
@@ -1438,28 +1590,35 @@ export function registerFinanceCCRoutes(app) {
     if (updErr) return res.status(500).json({ ok: false, error: updErr.message });
 
     let emailSent = false;
+    let trackingId = null;
     if (email_to) {
       const fmtAud = n => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n || 0);
       const amountEx = Number(variation.amount_ex_gst || 0);
       const safeAddr = (job.address || "").replace(/[^a-zA-Z0-9]/g, "-");
+      const { randomUUID } = await import("crypto");
+      trackingId = randomUUID();
+      const baseUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
+      const pixelUrl = `${baseUrl}/api/track/email/${trackingId}`;
       try {
+        const bodyText = [
+          `Please find attached Variation ${variation.variation_number} for ${job.address}.`,
+          ``,
+          `Title: ${variation.title}`,
+          ...(variation.description ? [`Description: ${variation.description}`, ``] : [``]),
+          `Amount (ex GST): ${fmtAud(amountEx)}`,
+          `GST: ${fmtAud(amountEx * 0.1)}`,
+          `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
+          ...(variation.eot_days ? [`Extension of time: ${variation.eot_days} days`, ``] : [``]),
+          `To approve this variation, please reply to this email or contact us at accounts@blueleafbuilding.com.au.`,
+          ``,
+          `Blue Leaf Building`,
+        ].join("\n");
         await sendPlainMail({
           to: email_to,
           cc: email_cc || undefined,
           subject: `Variation ${variation.variation_number} — ${job.address}`,
-          text: [
-            `Please find attached Variation ${variation.variation_number} for ${job.address}.`,
-            ``,
-            `Title: ${variation.title}`,
-            ...(variation.description ? [`Description: ${variation.description}`, ``] : [``]),
-            `Amount (ex GST): ${fmtAud(amountEx)}`,
-            `GST: ${fmtAud(amountEx * 0.1)}`,
-            `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
-            ...(variation.eot_days ? [`Extension of time: ${variation.eot_days} days`, ``] : [``]),
-            `To approve this variation, please reply to this email or contact us at accounts@blueleafbuilding.com.au.`,
-            ``,
-            `Blue Leaf Building`,
-          ].join("\n"),
+          text: bodyText,
+          html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${bodyText}</pre><img src="${pixelUrl}" width="1" height="1" style="display:none" alt="">`,
           attachments: [{
             filename: `Variation-${variation.variation_number}-${safeAddr}.pdf`,
             content: pdfBuffer,
@@ -1467,12 +1626,21 @@ export function registerFinanceCCRoutes(app) {
           }]
         });
         emailSent = true;
+        sb.from("email_delivery_events").insert({
+          tracking_id: trackingId,
+          resource_type: "variation",
+          resource_id: vid,
+          job_id: jobId,
+          recipient_email: email_to,
+          sent_at: new Date().toISOString(),
+          open_count: 0
+        }).then().catch(e => console.error("[variations] tracking insert:", e?.message));
       } catch (e) {
         console.error("[variations] email error:", e?.message);
       }
     }
 
-    res.json({ ok: true, variation: updated, emailSent, pdf_b64: pdfBuffer.toString("base64") });
+    res.json({ ok: true, variation: updated, emailSent, tracking_id: trackingId, pdf_b64: pdfBuffer.toString("base64") });
   });
 
   // ── Sign variation (admin marks as signed after client approval) ─────────────
@@ -1743,7 +1911,7 @@ export function registerFinanceCCRoutes(app) {
       await sendPlainMail({
         to: (users || []).map(u => u.email).filter(Boolean).join(", ") || "accounts@blueleafbuilding.com.au",
         subject: `WIPAA Review Due — ${jobs.length} job${jobs.length > 1 ? "s" : ""} (${today})`,
-        text: `Monthly WIPAA review is due for the following jobs:\n\n${jobList}\n\nLogin to Blue Leaf Hub to complete each review.\nhttps://app.blueleafbuilding.com.au/finance/jobs`,
+        text: `Monthly WIPAA review is due for the following jobs:\n\n${jobList}\n\nLogin to Blue Leaf Hub to complete each review.\n${(process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "")}/finance/jobs`,
       });
     } catch (e) {
       console.error("[WIPAA reminder] email failed:", e.message);

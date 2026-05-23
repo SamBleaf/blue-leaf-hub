@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../lib/ProjectContext.jsx";
 import ProgressClaims from "../components/finance/ProgressClaims.jsx";
@@ -259,6 +259,9 @@ export default function JobCommandCentre() {
   const [loading, setLoading] = useState(true);
   const [showAllBudget, setShowAllBudget] = useState(false);
   const [editingBudget, setEditingBudget] = useState(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedError, setSeedError] = useState(null);
+  const claimsSectionRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -295,6 +298,20 @@ export default function JobCommandCentre() {
   }, [jobId, allProjects, selectProject]);
 
   useEffect(() => { load(); }, [load]);
+
+  const seedBudget = useCallback(async () => {
+    setSeeding(true);
+    setSeedError(null);
+    try {
+      const r = await fetch(`/api/finance/jobs/${jobId}/budget/seed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Seed failed");
+      await load();
+    } catch (e) {
+      setSeedError(e.message);
+    }
+    setSeeding(false);
+  }, [jobId, load]);
 
   if (loading) {
     return (
@@ -378,7 +395,7 @@ export default function JobCommandCentre() {
             </span>
           </div>
           <button type="button"
-            onClick={() => {}}
+            onClick={() => claimsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
             className="shrink-0 rounded-lg bg-amber-700 text-white text-xs font-bold px-3 py-1.5 hover:bg-amber-800">
             Draft claim →
           </button>
@@ -423,32 +440,23 @@ export default function JobCommandCentre() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-hairline">
           <h2 className="text-sm font-bold text-ink">Budget vs Actual</h2>
           <div className="flex items-center gap-3">
-            {budgetRows.length === 0 && (
-              <button
-                type="button"
-                onClick={() => navigate(`/finance/jobs/${jobId}/budget`)}
-                className="text-xs text-primary font-semibold hover:underline"
-              >
-                Seed budget from Buildxact →
-              </button>
-            )}
-            {budgetRows.length > 0 && (
-              <button
-                type="button"
-                onClick={() => navigate(`/finance/jobs/${jobId}/budget`)}
-                className="text-xs text-muted hover:text-ink transition"
-              >
-                Edit budgets
-              </button>
-            )}
+            {seedError && <span className="text-xs text-red-600">{seedError}</span>}
+            <button
+              type="button"
+              onClick={seedBudget}
+              disabled={seeding}
+              className="text-xs text-primary font-semibold hover:underline disabled:opacity-40"
+            >
+              {seeding ? "Seeding…" : budgetRows.length === 0 ? "Seed budget from Buildxact →" : "Re-seed from Buildxact"}
+            </button>
           </div>
         </div>
 
         {budgetRows.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-muted">
             No budget seeded yet.{" "}
-            <button type="button" onClick={() => navigate(`/finance/jobs/${jobId}/budget`)} className="text-primary hover:underline font-semibold">
-              Seed from Buildxact
+            <button type="button" onClick={seedBudget} disabled={seeding} className="text-primary hover:underline font-semibold disabled:opacity-40">
+              {seeding ? "Seeding…" : "Seed from Buildxact"}
             </button>
           </div>
         ) : (
@@ -506,7 +514,7 @@ export default function JobCommandCentre() {
       </div>
 
       {/* Progress Claims */}
-      <div className="rounded-card border border-hairline bg-surface px-4 py-4">
+      <div ref={claimsSectionRef} className="rounded-card border border-hairline bg-surface px-4 py-4">
         <h2 className="text-sm font-bold text-ink mb-4">Progress Claims</h2>
         <ProgressClaims jobId={jobId} onUpdate={load} />
       </div>

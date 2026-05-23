@@ -35,6 +35,26 @@ const ACTIVITY_ICONS = {
 
 const STAGE_ORDER = ["enquiry","qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"];
 
+const PTSA_SERVICES = [
+  { value: "site_analysis",       label: "Site Analysis and Survey Review" },
+  { value: "cost_planning",       label: "Detailed Preliminary Cost Planning by Trade Category" },
+  { value: "design_coordination", label: "Design Coordination and Architectural Review" },
+  { value: "engineering_review",  label: "Engineering Review and Certification Coordination" },
+  { value: "specification_prep",  label: "Specification Preparation and Inclusion Schedule" },
+  { value: "council_liaison",     label: "Council and Authority Liaison" },
+  { value: "tender_report",       label: "Comprehensive Tender Report" },
+];
+const PTSA_DEFAULT_SERVICES = ["site_analysis","cost_planning","design_coordination","engineering_review","specification_prep"];
+const PTSA_STATUS_COLORS = {
+  draft:    "bg-slate-100 text-slate-600",
+  sent:     "bg-amber-100 text-amber-700",
+  signed:   "bg-green-100 text-green-700",
+  declined: "bg-red-50 text-red-600",
+};
+const PTSA_STATUS_LABELS = {
+  draft: "Draft", sent: "Sent to Client", signed: "Signed", declined: "Declined",
+};
+
 const GATE_REQUIREMENTS = {
   qualify:       [],
   discovery:     [{ field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5 }],
@@ -649,6 +669,8 @@ export default function LeadDetail() {
   const [bpLoading, setBpLoading] = useState(false);
   const [convOpen, setConvOpen] = useState(false);
   const [conversations, setConversations] = useState([]);
+  const [generatingPTSA, setGeneratingPTSA] = useState(false);
+  const [ptsaError, setPtsaError] = useState("");
 
   const bpFetchedFor = useRef(null);
 
@@ -754,6 +776,31 @@ export default function LeadDetail() {
       }
     } finally {
       setCreatingJob(false);
+    }
+  }
+
+  async function generatePTSA() {
+    setGeneratingPTSA(true);
+    setPtsaError("");
+    try {
+      const r = await fetch(`/api/sales/leads/${leadId}/ptsa/generate-docx`, { method: "POST" });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || `Server error ${r.status}`);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PTSA-${(lead.first_name || "client").replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setPtsaError(e.message);
+    } finally {
+      setGeneratingPTSA(false);
     }
   }
 
@@ -1012,34 +1059,130 @@ export default function LeadDetail() {
             )}
 
             {showPreTender && (
-              <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="section-label mb-3">Pre-Tender Agreement</h3>
-                <InlineField
-                  label="Tender deposit amount ($)"
-                  value={lead.pretender_deposit_amount ? String(lead.pretender_deposit_amount) : ""}
-                  type="number"
-                  onSave={v => patch({ pretender_deposit_amount: v ? parseFloat(v) : null })}
-                  placeholder="e.g. 5000"
-                />
-                <div className="flex items-center justify-between py-1.5 border-b border-hairline last:border-0">
-                  <span className="text-sm text-muted">Signed date</span>
+              <div className="rounded-card border border-amber-200 bg-amber-50/20 p-4">
+                {/* Header + status */}
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="section-label">Pre-Tender Service Agreement</h3>
+                  <select
+                    value={lead.ptsa_status || "draft"}
+                    onChange={e => patch({ ptsa_status: e.target.value })}
+                    className={`text-xs font-semibold rounded-full px-2.5 py-0.5 border-0 cursor-pointer focus:outline-none ${PTSA_STATUS_COLORS[lead.ptsa_status || "draft"]}`}
+                  >
+                    {Object.entries(PTSA_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+
+                {/* PTSA fee (read-only — set in Winning Offer section above) */}
+                <div className="flex items-center justify-between py-1.5 border-b border-amber-100 mb-3">
+                  <span className="text-xs text-muted">PTSA fee</span>
+                  {lead.preconstruction_fee
+                    ? <span className="text-sm font-semibold text-ink">${Number(lead.preconstruction_fee).toLocaleString("en-AU")}</span>
+                    : <span className="text-xs text-muted italic">Set &ldquo;Pre-construction fee&rdquo; above ↑</span>}
+                </div>
+
+                {/* Services checklist */}
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-ink mb-2">Pre-tender services included:</p>
+                  <div className="space-y-2">
+                    {PTSA_SERVICES.map(s => {
+                      const activeServices = lead.ptsa_services?.length > 0 ? lead.ptsa_services : PTSA_DEFAULT_SERVICES;
+                      const checked = activeServices.includes(s.value);
+                      return (
+                        <label key={s.value} className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => {
+                              const current = lead.ptsa_services?.length > 0 ? lead.ptsa_services : PTSA_DEFAULT_SERVICES;
+                              const updated = e.target.checked
+                                ? [...current.filter(v => v !== s.value), s.value]
+                                : current.filter(v => v !== s.value);
+                              patch({ ptsa_services: updated });
+                            }}
+                            className="mt-0.5 w-3.5 h-3.5 rounded accent-primary flex-shrink-0"
+                          />
+                          <span className="text-xs text-ink leading-relaxed">{s.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Project scope */}
+                <div className="mb-2">
+                  <label className="block text-xs text-muted mb-1">Project scope for agreement</label>
+                  <textarea
+                    className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                    rows={3}
+                    placeholder={lead.discovery_notes ? "(uses discovery notes if left blank)" : "e.g. Double storey new build, 4 bed, steep site, raked ceilings…"}
+                    defaultValue={lead.ptsa_scope_notes || ""}
+                    onBlur={e => { if (e.target.value !== (lead.ptsa_scope_notes || "")) patch({ ptsa_scope_notes: e.target.value || null }); }}
+                  />
+                </div>
+
+                {/* Validity period */}
+                <div className="flex items-center justify-between py-1.5 border-b border-hairline">
+                  <span className="text-xs text-muted">Agreement valid for</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="7"
+                      max="90"
+                      className="w-14 rounded border border-hairline px-2 py-1 text-xs text-right bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      defaultValue={lead.ptsa_validity_days || 14}
+                      onBlur={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (!isNaN(v) && v !== (lead.ptsa_validity_days || 14)) patch({ ptsa_validity_days: v });
+                      }}
+                    />
+                    <span className="text-xs text-muted">days</span>
+                  </div>
+                </div>
+
+                {/* Credit to contract toggle */}
+                <div className="flex items-center justify-between py-1.5 border-b border-hairline">
+                  <span className="text-xs text-muted">Fee credited back on contract signing</span>
+                  <input
+                    type="checkbox"
+                    checked={lead.ptsa_credit_to_contract !== false}
+                    onChange={e => patch({ ptsa_credit_to_contract: e.target.checked })}
+                    className="w-4 h-4 rounded accent-primary"
+                  />
+                </div>
+
+                {/* Special terms */}
+                <div className="mt-2 mb-2">
+                  <label className="block text-xs text-muted mb-1">Special terms <span className="font-normal">(optional)</span></label>
+                  <textarea
+                    className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                    rows={2}
+                    placeholder="Additional conditions, exclusions, or notes for the agreement…"
+                    defaultValue={lead.ptsa_special_terms || ""}
+                    onBlur={e => { if (e.target.value !== (lead.ptsa_special_terms || "")) patch({ ptsa_special_terms: e.target.value || null }); }}
+                  />
+                </div>
+
+                {/* Signed date */}
+                <div className="flex items-center justify-between py-1.5 border-b border-hairline mb-3">
+                  <span className="text-xs text-muted">Date signed by client</span>
                   <input
                     type="date"
-                    className="rounded-lg border border-hairline px-2 py-1 text-sm bg-page text-ink focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
                     value={lead.pretender_signed_date || ""}
                     onChange={e => patch({ pretender_signed_date: e.target.value || null })}
                   />
                 </div>
-                <div className="mt-2">
-                  <label className="block text-xs text-muted mb-1">Notes</label>
-                  <textarea
-                    className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
-                    rows={2}
-                    placeholder="Agreement notes, special conditions…"
-                    defaultValue={lead.pretender_notes || ""}
-                    onBlur={e => { if (e.target.value !== (lead.pretender_notes || "")) patch({ pretender_notes: e.target.value }); }}
-                  />
-                </div>
+
+                {/* Generate button */}
+                {ptsaError && <p className="text-xs text-red-600 mb-2">{ptsaError}</p>}
+                <button
+                  onClick={generatePTSA}
+                  disabled={generatingPTSA}
+                  className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                >
+                  {generatingPTSA ? "Generating…" : "⬇ Generate PTSA Document"}
+                </button>
+                <p className="text-xs text-muted text-center mt-1.5">Downloads a branded DOCX ready to send to the client</p>
               </div>
             )}
 
