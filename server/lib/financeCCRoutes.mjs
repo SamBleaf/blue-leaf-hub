@@ -1815,6 +1815,149 @@ export function registerFinanceCCRoutes(app) {
     });
   }
 
+  // ── Cashflow forecast (next 3 months) ─────────────────────────────────────
+  app.get("/api/finance/jobs/:jobId/cashflow", async (req, res) => {
+    const { jobId } = req.params;
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const threeMonthsOut = new Date(today);
+    threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
+
+    const monthKey = (d) => {
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+    };
+    const monthLabel = (key) => {
+      const [y, m] = key.split("-").map(Number);
+      return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "short", year: "numeric" });
+    };
+
+    const bucketMonths = [];
+    for (let i = 0; i < 3; i++) {
+      bucketMonths.push(monthKey(new Date(today.getFullYear(), today.getMonth() + i, 1)));
+    }
+    const currentMonth = bucketMonths[0];
+    const bucketMap = new Map(
+      bucketMonths.map((month) => [month, { label: monthLabel(month), month, inflows: [], outflows: [] }])
+    );
+
+    const [claimsRes, invoicesRes, variationsRes] = await Promise.all([
+      sb.from("progress_claims")
+        .select("claim_number, amount_ex_gst, due_date, status, description, progress_claim_payments(payment_amount)")
+        .eq("job_id", jobId)
+        .not("status", "in", '("draft","void")')
+        .not("due_date", "is", null),
+      sb.from("financial_documents")
+        .select("supplier_name, amount_ex_gst, created_at")
+        .eq("job_id", jobId)
+        .eq("status", "pending_approval"),
+      sb.from("job_variations")
+        .select("title, amount_ex_gst, sent_date")
+        .eq("job_id", jobId)
+        .eq("status", "sent_to_client"),
+    ]);
+
+    if (claimsRes.error) return res.status(500).json({ ok: false, error: claimsRes.error.message });
+    if (invoicesRes.error) return res.status(500).json({ ok: false, error: invoicesRes.error.message });
+    if (variationsRes.error) return res.status(500).json({ ok: false, error: variationsRes.error.message });
+
+    let overdueClaimsCount = 0;
+
+    for (const claim of claimsRes.data || []) {
+      const paid = (claim.progress_claim_payments || []).reduce(
+        (s, p) => s + Number(p.payment_amount || 0), 0
+      );
+      const unpaid = Number(claim.amount_ex_gst || 0) - paid;
+      if (unpaid <= 0.01) continue;
+
+      const due = new Date(claim.due_date);
+      due.setHours(0, 0, 0, 0);
+      const desc =
+        claim.description?.trim() ||
+        `Stage ${claim.claim_number} claim`;
+
+      let targetMonth;
+      if (due < today) {
+        targetMonth = currentMonth;
+        overdueClaimsCount++;
+      } else if (due > threeMonthsOut) {
+        continue;
+      } else {
+        targetMonth = monthKey(due);
+      }
+
+      const bucket = bucketMap.get(targetMonth);
+      if (!bucket) continue;
+
+      bucket.inflows.push({
+        type: "claim",
+        description: desc,
+        amount_ex_gst: Math.round(unpaid * 100) / 100,
+        due_date: claim.due_date,
+        status: claim.status,
+      });
+    }
+
+    for (const inv of invoicesRes.data || []) {
+      const created = inv.created_at ? new Date(inv.created_at) : null;
+      if (!created || Number.isNaN(created.getTime())) continue;
+      const payDate = new Date(created);
+      payDate.setDate(payDate.getDate() + 14);
+      payDate.setHours(0, 0, 0, 0);
+      if (payDate > threeMonthsOut) continue;
+
+      let targetMonth = monthKey(payDate);
+      if (!bucketMap.has(targetMonth)) {
+        if (payDate < today) targetMonth = currentMonth;
+        else continue;
+      }
+
+      const bucket = bucketMap.get(targetMonth);
+      if (!bucket) continue;
+
+      bucket.outflows.push({
+        type: "invoice",
+        description: inv.supplier_name || "Supplier invoice",
+        amount_ex_gst: Math.round(Number(inv.amount_ex_gst || 0) * 100) / 100,
+      });
+    }
+
+    let cumulative = 0;
+    const buckets = bucketMonths.map((month) => {
+      const b = bucketMap.get(month);
+      const inTotal = b.inflows.reduce((s, x) => s + x.amount_ex_gst, 0);
+      const outTotal = b.outflows.reduce((s, x) => s + x.amount_ex_gst, 0);
+      const net = Math.round((inTotal - outTotal) * 100) / 100;
+      cumulative = Math.round((cumulative + net) * 100) / 100;
+      return {
+        label: b.label,
+        month: b.month,
+        inflows: b.inflows,
+        outflows: b.outflows,
+        net_inflow: net,
+        cumulative_net: cumulative,
+      };
+    });
+
+    const total_expected_in = Math.round(
+      buckets.reduce((s, b) => s + b.inflows.reduce((t, x) => t + x.amount_ex_gst, 0), 0) * 100
+    ) / 100;
+    const total_expected_out = Math.round(
+      buckets.reduce((s, b) => s + b.outflows.reduce((t, x) => t + x.amount_ex_gst, 0), 0) * 100
+    ) / 100;
+
+    res.json({
+      ok: true,
+      buckets,
+      total_expected_in,
+      total_expected_out,
+      overdue_claims_count: overdueClaimsCount,
+    });
+  });
+
   // ── Requires Action ───────────────────────────────────────────────────────
   app.get("/api/finance/jobs/:jobId/requires-action", async (req, res) => {
     const { jobId } = req.params;

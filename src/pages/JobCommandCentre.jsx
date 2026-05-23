@@ -261,6 +261,8 @@ export default function JobCommandCentre() {
   const [editingBudget, setEditingBudget] = useState(null);
   const [seeding, setSeeding] = useState(false);
   const [seedError, setSeedError] = useState(null);
+  const [cashflow, setCashflow] = useState(null);
+  const [cashflowOpen, setCashflowOpen] = useState(false);
   const claimsSectionRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -292,6 +294,12 @@ export default function JobCommandCentre() {
       });
     }
     setLoading(false);
+
+    setCashflow(null);
+    fetch(`/api/finance/jobs/${jobId}/cashflow`)
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setCashflow(j); })
+      .catch(() => {});
 
     const project = allProjects.find(p => p.job_id === jobId);
     if (project) selectProject(project);
@@ -511,6 +519,69 @@ export default function JobCommandCentre() {
       <div className="rounded-card border border-hairline bg-surface px-4 py-4">
         <h2 className="text-sm font-bold text-ink mb-4">Variations</h2>
         <Variations jobId={jobId} onUpdate={load} />
+      </div>
+
+      {/* Cashflow Forecast */}
+      <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setCashflowOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-page transition-colors"
+        >
+          <span className="text-sm font-bold text-ink">
+            Cashflow Forecast — Next 3 Months
+          </span>
+          <span className="text-xs text-muted">{cashflowOpen ? "▲" : "▼"}</span>
+        </button>
+
+        {cashflowOpen && (
+          <div className="border-t border-hairline px-5 py-4">
+            {!cashflow && <p className="text-sm text-muted">Loading…</p>}
+            {cashflow && (
+              <div className="space-y-4">
+                {cashflow.overdue_claims_count > 0 && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">
+                    ⚠ {cashflow.overdue_claims_count} overdue claim
+                    {cashflow.overdue_claims_count > 1 ? "s" : ""} included in current month
+                  </div>
+                )}
+                {cashflow.buckets.map((bucket) => (
+                  <div key={bucket.month} className="rounded-lg border border-hairline bg-page p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-ink">{bucket.label}</span>
+                      <span className={`text-sm font-bold ${bucket.net_inflow >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {bucket.net_inflow >= 0 ? "+" : ""}{fmt(bucket.net_inflow)} net
+                      </span>
+                    </div>
+                    {bucket.inflows.map((item, i) => (
+                      <div key={`in-${i}`} className="flex items-center justify-between text-xs">
+                        <span className="text-green-600">↑ {item.description}</span>
+                        <span className="text-green-700 font-medium">{fmt(item.amount_ex_gst)}</span>
+                      </div>
+                    ))}
+                    {bucket.outflows.map((item, i) => (
+                      <div key={`out-${i}`} className="flex items-center justify-between text-xs">
+                        <span className="text-red-500">↓ {item.description}</span>
+                        <span className="text-red-600 font-medium">({fmt(item.amount_ex_gst)})</span>
+                      </div>
+                    ))}
+                    {bucket.inflows.length === 0 && bucket.outflows.length === 0 && (
+                      <p className="text-xs text-muted italic">No scheduled transactions</p>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm pt-2 border-t border-hairline">
+                  <span className="text-muted">Total expected in (3 months)</span>
+                  <span className="font-semibold text-green-700">{fmt(cashflow.total_expected_in)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">Total expected out (pending invoices)</span>
+                  <span className="font-semibold text-red-600">({fmt(cashflow.total_expected_out)})</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Progress Claims */}
