@@ -519,7 +519,7 @@ function UnmatchedTab() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/quote-tracker/unmatched")
+    authFetch("/api/quote-tracker/unmatched")
       .then((r) => r.json())
       .then((j) => setUnmatched(j?.items || []))
       .catch(() => setUnmatched([]))

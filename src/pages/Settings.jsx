@@ -76,8 +76,8 @@ export default function Settings() {
   const refreshBuildexact = useCallback(async () => {
     try {
       const [sRes, wRes] = await Promise.all([
-        fetch("/api/buildexact/status"),
-        fetch("/api/buildexact/webhook-events")
+        authFetch("/api/buildexact/status"),
+        authFetch("/api/buildexact/webhook-events")
       ]);
       const s = await sRes.json().catch(() => null);
       const w = await wRes.json().catch(() => null);

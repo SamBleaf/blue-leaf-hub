@@ -301,7 +301,7 @@ export default function JobCommandCentre() {
     setLoading(false);
 
     setCashflow(null);
-    fetch(`/api/finance/jobs/${jobId}/cashflow`)
+    authFetch(`/api/finance/jobs/${jobId}/cashflow`)
       .then((r) => r.json())
       .then((j) => { if (j.ok) setCashflow(j); })
       .catch(() => {});

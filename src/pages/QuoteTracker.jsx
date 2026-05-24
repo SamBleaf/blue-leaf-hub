@@ -72,7 +72,7 @@ export default function QuoteTracker() {
   }, [loadJobs]);
 
   const loadUnmatched = useCallback(() => {
-    fetch("/api/quote-tracker/unmatched")
+    authFetch("/api/quote-tracker/unmatched")
       .then((r) => r.json())
       .then((j) => {
         if (j?.items) setUnmatched(j.items);

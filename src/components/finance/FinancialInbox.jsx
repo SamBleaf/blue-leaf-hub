@@ -349,9 +349,9 @@ export default function FinancialInbox({ onUploaded }) {
     setLoading(true);
     try {
       const [dr, jr, ir] = await Promise.all([
-        fetch(`/api/finance/documents?status=${filter}&limit=100`).then(r => r.json()),
-        fetch("/api/finance/jobs").then(r => r.json()),
-        fetch("/api/finance/imap/status").then(r => r.json()).catch(() => null),
+        authFetch(`/api/finance/documents?status=${filter}&limit=100`).then(r => r.json()),
+        authFetch("/api/finance/jobs").then(r => r.json()),
+        authFetch("/api/finance/imap/status").then(r => r.json()).catch(() => null),
       ]);
       if (dr.ok) setDocuments(dr.documents);
       if (jr.ok) setJobs(jr.jobs);

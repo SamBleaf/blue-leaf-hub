@@ -1340,7 +1340,17 @@ app.post("/api/rfq/send", async (req, res) => {
     const sb = getServiceSupabase();
     const results = [];
 
-    for (const m of msgs) {
+    // Deduplicate by (to, subject, rfqId) — prevents double-inserts when the same
+    // rfq appears twice in the package (e.g. duplicate trade rows).
+    const seen = new Set();
+    const dedupedMsgs = msgs.filter((m) => {
+      const key = `${String(m?.to || "").trim()}|${String(m?.subject || "").trim()}|${String(m?.rfqId || "")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    for (const m of dedupedMsgs) {
       const to = m?.to?.trim();
       const subject = m?.subject?.trim();
       const body = m?.body;

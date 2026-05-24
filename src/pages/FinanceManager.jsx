@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import FinancialInbox from "../components/finance/FinancialInbox.jsx";
@@ -69,8 +70,8 @@ export default function FinanceManager() {
   const loadStats = useCallback(async () => {
     try {
       const [sr, xr] = await Promise.all([
-        fetch("/api/finance/stats").then(r => r.json()),
-        fetch("/api/finance/xero/status").then(r => r.json())
+        authFetch("/api/finance/stats").then(r => r.json()),
+        authFetch("/api/finance/xero/status").then(r => r.json())
       ]);
       if (sr.ok) setStats(sr);
       if (xr.ok) setXeroStatus(xr);

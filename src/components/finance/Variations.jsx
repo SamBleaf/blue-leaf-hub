@@ -209,7 +209,7 @@ function VariationModal({ jobId, variation, tradeCategories, onSaved, onClose })
   // Load Buildxact recipes on mount
   useEffect(() => {
     setRecipesLoading(true);
-    fetch(`/api/finance/jobs/${jobId}/variations/recipes`)
+    authFetch(`/api/finance/jobs/${jobId}/variations/recipes`)
       .then(r => r.json())
       .then(j => { if (j.ok) setRecipes(j.recipes); })
       .catch(() => {})
@@ -516,8 +516,8 @@ export default function Variations({ jobId, onUpdate }) {
   const load = useCallback(async () => {
     setLoading(true);
     const [vr, tr] = await Promise.all([
-      fetch(`/api/finance/jobs/${jobId}/variations`).then(r => r.json()),
-      fetch("/api/finance/trade-categories").then(r => r.json())
+      authFetch(`/api/finance/jobs/${jobId}/variations`).then(r => r.json()),
+      authFetch("/api/finance/trade-categories").then(r => r.json())
     ]);
     if (vr.ok) setVariations(vr.variations);
     if (tr.ok) setTradeCategories(tr.categories);

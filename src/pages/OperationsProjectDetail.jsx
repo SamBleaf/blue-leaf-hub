@@ -114,10 +114,10 @@ export default function OperationsProjectDetail() {
     if (!projectId) return;
     try {
       const [ts, di, co, rep] = await Promise.all([
-        fetch(`/api/schedule/${projectId}`).then((r) => r.json()),
-        fetch(`/api/diary/${projectId}?limit=3`).then((r) => r.json()),
-        fetch(`/api/whs/${projectId}/compliance`).then((r) => r.json()),
-        fetch(`/api/whs/${projectId}/reports`).then((r) => r.json())
+        authFetch(`/api/schedule/${projectId}`).then((r) => r.json()),
+        authFetch(`/api/diary/${projectId}?limit=3`).then((r) => r.json()),
+        authFetch(`/api/whs/${projectId}/compliance`).then((r) => r.json()),
+        authFetch(`/api/whs/${projectId}/reports`).then((r) => r.json())
       ]);
       setTasks(ts.ok ? ts.tasks || [] : []);
       setDiaryPreview(di.ok ? di.entries || [] : []);

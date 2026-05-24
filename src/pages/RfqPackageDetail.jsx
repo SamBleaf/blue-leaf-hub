@@ -778,7 +778,7 @@ export default function RfqPackageDetail() {
   useEffect(() => { load(); }, [packageId]);
 
   useEffect(() => {
-    fetch("/api/trade-master")
+    authFetch("/api/trade-master")
       .then((r) => r.json())
       .then((j) => {
         const list = j.trades || [];

@@ -144,17 +144,17 @@ function IntelligenceTab() {
   const fileRef = useRef(null);
 
   useEffect(() => {
-    fetch("/api/jobs").then(r => r.json()).then(j => { if (j.ok || Array.isArray(j.jobs)) setJobs(j.jobs || j || []); }).catch(() => {});
+    authFetch("/api/jobs").then(r => r.json()).then(j => { if (j.ok || Array.isArray(j.jobs)) setJobs(j.jobs || j || []); }).catch(() => {});
   }, []);
 
   const loadJobData = useCallback(async (jobId) => {
     if (!jobId) return;
     setLoading(true); setMetrics(null); setNormCosts(null); setExtractResult(null); setComparison([]); setSimilar([]);
     const [mRes, ncRes, compRes, simRes] = await Promise.all([
-      fetch(`/api/cost-intelligence/jobs/${jobId}/metrics`).then(r => r.json()).catch(() => null),
-      fetch(`/api/cost-intelligence/jobs/${jobId}/normalized-costs`).then(r => r.json()).catch(() => null),
-      fetch(`/api/cost-intelligence/jobs/${jobId}/comparison`).then(r => r.json()).catch(() => null),
-      fetch(`/api/cost-intelligence/jobs/${jobId}/similar`).then(r => r.json()).catch(() => null),
+      authFetch(`/api/cost-intelligence/jobs/${jobId}/metrics`).then(r => r.json()).catch(() => null),
+      authFetch(`/api/cost-intelligence/jobs/${jobId}/normalized-costs`).then(r => r.json()).catch(() => null),
+      authFetch(`/api/cost-intelligence/jobs/${jobId}/comparison`).then(r => r.json()).catch(() => null),
+      authFetch(`/api/cost-intelligence/jobs/${jobId}/similar`).then(r => r.json()).catch(() => null),
     ]);
     if (mRes?.ok) setMetrics(mRes.metrics);
     if (ncRes?.ok) setNormCosts(ncRes);
@@ -467,7 +467,7 @@ function TrendsTab() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch("/api/cost-intelligence/template").then(r => r.json()).then(j => {
+    authFetch("/api/cost-intelligence/template").then(r => r.json()).then(j => {
       if (j.ok && j.categories) setTrades(j.categories);
     }).catch(() => {});
   }, []);

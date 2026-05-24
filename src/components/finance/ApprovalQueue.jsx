@@ -263,9 +263,9 @@ export default function ApprovalQueue({ onAction }) {
     setLoading(true);
     try {
       const [dr, jr, tr] = await Promise.all([
-        fetch("/api/finance/documents?status=pending_approval&limit=50").then(r => r.json()),
-        fetch("/api/finance/jobs").then(r => r.json()),
-        fetch("/api/finance/trade-categories").then(r => r.json())
+        authFetch("/api/finance/documents?status=pending_approval&limit=50").then(r => r.json()),
+        authFetch("/api/finance/jobs").then(r => r.json()),
+        authFetch("/api/finance/trade-categories").then(r => r.json())
       ]);
       if (dr.ok) setDocuments(dr.documents);
       if (jr.ok) setJobs(jr.jobs);

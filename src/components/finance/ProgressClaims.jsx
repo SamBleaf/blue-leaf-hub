@@ -327,8 +327,8 @@ export default function ProgressClaims({ jobId, onUpdate }) {
   const load = useCallback(async () => {
     setLoading(true);
     const [cr, sr] = await Promise.all([
-      fetch(`/api/finance/jobs/${jobId}/claims`).then(r => r.json()),
-      fetch(`/api/finance/jobs/${jobId}/claims/schedule`).then(r => r.json())
+      authFetch(`/api/finance/jobs/${jobId}/claims`).then(r => r.json()),
+      authFetch(`/api/finance/jobs/${jobId}/claims/schedule`).then(r => r.json())
     ]);
     if (cr.ok) setClaims(cr.claims);
     if (sr.ok) {

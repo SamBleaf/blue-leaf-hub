@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useEffect, useState } from "react";
 
 const STAGE_LABELS = {
@@ -143,8 +144,8 @@ export default function SalesScorecard() {
     async function load() {
       try {
         const [sr, kr] = await Promise.all([
-          fetch("/api/sales/scorecard").then(r => r.json()),
-          fetch("/api/sales/knowledge-updates?days=14").then(r => r.json()),
+          authFetch("/api/sales/scorecard").then(r => r.json()),
+          authFetch("/api/sales/knowledge-updates?days=14").then(r => r.json()),
         ]);
         if (sr.ok) setData(sr);
         if (kr.ok) setUpdates(kr.updates || []);
