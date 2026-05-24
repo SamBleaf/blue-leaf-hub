@@ -132,8 +132,11 @@ function IntelligenceTab() {
   const [selectedJobId, setSelectedJobId] = useState("");
   const [metrics, setMetrics] = useState(null);
   const [normCosts, setNormCosts] = useState(null);
+  const [comparison, setComparison] = useState([]);
+  const [similar, setSimilar] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
   const [editingMetrics, setEditingMetrics] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractResult, setExtractResult] = useState(null);
@@ -145,13 +148,17 @@ function IntelligenceTab() {
 
   const loadJobData = useCallback(async (jobId) => {
     if (!jobId) return;
-    setLoading(true); setMetrics(null); setNormCosts(null); setExtractResult(null);
-    const [mRes, ncRes] = await Promise.all([
+    setLoading(true); setMetrics(null); setNormCosts(null); setExtractResult(null); setComparison([]); setSimilar([]);
+    const [mRes, ncRes, compRes, simRes] = await Promise.all([
       fetch(`/api/cost-intelligence/jobs/${jobId}/metrics`).then(r => r.json()).catch(() => null),
       fetch(`/api/cost-intelligence/jobs/${jobId}/normalized-costs`).then(r => r.json()).catch(() => null),
+      fetch(`/api/cost-intelligence/jobs/${jobId}/comparison`).then(r => r.json()).catch(() => null),
+      fetch(`/api/cost-intelligence/jobs/${jobId}/similar`).then(r => r.json()).catch(() => null),
     ]);
     if (mRes?.ok) setMetrics(mRes.metrics);
     if (ncRes?.ok) setNormCosts(ncRes);
+    if (compRes?.ok) setComparison(compRes.comparison || []);
+    if (simRes?.ok) setSimilar(simRes.similar || []);
     setLoading(false);
   }, []);
 
@@ -193,24 +200,42 @@ function IntelligenceTab() {
     reader.readAsDataURL(file);
   }
 
+  async function recomputeBenchmarks() {
+    setRecomputing(true);
+    const r = await fetch("/api/cost-intelligence/benchmarks/recompute", { method: "POST" });
+    const j = await r.json();
+    setRecomputing(false);
+    if (!j.ok) alert(j.error || "Recompute failed");
+    else alert(`Done — ${j.benchmarks_upserted} benchmark groups updated.`);
+  }
+
   const fmt = n => n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
   const fmtRate = n => n == null ? "—" : `$${Number(n).toFixed(0)}/m²`;
   const fmtPct = n => n == null ? "—" : `${n > 0 ? "+" : ""}${Number(n).toFixed(1)}%`;
 
+  const riskBadge = (level) => {
+    const cls = { low: "bg-green-100 text-green-700", medium: "bg-amber-100 text-amber-700", high: "bg-red-100 text-red-700" };
+    return level ? <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${cls[level] || ""}`}>{level}</span> : null;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Job selector */}
-      <div className="flex items-center gap-3">
+      {/* Top bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <select value={selectedJobId} onChange={e => setSelectedJobId(e.target.value)}
           className="flex-1 max-w-sm rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary/30">
           <option value="">Select a job…</option>
           {jobs.map(j => <option key={j.id} value={j.id}>{j.address || j.id}</option>)}
         </select>
+        <button type="button" onClick={recomputeBenchmarks} disabled={recomputing}
+          className="rounded-lg border border-hairline px-3 py-2 text-xs font-semibold text-muted hover:text-ink disabled:opacity-40">
+          {recomputing ? "Recomputing…" : "⟳ Recompute benchmarks"}
+        </button>
       </div>
 
       {!selectedJobId && (
         <div className="py-16 text-center text-muted text-sm">
-          Select a job to view its project metrics and normalised cost rates.
+          Select a job to view its project metrics, normalised cost rates and benchmark comparison.
         </div>
       )}
 
@@ -345,7 +370,393 @@ function IntelligenceTab() {
               )}
             </div>
           </div>
+
+          {/* Historical Comparison */}
+          {comparison.length > 0 && (
+            <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+              <div className="px-5 py-4 border-b border-hairline">
+                <h2 className="text-sm font-bold text-ink">Historical Comparison</h2>
+                <p className="text-xs text-muted mt-0.5">Current project rates vs benchmarks from similar completed projects.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-page">
+                      <th className="px-4 py-2.5 text-left text-xs font-bold text-muted">Trade</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Current</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Historical avg</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">p25 – p75</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Delta</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-bold text-muted">Risk</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-bold text-muted">Match</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hairline">
+                    {comparison.filter(c => c.benchmark).map(c => (
+                      <tr key={c.trade_category_id} className="hover:bg-page/50">
+                        <td className="px-4 py-2.5 font-medium text-ink">{c.trade_name}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs">{fmtRate(c.current_rate)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs text-muted">{fmtRate(c.benchmark?.rate_per_m2_floor_avg)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs text-muted">
+                          {c.benchmark?.rate_per_m2_floor_p25 != null
+                            ? `${fmtRate(c.benchmark.rate_per_m2_floor_p25)} – ${fmtRate(c.benchmark.rate_per_m2_floor_p75)}`
+                            : "—"}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right text-xs font-semibold ${c.delta_vs_avg_pct == null ? "text-muted" : c.delta_vs_avg_pct > 10 ? "text-red-700" : c.delta_vs_avg_pct > 0 ? "text-amber-700" : "text-green-700"}`}>
+                          {fmtPct(c.delta_vs_avg_pct)}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">{riskBadge(c.risk_level)}</td>
+                        <td className="px-4 py-2.5 text-center text-xs text-muted">{c.match_type}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {comparison.filter(c => c.benchmark).length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-muted">
+                    No benchmark data yet. Use <span className="font-semibold">⟳ Recompute benchmarks</span> once at least 3 projects have cost data.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Similar Projects */}
+          {similar.length > 0 && (
+            <div className="rounded-card border border-hairline bg-surface p-5">
+              <h2 className="text-sm font-bold text-ink mb-1">Similar Projects</h2>
+              <p className="text-xs text-muted mb-4">Weighted across 7 dimensions: project type (30%), floor area (20%), site slope (15%), complexity (15%), storeys (10%), raked ceilings (5%), wet areas (5%).</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {similar.map(s => (
+                  <div key={s.job_id} className="rounded-lg border border-hairline p-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-ink leading-tight">{s.address}</p>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-bold shrink-0 ${s.similarity_score >= 70 ? "bg-green-100 text-green-700" : s.similarity_score >= 40 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
+                        {s.similarity_score}%
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
+                      {s.project_type && <span>{s.project_type}</span>}
+                      {s.storeys != null && <span>{s.storeys}st</span>}
+                      {s.floor_area_m2 && <span>{s.floor_area_m2} m²</span>}
+                      {s.site_slope && <span>{s.site_slope.replace("_", " ")} slope</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {comparison.length === 0 && similar.length === 0 && (
+            <div className="rounded-card border border-dashed border-hairline p-8 text-center text-sm text-muted">
+              Benchmark comparison and similar projects will appear here once cost benchmarks are computed.
+              <br />Use <span className="font-semibold">⟳ Recompute benchmarks</span> above after collecting data from at least 3 projects.
+            </div>
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+function TrendsTab() {
+  const [trades, setTrades] = useState([]);
+  const [selectedTradeId, setSelectedTradeId] = useState("");
+  const [period, setPeriod] = useState(12);
+  const [trendData, setTrendData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/cost-intelligence/template").then(r => r.json()).then(j => {
+      if (j.ok && j.categories) setTrades(j.categories);
+    }).catch(() => {});
+  }, []);
+
+  const loadTrend = useCallback(async (tradeId, per) => {
+    if (!tradeId) return;
+    setLoading(true); setTrendData(null);
+    const r = await fetch(`/api/cost-intelligence/trends/${tradeId}?period=${per}`);
+    const j = await r.json().catch(() => null);
+    if (j?.ok) setTrendData(j);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (selectedTradeId) loadTrend(selectedTradeId, period); }, [selectedTradeId, period, loadTrend]);
+
+  const maxAvg = trendData?.points?.length ? Math.max(...trendData.points.map(p => p.avg)) : 0;
+
+  const trendBadge = (trend) => {
+    const cls = { rising: "bg-red-100 text-red-700", falling: "bg-green-100 text-green-700", stable: "bg-slate-100 text-slate-600" };
+    const labels = { rising: "↑ Rising", falling: "↓ Falling", stable: "→ Stable" };
+    return trend ? <span className={`text-xs px-2 py-0.5 rounded font-semibold ${cls[trend] || cls.stable}`}>{labels[trend] || trend}</span> : null;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={selectedTradeId} onChange={e => setSelectedTradeId(e.target.value)}
+          className="flex-1 max-w-xs rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <option value="">Select trade…</option>
+          {trades.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <div className="flex gap-1 rounded-lg bg-page p-1">
+          {[3, 6, 12].map(p => (
+            <button key={p} type="button" onClick={() => setPeriod(p)}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition ${period === p ? "bg-primary text-white" : "text-muted hover:bg-surface hover:text-ink"}`}>
+              {p}m
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!selectedTradeId && (
+        <div className="py-16 text-center text-muted text-sm">
+          Select a trade to view $/m² rate trends over time.
+        </div>
+      )}
+
+      {selectedTradeId && loading && <div className="py-12 text-center text-sm text-muted">Loading…</div>}
+
+      {selectedTradeId && !loading && trendData && (
+        <div className="rounded-card border border-hairline bg-surface p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-sm font-bold text-ink">
+              {trades.find(t => t.id === selectedTradeId)?.name || "Trade"} — last {period} months
+            </h2>
+            {trendBadge(trendData.trend)}
+          </div>
+
+          {trendData.points.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted">
+              No rate data for this trade in the last {period} months.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {/* CSS bar chart */}
+              <div className="flex items-end gap-1 border-b border-hairline" style={{ height: "180px" }}>
+                {trendData.points.map(p => {
+                  const barH = maxAvg > 0 ? Math.round((p.avg / maxAvg) * 100) : 0;
+                  return (
+                    <div key={p.month} className="flex flex-col items-center justify-end gap-0 flex-1 min-w-0 h-full">
+                      <span className="text-xs text-muted hidden sm:block mb-1">${p.avg}</span>
+                      <div
+                        className="w-full rounded-t-sm bg-primary/70 transition-all"
+                        style={{ height: `${barH}%`, minHeight: barH > 0 ? "4px" : "0" }}
+                        title={`${p.month}: $${p.avg}/m² (${p.count} data points)`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {/* X-axis month labels */}
+              <div className="flex gap-1">
+                {trendData.points.map(p => (
+                  <div key={p.month} className="flex-1 min-w-0 text-center text-xs text-muted truncate">
+                    {p.month.slice(5)}
+                  </div>
+                ))}
+              </div>
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-4 border-t border-hairline pt-3 text-center text-sm">
+                <div>
+                  <div className="text-xs text-muted">Min recorded</div>
+                  <div className="font-semibold text-ink">${Math.min(...trendData.points.map(p => p.avg)).toFixed(0)}/m²</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Period avg</div>
+                  <div className="font-semibold text-ink">${(trendData.points.reduce((s, p) => s + p.avg, 0) / trendData.points.length).toFixed(0)}/m²</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Max recorded</div>
+                  <div className="font-semibold text-ink">${maxAvg.toFixed(0)}/m²</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreTenderTab() {
+  const SLOPES = ["flat", "gentle", "moderate", "steep", "very_steep"];
+  const PROJECT_TYPES = ["new_build", "renovation", "extension", "knockdown_rebuild"];
+
+  const [form, setForm] = useState({
+    floor_area_m2: "", project_type: "", storeys: "", site_slope: "",
+    has_raked_ceilings: false, has_suspended_slab: false, wet_areas: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function runEstimate() {
+    if (!form.floor_area_m2) { setError("Floor area is required"); return; }
+    setError(""); setLoading(true); setResult(null);
+    const r = await fetch("/api/cost-intelligence/pretender/estimate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        floor_area_m2: Number(form.floor_area_m2),
+        project_type: form.project_type || null,
+        storeys: form.storeys ? Number(form.storeys) : null,
+        site_slope: form.site_slope || null,
+        has_raked_ceilings: form.has_raked_ceilings || null,
+        has_suspended_slab: form.has_suspended_slab || null,
+        wet_areas: form.wet_areas ? Number(form.wet_areas) : null,
+      }),
+    });
+    const j = await r.json().catch(() => null);
+    setLoading(false);
+    if (j?.ok) setResult(j);
+    else setError(j?.error || "Estimate failed");
+  }
+
+  function exportCsv() {
+    if (!result) return;
+    const rows = [
+      ["Trade", "Low", "Avg", "High", "$/m²", "Confidence", "Samples", "Match"],
+      ...result.estimate_ranges.map(r => [r.name, r.low, r.avg, r.high, r.rate_per_m2?.toFixed(2) || "", `${r.confidence}%`, r.sample_count, r.match_type]),
+      [],
+      ["Total low", result.suggested_total_low, "Total high", result.suggested_total_high, "Confidence", `${result.confidence_pct}%`],
+    ];
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `pre-tender-estimate-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const fmtAud = n => n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-card border border-hairline bg-surface p-6 space-y-4">
+        <div>
+          <h2 className="text-sm font-bold text-ink">Pre-Tender Estimator</h2>
+          <p className="text-xs text-muted mt-0.5">Generate trade-by-trade cost ranges before starting your Buildxact estimate. Requires benchmarks from at least 3 completed projects.</p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <label className="text-xs font-bold text-ink block mb-1">Floor area (m²) <span className="text-red-600">*</span></label>
+            <input type="number" value={form.floor_area_m2} onChange={e => set("floor_area_m2", e.target.value)}
+              placeholder="e.g. 240"
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-ink block mb-1">Project type</label>
+            <select value={form.project_type} onChange={e => set("project_type", e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none">
+              <option value="">— any —</option>
+              {PROJECT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-ink block mb-1">Site slope</label>
+            <select value={form.site_slope} onChange={e => set("site_slope", e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus:outline-none">
+              <option value="">— any —</option>
+              {SLOPES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-ink block mb-1">Storeys</label>
+            <input type="number" min={1} max={4} value={form.storeys} onChange={e => set("storeys", e.target.value)}
+              placeholder="e.g. 2"
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-ink block mb-1">Wet areas</label>
+            <input type="number" min={0} value={form.wet_areas} onChange={e => set("wet_areas", e.target.value)}
+              placeholder="e.g. 3"
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-4">
+          {[["has_raked_ceilings", "Raked ceilings"], ["has_suspended_slab", "Suspended slab"]].map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={!!form[key]} onChange={e => set(key, e.target.checked)} className="rounded" />
+              {label}
+            </label>
+          ))}
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end">
+          <button type="button" onClick={runEstimate} disabled={loading}
+            className="rounded-lg bg-primary px-5 py-2 text-sm font-bold text-white disabled:opacity-40">
+            {loading ? "Estimating…" : "Generate estimate"}
+          </button>
+        </div>
+      </div>
+
+      {result && (
+        <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+          <div className="px-5 py-4 border-b border-hairline flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-ink">Estimate Results</h2>
+              <p className="text-xs text-muted">
+                {result.trade_count} trades · Confidence: {result.confidence_pct}% · Range:{" "}
+                <span className="font-semibold text-ink">{fmtAud(result.suggested_total_low)} – {fmtAud(result.suggested_total_high)}</span>
+              </p>
+            </div>
+            <button type="button" onClick={exportCsv}
+              className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted hover:text-ink">
+              Export CSV
+            </button>
+          </div>
+
+          <div className="px-5 py-4 border-b border-hairline bg-primary/5 flex items-center justify-between">
+            <div className="text-sm font-semibold text-primary">{fmtAud(result.suggested_total_low)}</div>
+            <div className="text-xs text-muted font-semibold uppercase tracking-wide">total range</div>
+            <div className="text-sm font-semibold text-primary">{fmtAud(result.suggested_total_high)}</div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-page">
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-muted">Trade</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Low</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">Avg</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">High</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold text-muted">$/m²</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-bold text-muted">Confidence</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-bold text-muted">Match</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {result.estimate_ranges.map(r => (
+                  <tr key={r.trade_category_id} className="hover:bg-page/50">
+                    <td className="px-4 py-2.5 font-medium text-ink">{r.name}</td>
+                    <td className="px-4 py-2.5 text-right text-muted text-xs">{fmtAud(r.low)}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-ink text-xs">{fmtAud(r.avg)}</td>
+                    <td className="px-4 py-2.5 text-right text-muted text-xs">{fmtAud(r.high)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">${r.rate_per_m2?.toFixed(0)}/m²</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <div className="w-12 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${r.confidence}%` }} />
+                        </div>
+                        <span className="text-xs text-muted">{r.confidence}%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-center text-xs text-muted">{r.match_type}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-5 py-3 border-t border-hairline text-xs text-muted">
+            {result.confidence_pct < 50 && "⚠ Low confidence — collect more cost data from completed projects to improve accuracy. "}
+            Benchmarks require a minimum of 3 projects per trade category.
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1055,16 +1466,8 @@ export default function CostIntelligence() {
       {activeTab === "intelligence" && (
         <IntelligenceTab />
       )}
-      {activeTab === "trends" && (
-        <div className="py-16 text-center text-muted text-sm">
-          Trends analysis coming in the next phase. Once enough normalized cost data is collected, this tab will show rolling 3/6/12-month rate trends per trade.
-        </div>
-      )}
-      {activeTab === "pretender" && (
-        <div className="py-16 text-center text-muted text-sm">
-          Pre-Tender estimator coming in the next phase. Once benchmarks are computed from completed projects, you will be able to generate trade-by-trade cost ranges before starting a Buildxact estimate.
-        </div>
-      )}
+      {activeTab === "trends" && <TrendsTab />}
+      {activeTab === "pretender" && <PreTenderTab />}
     </div>
   );
 }

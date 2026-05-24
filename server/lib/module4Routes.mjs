@@ -23,6 +23,7 @@ import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -56,7 +57,7 @@ async function insertCorrespondence(sb, row) {
  * @param {import('express').Express} app
  */
 export function registerModule4Routes(app) {
-  app.get("/api/buildexact/status", (_req, res) => {
+  app.get("/api/buildexact/status", requireAuth, (_req, res) => {
     const host = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "";
     const port = process.env.PORT_API || 8787;
     const local = `http://127.0.0.1:${port}`;
@@ -83,7 +84,7 @@ export function registerModule4Routes(app) {
     return res.json({ ok: true, items: data || [] });
   });
 
-  app.post("/api/buildexact/test-connection", async (req, res) => {
+  app.post("/api/buildexact/test-connection", requireAuth, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim();
       const apiKey = String(req.body?.apiKey || "").trim();
@@ -123,7 +124,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/tender/query-draft", async (req, res) => {
+  app.post("/api/tender/query-draft", requireAuth, async (req, res) => {
     const key = process.env.ANTHROPIC_API_KEY?.trim();
     if (!key) {
       return res.status(500).json({ ok: false, error: "ANTHROPIC_API_KEY not configured." });
@@ -159,7 +160,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/tender/outcome-mails", async (req, res) => {
+  app.post("/api/tender/outcome-mails", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const jobId = String(req.body?.jobId || "").trim();
     const jobAddress = String(req.body?.jobAddress || "").trim();
@@ -218,7 +219,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/tender/win-finalize", async (req, res) => {
+  app.post("/api/tender/win-finalize", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });
@@ -383,7 +384,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/tender/lose-finalize", async (req, res) => {
+  app.post("/api/tender/lose-finalize", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });
@@ -436,7 +437,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/po/issue", async (req, res) => {
+  app.post("/api/po/issue", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });

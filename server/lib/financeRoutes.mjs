@@ -483,7 +483,7 @@ async function moveDropboxFile(token, fromPath, toPath) {
 
 export function registerFinanceRoutes(app) {
   // ── Trade categories ──────────────────────────────────────────────────────
-  app.get("/api/finance/trade-categories", async (_req, res) => {
+  app.get("/api/finance/trade-categories", requireAuth, async (_req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("trade_categories")
       .select("id, name, sort_order, category_type")
@@ -494,7 +494,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Assign trade to document (manual override) ───────────────────────────
-  app.put("/api/finance/documents/:id/trade", async (req, res) => {
+  app.put("/api/finance/documents/:id/trade", requireAuth, async (req, res) => {
     const { trade_category_id } = req.body || {};
     if (!trade_category_id) return res.status(400).json({ ok: false, error: "trade_category_id required" });
     const sb = getServiceSupabase();
@@ -506,7 +506,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Upload + extract + match ──────────────────────────────────────────────
-  app.post("/api/finance/documents", async (req, res) => {
+  app.post("/api/finance/documents", requireAuth, async (req, res) => {
     const { filename, mimeType, data: fileBase64, source = "upload" } = req.body || {};
     if (!filename || !fileBase64) return res.status(400).json({ ok: false, error: "filename and data required" });
 
@@ -612,7 +612,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── List documents ────────────────────────────────────────────────────────
-  app.get("/api/finance/documents", async (req, res) => {
+  app.get("/api/finance/documents", requireAuth, async (req, res) => {
     const { status, job_id, limit = 100, offset = 0 } = req.query;
     const sb = getServiceSupabase();
     let q = sb.from("financial_documents")
@@ -627,7 +627,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Stats ─────────────────────────────────────────────────────────────────
-  app.get("/api/finance/stats", async (req, res) => {
+  app.get("/api/finance/stats", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("financial_documents").select("status, amount_total");
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -640,7 +640,7 @@ export function registerFinanceRoutes(app) {
     res.json({ ok: true, counts, totalApprovedValue: totalValue });
   });
 
-  app.get("/api/finance/documents/unmatched-count", async (_req, res) => {
+  app.get("/api/finance/documents/unmatched-count", requireAuth, async (_req, res) => {
     const sb = getServiceSupabase();
     const { count, error } = await sb
       .from("financial_documents")
@@ -652,7 +652,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Update (rematch / notes) ──────────────────────────────────────────────
-  app.patch("/api/finance/documents/:id", async (req, res) => {
+  app.patch("/api/finance/documents/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
     const { job_id, notes, status } = req.body || {};
     const sb = getServiceSupabase();
@@ -683,7 +683,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Approve → file to Dropbox ─────────────────────────────────────────────
-  app.post("/api/finance/documents/:id/approve", async (req, res) => {
+  app.post("/api/finance/documents/:id/approve", requireAuth, async (req, res) => {
     const { id } = req.params;
     const { comment, trade_category_id: bodyTrade } = req.body || {};
     const sb = getServiceSupabase();
@@ -787,7 +787,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Reject ────────────────────────────────────────────────────────────────
-  app.post("/api/finance/documents/:id/reject", async (req, res) => {
+  app.post("/api/finance/documents/:id/reject", requireAuth, async (req, res) => {
     const { id } = req.params;
     const { comment } = req.body || {};
     const sb = getServiceSupabase();
@@ -802,7 +802,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Jobs list (for re-match dropdown) ────────────────────────────────────
-  app.get("/api/finance/jobs", async (req, res) => {
+  app.get("/api/finance/jobs", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("jobs")
       .select("id, address, arch_ref, status, contract_value, estimated_total_cost, progress_billed")
@@ -813,7 +813,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Update job WIP fields ─────────────────────────────────────────────────
-  app.patch("/api/finance/jobs/:id", async (req, res) => {
+  app.patch("/api/finance/jobs/:id", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const allowed = ["contract_value", "estimated_total_cost", "progress_billed"];
     const updates = {};
@@ -830,7 +830,7 @@ export function registerFinanceRoutes(app) {
 
   // ── WIPAA calculation for a job ───────────────────────────────────────────
   // cost_to_date = sum of approved/filed invoices; no Xero needed
-  app.get("/api/finance/jobs/:id/wipaa", async (req, res) => {
+  app.get("/api/finance/jobs/:id/wipaa", requireAuth, async (req, res) => {
     return res.redirect(307, `/api/finance/jobs/${req.params.id}/wipaa/current`);
     const sb = getServiceSupabase();
     const [jobRes, docsRes] = await Promise.all([
@@ -870,7 +870,7 @@ export function registerFinanceRoutes(app) {
   });
 
   // ── Xero status (Phase 2 stub) ────────────────────────────────────────────
-  app.get("/api/finance/xero/status", async (req, res) => {
+  app.get("/api/finance/xero/status", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data } = await sb.from("xero_credentials").select("tenant_name, expires_at").limit(1).single();
     res.json({ ok: true, connected: !!data, tenant: data?.tenant_name || null });
@@ -1060,7 +1060,7 @@ export function registerFinanceRoutes(app) {
     }
   }
 
-  app.post("/api/finance/imap/poll", async (_req, res) => {
+  app.post("/api/finance/imap/poll", requireAuth, async (_req, res) => {
     try {
       const out = await pollInvoiceEmails();
       return res.json(out);
@@ -1069,7 +1069,7 @@ export function registerFinanceRoutes(app) {
     }
   });
 
-  app.get("/api/finance/imap/status", (_req, res) => {
+  app.get("/api/finance/imap/status", requireAuth, (_req, res) => {
     const cfgs = invoiceImapConfigs();
     res.json({
       ok: true,
@@ -1092,7 +1092,7 @@ export function registerFinanceRoutes(app) {
   }
 
   // ── Fee proposal accepted → auto-set original_contract_value on job ─────────
-  app.post("/api/finance/fee-proposals/:proposalId/accept", async (req, res) => {
+  app.post("/api/finance/fee-proposals/:proposalId/accept", requireAuth, async (req, res) => {
     const { proposalId } = req.params;
     const sb = getServiceSupabase();
     const { data: proposal, error: pErr } = await sb.from("fee_proposals")

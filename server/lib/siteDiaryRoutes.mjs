@@ -1,0 +1,149 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { getServiceSupabase } from "./supabaseService.mjs";
+import {
+  getDropboxAccessToken,
+  dropboxUploadBuffer,
+  sharedJobRootPath,
+  ensureParentFoldersForFile
+} from "./dropboxClient.mjs";
+import { buildSiteDiaryPdfBuffer } from "./module6PdfKit.mjs";
+import { requireAuth } from "./requireAuth.mjs";
+
+const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
+
+// ── Pure helpers ──────────────────────────────────────────────────────────────
+
+async function claudeText(prompt) {
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
+  const client = new Anthropic({ apiKey: key, maxRetries: 0 });
+  const completion = await client.messages.create({
+    model: MODEL,
+    max_tokens: 8192,
+    temperature: 0.2,
+    messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
+  });
+  return completion.content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+/**
+ * @param {import("express").Express} app
+ */
+export function registerSiteDiaryRoutes(app) {
+  app.post("/api/diary/structure", requireAuth, async (req, res) => {
+    try {
+      const transcript = String(req.body?.transcript || "").trim();
+      const projectAddress = String(req.body?.projectAddress || "").trim();
+      if (!transcript) return res.status(400).json({ ok: false, error: "transcript required." });
+      const prompt = `Extract and structure this site diary transcript for ${projectAddress || "the site"}.
+Return JSON with these exact keys:
+{ "weather", "trades_onsite": [], "work_completed", "issues", "instructions_given", "visitors" }
+trades_onsite should be an array of trade name strings.
+Be concise and factual. Australian English.
+
+Transcript:
+${transcript}`;
+      const raw = await claudeText(prompt + "\n\nReturn only valid JSON, no markdown.");
+      let structured;
+      try {
+        structured = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim());
+      } catch {
+        structured = {
+          weather: "",
+          trades_onsite: [],
+          work_completed: raw,
+          issues: "",
+          instructions_given: "",
+          visitors: ""
+        };
+      }
+      return res.json({ ok: true, structured });
+    } catch (e) {
+      console.error("[diary/structure]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/diary/save", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.body?.projectId || "").trim();
+      const entry = req.body?.entry && typeof req.body.entry === "object" ? req.body.entry : {};
+      if (!projectId) return res.status(400).json({ ok: false, error: "projectId required." });
+
+      const { data: proj, error: pe } = await sb.from("projects").select("address").eq("id", projectId).single();
+      if (pe || !proj) return res.status(404).json({ ok: false, error: "Project not found." });
+
+      const row = {
+        project_id: projectId,
+        entry_date: entry.entry_date || new Date().toISOString().slice(0, 10),
+        weather: entry.weather ?? null,
+        trades_onsite: Array.isArray(entry.trades_onsite) ? entry.trades_onsite : [],
+        work_completed: entry.work_completed ?? null,
+        issues: entry.issues ?? null,
+        instructions_given: entry.instructions_given ?? null,
+        visitors: entry.visitors ?? null,
+        raw_voice_transcript: entry.raw_voice_transcript ?? null,
+        structured_by_ai: Boolean(entry.structured_by_ai),
+        supervisor: entry.supervisor ?? null
+      };
+
+      const { data: saved, error: se } = await sb.from("site_diary").insert(row).select("*").single();
+      if (se) throw se;
+
+      let dropbox_pdf_path = null;
+      try {
+        const token = await getDropboxAccessToken();
+        const pdfBuf = await buildSiteDiaryPdfBuffer({
+          projectAddress: proj.address,
+          entryDate: row.entry_date,
+          weather: row.weather,
+          tradesOnsite: row.trades_onsite,
+          workCompleted: row.work_completed,
+          issues: row.issues,
+          instructionsGiven: row.instructions_given,
+          visitors: row.visitors,
+          supervisor: row.supervisor,
+          generatedAt: new Date().toISOString()
+        });
+        const rel = `${sharedJobRootPath(proj.address)}/SITE DIARY/${row.entry_date}.pdf`;
+        await ensureParentFoldersForFile(token, rel);
+        await dropboxUploadBuffer(token, rel, pdfBuf, { autorename: true });
+        dropbox_pdf_path = rel;
+        await sb.from("site_diary").update({ dropbox_pdf_path }).eq("id", saved.id);
+      } catch (err) {
+        console.warn("[diary/save] Dropbox:", err?.message || err);
+      }
+
+      const { data: entryOut } = await sb.from("site_diary").select("*").eq("id", saved.id).single();
+      return res.json({ ok: true, entry: entryOut, dropbox_pdf_path: entryOut?.dropbox_pdf_path || null });
+    } catch (e) {
+      console.error("[diary/save]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/diary/:projectId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const projectId = String(req.params.projectId || "").trim();
+      const limit = req.query.limit ? Math.min(100, Math.max(1, Number(req.query.limit))) : null;
+      let q = sb.from("site_diary").select("*").eq("project_id", projectId).order("created_at", { ascending: false });
+      if (limit) q = q.limit(limit);
+      const { data, error } = await q;
+      if (error) throw error;
+      return res.json({ ok: true, entries: data || [] });
+    } catch (e) {
+      console.error("[diary/get]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+}

@@ -18,7 +18,13 @@ yarn-error.log*
 # Editor/OS
 .DS_Store
 .idea
+.cursor/
 
 # Vite cache
 .cache
 server/luts/*.cube
+
+# AI agent local files (never commit)
+.agent-test-context.local.md
+.test-credentials.local
+.claude/launch.json

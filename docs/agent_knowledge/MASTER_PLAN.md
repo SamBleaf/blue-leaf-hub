@@ -21,20 +21,19 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 
 | Module | Status | Next action |
 |--------|--------|-------------|
-| Sales Manager | ✅ Complete | — |
+| Sales Manager | ✅ Complete | PTSA tab needs building (migration 045 applied) |
 | Tender Manager — RFQ | ✅ Complete | — |
 | Tender Manager — Fee Proposals | ✅ Complete | — |
-| Tender Manager — Cost Intelligence | 🟡 Partial | Intelligence tab done. Trends/Pre-Tender = stubs. Benchmarks computation + historical comparison = not built |
-| Operations — Schedule | ✅ Complete (Sprint 2) | Baseline ghost bars + EOT fully built |
+| Tender Manager — Cost Intelligence | 🟡 Phase I done | Phase J (benchmarks + comparison) |
+| Operations — Schedule | ✅ Complete (Sprint 1) | Sprint 2: baseline + EOT UI |
 | Operations — WHS / Diary | ✅ Complete | — |
 | Finance — Invoice Inbox | ✅ Complete | — |
-| Finance — Command Centre | 🟡 Core built | Cashflow forecast + Director portfolio view not built |
+| Finance — Command Centre | 🟡 Core built | Stage 3: cashflow, portfolio view |
 | Client Portal | ✅ Complete | Variation signing (deferred to Stage 3) |
 | Blueprint AI | ✅ Complete | Proactive alerts (deferred) |
-| Home Dashboard | 🔴 Stub | 112-line static link page — needs real director/staff landing |
-| PTSA Module | ✅ Complete | Built into Lead detail right column |
-| Marketing Stage 1 | ✅ Complete | ContentGenerator, ContentLibrary, CampaignManager, MediaUpload, marketingAgent — all built + routed |
-| Marketing Stage 2 | 🟡 Partial | FinalAssembly.jsx + marketingMedia.mjs built — verify wiring |
+| Home Dashboard | 🔴 Stub | Needs building |
+| PTSA Module | 🔴 Not started | UI for migration 045 fields |
+| Marketing + Video | 🔴 Not started | Full build — see Marketing module section |
 | Xero Integration | 🔴 Not started | Deferred |
 
 ---
@@ -42,14 +41,14 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 ## BUILD QUEUE
 ### Next items to build, in priority order
 
-- [x] **BQ-1** PTSA — built in Lead detail right column. Tiny fix: auto-set ptsa_sent_date on status → sent
-- [x] **BQ-4** Schedule Sprint 2 — baseline ghost bars + EOT tab fully built (DelaysTab.jsx, scheduleRoutes.mjs)
-- [x] **BQ-7** Marketing Stage 1 — ContentGenerator, ContentLibrary, CampaignManager, MediaUpload, marketingAgent all built + routed
-- [ ] **BQ-2** Home dashboard — Cursor prompt written 2026-05-23 (live KPIs, pipeline stages, quick links)
-- [ ] **BQ-3** Cost Intelligence Phase J — HUB BUILDER prompt written 2026-05-23 (benchmarks compute, comparison, similar projects, trends, pre-tender)
-- [ ] **BQ-5** Finance cashflow — Cursor prompt written 2026-05-23 (3-month accordion in JobCommandCentre)
-- [ ] **BQ-6** Director portfolio — Cursor prompt written 2026-05-23 (ranked JobDashboardSelector with risk scoring)
-- [ ] **BQ-8** Marketing Stage 2 — FinalAssembly.jsx + marketingMedia.mjs exist, verify full wiring + test pipeline
+- [ ] **BQ-1** PTSA tab on Lead detail (migration 045 schema is applied)
+- [ ] **BQ-2** Home dashboard — meaningful director + staff landing page
+- [ ] **BQ-3** Cost Intelligence Phase J — cost_benchmarks computation + historical comparison view
+- [ ] **BQ-4** Schedule Sprint 2 — baseline ghost bars + EOT tab UI (migration 018 tables exist)
+- [ ] **BQ-5** Finance Stage 3 — cashflow forecast (rolling 3-month)
+- [ ] **BQ-6** Finance Stage 3 — Director portfolio view (all active jobs by margin risk)
+- [ ] **BQ-7** Marketing Module — Stage 1 (agent + content generation + basic photo pipeline)
+- [ ] **BQ-8** Marketing Module — Stage 2 (content library + music library + full video pipeline)
 
 ---
 
@@ -62,7 +61,7 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 **Route:** `/sales`, `/sales/:id`
 **Files:** `salesRoutes.mjs`, `SalesPipeline.jsx`, `LeadDetail.jsx`
 **DB:** `leads`, `pipeline_stages`, `lead_qualifying_scores`, `lead_documents`, `lead_notes`, `lead_conversations`
-**Migration 045:** Adds PTSA fields to `leads` — UI built in Lead detail right column (contextual card, appears when stage ≥ winning_offer)
+**Migration 045:** Adds PTSA fields to `leads` — UI not yet built
 
 **What's built:**
 - [x] APB 8-stage pipeline (enquiry → qualify → discovery → winning_offer → fee_proposal → accepted → tender → won)
@@ -73,10 +72,9 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 - [x] Transcript analysis → SuggestionReviewPanel → apply suggestions to lead
 - [x] Blueprint Insight tab (conversational AI coaching with lead context)
 - [x] PTSA fields on `leads` table (migration 045)
-- [x] PTSA card in Lead detail right column — status, services checklist, fee, scope notes, validity, credit toggle, special terms, signed date, generate DOCX button
 
 **What's missing:**
-- [ ] Auto-set `ptsa_sent_date = today` when status changes to `sent` (1-line fix in LeadDetail.jsx PTSA status select onChange)
+- [ ] PTSA tab on Lead detail — see BQ-1 prompt below
 
 **PTSA Build Prompt (for HUB BUILDER):**
 ```
@@ -1377,130 +1375,6 @@ does this stage go to production.
 
 ---
 
-## SYSTEM AUDIT FINDINGS — 2026-05-23
-> Source: TROUBLESHOOT AGENT full system audit
-> Planning Agent corrections applied below — read these BEFORE implementing fixes
-
----
-
-### ⚠ PLANNING AGENT CORRECTIONS TO AUDIT RECOMMENDATIONS
-
-**C-01 — requireAuth implementation method is WRONG in the audit**
-The audit recommends adding a global `app.use(['/api/sales', ...], requireAuth)` after route registration. **This will not work in Express** — middleware added after routes are registered does not apply to those routes. They have already been handled.
-
-**Correct approach:** Add `requireAuth` as the second argument directly on each individual route handler in every unprotected route file. Use `marketingRoutes.mjs` as the reference pattern — it correctly applies `requireAuth` per route. Do NOT use a global `app.use()` shortcut.
-
-Files that need per-route requireAuth added:
-- `server/lib/salesRoutes.mjs`
-- `server/lib/financeRoutes.mjs`
-- `server/lib/financeCCRoutes.mjs`
-- `server/lib/module4Routes.mjs`
-- `server/lib/module6Routes.mjs`
-- `server/lib/jobsApiRoutes.mjs`
-- `server/lib/operationsRoutes.mjs`
-- `server/lib/buildexactIntegrationRoutes.mjs`
-- `server/lib/scheduleRoutes.mjs`
-
-Exception: public routes that must remain unauthenticated:
-- `POST /api/auth/*` (login/signup)
-- `GET /induct/:projectId` (site induction QR — public by design)
-- `GET /portal/*` (client portal — token-auth, not JWT)
-
----
-
-**C-03 — Director Portfolio fix needs cleaner implementation**
-The audit's `?portfolio=true` query param is fragile. Correct fix:
-
-1. In `src/App.jsx` — split the route into two:
-   - `/finance/jobs` → `JobDashboardSelector` with prop `forcePortfolio={true}` (skips auto-redirect)
-   - `/finance/jobs/:jobId` → `JobCommandCentre` directly (no selector needed)
-
-2. In `JobDashboardSelector.jsx` — only auto-redirect when `forcePortfolio` prop is false (default behaviour for sidebar nav)
-
-3. In `JobCommandCentre.jsx` — add `← Portfolio` breadcrumb link at top that navigates to `/finance/jobs` with `forcePortfolio={true}`
-
----
-
-**M-11 — MISSING FROM AUDIT: PTSA sent date never auto-sets**
-When `ptsa_status` changes to `"sent"` in the PTSA status select in `src/pages/LeadDetail.jsx` (around line 1067), `ptsa_sent_date` is never populated. Add to the fix list:
-
-In `LeadDetail.jsx`, find the PTSA status select onChange and replace:
-```js
-onChange={e => patch({ ptsa_status: e.target.value })}
-```
-with:
-```js
-onChange={e => {
-  const updates = { ptsa_status: e.target.value };
-  if (e.target.value === "sent" && !lead.ptsa_sent_date) {
-    updates.ptsa_sent_date = new Date().toISOString().slice(0, 10);
-  }
-  patch(updates);
-}}
-```
-
----
-
-### AUDIT ISSUES TABLE (from TROUBLESHOOT AGENT)
-
-| ID | Severity | Issue | Recommended fix |
-|----|----------|-------|-----------------|
-| C-01 | CRITICAL | API-wide auth breach — Sales, Finance, Operations, RFQ, Jobs routes serve data unauthenticated | Add `requireAuth` per-route in each file — see correction above |
-| C-02 | CRITICAL | Forecast margin shows -11,832% (contract $11,900 vs forecast $1.4M from different sources) | Guard in UI: if `|forecast_margin_pct| > 200` show "⚠ Data mismatch — check Buildxact sync". Add `data_quality_warning` flag on server response |
-| C-03 | CRITICAL | Director Portfolio unreachable — auto-redirect bypasses it when project in context | Split routes in App.jsx — see correction above |
-| C-04 | CRITICAL | Duplicate job records for same address ("21 Folkestone Rd" variants) | One-time SQL dedup keeping record with most data. Add normalised address UNIQUE constraint |
-| M-01 | MODERATE | Cost Intelligence Trends + Pre-Tender tabs are still stubs — backend done, frontend not wired | Wire frontend in `CostIntelligence.jsx` — see BQ-3 prompt |
-| M-02 | MODERATE | Cashflow always blank — no progress claims have due_date, no pending_approval invoices | Expected for new system. Add in-UI hint: "Cashflow populates as claims are issued with due dates" |
-| M-03 | MODERATE | Home dashboard shows $0 contract for all jobs | Show "Contract TBC" when `contract_value` is null |
-| M-04 | MODERATE | Lead names not normalised on save ("bill" not "Bill") | Auto-capitalise `first_name` and `last_name` on save in `salesRoutes.mjs` PATCH handler |
-| M-05 | MODERATE | Close rate = 0%, FP hit rate = 0% on dashboard — no context | Show "No completed deals yet — stats will populate as leads are won" when `won_last_12m.count === 0` |
-| M-06 | MODERATE | Xero integration is a stub | Deferred — Finance Stage 3 |
-| M-07 | MODERATE | No calendar integration — next_action_date is dead data | Deferred — future roadmap |
-| M-08 | MODERATE | Supabase Storage RLS missing — media uploads fail | Add 3 SQL policies for `marketing-media` bucket in Supabase dashboard |
-| M-09 | MODERATE | No nodemon — stale server binary during dev | Add `"dev:api": "nodemon --watch server server/dev-api.mjs"` to `package.json` |
-| M-10 | MODERATE | 3 of 4 leads have no job_id at advanced stages | Add automation: fee proposal acceptance → auto-create Buildxact job + link lead.job_id |
-| M-11 | MINOR | PTSA sent date never auto-sets when status → sent | See Planning Agent correction above |
-| m-01 | MINOR | Mobile bottom nav: 6 items compress unreadably | Remove "Clients" from bottom nav — accessible via sidebar only |
-| m-02 | MINOR | "$2.4M weighted" — no tooltip explaining APB weighting model | Add tooltip/info icon showing APB probability % by stage |
-| m-03 | MINOR | "bill Hartley" case bug visible on pipeline cards | Covered by M-04 fix |
-| m-04 | MINOR | Home Active Jobs filters to project-linked jobs only — shows 1 of 5 | Show all jobs, use address as fallback if no project link |
-| m-05 | MINOR | Quick Links "New Lead" just navigates — doesn't open form | Pass `{ state: { openNewLead: true } }` on navigate, check in SalesPipeline.jsx |
-| m-06 | MINOR | Cost Intelligence: no empty-state message when no data | Add "Select a job with cost data to view comparisons" |
-| m-07 | MINOR | Site induction URL not surfaced in Operations UI | Add QR code display + copyable link in Operations project detail |
-| m-08 | MINOR | Marketing review "Educational Value: 1/10" — no guidance | Add tooltip: "Educational Value measures whether the post teaches something useful. Score under 5 = revise to include a tip or insight." |
-| m-09 | MINOR | Supabase Storage RLS (duplicate of M-08) | Covered by M-08 |
-| m-10 | MINOR | Buildxact sync is fire-and-forget with no status | Show spinner + "Last synced at [time]" after sync |
-
-### PRIORITY ORDER FOR TROUBLESHOOT AGENT
-
-1. **C-01** — requireAuth per-route (follow correction above — NOT global app.use())
-2. **M-08** — Supabase Storage RLS (10 min, SQL only)
-3. **M-09** — Add nodemon (2-line package.json change)
-4. **C-03** — Director Portfolio route fix (follow correction above)
-5. **C-02** — Forecast margin guard + server data_quality_warning flag
-6. **M-11** — PTSA sent date auto-set (1-line fix in LeadDetail.jsx)
-7. **M-03** — Home dashboard "Contract TBC" null guard
-8. **M-04** — Lead name auto-capitalise on save
-9. **m-01** — Remove "Clients" from mobile bottom nav
-10. **m-05** — Quick Links "New Lead" open form on navigate
-11. **m-10** — Buildxact sync status feedback
-12. **M-01** — BQ-3 frontend wiring (see BQ-3 build prompt — larger task)
-13. **M-10** — Lead → Job auto-creation on fee proposal acceptance (larger task)
-
-### AUTOMATION OPPORTUNITIES (from audit, for future backlog)
-
-- Lead stage change → APB-aligned email sequence trigger
-- Fee proposal accepted → auto-create Buildxact job + link lead.job_id
-- Progress claim due in 7 days + unpaid → auto-email client
-- Schedule milestone complete → auto-update client portal timeline
-- Underclaim > 10% → email alert to Sam
-- cost_benchmarks → nightly recompute cron (POST /api/cost-intelligence/benchmarks/recompute)
-- Quote expiry alert when RFQ validity period nears end
-- Duplicate lead detection on create (same phone/email)
-- Media consent reminder after 7 days if consent_for_marketing = false
-
----
-
 | ID | Severity | Module | Description | Fix |
 |----|----------|--------|-------------|-----|
 | ISSUE-001 | Medium | Deploy | `vercel.json` has `YOUR-RAILWAY-HOST` placeholder | Railway-only now — vercel.json is irrelevant but tidy it up |
@@ -1509,7 +1383,7 @@ onChange={e => {
 | ISSUE-008 | Low | Fee Proposals | DOCX template was in localStorage | ✅ FIXED — now Supabase Storage |
 | ISSUE-009 | Low | Blueprint | Lint warnings in src/blueprint/ files | Pre-existing, low priority |
 | ISSUE-014 | Low | Portal | No token expiry/revocation | Deferred to Sprint 5 |
-| ISSUE-016 | Medium | Home | Home.jsx is a stub | ✅ FIXED — see BQ-2 |
+| ISSUE-016 | Medium | Home | Home.jsx is a stub | See Home Dashboard build prompt |
 | ISSUE-017 | Low | Supervisor | SupervisorHome.jsx separate entry point | Review if needed or merge |
 | ISSUE-018 | Low | Xero | Credential table exists, no sync logic | Deferred to Finance Stage 3 |
 

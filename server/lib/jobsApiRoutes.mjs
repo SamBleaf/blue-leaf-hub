@@ -6,13 +6,14 @@ import {
 } from "./dropboxClient.mjs";
 import { buildFeeProposalPdfBuffer } from "./feeProposalPdfKit.mjs";
 import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactClient.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 
 /**
  * @param {import('express').Express} app
  */
 export function registerJobsApiRoutes(app) {
   // Create a new job (minimal fields, used from Sales Manager lead → job)
-  app.post("/api/jobs", async (req, res) => {
+  app.post("/api/jobs", requireAuth, async (req, res) => {
     try {
       const sb = getServiceSupabase();
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
@@ -40,7 +41,7 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
-  app.post("/api/jobs/merge-job-data-json", async (req, res) => {
+  app.post("/api/jobs/merge-job-data-json", requireAuth, async (req, res) => {
     try {
       if (!dropboxConfigured()) {
         return res.status(503).json({ ok: false, error: "Dropbox not configured." });
@@ -58,7 +59,7 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
-  app.post("/api/tender/job-delete", async (req, res) => {
+  app.post("/api/tender/job-delete", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });
@@ -84,7 +85,7 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
-  app.post("/api/unmatched-quotes/resolve", async (req, res) => {
+  app.post("/api/unmatched-quotes/resolve", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs Supabase service role." });
@@ -131,7 +132,7 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/generate-pdf", async (req, res) => {
+  app.post("/api/fee-proposal/generate-pdf", requireAuth, async (req, res) => {
     try {
       const proposalData = req.body?.proposalData;
       const logoDataUrl = String(req.body?.logoDataUrl || "").trim();
@@ -164,7 +165,7 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
-  app.get("/api/buildexact/job/:id", async (req, res) => {
+  app.get("/api/buildexact/job/:id", requireAuth, async (req, res) => {
     if (!buildexactConfigured()) {
       return res.status(503).json({ ok: false, error: "Buildxact not configured." });
     }

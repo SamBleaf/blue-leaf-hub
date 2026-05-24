@@ -122,7 +122,7 @@ export default function App() {
                 />
                 <Route
                   path="/finance/jobs"
-                  element={<RoleRoute element={<JobDashboardSelector />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<JobDashboardSelector forcePortfolio />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/finance/jobs/:jobId"

@@ -35,14 +35,18 @@ const HEALTH_STYLES = {
   unknown:  "text-muted bg-page border-hairline",
 };
 
-function MarginIndicator({ label, pct, target, floor }) {
-  const health = marginHealth(pct, target, floor);
+function MarginIndicator({ label, pct, target, floor, warning }) {
+  const health = warning ? "unknown" : marginHealth(pct, target, floor);
   const emoji = health === "green" ? "🟢" : health === "amber" ? "🟡" : health === "unknown" ? "⬜" : "🔴";
   return (
     <div className={`rounded-lg border px-3 py-2 ${HEALTH_STYLES[health]}`}>
       <div className="text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</div>
-      <div className="text-xl font-bold mt-0.5">{emoji} {fmtPct(pct)}</div>
-      {target && <div className="text-[10px] opacity-60 mt-0.5">Target: {target}%</div>}
+      {warning ? (
+        <div className="text-[10px] font-bold text-amber-700 mt-1 leading-tight">{warning}</div>
+      ) : (
+        <div className="text-xl font-bold mt-0.5">{emoji} {fmtPct(pct)}</div>
+      )}
+      {!warning && target && <div className="text-[10px] opacity-60 mt-0.5">Target: {target}%</div>}
     </div>
   );
 }
@@ -361,10 +365,11 @@ export default function JobCommandCentre() {
 
       {/* Header */}
       <div className="flex items-start gap-3">
-        <button type="button" onClick={() => navigate("/finance/jobs")} className="mt-1 text-muted hover:text-ink transition">
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <button type="button" onClick={() => navigate("/finance/jobs")} className="mt-1 flex items-center gap-1.5 text-xs text-muted hover:text-ink transition">
+          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5M12 5l-7 7 7 7" />
           </svg>
+          Portfolio
         </button>
         <div className="flex-1">
           <h1 className="text-xl font-bold text-ink">{job.address}</h1>
@@ -390,7 +395,7 @@ export default function JobCommandCentre() {
         <KpiCard label="Claims paid" value={fmt(kpis.claims_paid)} />
         <KpiCard label="Actual costs" value={fmt(kpis.actual_costs)} />
         <MarginIndicator label="Working margin" pct={kpis.working_margin_pct} target={target} floor={floor} />
-        <MarginIndicator label="Forecast margin" pct={kpis.forecast_margin_pct} target={target} floor={floor} />
+        <MarginIndicator label="Forecast margin" pct={kpis.forecast_data_quality_warning ? null : kpis.forecast_margin_pct} target={target} floor={floor} warning={kpis.forecast_data_quality_warning ? "⚠ Data mismatch — sync Buildexact" : null} />
       </div>
 
       {/* Underclaim alert */}

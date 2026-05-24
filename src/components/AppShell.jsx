@@ -564,7 +564,7 @@ export default function AppShell() {
       {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-surface md:hidden">
         <div className="flex justify-around px-1 py-2">
-          {visibleDepts.map((dept) => {
+          {visibleDepts.filter(d => d.id !== "client_portal").map((dept) => {
             const active =
               (dept.id === "sales_marketing" && location.pathname.startsWith("/sales")) ||
               (dept.id === "tender" && location.pathname.startsWith("/tender-manager")) ||

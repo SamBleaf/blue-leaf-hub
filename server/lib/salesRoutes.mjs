@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -176,7 +177,7 @@ const PTSA_TEMPLATE_B64 = "UEsDBAoAAAAIAGsLt1wxpqS4/gAAADoCAAATAAAAW0NvbnRlbnRfV
 export function registerSalesRoutes(app) {
 
   // ── Sales Scorecard ─────────────────────────────────────────────────────────
-  app.get("/api/sales/scorecard", async (req, res) => {
+  app.get("/api/sales/scorecard", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
 
@@ -264,7 +265,7 @@ export function registerSalesRoutes(app) {
   });
 
   // ── APB knowledge updates (surfaces new content from blueprint-agent) ────────
-  app.get("/api/sales/knowledge-updates", (req, res) => {
+  app.get("/api/sales/knowledge-updates", requireAuth, (req, res) => {
     if (!existsSync(KNOWLEDGE_DIR)) return res.json({ ok: true, updates: [] });
 
     const cutoffDays = Number(req.query.days || 14);
@@ -299,7 +300,7 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, updates });
   });
 
-  app.get("/api/sales/leads", async (req, res) => {
+  app.get("/api/sales/leads", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { data, error } = await sb
@@ -311,7 +312,7 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, leads: data || [] });
   });
 
-  app.get("/api/sales/leads/:id", async (req, res) => {
+  app.get("/api/sales/leads/:id", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { data: lead, error } = await sb
@@ -328,21 +329,27 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, lead, activities: activities || [] });
   });
 
-  app.post("/api/sales/leads", async (req, res) => {
+  app.post("/api/sales/leads", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const now = new Date().toISOString();
-    const insert = { ...req.body, created_at: now, updated_at: now, stage: req.body.stage || "enquiry", stage_entered_at: now, last_activity_at: now };
+    const body = req.body;
+    if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    const insert = { ...body, created_at: now, updated_at: now, stage: body.stage || "enquiry", stage_entered_at: now, last_activity_at: now };
     const { data, error } = await sb.from("leads").insert(insert).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
     await sb.from("lead_activities").insert({ lead_id: data.id, activity_type: "note", summary: "Lead created" });
     res.json({ ok: true, lead: data });
   });
 
-  app.patch("/api/sales/leads/:id", async (req, res) => {
+  app.patch("/api/sales/leads/:id", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
+    const body = req.body;
+    if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    const updates = { ...body, updated_at: new Date().toISOString() };
     const { data: current } = await sb.from("leads").select("stage").eq("id", req.params.id).single();
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
       updates.stage_entered_at = new Date().toISOString();
@@ -358,7 +365,7 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, lead: data });
   });
 
-  app.post("/api/sales/leads/:id/activities", async (req, res) => {
+  app.post("/api/sales/leads/:id/activities", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { activity_type, summary, detail, next_action, next_action_date } = req.body;
@@ -374,7 +381,7 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, activity: data });
   });
 
-  app.delete("/api/sales/leads/:id", async (req, res) => {
+  app.delete("/api/sales/leads/:id", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { error } = await sb.from("leads").update({ archived: true, updated_at: new Date().toISOString() }).eq("id", req.params.id);
@@ -385,7 +392,7 @@ export function registerSalesRoutes(app) {
   // ─── Conversations ────────────────────────────────────────────────────────
 
   // List conversations for a lead
-  app.get("/api/sales/leads/:id/conversations", async (req, res) => {
+  app.get("/api/sales/leads/:id/conversations", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { data, error } = await sb
@@ -398,7 +405,7 @@ export function registerSalesRoutes(app) {
   });
 
   // Get a single conversation (includes full transcript)
-  app.get("/api/sales/leads/:id/conversations/:convId", async (req, res) => {
+  app.get("/api/sales/leads/:id/conversations/:convId", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { data, error } = await sb
@@ -412,7 +419,7 @@ export function registerSalesRoutes(app) {
   });
 
   // Analyse a transcript — returns suggestions without saving yet
-  app.post("/api/sales/leads/:id/conversations/analyse", async (req, res) => {
+  app.post("/api/sales/leads/:id/conversations/analyse", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { transcript } = req.body;
@@ -429,7 +436,7 @@ export function registerSalesRoutes(app) {
   });
 
   // Save conversation + optionally apply suggestions
-  app.post("/api/sales/leads/:id/conversations", async (req, res) => {
+  app.post("/api/sales/leads/:id/conversations", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const { title, transcript, bp_suggestions, applied_fields } = req.body;
@@ -500,7 +507,7 @@ export function registerSalesRoutes(app) {
 
   // ─── PTSA Document Generation ─────────────────────────────────────────────
 
-  app.post("/api/sales/leads/:id/ptsa/generate-docx", async (req, res) => {
+  app.post("/api/sales/leads/:id/ptsa/generate-docx", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
 

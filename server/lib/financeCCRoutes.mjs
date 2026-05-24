@@ -84,7 +84,7 @@ export function registerFinanceCCRoutes(app) {
 
   // ── Budget: list ──────────────────────────────────────────────────────────
   // Returns all 37 trade categories with their job_budget row (or nulls if not seeded)
-  app.get("/api/finance/jobs/:jobId/budget", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/budget", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     const [catsRes, budgetsRes] = await Promise.all([
@@ -102,7 +102,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Budget: seed from Buildxact (via Cost Intelligence estimate sync) ───
-  app.post("/api/finance/jobs/:jobId/budget/seed", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/budget/seed", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     try {
@@ -130,7 +130,7 @@ export function registerFinanceCCRoutes(app) {
   // ── Budget: CSV import ────────────────────────────────────────────────────
   // Body: { csv: "<base64 or raw text>" }
   // Format: one line per trade — "Category Name,amount" or "trade_category_id,amount"
-  app.post("/api/finance/jobs/:jobId/budget/import", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/budget/import", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const { csv } = req.body || {};
     if (!csv) return res.status(400).json({ ok: false, error: "csv field required" });
@@ -182,7 +182,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Budget: edit a single line ────────────────────────────────────────────
-  app.put("/api/finance/jobs/:jobId/budget/:tradeCategoryId", async (req, res) => {
+  app.put("/api/finance/jobs/:jobId/budget/:tradeCategoryId", requireAuth, async (req, res) => {
     const { jobId, tradeCategoryId } = req.params;
     const { budget_amount, forecast_amount, forecast_notes, reason } = req.body || {};
 
@@ -251,7 +251,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Budget: history for a line ────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/budget/:tradeCategoryId/history", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/budget/:tradeCategoryId/history", requireAuth, async (req, res) => {
     const { jobId, tradeCategoryId } = req.params;
     const sb = getServiceSupabase();
     const { data: budget } = await sb.from("job_budgets")
@@ -264,7 +264,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Job financials summary (for Command Centre KPI bar) ───────────────────
-  app.get("/api/finance/jobs/:jobId/summary", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/summary", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
 
@@ -311,6 +311,10 @@ export function registerFinanceCCRoutes(app) {
       ? ((contractValue - forecastTotalCost) / contractValue) * 100
       : null;
 
+    // Flag data mismatch — contract value and forecast cost are from different sources
+    // and can diverge wildly if one isn't synced (e.g. Buildexact estimate vs signed contract)
+    const forecastDataQualityWarning = forecastMarginPct != null && Math.abs(forecastMarginPct) > 200;
+
     const targetMargin = Number(job.target_margin_pct || 40);
 
     // Underclaim detection: needs schedule % complete (Phase H). Return raw numbers for now.
@@ -337,14 +341,15 @@ export function registerFinanceCCRoutes(app) {
         actual_costs: Math.round(actualCosts * 100) / 100,
         forecast_total_cost: forecastTotalCost || null,
         working_margin_pct: workingMarginPct != null ? Math.round(workingMarginPct * 10) / 10 : null,
-        forecast_margin_pct: forecastMarginPct != null ? Math.round(forecastMarginPct * 10) / 10 : null
+        forecast_margin_pct: forecastMarginPct != null ? Math.round(forecastMarginPct * 10) / 10 : null,
+        forecast_data_quality_warning: forecastDataQualityWarning
       }
     });
   });
 
   // ── Command Centre aggregate (single round-trip for full page load) ────────
   // Combines: summary KPIs + budget/actuals + wipaa + requires-action + claims/variations summary
-  app.get("/api/finance/jobs/:jobId/command-centre", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/command-centre", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
 
@@ -477,7 +482,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Job: update financial fields (target margin, forecast cost, original contract) ──
-  app.patch("/api/finance/jobs/:jobId/financials", async (req, res) => {
+  app.patch("/api/finance/jobs/:jobId/financials", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const allowed = ["target_margin_pct", "floor_margin_pct", "forecast_total_cost", "original_contract_value", "financial_locked"];
     const updates = { updated_at: new Date().toISOString() };
@@ -497,7 +502,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── WIPAA: current calculation ────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/wipaa/current", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/wipaa/current", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     const [jobRes, docsRes, variationsRes] = await Promise.all([
@@ -551,7 +556,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── WIPAA: save review snapshot ───────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/wipaa/review", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/wipaa/review", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const { forecast_total_cost, notes, pct_complete } = req.body || {};
     const sb = getServiceSupabase();
@@ -593,7 +598,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── WIPAA: history ────────────────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/wipaa/history", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/wipaa/history", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("wipaa_reviews")
       .select("*").eq("job_id", req.params.jobId).order("review_date", { ascending: false });
@@ -602,7 +607,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Budget: actual costs by trade (for Budget vs Actual view) ────────────
-  app.get("/api/finance/jobs/:jobId/budget/actuals", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/budget/actuals", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     const [budgetsRes, docsRes] = await Promise.all([
@@ -703,7 +708,7 @@ export function registerFinanceCCRoutes(app) {
 
   // ── Load fee schedule for a job ─────────────────────────────────────────────
   // Returns staged schedule with: stage, label, pct, amount_ex_gst, claimed, remaining
-  app.get("/api/finance/jobs/:jobId/claims/schedule", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/claims/schedule", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
 
@@ -774,7 +779,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── List claims ─────────────────────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/claims", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/claims", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("progress_claims")
       .select("*, progress_claim_payments(payment_amount, payment_date, payment_method, payment_reference)")
@@ -790,7 +795,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Create claim ────────────────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/claims", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/claims", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const { stage, description, amount_ex_gst, claim_reference } = req.body || {};
     if (!stage) return res.status(400).json({ ok: false, error: "stage required" });
@@ -843,7 +848,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Update claim (draft only) ────────────────────────────────────────────────
-  app.put("/api/finance/jobs/:jobId/claims/:claimId", async (req, res) => {
+  app.put("/api/finance/jobs/:jobId/claims/:claimId", requireAuth, async (req, res) => {
     const { claimId } = req.params;
     const sb = getServiceSupabase();
     const { data: existing } = await sb.from("progress_claims").select("status").eq("id", claimId).single();
@@ -860,7 +865,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Issue claim (draft → issued): generate PDF + email ──────────────────────
-  app.post("/api/finance/jobs/:jobId/claims/:claimId/send", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/claims/:claimId/send", requireAuth, async (req, res) => {
     const { jobId, claimId } = req.params;
     const { email_to, email_cc } = req.body || {};
     const sb = getServiceSupabase();
@@ -1019,7 +1024,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Record payment ───────────────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/claims/:claimId/pay", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/claims/:claimId/pay", requireAuth, async (req, res) => {
     const { claimId } = req.params;
     const { payment_amount, payment_date, payment_reference, payment_method } = req.body || {};
     if (!payment_amount || !payment_date) return res.status(400).json({ ok: false, error: "payment_amount and payment_date required" });
@@ -1054,7 +1059,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Void claim ──────────────────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/claims/:claimId/void", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/claims/:claimId/void", requireAuth, async (req, res) => {
     const { claimId } = req.params;
     const { reason } = req.body || {};
     const sb = getServiceSupabase();
@@ -1451,7 +1456,7 @@ export function registerFinanceCCRoutes(app) {
   // ════════════════════════════════════════════════════════════════════════════
 
   // ── List variations ──────────────────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/variations", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/variations", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("job_variations")
       .select("*, trade_categories(name)")
@@ -1466,7 +1471,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Create variation (draft) ─────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/variations", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/variations", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const { title, description, trade_category_id, cost_to_builder, amount_ex_gst, line_items, eot_days } = req.body || {};
     if (!title) return res.status(400).json({ ok: false, error: "title required" });
@@ -1502,7 +1507,7 @@ export function registerFinanceCCRoutes(app) {
   // ── Buildxact recipes for quantity-based pricing ─────────────────────────────
   // Returns flattened line items from the active Buildxact estimate for this job.
   // Each item: { id, category, description, unit_cost, uom, suggested_qty }
-  app.get("/api/finance/jobs/:jobId/variations/recipes", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/variations/recipes", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     if (!buildexactConfigured()) {
       return res.json({ ok: true, recipes: [], source: "none", message: "Buildxact not configured" });
@@ -1542,7 +1547,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Update variation (draft only) ────────────────────────────────────────────
-  app.put("/api/finance/jobs/:jobId/variations/:vid", async (req, res) => {
+  app.put("/api/finance/jobs/:jobId/variations/:vid", requireAuth, async (req, res) => {
     const { vid } = req.params;
     const sb = getServiceSupabase();
     const { data: existing } = await sb.from("job_variations").select("status").eq("id", vid).single();
@@ -1563,7 +1568,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Send variation to client: PDF + email ────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/variations/:vid/send", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/variations/:vid/send", requireAuth, async (req, res) => {
     const { jobId, vid } = req.params;
     const { email_to, email_cc } = req.body || {};
     const sb = getServiceSupabase();
@@ -1645,7 +1650,7 @@ export function registerFinanceCCRoutes(app) {
 
   // ── Sign variation (admin marks as signed after client approval) ─────────────
   // E6: contract_value is recalculated live in /summary — no stored update needed
-  app.post("/api/finance/jobs/:jobId/variations/:vid/sign", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/variations/:vid/sign", requireAuth, async (req, res) => {
     const { jobId, vid } = req.params;
     const sb = getServiceSupabase();
     const { data: existing } = await sb.from("job_variations").select("status, amount_ex_gst").eq("id", vid).single();
@@ -1676,7 +1681,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Reject variation ─────────────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/variations/:vid/reject", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/variations/:vid/reject", requireAuth, async (req, res) => {
     const { vid } = req.params;
     const { reason } = req.body || {};
     const sb = getServiceSupabase();
@@ -1688,7 +1693,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Void variation ───────────────────────────────────────────────────────────
-  app.post("/api/finance/jobs/:jobId/variations/:vid/void", async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/variations/:vid/void", requireAuth, async (req, res) => {
     const { vid } = req.params;
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("job_variations")
@@ -1816,7 +1821,7 @@ export function registerFinanceCCRoutes(app) {
   }
 
   // ── Cashflow forecast (next 3 months) ─────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/cashflow", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/cashflow", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
@@ -1959,7 +1964,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Requires Action ───────────────────────────────────────────────────────
-  app.get("/api/finance/jobs/:jobId/requires-action", async (req, res) => {
+  app.get("/api/finance/jobs/:jobId/requires-action", requireAuth, async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
     const [invoicesRes, claimsRes] = await Promise.all([
@@ -1984,7 +1989,7 @@ export function registerFinanceCCRoutes(app) {
   });
 
   // ── Migrate progress_billed → progress_claims ─────────────────────────────
-  app.post("/api/finance/jobs/:jobId/migrate-progress-billed", requireRole("admin"), async (req, res) => {
+  app.post("/api/finance/jobs/:jobId/migrate-progress-billed", requireAuth, requireRole("admin"), async (req, res) => {
     const { jobId } = req.params;
     const sb = getServiceSupabase();
 

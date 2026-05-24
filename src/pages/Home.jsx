@@ -138,7 +138,7 @@ function PipelineRow({ stage, count, value, maxCount, onNavigate }) {
 }
 
 const QUICK_LINKS = [
-  { label: "📋 New Lead", to: "/sales" },
+  { label: "📋 New Lead", to: "/sales", state: { openNewLead: true } },
   { label: "📦 New RFQ Package", to: "/tender-manager/rfq-packages" },
   { label: "📅 Schedule", to: "/operations" },
   { label: "💰 Approval Queue", to: "/finance/approvals" }
@@ -340,7 +340,7 @@ export default function Home() {
                         ) : null}
                       </div>
                       <p className="mt-1 text-xs text-muted">
-                        Contract {currencyFmt.format(Number(job.contract_value) || 0)}
+                        Contract {job.contract_value ? currencyFmt.format(Number(job.contract_value)) : "TBC"}
                       </p>
                     </Link>
                   </li>

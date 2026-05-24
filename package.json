@@ -7,7 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "concurrently -n api,vite -c blue,green \"node server/dev-api.mjs\" \"vite\"",
+    "dev": "concurrently -n api,vite -c blue,green \"nodemon --watch server server/dev-api.mjs\" \"vite\"",
+    "dev:api": "nodemon --watch server server/dev-api.mjs",
     "start": "node server/dev-api.mjs",
     "build": "vite build",
     "preview": "vite preview",
@@ -63,6 +64,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.0.0",
+    "nodemon": "^3.1.14",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "vite": "^6.3.5",

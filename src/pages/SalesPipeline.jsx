@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
+import { authFetch } from "../lib/authFetch.js";
 import SalesScorecard from "../components/sales/SalesScorecard.jsx";
 
 const STAGES = [
@@ -192,7 +193,7 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
       const body = { ...form };
       if (body.estimated_value) body.estimated_value = parseFloat(body.estimated_value) || null;
       else delete body.estimated_value;
-      const r = await fetch("/api/sales/leads", {
+      const r = await authFetch("/api/sales/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -294,7 +295,7 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
       };
       if (body.estimated_value) body.estimated_value = parseFloat(body.estimated_value) || null;
       else delete body.estimated_value;
-      const r = await fetch("/api/sales/leads", {
+      const r = await authFetch("/api/sales/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -558,6 +559,7 @@ function ListView({ leads, onQuickNote, onNav }) {
 
 export default function SalesPipeline() {
   const nav = useNavigate();
+  const location = useLocation();
   const { setScreenContext } = useBlueprintContext() || {};
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -573,10 +575,18 @@ export default function SalesPipeline() {
     return () => setScreenContext?.(null);
   }, [setScreenContext]);
 
+  useEffect(() => {
+    if (location.state?.openNewLead) {
+      setAddOpen(true);
+      // Clear the state so refreshing doesn't reopen the modal
+      nav(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, nav]);
+
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const r = await fetch("/api/sales/leads");
+      const r = await authFetch("/api/sales/leads");
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
       setLeads(j.leads || []);

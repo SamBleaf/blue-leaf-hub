@@ -2,6 +2,7 @@ import { getJobById } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate, syncAcceptedQuoteToBuildexact, syncFeeProposalAcceptedToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { upsertJobKnowledge } from "./jobResolver.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 
 function pickBuildexactEstimateId(raw, estimate) {
   return String(
@@ -60,7 +61,7 @@ async function persistPulledEstimate(sb, buildexactJobId, pulled, jobId = null) 
 }
 
 export function registerBuildexactIntegrationRoutes(app) {
-  app.get("/api/buildexact/job/:buildexactJobId/estimate", async (req, res) => {
+  app.get("/api/buildexact/job/:buildexactJobId/estimate", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -101,7 +102,7 @@ export function registerBuildexactIntegrationRoutes(app) {
     }
   });
 
-  app.patch("/api/rfq/:rfqId", async (req, res) => {
+  app.patch("/api/rfq/:rfqId", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -133,7 +134,7 @@ export function registerBuildexactIntegrationRoutes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/:id/accept", async (req, res) => {
+  app.post("/api/fee-proposal/:id/accept", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
