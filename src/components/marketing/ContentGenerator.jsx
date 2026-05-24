@@ -389,7 +389,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
         {draft && (
           <div className="space-y-4">
             {/* Content preview */}
-            <ContentPreview draft={draft} />
+            <ContentPreview draft={draft} channel={channel} />
 
             {/* Review panel */}
             <ReviewPanel
@@ -433,7 +433,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
   );
 }
 
-function ContentPreview({ draft }) {
+function ContentPreview({ draft, channel }) {
   const [copied, setCopied] = useState(false);
   const content = draft.content || {};
 
@@ -483,10 +483,43 @@ function ContentPreview({ draft }) {
         </div>
       )}
 
+      {/* Email: subject + preview_text above body */}
+      {channel === "email" && content.subject && (
+        <div>
+          <p className="text-xs text-muted mb-1">Subject</p>
+          <p className="text-sm font-medium text-ink">{content.subject}</p>
+        </div>
+      )}
+      {channel === "email" && content.preview_text && (
+        <p className="text-xs text-muted italic">{content.preview_text}</p>
+      )}
+
       {content.body && (
         <div>
           <p className="text-xs text-muted mb-1">Body</p>
-          <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">{content.body}</p>
+          <p
+            className="text-sm text-ink whitespace-pre-wrap leading-relaxed"
+            style={channel === "website" ? { lineHeight: "1.75" } : undefined}
+          >
+            {content.body}
+          </p>
+          {/* Instagram: character count */}
+          {channel === "instagram" && (
+            <p className={[
+              "text-xs mt-1 tabular-nums",
+              (content.body?.length || 0) > 300 ? "text-red-500" :
+              (content.body?.length || 0) > 150 ? "text-amber-500" :
+              "text-emerald-600",
+            ].join(" ")}>
+              {content.body?.length || 0} / 2200
+            </p>
+          )}
+          {/* Facebook: character count (no limit indicator) */}
+          {channel === "facebook" && (
+            <p className="text-xs text-muted mt-1 tabular-nums">
+              {content.body?.length || 0} characters
+            </p>
+          )}
         </div>
       )}
 

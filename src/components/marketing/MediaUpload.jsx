@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import FinalAssembly from "./FinalAssembly.jsx";
+import BatchGenerator from "./BatchGenerator.jsx";
 import { getSupabase } from "../../lib/supabaseClient.js";
 import { authFetch } from "../../lib/authFetch.js";
 
@@ -40,6 +41,7 @@ export default function MediaUpload({ onGeneratePost }) {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
   const [showAssembly, setShowAssembly] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
   const fileRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -160,6 +162,17 @@ export default function MediaUpload({ onGeneratePost }) {
     );
   }
 
+  if (showBatch && selected) {
+    return (
+      <div>
+        <BatchGenerator
+          asset={selected}
+          onDone={() => { setShowBatch(false); }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Left — upload + asset list */}
@@ -227,7 +240,12 @@ export default function MediaUpload({ onGeneratePost }) {
             onConsent={() => grantConsent(selected.id)}
             onAssemble={() => setShowAssembly(true)}
             onGeneratePost={() => onGeneratePost?.(selected)}
+            onBatchGenerate={() => setShowBatch(true)}
             onClose={() => setSelected(null)}
+            onReanalysed={(updated) => {
+              setSelected(updated);
+              setAssets(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a));
+            }}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted text-sm border-2 border-dashed border-hairline rounded-xl p-6 min-h-[200px]">
@@ -291,8 +309,21 @@ function AssetCard({ asset, selected, onClick }) {
   );
 }
 
-function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onClose }) {
+function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onClose, onReanalysed }) {
   const isVideo = asset.mime_type?.startsWith("video/");
+  const [analysing, setAnalysing] = useState(false);
+  const hasAnalysis = !!asset.analysis?.summary;
+
+  async function reanalyse() {
+    setAnalysing(true);
+    try {
+      const r = await authFetch(`/api/marketing/media/${asset.id}/analyse`, { method: "POST" });
+      const j = await r.json();
+      if (r.ok && j.analysis) onReanalysed?.({ ...asset, analysis: j.analysis, stage_detected: j.analysis.stage || asset.stage_detected });
+    } catch { /* non-fatal */ } finally {
+      setAnalysing(false);
+    }
+  }
 
   return (
     <div className="bg-surface border border-hairline rounded-xl p-4 space-y-4 sticky top-4">
@@ -327,10 +358,34 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onClose }) 
       </div>
 
       {/* AI analysis summary */}
-      {asset.analysis?.summary && (
+      {hasAnalysis ? (
         <div className="bg-slate-50 rounded-lg px-3 py-2">
-          <p className="text-xs font-medium text-ink mb-1">AI Analysis</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs font-medium text-ink">AI Analysis</p>
+            <button
+              onClick={reanalyse}
+              disabled={analysing}
+              className="text-[10px] text-muted hover:text-ink underline underline-offset-2 disabled:opacity-50"
+            >
+              {analysing ? "Analysing…" : "Re-analyse"}
+            </button>
+          </div>
           <p className="text-xs text-muted leading-relaxed">{asset.analysis.summary}</p>
+          {asset.analysis.suggested_caption_hook && (
+            <p className="text-xs text-primary/80 italic mt-1">&ldquo;{asset.analysis.suggested_caption_hook}&rdquo;</p>
+          )}
+        </div>
+      ) : !isVideo && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+          <p className="text-xs font-medium text-ink mb-1">No AI analysis yet</p>
+          <p className="text-xs text-muted mb-2">Analysis runs automatically on new uploads. Click to run it now.</p>
+          <button
+            onClick={reanalyse}
+            disabled={analysing}
+            className="text-xs bg-slate-700 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"
+          >
+            {analysing ? "Analysing…" : "Analyse this photo"}
+          </button>
         </div>
       )}
 
@@ -356,13 +411,25 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onClose }) 
       )}
 
       {!isVideo && asset.consent_for_marketing && (
-        <button
-          type="button"
-          onClick={onGeneratePost}
-          className="w-full bg-primary text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors"
-        >
-          Generate post from this photo →
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={onGeneratePost}
+            className="w-full bg-primary text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+          >
+            Generate post from this photo →
+          </button>
+          {asset.analysis?.summary && (
+            <button
+              type="button"
+              onClick={onBatchGenerate}
+              className="w-full bg-emerald-600 text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition-colors"
+            >
+              Generate all formats →
+              <span className="text-xs opacity-75 ml-1">(6 posts at once)</span>
+            </button>
+          )}
+        </div>
       )}
 
       {/* Assemble button */}

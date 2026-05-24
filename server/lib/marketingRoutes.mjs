@@ -70,15 +70,25 @@ async function buildGenerationMessages(sb, mode, generationContext, enrichedRequ
       .single();
 
     if (asset) {
-      const { data: urlData } = sb.storage
-        .from(asset.storage_bucket || "marketing-media")
-        .getPublicUrl(asset.storage_path);
-
-      if (urlData?.publicUrl) {
-        userContent.push({
-          type: "image",
-          source: { type: "url", url: urlData.publicUrl },
-        });
+      try {
+        // Download via service role (works for both public and private buckets)
+        const { data: fileData, error: dlErr } = await sb.storage
+          .from(asset.storage_bucket || "marketing-media")
+          .download(asset.storage_path);
+        if (!dlErr && fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString("base64");
+          userContent.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: asset.mime_type || "image/jpeg",
+              data: base64,
+            },
+          });
+        }
+      } catch (_imgErr) {
+        // Non-fatal — generate without image if download fails
       }
     }
   }
@@ -234,6 +244,43 @@ export function registerMarketingRoutes(app) {
         res.end();
       }
     }
+  });
+
+  /**
+   * POST /api/marketing/generate/all-save
+   * Bulk-save an array of generated results to marketing_content_items.
+   */
+  app.post("/api/marketing/generate/all-save", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ error: "DB not configured" });
+
+    const { items = [] } = req.body;
+    if (!items.length) return res.status(400).json({ error: "No items to save" });
+
+    const rows = items.map((item) => {
+      const c = item.content || {};
+      return {
+        channel:         item.channel,
+        pillar:          item.pillar || "the_work",
+        client_stage:    item.client_stage || null,
+        topic:           item.topic || "",
+        title:           c.title || null,
+        body:            c.body || null,
+        cta:             c.cta || null,
+        hashtags:        c.hashtags || [],
+        structured_body: {},
+        status:          "draft",
+        review_scores:   item.review_scores || {},
+        media_source_id: item.media_source_id || null,
+        tags:            [],
+        created_by:      req.caller.id,
+        updated_at:      new Date().toISOString(),
+      };
+    });
+
+    const { data, error } = await sb.from("marketing_content_items").insert(rows).select("id, channel");
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true, saved: data });
   });
 
   // ── Stage 1: Content Items CRUD ─────────────────────────────────────────────
