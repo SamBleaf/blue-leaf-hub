@@ -50,7 +50,7 @@ export function labelForTrade(tradeId, mergedPlan = [], fallbackMap = {}) {
 }
 
 export async function generateMissingPackageScopes(packageId) {
-  const res = await fetch(`/api/rfq-packages/${packageId}/generate-missing-scopes`, {
+  const res = await authFetch(`/api/rfq-packages/${packageId}/generate-missing-scopes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})

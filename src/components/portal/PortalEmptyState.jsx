@@ -1,17 +1,13 @@
-import { BRAND_ICON_BLUE } from "../../lib/brandAssets.js";
-
-export default function PortalEmptyState({ title, message }) {
+export default function PortalEmptyState({ icon, title, message }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-      <img
-        src={BRAND_ICON_BLUE}
-        alt=""
-        aria-hidden
-        className="brand-mark-on-light mb-5 h-16 w-auto opacity-[0.28]"
-        draggable={false}
-      />
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      {icon && (
+        <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-2xl">
+          {icon}
+        </div>
+      )}
       <p className="text-base font-semibold text-ink mb-1">{title}</p>
-      <p className="text-sm text-muted max-w-xs leading-relaxed">{message}</p>
+      <p className="text-sm text-muted max-w-xs">{message}</p>
     </div>
   );
 }

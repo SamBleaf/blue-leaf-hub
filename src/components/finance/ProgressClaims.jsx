@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 
 const fmt = n => n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
@@ -47,7 +48,7 @@ function NewClaimModal({ jobId, schedule, contractValue, onSaved, onClose }) {
   async function submit() {
     if (!amountEx || !selected) return;
     setSaving(true); setError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/claims`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/claims`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage: selected.stage, description, amount_ex_gst: amountEx })
     });
@@ -158,7 +159,7 @@ function IssueModal({ jobId, claim, onSent, onClose }) {
 
   async function send() {
     setSending(true); setError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/claims/${claim.id}/send`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/claims/${claim.id}/send`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email_to: emailTo || undefined, email_cc: emailCc || undefined })
     });
@@ -256,7 +257,7 @@ function PaymentModal({ jobId, claim, onPaid, onClose }) {
 
   async function save() {
     setSaving(true); setError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/claims/${claim.id}/pay`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/claims/${claim.id}/pay`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payment_amount: Number(amount), payment_date: date, payment_reference: reference, payment_method: "eft" })
     });

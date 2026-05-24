@@ -239,7 +239,7 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
     if (!transcript.trim()) return;
     setStep("analysing"); setErr("");
     try {
-      const r = await fetch(`/api/sales/leads/${leadId}/conversations/analyse`, {
+      const r = await authFetch(`/api/sales/leads/${leadId}/conversations/analyse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript: transcript.trim() })
@@ -290,7 +290,7 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
       if (selected.next_action && s.next_action) applied.next_action = s.next_action;
       if (selected.next_action_date && s.next_action_date) applied.next_action_date = s.next_action_date;
 
-      const r = await fetch(`/api/sales/leads/${leadId}/conversations`, {
+      const r = await authFetch(`/api/sales/leads/${leadId}/conversations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -699,7 +699,7 @@ export default function LeadDetail() {
   }, [load, setScreenContext]);
 
   async function patch(updates) {
-    const r = await fetch(`/api/sales/leads/${leadId}`, {
+    const r = await authFetch(`/api/sales/leads/${leadId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates)
@@ -714,7 +714,7 @@ export default function LeadDetail() {
     if (!actSummary.trim()) return;
     setActBusy(true);
     try {
-      await fetch(`/api/sales/leads/${leadId}/activities`, {
+      await authFetch(`/api/sales/leads/${leadId}/activities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activity_type: actType, summary: actSummary, next_action: actNextAction || undefined, next_action_date: actNextDate || undefined })
@@ -784,7 +784,7 @@ export default function LeadDetail() {
     setGeneratingPTSA(true);
     setPtsaError("");
     try {
-      const r = await fetch(`/api/sales/leads/${leadId}/ptsa/generate-docx`, { method: "POST" });
+      const r = await authFetch(`/api/sales/leads/${leadId}/ptsa/generate-docx`, { method: "POST" });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || `Server error ${r.status}`);

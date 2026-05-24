@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
-import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus } from '../../src/blueprint/agent/runAgent.js';
+import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus, buildChatSystemPrompt } from '../../src/blueprint/agent/runAgent.js';
+import { requireAuth } from './requireAuth.mjs';
 import { courseNameFromMarkdown } from '../../src/blueprint/lib/knowledgeChunking.js';
 import { indexLearnedKnowledge } from '../../src/blueprint/lib/knowledgeIndex.js';
 import { runAttachmentDocumentReview } from '../../src/blueprint/lib/documentReview.js';
@@ -256,6 +257,48 @@ export function registerBlueprintRoutes(app) {
       tools: ['web_search', 'hub_list_subcontractors', 'hub_update_subcontractor', 'hub_list_jobs'],
       ...getHubStatus(),
     });
+  });
+
+  app.post('/api/blueprint/chat/stream', requireAuth, async (req, res) => {
+    try {
+      const { messages, jobContext, hubContext, attachments } = req.body;
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        return res.status(422).json({ fallback: true, reason: 'attachments' });
+      }
+      const chatMessages = sanitizeMessages(messages);
+      const lastUserText = [...chatMessages].reverse().find((m) => m.role === 'user')?.content || '';
+      const systemPrompt = await buildChatSystemPrompt('chat', lastUserText, { jobContext, hubContext });
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+      const stream = await getAnthropic().messages.stream(
+        {
+          model: MODEL,
+          max_tokens: Math.min(MAX_TOKENS, 8000),
+          system: systemPrompt
+            ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+            : undefined,
+          messages: chatMessages,
+        },
+        { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+      );
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+        }
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (err) {
+      console.error('[blueprint/chat/stream]', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.end();
+      }
+    }
   });
 
   app.post('/api/blueprint/chat', async (req, res) => {

@@ -168,14 +168,14 @@ function IntelligenceTab() {
   async function syncMetrics() {
     if (!selectedJobId) return;
     setSyncing(true);
-    const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/sync`, { method: "POST" });
+    const r = await authFetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/sync`, { method: "POST" });
     const j = await r.json();
     if (j.ok) setMetrics(j.metrics);
     setSyncing(false);
   }
 
   async function saveMetrics(form) {
-    const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics`, {
+    const r = await authFetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
     });
     const j = await r.json();
@@ -189,7 +189,7 @@ function IntelligenceTab() {
     const reader = new FileReader();
     reader.onload = async ev => {
       const b64 = ev.target.result.split(",")[1];
-      const r = await fetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/extract`, {
+      const r = await authFetch(`/api/cost-intelligence/jobs/${selectedJobId}/metrics/extract`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pdf_base64: b64, filename: file.name }),
       });
@@ -475,7 +475,7 @@ function TrendsTab() {
   const loadTrend = useCallback(async (tradeId, per) => {
     if (!tradeId) return;
     setLoading(true); setTrendData(null);
-    const r = await fetch(`/api/cost-intelligence/trends/${tradeId}?period=${per}`);
+    const r = await authFetch(`/api/cost-intelligence/trends/${tradeId}?period=${per}`);
     const j = await r.json().catch(() => null);
     if (j?.ok) setTrendData(j);
     setLoading(false);

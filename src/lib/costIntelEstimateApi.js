@@ -9,14 +9,14 @@ export async function fetchBuildxactTemplate() {
 }
 
 export async function fetchJobEstimateBreakdown(jobId) {
-  const res = await fetch(`/api/cost-intelligence/jobs/${jobId}/estimate`);
+  const res = await authFetch(`/api/cost-intelligence/jobs/${jobId}/estimate`);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Failed to load estimate");
   return json;
 }
 
 export async function syncJobEstimateFromBuildxact(jobId) {
-  const res = await fetch(`/api/cost-intelligence/jobs/${jobId}/sync-estimate`, {
+  const res = await authFetch(`/api/cost-intelligence/jobs/${jobId}/sync-estimate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}"

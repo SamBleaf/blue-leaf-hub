@@ -14,7 +14,7 @@ import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const MODEL = "claude-sonnet-4-5";
+export const MODEL = "claude-sonnet-4-5";
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
@@ -249,6 +249,37 @@ export function runReviewChecks(draft, channel) {
 // ─── Content Generation ───────────────────────────────────────────────────────
 
 /**
+ * Build the system + user message for a marketing generation request.
+ * Exported so streaming routes can call Claude directly without going through generateContent().
+ */
+export function buildMarketingPrompt(mode, context, userRequest) {
+  const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.social_instagram;
+  const contextBlock = [
+    context.pillar          && `Content pillar: ${CONTENT_PILLARS[context.pillar]?.label || context.pillar}`,
+    context.client_stage    && `Client stage: ${context.client_stage}`,
+    context.topic           && `Topic: ${context.topic}`,
+    context.project_context && `Project context: ${context.project_context}`,
+    context.photo_analysis  && `Photo analysis:\n${JSON.stringify(context.photo_analysis, null, 2)}`,
+  ].filter(Boolean).join("\n");
+  const userMessage = [modePrompt, "", contextBlock, "", `Request: ${userRequest}`].join("\n");
+  return { systemPrompt: MARKETING_SYSTEM_PROMPT, userMessage };
+}
+
+/**
+ * Parse raw LLM text (possibly with markdown fences) into a JS object.
+ */
+export function parseMarketingResponse(rawText) {
+  const jsonStr = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    const match = jsonStr.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error(`Model returned non-JSON response: ${rawText.slice(0, 300)}`);
+  }
+}
+
+/**
  * Generate marketing content via Claude.
  * @param {string} mode - one of the MODE_PROMPTS keys
  * @param {object} context - { pillar, client_stage, topic, project_context, job_context }
@@ -256,46 +287,20 @@ export function runReviewChecks(draft, channel) {
  */
 export async function generateContent(mode, context, userRequest) {
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-
-  const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.social_instagram;
-
-  const contextBlock = [
-    context.pillar         && `Content pillar: ${CONTENT_PILLARS[context.pillar]?.label || context.pillar}`,
-    context.client_stage   && `Client stage: ${context.client_stage}`,
-    context.topic          && `Topic: ${context.topic}`,
-    context.project_context && `Project context: ${context.project_context}`,
-    context.photo_analysis  && `Photo analysis:\n${JSON.stringify(context.photo_analysis, null, 2)}`,
-  ].filter(Boolean).join("\n");
-
-  const userPrompt = [
-    modePrompt,
-    "",
-    contextBlock,
-    "",
-    `Request: ${userRequest}`,
-  ].join("\n");
-
+  const { systemPrompt, userMessage } = buildMarketingPrompt(mode, context, userRequest);
   const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 2048,
-    temperature: 0.7,
-    system: MARKETING_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userPrompt }],
-  });
-
+  const response = await client.messages.create(
+    {
+      model: MODEL,
+      max_tokens: 2048,
+      temperature: 0.7,
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: userMessage }],
+    },
+    { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+  );
   const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
-  // Strip any accidental markdown fences
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    // Try to extract JSON object from the response
-    const match = jsonStr.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error(`Model returned non-JSON response: ${raw.slice(0, 300)}`);
-  }
+  return parseMarketingResponse(raw);
 }
 
 // ─── Photo Analysis Prompt ────────────────────────────────────────────────────

@@ -384,7 +384,7 @@ function QuickNoteModal({ lead, onClose, onSaved }) {
     if (!summary.trim()) return;
     setBusy(true);
     try {
-      await fetch(`/api/sales/leads/${lead.id}/activities`, {
+      await authFetch(`/api/sales/leads/${lead.id}/activities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activity_type: type, summary, next_action: nextAction || undefined, next_action_date: nextDate || undefined })
@@ -600,7 +600,7 @@ export default function SalesPipeline() {
   useEffect(() => { load(); }, [load]);
 
   async function moveStage(lead, newStage) {
-    await fetch(`/api/sales/leads/${lead.id}`, {
+    await authFetch(`/api/sales/leads/${lead.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage: newStage })

@@ -265,7 +265,7 @@ export default function TenderDetail() {
 
   async function updateRfq(id, patch) {
     if (readOnly) return;
-    const res = await fetch(`/api/rfq/${encodeURIComponent(id)}`, {
+    const res = await authFetch(`/api/rfq/${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch)
@@ -278,7 +278,7 @@ export default function TenderDetail() {
   async function reextractAmount(rfqId) {
     setReextractBusy((p) => ({ ...p, [rfqId]: true }));
     try {
-      const res = await fetch(`/api/rfq/${rfqId}/reextract-amount`, { method: "POST" });
+      const res = await authFetch(`/api/rfq/${rfqId}/reextract-amount`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Re-extraction failed.");

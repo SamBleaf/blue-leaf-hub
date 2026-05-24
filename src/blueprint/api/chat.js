@@ -30,14 +30,74 @@ async function post(endpoint, body) {
   return res.json();
 }
 
-export const chat = (messages, extras) =>
-  post('chat', { messages, ...extras }).then(r => r.reply);
+async function getAuthHeader() {
+  try {
+    const { getSupabase } = await import('../../lib/supabaseClient.js');
+    const { data: { session } } = await getSupabase().auth.getSession();
+    return session?.access_token ? `Bearer ${session.access_token}` : '';
+  } catch {
+    return '';
+  }
+}
+
+export async function chat(messages, extras = {}, onChunk = null) {
+  if (!onChunk) {
+    return post('chat', { messages, ...extras }).then((r) => r.reply);
+  }
+
+  let response;
+  try {
+    const authHeader = await getAuthHeader();
+    response = await fetch(`${BASE}/api/blueprint/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
+      body: JSON.stringify({ messages, ...extras }),
+    });
+  } catch {
+    return post('chat', { messages, ...extras }).then((r) => r.reply);
+  }
+
+  if (!response.ok) {
+    return post('chat', { messages, ...extras }).then((r) => r.reply);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    for (const line of chunk.split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      const payload = line.slice(6).trim();
+      if (payload === '[DONE]') break;
+      let parsed;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.text) {
+        fullText += parsed.text;
+        onChunk(fullText);
+      }
+    }
+  }
+
+  return fullText;
+}
 
 export const reviewDocument = (documentText, documentType) =>
   post('review-document', { documentText, documentType });
 
 export const generateSOP = (messages) =>
-  post('generate-sop', { messages }).then(r => r.reply);
+  post('generate-sop', { messages }).then((r) => r.reply);
 
 export const troubleshoot = (messages) =>
-  post('troubleshoot', { messages }).then(r => r.reply);
+  post('troubleshoot', { messages }).then((r) => r.reply);

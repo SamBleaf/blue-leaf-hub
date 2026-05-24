@@ -1,6 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ReviewPanel from "./ReviewPanel.jsx";
 import { authFetch } from "../../lib/authFetch.js";
+import { getSupabase } from "../../lib/supabaseClient.js";
+
+function storageUrl(path) {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data } = sb.storage.from("marketing-media").getPublicUrl(path);
+  return data?.publicUrl || null;
+}
 
 // Map frontend channel value → backend mode (MODE_PROMPTS keys)
 const CHANNEL_TO_MODE = {
@@ -40,17 +50,37 @@ const CLIENT_STAGES = [
   { value: "post_handover",    label: "Post Handover" },
 ];
 
-export default function ContentGenerator() {
+export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
   const [channel, setChannel] = useState("instagram");
   const [pillar, setPillar] = useState("how_we_build");
   const [clientStage, setClientStage] = useState("");
   const [topic, setTopic] = useState("");
   const [context, setContext] = useState("");
+  const [photoContext, setPhotoContext] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [error, setError] = useState("");
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState(null);
+
+  useEffect(() => {
+    if (!seedAsset) return;
+    const summary = seedAsset.analysis?.summary || "";
+    const stage = seedAsset.stage_detected
+      ? `${seedAsset.stage_detected} stage`
+      : "";
+    setTopic(summary || stage || "Project photo");
+    setPillar("the_work");
+    setChannel("instagram");
+    setPhotoContext({
+      url: storageUrl(seedAsset.thumbnail_path || seedAsset.storage_path),
+      analysis: seedAsset.analysis,
+      assetId: seedAsset.id,
+    });
+    onSeedConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onSeedConsumed intentionally omitted
+  }, [seedAsset]);
 
   async function generate() {
     if (!topic.trim()) { setError("Add a topic or brief before generating."); return; }
@@ -58,23 +88,50 @@ export default function ContentGenerator() {
     setError("");
     setDraft(null);
     setSavedId(null);
+    setStreamingText("");
     try {
-      const r = await authFetch("/api/marketing/generate", {
+      const body = JSON.stringify({
+        mode: CHANNEL_TO_MODE[channel] || "social_instagram",
+        channel,
+        pillar,
+        client_stage: clientStage || undefined,
+        topic,
+        context: {
+          ...(context ? { project_context: context } : {}),
+          ...(photoContext?.analysis ? { photo_analysis: photoContext.analysis } : {}),
+        },
+        user_request: context ? `${topic}\n\nContext: ${context}` : topic,
+      });
+      const response = await authFetch("/api/marketing/generate/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: CHANNEL_TO_MODE[channel] || "social_instagram",
-          channel,
-          pillar,
-          client_stage: clientStage || undefined,
-          topic,
-          context: context ? { project_context: context } : {},
-          user_request: context ? `${topic}\n\nContext: ${context}` : topic,
-        }),
+        body,
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
-      setDraft(j);
+      if (!response.ok) {
+        const j = await response.json().catch(() => ({}));
+        throw new Error(j.error || `Error ${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") break;
+          let parsed;
+          try { parsed = JSON.parse(payload); } catch { continue; }
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.text) { accumulated += parsed.text; setStreamingText(accumulated); }
+          if (parsed.done) {
+            setDraft({ content: parsed.content, review_scores: parsed.review_scores });
+            setStreamingText("");
+          }
+        }
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -188,6 +245,34 @@ export default function ContentGenerator() {
           </div>
         </div>
 
+        {photoContext && (
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            {photoContext.url && (
+              <img
+                src={photoContext.url}
+                alt=""
+                className="w-10 h-10 rounded object-cover flex-shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-emerald-800">Photo attached</p>
+              <p className="text-xs text-emerald-700 truncate">
+                {photoContext.analysis?.summary || "Photo from media library"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPhotoContext(null)}
+              className="text-emerald-600 hover:text-emerald-800 flex-shrink-0"
+              aria-label="Remove photo"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         <div>
           <label className="block text-sm font-medium text-ink mb-1.5">
             Topic / Brief <span className="text-red-500">*</span>
@@ -268,7 +353,14 @@ export default function ContentGenerator() {
           </div>
         )}
 
-        {generating && (
+        {generating && streamingText && (
+          <div className="rounded-lg border border-hairline bg-page p-4 text-sm text-ink whitespace-pre-wrap font-mono opacity-70 min-h-[300px]">
+            {streamingText}
+            <span className="animate-pulse text-primary">▍</span>
+          </div>
+        )}
+
+        {generating && !streamingText && (
           <div className="h-full flex items-center justify-center text-center text-muted border-2 border-dashed border-hairline rounded-xl p-8 min-h-[300px]">
             <div>
               <svg className="animate-spin w-8 h-8 text-primary mx-auto mb-3" viewBox="0 0 24 24" fill="none">

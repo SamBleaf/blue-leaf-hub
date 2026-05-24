@@ -12,6 +12,9 @@ import { requireAuth, requireRole } from "./requireAuth.mjs";
 import {
   generateContent,
   runReviewChecks,
+  buildMarketingPrompt,
+  parseMarketingResponse,
+  MODEL,
   PHOTO_ANALYSIS_SYSTEM_PROMPT,
   PHOTO_ANALYSIS_USER_PROMPT,
 } from "./marketingAgent.mjs";
@@ -35,10 +38,22 @@ export function registerMarketingRoutes(app) {
    * Generate content via AI. Does NOT auto-save — user reviews first.
    */
   app.post("/api/marketing/generate", requireAuth, async (req, res) => {
-    const { mode, pillar, client_stage, context = {}, topic, user_request } = req.body;
+    const {
+      mode,
+      pillar,
+      client_stage,
+      context = {},
+      topic,
+      user_request,
+      photo_analysis,
+    } = req.body;
     if (!mode)         return res.status(400).json({ ok: false, error: "mode required" });
     if (!topic)        return res.status(400).json({ ok: false, error: "topic required" });
     if (!user_request) return res.status(400).json({ ok: false, error: "user_request required" });
+
+    const enrichedRequest = photo_analysis?.summary
+      ? `[Photo: ${photo_analysis.summary}${photo_analysis.stage ? ` | Build stage: ${photo_analysis.stage}` : ""}]\n\n${user_request || topic}`
+      : (user_request || topic);
 
     try {
       const generationContext = {
@@ -46,16 +61,75 @@ export function registerMarketingRoutes(app) {
         client_stage,
         topic,
         project_context: context.project_context || null,
-        photo_analysis:  context.photo_analysis  || null,
+        photo_analysis: photo_analysis || context.photo_analysis || null,
       };
 
-      const content = await generateContent(mode, generationContext, user_request);
+      const content = await generateContent(mode, generationContext, enrichedRequest);
       const review_scores = runReviewChecks(content, mode);
 
       return res.json({ ok: true, content, review_scores });
     } catch (e) {
       console.error("[marketing/generate]", e);
       return res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/marketing/generate/stream
+   * SSE streaming version of content generation. Falls through to non-streaming on error.
+   */
+  app.post("/api/marketing/generate/stream", requireAuth, async (req, res) => {
+    const { mode, channel, pillar, client_stage, context = {}, topic, user_request } = req.body;
+    if (!mode) return res.status(400).json({ error: "mode required" });
+    if (!_apiKey) return res.status(503).json({ error: "AI not configured" });
+
+    const generationContext = {
+      pillar,
+      client_stage,
+      topic,
+      project_context: context.project_context || null,
+      photo_analysis:  context.photo_analysis  || null,
+    };
+    const { systemPrompt, userMessage } = buildMarketingPrompt(mode, generationContext, user_request || topic || "");
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    try {
+      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+      const stream = await client.messages.stream(
+        {
+          model: MODEL,
+          max_tokens: 2048,
+          system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+          messages: [{ role: "user", content: userMessage }],
+        },
+        { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+      );
+
+      let fullText = "";
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          fullText += event.delta.text;
+          res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+        }
+      }
+
+      const content = parseMarketingResponse(fullText);
+      const review_scores = runReviewChecks(content, channel || mode);
+      res.write(`data: ${JSON.stringify({ done: true, content, review_scores })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch (err) {
+      console.error("[marketing/generate/stream]", err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.end();
+      }
     }
   });
 

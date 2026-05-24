@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getSupabase } from "../lib/supabaseClient.js";
@@ -240,7 +241,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/rfq-packages/${pkg.id}/scopes/${scope.trade_id}/send`, {
+      const res = await authFetch(`/api/rfq-packages/${pkg.id}/scopes/${scope.trade_id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -449,7 +450,7 @@ function AddendumModal({ pkg, scopes, onClose, onAdded }) {
     if (!name.trim()) { setError("Name required"); return; }
     setSaving(true);
     try {
-      const res = await fetch(`/api/rfq-packages/${pkg.id}/addenda`, {
+      const res = await authFetch(`/api/rfq-packages/${pkg.id}/addenda`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, affected_trades: affected, send_emails: sendEmails })
@@ -533,7 +534,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
   async function handleFollowUp(recipientIds) {
     setFollowUpBusy(true);
     try {
-      await fetch(`/api/rfq-packages/${pkg.id}/follow-up`, {
+      await authFetch(`/api/rfq-packages/${pkg.id}/follow-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ recipient_ids: recipientIds })
@@ -545,7 +546,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
   }
 
   async function handleUpdateRecipient(recipientId, patch) {
-    await fetch(`/api/rfq-packages/${pkg.id}/recipients/${recipientId}`, {
+    await authFetch(`/api/rfq-packages/${pkg.id}/recipients/${recipientId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch)
@@ -555,7 +556,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
 
   async function handleDeleteRecipient(recipientId) {
     if (!confirm("Remove this recipient?")) return;
-    await fetch(`/api/rfq-packages/${pkg.id}/recipients/${recipientId}`, { method: "DELETE" });
+    await authFetch(`/api/rfq-packages/${pkg.id}/recipients/${recipientId}`, { method: "DELETE" });
     onRefresh();
   }
 
@@ -762,7 +763,7 @@ export default function RfqPackageDetail() {
   async function load() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/rfq-packages/${packageId}`);
+      const res = await authFetch(`/api/rfq-packages/${packageId}`);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Load failed");
       setPkg(j.package);
@@ -787,7 +788,7 @@ export default function RfqPackageDetail() {
   }, []);
 
   async function patchScope(tradeId, patch) {
-    await fetch(`/api/rfq-packages/${packageId}/scopes/${tradeId}`, {
+    await authFetch(`/api/rfq-packages/${packageId}/scopes/${tradeId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch)
@@ -798,7 +799,7 @@ export default function RfqPackageDetail() {
   async function saveMeta() {
     setSavingMeta(true);
     try {
-      await fetch(`/api/rfq-packages/${packageId}`, {
+      await authFetch(`/api/rfq-packages/${packageId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(metaDraft)
@@ -813,7 +814,7 @@ export default function RfqPackageDetail() {
   async function createSuggestedTrade(tradeId, tradeLabel) {
     setAddingTrade(true);
     try {
-      await fetch(`/api/rfq-packages/${packageId}/scopes`, {
+      await authFetch(`/api/rfq-packages/${packageId}/scopes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trade_id: tradeId, trade_label: tradeLabel })
@@ -827,7 +828,7 @@ export default function RfqPackageDetail() {
 
   async function archivePackage() {
     if (!confirm("Archive this RFQ package?")) return;
-    await fetch(`/api/rfq-packages/${packageId}`, {
+    await authFetch(`/api/rfq-packages/${packageId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "archived" })
@@ -1031,7 +1032,7 @@ export default function RfqPackageDetail() {
           <button
             type="button"
             onClick={async () => {
-              await fetch(`/api/rfq-packages/${packageId}/follow-up`, {
+              await authFetch(`/api/rfq-packages/${packageId}/follow-up`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ recipient_ids: followUpCandidates.map((r) => r.id) })

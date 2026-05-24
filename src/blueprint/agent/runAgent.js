@@ -94,6 +94,19 @@ function trimChatHistory(messages, maxTurns = 8) {
   return cleaned.slice(-maxTurns);
 }
 
+export async function buildChatSystemPrompt(mode, lastUserText, extras = {}) {
+  const jobId = extras.jobContext?.id ?? null;
+  const ragContext = await getRelevantContext(lastUserText, { jobId, limit: 5 });
+  let systemPrompt = buildSystemPrompt(mode, ragContext, extras.jobContext || null);
+  if (extras.hubContext) {
+    systemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHUB UI CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${JSON.stringify(extras.hubContext, null, 2)}`;
+  }
+  if (wantsSubcontractorData(lastUserText, extras.hubContext)) {
+    systemPrompt = await appendSubcontractorSnapshot(systemPrompt);
+  }
+  return systemPrompt;
+}
+
 export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {} }) {
   const compact = extras.compactContext === true || messageHasDocumentBlock(messages);
   const workingMessages = compact ? trimChatHistory(messages, 6) : messages;
@@ -133,7 +146,15 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
       request.tool_choice = { type: 'tool', name: 'hub_list_subcontractors' };
     }
 
-    const response = await anthropic.messages.create(request);
+    const response = await anthropic.messages.create(
+      {
+        ...request,
+        system: request.system
+          ? [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }]
+          : undefined,
+      },
+      { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+    );
 
     lastResponse = response;
     const pending = hubToolUses(response.content);

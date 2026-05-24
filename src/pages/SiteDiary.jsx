@@ -40,7 +40,7 @@ export default function SiteDiary() {
   }, [projectId]);
 
   const loadEntries = useCallback(async () => {
-    const res = await fetch(`/api/diary/${projectId}`);
+    const res = await authFetch(`/api/diary/${projectId}`);
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "Load failed");
     setEntries(j.entries || []);

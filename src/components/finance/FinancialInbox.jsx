@@ -63,7 +63,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
   async function rematch() {
     setSaving(true);
     try {
-      const r = await fetch(`/api/finance/documents/${doc.id}`, {
+      const r = await authFetch(`/api/finance/documents/${doc.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ job_id: selJob || null, notes })
@@ -76,7 +76,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
   async function approve() {
     setApproving(true);
     try {
-      const r = await fetch(`/api/finance/documents/${doc.id}/approve`, {
+      const r = await authFetch(`/api/finance/documents/${doc.id}/approve`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
       });
       const j = await r.json();
@@ -87,7 +87,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
   async function reject() {
     setRejecting(true);
     try {
-      const r = await fetch(`/api/finance/documents/${doc.id}/reject`, {
+      const r = await authFetch(`/api/finance/documents/${doc.id}/reject`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
       });
       const j = await r.json();

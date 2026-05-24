@@ -153,6 +153,9 @@ const MessageBubble = ({ message }) => {
         position: 'relative',
       }}>
         {message.content}
+        {message.streaming && (
+          <span style={{ display: 'inline-block', color: '#2E6B4F', animation: 'blink 1s step-end infinite', marginLeft: '1px' }}>▍</span>
+        )}
         {isAssistant && (
           <button
             onClick={copy}
@@ -317,14 +320,34 @@ const ChatTab = ({ jobContext, hubContext }) => {
       text || 'Please review the uploaded document(s).',
       attachmentNames ? `\n\nAttached: ${attachmentNames}` : '',
     ].join('');
-    const newMessages = [...messages, { role: 'user', content, attachments: sentAttachments.map(({ name, size, kind }) => ({ name, size, kind })) }];
-    setMessages(newMessages);
+    const userMsg = { role: 'user', content, attachments: sentAttachments.map(({ name, size, kind }) => ({ name, size, kind })) };
+    const newMessages = [...messages, userMsg];
+    const placeholderMsg = { role: 'assistant', content: '', streaming: true };
+    setMessages([...newMessages, placeholderMsg]);
     setLoading(true);
     try {
-      const reply = await chat(newMessages, { jobContext, hubContext, attachments: sentAttachments });
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      const reply = await chat(
+        newMessages,
+        { jobContext, hubContext, attachments: sentAttachments },
+        (cumulative) => {
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { ...updated[updated.length - 1], content: cumulative };
+            return updated;
+          });
+        },
+      );
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: 'assistant', content: reply, streaming: false };
+        return updated;
+      });
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Sorry, something went wrong: ${err.message}` }]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: 'assistant', content: `Sorry, something went wrong: ${err.message}`, streaming: false };
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
@@ -360,7 +383,7 @@ const ChatTab = ({ jobContext, hubContext }) => {
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {messages.map((m, i) => <MessageBubble key={i} message={m} />)}
-        {loading && <TypingIndicator />}
+        {loading && !messages.some((m) => m.streaming) && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>
 
@@ -1170,6 +1193,10 @@ export default function BlueprintAgent({
         @keyframes panelIn {
           from { opacity: 0; transform: translateY(20px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
         }
         .blueprint-fab:hover {
           transform: scale(1.06);

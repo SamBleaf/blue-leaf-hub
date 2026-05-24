@@ -161,7 +161,7 @@ export default function SupervisorHome() {
     if (!diaryProjectId || !diaryNotes.trim()) return;
     setDiaryBusy(true);
     try {
-      const res = await fetch(`/api/diary/${diaryProjectId}`, {
+      const res = await authFetch(`/api/diary/${diaryProjectId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -208,7 +208,7 @@ export default function SupervisorHome() {
 
       if (voiceParsed.type === "diary" || voiceParsed.type === "both") {
         const d = voiceParsed.type === "both" ? voiceParsed.data.diary : voiceParsed.data;
-        const res = await fetch(`/api/diary/${voiceProject}`, {
+        const res = await authFetch(`/api/diary/${voiceProject}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

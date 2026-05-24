@@ -65,21 +65,21 @@ export default function WhsManager() {
   }, [projectId]);
 
   const loadCompliance = useCallback(async () => {
-    const res = await fetch(`/api/whs/${projectId}/compliance`);
+    const res = await authFetch(`/api/whs/${projectId}/compliance`);
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "Load failed");
     setCompliance(j.subcontractors || []);
   }, [projectId]);
 
   const loadInductions = useCallback(async () => {
-    const res = await fetch(`/api/whs/${projectId}/inductions`);
+    const res = await authFetch(`/api/whs/${projectId}/inductions`);
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "Load failed");
     setInductions(j.inductions || []);
   }, [projectId]);
 
   const loadReports = useCallback(async () => {
-    const res = await fetch(`/api/whs/${projectId}/reports`);
+    const res = await authFetch(`/api/whs/${projectId}/reports`);
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "Load failed");
     setReports(j.reports || []);
@@ -199,7 +199,7 @@ export default function WhsManager() {
         });
         photosBase64.push({ name: f.name, data: b64 });
       }
-      const res = await fetch(`/api/whs/${projectId}/reports`, {
+      const res = await authFetch(`/api/whs/${projectId}/reports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -236,7 +236,7 @@ export default function WhsManager() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/whs/report/${id}`, {
+      const res = await authFetch(`/api/whs/report/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "resolved" })

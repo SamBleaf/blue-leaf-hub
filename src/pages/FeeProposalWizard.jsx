@@ -268,7 +268,7 @@ export default function FeeProposalWizard() {
     let buildexactClient = "";
     if (beId) {
       try {
-        const r = await fetch(`/api/buildexact/job/${encodeURIComponent(beId)}`);
+        const r = await authFetch(`/api/buildexact/job/${encodeURIComponent(beId)}`);
         const j = await r.json();
         if (r.ok && j?.ok && j.job) buildexactClient = pickBuildexactClientName(j.job);
       } catch {
@@ -378,7 +378,7 @@ export default function FeeProposalWizard() {
     if (!beJobId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/buildexact/job/${encodeURIComponent(beJobId)}/estimate`);
+      const res = await authFetch(`/api/buildexact/job/${encodeURIComponent(beJobId)}/estimate`);
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || "Buildexact pull failed");
       setParseSummary({ ...j.estimate, scheduleHints: j.scheduleHints, costMetrics: j.costMetrics });
@@ -560,7 +560,7 @@ info@blueleafbuilding.com.au`;
     if (!window.confirm("Mark this fee proposal as accepted?")) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/fee-proposal/${encodeURIComponent(id)}/accept`, { method: "POST" });
+      const res = await authFetch(`/api/fee-proposal/${encodeURIComponent(id)}/accept`, { method: "POST" });
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || "Could not mark accepted");
       setProposal((p) => ({ ...p, buildexact_status: "accepted" }));

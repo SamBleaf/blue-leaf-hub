@@ -81,7 +81,7 @@ function WipaaPanel({ jobId, contractValue, estimatedTotalCost, progressBilled, 
     if (!jobId) return;
     setLoading(true);
     try {
-      const r = await fetch(`/api/finance/jobs/${jobId}/wipaa`).then(r => r.json());
+      const r = await authFetch(`/api/finance/jobs/${jobId}/wipaa`).then(r => r.json());
       if (r.ok) setWipaa(r.wipaa);
     } finally { setLoading(false); }
   }, [jobId]);
@@ -239,7 +239,7 @@ export default function JobFinancials() {
     if (!jobId) { setDocuments([]); return; }
     setLoading(true);
     try {
-      const r = await fetch(`/api/finance/documents?job_id=${jobId}&limit=200`).then(r => r.json());
+      const r = await authFetch(`/api/finance/documents?job_id=${jobId}&limit=200`).then(r => r.json());
       if (r.ok) setDocuments(r.documents);
     } finally { setLoading(false); }
   }, []);
@@ -248,7 +248,7 @@ export default function JobFinancials() {
 
   async function saveJobField(updates) {
     if (!selectedJobId) return;
-    const r = await fetch(`/api/finance/jobs/${selectedJobId}`, {
+    const r = await authFetch(`/api/finance/jobs/${selectedJobId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates),

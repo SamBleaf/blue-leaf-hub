@@ -129,7 +129,7 @@ export default function ScheduleManager() {
   const loadEots = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/schedule/${projectId}/eot`);
+      const res = await authFetch(`/api/schedule/${projectId}/eot`);
       const j = await readApiJson(res);
       if (res.ok && j.ok) setEots(j.eots || []);
     } catch {
@@ -139,7 +139,7 @@ export default function ScheduleManager() {
 
   const loadMeta = useCallback(async () => {
     try {
-      const res = await fetch(`/api/schedule/meta/${projectId}`);
+      const res = await authFetch(`/api/schedule/meta/${projectId}`);
       const j = await readApiJson(res);
       if (res.ok && j.ok) setPhaseLabels(j.phaseLabels || {});
     } catch {
@@ -151,7 +151,7 @@ export default function ScheduleManager() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}`);
+      const res = await authFetch(`/api/schedule/${projectId}`);
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Failed to load schedule");
       setTasks((j.tasks || []).map(normalizeTask));
@@ -164,7 +164,7 @@ export default function ScheduleManager() {
 
   const loadDashboard = useCallback(async () => {
     try {
-      await fetch(`/api/schedule/${projectId}/dashboard`);
+      await authFetch(`/api/schedule/${projectId}/dashboard`);
     } catch { /* non-fatal */ }
   }, [projectId]);
 
@@ -257,7 +257,7 @@ export default function ScheduleManager() {
   }, [tasks]);
 
   async function patchTask(id, patch, options = {}) {
-    const res = await fetch(`/api/schedule/task/${id}`, {
+    const res = await authFetch(`/api/schedule/task/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch)
@@ -306,7 +306,7 @@ export default function ScheduleManager() {
       if (editTask.id) {
         await patchTask(editTask.id, payload);
       } else {
-        const res = await fetch(`/api/schedule/${projectId}/task`, {
+        const res = await authFetch(`/api/schedule/${projectId}/task`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -334,7 +334,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, save: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/task/${editTask.id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/schedule/task/${editTask.id}`, { method: "DELETE" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
       setEditTask(null);
@@ -352,7 +352,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, save: true }));
     try {
       for (const id of selectedIds) {
-        const res = await fetch(`/api/schedule/task/${id}`, { method: "DELETE" });
+        const res = await authFetch(`/api/schedule/task/${id}`, { method: "DELETE" });
         const j = await readApiJson(res);
         if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
       }
@@ -441,7 +441,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, template: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/load-template`, {
+      const res = await authFetch(`/api/schedule/${projectId}/load-template`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateId, startDate: templateStartDate })
@@ -464,7 +464,7 @@ export default function ScheduleManager() {
     if (!name) return;
     setBusy((b) => ({ ...b, template: true }));
     try {
-      const res = await fetch(`/api/schedule/${projectId}/save-as-template`, {
+      const res = await authFetch(`/api/schedule/${projectId}/save-as-template`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
@@ -483,7 +483,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, buildexact: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/buildexact-match`, { method: "POST" });
+      const res = await authFetch(`/api/schedule/${projectId}/buildexact-match`, { method: "POST" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Buildexact match failed");
       await loadTasks();
@@ -525,7 +525,7 @@ export default function ScheduleManager() {
       ? Math.max(1, daysBetween(newStartDate, newEndDate) + 1)
       : task.duration_days;
     try {
-      const res = await fetch(`/api/schedule/${projectId}/ripple-check`, {
+      const res = await authFetch(`/api/schedule/${projectId}/ripple-check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId: id, newStartDate })
@@ -574,7 +574,7 @@ export default function ScheduleManager() {
   async function directDeleteTask(id) {
     setBusy((b) => ({ ...b, save: true }));
     try {
-      const res = await fetch(`/api/schedule/task/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/schedule/task/${id}`, { method: "DELETE" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
       await loadTasks();
@@ -590,7 +590,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, baseline: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/baseline/lock`, { method: "POST" });
+      const res = await authFetch(`/api/schedule/${projectId}/baseline/lock`, { method: "POST" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Lock failed");
       await loadProject();
@@ -606,7 +606,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, baseline: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/baseline`, { method: "DELETE" });
+      const res = await authFetch(`/api/schedule/${projectId}/baseline`, { method: "DELETE" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Reset failed");
       await loadProject();
@@ -622,7 +622,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, raise: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/eot`, {
+      const res = await authFetch(`/api/schedule/${projectId}/eot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -641,7 +641,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, approve: true }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/eot/${eotId}`, {
+      const res = await authFetch(`/api/schedule/${projectId}/eot/${eotId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch)
@@ -660,7 +660,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, apply: eotId }));
     setError("");
     try {
-      const res = await fetch(`/api/schedule/${projectId}/eot/${eotId}/apply`, { method: "POST" });
+      const res = await authFetch(`/api/schedule/${projectId}/eot/${eotId}/apply`, { method: "POST" });
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Apply failed");
       await loadTasks();

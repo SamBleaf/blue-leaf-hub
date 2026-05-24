@@ -32,7 +32,7 @@ const STATUS_ICONS = {
   ),
 };
 
-export default function MediaUpload() {
+export default function MediaUpload({ onGeneratePost }) {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -221,6 +221,7 @@ export default function MediaUpload() {
             asset={selected}
             onConsent={() => grantConsent(selected.id)}
             onAssemble={() => setShowAssembly(true)}
+            onGeneratePost={() => onGeneratePost?.(selected)}
             onClose={() => setSelected(null)}
           />
         ) : (
@@ -285,7 +286,7 @@ function AssetCard({ asset, selected, onClick }) {
   );
 }
 
-function AssetDetail({ asset, onConsent, onAssemble, onClose }) {
+function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onClose }) {
   const isVideo = asset.mime_type?.startsWith("video/");
 
   return (
@@ -347,6 +348,16 @@ function AssetDetail({ asset, onConsent, onAssemble, onClose }) {
           </svg>
           Consent recorded
         </div>
+      )}
+
+      {!isVideo && asset.consent_for_marketing && (
+        <button
+          type="button"
+          onClick={onGeneratePost}
+          className="w-full bg-primary text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+        >
+          Generate post from this photo →
+        </button>
       )}
 
       {/* Assemble button */}

@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../lib/ProjectContext.jsx";
@@ -107,7 +108,7 @@ function BudgetEditModal({ row, jobId, onSaved, onClose }) {
   async function save() {
     if (!reason.trim()) { setError("Reason required"); return; }
     setSaving(true); setError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/budget/${row.trade_category_id}`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/budget/${row.trade_category_id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ budget_amount: Number(amount), reason }),
@@ -165,7 +166,7 @@ function WipaaSection({ jobId, wipaa, onReviewSaved }) {
 
   async function save() {
     setSaving(true);
-    const r = await fetch(`/api/finance/jobs/${jobId}/wipaa/review`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/wipaa/review`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ forecast_total_cost: forecast || null, notes })
     });
@@ -271,7 +272,7 @@ export default function JobCommandCentre() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const cc = await fetch(`/api/finance/jobs/${jobId}/command-centre`).then(r => r.json()).catch(() => null);
+    const cc = await authFetch(`/api/finance/jobs/${jobId}/command-centre`).then(r => r.json()).catch(() => null);
     if (cc?.ok) {
       setSummary({ ok: true, job: cc.job, kpis: {
         ...cc.kpis,
@@ -315,7 +316,7 @@ export default function JobCommandCentre() {
     setSeeding(true);
     setSeedError(null);
     try {
-      const r = await fetch(`/api/finance/jobs/${jobId}/budget/seed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const r = await authFetch(`/api/finance/jobs/${jobId}/budget/seed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "Seed failed");
       await load();

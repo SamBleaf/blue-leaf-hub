@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 
 const fmt = n =>
@@ -392,7 +393,7 @@ function SendVariationModal({ jobId, variation, onSent, onClose }) {
 
   async function send() {
     setSending(true); setError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/send`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/send`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email_to: emailTo || undefined, email_cc: emailCc || undefined })
     });
@@ -537,7 +538,7 @@ export default function Variations({ jobId, onUpdate }) {
 
   async function handleSign(variation) {
     setActionError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/sign`, { method: "POST" });
+    const r = await authFetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/sign`, { method: "POST" });
     const j = await r.json();
     if (j.ok) { applyVariation(j.variation); setConfirming(null); }
     else setActionError(j.error || "Failed to mark as signed");
@@ -545,7 +546,7 @@ export default function Variations({ jobId, onUpdate }) {
 
   async function handleReject(variation, reason) {
     setActionError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/reject`, {
+    const r = await authFetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/reject`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason })
     });
@@ -556,7 +557,7 @@ export default function Variations({ jobId, onUpdate }) {
 
   async function handleVoid(variation) {
     setActionError(null);
-    const r = await fetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/void`, { method: "POST" });
+    const r = await authFetch(`/api/finance/jobs/${jobId}/variations/${variation.id}/void`, { method: "POST" });
     const j = await r.json();
     if (j.ok) { applyVariation(j.variation); setConfirming(null); }
     else setActionError(j.error || "Failed to void variation");

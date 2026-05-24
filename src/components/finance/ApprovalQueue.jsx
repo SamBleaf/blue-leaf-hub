@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 
 function fmtAmount(n) {
@@ -275,7 +276,7 @@ export default function ApprovalQueue({ onAction }) {
   useEffect(() => { load(); }, [load]);
 
   async function handleApprove(id, trade_category_id) {
-    const r = await fetch(`/api/finance/documents/${id}/approve`, {
+    const r = await authFetch(`/api/finance/documents/${id}/approve`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trade_category_id })
     });
@@ -289,7 +290,7 @@ export default function ApprovalQueue({ onAction }) {
   }
 
   async function handleReject(id, comment) {
-    const r = await fetch(`/api/finance/documents/${id}/reject`, {
+    const r = await authFetch(`/api/finance/documents/${id}/reject`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ comment })
     });
@@ -301,7 +302,7 @@ export default function ApprovalQueue({ onAction }) {
   }
 
   async function handleRematch(id, job_id) {
-    const r = await fetch(`/api/finance/documents/${id}`, {
+    const r = await authFetch(`/api/finance/documents/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id })
     });
