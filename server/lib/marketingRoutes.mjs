@@ -10,36 +10,211 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import {
-  generateContent,
   runReviewChecks,
-  buildMarketingPrompt,
   parseMarketingResponse,
+  MODE_PROMPTS,
+  CONTENT_PILLARS,
   MODEL,
   PHOTO_ANALYSIS_SYSTEM_PROMPT,
   PHOTO_ANALYSIS_USER_PROMPT,
 } from "./marketingAgent.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
+import {
+  assertVisionMediaType,
+  HEIC_UNSUPPORTED_MESSAGE,
+  resolveVisionMediaType,
+} from "./visionImage.mjs";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const VISION_MODEL = "claude-sonnet-4-5";
+const VISION_MODEL =
+  process.env.CLAUDE_MODEL?.trim() || _env.CLAUDE_MODEL?.trim() || "claude-sonnet-4-6";
 
 function sbClient() {
   return getServiceSupabase();
 }
 
-const PHOTO_ANALYSE_USER_TEXT = `You are analysing a construction site photo for a residential builder's marketing system.
+const PHOTO_ANALYSE_USER_TEXT = `You are a construction analyst for Blue Leaf Building, a premium custom home builder in Adelaide.
 
-Analyse this image and return JSON only:
+Analyse this image and return ONLY what is directly visible. Do not invent materials, specifications, ratings, or construction details.
+
+Return a JSON object with these exact fields:
 {
-  "summary": "1-2 sentence description of what is shown",
-  "stage": "one of: pre_construction|site_prep|frame|lock_up|fitout|completion|landscaping|null",
-  "content_angles": ["array of 2-4 content themes this photo could support"],
-  "quality": "high|medium|low",
-  "suggested_pillar": "how_we_build|the_work|what_to_expect|community_craft",
-  "suggested_caption_hook": "one strong opening line for a social post"
-}`;
+  "visible_facts": [],
+  "design_principles": [],
+  "probable_assumptions": [],
+  "unknowns": [],
+  "build_stage": "",
+  "content_opportunities": [],
+  "summary": "",
+  "suggested_caption_hook": "",
+  "suggested_pillar": ""
+}
+
+CRITICAL RULE: Never state as fact what you cannot see. If you cannot confirm a material or specification, list it in unknowns.
+Do not guess timber species, stone types, energy ratings, or construction specifications from visual cues alone.
+Design principles and observable design intent ARE safe to describe. Specific products and specs are NOT.
+build_stage must be one of: site_prep | slab | frame | lock_up | fixing | completion | landscaping | design_photo (or null).
+suggested_pillar must be one of: the_work | how_we_build | what_to_expect | community_craft`;
+
+const BLUE_LEAF_IDENTITY = `You are the content voice for Blue Leaf Building — a premium custom home builder in Adelaide.
+
+## WHO BLUE LEAF IS
+A builder who thinks about consequences, not just appearances. Performance before aesthetics. Homes designed for 20-30 years of durability and liveability, not handover photos.
+
+Key differentiators (weave these in naturally, not as a list):
+- Weather-tightness systems and moisture management behind the visible finishes
+- Passive design as a decision made at design stage, not a feature added later
+- Limited number of projects so each gets full attention
+- Weekly client meetings as standard
+- Architect partnerships as a standard operating mode, not an upsell
+- Craftspeople who understand WHY details matter, not just how to execute them
+
+## VOICE
+- Direct and technically confident — like a builder who explains the WHY
+- Consequence-aware: specific materials can fail, poor details create future problems, timelines affect thermal performance
+- Never architectural magazine. Never generic. Never "luxurious" or "stunning".
+- Test: "Would Sam Morris say this standing on the site?" If no, rewrite.
+- Short sentences. Opinions stated directly. No hedging.
+
+## ACCURACY — NON-NEGOTIABLE
+The analysis object includes visible_facts, probable_assumptions, and unknowns.
+- Only state as FACT what is in visible_facts or in project_context provided
+- Probable assumptions may be referenced as design intent or philosophy — never as confirmed fact
+- NEVER reference anything in unknowns as fact
+- Acceptable: "High-performance homes require ventilated cavities behind cladding — it's a detail that's invisible but critical"
+- NOT acceptable: "This home features a rainscreen cavity system" (unless confirmed in project context)
+- If you want to reference a construction principle, frame it as a general Blue Leaf standard, not a claim about this specific project
+
+## CONTENT STRUCTURE — HOOK FIRST ALWAYS
+1. Hook — tension, curiosity, or a direct opinion (1-2 sentences). NEVER start with the project description.
+2. Specific observable detail — one interesting thing that IS visible
+3. Education or opinion — the WHY or a Blue Leaf perspective
+4. Blue Leaf reinforcement — connect to a differentiator (performance, longevity, process)
+5. CTA appropriate to channel (optional for some channels)
+
+## NEVER
+- Start with "Nestled in..." or "This stunning..." or "Beautiful [anything]..."
+- Use the word "luxurious", "stunning", "bespoke", "curated", or "elevated"
+- Invent specific measurements, ratings, or product names unless confirmed in project_context
+- Write more than 3 sentences about how something looks — looks are context, not the point
+- Reference APB, APBC, or any association by name or implication`;
+
+const CONTENT_MODE_MODIFIERS = {
+  educational: `
+CONTENT MODE — EDUCATIONAL
+Lead with a principle, use the project as the example. Universal truth → why it matters → how this project illustrates it → Blue Leaf's approach.
+Example opening: "Timber and stone aren't just an aesthetic choice. They behave differently over time, and that creates very specific demands on the details between them."`,
+
+  opinion: `
+CONTENT MODE — OPINION
+Blue Leaf's direct point of view. Can challenge common assumptions or industry norms. Bold position → common misconception → Blue Leaf's reasoning → implication for homeowners.
+Example opening: "A lot of homes are built to photograph well on day one. That's a different goal to building well."`,
+
+  behind_scenes: `
+CONTENT MODE — BEHIND THE SCENES
+Reveal what most people never consider — hidden detailing, systems, or decisions that make the visible result possible. What people see → what sits behind it → why that matters → Blue Leaf's approach.
+Example opening: "The material that gets photographed is almost never the most important decision made on this project."`,
+
+  client_focused: `
+CONTENT MODE — CLIENT FOCUSED
+Translate technical decisions into consequences for the person who will live here. Client concern or goal → how this decision serves it → what a lower-quality approach produces → Blue Leaf standard.
+Example opening: "Most people think carefully about how they want their home to look. Fewer think about how it will perform in Adelaide in January."`,
+
+  story: `
+CONTENT MODE — STORY
+A brief narrative moment from the project — a decision made, a challenge solved, a realisation on site. Human, specific, grounded. Scene → challenge or decision → outcome.
+Example opening: "When we first walked this site, the slope told us the design had to go one of two directions."`,
+
+  authority: `
+CONTENT MODE — AUTHORITY
+Demonstrate technical expertise by naming where projects commonly go wrong and how Blue Leaf avoids it. Common industry problem → why it happens → what Blue Leaf does differently → result.
+Example opening: "There are three ways cladding junctions fail. They all come from the same decision made at design stage."`,
+
+  vision: `
+CONTENT MODE — VISION
+Blue Leaf's philosophy about what good homes should achieve and why most fall short. Aspirational but grounded. The standard most miss → what it takes to reach it → how Blue Leaf thinks about it.
+Example opening: "A home should get better with age. Most don't, because performance is treated as secondary to appearance from the start."`,
+};
+
+function formatPhotoAnalysisForPrompt(photoAnalysis) {
+  if (!photoAnalysis || !Object.keys(photoAnalysis).length) return "";
+  const analysisSections = [];
+  if (photoAnalysis.visible_facts?.length) {
+    analysisSections.push(`CONFIRMED VISIBLE (state as fact):\n${photoAnalysis.visible_facts.join(", ")}`);
+  }
+  if (photoAnalysis.design_principles?.length) {
+    analysisSections.push(`DESIGN PRINCIPLES (safe to reference):\n${photoAnalysis.design_principles.join(", ")}`);
+  }
+  if (photoAnalysis.probable_assumptions?.length) {
+    analysisSections.push(`PROBABLE INTENT (frame as philosophy, not fact):\n${photoAnalysis.probable_assumptions.join(", ")}`);
+  }
+  if (photoAnalysis.unknowns?.length) {
+    analysisSections.push(`DO NOT STATE THESE AS FACT:\n${photoAnalysis.unknowns.join(", ")}`);
+  }
+  if (photoAnalysis.content_opportunities?.length) {
+    analysisSections.push(`CONTENT ANGLES:\n${photoAnalysis.content_opportunities.join(", ")}`);
+  }
+  return analysisSections.length ? `Image analysis:\n${analysisSections.join("\n\n")}` : "";
+}
+
+function buildUserMessageText(mode, generationContext, enrichedRequest) {
+  const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.social_instagram;
+  const contextBlock = [
+    generationContext.pillar && `Content pillar: ${CONTENT_PILLARS[generationContext.pillar]?.label || generationContext.pillar}`,
+    generationContext.client_stage && `Client stage: ${generationContext.client_stage}`,
+    generationContext.topic && `Topic: ${generationContext.topic}`,
+    generationContext.project_context && `Project context: ${generationContext.project_context}`,
+    formatPhotoAnalysisForPrompt(generationContext.photo_analysis),
+  ].filter(Boolean).join("\n");
+  return [modePrompt, "", contextBlock, "", `Request: ${enrichedRequest}`].join("\n");
+}
+
+async function buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id, content_mode = "educational") {
+  const systemPrompt = BLUE_LEAF_IDENTITY + (CONTENT_MODE_MODIFIERS[content_mode] || CONTENT_MODE_MODIFIERS.educational);
+  const userText = buildUserMessageText(mode, generationContext, enrichedRequest);
+  const userContent = [];
+
+  if (photo_asset_id && sb) {
+    const { data: asset } = await sb
+      .from("marketing_media_assets")
+      .select("storage_path, storage_bucket, mime_type")
+      .eq("id", photo_asset_id)
+      .single();
+
+    if (asset) {
+      try {
+        const { data: fileData, error: dlErr } = await sb.storage
+          .from(asset.storage_bucket || "marketing-media")
+          .download(asset.storage_path);
+        if (!dlErr && fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          const buf = Buffer.from(arrayBuffer);
+          const mediaType = resolveVisionMediaType(buf, asset.mime_type, asset.storage_path);
+          if (mediaType) {
+            userContent.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType,
+                data: buf.toString("base64"),
+              },
+            });
+          }
+        }
+      } catch {
+        // Non-fatal — generate without image if download fails
+      }
+    }
+  }
+
+  userContent.push({ type: "text", text: userText });
+  return {
+    systemPrompt,
+    messages: [{ role: "user", content: userContent }],
+  };
+}
 
 function parseVisionAnalysisJson(raw) {
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -54,50 +229,30 @@ function parseVisionAnalysisJson(raw) {
 
 function enrichUserRequest(photo_analysis, user_request, topic) {
   if (!photo_analysis?.summary) return user_request || topic;
-  const stage = photo_analysis.stage || photo_analysis.project_stage;
+  const stage = photo_analysis.build_stage || photo_analysis.stage || photo_analysis.project_stage;
   return `[Photo: ${photo_analysis.summary}${stage ? ` | Build stage: ${stage}` : ""}]\n\n${user_request || topic}`;
 }
 
-async function buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id) {
-  const { systemPrompt, userMessage } = buildMarketingPrompt(mode, generationContext, enrichedRequest);
-  const userContent = [];
+function mediaPreviewStoragePath(asset) {
+  return asset.thumbnail_path || asset.storage_path || null;
+}
 
-  if (photo_asset_id && sb) {
-    const { data: asset } = await sb
-      .from("marketing_media_assets")
-      .select("storage_path, storage_bucket, mime_type")
-      .eq("id", photo_asset_id)
-      .single();
-
-    if (asset) {
-      try {
-        // Download via service role (works for both public and private buckets)
-        const { data: fileData, error: dlErr } = await sb.storage
-          .from(asset.storage_bucket || "marketing-media")
-          .download(asset.storage_path);
-        if (!dlErr && fileData) {
-          const arrayBuffer = await fileData.arrayBuffer();
-          const base64 = Buffer.from(arrayBuffer).toString("base64");
-          userContent.push({
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: asset.mime_type || "image/jpeg",
-              data: base64,
-            },
-          });
-        }
-      } catch (_imgErr) {
-        // Non-fatal — generate without image if download fails
-      }
-    }
+/** Signed URL for uploads; public URL for thumbnails/ folder (migration 047). */
+async function attachMediaPreviewUrl(sb, asset) {
+  const path = mediaPreviewStoragePath(asset);
+  if (!path || !sb) return { ...asset, preview_url: null };
+  const bucket = asset.storage_bucket || "marketing-media";
+  if (path.startsWith("thumbnails/")) {
+    const { data } = sb.storage.from(bucket).getPublicUrl(path);
+    return { ...asset, preview_url: data?.publicUrl || null };
   }
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) return { ...asset, preview_url: null };
+  return { ...asset, preview_url: data.signedUrl };
+}
 
-  userContent.push({ type: "text", text: userMessage });
-  return {
-    systemPrompt,
-    messages: [{ role: "user", content: userContent }],
-  };
+async function attachMediaPreviewUrls(sb, assets) {
+  return Promise.all(assets.map((a) => attachMediaPreviewUrl(sb, a)));
 }
 
 export function registerMarketingRoutes(app) {
@@ -118,6 +273,7 @@ export function registerMarketingRoutes(app) {
       user_request,
       photo_analysis,
       photo_asset_id,
+      content_mode = "educational",
     } = req.body;
     if (!mode)         return res.status(400).json({ ok: false, error: "mode required" });
     if (!topic)        return res.status(400).json({ ok: false, error: "topic required" });
@@ -138,30 +294,25 @@ export function registerMarketingRoutes(app) {
         photo_analysis: photo_analysis || context.photo_analysis || null,
       };
 
-      const sb = sbClient();
-      let content;
+      if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
 
-      if (photo_asset_id && sb) {
-        if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
-        const { systemPrompt, messages } = await buildGenerationMessages(
-          sb, mode, generationContext, enrichedRequest, photo_asset_id,
-        );
-        const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-        const response = await client.messages.create(
-          {
-            model: MODEL,
-            max_tokens: 2048,
-            temperature: 0.7,
-            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-            messages,
-          },
-          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
-        );
-        const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
-        content = parseMarketingResponse(raw);
-      } else {
-        content = await generateContent(mode, generationContext, enrichedRequest);
-      }
+      const sb = sbClient();
+      const { systemPrompt, messages } = await buildGenerationMessages(
+        sb, mode, generationContext, enrichedRequest, photo_asset_id || null, content_mode,
+      );
+      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+      const response = await client.messages.create(
+        {
+          model: MODEL,
+          max_tokens: 2048,
+          temperature: 0.7,
+          system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+          messages,
+        },
+        { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+      );
+      const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+      const content = parseMarketingResponse(raw);
 
       const review_scores = runReviewChecks(content, mode);
 
@@ -179,7 +330,7 @@ export function registerMarketingRoutes(app) {
   app.post("/api/marketing/generate/stream", requireAuth, async (req, res) => {
     const {
       mode, channel, pillar, client_stage, context = {}, topic, user_request,
-      photo_analysis, photo_asset_id,
+      photo_analysis, photo_asset_id, content_mode = "educational",
     } = req.body;
     if (!mode) return res.status(400).json({ error: "mode required" });
     if (!_apiKey) return res.status(503).json({ error: "AI not configured" });
@@ -196,14 +347,9 @@ export function registerMarketingRoutes(app) {
     };
 
     const sb = sbClient();
-    const { systemPrompt, messages } = photo_asset_id && sb
-      ? await buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id)
-      : (() => {
-        const { systemPrompt: sp, userMessage } = buildMarketingPrompt(
-          mode, generationContext, enrichedRequest,
-        );
-        return { systemPrompt: sp, messages: [{ role: "user", content: userMessage }] };
-      })();
+    const { systemPrompt, messages } = await buildGenerationMessages(
+      sb, mode, generationContext, enrichedRequest, photo_asset_id || null, content_mode,
+    );
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -439,21 +585,164 @@ export function registerMarketingRoutes(app) {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_campaigns")
-      .select("*")
+      .select("*, marketing_content_items(count)")
       .neq("status", "archived")
       .order("created_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, campaigns: data || [] });
+    const campaigns = (data || []).map((c) => {
+      const countRow = c.marketing_content_items;
+      const content_count = Array.isArray(countRow) && countRow[0]?.count != null
+        ? countRow[0].count
+        : 0;
+      const { marketing_content_items: _c, ...rest } = c;
+      return { ...rest, content_count };
+    });
+    return res.json({ ok: true, campaigns });
+  });
+
+  app.get("/api/marketing/campaigns/:id", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { data, error } = await sb.from("marketing_campaigns")
+      .select("*, marketing_content_items(count)")
+      .eq("id", req.params.id)
+      .single();
+    if (error) return res.status(404).json({ ok: false, error: error.message });
+    const content_count = data.marketing_content_items?.[0]?.count ?? 0;
+    const { marketing_content_items: _c, ...campaign } = data;
+    return res.json({ ok: true, campaign: { ...campaign, content_count } });
   });
 
   app.put("/api/marketing/campaigns/:id", requireAuth, async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
-    delete updates.id; delete updates.created_by; delete updates.created_at;
-    const { data, error } = await sb.from("marketing_campaigns").update(updates).eq("id", req.params.id).select().single();
-    if (error) return res.status(400).json({ ok: false, error: error.message });
+    const { id } = req.params;
+    const {
+      name, objective, channels, start_at, end_at, status,
+      goal, audience, tone, posting_schedule, content_sources,
+      platform_settings, content_mix, ai_rules, approval_mode,
+    } = req.body;
+    const { data, error } = await sb.from("marketing_campaigns")
+      .update({
+        ...(name !== undefined && { name }),
+        ...(objective !== undefined && { objective }),
+        ...(channels !== undefined && { channels }),
+        ...(start_at !== undefined && { start_at: start_at || null }),
+        ...(end_at !== undefined && { end_at: end_at || null }),
+        ...(status !== undefined && { status }),
+        ...(goal !== undefined && { goal }),
+        ...(audience !== undefined && { audience }),
+        ...(tone !== undefined && { tone }),
+        ...(posting_schedule !== undefined && { posting_schedule }),
+        ...(content_sources !== undefined && { content_sources }),
+        ...(platform_settings !== undefined && { platform_settings }),
+        ...(content_mix !== undefined && { content_mix }),
+        ...(ai_rules !== undefined && { ai_rules }),
+        ...(approval_mode !== undefined && { approval_mode }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, campaign: data });
+  });
+
+  app.get("/api/marketing/campaigns/:id/slots", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    let q = sb.from("campaign_schedule_slots")
+      .select("*, marketing_content_items(id, channel, title, body, status, pillar, topic)")
+      .eq("campaign_id", req.params.id)
+      .order("slot_date");
+    const { from, to } = req.query;
+    if (from) q = q.gte("slot_date", from);
+    if (to) q = q.lte("slot_date", to);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, slots: data || [] });
+  });
+
+  app.post("/api/marketing/campaigns/:id/slots", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id } = req.params;
+    const { pattern } = req.body;
+    const { data: campaign, error: campErr } = await sb.from("marketing_campaigns")
+      .select("start_at, end_at")
+      .eq("id", id)
+      .single();
+    if (campErr || !campaign) return res.status(404).json({ ok: false, error: "Campaign not found" });
+
+    const start = new Date(campaign.start_at || new Date());
+    const end = campaign.end_at
+      ? new Date(campaign.end_at)
+      : new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const slots = [];
+    const current = new Date(start);
+    while (current <= end) {
+      const dow = days[current.getDay()];
+      const matching = (pattern || []).filter((p) => p.day === dow);
+      for (const m of matching) {
+        slots.push({
+          campaign_id: id,
+          slot_date: current.toISOString().slice(0, 10),
+          day_of_week: dow,
+          channel: m.channel || null,
+          content_mode: m.content_mode || null,
+          status: "empty",
+        });
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    if (!slots.length) return res.json({ ok: true, created: 0 });
+
+    await sb.from("campaign_schedule_slots").delete().eq("campaign_id", id).eq("status", "empty");
+    const { data, error } = await sb.from("campaign_schedule_slots").insert(slots).select("id");
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, created: data.length });
+  });
+
+  app.put("/api/marketing/campaigns/:id/slots/:slotId", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { content_item_id, status } = req.body;
+    const { data, error } = await sb.from("campaign_schedule_slots")
+      .update({
+        ...(content_item_id !== undefined && { content_item_id: content_item_id || null }),
+        ...(status !== undefined && { status }),
+      })
+      .eq("id", req.params.slotId)
+      .eq("campaign_id", req.params.id)
+      .select("*, marketing_content_items(id, channel, title, body, status, pillar, topic)")
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, slot: data });
+  });
+
+  app.get("/api/marketing/campaigns/:id/content", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { data, error } = await sb.from("marketing_content_items")
+      .select("*")
+      .eq("campaign_id", req.params.id)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, items: data || [] });
+  });
+
+  app.post("/api/marketing/campaigns/:id/content/:itemId", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { data, error } = await sb.from("marketing_content_items")
+      .update({ campaign_id: req.params.id, updated_at: new Date().toISOString() })
+      .eq("id", req.params.itemId)
+      .select()
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, item: data });
   });
 
   // ── Stage 1: Photo Analysis ────────────────────────────────────────────────
@@ -467,10 +756,19 @@ export function registerMarketingRoutes(app) {
     if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
 
     // Expect base64 image in body (client converts file to base64)
-    const { image_base64, media_type = "image/jpeg" } = req.body;
+    const { image_base64, media_type: bodyMediaType = "image/jpeg" } = req.body;
     if (!image_base64) return res.status(400).json({ ok: false, error: "image_base64 required" });
 
     try {
+      const raw = String(image_base64).replace(/^data:image\/\w+;base64,/, "");
+      const buf = Buffer.from(raw, "base64");
+      const mediaType = resolveVisionMediaType(buf, bodyMediaType, null) || bodyMediaType;
+      assertVisionMediaType(
+        ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mediaType)
+          ? mediaType
+          : "image/jpeg",
+      );
+
       const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
       const response = await client.messages.create({
         model: VISION_MODEL,
@@ -483,8 +781,8 @@ export function registerMarketingRoutes(app) {
               type: "image",
               source: {
                 type: "base64",
-                media_type: media_type,
-                data: image_base64,
+                media_type: mediaType,
+                data: raw,
               },
             },
             { type: "text", text: PHOTO_ANALYSIS_USER_PROMPT },
@@ -531,11 +829,11 @@ export function registerMarketingRoutes(app) {
     const { data, error, count } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     // Attach a top-level pipeline_status derived from the most recent export
-    const assets = (data || []).map((a) => {
+    const assets = await attachMediaPreviewUrls(sb, (data || []).map((a) => {
       const exports = a.marketing_media_exports || [];
       const latest = exports.sort((x, y) => new Date(y.created_at) - new Date(x.created_at))[0];
       return { ...a, pipeline_status: latest?.status || (exports.length === 0 ? "none" : "unknown") };
-    });
+    }));
     return res.json({ ok: true, assets, count: count || 0 });
   });
 
@@ -589,7 +887,8 @@ export function registerMarketingRoutes(app) {
       return res.json({ ok: true, media_asset_id: asset.id, status: "processing" });
     }
 
-    return res.json({ ok: true, media_asset_id: asset.id, status: "ready", asset });
+    const withPreview = await attachMediaPreviewUrl(sb, asset);
+    return res.json({ ok: true, media_asset_id: asset.id, status: "ready", asset: withPreview });
   });
 
   app.get("/api/marketing/media/:id", requireAuth, async (req, res) => {
@@ -597,7 +896,8 @@ export function registerMarketingRoutes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_media_assets").select("*, marketing_media_exports(*)").eq("id", req.params.id).single();
     if (error) return res.status(404).json({ ok: false, error: error.message });
-    return res.json({ ok: true, asset: data });
+    const asset = await attachMediaPreviewUrl(sb, data);
+    return res.json({ ok: true, asset });
   });
 
   app.get("/api/marketing/media/:id/status", requireAuth, async (req, res) => {
@@ -645,35 +945,50 @@ export function registerMarketingRoutes(app) {
 
   app.post("/api/marketing/media/:id/analyse", requireAuth, async (req, res) => {
     const sb = sbClient();
-    if (!sb) return res.status(503).json({ error: "DB not configured" });
-    if (!_apiKey) return res.status(503).json({ error: "AI not configured" });
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
 
-    const { data: asset } = await sb
+    const { data: asset, error: assetErr } = await sb
       .from("marketing_media_assets")
       .select("storage_path, storage_bucket, mime_type, media_type")
       .eq("id", req.params.id)
       .single();
 
-    if (!asset) return res.status(404).json({ error: "Asset not found" });
+    if (assetErr || !asset) return res.status(404).json({ ok: false, error: "Asset not found" });
 
-    if (!asset.mime_type?.startsWith("image/")) {
-      return res.json({ ok: true, skipped: "video" });
+    const isPhoto =
+      asset.media_type === "photo" ||
+      asset.mime_type?.startsWith("image/");
+    if (!isPhoto) {
+      return res.status(400).json({ ok: false, error: "Only photos can be analysed" });
     }
 
     try {
-      const { data: fileData, error: dlErr } = await sb.storage
-        .from(asset.storage_bucket || "marketing-media")
-        .download(asset.storage_path);
-      if (dlErr) throw dlErr;
+      let base64;
+      let mediaType;
 
-      const arrayBuffer = await fileData.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
-      const mediaType = asset.mime_type || "image/jpeg";
+      const { image_base64, media_type: bodyMediaType } = req.body || {};
+      if (image_base64) {
+        base64 = String(image_base64).replace(/^data:image\/\w+;base64,/, "");
+        mediaType = bodyMediaType || "image/jpeg";
+        assertVisionMediaType(mediaType);
+      } else {
+        const { data: fileData, error: dlErr } = await sb.storage
+          .from(asset.storage_bucket || "marketing-media")
+          .download(asset.storage_path);
+        if (dlErr) throw new Error(`Could not load image from storage: ${dlErr.message}`);
+
+        const buf = Buffer.from(await fileData.arrayBuffer());
+        mediaType = resolveVisionMediaType(buf, asset.mime_type, asset.storage_path);
+        if (!mediaType) throw new Error(HEIC_UNSUPPORTED_MESSAGE);
+        base64 = buf.toString("base64");
+      }
 
       const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
       const response = await client.messages.create({
         model: VISION_MODEL,
-        max_tokens: 1024,
+        max_tokens: 2048,
+        system: PHOTO_ANALYSIS_SYSTEM_PROMPT,
         messages: [{
           role: "user",
           content: [
@@ -681,7 +996,7 @@ export function registerMarketingRoutes(app) {
               type: "image",
               source: { type: "base64", media_type: mediaType, data: base64 },
             },
-            { type: "text", text: PHOTO_ANALYSE_USER_TEXT },
+            { type: "text", text: `${PHOTO_ANALYSE_USER_TEXT}\n\nReturn ONLY valid JSON. No markdown fences or commentary.` },
           ],
         }],
       });
@@ -689,15 +1004,28 @@ export function registerMarketingRoutes(app) {
       const raw = response.content.find((b) => b.type === "text")?.text || "{}";
       const analysis = parseVisionAnalysisJson(raw);
 
-      await sb.from("marketing_media_assets").update({
-        analysis,
-        stage_detected: analysis.stage || null,
-      }).eq("id", req.params.id);
+      const stage =
+        analysis.build_stage && analysis.build_stage !== "null"
+          ? analysis.build_stage
+          : analysis.stage || null;
 
-      return res.json({ ok: true, analysis });
+      const { data: updated, error: updateErr } = await sb
+        .from("marketing_media_assets")
+        .update({
+          analysis,
+          stage_detected: stage,
+        })
+        .eq("id", req.params.id)
+        .select()
+        .single();
+
+      if (updateErr) throw new Error(`Could not save analysis: ${updateErr.message}`);
+
+      const withPreview = await attachMediaPreviewUrl(sb, updated);
+      return res.json({ ok: true, analysis, asset: withPreview });
     } catch (err) {
-      console.error("[media/analyse]", err.message);
-      return res.status(500).json({ error: err.message });
+      console.error("[media/analyse]", err);
+      return res.status(500).json({ ok: false, error: err.message || "Analysis failed" });
     }
   });
 

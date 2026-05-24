@@ -108,6 +108,64 @@ export default function ReviewPanel({ scores, blocked, blockReason }) {
           </div>
         );
       })}
+
+      {/* Identity + hook scores (raw numbers from new review fields) */}
+      {(scores.identity_score != null || scores.hook_quality != null) && (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 pt-1 border-t border-hairline">
+          {scores.identity_score != null && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-muted">Blue Leaf identity</span>
+                <span className={`text-xs font-semibold ${scores.identity_score >= 8 ? "text-emerald-600" : scores.identity_score >= 6 ? "text-amber-600" : "text-red-500"}`}>
+                  {scores.identity_score}/10
+                </span>
+              </div>
+              <ScoreBar score={scores.identity_score} />
+            </div>
+          )}
+          {scores.hook_quality != null && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-muted">Hook quality</span>
+                <span className={`text-xs font-semibold ${scores.hook_quality >= 8 ? "text-emerald-600" : scores.hook_quality >= 6 ? "text-amber-600" : "text-red-500"}`}>
+                  {scores.hook_quality}/10
+                </span>
+              </div>
+              <ScoreBar score={scores.hook_quality} />
+              {scores.hook_quality <= 3 && (
+                <p className="text-xs text-red-500 mt-0.5 leading-tight">Opening line may be flat — avoid &ldquo;Nestled in&hellip;&rdquo; or &ldquo;This stunning&hellip;&rdquo;</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Philosophy + accuracy inline checks */}
+      {(scores.philosophy_present != null || scores.accuracy_check) && (
+        <div className="space-y-1.5 pt-1 border-t border-hairline">
+          {scores.philosophy_present != null && (
+            <div className="flex items-center gap-2 text-xs">
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className={scores.philosophy_present ? "text-emerald-500 shrink-0" : "text-amber-500 shrink-0"}>
+                {scores.philosophy_present
+                  ? <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  : <path d="M12 9v4m0 4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" strokeLinecap="round" strokeLinejoin="round" />
+                }
+              </svg>
+              <span className={scores.philosophy_present ? "text-muted" : "text-amber-700"}>
+                {scores.philosophy_present ? "Performance philosophy present" : "No long-term/performance references — consider adding"}
+              </span>
+            </div>
+          )}
+          {scores.accuracy_check && scores.accuracy_check !== "PASS" && (
+            <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="text-amber-500 shrink-0 mt-px">
+                <path d="M12 9v4m0 4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {scores.accuracy_check.replace("WARN — ", "")}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -14,6 +14,65 @@ const MEDIA_TYPE_LABELS = {
   notes:              "Notes",
 };
 
+const HEIC_MIMES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
+
+function isHeicFile(file) {
+  const t = (file.type || "").toLowerCase();
+  return HEIC_MIMES.has(t) || /\.heic$/i.test(file.name) || /\.heif$/i.test(file.name);
+}
+
+function normalizeImageMime(file) {
+  const t = (file.type || "").toLowerCase();
+  if (t === "image/jpg" || t === "image/pjpeg") return "image/jpeg";
+  if (["image/jpeg", "image/png", "image/gif", "image/webp"].includes(t)) return t;
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  const extMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp" };
+  return extMap[ext] || "image/jpeg";
+}
+
+/** Convert any browser-decodable image (incl. HEIC on Safari) to JPEG base64 for the vision API. */
+async function photoToJpegBase64(source) {
+  const blob =
+    typeof source === "string"
+      ? await fetch(source).then((r) => {
+        if (!r.ok) throw new Error("Could not load image for conversion");
+        return r.blob();
+      })
+      : source;
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    const jpegBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("Could not convert image to JPEG"))),
+        "image/jpeg",
+        0.92,
+      );
+    });
+    const buf = await jpegBlob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+async function preparePhotoUpload(file) {
+  if (!isHeicFile(file)) {
+    return { file, mimeType: normalizeImageMime(file), filename: file.name };
+  }
+  const base64 = await photoToJpegBase64(file);
+  const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const blob = new Blob([bin], { type: "image/jpeg" });
+  const filename = file.name.replace(/\.heic$/i, ".jpg").replace(/\.heif$/i, ".jpg");
+  return { file: blob, mimeType: "image/jpeg", filename };
+}
+
 const STATUS_ICONS = {
   processing: (
     <svg className="animate-spin w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none">
@@ -69,15 +128,27 @@ export default function MediaUpload({ onGeneratePost }) {
   }, [assets, load]);
 
   async function handleUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
     setUploading(true);
     setError("");
 
-    const isVideo = file.type.startsWith("video/");
-    const isDrone = file.name.toLowerCase().includes("dji") || file.name.toLowerCase().includes("drone");
+    const isVideo = rawFile.type.startsWith("video/");
+    let uploadFile = rawFile;
+    let mimeType = rawFile.type;
+    let filename = rawFile.name;
+
+    if (!isVideo) {
+      setUploadProgress(isHeicFile(rawFile) ? "Converting HEIC to JPEG…" : "Preparing…");
+      const prepared = await preparePhotoUpload(rawFile);
+      uploadFile = prepared.file;
+      mimeType = prepared.mimeType;
+      filename = prepared.filename;
+    }
+
+    const isDrone = filename.toLowerCase().includes("dji") || filename.toLowerCase().includes("drone");
     const mediaType = isDrone ? "drone_video" : isVideo ? "video" : "photo";
-    const ext = file.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
+    const ext = filename.split(".").pop() || (isVideo ? "mp4" : "jpg");
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, "0");
     const uid = crypto.randomUUID();
@@ -85,26 +156,24 @@ export default function MediaUpload({ onGeneratePost }) {
 
     setUploadProgress(isVideo ? "Uploading to storage…" : "Uploading…");
     try {
-      // 1. Upload file directly to Supabase Storage
       const sb = getSupabase();
       const { error: storageErr } = await sb.storage
         .from("marketing-media")
-        .upload(storagePath, file, { contentType: file.type, upsert: false });
+        .upload(storagePath, uploadFile, { contentType: mimeType, upsert: false });
       if (storageErr) throw new Error(`Storage upload failed: ${storageErr.message}`);
 
       setUploadProgress(isVideo ? "Registering — video pipeline will run in background…" : "Registering…");
 
-      // 2. Register the asset with the API (sends JSON, not FormData)
       const r = await authFetch("/api/marketing/media/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           storage_path: storagePath,
           storage_bucket: "marketing-media",
-          mime_type: file.type,
+          mime_type: mimeType,
           media_type: mediaType,
-          original_filename: file.name,
-          file_size_bytes: file.size,
+          original_filename: filename,
+          file_size_bytes: uploadFile.size,
         }),
       });
       const j = await r.json();
@@ -242,9 +311,11 @@ export default function MediaUpload({ onGeneratePost }) {
             onGeneratePost={() => onGeneratePost?.(selected)}
             onBatchGenerate={() => setShowBatch(true)}
             onClose={() => setSelected(null)}
+            onAnalyseError={setError}
             onReanalysed={(updated) => {
+              setError("");
               setSelected(updated);
-              setAssets(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a));
+              setAssets((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
             }}
           />
         ) : (
@@ -259,17 +330,22 @@ export default function MediaUpload({ onGeneratePost }) {
 
 function storageUrl(path) {
   if (!path) return null;
-  // Already a full URL
   if (path.startsWith("http")) return path;
   const sb = getSupabase();
+  if (!sb) return null;
   const { data } = sb.storage.from("marketing-media").getPublicUrl(path);
   return data?.publicUrl || null;
+}
+
+function assetPreviewUrl(asset) {
+  if (asset.preview_url) return asset.preview_url;
+  return storageUrl(asset.thumbnail_path || asset.storage_path);
 }
 
 function AssetCard({ asset, selected, onClick }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const statusIcon = STATUS_ICONS[asset.pipeline_status] || STATUS_ICONS.ready;
-  const thumbUrl = storageUrl(asset.thumbnail_path);
+  const thumbUrl = assetPreviewUrl(asset);
 
   return (
     <button
@@ -309,18 +385,83 @@ function AssetCard({ asset, selected, onClick }) {
   );
 }
 
-function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onClose, onReanalysed }) {
+function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onClose, onReanalysed, onAnalyseError }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const [analysing, setAnalysing] = useState(false);
-  const hasAnalysis = !!asset.analysis?.summary;
+  const [analyseError, setAnalyseError] = useState("");
+  const hasAnalysis = !!(
+    asset.analysis?.summary ||
+    asset.analysis?.visible_facts?.length
+  );
+  const previewUrl = assetPreviewUrl(asset);
+
+  async function applyAnalysisResponse(j) {
+    if (!j.analysis) throw new Error("No analysis returned from server");
+    if (j.asset) {
+      onReanalysed?.(j.asset);
+    } else {
+      onReanalysed?.({
+        ...asset,
+        analysis: j.analysis,
+        stage_detected: j.analysis.build_stage || j.analysis.stage || asset.stage_detected,
+      });
+    }
+  }
 
   async function reanalyse() {
     setAnalysing(true);
+    setAnalyseError("");
+    onAnalyseError?.("");
     try {
-      const r = await authFetch(`/api/marketing/media/${asset.id}/analyse`, { method: "POST" });
-      const j = await r.json();
-      if (r.ok && j.analysis) onReanalysed?.({ ...asset, analysis: j.analysis, stage_detected: j.analysis.stage || asset.stage_detected });
-    } catch { /* non-fatal */ } finally {
+      // Step 1: Let the server download and analyse the file directly.
+      // The server does magic-byte sniffing and will return a clear HEIC error if needed.
+      let r = await authFetch(`/api/marketing/media/${asset.id}/analyse`, { method: "POST" });
+
+      let j = {};
+      try {
+        j = await r.json();
+      } catch {
+        throw new Error(`Analysis failed (${r.status})`);
+      }
+
+      if (!r.ok) {
+        const errMsg = j.error || `Analysis failed (${r.status})`;
+        const isHeicErr = /heic/i.test(errMsg) || /heif/i.test(errMsg);
+
+        // Step 2: If server detected HEIC, attempt browser-side conversion (Safari supports
+        // createImageBitmap for HEIC; Chrome does not). If the conversion fails on Chrome,
+        // we catch the error and surface the server's helpful message with re-upload instructions.
+        if (isHeicErr) {
+          const url = asset.preview_url || assetPreviewUrl(asset);
+          if (!url) throw new Error(errMsg);
+          let imageBase64;
+          try {
+            imageBase64 = await photoToJpegBase64(url);
+          } catch {
+            // Browser cannot decode HEIC (Chrome/Firefox) — surface the helpful server message.
+            throw new Error(errMsg);
+          }
+          const r2 = await authFetch(`/api/marketing/media/${asset.id}/analyse`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_base64: imageBase64, media_type: "image/jpeg" }),
+          });
+          let j2 = {};
+          try { j2 = await r2.json(); } catch { throw new Error(errMsg); }
+          if (!r2.ok) throw new Error(j2.error || errMsg);
+          await applyAnalysisResponse(j2);
+          return;
+        }
+
+        throw new Error(errMsg);
+      }
+
+      await applyAnalysisResponse(j);
+    } catch (e) {
+      const msg = e.message || "Analysis failed";
+      setAnalyseError(msg);
+      onAnalyseError?.(msg);
+    } finally {
       setAnalysing(false);
     }
   }
@@ -338,8 +479,8 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
         </button>
       </div>
 
-      {asset.thumbnail_path && (
-        <img src={storageUrl(asset.thumbnail_path)} alt="" className="w-full rounded-lg object-cover max-h-48" />
+      {previewUrl && (
+        <img src={previewUrl} alt="" className="w-full rounded-lg object-cover max-h-48" />
       )}
 
       <div className="space-y-2 text-xs text-muted">
@@ -363,6 +504,7 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs font-medium text-ink">AI Analysis</p>
             <button
+              type="button"
               onClick={reanalyse}
               disabled={analysing}
               className="text-[10px] text-muted hover:text-ink underline underline-offset-2 disabled:opacity-50"
@@ -370,16 +512,63 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
               {analysing ? "Analysing…" : "Re-analyse"}
             </button>
           </div>
-          <p className="text-xs text-muted leading-relaxed">{asset.analysis.summary}</p>
+          {analyseError && (
+            <div className="mt-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <p className="text-xs text-red-700 leading-relaxed">{analyseError}</p>
+            </div>
+          )}
+          {asset.analysis.summary && (
+            <p className="text-xs text-muted leading-relaxed">{asset.analysis.summary}</p>
+          )}
+          {!asset.analysis.summary && asset.analysis.visible_facts?.length > 0 && (
+            <p className="text-xs text-muted leading-relaxed">
+              {asset.analysis.visible_facts.slice(0, 3).join(" · ")}
+            </p>
+          )}
+          {asset.analysis.visible_facts?.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1">Confirmed visible</p>
+              <div className="flex flex-wrap gap-1">
+                {asset.analysis.visible_facts.slice(0, 5).map((f, i) => (
+                  <span key={i} className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full">{f}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {asset.analysis.design_principles?.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1">Design principles</p>
+              <div className="flex flex-wrap gap-1">
+                {asset.analysis.design_principles.map((p, i) => (
+                  <span key={i} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-full">{p}</span>
+                ))}
+              </div>
+            </div>
+          )}
           {asset.analysis.suggested_caption_hook && (
             <p className="text-xs text-primary/80 italic mt-1">&ldquo;{asset.analysis.suggested_caption_hook}&rdquo;</p>
+          )}
+          {asset.analysis.content_opportunities?.length > 0 && (
+            <ul className="mt-2 space-y-0.5">
+              {asset.analysis.content_opportunities.slice(0, 3).map((opp, i) => (
+                <li key={i} className="text-[10px] text-muted flex gap-1.5">
+                  <span className="text-primary/60 shrink-0">·</span>{opp}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       ) : !isVideo && (
         <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
           <p className="text-xs font-medium text-ink mb-1">No AI analysis yet</p>
           <p className="text-xs text-muted mb-2">Analysis runs automatically on new uploads. Click to run it now.</p>
+          {analyseError && (
+            <div className="mb-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <p className="text-xs text-red-700 leading-relaxed">{analyseError}</p>
+            </div>
+          )}
           <button
+            type="button"
             onClick={reanalyse}
             disabled={analysing}
             className="text-xs bg-slate-700 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"

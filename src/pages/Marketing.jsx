@@ -59,7 +59,7 @@ export default function Marketing() {
       {/* Tab content */}
       {activeTab === "create"    && <ContentGenerator seedAsset={seedAsset} onSeedConsumed={() => setSeedAsset(null)} />}
       {activeTab === "library"   && <ContentLibrary />}
-      {activeTab === "campaigns" && <CampaignManager />}
+      {activeTab === "campaigns" && <CampaignManager onGoCreate={() => goTab("create")} />}
       {activeTab === "media"     && <MediaUpload onGeneratePost={handleGeneratePost} />}
     </div>
   );

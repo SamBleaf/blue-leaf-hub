@@ -2,6 +2,16 @@ import { useEffect, useState } from "react";
 import { authFetch } from "../../lib/authFetch.js";
 import { getSupabase } from "../../lib/supabaseClient.js";
 
+const CONTENT_MODES = [
+  { value: "educational",    label: "Educate" },
+  { value: "opinion",        label: "Opinion" },
+  { value: "behind_scenes",  label: "Behind it" },
+  { value: "client_focused", label: "For clients" },
+  { value: "story",          label: "Story" },
+  { value: "authority",      label: "Authority" },
+  { value: "vision",         label: "Vision" },
+];
+
 const BATCH_FORMATS = [
   { channel: "instagram",    mode: "social_instagram", label: "Instagram",    icon: "📸",
     hint: "Short caption + hashtags" },
@@ -26,7 +36,7 @@ function storageUrl(path) {
   return data?.publicUrl || null;
 }
 
-function fetchFormat(fmt, asset, pillar, clientStage) {
+function fetchFormat(fmt, asset, pillar, clientStage, contentMode) {
   const topic = asset.analysis?.summary || asset.analysis?.suggested_caption_hook || "Project photo";
   return authFetch("/api/marketing/generate", {
     method: "POST",
@@ -41,6 +51,7 @@ function fetchFormat(fmt, asset, pillar, clientStage) {
       context: { project_context: "" },
       photo_asset_id: asset.id,
       photo_analysis: asset.analysis || {},
+      content_mode: contentMode || "educational",
     }),
   });
 }
@@ -53,6 +64,8 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
   const [saved, setSaved] = useState(new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [batchMode, setBatchMode] = useState("educational");
+  const [generatedWithMode, setGeneratedWithMode] = useState(null);
 
   function runAll() {
     setResults(Object.fromEntries(
@@ -60,9 +73,10 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
     ));
     setSaved(new Set());
     setSaveError("");
+    setGeneratedWithMode(batchMode);
 
     BATCH_FORMATS.forEach((fmt) => {
-      fetchFormat(fmt, asset, pillar, clientStage)
+      fetchFormat(fmt, asset, pillar, clientStage, batchMode)
         .then((r) => r.json())
         .then((data) => {
           setResults((prev) => ({
@@ -81,7 +95,8 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
 
   function retryFormat(fmt) {
     setResults((prev) => ({ ...prev, [fmt.channel]: { status: "generating", data: null } }));
-    fetchFormat(fmt, asset, pillar, clientStage)
+    setGeneratedWithMode(batchMode);
+    fetchFormat(fmt, asset, pillar, clientStage, batchMode)
       .then((r) => r.json())
       .then((data) => {
         setResults((prev) => ({
@@ -183,10 +198,27 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {asset.thumbnail_path && (
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap gap-1 items-center justify-end">
+            <span className="text-xs text-muted mr-1">Mode:</span>
+            {CONTENT_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setBatchMode(m.value)}
+                className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${batchMode === m.value ? "border-primary bg-primary/10 text-primary font-medium" : "border-hairline text-muted hover:border-primary/40"}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {generatedWithMode && generatedWithMode !== batchMode && doneCount > 0 && (
+            <p className="text-xs text-amber-700">Mode changed — regenerate to apply</p>
+          )}
+          <div className="flex items-center gap-2">
+          {(asset.preview_url || asset.thumbnail_path || asset.storage_path) && (
             <img
-              src={storageUrl(asset.thumbnail_path)}
+              src={asset.preview_url || storageUrl(asset.thumbnail_path || asset.storage_path)}
               alt=""
               className="w-10 h-10 rounded-lg object-cover border border-hairline"
             />
@@ -205,6 +237,7 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
           >
             {saving ? "Saving…" : `Save ${unsavedDoneCount > 0 ? unsavedDoneCount : ""} to library`}
           </button>
+          </div>
         </div>
       </div>
 

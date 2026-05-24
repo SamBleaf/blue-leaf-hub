@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { authFetch } from "../../lib/authFetch.js";
+import { getSupabase } from "../../lib/supabaseClient.js";
 
 const STATUS_COLOURS = {
   draft:     "bg-slate-100 text-slate-600",
@@ -41,6 +42,29 @@ const PILLAR_LABELS = {
   community_craft: "Community & Craft",
 };
 
+function storageUrl(path) {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data } = sb.storage.from("marketing-media").getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+
+function groupItems(items) {
+  const withPhoto = {};
+  const standalone = [];
+  items.forEach((item) => {
+    if (item.media_source_id) {
+      if (!withPhoto[item.media_source_id]) withPhoto[item.media_source_id] = [];
+      withPhoto[item.media_source_id].push(item);
+    } else {
+      standalone.push(item);
+    }
+  });
+  return { withPhoto, standalone };
+}
+
 export default function ContentLibrary() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +74,7 @@ export default function ContentLibrary() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [updating, setUpdating] = useState(false);
+  const [groupByPhoto, setGroupByPhoto] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,6 +123,44 @@ export default function ContentLibrary() {
     );
   });
 
+  const { withPhoto, standalone } = groupItems(filtered);
+
+  function renderFlatItem(item) {
+    return (
+      <button
+        key={item.id}
+        onClick={() => setSelected(item)}
+        className={[
+          "w-full text-left bg-surface border rounded-xl px-4 py-3 transition-all hover:border-primary/40",
+          selected?.id === item.id ? "border-primary shadow-sm" : "border-hairline",
+        ].join(" ")}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="text-xs text-muted">{CHANNEL_LABELS[item.channel] || item.channel}</span>
+              {item.pillar && (
+                <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PILLAR_COLOURS[item.pillar] || "bg-slate-100 text-slate-600"}`}>
+                  {PILLAR_LABELS[item.pillar] || item.pillar}
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-medium text-ink truncate">{item.title || item.topic}</p>
+            {item.body && (
+              <p className="text-xs text-muted mt-0.5 line-clamp-2 leading-relaxed">{item.body}</p>
+            )}
+          </div>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${STATUS_COLOURS[item.status] || "bg-slate-100 text-slate-600"}`}>
+            {STATUS_LABELS[item.status] || item.status}
+          </span>
+        </div>
+        <div className="text-xs text-muted mt-2">
+          {item.created_at ? new Date(item.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : ""}
+        </div>
+      </button>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-muted text-sm">
@@ -108,9 +171,7 @@ export default function ContentLibrary() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* List panel */}
       <div className="lg:col-span-2 space-y-4">
-        {/* Filters */}
         <div className="flex flex-wrap gap-2 items-center">
           <input
             type="text"
@@ -135,6 +196,18 @@ export default function ContentLibrary() {
             <option value="">All statuses</option>
             {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
+          <button
+            type="button"
+            onClick={() => setGroupByPhoto((v) => !v)}
+            className={[
+              "text-xs px-3 py-2 rounded-lg border transition-colors shrink-0",
+              groupByPhoto
+                ? "border-primary bg-primary/10 text-primary font-medium"
+                : "border-hairline text-muted hover:border-primary/40",
+            ].join(" ")}
+          >
+            Group by photo
+          </button>
         </div>
 
         {error && (
@@ -145,51 +218,40 @@ export default function ContentLibrary() {
           <div className="flex items-center justify-center h-48 text-muted text-sm border-2 border-dashed border-hairline rounded-xl">
             {items.length === 0 ? "No content yet — generate some in the Create tab" : "No results match your filters"}
           </div>
+        ) : groupByPhoto ? (
+          <div className="space-y-4">
+            {Object.entries(withPhoto).map(([assetId, groupItemsList]) => (
+              <PhotoGroup
+                key={assetId}
+                assetId={assetId}
+                items={groupItemsList}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            ))}
+            {standalone.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted px-1">No photo</p>
+                {standalone.map(renderFlatItem)}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="space-y-2">
-            {filtered.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setSelected(item)}
-                className={[
-                  "w-full text-left bg-surface border rounded-xl px-4 py-3 transition-all hover:border-primary/40",
-                  selected?.id === item.id ? "border-primary shadow-sm" : "border-hairline",
-                ].join(" ")}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="text-xs text-muted">{CHANNEL_LABELS[item.channel] || item.channel}</span>
-                      {item.pillar && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PILLAR_COLOURS[item.pillar] || "bg-slate-100 text-slate-600"}`}>
-                          {PILLAR_LABELS[item.pillar] || item.pillar}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm font-medium text-ink truncate">{item.title || item.topic}</p>
-                    {item.body && (
-                      <p className="text-xs text-muted mt-0.5 line-clamp-2 leading-relaxed">{item.body}</p>
-                    )}
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${STATUS_COLOURS[item.status] || "bg-slate-100 text-slate-600"}`}>
-                    {STATUS_LABELS[item.status] || item.status}
-                  </span>
-                </div>
-                <div className="text-xs text-muted mt-2">
-                  {item.created_at ? new Date(item.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : ""}
-                </div>
-              </button>
-            ))}
+            {filtered.map(renderFlatItem)}
           </div>
         )}
       </div>
 
-      {/* Detail panel */}
       <div>
         {selected ? (
           <ItemDetail
             item={selected}
             onStatusChange={(s) => updateStatus(selected.id, s)}
+            onSaved={(updated) => {
+              setItems((prev) => prev.map((i) => i.id === updated.id ? { ...i, ...updated } : i));
+              setSelected((prev) => ({ ...prev, ...updated }));
+            }}
             updating={updating}
             onClose={() => setSelected(null)}
           />
@@ -203,15 +265,125 @@ export default function ContentLibrary() {
   );
 }
 
-function ItemDetail({ item, onStatusChange, updating, onClose }) {
+function PhotoGroup({ assetId, items, selected, onSelect }) {
+  const [asset, setAsset] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    authFetch(`/api/marketing/media/${assetId}`)
+      .then((r) => r.json())
+      .then((j) => setAsset(j.asset || j))
+      .catch(() => {});
+  }, [assetId]);
+
+  const visible = expanded ? items : items.slice(0, 3);
+
+  return (
+    <div className="border border-hairline rounded-xl overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-50 border-b border-hairline">
+        {(asset?.preview_url || asset?.thumbnail_path || asset?.storage_path) ? (
+          <img
+            src={asset.preview_url || storageUrl(asset.thumbnail_path || asset.storage_path)}
+            alt=""
+            className="w-8 h-8 rounded object-cover shrink-0"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded bg-slate-200 flex items-center justify-center text-sm shrink-0">🖼️</div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-ink truncate">{asset?.original_filename || assetId.slice(0, 8)}</p>
+          <p className="text-xs text-muted">{items.length} piece{items.length !== 1 ? "s" : ""}</p>
+        </div>
+      </div>
+      <div className="divide-y divide-hairline">
+        {visible.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => onSelect(item)}
+            className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors ${selected?.id === item.id ? "bg-primary/5" : ""}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs text-muted shrink-0">{CHANNEL_LABELS[item.channel] || item.channel}</span>
+                <p className="text-sm text-ink truncate">{item.title || item.topic}</p>
+              </div>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLOURS[item.status] || "bg-slate-100"}`}>
+                {STATUS_LABELS[item.status] || item.status}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+      {items.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-xs text-muted hover:text-ink py-2 border-t border-hairline transition-colors"
+        >
+          {expanded ? "Show less ▲" : `Show ${items.length - 3} more ▼`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    title: item.title || "",
+    body: item.body || "",
+    cta: item.cta || "",
+    hashtags: (item.hashtags || []).join(", "),
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      title: item.title || "",
+      body: item.body || "",
+      cta: item.cta || "",
+      hashtags: (item.hashtags || []).join(", "),
+    });
+    setEditing(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when switching items
+  }, [item.id]);
+
+  async function save() {
+    setSaving(true);
+    setSaveError("");
+    try {
+      const r = await authFetch(`/api/marketing/content/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.title || null,
+          body: form.body || null,
+          cta: form.cta || null,
+          hashtags: form.hashtags
+            ? form.hashtags.split(",").map((h) => h.trim().replace(/^#/, "")).filter(Boolean)
+            : [],
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Save failed");
+      onSaved?.(j.item || { ...item, ...j });
+      setEditing(false);
+    } catch (e) {
+      setSaveError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function copy() {
     const parts = [];
-    if (item.title) parts.push(item.title);
-    if (item.body) parts.push(item.body);
-    if (item.cta) parts.push(item.cta);
-    if (item.hashtags?.length) parts.push(item.hashtags.map((h) => `#${h}`).join(" "));
+    if (form.title) parts.push(form.title);
+    if (form.body) parts.push(form.body);
+    if (form.cta) parts.push(form.cta);
+    const tags = form.hashtags ? form.hashtags.split(",").map((h) => `#${h.trim().replace(/^#/, "")}`).join(" ") : "";
+    if (tags) parts.push(tags);
     navigator.clipboard.writeText(parts.join("\n\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -233,10 +405,17 @@ function ItemDetail({ item, onStatusChange, updating, onClose }) {
           {STATUS_LABELS[item.status] || item.status}
         </span>
         <div className="flex items-center gap-2">
-          <button onClick={copy} className="text-xs text-muted hover:text-ink transition-colors">
-            {copied ? "Copied ✓" : "Copy"}
-          </button>
-          <button onClick={onClose} className="text-muted hover:text-ink transition-colors">
+          {!editing && (
+            <button type="button" onClick={copy} className="text-xs text-muted hover:text-ink transition-colors">
+              {copied ? "Copied ✓" : "Copy"}
+            </button>
+          )}
+          {!editing ? (
+            <button type="button" onClick={() => setEditing(true)} className="text-xs text-primary hover:underline">Edit</button>
+          ) : (
+            <button type="button" onClick={() => { setEditing(false); setSaveError(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
+          )}
+          <button type="button" onClick={onClose} className="text-muted hover:text-ink transition-colors">
             <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
             </svg>
@@ -255,30 +434,81 @@ function ItemDetail({ item, onStatusChange, updating, onClose }) {
         )}
       </div>
 
-      {item.title && <p className="text-sm font-semibold text-ink">{item.title}</p>}
-
-      {item.body && (
-        <div>
-          <p className="text-xs text-muted mb-1">Body</p>
-          <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">{item.body}</p>
-        </div>
-      )}
-
-      {item.cta && (
-        <div>
-          <p className="text-xs text-muted mb-1">CTA</p>
-          <p className="text-sm text-ink font-medium">{item.cta}</p>
-        </div>
-      )}
-
-      {item.hashtags?.length > 0 && (
-        <div>
-          <p className="text-xs text-muted mb-1">Hashtags</p>
-          <div className="flex flex-wrap gap-1">
-            {item.hashtags.map((h) => (
-              <span key={h} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">#{h}</span>
-            ))}
+      {editing ? (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Title / Headline</label>
+            <input
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Optional headline"
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Body *</label>
+            <textarea
+              value={form.body}
+              onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+              rows={8}
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none leading-relaxed"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">CTA</label>
+            <input
+              value={form.cta}
+              onChange={(e) => setForm((f) => ({ ...f, cta: e.target.value }))}
+              placeholder="e.g. DM us to start your project"
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">
+              Hashtags <span className="text-muted font-normal">(comma-separated)</span>
+            </label>
+            <input
+              value={form.hashtags}
+              onChange={(e) => setForm((f) => ({ ...f, hashtags: e.target.value }))}
+              placeholder="AdelaideBuilder, CustomHomes, BlueLeafBuilding"
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+          </div>
+          {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="w-full bg-primary text-white text-sm px-4 py-2 rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {form.title && <p className="text-sm font-semibold text-ink">{form.title}</p>}
+          {form.body && (
+            <div>
+              <p className="text-xs text-muted mb-1">Body</p>
+              <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">{form.body}</p>
+            </div>
+          )}
+          {form.cta && (
+            <div>
+              <p className="text-xs text-muted mb-1">CTA</p>
+              <p className="text-sm text-ink font-medium">{form.cta}</p>
+            </div>
+          )}
+          {form.hashtags && (
+            <div>
+              <p className="text-xs text-muted mb-1">Hashtags</p>
+              <div className="flex flex-wrap gap-1">
+                {form.hashtags.split(",").map((h) => h.trim()).filter(Boolean).map((h) => (
+                  <span key={h} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">#{h.replace(/^#/, "")}</span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -289,6 +519,7 @@ function ItemDetail({ item, onStatusChange, updating, onClose }) {
             {nextStatuses.map((s) => (
               <button
                 key={s}
+                type="button"
                 onClick={() => onStatusChange(s)}
                 disabled={updating}
                 className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors disabled:opacity-50 ${

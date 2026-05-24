@@ -228,21 +228,61 @@ export function runReviewChecks(draft, channel) {
     (overpromisePass ? 1 : 0)
   );
 
+  // Identity score — does this sound like Blue Leaf?
+  const identitySignals = [
+    /passive design|thermal mass|cross.ventilation|weather.tight|building envelope/i,
+    /why we|the reason|what this means|because\b/i,
+    /20.?30 years|long.?term performance|not just handover/i,
+    /weather.tightness|moisture management|detailing/i,
+    /architect|architecturally designed/i,
+  ].filter(p => p.test(fullText)).length;
+  const identityScore = Math.min(10, Math.max(1, identitySignals * 2 + 2));
+
+  // Hook quality — does the opening line avoid flat openers?
+  const firstLine = (draft.body || "").split("\n")[0].trim();
+  const badHookPatterns = [
+    /^nestled in/i, /^this stunning/i, /^beautiful /i,
+    /^at blue leaf building/i, /^introducing /i, /^proud to present/i,
+    /^welcome to /i, /^we are pleased/i,
+  ];
+  const hookScore = badHookPatterns.some(p => p.test(firstLine)) ? 2 : firstLine.length > 30 ? 7 : 5;
+
+  // Philosophy present — references performance/detailing/long-term thinking?
+  const philosophyPresent = [
+    /performance|long.?term|20.?30 years/i,
+    /weather.tight|moisture|thermal/i,
+    /detailing|building envelope/i,
+  ].some(p => p.test(fullText));
+
+  // Accuracy check — flag invented specs
+  const inventedSpecPatterns = [
+    /\d+.?star\s+energy/gi,
+    /R.?value\s+of\s+\d/gi,
+    /\d+mm\s+(insulation|cavity|gap|spacing|wall)/gi,
+  ];
+  const accuracyCheck = inventedSpecPatterns.some(p => p.test(fullText))
+    ? "WARN — specific measurements found; verify against project data before publishing"
+    : "PASS";
+
   const overallPass = apbPass && voicePass && overpromisePass;
   const blockReason = !apbPass
     ? "APB reference detected — must be removed before approval. This content cannot reference APB or Association of Professional Builders in any public output."
     : null;
 
   return {
-    brand_voice:     { pass: voicePass,      flags: voiceFlags },
-    apb_reference:   { pass: apbPass,        matches: apbMatches },
-    overpromise:     { pass: overpromisePass, flags: overpromiseFlags },
-    lead_quality:    { score: Math.min(10, leadScore), notes: specificSignals > 1 ? "Good specificity signals" : "Add specific material or method details to improve" },
-    specificity:     { score: specificityScore, pass: specificityPass },
-    local_relevance: { score: localScore,    pass: localPass },
+    brand_voice:      { pass: voicePass,       flags: voiceFlags },
+    apb_reference:    { pass: apbPass,         matches: apbMatches },
+    overpromise:      { pass: overpromisePass,  flags: overpromiseFlags },
+    lead_quality:     { score: Math.min(10, leadScore), notes: specificSignals > 1 ? "Good specificity signals" : "Add specific material or method details to improve" },
+    specificity:      { score: specificityScore, pass: specificityPass },
+    local_relevance:  { score: localScore,     pass: localPass },
     educational_value: { score: educationalScore, pass: educationalPass },
-    overall_pass:    overallPass,
-    block_reason:    blockReason,
+    identity_score:   identityScore,
+    hook_quality:     hookScore,
+    philosophy_present: philosophyPresent,
+    accuracy_check:   accuracyCheck,
+    overall_pass:     overallPass,
+    block_reason:     blockReason,
   };
 }
 
@@ -305,27 +345,21 @@ export async function generateContent(mode, context, userRequest) {
 
 // ─── Photo Analysis Prompt ────────────────────────────────────────────────────
 
-export const PHOTO_ANALYSIS_SYSTEM_PROMPT = `You are analysing construction site photography for Blue Leaf Building, a high-end Adelaide residential builder. Your job is to identify what is visible and what content opportunities exist. Be specific about construction details — name materials, methods, and stages where you can see them. Flag anything that should not be published (safety hazards, identifiable people without consent, private documents visible, incomplete or unsafe-looking work that could damage reputation).`;
+export const PHOTO_ANALYSIS_SYSTEM_PROMPT = `You are a construction analyst for Blue Leaf Building, a high-end custom home builder in Adelaide.
+
+Analyse this image and return ONLY what is directly visible. Do not invent materials, finishes, or design intent — if you cannot confirm it visually, note it as a probable assumption or unknown. Be specific about construction details: name materials, methods, and stages where you can see them.`;
 
 export const PHOTO_ANALYSIS_USER_PROMPT = `Analyse this construction site photo for Blue Leaf Building's marketing use.
 
 Return ONLY valid JSON in exactly this shape:
 {
-  "project_stage": "frame|lock_up|fit_out|completion|site_prep|slab|unknown",
-  "workmanship_observations": ["specific observations about quality and method"],
-  "weather_tightness_details": ["any sarking, flashing, membrane, or waterproofing visible"],
-  "passive_design_details": ["orientation cues, eaves depth, glazing, thermal mass visible"],
-  "construction_methods": ["specific methods or materials visible"],
-  "educational_angles": ["what could be explained to an interested client from this image"],
-  "caption_ideas": [
-    { "platform": "instagram", "text": "draft caption", "angle": "what angle this takes", "pillar": "how_we_build|what_to_expect|the_work|community_craft" }
-  ],
-  "website_content_ideas": ["ideas for website copy or blog sections this image could illustrate"],
-  "client_guide_topics": ["client guide sections this image could support"],
-  "visual_quality": "high|medium|low",
-  "brand_fit": "strong|moderate|weak",
-  "lead_quality_potential": "high|medium|low",
-  "risks": ["any concerns about publishing this image"],
-  "do_not_publish": false,
-  "do_not_publish_reason": ""
+  "visible_facts": ["specific, confirmed observations about what is directly visible — materials, methods, stage, workmanship, site conditions"],
+  "design_principles": ["visible design intent — passive solar cues, eaves depth, glazing placement, thermal mass, roof pitch, spatial relationships"],
+  "probable_assumptions": ["educated inferences where the image strongly suggests but does not confirm — e.g. 'likely double-glazed given frame profile'"],
+  "unknowns": ["what cannot be determined from this image alone"],
+  "build_stage": "pre_construction|site_prep|slab|frame|lock_up|fitout|completion|landscaping|null",
+  "content_opportunities": ["2-4 marketing angles this photo supports — be specific about what story it tells"],
+  "summary": "1-2 sentence plain description of what is shown, suitable for an internal caption",
+  "suggested_caption_hook": "one strong opening line for a social post — present tense, no hashtags, no emojis",
+  "suggested_pillar": "how_we_build|the_work|what_to_expect|community_craft"
 }`;

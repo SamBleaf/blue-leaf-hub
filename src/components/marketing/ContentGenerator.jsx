@@ -39,6 +39,16 @@ const PILLARS = [
   { value: "community_craft",  label: "Community & Craft",colour: "bg-amber-100 text-amber-700",  desc: "Local roots, team stories, trade relationships" },
 ];
 
+const CONTENT_MODES = [
+  { value: "educational",    label: "Educate" },
+  { value: "opinion",        label: "Opinion" },
+  { value: "behind_scenes",  label: "Behind it" },
+  { value: "client_focused", label: "For clients" },
+  { value: "story",          label: "Story" },
+  { value: "authority",      label: "Authority" },
+  { value: "vision",         label: "Vision" },
+];
+
 const CLIENT_STAGES = [
   { value: "", label: "No stage filter" },
   { value: "awareness",        label: "Awareness" },
@@ -53,6 +63,7 @@ const CLIENT_STAGES = [
 export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
   const [channel, setChannel] = useState("instagram");
   const [pillar, setPillar] = useState("how_we_build");
+  const [contentMode, setContentMode] = useState("educational");
   const [clientStage, setClientStage] = useState("");
   const [topic, setTopic] = useState("");
   const [context, setContext] = useState("");
@@ -77,7 +88,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
     setPillar(seedAsset.analysis?.suggested_pillar || "the_work");
     setChannel("instagram");
     setPhotoContext({
-      url: storageUrl(seedAsset.thumbnail_path || seedAsset.storage_path),
+      url: seedAsset.preview_url || storageUrl(seedAsset.thumbnail_path || seedAsset.storage_path),
       analysis: seedAsset.analysis,
       assetId: seedAsset.id,
     });
@@ -110,6 +121,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
         user_request: context ? `${topic}\n\nContext: ${context}` : topic,
         photo_asset_id: photoContext?.assetId || undefined,
         photo_analysis: photoContext?.analysis || undefined,
+        content_mode: contentMode,
       });
       const response = await authFetch("/api/marketing/generate/stream", {
         method: "POST",
@@ -146,7 +158,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
     } finally {
       setGenerating(false);
     }
-  }, [channel, pillar, clientStage, topic, context, photoContext]);
+  }, [channel, pillar, clientStage, topic, context, photoContext, contentMode]);
 
   useEffect(() => {
     generateRef.current = generate;
@@ -172,6 +184,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
           review_scores: draft.review_scores || {},
           status: "draft",
           media_source_id: photoContext?.assetId || null,
+          content_mode: contentMode,
         }),
       });
       const j = await r.json();
@@ -238,6 +251,27 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
                   {p.label}
                 </span>
                 <div className="text-xs text-muted leading-tight">{p.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-muted mb-2">Content mode</label>
+          <div className="flex flex-wrap gap-1.5">
+            {CONTENT_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setContentMode(m.value)}
+                className={[
+                  "text-xs px-3 py-1.5 rounded-lg border transition-colors",
+                  contentMode === m.value
+                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    : "border-hairline text-muted hover:border-primary/40",
+                ].join(" ")}
+              >
+                {m.label}
               </button>
             ))}
           </div>
