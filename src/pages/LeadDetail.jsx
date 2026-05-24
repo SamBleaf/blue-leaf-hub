@@ -678,8 +678,8 @@ export default function LeadDetail() {
   const load = useCallback(async () => {
     try {
       const [lr, cr] = await Promise.all([
-        fetch(`/api/sales/leads/${leadId}`).then(r => r.json()),
-        fetch(`/api/sales/leads/${leadId}/conversations`).then(r => r.json()).catch(() => ({ ok: true, conversations: [] }))
+        authFetch(`/api/sales/leads/${leadId}`).then(r => r.json()),
+        authFetch(`/api/sales/leads/${leadId}/conversations`).then(r => r.json()).catch(() => ({ ok: true, conversations: [] }))
       ]);
       if (!lr.ok) throw new Error(lr.error);
       setLead(lr.lead);
@@ -1043,6 +1043,34 @@ export default function LeadDetail() {
             {showWinningOffer && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">Winning Offer</h3>
+
+                {/* APB Winning Offer preparation checklist */}
+                <details className="mb-4 rounded-lg border border-amber-200 bg-amber-50/40">
+                  <summary className="px-3 py-2 text-xs font-semibold text-amber-800 cursor-pointer select-none list-none flex items-center gap-1.5">
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+                    </svg>
+                    Preparation checklist — before you present
+                  </summary>
+                  <div className="px-3 pb-3 pt-1 space-y-1.5">
+                    {[
+                      "Can you repeat their brief back in their own words?",
+                      "Selected 2–3 completed projects similar to theirs to reference",
+                      "Prepared a personalised inclusions summary",
+                      "Pre-construction fee confirmed and justified",
+                      "Know who else they are getting quotes from",
+                      "Confirmed all decision-makers will be at the presentation",
+                      "PTSA drafted with project scope filled in (client-facing, not notes)",
+                      "Presentation booked — in person or video call",
+                    ].map((item, i) => (
+                      <label key={i} className="flex items-start gap-2 text-xs text-amber-900 cursor-pointer">
+                        <input type="checkbox" className="mt-0.5 accent-amber-600 flex-shrink-0" />
+                        {item}
+                      </label>
+                    ))}
+                  </div>
+                </details>
+
                 <InlineField label="Pre-construction fee" value={lead.preconstruction_fee ? String(lead.preconstruction_fee) : ""} type="number" onSave={v => patch({ preconstruction_fee: v ? parseFloat(v) : null })} placeholder="e.g. 15000" />
                 <InlineField label="Budget min ($)" value={lead.construction_budget_min ? String(lead.construction_budget_min) : ""} type="number" onSave={v => patch({ construction_budget_min: v ? parseFloat(v) : null })} />
                 <InlineField label="Budget max ($)" value={lead.construction_budget_max ? String(lead.construction_budget_max) : ""} type="number" onSave={v => patch({ construction_budget_max: v ? parseFloat(v) : null })} />
@@ -1115,15 +1143,25 @@ export default function LeadDetail() {
                   </div>
                 </div>
 
-                {/* Project scope */}
+                {/* Project scope — client-facing, appears verbatim in PTSA document */}
                 <div className="mb-2">
-                  <label className="block text-xs text-muted mb-1">Project scope for agreement</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-muted">Project scope <span className="font-medium text-ink">(appears in PTSA — client-facing)</span></label>
+                  </div>
+                  {!lead.ptsa_project_scope && (
+                    <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-1.5">
+                      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                      </svg>
+                      Scope not set — PTSA will show placeholder text
+                    </div>
+                  )}
                   <textarea
                     className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
                     rows={3}
-                    placeholder={lead.discovery_notes ? "(uses discovery notes if left blank)" : "e.g. Double storey new build, 4 bed, steep site, raked ceilings…"}
-                    defaultValue={lead.ptsa_scope_notes || ""}
-                    onBlur={e => { if (e.target.value !== (lead.ptsa_scope_notes || "")) patch({ ptsa_scope_notes: e.target.value || null }); }}
+                    placeholder="e.g. 720m² block at Burnside. Single storey contemporary new build — 4 bed, study, open plan living/kitchen. Approx $1.4M budget."
+                    defaultValue={lead.ptsa_project_scope || ""}
+                    onBlur={e => { if (e.target.value !== (lead.ptsa_project_scope || "")) patch({ ptsa_project_scope: e.target.value || null }); }}
                   />
                 </div>
 
