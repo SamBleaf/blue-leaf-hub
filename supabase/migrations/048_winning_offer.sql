@@ -38,8 +38,15 @@ CREATE TABLE IF NOT EXISTS reference_projects (
 );
 
 ALTER TABLE reference_projects ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "auth_users" ON reference_projects
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'reference_projects' AND policyname = 'auth_users'
+  ) THEN
+    CREATE POLICY "auth_users" ON reference_projects
+      FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_reference_projects_active
   ON reference_projects(is_active, sort_order);
