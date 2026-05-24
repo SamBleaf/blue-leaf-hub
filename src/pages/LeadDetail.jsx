@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
@@ -734,7 +735,7 @@ export default function LeadDetail() {
     const stageName = STAGES.find(s => s.id === l.stage)?.label || l.stage;
     const msg = `I have a sales lead named ${l.first_name} ${l.last_name || ""} in the ${stageName} stage of my builder sales pipeline. Qualifying score: ${l.qualify_score ?? "not assessed"}/8. Project type: ${l.project_type || "unknown"}. Suburb: ${l.suburb || "unknown"}.${l.discovery_notes ? " Discovery: " + l.discovery_notes.slice(0, 200) : ""} Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences.`;
     try {
-      const r = await fetch("/api/blueprint/chat", {
+      const r = await authFetch("/api/blueprint/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: [{ role: "user", content: msg }], hubContext: { page: "lead_detail", stage: l.stage } })
@@ -759,7 +760,7 @@ export default function LeadDetail() {
     if (creatingJob || lead.job_id) return;
     setCreatingJob(true);
     try {
-      const r = await fetch("/api/jobs", {
+      const r = await authFetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

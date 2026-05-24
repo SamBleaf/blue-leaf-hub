@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import RfqSettingsModal from "../components/RfqSettingsModal.jsx";
@@ -48,7 +49,7 @@ export default function Settings() {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/integrations/status");
+      const res = await authFetch("/api/integrations/status");
       const j = await res.json().catch(() => null);
       setStatus(j);
     } catch {
@@ -447,7 +448,7 @@ export default function Settings() {
               const apiKey = beApiKey.trim();
               const body =
                 email && apiKey ? { email, apiKey } : {};
-              const res = await fetch("/api/buildexact/test-connection", {
+              const res = await authFetch("/api/buildexact/test-connection", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body)

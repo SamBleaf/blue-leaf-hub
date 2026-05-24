@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -75,7 +76,7 @@ export default function TenderBoard() {
     setDeleteBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/tender/job-delete", {
+      const res = await authFetch("/api/tender/job-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: deleteModal.id })

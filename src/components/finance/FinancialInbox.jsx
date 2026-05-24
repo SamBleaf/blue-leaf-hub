@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const STATUS_LABELS = {
@@ -269,7 +270,7 @@ function UploadZone({ onUploaded }) {
         });
         mimeType = file.type;
       }
-      const r = await fetch("/api/finance/documents", {
+      const r = await authFetch("/api/finance/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename: file.name.replace(/\.heic$/i, ".jpg"), mimeType, data: base64 })
@@ -363,7 +364,7 @@ export default function FinancialInbox({ onUploaded }) {
   async function triggerImapPoll() {
     setImapPolling(true);
     try {
-      const r = await fetch("/api/finance/imap/poll", { method: "POST" }).then(r => r.json());
+      const r = await authFetch("/api/finance/imap/poll", { method: "POST" }).then(r => r.json());
       setImapStatus(prev => ({ ...prev, last: r, busy: false }));
       if (r.processed > 0) load();
     } finally {

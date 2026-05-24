@@ -1,3 +1,4 @@
+import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 
 function fmtAmount(n) {
@@ -228,7 +229,7 @@ export default function JobFinancials() {
   const [loading, setLoading] = useState(false);
 
   const loadJobs = useCallback(async () => {
-    const r = await fetch("/api/finance/jobs").then(r => r.json());
+    const r = await authFetch("/api/finance/jobs").then(r => r.json());
     if (r.ok) setJobs(r.jobs);
   }, []);
 

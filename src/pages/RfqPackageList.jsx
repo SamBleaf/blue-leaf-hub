@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -272,7 +273,7 @@ function DirectRfqsTab({ activeJobId, projectAddress }) {
     setError("");
     try {
       const sig = loadEmailSignature();
-      const res = await fetch("/api/rfq/remind-one", {
+      const res = await authFetch("/api/rfq/remind-one", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rfqId, signatureFooter: formatSignatureFooter(sig), signatureLogoDataUrl: String(sig.logoDataUrl || "").trim() }),
@@ -292,7 +293,7 @@ function DirectRfqsTab({ activeJobId, projectAddress }) {
     setDeleteBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/tender/job-delete", {
+      const res = await authFetch("/api/tender/job-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: deleteModal.id }),
@@ -536,7 +537,7 @@ function UnmatchedTab() {
     setMatchBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/unmatched-quotes/resolve", {
+      const res = await authFetch("/api/unmatched-quotes/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ unmatchedId: matchModal.id, rfqId: matchRfqId }),
@@ -644,7 +645,7 @@ export default function RfqPackageList() {
   async function loadPackages() {
     setPkgLoading(true);
     try {
-      const res = await fetch("/api/rfq-packages");
+      const res = await authFetch("/api/rfq-packages");
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Load failed");
       setPackages(j.packages || []);

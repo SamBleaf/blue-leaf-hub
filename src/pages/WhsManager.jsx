@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import QRCode from "qrcode";
@@ -149,7 +150,7 @@ export default function WhsManager() {
         r.onerror = reject;
         r.readAsDataURL(addForm.file);
       });
-      const res = await fetch("/api/whs/compliance", {
+      const res = await authFetch("/api/whs/compliance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

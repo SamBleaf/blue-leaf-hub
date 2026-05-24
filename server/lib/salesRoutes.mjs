@@ -16,7 +16,7 @@ const KNOWLEDGE_DIR = join(__dirname, "../../../blueprint-agent/src/blueprint/kn
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const CLAUDE_MODEL = _env.CLAUDE_MODEL || process.env.CLAUDE_MODEL || "claude-opus-4-5";
+const CLAUDE_MODEL = _env.CLAUDE_MODEL || process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 
 const TRANSCRIPT_ANALYSIS_PROMPT = `You are an expert builder sales consultant trained in the APB (Association of Professional Builders) framework. You have been given a transcript of a client meeting for a residential building company.
 

@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { composeRfqEmail } from "../lib/rfqComposer";
@@ -56,7 +57,7 @@ async function mergeJobDataJsonRemote(jobAddress, patch) {
   const addr = String(jobAddress || "").trim();
   if (!addr || !patch || typeof patch !== "object") return;
   try {
-    await fetch("/api/jobs/merge-job-data-json", {
+    await authFetch("/api/jobs/merge-job-data-json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobAddress: addr, patch })
@@ -1106,7 +1107,7 @@ export default function RfqEngine() {
 
         let res;
         try {
-          res = await fetch("/api/rfq/extract", {
+          res = await authFetch("/api/rfq/extract", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -1272,7 +1273,7 @@ export default function RfqEngine() {
     if (!dropboxMeta) {
       try {
         const trades = [...new Set(messages.map((m) => resolveTradeLabel(m.tradeId) || m.tradeId))];
-        await fetch("/api/dropbox/ensure-job-folders", {
+        await authFetch("/api/dropbox/ensure-job-folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jobAddress: job.address, trades })
@@ -1301,7 +1302,7 @@ export default function RfqEngine() {
             selectedTrades.size > 0
               ? Array.from(selectedTrades).map((tid) => tradeLabelUi(tid))
               : tradeIdsForUi.map((tid) => tradeLabelUi(tid));
-          const ensureRes = await fetch("/api/dropbox/ensure-job-folders", {
+          const ensureRes = await authFetch("/api/dropbox/ensure-job-folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jobAddress: addr, trades: tradeLabels })
@@ -1353,7 +1354,7 @@ export default function RfqEngine() {
                     console.warn("[dropbox upload] empty base64 for", fileForUpload.name);
                     continue;
                   }
-                  const upRes = await fetch("/api/dropbox/upload-tender-document", {
+                  const upRes = await authFetch("/api/dropbox/upload-tender-document", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1478,7 +1479,7 @@ export default function RfqEngine() {
       if (!finalDropboxUrl) {
         try {
           const tradeLabels = [...new Set(readyMessages.map((row) => resolveTradeLabel(row.tradeId) || row.tradeId))];
-          const ensureRes = await fetch("/api/dropbox/ensure-job-folders", {
+          const ensureRes = await authFetch("/api/dropbox/ensure-job-folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jobAddress: addr, trades: tradeLabels })
@@ -1540,7 +1541,7 @@ export default function RfqEngine() {
         rfqId: persistence.rfqIds[i]
       }));
 
-      const res = await fetch("/api/rfq/send", {
+      const res = await authFetch("/api/rfq/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: messagesWithIds })
@@ -1610,7 +1611,7 @@ export default function RfqEngine() {
         }
 
         try {
-          await fetch("/api/dropbox/save-rfq-email-copy", {
+          await authFetch("/api/dropbox/save-rfq-email-copy", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1659,7 +1660,7 @@ export default function RfqEngine() {
             rfq_id: persistence.rfqIds[i] || null
           });
         }
-        const pkgRes = await fetch("/api/rfq-packages", {
+        const pkgRes = await authFetch("/api/rfq-packages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

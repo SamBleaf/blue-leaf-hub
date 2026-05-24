@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { Link } from "react-router-dom";
 import { TEMPLATE_STORAGE_KEY } from "../lib/feeProposalDefaults.js";
 
@@ -112,7 +113,7 @@ export default function FeeProposalTemplateGuide() {
             localStorage.setItem(TEMPLATE_STORAGE_KEY, b64);
             // Push to server so it persists across browsers / devices
             try {
-              await fetch("/api/settings/fee-proposal-template", {
+              await authFetch("/api/settings/fee-proposal-template", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ dataBase64: b64 })

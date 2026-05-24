@@ -1,6 +1,7 @@
 /**
  * Client helpers for RFQ trade intelligence (estimate baseline + merge).
  */
+import { authFetch } from "./authFetch.js";
 
 export function sourceBadgeLabel(source) {
   const s = String(source || "");
@@ -23,7 +24,7 @@ export function sourceBadgeClass(source) {
  * @param {{ extraction?: object, job_id?: string, buildexact_job_id?: string }} params
  */
 export async function fetchMergedTradePlan(params = {}) {
-  const res = await fetch("/api/rfq/trade-intelligence/merge", {
+  const res = await authFetch("/api/rfq/trade-intelligence/merge", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params)

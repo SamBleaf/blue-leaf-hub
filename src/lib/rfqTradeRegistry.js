@@ -2,6 +2,7 @@
  * Runtime trade registry — hydrated from /api/rfq/trade-config (trade master library).
  * Subcontractor records are contacts only; trade logic lives here.
  */
+import { authFetch } from "./authFetch.js";
 
 const STATIC_LABELS = {
   // Site & civil
@@ -183,7 +184,7 @@ export function normalizeTradeKeyFromRegistry(text) {
 }
 
 export async function fetchAndHydrateTradeRegistry() {
-  const res = await fetch("/api/rfq/trade-config");
+  const res = await authFetch("/api/rfq/trade-config");
   const json = await res.json().catch(() => ({}));
   if (res.ok && json.ok) hydrateTradeRegistry(json);
   return registry;

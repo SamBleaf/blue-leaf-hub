@@ -25,7 +25,7 @@ import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 
 function safeFilePart(s, max = 48) {
   return (

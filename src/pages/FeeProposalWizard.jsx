@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
@@ -175,7 +176,7 @@ export default function FeeProposalWizard() {
     (async () => {
       // 1. Try server (Supabase Storage)
       try {
-        const r = await fetch("/api/settings/fee-proposal-template");
+        const r = await authFetch("/api/settings/fee-proposal-template");
         if (r.ok) {
           const j = await r.json();
           if (j?.dataBase64) {
@@ -449,7 +450,7 @@ export default function FeeProposalWizard() {
     }
     setBusy(true);
     try {
-      const res = await fetch("/api/fee-proposal/generate-docx", {
+      const res = await authFetch("/api/fee-proposal/generate-docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -488,7 +489,7 @@ export default function FeeProposalWizard() {
     }
     setBusy(true);
     try {
-      const res = await fetch("/api/fee-proposal/upload-to-drive", {
+      const res = await authFetch("/api/fee-proposal/upload-to-drive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -577,7 +578,7 @@ info@blueleafbuilding.com.au`;
     setBusy(true);
     try {
       // Step 1: generate DOCX
-      const gen = await fetch("/api/fee-proposal/generate-docx", {
+      const gen = await authFetch("/api/fee-proposal/generate-docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -591,7 +592,7 @@ info@blueleafbuilding.com.au`;
       const docxBase64 = arrayBufferToBase64(await blob.arrayBuffer());
 
       // Step 2: convert to PDF
-      const conv = await fetch("/api/fee-proposal/docx-to-pdf", {
+      const conv = await authFetch("/api/fee-proposal/docx-to-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -606,7 +607,7 @@ info@blueleafbuilding.com.au`;
 
       // Step 3: send email
       const sig = loadEmailSignature();
-      const res = await fetch("/api/fee-proposal/send", {
+      const res = await authFetch("/api/fee-proposal/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1056,7 +1057,7 @@ info@blueleafbuilding.com.au`;
                 setTemplateLoaded(true);
                 // Push to server so it persists across browsers / devices
                 try {
-                  await fetch("/api/settings/fee-proposal-template", {
+                  await authFetch("/api/settings/fee-proposal-template", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ dataBase64: b64 })

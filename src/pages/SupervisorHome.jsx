@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -186,7 +187,7 @@ export default function SupervisorHome() {
     const proj = projects.find((p) => p.id === voiceProject);
     const todayTasks = tasksByProject[voiceProject] || [];
     try {
-      const res = await fetch("/api/supervisor/parse-voice", {
+      const res = await authFetch("/api/supervisor/parse-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript, projectAddress: proj?.address, tasks: todayTasks })

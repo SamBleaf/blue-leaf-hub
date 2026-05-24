@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import ScheduleGantt from "../components/schedule/ScheduleGantt.jsx";
@@ -169,7 +170,7 @@ export default function ScheduleManager() {
 
   const loadTemplates = useCallback(async () => {
     try {
-      const res = await fetch("/api/schedule/templates");
+      const res = await authFetch("/api/schedule/templates");
       const j = await readApiJson(res);
       if (res.ok && j.ok) setTemplates(j.templates || []);
     } catch {
@@ -370,7 +371,7 @@ export default function ScheduleManager() {
     setError("");
     try {
       const excludeNames = excludeDemo ? ["Demolition (if applicable)"] : [];
-      const res = await fetch("/api/schedule/generate", {
+      const res = await authFetch("/api/schedule/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, startDate, overrides: { excludeNames, useLegacyTemplate: useLegacyGen } })
@@ -417,7 +418,7 @@ export default function ScheduleManager() {
     setBusy((b) => ({ ...b, pdf: true }));
     setError("");
     try {
-      const res = await fetch("/api/schedule/export-gantt-pdf", {
+      const res = await authFetch("/api/schedule/export-gantt-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId })
@@ -500,7 +501,7 @@ export default function ScheduleManager() {
     setTaskAdvice("");
     try {
       const context = [`Phase: ${editTask.phase}`, `Progress: ${editTask.percent_complete || 0}%`, `Dates: ${editTask.start_date || "-"} to ${editTask.end_date || "-"}`, editTask.notes ? `Notes: ${editTask.notes}` : ""].filter(Boolean).join("\n");
-      const res = await fetch("/api/schedule/task-advice", {
+      const res = await authFetch("/api/schedule/task-advice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskName: editTask.name, context })

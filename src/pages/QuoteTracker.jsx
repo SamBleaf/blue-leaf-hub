@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -121,7 +122,7 @@ export default function QuoteTracker() {
     setError("");
     try {
       const sig = loadEmailSignature();
-      const res = await fetch("/api/rfq/remind-one", {
+      const res = await authFetch("/api/rfq/remind-one", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -145,7 +146,7 @@ export default function QuoteTracker() {
     setDeleteBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/tender/job-delete", {
+      const res = await authFetch("/api/tender/job-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: deleteModal.id })
@@ -167,7 +168,7 @@ export default function QuoteTracker() {
     setMatchBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/unmatched-quotes/resolve", {
+      const res = await authFetch("/api/unmatched-quotes/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ unmatchedId: matchModal.id, rfqId: matchRfqId })

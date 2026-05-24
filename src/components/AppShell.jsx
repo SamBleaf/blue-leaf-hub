@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import BlueprintAgent from "../blueprint/components/BlueprintAgent";
@@ -223,7 +224,7 @@ export default function AppShell() {
     let stop = false;
     async function refresh() {
       try {
-        const res = await fetch("/api/quote-tracker/unmatched");
+        const res = await authFetch("/api/quote-tracker/unmatched");
         const j = await res.json().catch(() => null);
         if (stop || !res.ok || !j?.ok || !Array.isArray(j.items)) { setUnmatchedQuoteCount(0); return; }
         setUnmatchedQuoteCount(j.items.length);
@@ -238,7 +239,7 @@ export default function AppShell() {
     let stop = false;
     async function refresh() {
       try {
-        const res = await fetch("/api/finance/documents/unmatched-count");
+        const res = await authFetch("/api/finance/documents/unmatched-count");
         const j = await res.json().catch(() => null);
         if (stop || !res.ok || !j?.ok) { setUnmatchedDocCount(0); return; }
         setUnmatchedDocCount(j.count ?? 0);

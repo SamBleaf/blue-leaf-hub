@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getSupabase } from "../lib/supabaseClient.js";
@@ -54,7 +55,7 @@ export default function PortalAdmin() {
   });
 
   const loadProjects = useCallback(async () => {
-    const res = await fetch("/api/operations/projects");
+    const res = await authFetch("/api/operations/projects");
     const j = await res.json();
     if (j.ok) setProjects(j.projects || []);
   }, []);

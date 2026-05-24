@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -202,7 +203,7 @@ function IntelligenceTab() {
 
   async function recomputeBenchmarks() {
     setRecomputing(true);
-    const r = await fetch("/api/cost-intelligence/benchmarks/recompute", { method: "POST" });
+    const r = await authFetch("/api/cost-intelligence/benchmarks/recompute", { method: "POST" });
     const j = await r.json();
     setRecomputing(false);
     if (!j.ok) alert(j.error || "Recompute failed");
@@ -594,7 +595,7 @@ function PreTenderTab() {
   async function runEstimate() {
     if (!form.floor_area_m2) { setError("Floor area is required"); return; }
     setError(""); setLoading(true); setResult(null);
-    const r = await fetch("/api/cost-intelligence/pretender/estimate", {
+    const r = await authFetch("/api/cost-intelligence/pretender/estimate", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         floor_area_m2: Number(form.floor_area_m2),

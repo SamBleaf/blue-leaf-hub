@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -109,7 +110,7 @@ export default function SiteDiary() {
     setStructureBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/diary/structure", {
+      const res = await authFetch("/api/diary/structure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript, projectAddress: project?.address || "" })
@@ -148,7 +149,7 @@ export default function SiteDiary() {
     setSaveBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/diary/save", {
+      const res = await authFetch("/api/diary/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

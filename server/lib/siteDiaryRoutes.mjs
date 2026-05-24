@@ -9,7 +9,7 @@ import {
 import { buildSiteDiaryPdfBuffer } from "./module6PdfKit.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
+const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-haiku-4-5-20251001";
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ async function claudeText(prompt) {
   const client = new Anthropic({ apiKey: key, maxRetries: 0 });
   const completion = await client.messages.create({
     model: MODEL,
-    max_tokens: 8192,
+    max_tokens: 512,
     temperature: 0.2,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
   });

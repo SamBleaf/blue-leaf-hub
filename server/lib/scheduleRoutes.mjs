@@ -303,13 +303,13 @@ function templateTaskRow(templateTask, projectId, startDate, templateId) {
   };
 }
 
-async function claudeText(prompt) {
+async function claudeText(prompt, maxTokens = 8192) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
   const client = new Anthropic({ apiKey: key, maxRetries: 0 });
   const completion = await client.messages.create({
     model: MODEL,
-    max_tokens: 8192,
+    max_tokens: maxTokens,
     temperature: 0.2,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
   });
@@ -1198,7 +1198,7 @@ export function registerScheduleRoutes(app) {
       const context = String(req.body?.context || "").trim();
       if (!taskName) return res.status(400).json({ ok: false, error: "taskName required." });
       const prompt = `What should I consider when scheduling "${taskName}" for a residential renovation or new build in South Australia?${context ? `\n\nContext:\n${context}` : ""}\n\nAnswer in short bullet points for a builder (plain English).`;
-      const advice = await claudeText(prompt);
+      const advice = await claudeText(prompt, 1024);
       return res.json({ ok: true, advice });
     } catch (e) {
       console.error("[schedule/task-advice]", e);

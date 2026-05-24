@@ -1,7 +1,8 @@
 /** Cost Intelligence — Buildxact template + per-job estimate API helpers. */
+import { authFetch } from "./authFetch.js";
 
 export async function fetchBuildxactTemplate() {
-  const res = await fetch("/api/cost-intelligence/template");
+  const res = await authFetch("/api/cost-intelligence/template");
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Failed to load template");
   return json;

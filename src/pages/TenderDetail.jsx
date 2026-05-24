@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -192,7 +193,7 @@ export default function TenderDetail() {
     setScanBusy(true);
     setScanResult(null);
     try {
-      const res = await fetch("/api/imap/quote-poll", { method: "POST" });
+      const res = await authFetch("/api/imap/quote-poll", { method: "POST" });
       const json = await res.json();
       const matched = json.matched ?? 0;
       setScanResult(matched > 0 ? `${matched} new reply${matched > 1 ? "s" : ""} found` : "No new replies");
@@ -427,7 +428,7 @@ export default function TenderDetail() {
           tag: m.kind === "accepted" ? "WIN-ACCEPT" : "WIN-DECLINE"
         }));
 
-      const fin = await fetch("/api/tender/win-finalize", {
+      const fin = await authFetch("/api/tender/win-finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -444,7 +445,7 @@ export default function TenderDetail() {
       if (!fin.ok || !fj.ok) throw new Error(fj.error || "Win finalize failed");
 
       if (mailPayload.length) {
-        const mr = await fetch("/api/tender/outcome-mails", {
+        const mr = await authFetch("/api/tender/outcome-mails", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jobId: job.id, jobAddress: job.address, entries: mailPayload })
@@ -509,7 +510,7 @@ export default function TenderDetail() {
           tag: "LOST"
         }));
       if (entries.length) {
-        const mr = await fetch("/api/tender/outcome-mails", {
+        const mr = await authFetch("/api/tender/outcome-mails", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jobId: job.id, jobAddress: job.address, entries })
@@ -517,7 +518,7 @@ export default function TenderDetail() {
         const mj = await mr.json();
         if (!mr.ok || !mj.ok) throw new Error(mj.error || "Mail failed");
       }
-      const lr = await fetch("/api/tender/lose-finalize", {
+      const lr = await authFetch("/api/tender/lose-finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: job.id, emails: [] })
@@ -537,7 +538,7 @@ export default function TenderDetail() {
     if (!queryRfq) return;
     setQueryBusy(true);
     try {
-      const res = await fetch("/api/tender/query-draft", {
+      const res = await authFetch("/api/tender/query-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: job?.address, trade: queryRfq.trade, context: "" })
@@ -567,7 +568,7 @@ export default function TenderDetail() {
       const footer = formatSignatureFooter(sig);
       const fullText = `${queryBody}\n\n${footer}`.trim();
       const html = sig.logoDataUrl ? plainBodyToHtml(fullText, sig.logoDataUrl) : undefined;
-      const res = await fetch("/api/rfq/send", {
+      const res = await authFetch("/api/rfq/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

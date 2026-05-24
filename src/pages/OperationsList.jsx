@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Gantt, ViewMode } from "gantt-task-react";
@@ -245,7 +246,7 @@ export default function OperationsList() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/operations/projects");
+      const res = await authFetch("/api/operations/projects");
       const j = await res.json();
       if (res.ok && j.ok) setProjects(j.projects || []);
       else setError(j.error || "Failed to load projects");
@@ -258,7 +259,7 @@ export default function OperationsList() {
 
   const loadGlobal = useCallback(async () => {
     try {
-      const res = await fetch("/api/operations/global-tasks");
+      const res = await authFetch("/api/operations/global-tasks");
       const j = await res.json();
       if (res.ok && j.ok) {
         setGlobalTasks(j.tasks || []);
@@ -271,7 +272,7 @@ export default function OperationsList() {
 
   const loadConflicts = useCallback(async () => {
     try {
-      const res = await fetch("/api/operations/trade-conflicts");
+      const res = await authFetch("/api/operations/trade-conflicts");
       const j = await res.json();
       if (res.ok && j.ok) setTradeConflicts(j.conflicts || []);
     } catch {

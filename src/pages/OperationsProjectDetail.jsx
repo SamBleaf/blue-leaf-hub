@@ -1,3 +1,4 @@
+import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -159,7 +160,7 @@ export default function OperationsProjectDetail() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/po/issue", {
+      const res = await authFetch("/api/po/issue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
