@@ -672,6 +672,7 @@ export default function LeadDetail() {
   const [conversations, setConversations] = useState([]);
   const [generatingPTSA, setGeneratingPTSA] = useState(false);
   const [ptsaError, setPtsaError] = useState("");
+  const [refProjects, setRefProjects] = useState([]);
 
   const bpFetchedFor = useRef(null);
 
@@ -697,6 +698,17 @@ export default function LeadDetail() {
     load();
     return () => setScreenContext?.(null);
   }, [load, setScreenContext]);
+
+  useEffect(() => {
+    if (!lead) return;
+    const showWO = lead.lead_type !== "architect_tender"
+      && ["winning_offer", "fee_proposal", "accepted", "tender", "won"].includes(lead.stage);
+    if (!showWO) return;
+    authFetch("/api/sales/reference-projects")
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setRefProjects(j.projects || []); })
+      .catch(() => setRefProjects([]));
+  }, [lead?.id, lead?.stage, lead?.lead_type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function patch(updates) {
     const r = await authFetch(`/api/sales/leads/${leadId}`, {
@@ -738,7 +750,7 @@ export default function LeadDetail() {
       const r = await authFetch("/api/blueprint/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: msg }], hubContext: { page: "lead_detail", stage: l.stage } })
+        body: JSON.stringify({ messages: [{ role: "user", content: msg }], hubContext: { page: "lead_detail", stage: l.stage, leadId: l.id } })
       });
       const j = await r.json();
       setBpInsight(j.reply || j.response || j.message || "No response.");
@@ -1071,18 +1083,130 @@ export default function LeadDetail() {
                   </div>
                 </details>
 
-                <InlineField label="Pre-construction fee" value={lead.preconstruction_fee ? String(lead.preconstruction_fee) : ""} type="number" onSave={v => patch({ preconstruction_fee: v ? parseFloat(v) : null })} placeholder="e.g. 15000" />
-                <InlineField label="Budget min ($)" value={lead.construction_budget_min ? String(lead.construction_budget_min) : ""} type="number" onSave={v => patch({ construction_budget_min: v ? parseFloat(v) : null })} />
-                <InlineField label="Budget max ($)" value={lead.construction_budget_max ? String(lead.construction_budget_max) : ""} type="number" onSave={v => patch({ construction_budget_max: v ? parseFloat(v) : null })} />
-                <div className="mt-2">
-                  <label className="block text-xs text-muted mb-1">Inclusions summary</label>
+                <p className="text-xs font-semibold text-ink mb-2">About their project</p>
+
+                {!lead.wo_client_vision && lead.discovery_notes?.trim() && (
+                  <div className="flex items-center justify-between gap-3 mb-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                    <span className="text-xs text-primary">Auto-fill from discovery notes?</span>
+                    <button
+                      type="button"
+                      onClick={() => patch({ wo_client_vision: lead.discovery_notes.trim() })}
+                      className="text-xs font-semibold text-primary hover:underline whitespace-nowrap"
+                    >
+                      Fill in →
+                    </button>
+                  </div>
+                )}
+
+                <div className="mb-2">
+                  <label className="block text-xs text-muted mb-1">Their vision — in their own words</label>
                   <textarea
                     className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
-                    rows={3}
-                    placeholder="Key inclusions in the offer…"
-                    defaultValue={lead.inclusions_summary || ""}
-                    onBlur={e => { if (e.target.value !== (lead.inclusions_summary || "")) patch({ inclusions_summary: e.target.value }); }}
+                    rows={4}
+                    placeholder="Describe their project the way they described it to you. This goes into the presentation."
+                    defaultValue={lead.wo_client_vision || ""}
+                    onBlur={e => { if (e.target.value !== (lead.wo_client_vision || "")) patch({ wo_client_vision: e.target.value || null }); }}
                   />
+                </div>
+
+                <InlineField label="Budget confirmed" value={lead.wo_budget_confirmed || ""} onSave={v => patch({ wo_budget_confirmed: v || null })} placeholder="e.g. $1.3M–$1.5M approved finance" />
+                <InlineField label="Target timeline" value={lead.wo_timeline_confirmed || ""} onSave={v => patch({ wo_timeline_confirmed: v || null })} placeholder="e.g. Start March 2026, move-in by Christmas" />
+                <InlineField label="Decision makers" value={lead.wo_decision_makers || ""} onSave={v => patch({ wo_decision_makers: v || null })} placeholder="e.g. Bill + Sarah — both need to sign off" />
+                <InlineField label="Most excited about" value={lead.wo_most_excited_about || ""} onSave={v => patch({ wo_most_excited_about: v || null })} placeholder="e.g. The kitchen and outdoor entertaining area" />
+                <InlineField label="Biggest concern" value={lead.wo_biggest_concern || ""} onSave={v => patch({ wo_biggest_concern: v || null })} placeholder="e.g. Budget blowout, had a bad experience with a previous builder" />
+
+                <div className="mt-4 pt-3 border-t border-hairline space-y-2">
+                  <InlineField label="Pre-construction fee" value={lead.preconstruction_fee ? String(lead.preconstruction_fee) : ""} type="number" onSave={v => patch({ preconstruction_fee: v ? parseFloat(v) : null })} placeholder="e.g. 15000" />
+                  <InlineField label="Budget min ($)" value={lead.construction_budget_min ? String(lead.construction_budget_min) : ""} type="number" onSave={v => patch({ construction_budget_min: v ? parseFloat(v) : null })} />
+                  <InlineField label="Budget max ($)" value={lead.construction_budget_max ? String(lead.construction_budget_max) : ""} type="number" onSave={v => patch({ construction_budget_max: v ? parseFloat(v) : null })} />
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Inclusions summary</label>
+                    <textarea
+                      className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                      rows={3}
+                      placeholder="Key inclusions in the offer…"
+                      defaultValue={lead.inclusions_summary || ""}
+                      onBlur={e => { if (e.target.value !== (lead.inclusions_summary || "")) patch({ inclusions_summary: e.target.value }); }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-lg border border-red-100 bg-red-50/60 p-3 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-red-700/80">Internal only — never shown to client</p>
+                  <InlineField label="Other builders they're comparing" value={lead.wo_other_builders || ""} onSave={v => patch({ wo_other_builders: v || null })} placeholder="e.g. Rendition Homes, one other local custom builder" />
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Why we win this</label>
+                    <textarea
+                      className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                      rows={2}
+                      placeholder="e.g. Sam supervised [similar project] — same brief, same budget range"
+                      defaultValue={lead.wo_our_differentiator || ""}
+                      onBlur={e => { if (e.target.value !== (lead.wo_our_differentiator || "")) patch({ wo_our_differentiator: e.target.value || null }); }}
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-ink mb-0.5">Reference projects for this presentation</p>
+                    <p className="text-[10px] text-muted mb-2">Select 2–3 most relevant to this client&apos;s brief</p>
+                    {refProjects.length === 0 ? (
+                      <p className="text-xs text-muted">
+                        No reference projects yet —{" "}
+                        <Link to="/sales/reference-projects" className="underline text-primary">
+                          add them here ↗
+                        </Link>
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {refProjects.map((rp) => {
+                          const selected = (lead.wo_reference_project_ids || []).includes(rp.id);
+                          return (
+                            <label
+                              key={rp.id}
+                              className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer transition-all ${
+                                selected
+                                  ? "border-primary bg-primary/5"
+                                  : "border-hairline hover:border-primary/40 bg-surface"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={(e) => {
+                                  const current = lead.wo_reference_project_ids || [];
+                                  const updated = e.target.checked
+                                    ? [...current, rp.id]
+                                    : current.filter((id) => id !== rp.id);
+                                  patch({ wo_reference_project_ids: updated });
+                                }}
+                                className="mt-0.5 accent-primary flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-semibold text-ink">{rp.project_label}</span>
+                                  {rp.suburb && <span className="text-xs text-muted">{rp.suburb}</span>}
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                    rp.our_role === "supervised"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : "bg-green-100 text-green-700"
+                                  }`}>
+                                    {rp.our_role}
+                                  </span>
+                                </div>
+                                {rp.attribution_note && (
+                                  <p className="text-xs text-muted mt-0.5 line-clamp-1">{rp.attribution_note}</p>
+                                )}
+                              </div>
+                              {rp.approx_value && (
+                                <span className="text-xs font-medium text-muted flex-shrink-0">
+                                  ${(rp.approx_value / 1000000).toFixed(1)}M
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1153,7 +1277,16 @@ export default function LeadDetail() {
                       <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                         <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                       </svg>
-                      Scope not set — PTSA will show placeholder text
+                      <span>Scope not set — PTSA will show placeholder text</span>
+                      {lead.wo_client_vision && (
+                        <button
+                          type="button"
+                          onClick={() => patch({ ptsa_project_scope: lead.wo_client_vision })}
+                          className="ml-auto text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900 whitespace-nowrap"
+                        >
+                          Use client vision ↑
+                        </button>
+                      )}
                     </div>
                   )}
                   <textarea

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ContentGenerator from "../components/marketing/ContentGenerator.jsx";
 import ContentLibrary from "../components/marketing/ContentLibrary.jsx";
@@ -15,9 +16,15 @@ export default function Marketing() {
   const { tab } = useParams();
   const navigate = useNavigate();
   const activeTab = tab || "create";
+  const [seedAsset, setSeedAsset] = useState(null);
 
   function goTab(id) {
     navigate(id === "create" ? "/marketing" : `/marketing/${id}`);
+  }
+
+  function handleGeneratePost(asset) {
+    setSeedAsset(asset);
+    goTab("create");
   }
 
   return (
@@ -50,10 +57,10 @@ export default function Marketing() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "create"    && <ContentGenerator />}
+      {activeTab === "create"    && <ContentGenerator seedAsset={seedAsset} onSeedConsumed={() => setSeedAsset(null)} />}
       {activeTab === "library"   && <ContentLibrary />}
       {activeTab === "campaigns" && <CampaignManager />}
-      {activeTab === "media"     && <MediaUpload />}
+      {activeTab === "media"     && <MediaUpload onGeneratePost={handleGeneratePost} />}
     </div>
   );
 }

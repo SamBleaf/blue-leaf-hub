@@ -109,6 +109,11 @@ export default function MediaUpload({ onGeneratePost }) {
       if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
       // Reload full list to get pipeline_status derived field
       load();
+      const assetId = j.media_asset_id || j.asset?.id;
+      if (assetId && !isVideo) {
+        authFetch(`/api/marketing/media/${assetId}/analyse`, { method: "POST" })
+          .catch(() => {});
+      }
       setUploadProgress("");
     } catch (err) {
       setError(err.message);

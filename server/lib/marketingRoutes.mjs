@@ -29,6 +29,67 @@ function sbClient() {
   return getServiceSupabase();
 }
 
+const PHOTO_ANALYSE_USER_TEXT = `You are analysing a construction site photo for a residential builder's marketing system.
+
+Analyse this image and return JSON only:
+{
+  "summary": "1-2 sentence description of what is shown",
+  "stage": "one of: pre_construction|site_prep|frame|lock_up|fitout|completion|landscaping|null",
+  "content_angles": ["array of 2-4 content themes this photo could support"],
+  "quality": "high|medium|low",
+  "suggested_pillar": "how_we_build|the_work|what_to_expect|community_craft",
+  "suggested_caption_hook": "one strong opening line for a social post"
+}`;
+
+function parseVisionAnalysisJson(raw) {
+  const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    const match = jsonStr.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Model returned non-JSON analysis");
+    return JSON.parse(match[0]);
+  }
+}
+
+function enrichUserRequest(photo_analysis, user_request, topic) {
+  if (!photo_analysis?.summary) return user_request || topic;
+  const stage = photo_analysis.stage || photo_analysis.project_stage;
+  return `[Photo: ${photo_analysis.summary}${stage ? ` | Build stage: ${stage}` : ""}]\n\n${user_request || topic}`;
+}
+
+async function buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id) {
+  const { systemPrompt, userMessage } = buildMarketingPrompt(mode, generationContext, enrichedRequest);
+  const userContent = [];
+
+  if (photo_asset_id && sb) {
+    const { data: asset } = await sb
+      .from("marketing_media_assets")
+      .select("storage_path, storage_bucket, mime_type")
+      .eq("id", photo_asset_id)
+      .single();
+
+    if (asset) {
+      const { data: urlData } = sb.storage
+        .from(asset.storage_bucket || "marketing-media")
+        .getPublicUrl(asset.storage_path);
+
+      if (urlData?.publicUrl) {
+        userContent.push({
+          type: "image",
+          source: { type: "url", url: urlData.publicUrl },
+        });
+      }
+    }
+  }
+
+  userContent.push({ type: "text", text: userMessage });
+  return {
+    systemPrompt,
+    messages: [{ role: "user", content: userContent }],
+  };
+}
+
 export function registerMarketingRoutes(app) {
 
   // ── Stage 1: Content Generation ─────────────────────────────────────────────
@@ -46,14 +107,17 @@ export function registerMarketingRoutes(app) {
       topic,
       user_request,
       photo_analysis,
+      photo_asset_id,
     } = req.body;
     if (!mode)         return res.status(400).json({ ok: false, error: "mode required" });
     if (!topic)        return res.status(400).json({ ok: false, error: "topic required" });
     if (!user_request) return res.status(400).json({ ok: false, error: "user_request required" });
 
-    const enrichedRequest = photo_analysis?.summary
-      ? `[Photo: ${photo_analysis.summary}${photo_analysis.stage ? ` | Build stage: ${photo_analysis.stage}` : ""}]\n\n${user_request || topic}`
-      : (user_request || topic);
+    const enrichedRequest = enrichUserRequest(
+      photo_analysis || context.photo_analysis,
+      user_request,
+      topic,
+    );
 
     try {
       const generationContext = {
@@ -64,7 +128,31 @@ export function registerMarketingRoutes(app) {
         photo_analysis: photo_analysis || context.photo_analysis || null,
       };
 
-      const content = await generateContent(mode, generationContext, enrichedRequest);
+      const sb = sbClient();
+      let content;
+
+      if (photo_asset_id && sb) {
+        if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
+        const { systemPrompt, messages } = await buildGenerationMessages(
+          sb, mode, generationContext, enrichedRequest, photo_asset_id,
+        );
+        const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+        const response = await client.messages.create(
+          {
+            model: MODEL,
+            max_tokens: 2048,
+            temperature: 0.7,
+            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+            messages,
+          },
+          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+        );
+        const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+        content = parseMarketingResponse(raw);
+      } else {
+        content = await generateContent(mode, generationContext, enrichedRequest);
+      }
+
       const review_scores = runReviewChecks(content, mode);
 
       return res.json({ ok: true, content, review_scores });
@@ -79,18 +167,33 @@ export function registerMarketingRoutes(app) {
    * SSE streaming version of content generation. Falls through to non-streaming on error.
    */
   app.post("/api/marketing/generate/stream", requireAuth, async (req, res) => {
-    const { mode, channel, pillar, client_stage, context = {}, topic, user_request } = req.body;
+    const {
+      mode, channel, pillar, client_stage, context = {}, topic, user_request,
+      photo_analysis, photo_asset_id,
+    } = req.body;
     if (!mode) return res.status(400).json({ error: "mode required" });
     if (!_apiKey) return res.status(503).json({ error: "AI not configured" });
+
+    const photoAnalysis = photo_analysis || context.photo_analysis || null;
+    const enrichedRequest = enrichUserRequest(photoAnalysis, user_request, topic);
 
     const generationContext = {
       pillar,
       client_stage,
       topic,
       project_context: context.project_context || null,
-      photo_analysis:  context.photo_analysis  || null,
+      photo_analysis: photoAnalysis,
     };
-    const { systemPrompt, userMessage } = buildMarketingPrompt(mode, generationContext, user_request || topic || "");
+
+    const sb = sbClient();
+    const { systemPrompt, messages } = photo_asset_id && sb
+      ? await buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id)
+      : (() => {
+        const { systemPrompt: sp, userMessage } = buildMarketingPrompt(
+          mode, generationContext, enrichedRequest,
+        );
+        return { systemPrompt: sp, messages: [{ role: "user", content: userMessage }] };
+      })();
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -104,7 +207,7 @@ export function registerMarketingRoutes(app) {
           model: MODEL,
           max_tokens: 2048,
           system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-          messages: [{ role: "user", content: userMessage }],
+          messages,
         },
         { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
       );
@@ -491,6 +594,64 @@ export function registerMarketingRoutes(app) {
     }
 
     return res.json({ ok: true, export_id: exportRecord.id, status: "processing" });
+  });
+
+  app.post("/api/marketing/media/:id/analyse", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ error: "DB not configured" });
+    if (!_apiKey) return res.status(503).json({ error: "AI not configured" });
+
+    const { data: asset } = await sb
+      .from("marketing_media_assets")
+      .select("storage_path, storage_bucket, mime_type, media_type")
+      .eq("id", req.params.id)
+      .single();
+
+    if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+    if (!asset.mime_type?.startsWith("image/")) {
+      return res.json({ ok: true, skipped: "video" });
+    }
+
+    try {
+      const { data: fileData, error: dlErr } = await sb.storage
+        .from(asset.storage_bucket || "marketing-media")
+        .download(asset.storage_path);
+      if (dlErr) throw dlErr;
+
+      const arrayBuffer = await fileData.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      const mediaType = asset.mime_type || "image/jpeg";
+
+      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+      const response = await client.messages.create({
+        model: VISION_MODEL,
+        max_tokens: 1024,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: base64 },
+            },
+            { type: "text", text: PHOTO_ANALYSE_USER_TEXT },
+          ],
+        }],
+      });
+
+      const raw = response.content.find((b) => b.type === "text")?.text || "{}";
+      const analysis = parseVisionAnalysisJson(raw);
+
+      await sb.from("marketing_media_assets").update({
+        analysis,
+        stage_detected: analysis.stage || null,
+      }).eq("id", req.params.id);
+
+      return res.json({ ok: true, analysis });
+    } catch (err) {
+      console.error("[media/analyse]", err.message);
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/marketing/media/:id/consent", requireAuth, async (req, res) => {

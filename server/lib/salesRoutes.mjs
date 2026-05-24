@@ -105,6 +105,33 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
   }
 }
 
+// ── Winning Offer — Blueprint coaching context block ─────────────────────────
+export function buildWinningOfferBlueprintAppend(lead) {
+  if (!lead || lead.stage !== "winning_offer") return "";
+  return `
+
+--- WINNING OFFER CONTEXT ---
+Client vision: ${lead.wo_client_vision || "not recorded"}
+Budget confirmed: ${lead.wo_budget_confirmed || "not confirmed"}
+Timeline: ${lead.wo_timeline_confirmed || "not confirmed"}
+Decision makers: ${lead.wo_decision_makers || "not recorded"}
+Most excited about: ${lead.wo_most_excited_about || "not recorded"}
+Biggest concern: ${lead.wo_biggest_concern || "not recorded"}
+
+INTERNAL — do not share directly with client:
+Other builders they're comparing: ${lead.wo_other_builders || "unknown"}
+Why Blue Leaf wins this: ${lead.wo_our_differentiator || "not recorded"}
+
+At this stage, coaching should be specific to the concerns and context above.
+APB objection-handling principles to apply when relevant:
+- Price higher than competitors → reframe: cost of risk with a cheaper builder
+- "Need more time to think" → what does delay cost their timeline?
+- "Still getting other quotes" → PTSA doesn't prevent comparing, it starts the work
+- "Can you reduce the PTSA fee?" → the fee funds the work that gives them a 
+  price they can trust — it protects them, not us
+---`;
+}
+
 // ── APB stage probability weights ────────────────────────────────────────────
 const STAGE_PROB = {
   enquiry: 0.05, qualify: 0.10, discovery: 0.20,
@@ -580,5 +607,61 @@ export function registerSalesRoutes(app) {
       const msg = e?.properties?.errors ? JSON.stringify(e.properties.errors) : e?.message || String(e);
       return res.status(502).json({ ok: false, error: msg });
     }
+  });
+
+  // ── Reference projects library ─────────────────────────────────────────────
+  app.get("/api/sales/reference-projects", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("reference_projects")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("project_label", { ascending: true });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, projects: data || [] });
+  });
+
+  app.post("/api/sales/reference-projects", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const body = { ...req.body, updated_at: new Date().toISOString() };
+    if (!body.project_label?.trim()) {
+      return res.status(400).json({ ok: false, error: "project_label required" });
+    }
+    const { data, error } = await sb
+      .from("reference_projects")
+      .insert({ ...body, created_at: new Date().toISOString() })
+      .select()
+      .single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    res.json({ ok: true, project: data });
+  });
+
+  app.put("/api/sales/reference-projects/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("reference_projects")
+      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    res.json({ ok: true, project: data });
+  });
+
+  app.delete("/api/sales/reference-projects/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("reference_projects")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    res.json({ ok: true, project: data });
   });
 }

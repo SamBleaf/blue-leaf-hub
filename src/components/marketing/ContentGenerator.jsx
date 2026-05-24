@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import ReviewPanel from "./ReviewPanel.jsx";
 import { authFetch } from "../../lib/authFetch.js";
 import { getSupabase } from "../../lib/supabaseClient.js";
@@ -63,6 +63,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState(null);
+  const generateRef = useRef(null);
 
   useEffect(() => {
     if (!seedAsset) return;
@@ -70,8 +71,10 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
     const stage = seedAsset.stage_detected
       ? `${seedAsset.stage_detected} stage`
       : "";
-    setTopic(summary || stage || "Project photo");
-    setPillar("the_work");
+    const topicValue = summary || stage || "Project photo";
+
+    setTopic(topicValue);
+    setPillar(seedAsset.analysis?.suggested_pillar || "the_work");
     setChannel("instagram");
     setPhotoContext({
       url: storageUrl(seedAsset.thumbnail_path || seedAsset.storage_path),
@@ -79,10 +82,14 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
       assetId: seedAsset.id,
     });
     onSeedConsumed?.();
+
+    if (summary) {
+      setTimeout(() => generateRef.current?.(), 50);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onSeedConsumed intentionally omitted
   }, [seedAsset]);
 
-  async function generate() {
+  const generate = useCallback(async function generate() {
     if (!topic.trim()) { setError("Add a topic or brief before generating."); return; }
     setGenerating(true);
     setError("");
@@ -101,6 +108,8 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
           ...(photoContext?.analysis ? { photo_analysis: photoContext.analysis } : {}),
         },
         user_request: context ? `${topic}\n\nContext: ${context}` : topic,
+        photo_asset_id: photoContext?.assetId || undefined,
+        photo_analysis: photoContext?.analysis || undefined,
       });
       const response = await authFetch("/api/marketing/generate/stream", {
         method: "POST",
@@ -137,7 +146,11 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
     } finally {
       setGenerating(false);
     }
-  }
+  }, [channel, pillar, clientStage, topic, context, photoContext]);
+
+  useEffect(() => {
+    generateRef.current = generate;
+  }, [generate]);
 
   async function saveDraft() {
     if (!draft) return;
@@ -158,6 +171,7 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
           hashtags: draft.content?.hashtags || [],
           review_scores: draft.review_scores || {},
           status: "draft",
+          media_source_id: photoContext?.assetId || null,
         }),
       });
       const j = await r.json();

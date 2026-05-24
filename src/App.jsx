@@ -30,6 +30,7 @@ import FeeProposalWizard from "./pages/FeeProposalWizard.jsx";
 import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
 import SalesPipeline from "./pages/SalesPipeline.jsx";
 import LeadDetail from "./pages/LeadDetail.jsx";
+import ReferenceProjects from "./pages/ReferenceProjects.jsx";
 import FinanceManager from "./pages/FinanceManager.jsx";
 import JobCommandCentre from "./pages/JobCommandCentre.jsx";
 import JobDashboardSelector from "./pages/JobDashboardSelector.jsx";
@@ -110,6 +111,10 @@ export default function App() {
                 <Route
                   path="/sales"
                   element={<RoleRoute element={<SalesPipeline />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/sales/reference-projects"
+                  element={<RoleRoute element={<ReferenceProjects />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/sales/:leadId"

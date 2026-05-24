@@ -97,7 +97,7 @@ const MARKETING_MODULES = [
 ];
 
 const BASE_DEPARTMENTS = [
-  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",     icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }], defaultTo: "/sales" },
+  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",     icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }, { to: "/sales/reference-projects", label: "Reference Projects" }], defaultTo: "/sales" },
   { id: "tender",             label: "Tendering",  tabShort: "Tender",    icon: "tender",     comingSoon: false, modules: TENDER_MODULES,    defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations", tabShort: "Ops",       icon: "operations", comingSoon: false, modules: null /* computed */ },
   { id: "finance_manager",    label: "Financials", tabShort: "Finance",   icon: "finance",    comingSoon: false, modules: null /* computed */, defaultTo: "/finance" },

@@ -9,6 +9,8 @@ import { courseNameFromMarkdown } from '../../src/blueprint/lib/knowledgeChunkin
 import { indexLearnedKnowledge } from '../../src/blueprint/lib/knowledgeIndex.js';
 import { runAttachmentDocumentReview } from '../../src/blueprint/lib/documentReview.js';
 import { QC_REVIEW_SYSTEM_PROMPT, parseQCReviewJson } from './blueprintQc.js';
+import { getServiceSupabase } from './supabaseService.mjs';
+import { buildWinningOfferBlueprintAppend } from './salesRoutes.mjs';
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -33,14 +35,25 @@ function getAnthropic() {
 }
 
 async function callClaude(mode, messages, extras = {}) {
+  const systemPromptAppend = await resolveWinningOfferAppend(extras.hubContext);
   return runBlueprintAgent({
     anthropic: getAnthropic(),
     model: MODEL,
     maxTokens: MAX_TOKENS,
     mode,
     messages,
-    extras,
+    extras: { ...extras, systemPromptAppend },
   });
+}
+
+async function resolveWinningOfferAppend(hubContext) {
+  const leadId = hubContext?.leadId;
+  if (!leadId || hubContext?.stage !== "winning_offer") return "";
+  const sb = getServiceSupabase();
+  if (!sb) return "";
+  const { data: lead } = await sb.from("leads").select("*").eq("id", leadId).single();
+  if (!lead || lead.stage !== "winning_offer") return "";
+  return buildWinningOfferBlueprintAppend(lead);
 }
 
 const MAX_CHAT_ATTACHMENTS = 4;
@@ -267,7 +280,9 @@ export function registerBlueprintRoutes(app) {
       }
       const chatMessages = sanitizeMessages(messages);
       const lastUserText = [...chatMessages].reverse().find((m) => m.role === 'user')?.content || '';
-      const systemPrompt = await buildChatSystemPrompt('chat', lastUserText, { jobContext, hubContext });
+      let systemPrompt = await buildChatSystemPrompt('chat', lastUserText, { jobContext, hubContext });
+      const woAppend = await resolveWinningOfferAppend(hubContext);
+      if (woAppend) systemPrompt += woAppend;
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');

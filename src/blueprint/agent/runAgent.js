@@ -104,6 +104,9 @@ export async function buildChatSystemPrompt(mode, lastUserText, extras = {}) {
   if (wantsSubcontractorData(lastUserText, extras.hubContext)) {
     systemPrompt = await appendSubcontractorSnapshot(systemPrompt);
   }
+  if (extras.systemPromptAppend) {
+    systemPrompt += extras.systemPromptAppend;
+  }
   return systemPrompt;
 }
 
@@ -124,6 +127,9 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
   const subDataQuery = wantsSubcontractorData(lastUser, extras.hubContext);
   if (subDataQuery) {
     systemPrompt = await appendSubcontractorSnapshot(systemPrompt);
+  }
+  if (extras.systemPromptAppend) {
+    systemPrompt += extras.systemPromptAppend;
   }
 
   const useTools = extras.enableTools !== false;
