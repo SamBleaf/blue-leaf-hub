@@ -1,7 +1,7 @@
 # Blue Leaf Hub — Master Plan
 ## Live Planning Document
 
-> **Last updated:** 2026-05-23 (Marketing module added)
+> **Last updated:** 2026-05-24 (Winning Offer system designed, Phase 1 prompt written)
 > **Maintained by:** Planning Agent
 > **Read this first.** Then read `AGENT_OVERVIEW.md` for technical orientation.
 
@@ -13,7 +13,7 @@
 **TROUBLESHOOT AGENT** — Find the module in KNOWN ISSUES or MODULE STATUS. Read its prompt.
 **PLANNING AGENT** — Update build status after each session. Keep checklists current.
 
-Migrations: applied via Supabase SQL editor in order. Current max = **045**. Next = **046** (Marketing module).
+Migrations: applied via Supabase SQL editor in order. Current max = **047**. Next = **048** (Winning Offer fields + reference_projects table).
 
 ---
 
@@ -21,7 +21,7 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 
 | Module | Status | Next action |
 |--------|--------|-------------|
-| Sales Manager | ✅ Complete | — |
+| Sales Manager | 🟡 Winning Offer extended | Phase 1 (data + form + ref projects) prompt ready to run |
 | Tender Manager — RFQ | ✅ Complete | — |
 | Tender Manager — Fee Proposals | ✅ Complete | — |
 | Tender Manager — Cost Intelligence | 🟡 Partial | Intelligence tab done. Trends/Pre-Tender = stubs. Benchmarks computation + historical comparison = not built |
@@ -1576,6 +1576,29 @@ These are non-negotiable. Reference them before every build.
 
 ---
 
+## WINNING OFFER SYSTEM — DEFERRED ITEMS
+
+### Plan C — Client-facing proposal web page
+**Trigger:** When Blue Leaf has 2–3 completed builds (under their own licence) with photos
+in the marketing media library and client testimonials available.
+
+**What it is:** Hub generates a unique URL (`/proposal/[token]`) for each lead at Winning
+Offer stage. Client opens it on any device — branded page with photos, their brief
+reflected back, reference projects, process overview, PTSA CTA. Trackable (logs first view).
+
+**Why deferred:** Not worth building against supervised-only reference projects. The
+visual impact requires completed Blue Leaf builds with real photos. When the first 2–3
+new builds are at handover, revisit this and build Phase 4.
+
+**What to build then:**
+- Public route `/proposal/:token` — no auth required
+- `proposal_views` log table (token, lead_id, viewed_at, ip)
+- Hub generates token on "Send proposal" click, stores in `leads.wo_proposal_token`
+- Page uses: wo_client_vision, wo_reference_project_ids, inclusions_summary, ptsa fee
+- "Sign PTSA" CTA links to a DocuSign/PandaDoc link or email confirmation flow
+
+---
+
 ## UPCOMING PLANNING WORK
 
 These items need planning before they can be built:
@@ -1584,6 +1607,7 @@ These items need planning before they can be built:
 2. **Xero integration** — Full planning needed. `xero_credentials` table exists. Need API OAuth flow + AP bill push + payment pull.
 3. **Procurement Intelligence** — Alert system when trade lead times are approaching. Based on `schedule_tasks.procurement_lead_days` + historical data.
 4. **Sprint 3 Dependencies** — Full planning in CLAUDE.md. Need to migrate `depends_on` array → `task_dependencies` JSONB with FS/SS/FF/SF types.
+5. **Winning Offer — Phase 4 (proposal web page)** — See WINNING OFFER SYSTEM section above. Revisit when first Blue Leaf builds reach practical completion.
 
 ---
 
@@ -1603,7 +1627,8 @@ These items need planning before they can be built:
 | 043 | ✅ | trade_category_id FK on trade_master_library + rfq_trade_scopes (backfilled 37/37) |
 | 044 | ✅ | RLS tightened — authenticated only on all tables |
 | 045 | ✅ | PTSA fields on leads (ptsa_services, ptsa_scope_notes, ptsa_validity_days, ptsa_status, ptsa_sent_date, ptsa_special_terms, ptsa_credit_to_contract) |
+| 046 | ✅ | Marketing module — marketing_campaigns, marketing_content_items, marketing_media_assets, marketing_media_exports, marketing_music_library |
+| 047 | ✅ | Storage RLS — marketing-media bucket (authenticated upload/read/delete, public thumbnails) |
+| 048 | 🔴 Pending | Winning Offer fields on leads (wo_*, ptsa_project_scope) + reference_projects table |
 
-| 046 | 🔴 Pending | Marketing module — marketing_campaigns, marketing_content_items, marketing_media_assets, marketing_media_exports, marketing_music_library |
-
-**Next migration needed:** 046 (Marketing module — apply when Stage 1 build begins).
+**Next migration needed:** 048 (Winning Offer — apply before running Phase 1 Cursor prompt).
