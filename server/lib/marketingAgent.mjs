@@ -11,6 +11,12 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
+import {
+  BLUE_LEAF_IDENTITY,
+  CONTENT_MODE_MODIFIERS,
+  GENERATION_JSON_FORMAT,
+  formatPhotoAnalysisForPrompt,
+} from "./marketingPrompts.mjs";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -18,6 +24,8 @@ export const MODEL = "claude-sonnet-4-5";
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
+// DEPRECATED — use BLUE_LEAF_IDENTITY from marketingPrompts.mjs for all new generation.
+// Kept here so existing callers don't break during migration.
 export const MARKETING_SYSTEM_PROMPT = `You are the marketing writer for Blue Leaf Building — a high-end residential builder based in Adelaide, South Australia. You write all external-facing content: website copy, social media posts, email sequences, and client guides.
 
 WHO BLUE LEAF IS:
@@ -113,19 +121,24 @@ export const CONTENT_PILLARS = {
 
 export const MODE_PROMPTS = {
   website: `CHANNEL: Website copy
-Include Adelaide local SEO signals naturally — suburb names, "custom home builder Adelaide", "architecturally designed homes SA". Write for F-pattern scanning: the reader skims headers first. Hero headline 15 words maximum. One primary CTA only. Sections should be short with specific, scannable subheadings.`,
+Include Adelaide local SEO signals naturally — suburb names, "custom home builder Adelaide", "architecturally designed homes SA". Write for F-pattern scanning: the reader skims headers first. Hero headline 15 words maximum. One primary CTA only. Sections should be short with specific, scannable subheadings.
+Every section should answer an implicit homeowner question: "What does this mean for me?" Convert builder reasoning into client outcomes.`,
 
   social_instagram: `CHANNEL: Instagram
-150–200 words maximum. Single idea only — do not try to cover multiple topics. Strong specific opening hook that is not a question. The first line must earn the scroll. 5–8 hashtags: local-first (#adelaidehomes, #adelaidebuilder, #customhomesadelaide, #architecturallydesigned, #passivedesign as appropriate). No emoji overload.`,
+150–200 words maximum. Single idea only — do not try to cover multiple topics. Strong specific opening hook that is not a question. The first line must earn the scroll. 5–8 hashtags: local-first (#adelaidehomes, #adelaidebuilder, #customhomesadelaide, #architecturallydesigned, #passivedesign as appropriate). No emoji overload.
+Every post must translate one construction decision into a human outcome before the CTA. The reader is a potential client who cares about living in the home, not building it.`,
 
   social_facebook: `CHANNEL: Facebook
-Slightly longer than Instagram — 200–300 words. More conversational register. Educational angle preferred. Facebook readers are more tolerant of detail. Avoid clickbait-style hooks. Write as if explaining something useful to a knowledgeable friend.`,
+Slightly longer than Instagram — 200–300 words. More conversational register. Educational angle preferred. Facebook readers are more tolerant of detail. Avoid clickbait-style hooks. Write as if explaining something useful to a knowledgeable friend.
+Facebook readers tolerate more detail but still need to understand why it matters to them. Ground one technical point in a consequence (comfort, cost, longevity) per post.`,
 
   email: `CHANNEL: Email sequence
-Write 3–5 emails covering the full nurture journey. One email per client stage. Subject line under 50 characters. Single CTA per email. No hard sell at any stage. Return as a JSON array of { subject, preview_text, body, cta } objects. Email body prose only — no HTML tags.`,
+Write 3–5 emails covering the full nurture journey. One email per client stage. Subject line under 50 characters. Single CTA per email. No hard sell at any stage. Return as a JSON array of { subject, preview_text, body, cta } objects. Email body prose only — no HTML tags.
+Each email should leave the reader with one actionable understanding — something they know now that they didn't before, that makes them more likely to build well.`,
 
   client_guide: `CHANNEL: Client guide
-Practical, educational sections. Write information a client genuinely needs, explained clearly. Not a sales brochure with a guide wrapper. Use numbered sections with specific, useful headings. Each section should answer a real question the client has at this stage of their project.`,
+Practical, educational sections. Write information a client genuinely needs, explained clearly. Not a sales brochure with a guide wrapper. Use numbered sections with specific, useful headings. Each section should answer a real question the client has at this stage of their project.
+Practical sections should explain the WHY behind the process step, not just WHAT happens. A client who understands why feels in control.`,
 
   cta: `CHANNEL: Call to action copy
 Low-pressure, filtering. The CTA should gently signal who this is for. Example register: "If you're working with an architect or considering one, we'd like to have a conversation." Never urgency-based. The right client is not in a rush, and neither are we.`,
@@ -169,9 +182,10 @@ const OVERPROMISE_PATTERNS = [
  * Run all automated review checks against draft content.
  * @param {{ title?: string, body?: string, cta?: string }} draft
  * @param {string} channel
+ * @param {object|null} photoAnalysis - structured photo analysis object (optional)
  * @returns {object} review result
  */
-export function runReviewChecks(draft, channel) {
+export function runReviewChecks(draft, channel, photoAnalysis = null) {
   const fullText = [draft.title, draft.body, draft.cta, ...(draft.hashtags || [])].filter(Boolean).join(" ");
 
   // APB reference — hard block
@@ -264,25 +278,81 @@ export function runReviewChecks(draft, channel) {
     ? "WARN — specific measurements found; verify against project data before publishing"
     : "PASS";
 
-  const overallPass = apbPass && voicePass && overpromisePass;
+  // Authority score — does the content explain WHY or name consequences?
+  const authoritySignals = [
+    /why (we|this|it|the|a)\b/i,
+    /what (this|it|that) means/i,
+    /the (reason|difference|consequence|result)/i,
+    /when (this|it) (fails|goes wrong|isn.?t done|is ignored)/i,
+    /in (10|20|thirty|twenty|ten) years/i,
+    /most builders/i,
+    /common (mistake|failure|approach|shortcut)/i,
+  ].filter(p => p.test(fullText)).length;
+  const authorityScore = Math.min(10, Math.max(1, authoritySignals * 2 + 2));
+  const authorityPass = authorityScore >= 5;
+
+  // Human translation score — does it land a technical point as a homeowner consequence?
+  const humanTranslationSignals = [
+    /comfort|comfortable/i,
+    /lower (energy|power|cooling|heating)/i,
+    /less (maintenance|work|cost|reliance)/i,
+    /feel(s)? (better|comfortable|cool|warm)/i,
+    /means (you|the|a|your)/i,
+    /consequence|result in/i,
+    /person living/i,
+    /homeowner/i,
+  ].filter(p => p.test(fullText)).length;
+  const humanTranslationScore = Math.min(10, humanTranslationSignals * 2 + 2);
+  const humanTranslationPass = humanTranslationScore >= 4;
+
+  // Visual relevance score — is the content grounded in the specific image?
+  const visualGroundingSignals = [
+    /this (photo|image|project|site|home|build)/i,
+    /you can see/i,
+    /visible (here|in this)/i,
+    /on this (project|site|job|build)/i,
+    /in this (case|photo|image|home)/i,
+  ].filter(p => p.test(fullText)).length;
+  const visualRelevanceScore = Math.min(10, (visualGroundingSignals * 3) + (photoAnalysis ? 4 : 1));
+
+  // Updated overall_pass gate — quality floor added
+  const qualityPass = identityScore >= 5 && hookScore >= 3;
+  const overallPass = apbPass && voicePass && overpromisePass && qualityPass;
+
   const blockReason = !apbPass
-    ? "APB reference detected — must be removed before approval. This content cannot reference APB or Association of Professional Builders in any public output."
+    ? "APB reference detected — must be removed before approval."
+    : !qualityPass && identityScore < 5
+    ? `Blue Leaf identity score too low (${identityScore}/10). Content could belong to any builder. Reinforce at least one Blue Leaf principle.`
+    : !qualityPass && hookScore < 3
+    ? "Hook too weak — opening line starts with a flat or banned opener. Rewrite the first sentence."
     : null;
 
+  const reject_reasons = [
+    ...(!apbPass ? apbMatches.map(m => `APB reference: ${m}`) : []),
+    ...(!voicePass ? voiceFlags.map(f => `Brand voice violation: ${f}`) : []),
+    ...(!overpromisePass ? overpromiseFlags.map(f => `Overpromise: ${f}`) : []),
+    ...(identityScore < 5 ? [`Identity score ${identityScore}/10 — no Blue Leaf principles present`] : []),
+    ...(hookScore < 3 ? [`Hook score ${hookScore}/10 — rewrite opening line`] : []),
+  ].filter(Boolean);
+
   return {
-    brand_voice:      { pass: voicePass,       flags: voiceFlags },
-    apb_reference:    { pass: apbPass,         matches: apbMatches },
-    overpromise:      { pass: overpromisePass,  flags: overpromiseFlags },
-    lead_quality:     { score: Math.min(10, leadScore), notes: specificSignals > 1 ? "Good specificity signals" : "Add specific material or method details to improve" },
-    specificity:      { score: specificityScore, pass: specificityPass },
-    local_relevance:  { score: localScore,     pass: localPass },
+    brand_voice:       { pass: voicePass,        flags: voiceFlags },
+    apb_reference:     { pass: apbPass,          matches: apbMatches },
+    overpromise:       { pass: overpromisePass,   flags: overpromiseFlags },
+    lead_quality:      { score: Math.min(10, leadScore), notes: specificSignals > 1 ? "Good specificity signals" : "Add specific material or method details to improve" },
+    specificity:       { score: specificityScore, pass: specificityPass },
+    local_relevance:   { score: localScore,      pass: localPass },
     educational_value: { score: educationalScore, pass: educationalPass },
-    identity_score:   identityScore,
-    hook_quality:     hookScore,
+    identity_score:    identityScore,
+    hook_quality:      hookScore,
     philosophy_present: philosophyPresent,
-    accuracy_check:   accuracyCheck,
-    overall_pass:     overallPass,
-    block_reason:     blockReason,
+    accuracy_check:    accuracyCheck,
+    authority_score:   { score: authorityScore,        pass: authorityPass },
+    human_translation: { score: humanTranslationScore, pass: humanTranslationPass },
+    visual_relevance:  { score: visualRelevanceScore },
+    reject_reasons,
+    overall_pass:      overallPass,
+    block_reason:      blockReason,
   };
 }
 
@@ -292,17 +362,18 @@ export function runReviewChecks(draft, channel) {
  * Build the system + user message for a marketing generation request.
  * Exported so streaming routes can call Claude directly without going through generateContent().
  */
-export function buildMarketingPrompt(mode, context, userRequest) {
+export function buildMarketingPrompt(mode, context, userRequest, content_mode = "educational") {
   const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.social_instagram;
+  const modeModifier = CONTENT_MODE_MODIFIERS[content_mode] || CONTENT_MODE_MODIFIERS.educational;
   const contextBlock = [
     context.pillar          && `Content pillar: ${CONTENT_PILLARS[context.pillar]?.label || context.pillar}`,
     context.client_stage    && `Client stage: ${context.client_stage}`,
     context.topic           && `Topic: ${context.topic}`,
     context.project_context && `Project context: ${context.project_context}`,
-    context.photo_analysis  && `Photo analysis:\n${JSON.stringify(context.photo_analysis, null, 2)}`,
+    context.photo_analysis  && formatPhotoAnalysisForPrompt(context.photo_analysis),
   ].filter(Boolean).join("\n");
-  const userMessage = [modePrompt, "", contextBlock, "", `Request: ${userRequest}`].join("\n");
-  return { systemPrompt: MARKETING_SYSTEM_PROMPT, userMessage };
+  const userMessage = [modePrompt, modeModifier, "", contextBlock, "", `Request: ${userRequest}`].join("\n");
+  return { systemPrompt: BLUE_LEAF_IDENTITY + GENERATION_JSON_FORMAT, userMessage };
 }
 
 /**
@@ -325,9 +396,9 @@ export function parseMarketingResponse(rawText) {
  * @param {object} context - { pillar, client_stage, topic, project_context, job_context }
  * @param {string} userRequest - the user's plain-text request
  */
-export async function generateContent(mode, context, userRequest) {
+export async function generateContent(mode, context, userRequest, content_mode = "educational") {
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-  const { systemPrompt, userMessage } = buildMarketingPrompt(mode, context, userRequest);
+  const { systemPrompt, userMessage } = buildMarketingPrompt(mode, context, userRequest, content_mode);
   const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
   const response = await client.messages.create(
     {

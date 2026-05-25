@@ -7,6 +7,11 @@ const SCORE_LABELS = {
   educational_value:  "Educational value",
 };
 
+const QUALITY_SCORE_LABELS = {
+  authority_score:    "Authority",
+  human_translation:  "Human translation",
+};
+
 const FLAG_LABELS = {
   brand_voice:   "Brand voice",
   overpromise:   "Overpromise check",
@@ -164,6 +169,57 @@ export default function ReviewPanel({ scores, blocked, blockReason }) {
               {scores.accuracy_check.replace("WARN — ", "")}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Authority + human translation scores */}
+      {Object.entries(QUALITY_SCORE_LABELS).some(([key]) => scores[key] != null) && (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 pt-1 border-t border-hairline">
+          {Object.entries(QUALITY_SCORE_LABELS).map(([key, label]) => {
+            const check = scores[key];
+            if (!check) return null;
+            const score = check.score ?? 0;
+            const pass = check.pass;
+            return (
+              <div key={key}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted">{label}</span>
+                  <span className={`text-xs font-semibold ${pass === false ? "text-red-500" : score >= 8 ? "text-emerald-600" : score >= 6 ? "text-amber-600" : "text-red-500"}`}>
+                    {score}/10
+                  </span>
+                </div>
+                <ScoreBar score={score} pass={pass} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Visual relevance */}
+      {scores.visual_relevance != null && (
+        <div className="pt-1 border-t border-hairline">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-muted">Visual relevance</span>
+            <span className={`text-xs font-semibold ${scores.visual_relevance.score >= 7 ? "text-emerald-600" : scores.visual_relevance.score >= 4 ? "text-amber-600" : "text-slate-400"}`}>
+              {scores.visual_relevance.score}/10
+            </span>
+          </div>
+          <ScoreBar score={scores.visual_relevance.score} />
+        </div>
+      )}
+
+      {/* Reject reasons */}
+      {scores.reject_reasons?.length > 0 && (
+        <div className="pt-1 border-t border-hairline space-y-1">
+          <span className="text-xs font-medium text-red-600">Issues to fix before publishing</span>
+          <ul className="space-y-0.5">
+            {scores.reject_reasons.map((reason, i) => (
+              <li key={i} className="text-xs text-red-600 flex items-start gap-1.5">
+                <span className="mt-px shrink-0">•</span>
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

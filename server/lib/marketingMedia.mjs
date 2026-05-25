@@ -15,6 +15,7 @@ import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { extractMeaningfulFrames, downloadFramesForAnalysis } from "./videoIntelligence.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
 
@@ -472,19 +473,39 @@ export async function runFullDronePipeline(assetId, filePath, context = {}) {
     console.info(`[marketing/pipeline] ${step}: ${status}`, detail || "");
   }
 
+  // localSrc is the downloaded video — all ffmpeg steps use this, never filePath directly
+  const localSrc = join(workDir, "src.mp4");
+
   try {
+    // 0. Download video from Supabase storage to local temp file
+    // filePath is a Supabase storage path (e.g. "uploads/2024/01/<assetId>.mp4")
+    logStep("download_source", "running");
+    const { data: srcData, error: srcErr } = await sb.storage
+      .from("marketing-media")
+      .download(filePath);
+    if (srcErr || !srcData) {
+      throw new Error(`Failed to download source video: ${srcErr?.message || "no data"}`);
+    }
+    await writeFile(localSrc, Buffer.from(await srcData.arrayBuffer()));
+    logStep("download_source", "ok", `${filePath}`);
+
     // 1. Detect D-Log M
     logStep("detect_dlog_m", "running");
-    const isDLogM = await detectDLogM(filePath);
+    const isDLogM = await detectDLogM(localSrc);
     await sb.from("marketing_media_assets").update({ is_dji_dlog_m: isDLogM }).eq("id", assetId);
     logStep("detect_dlog_m", isDLogM ? "detected" : "not_detected");
 
-    // 2. Extract frames
+    // 2. Extract meaningful frames (scene-change detection → upload to Supabase storage)
     logStep("extract_frames", "running");
-    const framePaths = await extractFrames(filePath, 5);
-    logStep("extract_frames", "ok", `${framePaths.length} frames`);
+    const frameRecords = await extractMeaningfulFrames(localSrc, assetId, sb);
+    logStep("extract_frames", "ok", `${frameRecords.length} frames (scene-change detection)`);
 
-    // 3. Analyse with Claude
+    // 3. Download frames locally for Claude Vision analysis
+    logStep("download_frames", "running");
+    const framePaths = await downloadFramesForAnalysis(frameRecords, sb, workDir);
+    logStep("download_frames", "ok", `${framePaths.length} frames ready for analysis`);
+
+    // 4. Analyse with Claude
     logStep("analyse_frames", "running");
     const analysis = await analyseFramesWithClaude(framePaths, context);
     await sb.from("marketing_media_assets").update({
@@ -493,24 +514,24 @@ export async function runFullDronePipeline(assetId, filePath, context = {}) {
     }).eq("id", assetId);
     logStep("analyse_frames", "ok", analysis.project_stage || "unknown stage");
 
-    // 4. Identify best segments
+    // 5. Identify best segments
     logStep("identify_segments", "running");
     const segments = identifyBestSegments(analysis, 30);
     logStep("identify_segments", "ok", `${segments.length} segments`);
 
-    // 5. Cut segments
+    // 6. Cut segments (use localSrc — not the Supabase storage path)
     logStep("cut_segments", "running");
     const cutPath = join(workDir, "cut.mp4");
-    await cutSegments(filePath, segments, cutPath);
+    await cutSegments(localSrc, segments, cutPath);
     logStep("cut_segments", "ok");
 
-    // 6. Apply LUTs
+    // 7. Apply LUTs
     logStep("apply_luts", "running");
     const lutPath = join(workDir, "lut.mp4");
     await applyLUTs(cutPath, isDLogM, "brand", lutPath);
     logStep("apply_luts", "ok", isDLogM ? "D-Log M conversion applied" : "brand LUT applied");
 
-    // 7. 9:16 reframe
+    // 8. 9:16 reframe
     logStep("reframe_9x16", "running");
     const reframe916 = join(workDir, "9x16.mp4");
     await smartReframe(lutPath, "9x16", reframe916);
@@ -533,7 +554,7 @@ export async function runFullDronePipeline(assetId, filePath, context = {}) {
     logStep("transcribe", "running");
     let srt = null;
     try {
-      srt = await transcribeAudio(filePath);
+      srt = await transcribeAudio(localSrc);
       logStep("transcribe", srt ? "ok" : "no_speech");
     } catch (e) {
       logStep("transcribe", "skipped", e.message);

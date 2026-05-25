@@ -17,6 +17,13 @@ import {
   MODEL,
   PHOTO_ANALYSIS_SYSTEM_PROMPT,
 } from "./marketingAgent.mjs";
+import {
+  BLUE_LEAF_IDENTITY,
+  CONTENT_MODE_MODIFIERS,
+  GENERATION_JSON_FORMAT,
+  formatPhotoAnalysisForPrompt,
+  enrichUserRequest,
+} from "./marketingPrompts.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
 import {
@@ -57,106 +64,6 @@ Design principles and observable design intent ARE safe to describe. Specific pr
 build_stage must be one of: site_prep | slab | frame | lock_up | fixing | completion | landscaping | design_photo (or null).
 suggested_pillar must be one of: the_work | how_we_build | what_to_expect | community_craft`;
 
-const BLUE_LEAF_IDENTITY = `You are the content voice for Blue Leaf Building — a premium custom home builder in Adelaide.
-
-## WHO BLUE LEAF IS
-A builder who thinks about consequences, not just appearances. Performance before aesthetics. Homes designed for 20-30 years of durability and liveability, not handover photos.
-
-Key differentiators (weave these in naturally, not as a list):
-- Weather-tightness systems and moisture management behind the visible finishes
-- Passive design as a decision made at design stage, not a feature added later
-- Limited number of projects so each gets full attention
-- Weekly client meetings as standard
-- Architect partnerships as a standard operating mode, not an upsell
-- Craftspeople who understand WHY details matter, not just how to execute them
-
-## VOICE
-- Direct and technically confident — like a builder who explains the WHY
-- Consequence-aware: specific materials can fail, poor details create future problems, timelines affect thermal performance
-- Never architectural magazine. Never generic. Never "luxurious" or "stunning".
-- Test: "Would Sam Morris say this standing on the site?" If no, rewrite.
-- Short sentences. Opinions stated directly. No hedging.
-
-## ACCURACY — NON-NEGOTIABLE
-The analysis object includes visible_facts, probable_assumptions, and unknowns.
-- Only state as FACT what is in visible_facts or in project_context provided
-- Probable assumptions may be referenced as design intent or philosophy — never as confirmed fact
-- NEVER reference anything in unknowns as fact
-- Acceptable: "High-performance homes require ventilated cavities behind cladding — it's a detail that's invisible but critical"
-- NOT acceptable: "This home features a rainscreen cavity system" (unless confirmed in project context)
-- If you want to reference a construction principle, frame it as a general Blue Leaf standard, not a claim about this specific project
-
-## CONTENT STRUCTURE — HOOK FIRST ALWAYS
-1. Hook — tension, curiosity, or a direct opinion (1-2 sentences). NEVER start with the project description.
-2. Specific observable detail — one interesting thing that IS visible
-3. Education or opinion — the WHY or a Blue Leaf perspective
-4. Blue Leaf reinforcement — connect to a differentiator (performance, longevity, process)
-5. CTA appropriate to channel (optional for some channels)
-
-## NEVER
-- Start with "Nestled in..." or "This stunning..." or "Beautiful [anything]..."
-- Use the word "luxurious", "stunning", "bespoke", "curated", or "elevated"
-- Invent specific measurements, ratings, or product names unless confirmed in project_context
-- Write more than 3 sentences about how something looks — looks are context, not the point
-- Reference APB, APBC, or any association by name or implication`;
-
-const CONTENT_MODE_MODIFIERS = {
-  educational: `
-CONTENT MODE — EDUCATIONAL
-Lead with a principle, use the project as the example. Universal truth → why it matters → how this project illustrates it → Blue Leaf's approach.
-Example opening: "Timber and stone aren't just an aesthetic choice. They behave differently over time, and that creates very specific demands on the details between them."`,
-
-  opinion: `
-CONTENT MODE — OPINION
-Blue Leaf's direct point of view. Can challenge common assumptions or industry norms. Bold position → common misconception → Blue Leaf's reasoning → implication for homeowners.
-Example opening: "A lot of homes are built to photograph well on day one. That's a different goal to building well."`,
-
-  behind_scenes: `
-CONTENT MODE — BEHIND THE SCENES
-Reveal what most people never consider — hidden detailing, systems, or decisions that make the visible result possible. What people see → what sits behind it → why that matters → Blue Leaf's approach.
-Example opening: "The material that gets photographed is almost never the most important decision made on this project."`,
-
-  client_focused: `
-CONTENT MODE — CLIENT FOCUSED
-Translate technical decisions into consequences for the person who will live here. Client concern or goal → how this decision serves it → what a lower-quality approach produces → Blue Leaf standard.
-Example opening: "Most people think carefully about how they want their home to look. Fewer think about how it will perform in Adelaide in January."`,
-
-  story: `
-CONTENT MODE — STORY
-A brief narrative moment from the project — a decision made, a challenge solved, a realisation on site. Human, specific, grounded. Scene → challenge or decision → outcome.
-Example opening: "When we first walked this site, the slope told us the design had to go one of two directions."`,
-
-  authority: `
-CONTENT MODE — AUTHORITY
-Demonstrate technical expertise by naming where projects commonly go wrong and how Blue Leaf avoids it. Common industry problem → why it happens → what Blue Leaf does differently → result.
-Example opening: "There are three ways cladding junctions fail. They all come from the same decision made at design stage."`,
-
-  vision: `
-CONTENT MODE — VISION
-Blue Leaf's philosophy about what good homes should achieve and why most fall short. Aspirational but grounded. The standard most miss → what it takes to reach it → how Blue Leaf thinks about it.
-Example opening: "A home should get better with age. Most don't, because performance is treated as secondary to appearance from the start."`,
-};
-
-function formatPhotoAnalysisForPrompt(photoAnalysis) {
-  if (!photoAnalysis || !Object.keys(photoAnalysis).length) return "";
-  const analysisSections = [];
-  if (photoAnalysis.visible_facts?.length) {
-    analysisSections.push(`CONFIRMED VISIBLE (state as fact):\n${photoAnalysis.visible_facts.join(", ")}`);
-  }
-  if (photoAnalysis.design_principles?.length) {
-    analysisSections.push(`DESIGN PRINCIPLES (safe to reference):\n${photoAnalysis.design_principles.join(", ")}`);
-  }
-  if (photoAnalysis.probable_assumptions?.length) {
-    analysisSections.push(`PROBABLE INTENT (frame as philosophy, not fact):\n${photoAnalysis.probable_assumptions.join(", ")}`);
-  }
-  if (photoAnalysis.unknowns?.length) {
-    analysisSections.push(`DO NOT STATE THESE AS FACT:\n${photoAnalysis.unknowns.join(", ")}`);
-  }
-  if (photoAnalysis.content_opportunities?.length) {
-    analysisSections.push(`CONTENT ANGLES:\n${photoAnalysis.content_opportunities.join(", ")}`);
-  }
-  return analysisSections.length ? `Image analysis:\n${analysisSections.join("\n\n")}` : "";
-}
 
 function buildUserMessageText(mode, generationContext, enrichedRequest) {
   const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.social_instagram;
@@ -170,24 +77,6 @@ function buildUserMessageText(mode, generationContext, enrichedRequest) {
   return [modePrompt, "", contextBlock, "", `Request: ${enrichedRequest}`].join("\n");
 }
 
-// JSON output contract appended to every generation system prompt.
-// Must be present — without it the model returns prose and the client parser throws.
-const GENERATION_JSON_FORMAT = `
-
-OUTPUT FORMAT — return ONLY valid JSON in exactly this shape:
-{
-  "title": "Short descriptive title",
-  "body": "Main content",
-  "cta": "Call to action (empty string if client_stage is awareness)",
-  "hashtags": ["array", "of", "hashtags"],
-  "alt_text": "Image alt text suggestion for accessibility",
-  "notes": "Brief internal note on approach or any caveats"
-}
-
-For email mode, return a JSON array instead:
-[{ "subject": "", "preview_text": "", "body": "", "cta": "" }]
-
-CRITICAL: Output ONLY the JSON. No preamble, no explanation, no markdown fences, no text before or after the JSON.`;
 
 async function buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id, content_mode = "educational") {
   const systemPrompt = BLUE_LEAF_IDENTITY + (CONTENT_MODE_MODIFIERS[content_mode] || CONTENT_MODE_MODIFIERS.educational) + GENERATION_JSON_FORMAT;
@@ -245,11 +134,6 @@ function parseVisionAnalysisJson(raw) {
   }
 }
 
-function enrichUserRequest(photo_analysis, user_request, topic) {
-  if (!photo_analysis?.summary) return user_request || topic;
-  const stage = photo_analysis.build_stage || photo_analysis.stage || photo_analysis.project_stage;
-  return `[Photo: ${photo_analysis.summary}${stage ? ` | Build stage: ${stage}` : ""}]\n\n${user_request || topic}`;
-}
 
 function mediaPreviewStoragePath(asset) {
   return asset.thumbnail_path || asset.storage_path || null;
@@ -332,7 +216,7 @@ export function registerMarketingRoutes(app) {
       const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
       const content = parseMarketingResponse(raw);
 
-      const review_scores = runReviewChecks(content, mode);
+      const review_scores = runReviewChecks(content, mode, generationContext.photo_analysis);
 
       return res.json({ ok: true, content, review_scores });
     } catch (e) {
@@ -396,7 +280,7 @@ export function registerMarketingRoutes(app) {
       }
 
       const content = parseMarketingResponse(fullText);
-      const review_scores = runReviewChecks(content, channel || mode);
+      const review_scores = runReviewChecks(content, channel || mode, photoAnalysis);
       res.write(`data: ${JSON.stringify({ done: true, content, review_scores })}\n\n`);
       res.write("data: [DONE]\n\n");
       res.end();
@@ -437,6 +321,7 @@ export function registerMarketingRoutes(app) {
         status:          "draft",
         review_scores:   item.review_scores || {},
         media_source_id: item.media_source_id || null,
+        campaign_id:     item.campaign_id     || null,
         tags:            [],
         created_by:      req.caller.id,
         updated_at:      new Date().toISOString(),
@@ -770,6 +655,146 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, item: data });
   });
 
+  // POST /api/marketing/campaigns/:id/slots/:slotId/publish
+  app.post("/api/marketing/campaigns/:id/slots/:slotId/publish", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { metrics = {} } = req.body;
+    const { data, error } = await sb.from("campaign_schedule_slots")
+      .update({
+        status: "published",
+        published_at: new Date().toISOString(),
+        published_by: req.caller.id,
+        published_metrics: metrics,
+      })
+      .eq("id", req.params.slotId)
+      .eq("campaign_id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, slot: data });
+  });
+
+  // POST /api/marketing/campaigns/:id/slots/auto-assign
+  // Body: { content_item_ids: [uuid...] } — ordered, assigns to next empty slots in date order
+  app.post("/api/marketing/campaigns/:id/slots/auto-assign", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { content_item_ids = [] } = req.body;
+    if (!content_item_ids.length) return res.status(400).json({ ok: false, error: "No items to assign" });
+    const { data: emptySlots } = await sb.from("campaign_schedule_slots")
+      .select("id").eq("campaign_id", req.params.id).eq("status", "empty")
+      .order("slot_date").limit(content_item_ids.length);
+    if (!emptySlots?.length) return res.json({ ok: true, assigned: 0, message: "No empty slots available" });
+    const updates = emptySlots.map((slot, i) => ({
+      id: slot.id,
+      content_item_id: content_item_ids[i],
+      status: "assigned",
+    }));
+    await Promise.all(
+      updates.map((u) =>
+        sb.from("campaign_schedule_slots")
+          .update({ content_item_id: u.content_item_id, status: "assigned" })
+          .eq("id", u.id),
+      ),
+    );
+    return res.json({ ok: true, assigned: updates.length });
+  });
+
+  // POST /api/marketing/campaigns/:id/preload
+  // Body: { count: 8, content_modes: ['educational','story','behind_scenes','authority'] }
+  // Returns generated items (not saved) for preview before user approves
+  app.post("/api/marketing/campaigns/:id/preload", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
+    const { data: campaign } = await sb.from("marketing_campaigns")
+      .select("*").eq("id", req.params.id).single();
+    if (!campaign) return res.status(404).json({ ok: false, error: "Campaign not found" });
+    const { count = 8, content_modes = ["educational", "story", "behind_scenes", "authority"] } = req.body;
+    const { data: photos } = await sb.from("marketing_media_assets")
+      .select("id, analysis, original_filename, thumbnail_path, storage_path, storage_bucket")
+      .eq("media_type", "photo")
+      .not("analysis", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (!photos?.length) {
+      return res.status(400).json({ ok: false, error: "No analysed photos found. Upload and analyse project photos first." });
+    }
+    const { data: slots } = await sb.from("campaign_schedule_slots")
+      .select("id, slot_date, day_of_week, channel, content_mode")
+      .eq("campaign_id", req.params.id)
+      .eq("status", "empty")
+      .order("slot_date")
+      .limit(count);
+    const targetSlots = slots?.length
+      ? slots
+      : Array.from({ length: count }, (_, i) => ({
+          id: null, channel: i % 2 === 0 ? "instagram" : "facebook", content_mode: null,
+        }));
+
+    const { BLUE_LEAF_IDENTITY: BLI, CONTENT_MODE_MODIFIERS: CMM, formatPhotoAnalysisForPrompt: fpa } = await import("./marketingPrompts.mjs");
+    const { MODE_PROMPTS, runReviewChecks, parseMarketingResponse } = await import("./marketingAgent.mjs");
+    const { resolveVisionMediaType } = await import("./visionImage.mjs");
+    const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+
+    const previews = [];
+    for (let i = 0; i < Math.min(count, targetSlots.length); i++) {
+      const slot = targetSlots[i];
+      const photo = photos[i % photos.length];
+      const mode = content_modes[i % content_modes.length];
+      const channel = slot.channel || (i % 2 === 0 ? "instagram" : "facebook");
+      const channelMode = channel === "instagram" ? "social_instagram" : "social_facebook";
+      const systemPrompt = BLI + (CMM[mode] || CMM.educational);
+      const analysis = photo.analysis || {};
+      const analysisText = fpa(analysis);
+      const topic = analysis.summary || analysis.suggested_caption_hook || "Project photo";
+      const modeInstruction = MODE_PROMPTS[channelMode] || MODE_PROMPTS.social_instagram;
+      const userText = [modeInstruction, "", analysisText, "", `Request: ${topic}`].join("\n");
+      const userContent = [];
+      try {
+        const { data: fileData } = await sb.storage.from(photo.storage_bucket || "marketing-media").download(photo.storage_path);
+        if (fileData) {
+          const buf = Buffer.from(await fileData.arrayBuffer());
+          const mediaType = resolveVisionMediaType(buf, null, photo.storage_path);
+          if (mediaType) {
+            userContent.push({ type: "image", source: { type: "base64", media_type: mediaType, data: buf.toString("base64") } });
+          }
+        }
+      } catch { /* non-fatal */ }
+      userContent.push({ type: "text", text: userText });
+      try {
+        const response = await client.messages.create(
+          {
+            model: "claude-sonnet-4-5",
+            max_tokens: 1024,
+            temperature: 0.7,
+            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+            messages: [{ role: "user", content: userContent }],
+          },
+          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+        );
+        const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+        const content = parseMarketingResponse(raw);
+        const review_scores = runReviewChecks(content, channelMode);
+        previews.push({
+          slot_id: slot.id,
+          slot_date: slot.slot_date,
+          channel,
+          content_mode: mode,
+          photo_asset_id: photo.id,
+          photo_thumbnail: photo.thumbnail_path || photo.storage_path,
+          content,
+          review_scores,
+          topic,
+        });
+      } catch (e) {
+        previews.push({ slot_id: slot.id, slot_date: slot.slot_date, channel, content_mode: mode, error: e.message });
+      }
+    }
+    return res.json({ ok: true, previews });
+  });
+
   // ── Stage 2: Media Assets ─────────────────────────────────────────────────
 
   /**
@@ -817,7 +842,9 @@ export function registerMarketingRoutes(app) {
     if (!media_type)   return res.status(400).json({ ok: false, error: "media_type required" });
     if (!mime_type)    return res.status(400).json({ ok: false, error: "mime_type required" });
 
-    const { data: asset, error } = await sb.from("marketing_media_assets").insert({
+    const isVideo = ["video", "drone_video", "timelapse", "testimonial_video"].includes(media_type);
+
+    const insertRow = {
       storage_path,
       storage_bucket,
       mime_type,
@@ -828,23 +855,40 @@ export function registerMarketingRoutes(app) {
       job_id:            job_id            || null,
       capture_date:      capture_date      || null,
       created_by:        req.caller.id,
-    }).select().single();
+    };
+    if (isVideo) insertRow.analysis_status = "pending";
+
+    const { data: asset, error } = await sb.from("marketing_media_assets").insert(insertRow).select().single();
 
     if (error) return res.status(400).json({ ok: false, error: error.message });
 
-    // For video types, kick off pipeline asynchronously
-    const isVideo = ["video","drone_video","timelapse","testimonial_video"].includes(media_type);
     if (isVideo) {
-      // Import pipeline lazily to avoid startup cost when video isn't used
       try {
         const { runFullDronePipeline } = await import("./marketingMedia.mjs");
-        // Fire and forget — status is tracked via marketing_media_exports
-        runFullDronePipeline(asset.id, storage_path, { project_id, job_id }).catch(e => {
+        runFullDronePipeline(asset.id, storage_path, { project_id, job_id }).catch((e) => {
           console.error("[marketing/pipeline] async error for asset", asset.id, e.message);
         });
       } catch (e) {
         console.warn("[marketing/pipeline] marketingMedia.mjs not available:", e.message);
       }
+
+      (async () => {
+        try {
+          const {
+            runVideoIntelligencePipeline,
+          } = await import("./videoIntelligence.mjs");
+          const campaignObjective = req.body.campaign_objective || "educate";
+          await runVideoIntelligencePipeline(
+            asset.id, storage_path, sb, _apiKey, campaignObjective,
+          );
+        } catch (e) {
+          console.error("[videoIntelligence pipeline]", e.message);
+          await sb.from("marketing_media_assets")
+            .update({ analysis_status: "error" })
+            .eq("id", asset.id);
+        }
+      })();
+
       return res.json({ ok: true, media_asset_id: asset.id, status: "processing" });
     }
 
@@ -1001,6 +1045,86 @@ export function registerMarketingRoutes(app) {
     }
   });
 
+  async function enrichStoryClips(sb, story) {
+    if (!story?.clips?.length) return story;
+    const clips = await Promise.all(story.clips.map(async (c) => {
+      if (!c.storage_path) return c;
+      const { data } = await sb.storage.from("marketing-media").createSignedUrl(c.storage_path, 3600);
+      return { ...c, thumbnail_url: data?.signedUrl || null };
+    }));
+    return { ...story, clips };
+  }
+
+  app.get("/api/marketing/media/:id/story-sequence", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+
+    const { data: asset, error: assetErr } = await sb
+      .from("marketing_media_assets")
+      .select("analysis_status")
+      .eq("id", req.params.id)
+      .single();
+
+    if (assetErr || !asset) return res.status(404).json({ ok: false, error: "Asset not found" });
+
+    if (asset.analysis_status !== "complete") {
+      return res.json({
+        ok: true,
+        ready: false,
+        status: asset.analysis_status || "processing",
+      });
+    }
+
+    const { data: exportRec } = await sb
+      .from("marketing_media_exports")
+      .select("story_sequence")
+      .eq("media_asset_id", req.params.id)
+      .eq("export_format", "story_sequence")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const story = exportRec?.story_sequence
+      ? await enrichStoryClips(sb, exportRec.story_sequence)
+      : null;
+
+    return res.json({ ok: true, ready: true, story_sequence: story });
+  });
+
+  app.get("/api/marketing/media/:id/clip-alternative", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+
+    const { position } = req.query;
+    if (!position) return res.status(400).json({ ok: false, error: "position query required" });
+
+    const exclude = (req.query.exclude || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    try {
+      const { selectAlternativeClip } = await import("./videoIntelligence.mjs");
+      const clip = await selectAlternativeClip(req.params.id, position, exclude, sb);
+      if (!clip) return res.status(404).json({ ok: false, error: "No alternative clip found" });
+
+      const { data: signed } = await sb.storage.from("marketing-media").createSignedUrl(clip.storage_path, 3600);
+      return res.json({
+        ok: true,
+        clip: {
+          frame_index: clip.frame_index,
+          timestamp_secs: clip.timestamp_secs,
+          storage_path: clip.storage_path,
+          overall_score: clip.overall_score,
+          primary_subject: clip.primary_subject,
+          thumbnail_url: signed?.signedUrl || null,
+        },
+      });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.post("/api/marketing/media/:id/consent", requireAuth, async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
@@ -1090,7 +1214,28 @@ export function registerMarketingRoutes(app) {
     const {
       export_id, music_track_id, music_volume = 0.6,
       colour_preset = "brand", export_formats = ["9x16"],
+      media_asset_id, story_sequence,
     } = req.body;
+
+    // Video review approval — persist reviewed story sequence (Final Assembly adds music later)
+    if (media_asset_id && story_sequence && !export_id) {
+      const { data, error } = await sb
+        .from("marketing_media_exports")
+        .upsert(
+          {
+            media_asset_id,
+            export_format: "story_sequence",
+            story_sequence,
+            status: "ready",
+          },
+          { onConflict: "media_asset_id,export_format" },
+        )
+        .select("id")
+        .single();
+
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true, export_id: data.id, status: "ready" });
+    }
 
     if (!export_id)      return res.status(400).json({ ok: false, error: "export_id required" });
     if (!music_track_id) return res.status(400).json({ ok: false, error: "music_track_id required — select a music track before exporting" });

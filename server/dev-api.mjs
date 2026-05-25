@@ -777,6 +777,20 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
 });
 
+app.get("/api/health/ffmpeg", async (_req, res) => {
+  const { exec } = await import("child_process");
+  const { promisify } = await import("util");
+  const execP = promisify(exec);
+  for (const bin of ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"]) {
+    try {
+      const { stdout } = await execP(`"${bin}" -version`);
+      const versionLine = stdout.split("\n")[0] || stdout.trim();
+      return res.json({ ok: true, bin, version: versionLine });
+    } catch { /* try next */ }
+  }
+  return res.status(503).json({ ok: false, error: "ffmpeg not found on PATH" });
+});
+
 app.post("/api/subcontractors/csv-template-sheet", async (req, res) => {
   if (!driveConfigured()) {
     return res.status(503).json({ ok: false, error: "Google Drive not configured." });

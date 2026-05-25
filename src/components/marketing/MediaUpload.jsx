@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import FinalAssembly from "./FinalAssembly.jsx";
 import BatchGenerator from "./BatchGenerator.jsx";
+import VideoReview from "./VideoReview.jsx";
 import { getSupabase } from "../../lib/supabaseClient.js";
 import { authFetch } from "../../lib/authFetch.js";
 
@@ -113,6 +114,7 @@ export default function MediaUpload({ onGeneratePost }) {
   const [selected, setSelected] = useState(null);
   const [showAssembly, setShowAssembly] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
+  const [showVideoReview, setShowVideoReview] = useState(false);
   const fileRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -131,12 +133,39 @@ export default function MediaUpload({ onGeneratePost }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll for processing assets (pipeline_status comes from list endpoint derived field)
+  // Poll for processing exports (drone pipeline)
   useEffect(() => {
     const processing = assets.filter((a) => a.pipeline_status === "processing");
     if (processing.length === 0) return;
     const timer = setTimeout(load, 5000);
     return () => clearTimeout(timer);
+  }, [assets, load]);
+
+  // Poll video intelligence (story sequence) every 15s while analysing
+  useEffect(() => {
+    const analysing = assets.filter(
+      (a) => a.mime_type?.startsWith("video/") &&
+        a.analysis_status &&
+        a.analysis_status !== "complete" &&
+        a.analysis_status !== "error",
+    );
+    if (analysing.length === 0) return;
+
+    const poll = async () => {
+      let changed = false;
+      for (const asset of analysing) {
+        try {
+          const r = await authFetch(`/api/marketing/media/${asset.id}/story-sequence`);
+          const j = await r.json();
+          if (j.ready) changed = true;
+        } catch { /* ignore */ }
+      }
+      if (changed) load();
+    };
+
+    const timer = setInterval(poll, 15000);
+    poll();
+    return () => clearInterval(timer);
   }, [assets, load]);
 
   async function handleUpload(e) {
@@ -224,6 +253,31 @@ export default function MediaUpload({ onGeneratePost }) {
 
   if (loading) {
     return <div className="flex items-center justify-center h-48 text-muted text-sm">Loading media library…</div>;
+  }
+
+  if (showVideoReview && selected) {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowVideoReview(false)}
+          className="flex items-center gap-2 text-sm text-muted hover:text-ink mb-4 transition-colors"
+        >
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Back to Media
+        </button>
+        <VideoReview
+          assetId={selected.id}
+          onDone={() => { setShowVideoReview(false); load(); }}
+          onGenerateFinal={() => {
+            setShowVideoReview(false);
+            setShowAssembly(true);
+          }}
+        />
+      </div>
+    );
   }
 
   if (showAssembly && selected) {
@@ -322,6 +376,7 @@ export default function MediaUpload({ onGeneratePost }) {
             onAssemble={() => setShowAssembly(true)}
             onGeneratePost={() => onGeneratePost?.(selected)}
             onBatchGenerate={() => setShowBatch(true)}
+            onReviewEdit={() => setShowVideoReview(true)}
             onClose={() => setSelected(null)}
             onAnalyseError={setError}
             onReanalysed={(updated) => {
@@ -551,7 +606,7 @@ function AddChipButton({ onAdd, color = "slate" }) {
   );
 }
 
-function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onClose, onReanalysed, onAnalyseError }) {
+function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onReviewEdit, onClose, onReanalysed, onAnalyseError }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const [analysing, setAnalysing] = useState(false);
   const [analyseError, setAnalyseError] = useState("");
@@ -925,11 +980,44 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
         </div>
       )}
 
-      {/* Assemble button */}
+      {/* Video intelligence status */}
+      {isVideo && (
+        <div className="rounded-lg border border-hairline px-3 py-2.5 space-y-2">
+          {asset.analysis_status === "complete" && (
+            <>
+              <p className="text-xs text-emerald-700 font-medium">AI edit ready for review</p>
+              <button
+                type="button"
+                onClick={onReviewEdit}
+                className="w-full bg-primary text-white text-sm px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+              >
+                Review AI edit →
+              </button>
+            </>
+          )}
+          {(asset.analysis_status === "processing" || asset.analysis_status === "pending") && (
+            <p className="text-xs text-amber-800 flex items-center gap-2">
+              <svg className="animate-spin w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              Analysing footage… this takes 3–5 minutes.
+            </p>
+          )}
+          {asset.analysis_status === "error" && (
+            <p className="text-xs text-red-600">Video analysis failed — check server logs and try re-uploading.</p>
+          )}
+          {!asset.analysis_status && asset.pipeline_status === "processing" && (
+            <p className="text-xs text-muted">Export pipeline running in background…</p>
+          )}
+        </div>
+      )}
+
       {isVideo && asset.consent_for_marketing && (
         <button
+          type="button"
           onClick={onAssemble}
-          className="w-full bg-primary text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+          className="w-full border border-hairline text-ink text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-slate-50 transition-colors"
         >
           Final Assembly →
         </button>

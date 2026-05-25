@@ -276,8 +276,10 @@ export default function BatchGenerator({ asset, onDone, pillar, clientStage }) {
 function FormatCard({ fmt, result, isSaved, onRetry, onSave }) {
   const status = result?.status || "pending";
   const content = result?.data?.content || result?.data || {};
+  const [expanded, setExpanded] = useState(false);
+  const isTruncated = content.body?.length > 200;
   const bodyPreview = content.body
-    ? content.body.slice(0, 200) + (content.body.length > 200 ? "…" : "")
+    ? (expanded || !isTruncated ? content.body : content.body.slice(0, 200))
     : null;
 
   return (
@@ -348,7 +350,18 @@ function FormatCard({ fmt, result, isSaved, onRetry, onSave }) {
             </p>
           )}
           {bodyPreview && (
-            <p className="text-xs text-muted leading-relaxed">{bodyPreview}</p>
+            <div>
+              <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">{bodyPreview}</p>
+              {isTruncated && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded(e => !e)}
+                  className="text-[10px] text-primary hover:underline mt-1"
+                >
+                  {expanded ? "Show less" : "Show more"}
+                </button>
+              )}
+            </div>
           )}
           {content.hashtags?.length > 0 && (
             <div className="flex flex-wrap gap-1">
