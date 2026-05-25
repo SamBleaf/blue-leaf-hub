@@ -788,6 +788,13 @@ app.get("/api/health/ffmpeg", async (_req, res) => {
       return res.json({ ok: true, bin, version: versionLine });
     } catch { /* try next */ }
   }
+  // Fallback: @ffmpeg-installer/ffmpeg bundled binary
+  try {
+    const { path: ffmpegPath } = await import("@ffmpeg-installer/ffmpeg");
+    const { stdout } = await execP(`"${ffmpegPath}" -version`);
+    const versionLine = stdout.split("\n")[0] || stdout.trim();
+    return res.json({ ok: true, bin: ffmpegPath, version: versionLine, source: "npm" });
+  } catch { /* not available */ }
   return res.status(503).json({ ok: false, error: "ffmpeg not found on PATH" });
 });
 

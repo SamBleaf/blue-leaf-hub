@@ -900,6 +900,7 @@ export function registerMarketingRoutes(app) {
           for (const bin of ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"]) {
             try { await execP(`"${bin}" -version`); return bin; } catch { /* try next */ }
           }
+          try { const { path } = await import("@ffmpeg-installer/ffmpeg"); return path; } catch { /* */ }
           return "ffmpeg";
         })();
         const thumbPath = pathJoin(tmpdir(), `blvi-thumb-${uid}.jpg`);
