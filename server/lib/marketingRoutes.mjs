@@ -923,6 +923,17 @@ export function registerMarketingRoutes(app) {
         const buf = Buffer.from(await fileData.arrayBuffer());
         mediaType = resolveVisionMediaType(buf, asset.mime_type, asset.storage_path);
         if (!mediaType) throw new Error(HEIC_UNSUPPORTED_MESSAGE);
+
+        // Anthropic hard limit: 5 MB decoded. If the stored image is over 4.5 MB, ask
+        // the client to resize it in the browser and re-send as image_base64.
+        if (buf.length > 4_500_000) {
+          return res.status(422).json({
+            ok: false,
+            tooLarge: true,
+            error: `Image is ${(buf.length / 1_048_576).toFixed(1)} MB — too large for direct analysis (max 4.5 MB). It will be resized automatically.`,
+          });
+        }
+
         base64 = buf.toString("base64");
       }
 

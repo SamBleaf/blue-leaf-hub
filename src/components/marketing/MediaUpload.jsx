@@ -30,7 +30,11 @@ function normalizeImageMime(file) {
   return extMap[ext] || "image/jpeg";
 }
 
-/** Convert any browser-decodable image (incl. HEIC on Safari) to JPEG base64 for the vision API. */
+/**
+ * Convert any browser-decodable image (incl. HEIC on Safari) to JPEG base64
+ * for the Anthropic vision API (hard limit: 5 MB decoded).
+ * Scales to ≤ 2048px on the longest side before encoding to keep output well under the limit.
+ */
 async function photoToJpegBase64(source) {
   const blob =
     typeof source === "string"
@@ -41,15 +45,23 @@ async function photoToJpegBase64(source) {
       : source;
   const bitmap = await createImageBitmap(blob);
   try {
+    // Scale down to max 2048px on longest side (Anthropic 5 MB hard limit).
+    // A 4032×3024 iPhone HEIC → 2048×1536 at q=0.82 ≈ 0.8–2 MB — well within limits.
+    const MAX_DIM = 2048;
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+
     const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+
     const jpegBlob = await new Promise((resolve, reject) => {
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("Could not convert image to JPEG"))),
         "image/jpeg",
-        0.92,
+        0.82,
       );
     });
     const buf = await jpegBlob.arrayBuffer();
@@ -426,19 +438,19 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
 
       if (!r.ok) {
         const errMsg = j.error || `Analysis failed (${r.status})`;
-        const isHeicErr = /heic/i.test(errMsg) || /heif/i.test(errMsg);
+        // Server returns tooLarge:true for images >4.5 MB, or HEIC for unsupported format.
+        // Either way: resize in the browser (scale to ≤2048px, q=0.82) and retry.
+        const needsBrowserResize = j.tooLarge || /heic/i.test(errMsg) || /heif/i.test(errMsg);
 
-        // Step 2: If server detected HEIC, attempt browser-side conversion (Safari supports
-        // createImageBitmap for HEIC; Chrome does not). If the conversion fails on Chrome,
-        // we catch the error and surface the server's helpful message with re-upload instructions.
-        if (isHeicErr) {
+        if (needsBrowserResize) {
           const url = asset.preview_url || assetPreviewUrl(asset);
           if (!url) throw new Error(errMsg);
           let imageBase64;
           try {
+            // photoToJpegBase64 caps at 2048px longest side — always produces < 4 MB output.
             imageBase64 = await photoToJpegBase64(url);
           } catch {
-            // Browser cannot decode HEIC (Chrome/Firefox) — surface the helpful server message.
+            // Browser cannot decode this format (e.g. HEIC on Chrome) — surface server message.
             throw new Error(errMsg);
           }
           const r2 = await authFetch(`/api/marketing/media/${asset.id}/analyse`, {
