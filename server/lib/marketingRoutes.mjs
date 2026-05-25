@@ -996,6 +996,40 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, asset: data });
   });
 
+  /**
+   * PATCH /api/marketing/media/:id/analysis
+   * Save manually-corrected analysis fields without re-running the AI.
+   * Body: { analysis: { summary?, visible_facts?, design_principles?,
+   *                      suggested_caption_hook?, content_opportunities?,
+   *                      build_stage?, ... } }
+   */
+  app.patch("/api/marketing/media/:id/analysis", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const analysis = req.body?.analysis;
+    if (!analysis || typeof analysis !== "object") {
+      return res.status(400).json({ ok: false, error: "analysis object required" });
+    }
+    // Merge with existing analysis so partial updates are safe
+    const { data: existing, error: fetchErr } = await sb
+      .from("marketing_media_assets")
+      .select("analysis")
+      .eq("id", req.params.id)
+      .single();
+    if (fetchErr) return res.status(404).json({ ok: false, error: fetchErr.message });
+    const merged = { ...(existing?.analysis || {}), ...analysis };
+    const stage = merged.build_stage && merged.build_stage !== "null" ? merged.build_stage : null;
+    const { data, error } = await sb
+      .from("marketing_media_assets")
+      .update({ analysis: merged, stage_detected: stage, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const withPreview = await attachMediaPreviewUrl(sb, data);
+    return res.json({ ok: true, asset: withPreview });
+  });
+
   // ── Stage 2: Music Library ─────────────────────────────────────────────────
 
   app.get("/api/marketing/music", requireAuth, async (req, res) => {

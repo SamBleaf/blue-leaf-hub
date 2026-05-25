@@ -397,15 +397,222 @@ function AssetCard({ asset, selected, onClick }) {
   );
 }
 
+/**
+ * A single editable chip. Click the text to edit inline; × to delete.
+ * color: "green" | "blue" | "slate"
+ */
+function EditableChip({ value, color = "slate", onEdit, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (!trimmed) { onDelete(); }
+    else if (trimmed !== value) { onEdit(trimmed); }
+    setEditing(false);
+  }
+
+  const colorCls = {
+    green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    blue:  "bg-blue-50 text-blue-700 border-blue-200",
+    slate: "bg-slate-100 text-slate-600 border-slate-200",
+  }[color] || "bg-slate-100 text-slate-600 border-slate-200";
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        }}
+        className={`text-[10px] border px-1.5 py-0.5 rounded-full outline-none ${colorCls}`}
+        style={{ width: `${Math.max(80, draft.length * 6.5)}px`, maxWidth: "220px" }}
+      />
+    );
+  }
+
+  return (
+    <span className={`group inline-flex items-center gap-1 text-[10px] border px-1.5 py-0.5 rounded-full cursor-pointer hover:brightness-95 transition-all ${colorCls}`}>
+      <span
+        title="Click to edit"
+        onClick={() => { setDraft(value); setEditing(true); }}
+        className="leading-tight"
+      >
+        {value}
+      </span>
+      <button
+        type="button"
+        title="Remove"
+        onClick={e => { e.stopPropagation(); onDelete(); }}
+        className="opacity-0 group-hover:opacity-50 hover:!opacity-100 transition-opacity shrink-0 leading-none text-[11px] font-bold"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+/** One-line text field that shows as a label until clicked */
+function EditableTextField({ value, placeholder, italic = false, onEdit, className = "" }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || "");
+  const ref = useRef(null);
+
+  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed !== (value || "")) onEdit(trimmed);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <textarea
+        ref={ref}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
+        }}
+        rows={2}
+        className={`w-full text-xs border border-primary/30 rounded-lg px-2 py-1 outline-none resize-none ${className}`}
+      />
+    );
+  }
+
+  return (
+    <p
+      title="Click to edit"
+      onClick={() => { setDraft(value || ""); setEditing(true); }}
+      className={`text-xs cursor-pointer hover:bg-primary/5 rounded px-1 -mx-1 transition-colors ${italic ? "italic text-primary/80" : "text-muted leading-relaxed"} ${className}`}
+    >
+      {value || <span className="text-muted/50">{placeholder}</span>}
+    </p>
+  );
+}
+
+/** Small inline "+" button that expands to a text input to add a new chip */
+function AddChipButton({ onAdd, color = "slate" }) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => { if (adding) ref.current?.focus(); }, [adding]);
+
+  const colorCls = {
+    green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    blue:  "bg-blue-50 text-blue-700 border-blue-200",
+    slate: "bg-slate-100 text-slate-600 border-slate-200",
+  }[color] || "bg-slate-100 text-slate-600 border-slate-200";
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed) onAdd(trimmed);
+    setDraft("");
+    setAdding(false);
+  }
+
+  if (adding) {
+    return (
+      <input
+        ref={ref}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { setDraft(""); setAdding(false); }
+        }}
+        placeholder="Add…"
+        className={`text-[10px] border px-1.5 py-0.5 rounded-full outline-none ${colorCls}`}
+        style={{ width: "80px" }}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setAdding(true)}
+      className="text-[10px] border border-dashed border-hairline text-muted hover:text-ink hover:border-ink px-1.5 py-0.5 rounded-full transition-colors"
+    >
+      +
+    </button>
+  );
+}
+
 function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGenerate, onClose, onReanalysed, onAnalyseError }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const [analysing, setAnalysing] = useState(false);
   const [analyseError, setAnalyseError] = useState("");
+  // ── Analysis editing state ──────────────────────────────────────────────────
+  const [editedAnalysis, setEditedAnalysis] = useState(null); // null = no local edits
+  const [savingEdits, setSavingEdits] = useState(false);
+  const [editSaveError, setEditSaveError] = useState("");
   const hasAnalysis = !!(
     asset.analysis?.summary ||
     asset.analysis?.visible_facts?.length
   );
   const previewUrl = assetPreviewUrl(asset);
+
+  // Reset edit state when switching to a different asset
+  useEffect(() => { setEditedAnalysis(null); setEditSaveError(""); }, [asset.id]);
+
+  const workingAnalysis = editedAnalysis ?? asset.analysis ?? {};
+  const hasEdits = editedAnalysis !== null;
+
+  function editArray(field, index, newValue) {
+    const base = editedAnalysis ?? { ...asset.analysis };
+    const arr = [...(base[field] ?? [])];
+    arr[index] = newValue;
+    setEditedAnalysis({ ...base, [field]: arr });
+  }
+  function deleteArrayItem(field, index) {
+    const base = editedAnalysis ?? { ...asset.analysis };
+    const arr = [...(base[field] ?? [])];
+    arr.splice(index, 1);
+    setEditedAnalysis({ ...base, [field]: arr });
+  }
+  function addArrayItem(field, value) {
+    const base = editedAnalysis ?? { ...asset.analysis };
+    const arr = [...(base[field] ?? []), value];
+    setEditedAnalysis({ ...base, [field]: arr });
+  }
+  function editField(field, value) {
+    const base = editedAnalysis ?? { ...asset.analysis };
+    setEditedAnalysis({ ...base, [field]: value });
+  }
+
+  async function saveEdits() {
+    if (!editedAnalysis) return;
+    setSavingEdits(true);
+    setEditSaveError("");
+    try {
+      const r = await authFetch(`/api/marketing/media/${asset.id}/analysis`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysis: editedAnalysis }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Save failed");
+      onReanalysed?.(j.asset || { ...asset, analysis: editedAnalysis });
+      setEditedAnalysis(null);
+    } catch (e) {
+      setEditSaveError(e.message);
+    } finally {
+      setSavingEdits(false);
+    }
+  }
 
   async function applyAnalysisResponse(j) {
     if (!j.analysis) throw new Error("No analysis returned from server");
@@ -510,64 +717,149 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
         )}
       </div>
 
-      {/* AI analysis summary */}
+      {/* AI analysis — editable */}
       {hasAnalysis ? (
-        <div className="bg-slate-50 rounded-lg px-3 py-2">
-          <div className="flex items-center justify-between mb-1">
+        <div className="bg-slate-50 rounded-lg px-3 py-2 space-y-2">
+          {/* Header row */}
+          <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-ink">AI Analysis</p>
-            <button
-              type="button"
-              onClick={reanalyse}
-              disabled={analysing}
-              className="text-[10px] text-muted hover:text-ink underline underline-offset-2 disabled:opacity-50"
-            >
-              {analysing ? "Analysing…" : "Re-analyse"}
-            </button>
+            <div className="flex items-center gap-2">
+              {hasEdits && (
+                <button
+                  type="button"
+                  onClick={() => { setEditedAnalysis(null); setEditSaveError(""); }}
+                  className="text-[10px] text-muted hover:text-ink underline underline-offset-2"
+                >
+                  Discard
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={reanalyse}
+                disabled={analysing}
+                className="text-[10px] text-muted hover:text-ink underline underline-offset-2 disabled:opacity-50"
+              >
+                {analysing ? "Analysing…" : "Re-analyse"}
+              </button>
+            </div>
           </div>
+
           {analyseError && (
-            <div className="mt-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               <p className="text-xs text-red-700 leading-relaxed">{analyseError}</p>
             </div>
           )}
-          {asset.analysis.summary && (
-            <p className="text-xs text-muted leading-relaxed">{asset.analysis.summary}</p>
+
+          {/* Hint on first load */}
+          {!hasEdits && (
+            <p className="text-[10px] text-muted/60 italic">Click any item to correct it · × to remove · + to add</p>
           )}
-          {!asset.analysis.summary && asset.analysis.visible_facts?.length > 0 && (
-            <p className="text-xs text-muted leading-relaxed">
-              {asset.analysis.visible_facts.slice(0, 3).join(" · ")}
-            </p>
+
+          {/* Summary */}
+          {(workingAnalysis.summary || hasEdits) && (
+            <EditableTextField
+              value={workingAnalysis.summary}
+              placeholder="Add a summary…"
+              onEdit={v => editField("summary", v)}
+            />
           )}
-          {asset.analysis.visible_facts?.length > 0 && (
-            <div className="mt-2">
+
+          {/* Confirmed visible (visible_facts) */}
+          {(workingAnalysis.visible_facts?.length > 0 || hasEdits) && (
+            <div>
               <p className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1">Confirmed visible</p>
               <div className="flex flex-wrap gap-1">
-                {asset.analysis.visible_facts.slice(0, 5).map((f, i) => (
-                  <span key={i} className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full">{f}</span>
+                {(workingAnalysis.visible_facts || []).map((f, i) => (
+                  <EditableChip
+                    key={`vf-${i}`}
+                    value={f}
+                    color="green"
+                    onEdit={v => editArray("visible_facts", i, v)}
+                    onDelete={() => deleteArrayItem("visible_facts", i)}
+                  />
                 ))}
+                <AddChipButton onAdd={v => addArrayItem("visible_facts", v)} color="green" />
               </div>
             </div>
           )}
-          {asset.analysis.design_principles?.length > 0 && (
-            <div className="mt-2">
+
+          {/* Design principles */}
+          {(workingAnalysis.design_principles?.length > 0 || hasEdits) && (
+            <div>
               <p className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1">Design principles</p>
               <div className="flex flex-wrap gap-1">
-                {asset.analysis.design_principles.map((p, i) => (
-                  <span key={i} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-full">{p}</span>
+                {(workingAnalysis.design_principles || []).map((p, i) => (
+                  <EditableChip
+                    key={`dp-${i}`}
+                    value={p}
+                    color="blue"
+                    onEdit={v => editArray("design_principles", i, v)}
+                    onDelete={() => deleteArrayItem("design_principles", i)}
+                  />
                 ))}
+                <AddChipButton onAdd={v => addArrayItem("design_principles", v)} color="blue" />
               </div>
             </div>
           )}
-          {asset.analysis.suggested_caption_hook && (
-            <p className="text-xs text-primary/80 italic mt-1">&ldquo;{asset.analysis.suggested_caption_hook}&rdquo;</p>
+
+          {/* Caption hook */}
+          {(workingAnalysis.suggested_caption_hook || hasEdits) && (
+            <EditableTextField
+              value={workingAnalysis.suggested_caption_hook}
+              placeholder="Add a caption hook…"
+              italic
+              onEdit={v => editField("suggested_caption_hook", v)}
+            />
           )}
-          {asset.analysis.content_opportunities?.length > 0 && (
-            <ul className="mt-2 space-y-0.5">
-              {asset.analysis.content_opportunities.slice(0, 3).map((opp, i) => (
-                <li key={i} className="text-[10px] text-muted flex gap-1.5">
-                  <span className="text-primary/60 shrink-0">·</span>{opp}
-                </li>
-              ))}
-            </ul>
+
+          {/* Content opportunities */}
+          {(workingAnalysis.content_opportunities?.length > 0 || hasEdits) && (
+            <div>
+              <p className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1">Content angles</p>
+              <div className="space-y-1">
+                {(workingAnalysis.content_opportunities || []).map((opp, i) => (
+                  <div key={`co-${i}`} className="group flex items-start gap-1.5">
+                    <span className="text-primary/60 shrink-0 text-[10px] mt-0.5">·</span>
+                    <EditableTextField
+                      value={opp}
+                      onEdit={v => editArray("content_opportunities", i, v)}
+                      className="flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => deleteArrayItem("content_opportunities", i)}
+                      className="opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity text-[11px] font-bold text-muted shrink-0 mt-0.5"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => addArrayItem("content_opportunities", "New content angle")}
+                  className="text-[10px] text-muted hover:text-primary transition-colors mt-0.5"
+                >
+                  + add angle
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Save corrections */}
+          {hasEdits && (
+            <div className="pt-1 border-t border-hairline space-y-1">
+              {editSaveError && (
+                <p className="text-[10px] text-red-600">{editSaveError}</p>
+              )}
+              <button
+                type="button"
+                onClick={saveEdits}
+                disabled={savingEdits}
+                className="w-full text-xs bg-primary text-white rounded-lg py-1.5 font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {savingEdits ? "Saving…" : "Save corrections"}
+              </button>
+            </div>
           )}
         </div>
       ) : !isVideo && (
