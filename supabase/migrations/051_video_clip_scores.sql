@@ -1,33 +1,27 @@
--- Migration 051 — Video clip scores
+-- Migration 051 — Video clip scores (V2 redesign)
 -- 050 is campaign slot publish metrics — do not skip
+-- Drop and recreate if schema changed from previous draft.
+
+DROP TABLE IF EXISTS video_clip_scores CASCADE;
 
 CREATE TABLE IF NOT EXISTS video_clip_scores (
-  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  media_asset_id         uuid NOT NULL REFERENCES marketing_media_assets(id) ON DELETE CASCADE,
-  frame_index            integer NOT NULL,
-  storage_path           text NOT NULL,
-  timestamp_secs         numeric(10,2),
-
-  -- 8 scored dimensions (1–10)
-  visual_quality         integer CHECK (visual_quality         BETWEEN 1 AND 10),
-  motion_blur            integer CHECK (motion_blur            BETWEEN 1 AND 10),  -- 10 = sharp, 1 = very blurry
-  construction_relevance integer CHECK (construction_relevance BETWEEN 1 AND 10),
-  brand_alignment        integer CHECK (brand_alignment        BETWEEN 1 AND 10),
-  educational_value      integer CHECK (educational_value      BETWEEN 1 AND 10),
-  human_interest         integer CHECK (human_interest         BETWEEN 1 AND 10),
-  technical_detail       integer CHECK (technical_detail       BETWEEN 1 AND 10),
-  overall_score          integer CHECK (overall_score          BETWEEN 1 AND 10),
-
-  -- Qualitative outputs
-  primary_subject        text,
-  content_opportunities  text[]    DEFAULT '{}',
-  publish_ready          boolean   DEFAULT false,
-  reject_reason          text,
-
-  model_used             text,
-  scored_at              timestamptz DEFAULT now(),
-
-  UNIQUE(media_asset_id, frame_index)
+  id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  media_asset_id          uuid NOT NULL REFERENCES marketing_media_assets(id) ON DELETE CASCADE,
+  frame_index             integer NOT NULL,
+  timestamp_secs          numeric(8,2),
+  frame_storage_path      text,
+  construction_stage      text,
+  activity_description    text,
+  composition_score       integer CHECK (composition_score       BETWEEN 1 AND 10),
+  motion_score            integer CHECK (motion_score            BETWEEN 1 AND 10),
+  narrative_value         integer CHECK (narrative_value         BETWEEN 1 AND 10),
+  construction_importance integer CHECK (construction_importance BETWEEN 1 AND 10),
+  visual_preference_score integer CHECK (visual_preference_score BETWEEN 1 AND 10),
+  narrative_position      text CHECK (narrative_position IN
+    ('establishing','progress','detail','activity','reveal','avoid','none')),
+  confidence_pct          numeric(5,2),
+  is_selected             boolean DEFAULT false,
+  created_at              timestamptz DEFAULT now()
 );
 
 ALTER TABLE video_clip_scores ENABLE ROW LEVEL SECURITY;
@@ -42,6 +36,4 @@ DO $$ BEGIN
   END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS idx_video_clip_scores_asset  ON video_clip_scores(media_asset_id);
-CREATE INDEX IF NOT EXISTS idx_video_clip_scores_ready  ON video_clip_scores(publish_ready);
-CREATE INDEX IF NOT EXISTS idx_video_clip_scores_overall ON video_clip_scores(overall_score DESC);
+CREATE INDEX IF NOT EXISTS idx_clip_scores_asset ON video_clip_scores(media_asset_id);

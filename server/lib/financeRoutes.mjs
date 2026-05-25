@@ -5,6 +5,7 @@ import { config as dotenvConfig } from "dotenv";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { upsertNormalizedCost } from "./normalizedCosts.mjs";
+import { checkProjectInsights } from "./projectInsights.mjs";
 import PDFDocument from "pdfkit";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
@@ -784,6 +785,12 @@ export function registerFinanceRoutes(app) {
         field: "actual",
         amount: totalActual,
       }).catch(e => console.warn("[approval] normalized_costs:", e.message));
+    }
+
+    // Fire-and-forget: generate project insight for margin / trade variance
+    if (doc.job_id) {
+      checkProjectInsights(doc.job_id, "invoice_approved", getServiceSupabase(), process.env.ANTHROPIC_API_KEY)
+        .catch(e => console.warn("[insights] invoice_approved:", e.message));
     }
 
     res.json({ ok: true, document: updated });
@@ -1777,6 +1784,10 @@ export function registerFinanceRoutes(app) {
         updated_at: new Date().toISOString(),
       }).eq("id", id);
 
+      // Fire-and-forget: note the signed variation for Blueprint + Command Centre context
+      checkProjectInsights(id, "variation_signed", sb, process.env.ANTHROPIC_API_KEY)
+        .catch(e => console.warn("[insights] variation_signed:", e.message));
+
       res.json({ ok: true, variation: signed, new_contract_value: newContractValue });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1896,5 +1907,57 @@ export function registerFinanceRoutes(app) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── NPS ────────────────────────────────────────────────────────────────────
+
+  app.post("/api/finance/jobs/:id/nps", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ error: "DB not configured" });
+    const { id } = req.params;
+    const { score, comment, surveyed_by } = req.body || {};
+    if (score === undefined || Number(score) < 0 || Number(score) > 10) {
+      return res.status(400).json({ error: "score must be 0–10" });
+    }
+    const { data, error } = await sb.from("job_nps_scores").insert({
+      job_id:      id,
+      score:       Number(score),
+      comment:     comment || null,
+      surveyed_by: surveyed_by || null,
+      recorded_by: req.user?.id || null,
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    // Fire insight check — NPS threshold gate is inside checkProjectInsights
+    checkProjectInsights(id, "nps_submitted", sb, process.env.ANTHROPIC_API_KEY,
+      { score: Number(score), comment: comment || null })
+      .catch(e => console.warn("[insights] nps_submitted:", e.message));
+    res.json({ ok: true, nps: data });
+  });
+
+  app.get("/api/finance/jobs/:id/nps", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ error: "DB not configured" });
+    const { data, error } = await sb.from("job_nps_scores")
+      .select("*").eq("job_id", req.params.id)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  });
+
+  // ── Insight dismiss ────────────────────────────────────────────────────────
+
+  app.put("/api/insights/:id/dismiss", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ error: "DB not configured" });
+    const { data, error } = await sb.from("cost_intelligence_insights")
+      .update({
+        is_dismissed:  true,
+        dismissed_by:  req.user?.id || null,
+        dismissed_at:  new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true, insight: data });
   });
 }

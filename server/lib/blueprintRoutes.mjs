@@ -11,6 +11,7 @@ import { runAttachmentDocumentReview } from '../../src/blueprint/lib/documentRev
 import { QC_REVIEW_SYSTEM_PROMPT, parseQCReviewJson } from './blueprintQc.js';
 import { getServiceSupabase } from './supabaseService.mjs';
 import { buildWinningOfferBlueprintAppend } from './salesRoutes.mjs';
+import { getJobInsights } from './projectInsights.mjs';
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -318,7 +319,8 @@ export function registerBlueprintRoutes(app) {
 
   app.post('/api/blueprint/chat', async (req, res) => {
     try {
-      const { messages, jobContext, hubContext, attachments } = req.body;
+      const { messages, jobContext, attachments } = req.body;
+      let { hubContext } = req.body;
       const hasReviewableAttachment = Array.isArray(attachments) && attachments.some(
         (a) => a?.kind === 'pdf' || a?.kind === 'text',
       );
@@ -332,6 +334,29 @@ export function registerBlueprintRoutes(app) {
           maxTokens: Math.min(MAX_TOKENS, 4096),
         });
         return res.json({ reply });
+      }
+
+      // Inject recent project insights for Blueprint context
+      if (hubContext?.jobId) {
+        try {
+          const sbInsights = getServiceSupabase();
+          const insights = await getJobInsights(hubContext.jobId, sbInsights, { limit: 3 });
+          if (insights.length) {
+            hubContext = {
+              ...hubContext,
+              recent_insights: insights.map(i => ({
+                severity:     i.severity,
+                title:        i.title,
+                body:         i.body,
+                trigger:      i.trigger_type,
+                generated_at: i.generated_at,
+              })),
+            };
+          }
+        } catch (e) {
+          // Non-fatal — Blueprint still works without insights
+          console.warn('[blueprint] insights fetch failed:', e.message);
+        }
       }
 
       const chatMessages = attachDocumentsToLastUserMessage(messages, attachments);

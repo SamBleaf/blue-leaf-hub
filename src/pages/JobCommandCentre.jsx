@@ -268,6 +268,7 @@ export default function JobCommandCentre() {
   const [seedError, setSeedError] = useState(null);
   const [cashflow, setCashflow] = useState(null);
   const [cashflowOpen, setCashflowOpen] = useState(false);
+  const [insights, setInsights] = useState([]);
   const claimsSectionRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -297,6 +298,7 @@ export default function JobCommandCentre() {
         pending_invoices: cc.pending_approvals || [],
         overdue_claims: (cc.claims || []).filter(c => c.status === "overdue"),
       });
+      setInsights((cc.recent_insights || []).filter(i => !i.is_dismissed));
     }
     setLoading(false);
 
@@ -413,6 +415,32 @@ export default function JobCommandCentre() {
             className="shrink-0 rounded-lg bg-amber-700 text-white text-xs font-bold px-3 py-1.5 hover:bg-amber-800">
             Draft claim →
           </button>
+        </div>
+      )}
+
+      {/* Insights */}
+      {insights.length > 0 && (
+        <div className="space-y-2">
+          {insights.slice(0, 5).map(ins => {
+            const borderColor = ins.severity === "alert" ? "border-red-400" : ins.severity === "warning" ? "border-amber-400" : "border-blue-400";
+            const badge = ins.severity === "alert" ? "🔴" : ins.severity === "warning" ? "🟡" : "🔵";
+            const dismissInsight = async () => {
+              await authFetch(`/api/insights/${ins.id}/dismiss`, { method: "PUT" });
+              setInsights(prev => prev.filter(i => i.id !== ins.id));
+            };
+            return (
+              <div key={ins.id} className={`flex items-start gap-3 rounded-card border border-hairline border-l-4 ${borderColor} bg-surface px-4 py-3`}>
+                <span className="mt-0.5 shrink-0 text-base leading-none">{badge}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-ink">{ins.title}</p>
+                  {ins.body && <p className="text-xs text-muted mt-0.5 leading-relaxed">{ins.body}</p>}
+                </div>
+                <button type="button" onClick={dismissInsight} className="shrink-0 text-xs text-muted hover:text-ink transition" title="Dismiss">
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

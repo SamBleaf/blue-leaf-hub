@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { upsertNormalizedCost } from "./normalizedCosts.mjs";
+import { getJobInsights } from "./projectInsights.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { getBuildexactCategoryMapping } from "./buildexactParser.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
@@ -355,7 +356,7 @@ export function registerFinanceCCRoutes(app) {
 
     const [
       jobRes, docsRes, variationsRes, claimsRes,
-      budgetsRes, wipaaReviewRes, pendingInvoicesRes
+      budgetsRes, wipaaReviewRes, pendingInvoicesRes, recentInsights
     ] = await Promise.all([
       sb.from("jobs")
         .select("id, address, contract_value, original_contract_value, estimated_total_cost, forecast_total_cost, target_margin_pct, floor_margin_pct, financial_locked, last_wipaa_review_date")
@@ -383,6 +384,8 @@ export function registerFinanceCCRoutes(app) {
         .select("id, supplier_name, amount_ex_gst, ai_job_match_confidence, ai_trade_confidence, trade_category_id, status, created_at")
         .eq("job_id", jobId).eq("status", "pending_approval")
         .order("created_at", { ascending: true }).limit(5),
+      // Recent insights (non-fatal — defaults to [] if migration not yet applied)
+      getJobInsights(jobId, sb, { limit: 5 }).catch(() => []),
     ]);
 
     if (jobRes.error) return res.status(404).json({ ok: false, error: "Job not found" });
@@ -478,6 +481,7 @@ export function registerFinanceCCRoutes(app) {
       },
       claims: claims.filter(c => c.status === "overdue"),
       pending_approvals: pendingInvoicesRes.data || [],
+      recent_insights: recentInsights || [],
     });
   });
 

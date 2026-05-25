@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { checkProjectInsights } from "./projectInsights.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import {
   buildScheduleRowsForInsert,
@@ -1072,6 +1073,17 @@ export function registerScheduleRoutes(app) {
       if (!body.no_cascade && (body.start_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on))) {
         const more = await cascadeScheduleForward(sb, cur.project_id, id);
         updatedIds = [...new Set([...updatedIds, ...more])];
+      }
+
+      // Fire-and-forget: schedule slip insight (only when baseline is set and dates/progress changed)
+      if (cur.baseline_end_date && (body.end_date != null || body.percent_complete != null)) {
+        const { data: proj } = await sb.from("projects")
+          .select("job_id").eq("id", merged.project_id).maybeSingle();
+        if (proj?.job_id) {
+          checkProjectInsights(proj.job_id, "schedule_update", sb, process.env.ANTHROPIC_API_KEY,
+            { taskId: id, projectId: merged.project_id })
+            .catch(e => console.warn("[insights] schedule_update:", e.message));
+        }
       }
 
       return res.json({ ok: true, updated: updatedIds });

@@ -3,8 +3,8 @@
  * Blue Leaf Building — Video Intelligence Layer
  *
  * V1: Scene-change frame extraction + Supabase storage upload
- * V2: Claude Haiku clip scoring (scoreVideoClips)
- * V3: Narrative template engine (generateStorySequence)
+ * V2: Claude Haiku clip scoring (scoreVideoClips) — 5-dimension scoring + narrative position
+ * V3: Narrative template engine (generateStorySequence) — composite selection + Sonnet captions
  */
 
 import { exec } from "child_process";
@@ -16,11 +16,13 @@ import { join } from "path";
 import { tmpdir } from "os";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
+import { BLUE_LEAF_IDENTITY, CONTENT_MODE_MODIFIERS } from "./marketingPrompts.mjs";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
-const HAIKU_MODEL = "claude-haiku-4-5";
+const HAIKU_MODEL  = "claude-haiku-4-5";
+const SONNET_MODEL = "claude-sonnet-4-6";
 
 const execP = promisify(exec);
 
@@ -38,7 +40,7 @@ async function getFfmpegPath() {
   }
 }
 
-// ── Scene-Change Frame Extraction ─────────────────────────────────────────────
+// ── V1: Scene-Change Frame Extraction ────────────────────────────────────────
 
 /**
  * Extract meaningful frames from a local video using ffmpeg scene-change detection.
@@ -75,7 +77,6 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
 
     if (sceneFiles.length >= 8) {
       // Parse pts_time values from showinfo stderr output
-      // Each selected frame line contains "pts_time:<value>"
       const timestamps = [];
       const tsRe = /pts_time:(\d+\.?\d*)/g;
       let m;
@@ -86,7 +87,6 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
     }
 
     // --- Fallback: fixed-interval fps=1/20 ---
-    // Remove any partial scene-change frames first
     for (const f of sceneFiles) {
       await rm(join(tmpDir, f), { force: true }).catch(() => {});
     }
@@ -105,10 +105,7 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
   }
 }
 
-/**
- * Upload a list of local frame files to Supabase Storage and return frame records.
- * @private
- */
+/** @private */
 async function _uploadFrames(frameFiles, dir, assetId, sb, timestamps) {
   const records = [];
   for (let i = 0; i < frameFiles.length; i++) {
@@ -133,7 +130,7 @@ async function _uploadFrames(frameFiles, dir, assetId, sb, timestamps) {
 
 /**
  * Download frame records from Supabase Storage to a local directory for Claude Vision analysis.
- * Frames are downloaded sequentially (Supabase Smart Sync / concurrent read limitation).
+ * Sequential download — concurrent reads fail for online-only (Smart Sync) files.
  *
  * @param {Array<{storage_path: string}>} frameRecords
  * @param {object} sb      - Supabase service client
@@ -162,24 +159,41 @@ export async function downloadFramesForAnalysis(frameRecords, sb, destDir) {
 
 // ── V2: Claude Haiku Clip Scoring ─────────────────────────────────────────────
 
-const CLIP_SCORE_PROMPT = `You are scoring a video frame for Blue Leaf Building (Adelaide custom home builder).
-Score each dimension honestly — these scores drive which clips get used in marketing content.
-
-Return ONLY valid JSON with exactly these fields:
+const CLIP_SCORE_PROMPT = `You are a construction video analyst for Blue Leaf Building, a premium custom home builder.
+Score this frame from a construction site video.
+Return ONLY valid JSON:
 {
-  "visual_quality":         <1-10>,  // sharpness, exposure, composition — 10 = publication ready
-  "motion_blur":            <1-10>,  // 10 = crisp/sharp, 1 = heavily blurred
-  "construction_relevance": <1-10>,  // how clearly it shows construction craft or progress
-  "brand_alignment":        <1-10>,  // fits premium custom builder aesthetic
-  "educational_value":      <1-10>,  // potential to explain a building technique or decision
-  "human_interest":         <1-10>,  // human story, scale, lifestyle connection
-  "technical_detail":       <1-10>,  // shows quality of materials or workmanship
-  "overall_score":          <1-10>,  // single holistic rating
-  "primary_subject":        "<one sentence — what is shown in this frame>",
-  "content_opportunities":  ["<content idea>", "<content idea>"],
-  "publish_ready":          <true|false>,
-  "reject_reason":          "<null or reason why this frame should not be published>"
-}`;
+  "construction_stage": "site_prep|slab|frame|lock_up|fitout|completion|landscaping|null",
+  "activity_description": "1 sentence describing what is happening",
+  "composition_score": 1-10,
+  "motion_score": 1-10,
+  "narrative_value": 1-10,
+  "construction_importance": 1-10,
+  "visual_preference_score": 1-10,
+  "narrative_position": "establishing|progress|detail|activity|reveal|avoid|none",
+  "confidence_pct": 0-100
+}
+VISUAL PREFERENCES — score higher for:
+✓ Symmetry and geometric lines in the frame
+✓ Shadow lines and material texture contrast
+✓ Craftsmanship closeups showing trade skill
+✓ Reveal shots (partial to full view of a space or element)
+✓ Site-to-landscape relationship
+✓ Team members actively working (not posing)
+✓ Material transitions and junctions
+Score lower for (narrative_position = "avoid"):
+✗ Empty static shots with no activity or feature
+✗ Repeated wide shots from the same angle as a previous frame
+✗ Overexposed or significantly blurred frames
+✗ Random machinery with no construction context
+✗ Messy or incomplete work areas with no narrative purpose
+narrative_position meanings:
+  establishing: wide shot showing site/building in context
+  progress: work underway at this build stage
+  detail: closeup of specific material, joint, or craft element
+  activity: trade team actively working
+  reveal: partial-to-full view that creates visual interest
+  avoid: low quality, repetitive, or off-brand`;
 
 /**
  * Score a set of video frame records using Claude Haiku Vision.
@@ -196,11 +210,11 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
   const key = apiKey || _apiKey;
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const client  = new Anthropic({ apiKey: key, maxRetries: 1 });
-  const scored  = [];
+  const client = new Anthropic({ apiKey: key, maxRetries: 1 });
+  const scored = [];
 
   for (const fr of frameRecords) {
-    // Download frame from storage for Vision analysis
+    // Download frame buffer from storage for Vision
     let imageData;
     try {
       const { data, error } = await sb.storage.from("marketing-media").download(fr.storage_path);
@@ -208,8 +222,7 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
         console.warn(`[videoIntelligence/score] Download failed for ${fr.storage_path}: ${error?.message}`);
         continue;
       }
-      const buf = Buffer.from(await data.arrayBuffer());
-      imageData = buf.toString("base64");
+      imageData = Buffer.from(await data.arrayBuffer()).toString("base64");
     } catch (e) {
       console.warn(`[videoIntelligence/score] Frame ${fr.frame_index} download error: ${e.message}`);
       continue;
@@ -238,25 +251,20 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
       continue;
     }
 
-    // Upsert to video_clip_scores
     const row = {
-      media_asset_id:         assetId,
-      frame_index:            fr.frame_index,
-      storage_path:           fr.storage_path,
-      timestamp_secs:         fr.timestamp_secs ?? null,
-      visual_quality:         scoreData.visual_quality         ?? null,
-      motion_blur:            scoreData.motion_blur            ?? null,
-      construction_relevance: scoreData.construction_relevance ?? null,
-      brand_alignment:        scoreData.brand_alignment        ?? null,
-      educational_value:      scoreData.educational_value      ?? null,
-      human_interest:         scoreData.human_interest         ?? null,
-      technical_detail:       scoreData.technical_detail       ?? null,
-      overall_score:          scoreData.overall_score          ?? null,
-      primary_subject:        scoreData.primary_subject        ?? null,
-      content_opportunities:  Array.isArray(scoreData.content_opportunities) ? scoreData.content_opportunities : [],
-      publish_ready:          scoreData.publish_ready === true,
-      reject_reason:          scoreData.reject_reason || null,
-      model_used:             HAIKU_MODEL,
+      media_asset_id:          assetId,
+      frame_index:             fr.frame_index,
+      timestamp_secs:          fr.timestamp_secs ?? null,
+      frame_storage_path:      fr.storage_path,
+      construction_stage:      scoreData.construction_stage  || null,
+      activity_description:    scoreData.activity_description || null,
+      composition_score:       scoreData.composition_score       ?? null,
+      motion_score:            scoreData.motion_score            ?? null,
+      narrative_value:         scoreData.narrative_value         ?? null,
+      construction_importance: scoreData.construction_importance ?? null,
+      visual_preference_score: scoreData.visual_preference_score ?? null,
+      narrative_position:      scoreData.narrative_position      || "none",
+      confidence_pct:          scoreData.confidence_pct          ?? null,
     };
 
     const { error: upsertErr } = await sb
@@ -273,152 +281,121 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
   return scored;
 }
 
-// ── V3: Narrative Template Engine ────────────────────────────────────────────
-
-import { BLUE_LEAF_IDENTITY } from "./marketingPrompts.mjs";
-
-const SONNET_MODEL = "claude-sonnet-4-6";
-
-/**
- * Narrative position roles — each clip fills a structural position in the story.
- * Templates define which positions are required and how to select clips for each.
- */
-const NARRATIVE_POSITIONS = {
-  hook:    { duration_secs: 3,  description: "Attention-grabbing opening — highest visual_quality or human_interest" },
-  build:   { duration_secs: 8,  description: "Main content — highest construction_relevance or technical_detail" },
-  proof:   { duration_secs: 6,  description: "Evidence of quality — highest overall_score among remaining clips" },
-  context: { duration_secs: 5,  description: "Site or scale context — construction_relevance" },
-  cta:     { duration_secs: 4,  description: "Closing moment — brand_alignment, publish_ready" },
-};
+// ── V3: Narrative Template Engine ─────────────────────────────────────────────
 
 /**
  * Narrative templates per campaign objective.
- * Each template defines the clip sequence as an array of position keys.
+ * Each template is an ordered array of narrative_position values (matching DB enum).
+ * Clip selection picks the best-scoring clip whose tagged position matches each slot.
  */
 const NARRATIVE_TEMPLATES = {
-  brand_awareness: {
-    name:      "Brand Story",
-    positions: ["hook", "build", "proof", "cta"],
-    caption_intent: "Show the quality of thinking behind this build — performance, not aesthetics",
-  },
-  generate_enquiries: {
-    name:      "Lead Generation",
-    positions: ["hook", "proof", "build", "cta"],
-    caption_intent: "Show what a Blue Leaf build looks like in practice and invite conversation",
-  },
-  educate: {
-    name:      "Educational Sequence",
-    positions: ["hook", "context", "build", "proof", "cta"],
-    caption_intent: "Explain one construction decision or detail and why it matters for performance",
-  },
-  build_authority: {
-    name:      "Authority Demonstration",
-    positions: ["hook", "build", "proof", "context", "cta"],
-    caption_intent: "Demonstrate craft knowledge — specific techniques, consequences, long-term outcomes",
-  },
-  seo: {
-    name:      "Discovery Content",
-    positions: ["hook", "context", "build", "cta"],
-    caption_intent: "Clear, searchable content that answers homeowner questions about building",
-  },
+  educational:  ["establishing", "detail",   "activity", "detail",   "reveal"],
+  story:        ["establishing", "progress", "activity", "detail",   "reveal"],
+  authority:    ["detail",       "activity", "detail",   "progress", "reveal"],
+  recruitment:  ["activity",     "establishing", "activity", "detail", "reveal"],
+  architect:    ["establishing", "detail",   "detail",   "activity", "reveal"],
+  progress:     ["establishing", "progress", "activity", "progress", "reveal"],
 };
 
 /**
- * Select the best clip for a given narrative position from scored frames.
- * Uses position-specific scoring heuristics. Clips already used are excluded.
- * @param {string}   position  - narrative position key
- * @param {Array}    clips     - all scored clip rows (from video_clip_scores)
- * @param {Set}      usedIdx   - frame_index values already assigned
- * @returns {object|null}
+ * Composite clip quality score — used for ranking within a position group.
+ * @param {object} clip - video_clip_scores row
+ * @returns {number}
  */
-function _selectClipForPosition(position, clips, usedIdx) {
-  const candidates = clips.filter(c => !usedIdx.has(c.frame_index) && c.publish_ready !== false);
-
-  if (!candidates.length) {
-    // Relax publish_ready if no candidates
-    const fallback = clips.filter(c => !usedIdx.has(c.frame_index));
-    if (!fallback.length) return null;
-    candidates.push(...fallback);
-  }
-
-  const score = (c) => {
-    switch (position) {
-      case "hook":
-        return (c.visual_quality || 0) * 0.4 + (c.human_interest || 0) * 0.4 + (c.brand_alignment || 0) * 0.2;
-      case "build":
-        return (c.construction_relevance || 0) * 0.5 + (c.technical_detail || 0) * 0.3 + (c.educational_value || 0) * 0.2;
-      case "proof":
-        return (c.overall_score || 0) * 0.5 + (c.visual_quality || 0) * 0.3 + (c.brand_alignment || 0) * 0.2;
-      case "context":
-        return (c.construction_relevance || 0) * 0.6 + (c.human_interest || 0) * 0.2 + (c.visual_quality || 0) * 0.2;
-      case "cta":
-        return (c.brand_alignment || 0) * 0.5 + (c.visual_quality || 0) * 0.3 + (c.overall_score || 0) * 0.2;
-      default:
-        return c.overall_score || 0;
-    }
-  };
-
-  return candidates.sort((a, b) => score(b) - score(a))[0];
+function _compositeScore(clip) {
+  return (clip.narrative_value         || 0) * 0.4
+       + (clip.construction_importance || 0) * 0.3
+       + (clip.visual_preference_score || 0) * 0.2
+       + (clip.composition_score       || 0) * 0.1;
 }
 
 /**
- * Generate a branded caption for a clip using Claude Sonnet.
- * @param {object} clip          - selected clip (from video_clip_scores)
- * @param {string} position      - narrative position
- * @param {string} captionIntent - from template
- * @param {object} projectCtx    - project context
- * @param {Anthropic} client
- * @returns {Promise<{caption: string, overlay_text: string}>}
+ * Select the best clip for a given narrative position slot.
+ * Prefers clips whose tagged narrative_position matches the slot; falls back to any non-avoid clip.
+ *
+ * @param {string} position - desired narrative position
+ * @param {Array}  clips    - all scored rows for this asset (already filtered, avoid removed)
+ * @param {Set}    usedIds  - set of `id` values already assigned
+ * @returns {object|null}
  */
-async function _generateCaption(clip, position, captionIntent, projectCtx, client) {
-  const contextLines = [
-    projectCtx.project_type && `Project type: ${projectCtx.project_type}`,
-    projectCtx.suburb        && `Location: ${projectCtx.suburb}`,
-    projectCtx.build_stage   && `Build stage: ${projectCtx.build_stage}`,
+function _selectClipForPosition(position, clips, usedIds) {
+  const available = clips.filter(c => !usedIds.has(c.id) && c.narrative_position !== "avoid");
+
+  // Prefer exact position match
+  const preferred = available.filter(c => c.narrative_position === position);
+  const pool      = preferred.length ? preferred : available;
+
+  if (!pool.length) return null;
+
+  return pool.sort((a, b) => _compositeScore(b) - _compositeScore(a))[0];
+}
+
+/**
+ * Generate a single caption + per-clip overlay texts for the whole sequence using Claude Sonnet.
+ * One call covers all clips — more contextually coherent than per-clip generation.
+ *
+ * @param {Array}  orderedClips    - selected clip rows in template order
+ * @param {string} objective       - campaign objective
+ * @param {object} projectContext  - { project_type, suburb, build_stage, voiceNote? }
+ * @param {Anthropic} client
+ * @returns {Promise<{caption: string, clip_overlays: string[], confidence_pct: number}>}
+ */
+async function _generateSequenceCaption(orderedClips, objective, projectContext, client) {
+  const ctx = projectContext || {};
+
+  const clipDescriptions = orderedClips
+    .map((c, i) =>
+      `${i + 1}. [${c.narrative_position}] ${c.activity_description || "construction footage"}` +
+      (c.construction_stage ? ` (stage: ${c.construction_stage})` : "")
+    )
+    .join("\n");
+
+  const contextBlock = [
+    ctx.project_type && `Project type: ${ctx.project_type}`,
+    ctx.suburb        && `Location: ${ctx.suburb}`,
+    ctx.build_stage   && `Build stage: ${ctx.build_stage}`,
+    ctx.voiceNote     && `Voice note transcript:\n${ctx.voiceNote}`,
   ].filter(Boolean).join("\n");
 
-  const userMessage = `Generate a caption for the following video clip.
+  const modeModifier = CONTENT_MODE_MODIFIERS[objective] || CONTENT_MODE_MODIFIERS.educational;
+  const systemPrompt = `${BLUE_LEAF_IDENTITY}\n\n${modeModifier}`;
 
-Clip subject: ${clip.primary_subject || "construction footage"}
-Narrative position: ${position} (${NARRATIVE_POSITIONS[position]?.description || position})
-Content intent: ${captionIntent}
-${contextLines ? `Project context:\n${contextLines}` : ""}
-Clip strengths: construction_relevance=${clip.construction_relevance}, technical_detail=${clip.technical_detail}, educational_value=${clip.educational_value}
-${clip.content_opportunities?.length ? `Content opportunities: ${clip.content_opportunities.join(", ")}` : ""}
+  const userMessage = `Generate a caption and clip overlay texts for this ${objective} video sequence.\n\nClip sequence:\n${clipDescriptions}\n${contextBlock ? `\nContext:\n${contextBlock}` : ""}\n\nReturn ONLY valid JSON:\n{\n  "caption": "<Instagram caption, 2–4 sentences, no hashtags, follows Blue Leaf voice>",\n  "clip_overlays": ["<3–5 word overlay for clip 1>", "<overlay for clip 2>"],\n  "confidence_pct": 0-100\n}\nclip_overlays must have exactly ${orderedClips.length} entries, one per clip, in order.`;
 
-Return ONLY valid JSON:
-{
-  "caption": "<Instagram caption, 2–4 sentences, no hashtags, follows Blue Leaf voice>",
-  "overlay_text": "<3–5 word screen overlay, direct statement, no punctuation>"
-}`;
-
-  const resp = await client.messages.create({
-    model: SONNET_MODEL,
-    max_tokens: 400,
-    system: BLUE_LEAF_IDENTITY,
-    messages: [{ role: "user", content: userMessage }],
-  });
-
-  const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return { caption: raw.slice(0, 300), overlay_text: "" };
+    const resp = await client.messages.create({
+      model:      SONNET_MODEL,
+      max_tokens: 600,
+      system:     systemPrompt,
+      messages:   [{ role: "user", content: userMessage }],
+    });
+
+    const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
+    const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed  = JSON.parse(jsonStr);
+
+    return {
+      caption:       parsed.caption        || "",
+      clip_overlays: Array.isArray(parsed.clip_overlays) ? parsed.clip_overlays : [],
+      confidence_pct: typeof parsed.confidence_pct === "number" ? parsed.confidence_pct : 70,
+    };
+  } catch (e) {
+    console.warn(`[videoIntelligence/story] Caption generation failed: ${e.message}`);
+    return { caption: "", clip_overlays: [], confidence_pct: 50 };
   }
 }
 
 /**
  * Generate a narrative clip sequence for a media asset using scored frames.
- * Selects clips for each template position, generates captions with Claude Sonnet,
- * and writes the result to marketing_media_exports.story_sequence.
+ * Selects clips per template position, generates a single caption + per-clip overlays
+ * with Claude Sonnet, and writes the result to marketing_media_exports.story_sequence.
  *
- * @param {string} assetId           - marketing_media_assets UUID
- * @param {string} campaignObjective - brand_awareness|generate_enquiries|educate|build_authority|seo
- * @param {object} projectContext    - { project_type, suburb, build_stage }
- * @param {object} sb                - Supabase service client
- * @param {string} [apiKey]          - optional ANTHROPIC_API_KEY override
- * @returns {Promise<object>}        - story_sequence payload
+ * @param {string} assetId            - marketing_media_assets UUID
+ * @param {string} campaignObjective  - educational|story|authority|recruitment|architect|progress
+ * @param {object} projectContext     - { project_type?, suburb?, build_stage?, voiceNote? }
+ * @param {object} sb                 - Supabase service client
+ * @param {string} [apiKey]           - optional ANTHROPIC_API_KEY override
+ * @returns {Promise<object>}         - story_sequence payload
  */
 export async function generateStorySequence(assetId, campaignObjective, projectContext, sb, apiKey) {
   const key = apiKey || _apiKey;
@@ -426,74 +403,75 @@ export async function generateStorySequence(assetId, campaignObjective, projectC
 
   const client = new Anthropic({ apiKey: key, maxRetries: 1 });
 
-  // 1. Load scored clips for this asset
+  // 1. Load all scored clips for this asset
   const { data: clips, error: clipErr } = await sb
     .from("video_clip_scores")
     .select("*")
-    .eq("media_asset_id", assetId)
-    .order("overall_score", { ascending: false });
+    .eq("media_asset_id", assetId);
 
   if (clipErr) throw new Error(`Failed to load clip scores: ${clipErr.message}`);
   if (!clips?.length) throw new Error(`No scored clips found for asset ${assetId}`);
 
-  const template = NARRATIVE_TEMPLATES[campaignObjective] || NARRATIVE_TEMPLATES.brand_awareness;
+  const template = NARRATIVE_TEMPLATES[campaignObjective] || NARRATIVE_TEMPLATES.educational;
 
-  // 2. Select clips for each position
-  const usedIdx = new Set();
+  // 2. Select clips — one per template position
+  const usedIds = new Set();
   const selectedClips = [];
 
-  for (const position of template.positions) {
-    const clip = _selectClipForPosition(position, clips, usedIdx);
+  for (const position of template) {
+    const clip = _selectClipForPosition(position, clips, usedIds);
     if (clip) {
-      usedIdx.add(clip.frame_index);
+      usedIds.add(clip.id);
       selectedClips.push({ position, clip });
     }
   }
 
-  // 3. Compute confidence — ratio of publish_ready clips, penalise low overall_score
-  const totalScore   = selectedClips.reduce((s, { clip }) => s + (clip.overall_score || 5), 0);
-  const avgScore     = selectedClips.length ? totalScore / selectedClips.length : 5;
-  const readyRatio   = selectedClips.filter(({ clip }) => clip.publish_ready).length / (selectedClips.length || 1);
-  const confidence   = Math.round((avgScore / 10) * 60 + readyRatio * 40);
-  const assumptionsDetected = confidence < 70;
+  // Guarantee minimums: must have at least 1 establishing + 1 progress/detail + 1 activity/reveal
+  const hasEstablishing = selectedClips.some(s => s.position === "establishing");
+  const hasContent      = selectedClips.some(s => ["progress", "detail"].includes(s.position));
+  const hasHuman        = selectedClips.some(s => ["activity", "reveal"].includes(s.position));
 
-  // 4. Generate captions sequentially
-  const sequenceClips = [];
-  for (const { position, clip } of selectedClips) {
-    let captionData = { caption: "", overlay_text: "" };
-    try {
-      captionData = await _generateCaption(clip, position, template.caption_intent, projectContext || {}, client);
-    } catch (e) {
-      console.warn(`[videoIntelligence/story] Caption failed for position ${position}: ${e.message}`);
-    }
-
-    sequenceClips.push({
-      position,
-      frame_index:    clip.frame_index,
-      timestamp_secs: clip.timestamp_secs,
-      storage_path:   clip.storage_path,
-      overall_score:  clip.overall_score,
-      caption:        captionData.caption,
-      overlay_text:   captionData.overlay_text,
-      duration_secs:  NARRATIVE_POSITIONS[position]?.duration_secs ?? 5,
-    });
+  if (!hasEstablishing || !hasContent || !hasHuman) {
+    console.warn(`[videoIntelligence/story] Sequence for ${assetId} may be incomplete — insufficient scored clip variety`);
   }
 
-  // 5. Build story_sequence payload
+  // Cap at 6 clips
+  const cappedClips = selectedClips.slice(0, 6);
+  const orderedClipRows = cappedClips.map(s => s.clip);
+
+  // 3. Generate caption + overlays (single Sonnet call)
+  const { caption, clip_overlays, confidence_pct } = await _generateSequenceCaption(
+    orderedClipRows,
+    campaignObjective,
+    projectContext || {},
+    client
+  );
+
+  const assumptionsDetected = confidence_pct < 70;
+
+  // 4. Build story_sequence payload
   const storySequence = {
-    objective:             campaignObjective,
-    template_used:         template.name,
-    clips:                 sequenceClips,
-    assumptions_detected:  assumptionsDetected,
-    confidence,
-    generated_at:          new Date().toISOString(),
+    template:             campaignObjective,
+    clips:                cappedClips.map((s, i) => ({
+      clip_score_id: s.clip.id,
+      position:      s.position,
+      overlay:       clip_overlays[i] || "",
+    })),
+    caption,
+    overall_confidence:   confidence_pct,
+    assumptions_detected: assumptionsDetected,
   };
 
-  // 6. Write to marketing_media_exports (upsert on asset + format)
+  // 5. Write to marketing_media_exports (upsert on asset + format)
   const { error: upsertErr } = await sb
     .from("marketing_media_exports")
     .upsert(
-      { media_asset_id: assetId, export_format: "story_sequence", story_sequence: storySequence, status: "ready" },
+      {
+        media_asset_id: assetId,
+        export_format:  "story_sequence",
+        story_sequence: storySequence,
+        status:         "ready",
+      },
       { onConflict: "media_asset_id,export_format" }
     );
 
@@ -506,21 +484,44 @@ export async function generateStorySequence(assetId, campaignObjective, projectC
 
 /**
  * Return the next-best clip for a narrative position, excluding already-used frame indices.
+ * Normalises return fields for backward-compat with marketingRoutes.mjs callers
+ * (storage_path, overall_score).
+ *
+ * @param {string}   assetId              - marketing_media_assets UUID
+ * @param {string}   position             - narrative position
+ * @param {string[]} excludeFrameIndices  - frame_index values to exclude
+ * @param {object}   sb                   - Supabase service client
+ * @returns {Promise<object|null>}
  */
 export async function selectAlternativeClip(assetId, position, excludeFrameIndices, sb) {
   const { data: clips, error } = await sb
     .from("video_clip_scores")
     .select("*")
-    .eq("media_asset_id", assetId)
-    .order("overall_score", { ascending: false });
+    .eq("media_asset_id", assetId);
 
   if (error || !clips?.length) return null;
-  const usedIdx = new Set((excludeFrameIndices || []).map((n) => Number(n)));
-  return _selectClipForPosition(position, clips, usedIdx);
+
+  const usedIds = new Set(
+    clips
+      .filter(c => (excludeFrameIndices || []).map(Number).includes(c.frame_index))
+      .map(c => c.id)
+  );
+
+  const clip = _selectClipForPosition(position, clips, usedIds);
+  if (!clip) return null;
+
+  // Normalise for backward-compat: callers expect storage_path and overall_score
+  return {
+    ...clip,
+    storage_path: clip.frame_storage_path,
+    overall_score: Math.round(_compositeScore(clip)),
+  };
 }
 
+// ── Full pipeline: V1 → V2 → V3 ──────────────────────────────────────────────
+
 /**
- * Full V1-V3 pipeline: extract frames -> score -> generate story sequence.
+ * Full V1–V3 pipeline: extract frames → score → generate story sequence.
  *
  * @param {string}      assetId
  * @param {string|null} storagePath        Supabase storage path. Pass null when localVideoPath is used.
@@ -536,7 +537,7 @@ export async function runVideoIntelligencePipeline(
   storagePath,
   sb,
   apiKey,
-  campaignObjective = "educate",
+  campaignObjective = "educational",
   { localVideoPath = null, cleanupLocalPath = false } = {}
 ) {
   const key = apiKey || _apiKey;
@@ -550,7 +551,7 @@ export async function runVideoIntelligencePipeline(
     tmpPath = localVideoPath;
     ownsTmp = cleanupLocalPath;
   } else {
-    // Download from Supabase storage (original flow for small browser-uploaded videos).
+    // Download from Supabase storage.
     const { data: fileData, error: dlErr } = await sb.storage
       .from("marketing-media")
       .download(storagePath);
