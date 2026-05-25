@@ -277,20 +277,32 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
           </div>
         </div>
 
-        {/* Client stage + topic */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-ink mb-1.5">Client Stage</label>
-            <select
-              value={clientStage}
-              onChange={(e) => setClientStage(e.target.value)}
-              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-            >
-              {CLIENT_STAGES.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-          </div>
+        {/* Topic / Brief */}
+        <div>
+          <label className="block text-sm font-medium text-ink mb-1.5">
+            Topic / Brief <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder={`e.g. "Slab pour at Stirling renovation — rainy day, great result"`}
+            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-surface text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          />
+        </div>
+
+        {/* Client stage */}
+        <div>
+          <label className="block text-sm font-medium text-ink mb-1.5">Client Stage</label>
+          <select
+            value={clientStage}
+            onChange={(e) => setClientStage(e.target.value)}
+            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          >
+            {CLIENT_STAGES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
         </div>
 
         {photoContext && (
@@ -320,19 +332,6 @@ export default function ContentGenerator({ seedAsset, onSeedConsumed }) {
             </button>
           </div>
         )}
-
-        <div>
-          <label className="block text-sm font-medium text-ink mb-1.5">
-            Topic / Brief <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder={`e.g. "Slab pour at Stirling renovation — rainy day, great result"`}
-            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-surface text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-          />
-        </div>
 
         <div>
           <label className="block text-sm font-medium text-ink mb-1.5">

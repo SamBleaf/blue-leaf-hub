@@ -16,7 +16,6 @@ import {
   CONTENT_PILLARS,
   MODEL,
   PHOTO_ANALYSIS_SYSTEM_PROMPT,
-  PHOTO_ANALYSIS_USER_PROMPT,
 } from "./marketingAgent.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
@@ -362,6 +361,7 @@ export function registerMarketingRoutes(app) {
         {
           model: MODEL,
           max_tokens: 2048,
+          temperature: 0.7,
           system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
           messages,
         },
@@ -674,9 +674,10 @@ export function registerMarketingRoutes(app) {
       .single();
     if (campErr || !campaign) return res.status(404).json({ ok: false, error: "Campaign not found" });
 
-    const start = new Date(campaign.start_at || new Date());
-    const end = campaign.end_at
-      ? new Date(campaign.end_at)
+    const start = new Date(`${(campaign.start_at || new Date().toISOString().slice(0, 10))}T12:00:00`);
+    const endYmd = campaign.end_at || null;
+    const end = endYmd
+      ? new Date(`${endYmd}T12:00:00`)
       : new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const slots = [];
@@ -684,10 +685,15 @@ export function registerMarketingRoutes(app) {
     while (current <= end) {
       const dow = days[current.getDay()];
       const matching = (pattern || []).filter((p) => p.day === dow);
+      const slotYmd = [
+        current.getFullYear(),
+        String(current.getMonth() + 1).padStart(2, "0"),
+        String(current.getDate()).padStart(2, "0"),
+      ].join("-");
       for (const m of matching) {
         slots.push({
           campaign_id: id,
-          slot_date: current.toISOString().slice(0, 10),
+          slot_date: slotYmd,
           day_of_week: dow,
           channel: m.channel || null,
           content_mode: m.content_mode || null,
@@ -743,70 +749,6 @@ export function registerMarketingRoutes(app) {
       .single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, item: data });
-  });
-
-  // ── Stage 1: Photo Analysis ────────────────────────────────────────────────
-
-  /**
-   * POST /api/marketing/media/analyse-photo
-   * Multipart image upload → Claude Vision analysis.
-   * Does NOT save — user reviews first.
-   */
-  app.post("/api/marketing/media/analyse-photo", requireAuth, async (req, res) => {
-    if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
-
-    // Expect base64 image in body (client converts file to base64)
-    const { image_base64, media_type: bodyMediaType = "image/jpeg" } = req.body;
-    if (!image_base64) return res.status(400).json({ ok: false, error: "image_base64 required" });
-
-    try {
-      const raw = String(image_base64).replace(/^data:image\/\w+;base64,/, "");
-      const buf = Buffer.from(raw, "base64");
-      const mediaType = resolveVisionMediaType(buf, bodyMediaType, null) || bodyMediaType;
-      assertVisionMediaType(
-        ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mediaType)
-          ? mediaType
-          : "image/jpeg",
-      );
-
-      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const response = await client.messages.create({
-        model: VISION_MODEL,
-        max_tokens: 2048,
-        system: PHOTO_ANALYSIS_SYSTEM_PROMPT,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mediaType,
-                data: raw,
-              },
-            },
-            { type: "text", text: PHOTO_ANALYSIS_USER_PROMPT },
-          ],
-        }],
-      });
-
-      const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
-      const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-      let analysis;
-      try {
-        analysis = JSON.parse(jsonStr);
-      } catch {
-        const match = jsonStr.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error("Model returned non-JSON analysis");
-        analysis = JSON.parse(match[0]);
-      }
-
-      return res.json({ ok: true, analysis });
-    } catch (e) {
-      console.error("[marketing/analyse-photo]", e);
-      return res.status(502).json({ ok: false, error: e.message });
-    }
   });
 
   // ── Stage 2: Media Assets ─────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { authFetch } from "../../lib/authFetch.js";
+import { toYmd } from "../../lib/dateYmd.js";
 
 const STATUS_COLOURS = {
   active: "bg-emerald-100 text-emerald-700",
@@ -101,8 +102,12 @@ function addDays(date, n) {
   return d;
 }
 
+/** Local calendar YYYY-MM-DD (avoids UTC shift from toISOString). */
 function fmtDate(d) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function fmtWeekLabel(start) {
@@ -120,8 +125,8 @@ function configFromCampaign(c) {
     name: c?.name || "",
     objective: c?.objective || "",
     channels: c?.channels || [],
-    start_at: c?.start_at?.slice(0, 10) || "",
-    end_at: c?.end_at?.slice(0, 10) || "",
+    start_at: toYmd(c?.start_at),
+    end_at: toYmd(c?.end_at),
     status: c?.status || "active",
     goal: c?.goal || "brand_awareness",
     audience: c?.audience || [],
@@ -194,7 +199,11 @@ export default function CampaignManager({ onGoCreate }) {
       const r = await authFetch("/api/marketing/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createForm),
+        body: JSON.stringify({
+          ...createForm,
+          start_at: toYmd(createForm.start_at) || null,
+          end_at: toYmd(createForm.end_at) || null,
+        }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Failed to create");
@@ -239,7 +248,7 @@ export default function CampaignManager({ onGoCreate }) {
         )}
 
         {showNewForm && (
-          <form onSubmit={createCampaign} className="bg-surface border border-hairline rounded-xl p-4 space-y-3">
+          <form onSubmit={createCampaign} noValidate className="bg-surface border border-hairline rounded-xl p-4 space-y-3">
             <h3 className="text-sm font-semibold text-ink">New Campaign</h3>
             <input
               value={createForm.name}
@@ -268,8 +277,8 @@ export default function CampaignManager({ onGoCreate }) {
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <input type="date" value={createForm.start_at} onChange={(e) => setCreateForm((f) => ({ ...f, start_at: e.target.value }))} className="border border-hairline rounded-lg px-3 py-2 text-sm" />
-              <input type="date" value={createForm.end_at} onChange={(e) => setCreateForm((f) => ({ ...f, end_at: e.target.value }))} className="border border-hairline rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={toYmd(createForm.start_at)} onChange={(e) => setCreateForm((f) => ({ ...f, start_at: e.target.value }))} className="border border-hairline rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={toYmd(createForm.end_at)} onChange={(e) => setCreateForm((f) => ({ ...f, end_at: e.target.value }))} className="border border-hairline rounded-lg px-3 py-2 text-sm" />
             </div>
             <div className="flex gap-2">
               <button type="submit" disabled={creating} className="bg-primary text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50">
@@ -367,6 +376,12 @@ function SetupWizard({ campaign, error, setError, onCancel, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState(() => configFromCampaign(campaign));
 
+  useEffect(() => {
+    setConfig(configFromCampaign(campaign));
+    setStep(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when switching campaigns
+  }, [campaign.id]);
+
   const patternPreview = useMemo(() => {
     const lines = [];
     for (const day of WEEK_DAYS) {
@@ -432,8 +447,8 @@ function SetupWizard({ campaign, error, setError, onCancel, onSaved }) {
         name: config.name || campaign.name,
         objective: config.objective,
         channels: config.channels,
-        start_at: config.start_at || null,
-        end_at: config.end_at || null,
+        start_at: toYmd(config.start_at) || null,
+        end_at: toYmd(config.end_at) || null,
         goal: config.goal,
         audience: config.audience,
         tone: config.tone,
@@ -543,11 +558,11 @@ function SetupWizard({ campaign, error, setError, onCancel, onSaved }) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-muted">Start</label>
-              <input type="date" value={config.start_at} onChange={(e) => setConfig((c) => ({ ...c, start_at: e.target.value }))} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+              <input type="date" value={toYmd(config.start_at)} onChange={(e) => setConfig((c) => ({ ...c, start_at: e.target.value }))} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-sm mt-0.5" />
             </div>
             <div>
               <label className="text-xs text-muted">End</label>
-              <input type="date" value={config.end_at} onChange={(e) => setConfig((c) => ({ ...c, end_at: e.target.value }))} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+              <input type="date" value={toYmd(config.end_at)} onChange={(e) => setConfig((c) => ({ ...c, end_at: e.target.value }))} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-sm mt-0.5" />
             </div>
           </div>
           <p className="text-xs text-muted">Weekly posting pattern</p>
