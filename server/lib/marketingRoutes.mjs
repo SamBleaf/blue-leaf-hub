@@ -170,8 +170,27 @@ function buildUserMessageText(mode, generationContext, enrichedRequest) {
   return [modePrompt, "", contextBlock, "", `Request: ${enrichedRequest}`].join("\n");
 }
 
+// JSON output contract appended to every generation system prompt.
+// Must be present — without it the model returns prose and the client parser throws.
+const GENERATION_JSON_FORMAT = `
+
+OUTPUT FORMAT — return ONLY valid JSON in exactly this shape:
+{
+  "title": "Short descriptive title",
+  "body": "Main content",
+  "cta": "Call to action (empty string if client_stage is awareness)",
+  "hashtags": ["array", "of", "hashtags"],
+  "alt_text": "Image alt text suggestion for accessibility",
+  "notes": "Brief internal note on approach or any caveats"
+}
+
+For email mode, return a JSON array instead:
+[{ "subject": "", "preview_text": "", "body": "", "cta": "" }]
+
+CRITICAL: Output ONLY the JSON. No preamble, no explanation, no markdown fences, no text before or after the JSON.`;
+
 async function buildGenerationMessages(sb, mode, generationContext, enrichedRequest, photo_asset_id, content_mode = "educational") {
-  const systemPrompt = BLUE_LEAF_IDENTITY + (CONTENT_MODE_MODIFIERS[content_mode] || CONTENT_MODE_MODIFIERS.educational);
+  const systemPrompt = BLUE_LEAF_IDENTITY + (CONTENT_MODE_MODIFIERS[content_mode] || CONTENT_MODE_MODIFIERS.educational) + GENERATION_JSON_FORMAT;
   const userText = buildUserMessageText(mode, generationContext, enrichedRequest);
   const userContent = [];
 
