@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import ContentGenerator from "../components/marketing/ContentGenerator.jsx";
 import ContentLibrary from "../components/marketing/ContentLibrary.jsx";
@@ -23,7 +24,9 @@ export default function Marketing() {
   }
 
   function handleGeneratePost(asset) {
-    setSeedAsset(asset);
+    // flushSync ensures seedAsset is committed to state before navigate() fires,
+    // so ContentGenerator mounts with the asset already available on its first render.
+    flushSync(() => setSeedAsset(asset));
     goTab("create");
   }
 

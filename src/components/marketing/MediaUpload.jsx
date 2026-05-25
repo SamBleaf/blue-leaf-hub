@@ -175,58 +175,66 @@ export default function MediaUpload({ onGeneratePost }) {
     setError("");
 
     const isVideo = rawFile.type.startsWith("video/");
-    let uploadFile = rawFile;
-    let mimeType = rawFile.type;
-    let filename = rawFile.name;
 
-    if (!isVideo) {
-      setUploadProgress(isHeicFile(rawFile) ? "Converting HEIC to JPEG…" : "Preparing…");
-      const prepared = await preparePhotoUpload(rawFile);
-      uploadFile = prepared.file;
-      mimeType = prepared.mimeType;
-      filename = prepared.filename;
-    }
-
-    const isDrone = filename.toLowerCase().includes("dji") || filename.toLowerCase().includes("drone");
-    const mediaType = isDrone ? "drone_video" : isVideo ? "video" : "photo";
-    const ext = filename.split(".").pop() || (isVideo ? "mp4" : "jpg");
-    const year = new Date().getFullYear();
-    const month = String(new Date().getMonth() + 1).padStart(2, "0");
-    const uid = crypto.randomUUID();
-    const storagePath = `uploads/${year}/${month}/${uid}.${ext}`;
-
-    setUploadProgress(isVideo ? "Uploading to storage…" : "Uploading…");
     try {
-      const sb = getSupabase();
-      const { error: storageErr } = await sb.storage
-        .from("marketing-media")
-        .upload(storagePath, uploadFile, { contentType: mimeType, upsert: false });
-      if (storageErr) throw new Error(`Storage upload failed: ${storageErr.message}`);
+      if (isVideo) {
+        // ── Video path — stream directly to server (bypasses Supabase 50 MB limit) ──
+        setUploadProgress(`Uploading ${(rawFile.size / 1024 / 1024).toFixed(0)} MB — please wait…`);
+        const r = await authFetch("/api/marketing/media/upload-video", {
+          method: "POST",
+          headers: {
+            "Content-Type": rawFile.type || "video/mp4",
+            "X-Filename": encodeURIComponent(rawFile.name),
+            "X-Campaign-Objective": "brand_awareness",
+          },
+          body: rawFile,
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+        load();
+        setUploadProgress("");
+      } else {
+        // ── Photo path — convert HEIC if needed, then upload to Supabase directly ──
+        setUploadProgress(isHeicFile(rawFile) ? "Converting HEIC to JPEG…" : "Preparing…");
+        const prepared = await preparePhotoUpload(rawFile);
+        const uploadFile = prepared.file;
+        const mimeType = prepared.mimeType;
+        const filename = prepared.filename;
+        const ext = filename.split(".").pop() || "jpg";
+        const year = new Date().getFullYear();
+        const month = String(new Date().getMonth() + 1).padStart(2, "0");
+        const uid = crypto.randomUUID();
+        const storagePath = `uploads/${year}/${month}/${uid}.${ext}`;
 
-      setUploadProgress(isVideo ? "Registering — video pipeline will run in background…" : "Registering…");
+        setUploadProgress("Uploading…");
+        const sb = getSupabase();
+        const { error: storageErr } = await sb.storage
+          .from("marketing-media")
+          .upload(storagePath, uploadFile, { contentType: mimeType, upsert: false });
+        if (storageErr) throw new Error(`Storage upload failed: ${storageErr.message}`);
 
-      const r = await authFetch("/api/marketing/media/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          storage_path: storagePath,
-          storage_bucket: "marketing-media",
-          mime_type: mimeType,
-          media_type: mediaType,
-          original_filename: filename,
-          file_size_bytes: uploadFile.size,
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
-      // Reload full list to get pipeline_status derived field
-      load();
-      const assetId = j.media_asset_id || j.asset?.id;
-      if (assetId && !isVideo) {
-        authFetch(`/api/marketing/media/${assetId}/analyse`, { method: "POST" })
-          .catch(() => {});
+        setUploadProgress("Registering…");
+        const r = await authFetch("/api/marketing/media/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storage_path: storagePath,
+            storage_bucket: "marketing-media",
+            mime_type: mimeType,
+            media_type: "photo",
+            original_filename: filename,
+            file_size_bytes: uploadFile.size,
+          }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+        load();
+        const assetId = j.media_asset_id || j.asset?.id;
+        if (assetId) {
+          authFetch(`/api/marketing/media/${assetId}/analyse`, { method: "POST" }).catch(() => {});
+        }
+        setUploadProgress("");
       }
-      setUploadProgress("");
     } catch (err) {
       setError(err.message);
       setUploadProgress("");

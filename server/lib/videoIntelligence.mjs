@@ -520,20 +520,45 @@ export async function selectAlternativeClip(assetId, position, excludeFrameIndic
 }
 
 /**
- * Full V1–V3 pipeline: extract frames → score → generate story sequence.
- * @param {string} storagePath - Supabase storage path to source video
+ * Full V1-V3 pipeline: extract frames -> score -> generate story sequence.
+ *
+ * @param {string}      assetId
+ * @param {string|null} storagePath        Supabase storage path. Pass null when localVideoPath is used.
+ * @param {object}      sb
+ * @param {string}      apiKey
+ * @param {string}      [campaignObjective]
+ * @param {object}      [opts]
+ * @param {string}      [opts.localVideoPath]   If set, skip Supabase download and use this local path.
+ * @param {boolean}     [opts.cleanupLocalPath] Delete localVideoPath on completion.
  */
-export async function runVideoIntelligencePipeline(assetId, storagePath, sb, apiKey, campaignObjective = "educate") {
+export async function runVideoIntelligencePipeline(
+  assetId,
+  storagePath,
+  sb,
+  apiKey,
+  campaignObjective = "educate",
+  { localVideoPath = null, cleanupLocalPath = false } = {}
+) {
   const key = apiKey || _apiKey;
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const { data: fileData, error: dlErr } = await sb.storage
-    .from("marketing-media")
-    .download(storagePath);
-  if (dlErr) throw new Error(`Video download failed: ${dlErr.message}`);
+  let tmpPath;
+  let ownsTmp;
 
-  const tmpPath = join(tmpdir(), `blvi-src-${assetId.slice(0, 8)}-${randomUUID()}.mp4`);
-  await writeFile(tmpPath, Buffer.from(await fileData.arrayBuffer()));
+  if (localVideoPath) {
+    // Video already on local disk — provided by the streaming upload endpoint.
+    tmpPath = localVideoPath;
+    ownsTmp = cleanupLocalPath;
+  } else {
+    // Download from Supabase storage (original flow for small browser-uploaded videos).
+    const { data: fileData, error: dlErr } = await sb.storage
+      .from("marketing-media")
+      .download(storagePath);
+    if (dlErr) throw new Error(`Video download failed: ${dlErr.message}`);
+    tmpPath = join(tmpdir(), `blvi-src-${assetId.slice(0, 8)}-${randomUUID()}.mp4`);
+    await writeFile(tmpPath, Buffer.from(await fileData.arrayBuffer()));
+    ownsTmp = true;
+  }
 
   try {
     await sb.from("marketing_media_assets").update({ analysis_status: "processing" }).eq("id", assetId);
@@ -548,6 +573,8 @@ export async function runVideoIntelligencePipeline(assetId, storagePath, sb, api
     await sb.from("marketing_media_assets").update({ analysis_status: "error" }).eq("id", assetId);
     throw e;
   } finally {
-    await rm(tmpPath, { force: true }).catch(() => {});
+    if (ownsTmp && tmpPath) {
+      await rm(tmpPath, { force: true }).catch(() => {});
+    }
   }
 }

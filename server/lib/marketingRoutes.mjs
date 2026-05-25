@@ -7,6 +7,14 @@
  * All routes require authentication. Blueprint routes are NOT touched here.
  */
 
+import { createWriteStream } from "fs";
+import { stat, rm, readFile } from "fs/promises";
+import { join as pathJoin } from "path";
+import { tmpdir } from "os";
+import { randomUUID } from "crypto";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { pipeline as streamPipeline } from "stream/promises";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import {
@@ -31,6 +39,8 @@ import {
   HEIC_UNSUPPORTED_MESSAGE,
   resolveVisionMediaType,
 } from "./visionImage.mjs";
+
+const execP = promisify(exec);
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -821,6 +831,117 @@ export function registerMarketingRoutes(app) {
       return { ...a, pipeline_status: latest?.status || (exports.length === 0 ? "none" : "unknown") };
     }));
     return res.json({ ok: true, assets, count: count || 0 });
+  });
+
+  /**
+   * POST /api/marketing/media/upload-video
+   * Stream large video files (drone footage etc.) directly to the server —
+   * bypasses Supabase's 50 MB per-object storage limit.
+   *
+   * Browser sends:
+   *   Content-Type: video/mp4 (or the actual MIME)
+   *   X-Filename: <URI-encoded filename>
+   *   X-Campaign-Objective: brand_awareness|educate|generate_enquiries (optional)
+   *   Authorization: Bearer <token>
+   *   body: raw binary stream
+   *
+   * Server:
+   *   1. Pipes stream → temp file (no memory buffering)
+   *   2. Extracts thumbnail with ffmpeg → uploads to Supabase thumbnails/
+   *   3. Creates marketing_media_assets row (storage_path = null, raw video stays local)
+   *   4. Runs video intelligence pipeline on the temp file in background
+   *   5. Returns { ok: true, media_asset_id }
+   */
+  app.post("/api/marketing/media/upload-video", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
+
+    const originalFilename = decodeURIComponent(req.headers["x-filename"] || "video.mp4");
+    const mimeType = (req.headers["content-type"] || "video/mp4").split(";")[0].trim();
+    const campaignObjective = req.headers["x-campaign-objective"] || "brand_awareness";
+    const isDrone = /dji/i.test(originalFilename) || /drone/i.test(originalFilename);
+    const mediaType = isDrone ? "drone_video" : "video";
+    const ext = originalFilename.split(".").pop()?.toLowerCase() || "mp4";
+    const uid = randomUUID();
+    const tmpPath = pathJoin(tmpdir(), `blvi-upload-${uid}.${ext}`);
+
+    let assetId = null;
+    try {
+      // 1. Stream request body → temp file (no size cap, no memory buffering)
+      const writeStream = createWriteStream(tmpPath);
+      await streamPipeline(req, writeStream);
+
+      const stats = await stat(tmpPath);
+      const fileSizeBytes = stats.size;
+      console.log(`[upload-video] received ${originalFilename} (${(fileSizeBytes / 1024 / 1024).toFixed(1)} MB) → ${tmpPath}`);
+
+      // 2. Create DB record (no Supabase storage_path — raw video stays on server temp disk)
+      const { data: asset, error: dbErr } = await sb
+        .from("marketing_media_assets")
+        .insert({
+          media_type: mediaType,
+          mime_type: mimeType,
+          original_filename: originalFilename,
+          file_size_bytes: fileSizeBytes,
+          storage_path: null,
+          storage_bucket: "marketing-media",
+          analysis_status: "pending",
+          created_by: req.caller.id,
+        })
+        .select("id")
+        .single();
+      if (dbErr) throw new Error(dbErr.message);
+      assetId = asset.id;
+
+      // 3. Extract thumbnail (first frame) → upload to Supabase for card preview
+      try {
+        const ffmpegBin = await (async () => {
+          for (const bin of ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"]) {
+            try { await execP(`"${bin}" -version`); return bin; } catch { /* try next */ }
+          }
+          return "ffmpeg";
+        })();
+        const thumbPath = pathJoin(tmpdir(), `blvi-thumb-${uid}.jpg`);
+        await execP(
+          `"${ffmpegBin}" -i "${tmpPath}" -vf "select=eq(n\\,0),scale=640:-2" -frames:v 1 -q:v 3 "${thumbPath}" -y`,
+          { maxBuffer: 5 * 1024 * 1024 }
+        );
+        const thumbBuf = await readFile(thumbPath);
+        const thumbStoragePath = `thumbnails/${assetId}/thumb.jpg`;
+        await sb.storage.from("marketing-media").upload(thumbStoragePath, thumbBuf, { contentType: "image/jpeg", upsert: true });
+        await sb.from("marketing_media_assets").update({ thumbnail_path: thumbStoragePath }).eq("id", assetId);
+        await rm(thumbPath, { force: true }).catch(() => {});
+        console.log(`[upload-video] thumbnail uploaded for asset ${assetId}`);
+      } catch (thumbErr) {
+        console.warn("[upload-video] thumbnail extraction failed:", thumbErr.message);
+      }
+
+      // 4. Respond immediately — pipeline runs in background
+      res.json({ ok: true, media_asset_id: assetId, status: "processing" });
+
+      // 5. Video intelligence pipeline (cleans up tmpPath on completion)
+      (async () => {
+        try {
+          const { runVideoIntelligencePipeline } = await import("./videoIntelligence.mjs");
+          await runVideoIntelligencePipeline(assetId, null, sb, _apiKey, campaignObjective, {
+            localVideoPath: tmpPath,
+            cleanupLocalPath: true,
+          });
+          console.log(`[upload-video] pipeline complete for asset ${assetId}`);
+        } catch (e) {
+          console.error(`[upload-video] pipeline error for asset ${assetId}:`, e.message);
+          await rm(tmpPath, { force: true }).catch(() => {});
+        }
+      })();
+
+    } catch (err) {
+      await rm(tmpPath, { force: true }).catch(() => {});
+      console.error("[upload-video]", err);
+      if (!res.headersSent) {
+        return res.status(500).json({ ok: false, error: err.message || "Video upload failed" });
+      }
+    }
   });
 
   /**
