@@ -57,14 +57,26 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
   const pattern = join(tmpDir, "frame%04d.jpg");
 
   try {
+    // --- Probe video duration ---
+    let durationSecs = 0;
+    try {
+      const probe = await execP(
+        `"${ffmpeg}" -i "${localVideoPath}" 2>&1 | grep Duration`,
+        { maxBuffer: 1024 * 1024, shell: true }
+      );
+      const dm = (probe.stdout || probe.stderr || "").match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/);
+      if (dm) durationSecs = Number(dm[1]) * 3600 + Number(dm[2]) * 60 + parseFloat(dm[3]);
+    } catch { /* non-fatal — duration stays 0 */ }
+
     // --- Scene-change pass ---
-    // select filter picks frames where scene score > 0.35 (significant visual change).
+    // Lower threshold (0.2) for short clips so even subtle cuts are captured.
     // showinfo writes pts_time for every selected frame to stderr.
-    // -vsync vfr avoids duplicate frames. -frames:v 30 caps output.
+    // -vsync vfr avoids duplicates. -frames:v 30 caps output.
+    const sceneThreshold = durationSecs > 0 && durationSecs < 60 ? 0.2 : 0.35;
     let sceneStderr = "";
     try {
       const res = await execP(
-        `"${ffmpeg}" -i "${localVideoPath}" -vf "select='gt(scene,0.35)',showinfo,scale=1280:-2" -vsync vfr -frames:v 30 -q:v 3 "${pattern}" -y`,
+        `"${ffmpeg}" -i "${localVideoPath}" -vf "select='gt(scene,${sceneThreshold})',showinfo,scale=1280:-2" -vsync vfr -frames:v 30 -q:v 3 "${pattern}" -y`,
         { maxBuffer: 20 * 1024 * 1024 }
       );
       sceneStderr = res.stderr || "";
@@ -86,18 +98,21 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
       return await _uploadFrames(sceneFiles, tmpDir, assetId, sb, timestamps);
     }
 
-    // --- Fallback: fixed-interval fps=1/20 ---
+    // --- Fallback: fixed-interval extraction ---
+    // Scale interval to video length: aim for ~8 frames minimum.
+    // Short clips (<30s) → 1 frame every 3s. Medium (<120s) → 1 every 10s. Long → 1 every 20s.
     for (const f of sceneFiles) {
       await rm(join(tmpDir, f), { force: true }).catch(() => {});
     }
+    const interval = durationSecs <= 30 ? 3 : durationSecs <= 120 ? 10 : 20;
 
     await execP(
-      `"${ffmpeg}" -i "${localVideoPath}" -vf "fps=1/20,scale=1280:-2" -q:v 3 "${pattern}" -y`,
+      `"${ffmpeg}" -i "${localVideoPath}" -vf "fps=1/${interval},scale=1280:-2" -q:v 3 "${pattern}" -y`,
       { maxBuffer: 20 * 1024 * 1024 }
     );
 
     const fbFiles = readdirSync(tmpDir).filter(f => f.endsWith(".jpg")).sort();
-    const fbTimestamps = fbFiles.map((_, i) => i * 20);
+    const fbTimestamps = fbFiles.map((_, i) => i * interval);
     return await _uploadFrames(fbFiles, tmpDir, assetId, sb, fbTimestamps);
 
   } finally {

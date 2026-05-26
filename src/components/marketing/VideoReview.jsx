@@ -79,6 +79,9 @@ export default function VideoReview({ assetId, onDone, onGenerateFinal }) {
     [clips, decisions],
   );
 
+  // Minimum clips to proceed: 1 for very short videos, 3 for longer ones.
+  const minKeep = Math.min(clips.length, 3);
+
   const totalSecs = useMemo(
     () => clips.reduce((n, c) => {
       if ((decisions[clipKey(c)] || "keep") === "remove") return n;
@@ -305,13 +308,15 @@ export default function VideoReview({ assetId, onDone, onGenerateFinal }) {
       <button
         type="button"
         onClick={generateFinal}
-        disabled={generating || keepCount < 3}
+        disabled={generating || keepCount < minKeep}
         className="w-full bg-primary text-white text-sm font-medium py-3 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
       >
         {generating ? "Saving…" : "Generate Final →"}
       </button>
-      {keepCount < 3 && (
-        <p className="text-xs text-muted text-center">Approve at least 3 clips (👍) to continue</p>
+      {keepCount < minKeep && (
+        <p className="text-xs text-muted text-center">
+          Approve at least {minKeep} clip{minKeep !== 1 ? "s" : ""} (👍) to continue
+        </p>
       )}
     </div>
   );
