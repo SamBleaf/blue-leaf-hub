@@ -56,63 +56,73 @@ export async function extractMeaningfulFrames(localVideoPath, assetId, sb) {
   const tmpDir  = await mkdtemp(join(tmpdir(), `blvi-${assetId.slice(0, 8)}-`));
   const pattern = join(tmpDir, "frame%04d.jpg");
 
+  // Max frames to score — hard cap keeps pipeline under ~2 minutes.
+  // 12 frames × ~5s per Haiku call = ~60s scoring. More than enough for a story edit.
+  const MAX_FRAMES = 12;
+
   try {
-    // --- Probe video duration ---
+    // --- Probe video duration (parse ffmpeg's own stderr — no shell pipe needed) ---
     let durationSecs = 0;
     try {
-      const probe = await execP(
-        `"${ffmpeg}" -i "${localVideoPath}" 2>&1 | grep Duration`,
-        { maxBuffer: 1024 * 1024, shell: true }
-      );
-      const dm = (probe.stdout || probe.stderr || "").match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/);
+      // ffmpeg -i with no output exits non-zero but writes file info to stderr
+      await execP(`"${ffmpeg}" -i "${localVideoPath}"`, { maxBuffer: 2 * 1024 * 1024 });
+    } catch (e) {
+      const output = e.stderr || e.stdout || "";
+      const dm = output.match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/);
       if (dm) durationSecs = Number(dm[1]) * 3600 + Number(dm[2]) * 60 + parseFloat(dm[3]);
-    } catch { /* non-fatal — duration stays 0 */ }
+    }
+    console.log(`[videoIntelligence] duration=${durationSecs.toFixed(1)}s`);
 
     // --- Scene-change pass ---
-    // Lower threshold (0.2) for short clips so even subtle cuts are captured.
-    // showinfo writes pts_time for every selected frame to stderr.
-    // -vsync vfr avoids duplicates. -frames:v 30 caps output.
+    // Lower threshold for short clips to catch subtle camera moves.
+    // Hard cap at MAX_FRAMES to bound scoring time.
     const sceneThreshold = durationSecs > 0 && durationSecs < 60 ? 0.2 : 0.35;
     let sceneStderr = "";
     try {
       const res = await execP(
-        `"${ffmpeg}" -i "${localVideoPath}" -vf "select='gt(scene,${sceneThreshold})',showinfo,scale=1280:-2" -vsync vfr -frames:v 30 -q:v 3 "${pattern}" -y`,
+        `"${ffmpeg}" -i "${localVideoPath}" -vf "select='gt(scene,${sceneThreshold})',showinfo,scale=1280:-2" -vsync vfr -frames:v ${MAX_FRAMES} -q:v 3 "${pattern}" -y`,
         { maxBuffer: 20 * 1024 * 1024 }
       );
       sceneStderr = res.stderr || "";
     } catch (e) {
-      // ffmpeg sometimes exits non-zero on filter warnings — check if frames produced anyway
       sceneStderr = e.stderr || "";
     }
 
     const sceneFiles = readdirSync(tmpDir).filter(f => f.endsWith(".jpg")).sort();
 
-    if (sceneFiles.length >= 8) {
-      // Parse pts_time values from showinfo stderr output
+    if (sceneFiles.length >= Math.min(8, MAX_FRAMES)) {
       const timestamps = [];
       const tsRe = /pts_time:(\d+\.?\d*)/g;
       let m;
       while ((m = tsRe.exec(sceneStderr)) !== null) {
         timestamps.push(parseFloat(m[1]));
       }
+      console.log(`[videoIntelligence] scene-change: ${sceneFiles.length} frames`);
       return await _uploadFrames(sceneFiles, tmpDir, assetId, sb, timestamps);
     }
 
-    // --- Fallback: fixed-interval extraction ---
-    // Scale interval to video length: aim for ~8 frames minimum.
-    // Short clips (<30s) → 1 frame every 3s. Medium (<120s) → 1 every 10s. Long → 1 every 20s.
+    // --- Fallback: fixed-interval extraction, scaled to video length ---
+    // Target MAX_FRAMES evenly spread across the clip.
+    // Short (<30s) → ~3s interval. Medium (<120s) → ~10s. Long → ~20s.
+    // Always cap at MAX_FRAMES.
     for (const f of sceneFiles) {
       await rm(join(tmpDir, f), { force: true }).catch(() => {});
     }
-    const interval = durationSecs <= 30 ? 3 : durationSecs <= 120 ? 10 : 20;
+
+    const baseInterval = durationSecs <= 30 ? 3 : durationSecs <= 120 ? 10 : 20;
+    // Recalculate to ensure we don't exceed MAX_FRAMES
+    const interval = durationSecs > 0
+      ? Math.max(baseInterval, Math.ceil(durationSecs / MAX_FRAMES))
+      : baseInterval;
 
     await execP(
-      `"${ffmpeg}" -i "${localVideoPath}" -vf "fps=1/${interval},scale=1280:-2" -q:v 3 "${pattern}" -y`,
+      `"${ffmpeg}" -i "${localVideoPath}" -vf "fps=1/${interval},scale=1280:-2" -frames:v ${MAX_FRAMES} -q:v 3 "${pattern}" -y`,
       { maxBuffer: 20 * 1024 * 1024 }
     );
 
     const fbFiles = readdirSync(tmpDir).filter(f => f.endsWith(".jpg")).sort();
     const fbTimestamps = fbFiles.map((_, i) => i * interval);
+    console.log(`[videoIntelligence] fixed-interval (1/${interval}s): ${fbFiles.length} frames`);
     return await _uploadFrames(fbFiles, tmpDir, assetId, sb, fbTimestamps);
 
   } finally {
@@ -576,16 +586,26 @@ export async function runVideoIntelligencePipeline(
     ownsTmp = true;
   }
 
-  try {
-    await sb.from("marketing_media_assets").update({ analysis_status: "processing" }).eq("id", assetId);
+  const PIPELINE_TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes hard limit
 
+  const runPipeline = async () => {
+    await sb.from("marketing_media_assets").update({ analysis_status: "processing" }).eq("id", assetId);
     const frames = await extractMeaningfulFrames(tmpPath, assetId, sb);
+    console.log(`[videoIntelligence] scoring ${frames.length} frames for asset ${assetId}`);
     await scoreVideoClips(assetId, frames, sb, key);
     const story = await generateStorySequence(assetId, campaignObjective, {}, sb, key);
-
     await sb.from("marketing_media_assets").update({ analysis_status: "complete" }).eq("id", assetId);
     return story;
+  };
+
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Pipeline timeout after ${PIPELINE_TIMEOUT_MS / 60000} minutes`)), PIPELINE_TIMEOUT_MS)
+  );
+
+  try {
+    return await Promise.race([runPipeline(), timeout]);
   } catch (e) {
+    console.error(`[videoIntelligence] pipeline failed for ${assetId}:`, e.message);
     await sb.from("marketing_media_assets").update({ analysis_status: "error" }).eq("id", assetId);
     throw e;
   } finally {

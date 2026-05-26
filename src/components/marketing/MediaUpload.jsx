@@ -1009,7 +1009,7 @@ function AssetDetail({ asset, onConsent, onAssemble, onGeneratePost, onBatchGene
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
               </svg>
-              Analysing footage… this takes 3–5 minutes.
+              Analysing footage… usually 1–2 minutes.
             </p>
           )}
           {asset.analysis_status === "error" && (
