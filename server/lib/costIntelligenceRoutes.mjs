@@ -1,6 +1,7 @@
 /**
  * Cost Intelligence API — Buildxact estimate template + per-job estimate sync.
  */
+import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
@@ -155,6 +156,25 @@ export function registerCostIntelligenceRoutes(app) {
     const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
     if (!apiKey) return res.status(503).json({ ok: false, error: "ANTHROPIC_API_KEY not set" });
 
+    // F6 — Return cached extraction if same PDF file was already processed
+    // Requires migration 056 — source_hash column on project_metrics
+    const db = getServiceSupabase();
+    const incomingHash = createHash("sha256").update(pdf_base64).digest("hex");
+    if (db) {
+      const { data: existingMetrics } = await db
+        .from("project_metrics")
+        .select("*")
+        .eq("job_id", jobId)
+        .maybeSingle();
+      if (
+        existingMetrics?.floor_area_m2 != null &&
+        existingMetrics?.source_hash === incomingHash &&
+        !req.query.force
+      ) {
+        return res.json({ ok: true, metrics: existingMetrics, cached: true });
+      }
+    }
+
     const client = new Anthropic({ apiKey });
 
     const prompt = `You are extracting project metrics from an architectural plan PDF for a residential building project in South Australia.
@@ -229,19 +249,19 @@ Definitions:
         }
       }
 
-      // Save high-confidence fields
-      const db = getServiceSupabase();
+      // Save high-confidence fields (db and incomingHash declared above for F6 cache check)
       const now = new Date().toISOString();
       const { data: existing } = await db.from("project_metrics").select("id").eq("job_id", jobId).maybeSingle();
       if (existing?.id) {
         await db.from("project_metrics").update({
           ...patch, extraction_source: "ai_plans", extraction_confidence: overallConfidence,
-          extracted_at: now, updated_at: now
+          extracted_at: now, updated_at: now, source_hash: incomingHash,
         }).eq("id", existing.id);
       } else {
         await db.from("project_metrics").insert({
           job_id: jobId, ...patch, extraction_source: "ai_plans",
-          extraction_confidence: overallConfidence, extracted_at: now, created_at: now, updated_at: now
+          extraction_confidence: overallConfidence, extracted_at: now, created_at: now,
+          updated_at: now, source_hash: incomingHash,
         });
       }
 

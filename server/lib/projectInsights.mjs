@@ -255,12 +255,23 @@ async function _checkVariationSigned(jobId, sb, apiKey) {
 
   // Get the most recently signed variation
   const { data: latestVar } = await sb.from("job_variations")
-    .select("title, amount_ex_gst")
+    .select("title, amount_ex_gst, eot_days")
     .eq("job_id", jobId)
     .eq("status", "signed")
     .order("signed_date", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  // F4 — Skip Haiku insight for low-value variations (noise reduction)
+  // Threshold is configurable via env var; default $2,000 ex-GST
+  const VARIATION_INSIGHT_THRESHOLD =
+    Number(process.env.VARIATION_INSIGHT_THRESHOLD_AUD ?? 2000);
+  const variationAmount = Number(latestVar?.amount_ex_gst ?? 0);
+  const hasScheduleImpact = Number(latestVar?.eot_days ?? 0) > 0;
+  if (variationAmount < VARIATION_INSIGHT_THRESHOLD && !hasScheduleImpact) {
+    // Low-value variation with no schedule impact — no insight needed
+    return;
+  }
 
   const deltaJson = {
     trigger: "variation_signed",

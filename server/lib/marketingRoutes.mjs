@@ -1077,7 +1077,7 @@ export function registerMarketingRoutes(app) {
 
     const { data: asset, error: assetErr } = await sb
       .from("marketing_media_assets")
-      .select("storage_path, storage_bucket, mime_type, media_type")
+      .select("storage_path, storage_bucket, mime_type, media_type, analysis")
       .eq("id", req.params.id)
       .single();
 
@@ -1088,6 +1088,12 @@ export function registerMarketingRoutes(app) {
       asset.mime_type?.startsWith("image/");
     if (!isPhoto) {
       return res.status(400).json({ ok: false, error: "Only photos can be analysed" });
+    }
+
+    // F5 — Return cached analysis if it already exists
+    // Re-analyse only if ?force=true is passed (e.g. after replacing media)
+    if (asset.analysis && !req.query.force) {
+      return res.json({ ok: true, analysis: asset.analysis, cached: true });
     }
 
     try {

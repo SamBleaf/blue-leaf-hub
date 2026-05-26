@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
@@ -121,6 +122,22 @@ export function registerModule5Routes(app) {
       const b64 = String(req.body?.dataBase64 || "").trim();
       if (!b64) return res.status(400).json({ ok: false, error: "dataBase64 required." });
       const buf = Buffer.from(b64, "base64");
+
+      // F7 — Return cached parse result if same file was already processed
+      // Requires migration 056 — source_hash column on buildexact_estimates
+      const incomingHashXlsx = createHash("sha256").update(buf).digest("hex");
+      const sbXlsx = getServiceSupabase();
+      if (sbXlsx) {
+        const { data: existingParse } = await sbXlsx
+          .from("buildexact_estimates")
+          .select("*")
+          .eq("source_hash", incomingHashXlsx)
+          .maybeSingle();
+        if (existingParse && !req.query.force) {
+          return res.json({ ok: true, result: existingParse, cached: true });
+        }
+      }
+
       const filenameHint = String(req.body?.filename || "").trim();
       const parsed = parseXLSX(buf, filenameHint);
       const scheduleHints = parseSchedItems(parsed.categories);
@@ -148,7 +165,8 @@ export function registerModule5Routes(app) {
             categories: parsed.categories,
             schedule_hints: scheduleHints.length ? scheduleHints : null,
             cost_metrics: Object.keys(costMetrics).length ? costMetrics : null,
-            source: "xlsx"
+            source: "xlsx",
+            source_hash: incomingHashXlsx,
           })
           .select("id")
           .single();
@@ -185,6 +203,22 @@ export function registerModule5Routes(app) {
       const b64 = String(req.body?.dataBase64 || "").trim();
       if (!b64) return res.status(400).json({ ok: false, error: "dataBase64 required." });
       const buf = Buffer.from(b64, "base64");
+
+      // F7 — Return cached parse result if same file was already processed
+      // Requires migration 056 — source_hash column on buildexact_estimates
+      const incomingHashPdf = createHash("sha256").update(buf).digest("hex");
+      const sbPdf = getServiceSupabase();
+      if (sbPdf) {
+        const { data: existingParse } = await sbPdf
+          .from("buildexact_estimates")
+          .select("*")
+          .eq("source_hash", incomingHashPdf)
+          .maybeSingle();
+        if (existingParse && !req.query.force) {
+          return res.json({ ok: true, result: existingParse, cached: true });
+        }
+      }
+
       const client = new Anthropic({ apiKey: key, maxRetries: 0 });
       const runClaudeJson = async (prompt, pdfBase64) => {
         const completion = await client.messages.create({
@@ -236,7 +270,8 @@ export function registerModule5Routes(app) {
             categories: parsed.categories,
             schedule_hints: scheduleHintsPdf.length ? scheduleHintsPdf : null,
             cost_metrics: Object.keys(costMetricsPdf).length ? costMetricsPdf : null,
-            source: "pdf"
+            source: "pdf",
+            source_hash: incomingHashPdf,
           })
           .select("id")
           .single();
