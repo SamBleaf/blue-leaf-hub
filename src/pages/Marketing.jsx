@@ -1,23 +1,36 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import ContentGenerator from "../components/marketing/ContentGenerator.jsx";
 import ContentLibrary from "../components/marketing/ContentLibrary.jsx";
 import CampaignManager from "../components/marketing/CampaignManager.jsx";
 import MediaUpload from "../components/marketing/MediaUpload.jsx";
+import MusicLibrarySettings from "../components/marketing/MusicLibrarySettings.jsx";
+import { useAuth } from "../lib/useAuth.js";
 
 const TABS = [
   { id: "create",    label: "Create" },
   { id: "library",   label: "Library" },
   { id: "campaigns", label: "Campaigns" },
   { id: "media",     label: "Media" },
+  { id: "music",     label: "Music Library", adminOnly: true },
 ];
 
 export default function Marketing() {
   const { tab } = useParams();
   const navigate = useNavigate();
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const activeTab = tab || "create";
   const [seedAsset, setSeedAsset] = useState(null);
+
+  const visibleTabs = TABS.filter((t) => !t.adminOnly || isAdmin);
+
+  useEffect(() => {
+    if (tab === "music" && !isAdmin) {
+      navigate("/marketing", { replace: true });
+    }
+  }, [tab, isAdmin, navigate]);
 
   function goTab(id) {
     navigate(id === "create" ? "/marketing" : `/marketing/${id}`);
@@ -42,8 +55,8 @@ export default function Marketing() {
       </header>
 
       {/* Pill tab bar */}
-      <div className="flex gap-1 rounded-lg bg-page p-1 w-fit">
-        {TABS.map((t) => (
+      <div className="flex gap-1 rounded-lg bg-page p-1 w-fit flex-wrap">
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -64,6 +77,7 @@ export default function Marketing() {
       {activeTab === "library"   && <ContentLibrary />}
       {activeTab === "campaigns" && <CampaignManager onGoCreate={() => goTab("create")} />}
       {activeTab === "media"     && <MediaUpload onGeneratePost={handleGeneratePost} />}
+      {activeTab === "music" && isAdmin && <MusicLibrarySettings />}
     </div>
   );
 }

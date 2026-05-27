@@ -5,7 +5,6 @@ import RfqSettingsModal from "../components/RfqSettingsModal.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { loadNotificationPrefs, saveNotificationPrefs } from "../lib/notificationPrefs.js";
 import { loadCompanySettings, persistCompanyLogoDataUrl, saveCompanySettings } from "../lib/companySettings.js";
-
 const BE_UI_STORAGE = "blhub_buildexact_ui_v1";
 
 async function syncUserSetting(key, value) {
