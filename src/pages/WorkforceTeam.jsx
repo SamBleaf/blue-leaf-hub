@@ -223,6 +223,7 @@ export default function WorkforceTeam() {
               <div>
                 <label className="text-xs text-muted block mb-1">Buildexact Employee ID</label>
                 <input type="text" value={form.buildexact_employee_id} onChange={e => setField("buildexact_employee_id", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. 12345" />
+                <p className="text-[11px] text-muted mt-1">Used to sync approved timesheets to Buildexact. Find this in Buildexact under Staff settings.</p>
               </div>
 
               {/* Invite section */}

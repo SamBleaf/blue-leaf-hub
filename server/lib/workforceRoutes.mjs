@@ -382,6 +382,24 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true });
   });
 
+  // Director can un-approve a timesheet → resets to submitted so it can be re-reviewed/edited
+  app.post("/api/workforce/timesheets/:id/unapprove", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { error } = await sb.from("timesheets").update({
+      status: "submitted",
+      approved_by: null,
+      approved_at: null,
+      buildexact_synced_at: null,
+      buildexact_sync_error: null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).eq("status", "approved");
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    // Reset cost_amount on entries so it gets re-computed on next approval
+    await sb.from("timesheet_entries").update({ cost_amount: null, overtime_hours: 0 })
+      .eq("timesheet_id", req.params.id);
+    res.json({ ok: true });
+  });
+
   // ── Labour dashboard ──────────────────────────────────────────────────────
 
   app.get("/api/projects/:id/labour", requireAuth, async (req, res) => {

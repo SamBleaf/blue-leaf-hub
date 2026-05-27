@@ -269,6 +269,7 @@ export default function JobCommandCentre() {
   const [cashflow, setCashflow] = useState(null);
   const [cashflowOpen, setCashflowOpen] = useState(false);
   const [insights, setInsights] = useState([]);
+  const [labour, setLabour] = useState(null);
   const claimsSectionRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -299,6 +300,7 @@ export default function JobCommandCentre() {
         overdue_claims: (cc.claims || []).filter(c => c.status === "overdue"),
       });
       setInsights((cc.recent_insights || []).filter(i => !i.is_dismissed));
+      setLabour(cc.labour || null);
     }
     setLoading(false);
 
@@ -518,17 +520,32 @@ export default function JobCommandCentre() {
                 {visibleRows.map(row => (
                   <BudgetRow key={row.trade_category_id} row={row} onEdit={setEditingBudget} />
                 ))}
+                {/* Labour row — from approved timesheets */}
+                {labour && labour.total_cost > 0 && (
+                  <tr className="border-b border-hairline bg-blue-50/40">
+                    <td className="px-4 py-2 text-sm text-ink">
+                      Labour
+                      <span className="ml-1.5 text-[10px] text-muted font-normal">(timesheets)</span>
+                    </td>
+                    <td className="px-4 py-2 text-sm text-right text-muted">—</td>
+                    <td className="px-4 py-2 text-sm text-right font-semibold text-ink">{fmt(labour.total_cost)}</td>
+                    <td className="px-4 py-2 text-sm text-right text-muted">—</td>
+                    <td className="px-4 py-2 text-sm text-right text-muted">—</td>
+                    <td className="px-4 py-2 w-8" />
+                  </tr>
+                )}
                 {budgetTotals && (
                   <tr className="bg-page">
                     <td className="px-4 py-2.5 text-sm font-bold text-ink">Total</td>
                     <td className="px-4 py-2.5 text-sm font-bold text-ink text-right">{fmt(budgetTotals.budget)}</td>
-                    <td className="px-4 py-2.5 text-sm font-bold text-ink text-right">{fmt(budgetTotals.actual)}</td>
+                    <td className="px-4 py-2.5 text-sm font-bold text-ink text-right">{fmt(budgetTotals.actual + (labour?.total_cost ?? 0))}</td>
                     <td className="px-4 py-2.5 text-sm font-bold text-ink text-right">{fmt(budgetTotals.forecast)}</td>
                     <td className="px-4 py-2.5 text-sm font-bold text-right">
-                      <span className={budgetTotals.actual > budgetTotals.budget ? "text-red-700" : "text-green-700"}>
-                        {fmt(budgetTotals.actual - budgetTotals.budget)}
+                      <span className={(budgetTotals.actual + (labour?.total_cost ?? 0)) > budgetTotals.budget ? "text-red-700" : "text-green-700"}>
+                        {fmt((budgetTotals.actual + (labour?.total_cost ?? 0)) - budgetTotals.budget)}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 w-8" />
                   </tr>
                 )}
               </tbody>

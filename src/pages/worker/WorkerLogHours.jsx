@@ -27,6 +27,7 @@ export default function WorkerLogHours() {
   const [editIdx, setEditIdx] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [me, setMe] = useState(null);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     authFetch("/api/worker/me").then(r => r.json()).then(j => { if (j.ok) setMe(j); }).catch(() => {});
@@ -78,11 +79,10 @@ export default function WorkerLogHours() {
     if (!entries.length) return;
     setSubmitting(true);
     try {
-      const today = new Date().toISOString().slice(0, 10);
       const res = await authFetch("/api/worker/timesheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: today, project_id: projectId, job_id: jobId, entries }),
+        body: JSON.stringify({ date, project_id: projectId, job_id: jobId, entries }),
       });
       const j = await res.json();
       if (j.ok) { setStep("success"); }
@@ -120,11 +120,18 @@ export default function WorkerLogHours() {
   // ── Pick task ─────────────────────────────────────────────────────────────
   if (step === "pick_task") {
     return (
-      <WorkerLayout>
+      <WorkerLayout onBack={() => navigate("/worker")}>
         <div className="px-4 pt-5 pb-8">
-          <div className="flex items-center gap-2 mb-5">
-            <button type="button" onClick={() => navigate("/worker")} className="text-muted text-sm">← Back</button>
-            <h1 className="text-base font-bold text-ink">What did you work on?</h1>
+          <h1 className="text-base font-bold text-ink mb-1">What did you work on?</h1>
+          {/* Date picker — defaults to today, allow previous days */}
+          <div className="mb-5">
+            <input
+              type="date"
+              value={date}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={e => setDate(e.target.value)}
+              className="text-sm text-muted border-0 bg-transparent focus:outline-none cursor-pointer"
+            />
           </div>
           <div className="space-y-2">
             {TASK_OPTIONS.map(t => (
@@ -146,12 +153,9 @@ export default function WorkerLogHours() {
   // ── Enter hours ───────────────────────────────────────────────────────────
   if (step === "enter_hours") {
     return (
-      <WorkerLayout>
+      <WorkerLayout onBack={() => { setStep("pick_task"); setEditIdx(null); }}>
         <div className="px-4 pt-5 pb-8">
-          <div className="flex items-center gap-2 mb-5">
-            <button type="button" onClick={() => { setStep("pick_task"); setEditIdx(null); }} className="text-muted text-sm">← Back</button>
-            <h1 className="text-base font-bold text-ink">{selectedTask?.label}</h1>
-          </div>
+          <h1 className="text-base font-bold text-ink mb-5">{selectedTask?.label}</h1>
 
           {/* Large hours input */}
           <div className="flex flex-col items-center mb-6">
@@ -219,7 +223,7 @@ export default function WorkerLogHours() {
 
   // ── Review ────────────────────────────────────────────────────────────────
   return (
-    <WorkerLayout>
+    <WorkerLayout onBack={() => setStep("pick_task")}>
       <div className="px-4 pt-5 pb-8">
         <div className="flex items-center gap-2 mb-5">
           <h1 className="text-base font-bold text-ink">Review timesheet</h1>

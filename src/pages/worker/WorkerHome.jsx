@@ -110,6 +110,16 @@ export default function WorkerHome() {
                 <span className="text-ink">Total</span>
                 <span className="text-ink">{totalHoursToday}h</span>
               </div>
+              {/* Allow editing until approved */}
+              {ts.status === "submitted" && (
+                <button
+                  type="button"
+                  onClick={() => navigate("/worker/timesheet/log")}
+                  className="mt-3 w-full py-2 rounded-lg border border-hairline text-ink text-sm font-medium"
+                >
+                  Edit timesheet
+                </button>
+              )}
             </>
           ) : (
             <>

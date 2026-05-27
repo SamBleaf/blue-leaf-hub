@@ -368,7 +368,8 @@ function MassFillTab() {
 
 // ── History tab ───────────────────────────────────────────────────────────────
 
-function HistoryTab() {
+function HistoryTab({ role }) {
+  const isDirector = role === "admin";
   const [timesheets, setTimesheets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -378,6 +379,7 @@ function HistoryTab() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [empFilter, setEmpFilter] = useState("");
   const [employees, setEmployees] = useState([]);
+  const [unapproving, setUnapproving] = useState(null);
 
   useEffect(() => {
     authFetch("/api/workforce/employees").then(r => r.json()).then(j => { if (j.ok) setEmployees(j.employees || []); }).catch(() => {});
@@ -400,6 +402,16 @@ function HistoryTab() {
     const p = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
     if (empFilter) p.set("employee_id", empFilter);
     window.location.href = `/api/workforce/timesheets/export.csv?${p}`;
+  }
+
+  async function unapprove(id) {
+    setUnapproving(id);
+    try {
+      await authFetch(`/api/workforce/timesheets/${id}/unapprove`, { method: "POST" });
+      load();
+    } catch { /* ignore */ } finally {
+      setUnapproving(null);
+    }
   }
 
   return (
@@ -437,6 +449,7 @@ function HistoryTab() {
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Project</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-muted">Hours</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Status</th>
+                {isDirector && <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-hairline">
@@ -451,6 +464,20 @@ function HistoryTab() {
                     <td className="px-3 py-2">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE[ts.status] || ""}`}>{ts.status}</span>
                     </td>
+                    {isDirector && (
+                      <td className="px-3 py-2">
+                        {ts.status === "approved" && (
+                          <button
+                            type="button"
+                            disabled={unapproving === ts.id}
+                            onClick={() => unapprove(ts.id)}
+                            className="text-xs text-amber-700 font-medium hover:underline disabled:opacity-40"
+                          >
+                            {unapproving === ts.id ? "…" : "Unapprove"}
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -490,7 +517,7 @@ export default function Workforce() {
 
       {tab === "Approvals" && <ApprovalsTab role={role} />}
       {tab === "Mass Fill" && <MassFillTab />}
-      {tab === "History" && <HistoryTab />}
+      {tab === "History" && <HistoryTab role={role} />}
     </div>
   );
 }
