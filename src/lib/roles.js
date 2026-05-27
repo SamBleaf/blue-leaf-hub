@@ -23,6 +23,7 @@ export const can = {
   editSchedule: (r) => ["admin", "supervisor"].includes(r),
   accessSiteDiary: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWHS: (r) => ["admin", "supervisor", "employee"].includes(r),
+  accessWorkforce: (r) => ["admin", "supervisor"].includes(r),
   accessPortalAdmin: (r) => ["admin", "supervisor"].includes(r),
   accessMarketing: (r) => ["admin", "supervisor"].includes(r),
   manageUsers: (r) => r === "admin",

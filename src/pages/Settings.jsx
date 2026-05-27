@@ -1,5 +1,6 @@
 import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../lib/useAuth.js";
 import { Link } from "react-router-dom";
 import RfqSettingsModal from "../components/RfqSettingsModal.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -538,6 +539,121 @@ export default function Settings() {
           }}
         />
       ) : null}
+
+      <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
     </div>
+  );
+}
+
+// ── Workforce Settings (director/admin only) ──────────────────────────────────
+
+function WorkforceSettingsSection({ onSaved }) {
+  const { role } = useAuth();
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!["admin", "supervisor"].includes(role)) return;
+    authFetch("/api/workforce/settings").then(r => r.json()).then(j => { if (j.ok) setSettings(j.settings); }).catch(() => {});
+  }, [role]);
+
+  if (!["admin", "supervisor"].includes(role)) return null;
+  if (!settings) return null;
+
+  function setField(k, v) { setSettings(s => ({ ...s, [k]: v })); }
+
+  const COST_CODE_FIELDS = [
+    ["cost_code_first_fix_framing",  "First fix / framing"],
+    ["cost_code_cladding",           "Cladding"],
+    ["cost_code_second_fix",         "Second fix"],
+    ["cost_code_outdoor_works",      "Outdoor works"],
+    ["cost_code_formwork_slab_prep", "Formwork / slab prep"],
+    ["cost_code_site_labouring",     "Site labouring"],
+    ["cost_code_site_cleanup",       "Site cleanup"],
+    ["cost_code_supervision",        "Supervision"],
+    ["cost_code_other",              "Other"],
+  ];
+
+  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  async function save() {
+    setSaving(true);
+    try {
+      await authFetch("/api/workforce/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      onSaved?.();
+    } catch { /* ignore */ } finally { setSaving(false); }
+  }
+
+  return (
+    <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-primary mb-4">Workforce</h2>
+
+      <h3 className="section-label mb-3">Working Hours</h3>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-4">
+        <label className="text-xs text-muted flex flex-col gap-1">
+          Standard day (hrs)
+          <input type="number" step="0.5" min="1" max="24" value={settings.standard_hours ?? 8} onChange={e => setField("standard_hours", Number(e.target.value))} className="border border-hairline rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label className="text-xs text-muted flex flex-col gap-1">
+          Break (min, unpaid)
+          <input type="number" step="5" min="0" max="120" value={settings.standard_break_minutes ?? 30} onChange={e => setField("standard_break_minutes", Number(e.target.value))} className="border border-hairline rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label className="text-xs text-muted flex flex-col gap-1">
+          Start time
+          <input type="time" value={settings.standard_start_time ?? "07:00"} onChange={e => setField("standard_start_time", e.target.value)} className="border border-hairline rounded px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <div className="mb-4">
+        <p className="text-xs text-muted mb-1">Working days</p>
+        <div className="flex gap-2 flex-wrap">
+          {DAYS.map(d => {
+            const active = (settings.working_days || []).includes(d);
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => {
+                  const days = settings.working_days || [];
+                  setField("working_days", active ? days.filter(x => x !== d) : [...days, d]);
+                }}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition ${active ? "bg-primary text-white border-primary" : "border-hairline text-muted"}`}
+              >
+                {d}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <h3 className="section-label mb-3">Overtime Rules</h3>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
+        <label className="text-xs text-muted flex flex-col gap-1">
+          Overtime after (hrs)
+          <input type="number" step="0.5" value={settings.overtime_threshold ?? 8} onChange={e => setField("overtime_threshold", Number(e.target.value))} className="border border-hairline rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label className="text-xs text-muted flex flex-col gap-1">
+          Double time after (hrs)
+          <input type="number" step="0.5" value={settings.double_time_threshold ?? 10} onChange={e => setField("double_time_threshold", Number(e.target.value))} className="border border-hairline rounded px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+
+      <h3 className="section-label mb-3">Buildexact Cost Code Mapping</h3>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 mb-5">
+        {COST_CODE_FIELDS.map(([key, label]) => (
+          <label key={key} className="text-xs text-muted flex flex-col gap-1">
+            {label}
+            <input type="text" value={settings[key] ?? ""} onChange={e => setField(key, e.target.value)} className="border border-hairline rounded px-2 py-1.5 text-sm font-mono" />
+          </label>
+        ))}
+      </div>
+
+      <button type="button" onClick={save} disabled={saving} className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        {saving ? "Saving…" : "Save workforce settings"}
+      </button>
+    </section>
   );
 }

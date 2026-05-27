@@ -39,12 +39,17 @@ import PortalAdmin from "./pages/PortalAdmin.jsx";
 import RfqPackageList from "./pages/RfqPackageList.jsx";
 import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
 import Marketing from "./pages/Marketing.jsx";
+import Workforce from "./pages/Workforce.jsx";
+import WorkforceTeam from "./pages/WorkforceTeam.jsx";
+import WorkerHome from "./pages/worker/WorkerHome.jsx";
+import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
+import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <BlueprintProvider>
           <ProjectProvider>
@@ -58,6 +63,9 @@ export default function App() {
                 </Suspense>
               }
             />
+            <Route path="/worker" element={<WorkerHome />} />
+            <Route path="/worker/timesheet/log" element={<WorkerLogHours />} />
+            <Route path="/worker/tasks" element={<WorkerTasks />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/accept-invite/:token" element={<AcceptInvite />} />
@@ -145,6 +153,15 @@ export default function App() {
                 <Route
                   path="/marketing/:tab"
                   element={<RoleRoute element={<Marketing />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+
+                <Route
+                  path="/workforce"
+                  element={<RoleRoute element={<Workforce />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/workforce/team"
+                  element={<RoleRoute element={<WorkforceTeam />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route

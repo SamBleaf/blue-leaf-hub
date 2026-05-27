@@ -5,6 +5,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./lib/aiGateway.mjs";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { smtpReady } from "./lib/smtpSend.mjs";
@@ -20,6 +21,8 @@ import {
 } from "./lib/dropboxClient.mjs";
 import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
+import { runGhostCheck } from "./lib/tradeCommitment.mjs";
+import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
 import { buildexactConfigured } from "./lib/buildexactClient.mjs";
 import { sendReminderForRfqId } from "./lib/sendOneReminder.mjs";
@@ -43,6 +46,8 @@ import { registerRfqPackageRoutes } from "./lib/rfqPackageRoutes.mjs";
 import { registerRfqTradeRoutes } from "./lib/rfqTradeRoutes.mjs";
 import { registerCostIntelligenceRoutes } from "./lib/costIntelligenceRoutes.mjs";
 import { registerMarketingRoutes } from "./lib/marketingRoutes.mjs";
+import { registerAdminRoutes } from "./lib/adminRoutes.mjs";
+import { registerWorkforceRoutes } from "./lib/workforceRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 
@@ -202,7 +207,7 @@ async function extractQuoteFromPdf(pdfBuffer, label = "") {
   try {
     const client = new Anthropic({ apiKey: key, maxRetries: 0 });
     const b64 = pdfBuffer.toString("base64");
-    const completion = await client.messages.create({
+    const completion = await callAI(client, {
       model: MODEL_FAST, // simple structured extraction — haiku is sufficient
       max_tokens: 1024,
       temperature: 0,
@@ -213,7 +218,7 @@ async function extractQuoteFromPdf(pdfBuffer, label = "") {
           { type: "text", text: 'You are extracting the total price from an Australian subcontractor quote PDF.\n\nReturn ONLY valid JSON, no markdown, no explanation:\n{"trade":"string","company":"string","total_ex_gst":number,"total_inc_gst":number,"gst":number,"items":[{"description":"string","amount":number}]}\n\nRules for totals:\n- Look for a summary/totals section near the bottom of the document.\n- total_inc_gst: the grand total INCLUDING GST (labelled "Total", "Total inc GST", "Amount due", "Grand Total" etc.).\n- gst: the GST amount (labelled "GST" or "Tax").\n- total_ex_gst: the subtotal BEFORE GST (labelled "Subtotal", "Ex GST", "Net"). If not shown explicitly, calculate: total_inc_gst / 1.1.\n- All values are numbers only — no $ signs, no commas.\n- Use null for any field genuinely not found.' }
         ]
       }]
-    });
+    }, { module: "devApi" });
     const raw = completion.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
     console.log(`[quote-extraction] ${label} raw response:`, raw.slice(0, 300));
     const clean = raw.replace(/```(?:json)?\s*([\s\S]*?)```/, "$1").trim();
@@ -772,6 +777,8 @@ registerRfqPackageRoutes(app);
 registerRfqTradeRoutes(app);
 registerCostIntelligenceRoutes(app);
 registerMarketingRoutes(app);
+registerAdminRoutes(app);
+registerWorkforceRoutes(app);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
@@ -858,7 +865,7 @@ Rules:
 `;
 
     const client = new Anthropic({ apiKey: key });
-    const completion = await client.messages.create({
+    const completion = await callAI(client, {
       model: MODEL,
       max_tokens: 1400,
       temperature: 0.1,
@@ -881,7 +888,7 @@ Rules:
           ]
         }
       ]
-    });
+    }, { module: "devApi" });
 
     const textOut = completion.content
       .filter((b) => b.type === "text")
@@ -1041,13 +1048,15 @@ app.post("/api/rfq/extract", async (req, res) => {
     let rateLimitRetriesUsed = 0;
     while (true) {
       try {
-        completion = await client.messages.create(
+        completion = await callAI(
+          client,
           {
             model: MODEL,
             max_tokens: 16000,
             temperature: 0.2,
             messages: [{ role: "user", content: userContent }]
           },
+          { module: "devApi" },
           { maxRetries: 0 }
         );
         break;
@@ -1291,6 +1300,19 @@ app.post("/api/cron/rfq-reminders", async (_req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("[cron/rfq-reminders]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/cron/lead-time-notifications", async (req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+  try {
+    const simulateDate = req.body?.simulateDate?.trim?.() || undefined;
+    const result = await runLeadTimeNotifications(sb, { simulateDate });
+    return res.json(result);
+  } catch (err) {
+    console.error("[cron/lead-time-notifications]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
@@ -1688,6 +1710,13 @@ if (envBool(process.env.REMINDER_CRON_ENABLED, false)) {
     runDeadlineReminders({ daysBefore: days })
       .then((r) => console.log("[rfq-reminders]", r))
       .catch((e) => console.error("[rfq-reminders]", e));
+    const sb = getServiceSupabase();
+    runGhostCheck(sb)
+      .then(r => console.log("[trade-ghost-check]", r))
+      .catch(e => console.error("[trade-ghost-check]", e));
+    runLeadTimeNotifications(sb)
+      .then(r => console.log("[lead-time-notifications]", r))
+      .catch(e => console.error("[lead-time-notifications]", e));
   };
   setInterval(tick, dayMs);
   setTimeout(tick, 45_000);

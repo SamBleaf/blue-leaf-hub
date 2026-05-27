@@ -53,6 +53,14 @@ const ICONS = {
       <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
     </svg>
   ),
+  workforce: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  ),
   settings: (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -96,13 +104,19 @@ const MARKETING_MODULES = [
   { to: "/marketing/media",    label: "Media" },
 ];
 
+const WORKFORCE_MODULES = [
+  { to: "/workforce",      label: "Timesheets", end: true },
+  { to: "/workforce/team", label: "Team" },
+];
+
 const BASE_DEPARTMENTS = [
-  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",     icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }, { to: "/sales/reference-projects", label: "Reference Projects" }], defaultTo: "/sales" },
-  { id: "tender",             label: "Tendering",  tabShort: "Tender",    icon: "tender",     comingSoon: false, modules: TENDER_MODULES,    defaultTo: "/tender-manager/rfq-engine" },
-  { id: "operations_manager", label: "Operations", tabShort: "Ops",       icon: "operations", comingSoon: false, modules: null /* computed */ },
-  { id: "finance_manager",    label: "Financials", tabShort: "Finance",   icon: "finance",    comingSoon: false, modules: null /* computed */, defaultTo: "/finance" },
-  { id: "marketing_agent",    label: "Marketing",  tabShort: "Marketing", icon: "marketing",  comingSoon: false, modules: MARKETING_MODULES, defaultTo: "/marketing" },
-  { id: "client_portal",      label: "Clients",    tabShort: "Clients",   icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
+  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",      icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }, { to: "/sales/reference-projects", label: "Reference Projects" }], defaultTo: "/sales" },
+  { id: "tender",             label: "Tendering",  tabShort: "Tender",     icon: "tender",     comingSoon: false, modules: TENDER_MODULES,    defaultTo: "/tender-manager/rfq-engine" },
+  { id: "operations_manager", label: "Operations", tabShort: "Ops",        icon: "operations", comingSoon: false, modules: null /* computed */ },
+  { id: "workforce_manager",  label: "Workforce",  tabShort: "Workforce",  icon: "workforce",  comingSoon: false, modules: WORKFORCE_MODULES,  defaultTo: "/workforce" },
+  { id: "finance_manager",    label: "Financials", tabShort: "Finance",    icon: "finance",    comingSoon: false, modules: null /* computed */, defaultTo: "/finance" },
+  { id: "marketing_agent",    label: "Marketing",  tabShort: "Marketing",  icon: "marketing",  comingSoon: false, modules: MARKETING_MODULES, defaultTo: "/marketing" },
+  { id: "client_portal",      label: "Clients",    tabShort: "Clients",    icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
 ];
 
 const SIDEBAR_EXPANDED_W = 256;
@@ -166,6 +180,7 @@ export default function AppShell() {
         if (dept.id === "sales_marketing") return can.accessSales(role);
         if (dept.id === "tender") return can.accessTender(role);
         if (dept.id === "operations_manager") return can.accessOperations(role);
+        if (dept.id === "workforce_manager") return can.accessWorkforce(role);
         if (dept.id === "finance_manager") return can.accessFinance(role);
         if (dept.id === "marketing_agent") return can.accessMarketing(role);
         if (dept.id === "client_portal") return can.accessPortalAdmin(role);
@@ -198,6 +213,7 @@ export default function AppShell() {
   const activeDeptId = useMemo(() => {
     if (location.pathname.startsWith("/tender-manager")) return "tender";
     if (location.pathname.startsWith("/operations")) return "operations_manager";
+    if (location.pathname.startsWith("/workforce")) return "workforce_manager";
     if (location.pathname.startsWith("/sales")) return "sales_marketing";
     if (location.pathname.startsWith("/marketing")) return "marketing_agent";
     if (location.pathname.startsWith("/finance")) return "finance_manager";

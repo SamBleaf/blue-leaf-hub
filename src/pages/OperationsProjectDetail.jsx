@@ -1,5 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { useProject } from "../lib/ProjectContext.jsx";
@@ -93,6 +93,26 @@ export default function OperationsProjectDetail() {
   const [complianceSubs, setComplianceSubs] = useState([]);
   const [reports, setReports] = useState([]);
   const [showFinancials, setShowFinancials] = useState(false);
+  const [tradesData, setTradesData] = useState(null); // null = not loaded
+  const [tradesLoading, setTradesLoading] = useState(false);
+  const [showTradesTab, setShowTradesTab] = useState(false);
+  const [commencementDate, setCommencementDate] = useState("");
+  const [expandedTradeId, setExpandedTradeId] = useState(null);
+  const [taskActionBusy, setTaskActionBusy] = useState({});
+  const [taskUnsureId, setTaskUnsureId] = useState(null);
+  const [taskUnsureNote, setTaskUnsureNote] = useState("");
+  const [supervisorTasks, setSupervisorTasks] = useState([]);
+  const [showLabourTab, setShowLabourTab] = useState(false);
+  const [labourData, setLabourData] = useState(null);
+  const [labourLoading, setLabourLoading] = useState(false);
+  const [showSiteTasksTab, setShowSiteTasksTab] = useState(false);
+  const [siteTasks, setSiteTasks] = useState([]);
+  const [siteTasksLoading, setSiteTasksLoading] = useState(false);
+  const [siteTaskFilter, setSiteTaskFilter] = useState("All");
+  const [newTaskForm, setNewTaskForm] = useState(null); // null | {}
+  const [newTaskBusy, setNewTaskBusy] = useState(false);
+  const [employees, setEmployees] = useState([]);
+  const siteTaskFormRef = useRef(null);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured || !projectId) return;
@@ -128,9 +148,203 @@ export default function OperationsProjectDetail() {
     }
   }, [projectId]);
 
+  const loadTrades = useCallback(async () => {
+    if (!projectId) return;
+    setTradesLoading(true);
+    try {
+      const [tradesRes, tasksRes] = await Promise.all([
+        authFetch(`/api/projects/${projectId}/trades`),
+        authFetch(`/api/projects/${projectId}/supervisor-tasks`),
+      ]);
+      const j = await tradesRes.json();
+      const tj = await tasksRes.json();
+      if (j.ok) {
+        setTradesData(j);
+        setCommencementDate(j.commencement_date || "");
+      }
+      if (tj.ok) setSupervisorTasks(tj.tasks || []);
+    } catch { /* non-fatal */ }
+    finally { setTradesLoading(false); }
+  }, [projectId]);
+
   useEffect(() => {
     Promise.all([load(), loadDashboardData()]).finally(() => setLoading(false));
   }, [load, loadDashboardData]);
+
+  useEffect(() => {
+    if (showTradesTab) loadTrades();
+  }, [showTradesTab, loadTrades]);
+
+  const loadLabour = useCallback(async () => {
+    if (!projectId) return;
+    setLabourLoading(true);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/labour`);
+      const j = await res.json();
+      if (j.ok) setLabourData(j);
+    } catch { /* non-fatal */ } finally { setLabourLoading(false); }
+  }, [projectId]);
+
+  useEffect(() => { if (showLabourTab) loadLabour(); }, [showLabourTab, loadLabour]);
+
+  const loadSiteTasks = useCallback(async () => {
+    if (!projectId) return;
+    setSiteTasksLoading(true);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/site-tasks`);
+      const j = await res.json();
+      if (j.ok) setSiteTasks(j.tasks || []);
+    } catch { /* non-fatal */ } finally { setSiteTasksLoading(false); }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (showSiteTasksTab) {
+      loadSiteTasks();
+      authFetch("/api/workforce/employees").then(r => r.json()).then(j => { if (j.ok) setEmployees(j.employees || []); }).catch(() => {});
+    }
+  }, [showSiteTasksTab, loadSiteTasks]);
+
+  async function createSiteTask(form) {
+    setNewTaskBusy(true);
+    try {
+      await authFetch(`/api/projects/${projectId}/site-tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setNewTaskForm(null);
+      loadSiteTasks();
+    } catch (e) { setError(e?.message || String(e)); } finally { setNewTaskBusy(false); }
+  }
+
+  async function completeSiteTask(taskId) {
+    await authFetch(`/api/site-tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "done" }),
+    });
+    setSiteTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: "done", completed_at: new Date().toISOString() } : t));
+  }
+
+  async function saveCommencementDate(isoDate) {
+    try {
+      await authFetch(`/api/projects/${projectId}/commencement`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commencement_date: isoDate || null })
+      });
+      setCommencementDate(isoDate);
+    } catch (e) { setError(e?.message || String(e)); }
+  }
+
+  async function markResponded(task, poId) {
+    setTaskActionBusy(prev => ({ ...prev, [task.id]: true }));
+    try {
+      await authFetch(`/api/supervisor-tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" })
+      });
+      await authFetch("/api/trade-communication/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchase_order_id: poId, response_status: "responded" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [task.id]: false })); }
+  }
+
+  async function markGhosted(task, poId) {
+    setTaskActionBusy(prev => ({ ...prev, [task.id]: "ghosted" }));
+    try {
+      await authFetch(`/api/supervisor-tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" })
+      });
+      await authFetch("/api/trade-communication/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchase_order_id: poId, response_status: "ghosted" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [task.id]: false })); }
+  }
+
+  async function markUnavailable(task, poId) {
+    setTaskActionBusy(prev => ({ ...prev, [task.id]: "unavailable" }));
+    try {
+      await authFetch(`/api/supervisor-tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" })
+      });
+      await authFetch("/api/trade-communication/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchase_order_id: poId, response_status: "unavailable" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [task.id]: false })); }
+  }
+
+  async function snoozeTask(task, note) {
+    setTaskActionBusy(prev => ({ ...prev, [task.id]: "snooze" }));
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
+    try {
+      const desc = note ? `${task.description || ""}\n\nNote: ${note}`.trim() : task.description;
+      await authFetch(`/api/supervisor-tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ due_date: dueDate.toISOString().slice(0, 10), description: desc })
+      });
+      setTaskUnsureId(null);
+      setTaskUnsureNote("");
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [task.id]: false })); }
+  }
+
+  async function completeSupervisorTask(taskId) {
+    setTaskActionBusy(prev => ({ ...prev, [taskId]: "done" }));
+    try {
+      await authFetch(`/api/supervisor-tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [taskId]: false })); }
+  }
+
+  async function dismissSupervisorTask(taskId) {
+    setTaskActionBusy(prev => ({ ...prev, [taskId]: "dismiss" }));
+    try {
+      await authFetch(`/api/supervisor-tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "dismissed" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setTaskActionBusy(prev => ({ ...prev, [taskId]: false })); }
+  }
+
+  async function markTradeResponded(poId) {
+    try {
+      await authFetch("/api/trade-communication/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchase_order_id: poId, response_status: "responded" })
+      });
+      loadTrades();
+    } catch (e) { setError(e?.message || String(e)); }
+  }
 
   async function saveTentative(isoDate) {
     const sb = getSupabase();
@@ -456,6 +670,492 @@ export default function OperationsProjectDetail() {
           </div>
         </section>
       ) : null}
+
+      {/* ── Trades tab (collapsible) ── */}
+      <section>
+        <button
+          type="button"
+          onClick={() => setShowTradesTab(v => !v)}
+          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="section-label">Trades</h2>
+            {supervisorTasks.length > 0 && (
+              <span className="rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-white">
+                {supervisorTasks.length}
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-muted">{showTradesTab ? "Hide ▲" : "Show ▼"}</span>
+        </button>
+        {showTradesTab ? (
+          <div className="mt-2 space-y-4 rounded-lg border border-hairline bg-surface p-4">
+
+            {/* ── Supervisor Actions panel ── */}
+            {supervisorTasks.length > 0 && (() => {
+              const today = new Date().toISOString().slice(0, 10);
+              const TASK_ICONS = {
+                call_trade_schedule_change: { icon: "⚠", cls: "border-warning/40 bg-warning/5" },
+                call_trade_no_response: { icon: "📞", cls: "border-primary/30 bg-primary/5" },
+                find_backup_trade: { icon: "🔴", cls: "border-danger/30 bg-danger/5" },
+                follow_up_trade: { icon: "📋", cls: "border-hairline bg-page" },
+              };
+              return (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">
+                    Supervisor Actions <span className="text-warning">({supervisorTasks.length} open)</span>
+                  </p>
+                  <div className="space-y-2">
+                    {supervisorTasks.map(task => {
+                      const style = TASK_ICONS[task.task_type] || TASK_ICONS.follow_up_trade;
+                      const isOverdue = task.due_date && task.due_date < today;
+                      const sub = task.subcontractors || {};
+                      const busy = taskActionBusy[task.id];
+
+                      const dueLabel = (() => {
+                        if (!task.due_date) return null;
+                        if (isOverdue) {
+                          const daysAgo = Math.ceil((new Date(today) - new Date(`${task.due_date}T00:00:00`)) / 86400000);
+                          return <span className="text-danger font-semibold">{daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`} (overdue)</span>;
+                        }
+                        const diff = Math.ceil((new Date(`${task.due_date}T00:00:00`) - new Date(today)) / 86400000);
+                        if (diff === 0) return "today";
+                        if (diff === 1) return "tomorrow";
+                        return `in ${diff} days`;
+                      })();
+
+                      return (
+                        <div
+                          key={task.id}
+                          className={`rounded-lg border px-4 py-3 ${style.cls} ${isOverdue ? "border-danger/40" : ""}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-ink">
+                                {style.icon} {task.title}
+                              </p>
+                              {task.description && (
+                                <p className="mt-0.5 text-xs text-muted whitespace-pre-line">{task.description}</p>
+                              )}
+                              {sub.phone && (
+                                <p className="mt-0.5 text-xs text-ink">Contact: {sub.phone}</p>
+                              )}
+                            </div>
+                            {dueLabel && (
+                              <span className="flex-shrink-0 text-xs text-muted">{dueLabel}</span>
+                            )}
+                          </div>
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              type="button"
+                              disabled={!!busy}
+                              onClick={() => completeSupervisorTask(task.id)}
+                              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {busy === "done" ? "…" : "Done"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!!busy}
+                              onClick={() => dismissSupervisorTask(task.id)}
+                              className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+                            >
+                              {busy === "dismiss" ? "…" : "Dismiss"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <hr className="my-4 border-hairline" />
+                </div>
+              );
+            })()}
+
+            {/* Commencement date */}
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-semibold text-muted">
+                Commencement date
+              </label>
+              <input
+                type="date"
+                value={commencementDate}
+                className="rounded border border-hairline px-2 py-1 text-sm"
+                onChange={e => setCommencementDate(e.target.value)}
+                onBlur={e => saveCommencementDate(e.target.value)}
+              />
+            </div>
+
+            {tradesLoading ? (
+              <p className="text-sm text-muted">Loading…</p>
+            ) : !tradesData?.trades?.length ? (
+              <p className="text-sm text-muted">No accepted trades yet. Issue POs from the Tender Manager.</p>
+            ) : (
+              <div className="space-y-3">
+                {tradesData.trades.map((trade, idx) => {
+                  // Supervisor tasks for this PO
+                  const noResponseTasks = (trade.supervisor_tasks || []).filter(t => t.task_type === "call_trade_no_response");
+
+                  const statusCls = trade.is_ghosting && !trade.response_received_at
+                    ? "text-warning font-semibold"
+                    : trade.response_received_at
+                    ? "text-green-600"
+                    : trade.status_label === "PO not issued"
+                    ? "text-muted"
+                    : "text-ink";
+
+                  const rowKey = trade.id || `nopo-${idx}`;
+                  const isExpanded = expandedTradeId === rowKey;
+
+                  return (
+                    <div key={rowKey} className="rounded-lg border border-hairline bg-page">
+                      {/* Supervisor task action cards */}
+                      {noResponseTasks.map(task => (
+                        <div key={task.id} className="rounded-t-lg border-b border-warning/30 bg-warning/5 px-4 py-3">
+                          <p className="text-sm font-semibold text-warning">Action required</p>
+                          <p className="text-sm text-ink mt-0.5">{task.title}</p>
+                          {trade.subcontractor?.phone && (
+                            <p className="text-xs text-muted mt-0.5">Contact: {trade.subcontractor.phone}</p>
+                          )}
+                          {task.due_date && (
+                            <p className="text-xs text-muted">Due: {task.due_date}</p>
+                          )}
+                          {taskUnsureId === task.id ? (
+                            <div className="mt-2 space-y-2">
+                              <input
+                                type="text"
+                                placeholder="Note (optional)"
+                                value={taskUnsureNote}
+                                onChange={e => setTaskUnsureNote(e.target.value)}
+                                className="w-full rounded border border-hairline px-3 py-1.5 text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!!taskActionBusy[task.id]}
+                                  onClick={() => snoozeTask(task, taskUnsureNote)}
+                                  className="rounded-lg bg-warning px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                                >
+                                  {taskActionBusy[task.id] ? "Saving…" : "Confirm — try again in 7 days"}
+                                </button>
+                                <button type="button" onClick={() => { setTaskUnsureId(null); setTaskUnsureNote(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={!!taskActionBusy[task.id]}
+                                onClick={() => markResponded(task, trade.id)}
+                                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              >
+                                {taskActionBusy[task.id] === true ? "…" : "✅ Responded"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!!taskActionBusy[task.id]}
+                                onClick={() => setTaskUnsureId(task.id)}
+                                className="rounded-lg border border-warning bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning disabled:opacity-50"
+                              >
+                                ⏸ Unsure
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!!taskActionBusy[task.id]}
+                                onClick={() => markGhosted(task, trade.id)}
+                                className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-1.5 text-xs font-semibold text-danger disabled:opacity-50"
+                              >
+                                {taskActionBusy[task.id] === "ghosted" ? "…" : "🔴 Ghosted"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!!taskActionBusy[task.id]}
+                                onClick={() => markUnavailable(task, trade.id)}
+                                className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted disabled:opacity-50"
+                              >
+                                {taskActionBusy[task.id] === "unavailable" ? "…" : "Can't make it"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {/* Trade row */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTradeId(isExpanded ? null : rowKey)}
+                        className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-hairline/30 rounded-b-lg"
+                      >
+                        <div className="w-32 flex-shrink-0">
+                          <p className="text-sm font-semibold text-ink">{trade.trade}</p>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-ink truncate">{trade.subcontractor?.business_name || "—"}</p>
+                          <p className="text-xs text-muted truncate">{trade.subcontractor?.phone || ""}</p>
+                        </div>
+                        <div className="w-24 flex-shrink-0 text-center">
+                          <p className="text-xs font-mono text-muted">{trade.po_number || "—"}</p>
+                        </div>
+                        <div className="w-28 flex-shrink-0 text-center">
+                          <p className="text-xs text-muted">
+                            {trade.last_contact_at
+                              ? `${trade.days_since_contact}d ago`
+                              : "—"}
+                          </p>
+                        </div>
+                        <div className="w-48 flex-shrink-0 text-right">
+                          <p className={`text-xs ${statusCls}`}>
+                            {trade.is_ghosting && !trade.response_received_at
+                              ? `⚠ No response (${trade.days_since_contact}d)`
+                              : trade.status_label}
+                          </p>
+                        </div>
+                        <span className="text-xs text-muted">{isExpanded ? "▲" : "▼"}</span>
+                      </button>
+
+                      {/* Expanded log */}
+                      {isExpanded ? (
+                        <div className="border-t border-hairline px-4 pb-4 pt-3 space-y-2">
+                          {!trade.id ? (
+                            <p className="text-xs text-muted">No PO issued yet.</p>
+                          ) : trade.log.length === 0 ? (
+                            <p className="text-xs text-muted">No communication logged yet.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {trade.log.map(ev => (
+                                <div key={ev.id} className="flex items-start gap-3 text-xs">
+                                  <span className="w-36 flex-shrink-0 text-muted">{new Date(ev.sent_at).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</span>
+                                  <span className="text-ink capitalize">{ev.event_type.replace(/_/g, " ")}</span>
+                                  {ev.email_subject ? <span className="text-muted truncate">— {ev.email_subject}</span> : null}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {trade.id && !trade.response_received_at && (
+                            <button
+                              type="button"
+                              onClick={() => markTradeResponded(trade.id)}
+                              className="mt-2 rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-hairline"
+                            >
+                              Mark responded
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      {/* ── Labour (collapsible) ── */}
+      <section>
+        <button
+          type="button"
+          onClick={() => setShowLabourTab(v => !v)}
+          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
+        >
+          <h2 className="section-label">Labour</h2>
+          <span className="text-xs text-muted">{showLabourTab ? "Hide ▲" : "Show ▼"}</span>
+        </button>
+        {showLabourTab && (
+          <div className="mt-2 rounded-lg border border-hairline bg-surface p-4">
+            {labourLoading ? (
+              <p className="text-sm text-muted">Loading…</p>
+            ) : !labourData ? (
+              <p className="text-sm text-muted">No labour data</p>
+            ) : (
+              <div className="space-y-3">
+                {labourData.entries_by_category?.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-hairline">
+                          <th className="py-2 text-left text-xs font-semibold text-muted">Category</th>
+                          <th className="py-2 text-right text-xs font-semibold text-muted">Hours</th>
+                          <th className="py-2 pr-3" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-hairline">
+                        {labourData.entries_by_category.map(cat => (
+                          <tr key={cat.task_category}>
+                            <td className="py-2 text-ink font-medium">{cat.label}</td>
+                            <td className="py-2 text-right text-muted">{cat.total_hours}h</td>
+                            <td className="py-2 pr-3 w-32">
+                              <div className="h-1.5 rounded-full bg-hairline overflow-hidden">
+                                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(cat.total_hours / 200 * 100, 100)}%` }} />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="flex items-center gap-4 pt-1 border-t border-hairline text-sm">
+                  <div>
+                    <p className="text-xs text-muted">Total hours</p>
+                    <p className="font-bold text-ink">{labourData.total_hours}h</p>
+                  </div>
+                  {labourData.workers_this_week?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted">Active this week</p>
+                      <p className="text-ink">{labourData.workers_this_week.map(w => w.name).join(" · ")}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Site Tasks (collapsible) ── */}
+      <section>
+        <button
+          type="button"
+          onClick={() => setShowSiteTasksTab(v => !v)}
+          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="section-label">Site Tasks</h2>
+            {siteTasks.filter(t => t.status !== "done" && t.status !== "wont_do").length > 0 && (
+              <span className="rounded-full bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5">
+                {siteTasks.filter(t => t.status !== "done" && t.status !== "wont_do").length}
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-muted">{showSiteTasksTab ? "Hide ▲" : "Show ▼"}</span>
+        </button>
+        {showSiteTasksTab && (
+          <div className="mt-2 rounded-lg border border-hairline bg-surface p-4 space-y-3">
+            {/* Filter + add */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {["All", "Urgent", "Defects", "Done"].map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setSiteTaskFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition ${siteTaskFilter === f ? "bg-primary text-white" : "bg-page border border-hairline text-ink"}`}
+                >
+                  {f}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setNewTaskForm({ title: "", description: "", priority: "normal", category: "general", assigned_to: "" })}
+                className="ml-auto text-xs font-semibold text-primary hover:underline"
+              >
+                + Add task
+              </button>
+            </div>
+
+            {/* New task form */}
+            {newTaskForm && (
+              <div ref={siteTaskFormRef} className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+                <input
+                  type="text"
+                  placeholder="Task title *"
+                  value={newTaskForm.title}
+                  onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
+                  className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <input
+                  type="text"
+                  placeholder="Description (optional)"
+                  value={newTaskForm.description}
+                  onChange={e => setNewTaskForm(f => ({ ...f, description: e.target.value }))}
+                  className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <div className="flex gap-2 flex-wrap">
+                  <select value={newTaskForm.priority} onChange={e => setNewTaskForm(f => ({ ...f, priority: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                    <option value="urgent">Urgent</option>
+                    <option value="normal">Normal</option>
+                    <option value="when_time_permits">When time permits</option>
+                  </select>
+                  <select value={newTaskForm.category} onChange={e => setNewTaskForm(f => ({ ...f, category: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                    <option value="general">General</option>
+                    <option value="defect">Defect</option>
+                    <option value="safety">Safety</option>
+                    <option value="materials">Materials</option>
+                    <option value="inspection">Inspection</option>
+                  </select>
+                  <select value={newTaskForm.assigned_to} onChange={e => setNewTaskForm(f => ({ ...f, assigned_to: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                    <option value="">Unassigned</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" disabled={newTaskBusy || !newTaskForm.title.trim()} onClick={() => createSiteTask({ title: newTaskForm.title, description: newTaskForm.description, priority: newTaskForm.priority, category: newTaskForm.category, assigned_to: newTaskForm.assigned_to || undefined })} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
+                    {newTaskBusy ? "Saving…" : "Add task"}
+                  </button>
+                  <button type="button" onClick={() => setNewTaskForm(null)} className="text-xs text-muted">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {siteTasksLoading ? (
+              <p className="text-sm text-muted">Loading…</p>
+            ) : (
+              (() => {
+                const PRIORITY_DOT = { urgent: "bg-red-500", normal: "bg-gray-400", when_time_permits: "bg-transparent border border-gray-400 rounded-full" };
+                const filtered = siteTasks.filter(t => {
+                  if (siteTaskFilter === "Done") return t.status === "done";
+                  if (siteTaskFilter === "Urgent") return t.priority === "urgent" && t.status !== "done";
+                  if (siteTaskFilter === "Defects") return t.category === "defect" && t.status !== "done";
+                  return t.status !== "done" && t.status !== "wont_do";
+                });
+                const groups = [
+                  { label: "Urgent", tasks: filtered.filter(t => t.priority === "urgent") },
+                  { label: "Normal", tasks: filtered.filter(t => t.priority === "normal") },
+                  { label: "When time permits", tasks: filtered.filter(t => t.priority === "when_time_permits") },
+                  { label: "Done", tasks: filtered.filter(t => t.status === "done") },
+                ].filter(g => (siteTaskFilter === "Done" ? g.label === "Done" : g.label !== "Done") && g.tasks.length > 0);
+
+                if (!groups.length && !newTaskForm) return <p className="text-sm text-muted text-center py-4">No tasks</p>;
+                return (
+                  <div className="space-y-3">
+                    {groups.map(g => (
+                      <div key={g.label}>
+                        <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">{g.label}</p>
+                        <div className="divide-y divide-hairline rounded-lg border border-hairline">
+                          {g.tasks.map(task => (
+                            <div key={task.id} className="flex items-start gap-3 px-3 py-2.5">
+                              <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm text-ink ${task.status === "done" ? "line-through text-muted" : ""}`}>{task.title}</p>
+                                {task.employees?.name && <p className="text-xs text-muted mt-0.5">assigned: {task.employees.name}</p>}
+                                {(task.created_via === "voice_note" || task.created_via === "ai_extraction") && (
+                                  <p className="text-xs text-muted">via voice note</p>
+                                )}
+                              </div>
+                              {task.status !== "done" && (
+                                <button
+                                  type="button"
+                                  onClick={() => completeSiteTask(task.id)}
+                                  className="text-xs text-green-700 font-medium hover:underline shrink-0"
+                                >
+                                  Done
+                                </button>
+                              )}
+                              {task.status === "done" && (
+                                <span className="text-green-500 text-xs shrink-0">✓</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
+      </section>
 
       {/* ── Financials (collapsible) ── */}
       <section>
