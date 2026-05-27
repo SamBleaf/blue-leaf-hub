@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
 
@@ -152,12 +153,12 @@ Categories and items:
 ${JSON.stringify(categoriesPayload, null, 2)}`;
 
   const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await client.messages.create({
+  const completion = await callAI(client, {
     model: MODEL,
     max_tokens: 8192,
     temperature: 0.2,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
-  });
+  }, { module: "scheduleClaudePlan" });
 
   const text = completion.content
     .filter((b) => b.type === "text")

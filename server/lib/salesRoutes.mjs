@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import expressions from "angular-expressions";
@@ -83,7 +84,7 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
       `\n- Suburb: ${lead.suburb || "unknown"}\n`
     : "";
 
-  const response = await client.messages.create({
+  const response = await callAI(client, {
     model: CLAUDE_MODEL,
     max_tokens: 2048,
     temperature: 0.1,
@@ -93,7 +94,7 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
         content: `${TRANSCRIPT_ANALYSIS_PROMPT}\n${contextBlock}\n\nTRANSCRIPT:\n${transcript}`
       }
     ]
-  });
+  }, { module: "salesRoutes" });
 
   const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
   // Strip markdown code fences if present
@@ -663,5 +664,179 @@ export function registerSalesRoutes(app) {
       .single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
     res.json({ ok: true, project: data });
+  });
+
+  // ─── Lead Notes ───────────────────────────────────────────────────────────
+  // Notes are persistent internal context on a lead — distinct from the activity
+  // timeline (which logs events) and conversations (which store transcripts).
+
+  app.get("/api/sales/leads/:id/notes", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("lead_notes")
+      .select("*")
+      .eq("lead_id", req.params.id)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true, notes: data || [] });
+  });
+
+  app.post("/api/sales/leads/:id/notes", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { body, note_type, author_name } = req.body;
+    if (!body?.trim()) return res.status(400).json({ ok: false, error: "body required" });
+    const now = new Date().toISOString();
+    const { data, error } = await sb
+      .from("lead_notes")
+      .insert({
+        lead_id: req.params.id,
+        body: body.trim(),
+        note_type: note_type || "internal",
+        author_name: author_name || req.caller?.email || "Unknown",
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    // Touch the lead's updated_at so it surfaces in recency sorts
+    await sb.from("leads").update({ updated_at: now }).eq("id", req.params.id);
+    res.json({ ok: true, note: data });
+  });
+
+  app.patch("/api/sales/leads/:id/notes/:noteId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { body, note_type } = req.body;
+    if (!body?.trim()) return res.status(400).json({ ok: false, error: "body required" });
+    const now = new Date().toISOString();
+    const { data, error } = await sb
+      .from("lead_notes")
+      .update({ body: body.trim(), note_type: note_type || "internal", updated_at: now })
+      .eq("id", req.params.noteId)
+      .eq("lead_id", req.params.id)   // scope to this lead for safety
+      .select()
+      .single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    res.json({ ok: true, note: data });
+  });
+
+  app.delete("/api/sales/leads/:id/notes/:noteId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { error } = await sb
+      .from("lead_notes")
+      .delete()
+      .eq("id", req.params.noteId)
+      .eq("lead_id", req.params.id);
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    res.json({ ok: true });
+  });
+
+  // ─── Lead Documents ───────────────────────────────────────────────────────
+  // Files attached to a lead (blueprints, briefs, site surveys, client references).
+  // Binary data is stored in Supabase Storage bucket 'lead-documents'.
+  // The lead_documents table holds metadata + storage path.
+  // Requires: 'lead-documents' bucket created in Supabase dashboard (private).
+
+  app.get("/api/sales/leads/:id/documents", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("lead_documents")
+      .select("*")
+      .eq("lead_id", req.params.id)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // Generate short-lived signed URLs so the client can download each file
+    const docs = await Promise.all((data || []).map(async (doc) => {
+      const { data: signed, error: signErr } = await sb.storage
+        .from("lead-documents")
+        .createSignedUrl(doc.storage_path, 3600); // 1-hour expiry
+      return { ...doc, download_url: signErr ? null : signed?.signedUrl };
+    }));
+
+    res.json({ ok: true, documents: docs });
+  });
+
+  app.post("/api/sales/leads/:id/documents", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+
+    const { filename, data: fileDataB64, mime_type, document_type, uploaded_by } = req.body;
+    if (!filename?.trim()) return res.status(400).json({ ok: false, error: "filename required" });
+    if (!fileDataB64) return res.status(400).json({ ok: false, error: "data (base64) required" });
+
+    const buffer = Buffer.from(fileDataB64, "base64");
+    const safeName = filename.replace(/[^\w.\-]/g, "_");
+    const storagePath = `leads/${req.params.id}/${Date.now()}_${safeName}`;
+
+    // Upload to Supabase Storage
+    const { error: uploadErr } = await sb.storage
+      .from("lead-documents")
+      .upload(storagePath, buffer, {
+        contentType: mime_type || "application/octet-stream",
+        upsert: false,
+      });
+    if (uploadErr) return res.status(502).json({ ok: false, error: `Storage upload failed: ${uploadErr.message}` });
+
+    // Record metadata in DB
+    const now = new Date().toISOString();
+    const { data: doc, error: dbErr } = await sb
+      .from("lead_documents")
+      .insert({
+        lead_id: req.params.id,
+        filename: filename.trim(),
+        file_size: buffer.length,
+        mime_type: mime_type || null,
+        storage_path: storagePath,
+        document_type: document_type || "other",
+        uploaded_by: uploaded_by || req.caller?.email || "Unknown",
+        created_at: now,
+      })
+      .select()
+      .single();
+    if (dbErr) {
+      // Best-effort cleanup of the uploaded file if DB insert fails
+      await sb.storage.from("lead-documents").remove([storagePath]);
+      return res.status(400).json({ ok: false, error: dbErr.message });
+    }
+
+    // Return with a signed download URL
+    const { data: signed } = await sb.storage
+      .from("lead-documents")
+      .createSignedUrl(storagePath, 3600);
+
+    res.json({ ok: true, document: { ...doc, download_url: signed?.signedUrl || null } });
+  });
+
+  app.delete("/api/sales/leads/:id/documents/:docId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+
+    // Fetch the record first so we know the storage path
+    const { data: doc, error: fetchErr } = await sb
+      .from("lead_documents")
+      .select("storage_path")
+      .eq("id", req.params.docId)
+      .eq("lead_id", req.params.id)
+      .single();
+    if (fetchErr || !doc) return res.status(404).json({ ok: false, error: "Document not found" });
+
+    // Delete from Storage
+    await sb.storage.from("lead-documents").remove([doc.storage_path]);
+
+    // Delete the DB record
+    const { error: dbErr } = await sb
+      .from("lead_documents")
+      .delete()
+      .eq("id", req.params.docId)
+      .eq("lead_id", req.params.id);
+    if (dbErr) return res.status(400).json({ ok: false, error: dbErr.message });
+
+    res.json({ ok: true });
   });
 }

@@ -33,6 +33,7 @@ import {
   enrichUserRequest,
 } from "./marketingPrompts.mjs";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI, wrapStream } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 import {
   assertVisionMediaType,
@@ -213,7 +214,7 @@ export function registerMarketingRoutes(app) {
         sb, mode, generationContext, enrichedRequest, photo_asset_id || null, content_mode,
       );
       const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const response = await client.messages.create(
+      const response = await callAI(client,
         {
           model: MODEL,
           max_tokens: 2048,
@@ -221,6 +222,7 @@ export function registerMarketingRoutes(app) {
           system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
           messages,
         },
+        { module: "marketingRoutes" },
         { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
       );
       const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
@@ -270,15 +272,19 @@ export function registerMarketingRoutes(app) {
 
     try {
       const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const stream = await client.messages.stream(
-        {
-          model: MODEL,
-          max_tokens: 2048,
-          temperature: 0.7,
-          system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-          messages,
-        },
-        { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+      const stream = wrapStream(
+        await client.messages.stream(
+          {
+            model: MODEL,
+            max_tokens: 2048,
+            temperature: 0.7,
+            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+            messages,
+          },
+          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
+        ),
+        MODEL,
+        { module: "marketingRoutes" },
       );
 
       let fullText = "";
@@ -774,7 +780,7 @@ export function registerMarketingRoutes(app) {
       } catch { /* non-fatal */ }
       userContent.push({ type: "text", text: userText });
       try {
-        const response = await client.messages.create(
+        const response = await callAI(client,
           {
             model: "claude-sonnet-4-5",
             max_tokens: 1024,
@@ -782,6 +788,7 @@ export function registerMarketingRoutes(app) {
             system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
             messages: [{ role: "user", content: userContent }],
           },
+          { module: "marketingRoutes" },
           { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
         );
         const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
@@ -1129,7 +1136,7 @@ export function registerMarketingRoutes(app) {
       }
 
       const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const response = await client.messages.create({
+      const response = await callAI(client, {
         model: VISION_MODEL,
         max_tokens: 2048,
         system: PHOTO_ANALYSIS_SYSTEM_PROMPT,
@@ -1143,7 +1150,7 @@ export function registerMarketingRoutes(app) {
             { type: "text", text: `${PHOTO_ANALYSE_USER_TEXT}\n\nReturn ONLY valid JSON. No markdown fences or commentary.` },
           ],
         }],
-      });
+      }, { module: "marketingRoutes" });
 
       const raw = response.content.find((b) => b.type === "text")?.text || "{}";
       const analysis = parseVisionAnalysisJson(raw);
@@ -1327,6 +1334,85 @@ export function registerMarketingRoutes(app) {
     }).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
     return res.json({ ok: true, track: data });
+  });
+
+  /** GET /api/marketing/music/all — admin: all tracks including inactive */
+  app.get("/api/marketing/music/all", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { data, error } = await sb.from("marketing_music_library").select("*").order("mood").order("title");
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, tracks: data || [] });
+  });
+
+  /** PATCH /api/marketing/music/:id — admin: update track fields or toggle active */
+  app.patch("/api/marketing/music/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id } = req.params;
+    const allowed = ["title", "artist", "source", "mood", "bpm", "duration_seconds", "is_active"];
+    const updates = {};
+    for (const k of allowed) {
+      if (k in req.body) updates[k] = req.body[k];
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ ok: false, error: "Nothing to update" });
+    const { data, error } = await sb.from("marketing_music_library").update(updates).eq("id", id).select().single();
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    return res.json({ ok: true, track: data });
+  });
+
+  /** DELETE /api/marketing/music/:id — admin: remove track and its audio file */
+  app.delete("/api/marketing/music/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id } = req.params;
+    const { data: track } = await sb.from("marketing_music_library").select("storage_path").eq("id", id).single();
+    const { error } = await sb.from("marketing_music_library").delete().eq("id", id);
+    if (error) return res.status(400).json({ ok: false, error: error.message });
+    // Best-effort: delete audio file from storage
+    if (track?.storage_path) {
+      await sb.storage.from("marketing-media").remove([track.storage_path]).catch(() => {});
+    }
+    return res.json({ ok: true });
+  });
+
+  /**
+   * POST /api/marketing/music/upload-audio
+   * Admin: stream audio file to Supabase marketing-media/music/ and return storage_path.
+   * Headers: Content-Type (audio/*), X-Filename (encoded original name)
+   */
+  app.post("/api/marketing/music/upload-audio", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+
+    const rawName = req.headers["x-filename"]
+      ? decodeURIComponent(req.headers["x-filename"])
+      : `track_${Date.now()}.mp3`;
+    const ext = rawName.split(".").pop().toLowerCase() || "mp3";
+    const safeBase = rawName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]/gi, "_").slice(0, 60);
+    const storagePath = `music/${Date.now()}_${safeBase}.${ext}`;
+
+    // Stream to temp file first (Supabase upload needs a Buffer or stream)
+    const tmpPath = pathJoin(tmpdir(), `blhub_music_${randomUUID()}.${ext}`);
+    try {
+      const writeStream = createWriteStream(tmpPath);
+      await streamPipeline(req, writeStream);
+
+      const { size } = await stat(tmpPath);
+      const fileBuffer = await readFile(tmpPath);
+
+      const mimeType = req.headers["content-type"] || "audio/mpeg";
+      const { error: upErr } = await sb.storage
+        .from("marketing-media")
+        .upload(storagePath, fileBuffer, { contentType: mimeType, upsert: false });
+      if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+
+      return res.json({ ok: true, storage_path: storagePath, size_bytes: size });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    } finally {
+      rm(tmpPath, { force: true }).catch(() => {});
+    }
   });
 
   // ── Stage 2: Final Assembly ────────────────────────────────────────────────

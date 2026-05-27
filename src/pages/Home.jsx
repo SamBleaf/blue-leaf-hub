@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { authFetch } from "../lib/authFetch.js";
 
 const PIPELINE_STAGES = [
   "enquiry",
@@ -68,7 +69,7 @@ function formatPct(rate) {
 
 async function fetchJson(url) {
   try {
-    const res = await fetch(url);
+    const res = await authFetch(url);
     const json = await res.json().catch(() => null);
     if (!res.ok) return { ok: false, data: json };
     return { ok: true, data: json };

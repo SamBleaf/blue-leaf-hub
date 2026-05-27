@@ -1,5 +1,8 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { emailAvailabilityConflict } from "./tradeCommitment.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -146,6 +149,312 @@ export function registerOperationsRoutes(app) {
       return res.json({ ok: true, conflicts });
     } catch (e) {
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ── Trade Commitment Engine routes ────────────────────────────────────────
+
+  /**
+   * GET /api/projects/:id/trades
+   * Returns all purchase orders for the project with communication log + supervisor tasks.
+   */
+  app.get("/api/projects/:id/trades", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id: projectId } = req.params;
+    try {
+      const { data: pos, error: poErr } = await sb
+        .from("purchase_orders")
+        .select(`
+          id, trade, po_number, status,
+          po_sent_at, commencement_notified_at, stage_notified_at,
+          last_contact_at, response_received_at,
+          follow_up_1_sent_at, follow_up_2_sent_at,
+          subcontractor_id,
+          subcontractors ( id, business_name, contact, phone, email )
+        `)
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: true });
+      if (poErr) throw new Error(poErr.message);
+
+      // Fetch accepted RFQs with no PO (to show "PO not issued" rows)
+      const { data: acceptedRfqs } = await sb
+        .from("rfqs")
+        .select("id, trade, subcontractor_id, subcontractors(id, business_name, contact, phone, email)")
+        .eq("project_id", projectId)
+        .eq("status", "accepted");
+
+      const existingPoSubIds = new Set((pos || []).map(p => p.subcontractor_id).filter(Boolean));
+      const noPo = (acceptedRfqs || []).filter(r => !existingPoSubIds.has(r.subcontractor_id));
+
+      const poIds = (pos || []).map(p => p.id);
+
+      // Fetch communication log for these POs
+      const { data: logRows } = poIds.length
+        ? await sb
+          .from("trade_communication_log")
+          .select("id, purchase_order_id, event_type, sent_at, email_subject, tentative_start_label, response_status")
+          .in("purchase_order_id", poIds)
+          .order("sent_at", { ascending: false })
+        : { data: [] };
+
+      // Fetch pending supervisor tasks for these POs
+      const { data: taskRows } = poIds.length
+        ? await sb
+          .from("supervisor_tasks")
+          .select("id, purchase_order_id, task_type, title, description, due_date, status")
+          .in("purchase_order_id", poIds)
+          .eq("status", "pending")
+        : { data: [] };
+
+      const logByPo = {};
+      for (const l of logRows || []) {
+        if (!logByPo[l.purchase_order_id]) logByPo[l.purchase_order_id] = [];
+        logByPo[l.purchase_order_id].push(l);
+      }
+      const tasksByPo = {};
+      for (const t of taskRows || []) {
+        if (!tasksByPo[t.purchase_order_id]) tasksByPo[t.purchase_order_id] = [];
+        tasksByPo[t.purchase_order_id].push(t);
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const trades = (pos || []).map(po => {
+        const lastContact = po.last_contact_at ? new Date(po.last_contact_at) : (po.po_sent_at ? new Date(po.po_sent_at) : null);
+        let daysSince = null;
+        if (lastContact) {
+          lastContact.setHours(0, 0, 0, 0);
+          daysSince = Math.floor((today - lastContact) / (24 * 60 * 60 * 1000));
+        }
+        const log = logByPo[po.id] || [];
+        const latestEvent = log[0] || null;
+        const tasks = tasksByPo[po.id] || [];
+
+        let statusLabel = "PO issued";
+        if (po.response_received_at) statusLabel = "Response received";
+        else if (po.stage_notified_at) statusLabel = "Stage notice sent";
+        else if (po.commencement_notified_at) statusLabel = "Commencement notice sent";
+        else if (po.po_sent_at) statusLabel = "PO issued";
+
+        const isGhosting = !po.response_received_at && daysSince !== null && daysSince >= 5;
+
+        return {
+          id: po.id,
+          trade: po.trade,
+          po_number: po.po_number,
+          status: po.status,
+          po_sent_at: po.po_sent_at,
+          response_received_at: po.response_received_at,
+          last_contact_at: po.last_contact_at,
+          days_since_contact: daysSince,
+          status_label: statusLabel,
+          is_ghosting: isGhosting,
+          subcontractor: po.subcontractors || null,
+          latest_event: latestEvent,
+          log,
+          supervisor_tasks: tasks,
+        };
+      });
+
+      // Append "no PO" rows
+      for (const rfq of noPo) {
+        trades.push({
+          id: null,
+          trade: rfq.trade,
+          po_number: null,
+          status: null,
+          po_sent_at: null,
+          response_received_at: null,
+          last_contact_at: null,
+          days_since_contact: null,
+          status_label: "PO not issued",
+          is_ghosting: false,
+          subcontractor: rfq.subcontractors || null,
+          latest_event: null,
+          log: [],
+          supervisor_tasks: [],
+        });
+      }
+
+      // Fetch project commencement date
+      const { data: proj } = await sb
+        .from("projects")
+        .select("commencement_date, contract_signed_at")
+        .eq("id", projectId)
+        .single();
+
+      return res.json({ ok: true, trades, commencement_date: proj?.commencement_date || null, contract_signed_at: proj?.contract_signed_at || null });
+    } catch (e) {
+      console.error("[projects/trades]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * PATCH /api/projects/:id/commencement
+   * Update project commencement_date (and optionally contract_signed_at).
+   */
+  app.patch("/api/projects/:id/commencement", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id: projectId } = req.params;
+    try {
+      const update = {};
+      if (req.body?.commencement_date !== undefined) update.commencement_date = req.body.commencement_date || null;
+      if (req.body?.contract_signed !== undefined) update.contract_signed_at = req.body.contract_signed ? new Date().toISOString() : null;
+      const { error } = await sb.from("projects").update(update).eq("id", projectId);
+      if (error) throw new Error(error.message);
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * POST /api/trade-communication/respond
+   * Record a response against a purchase order.
+   */
+  app.post("/api/trade-communication/respond", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { purchase_order_id, response_status, notes } = req.body || {};
+    if (!purchase_order_id || !response_status) {
+      return res.status(400).json({ ok: false, error: "purchase_order_id and response_status required" });
+    }
+    const validStatuses = ["responded", "unsure", "ghosted", "unavailable"];
+    if (!validStatuses.includes(response_status)) {
+      return res.status(400).json({ ok: false, error: "Invalid response_status" });
+    }
+    try {
+      const nowIso = new Date().toISOString();
+      const { data: po, error: poErr } = await sb
+        .from("purchase_orders")
+        .update({ response_received_at: nowIso, last_contact_at: nowIso })
+        .eq("id", purchase_order_id)
+        .select("id, project_id, subcontractor_id, trade, subcontractors(contact, email, business_name, phone), projects(address)")
+        .single();
+      if (poErr) throw new Error(poErr.message);
+
+      await sb.from("trade_communication_log").insert({
+        purchase_order_id,
+        project_id: po.project_id,
+        subcontractor_id: po.subcontractor_id,
+        event_type: "response_received",
+        response_status,
+        response_notes: notes || null,
+        response_received_at: nowIso,
+      });
+
+      // If ghosted or unavailable — create find_backup_trade task + send conflict email
+      if (response_status === "ghosted" || response_status === "unavailable") {
+        const sub = po.subcontractors || {};
+        const proj = po.projects || {};
+        const jobAddress = proj.address || "";
+        const contactName = sub.contact || "there";
+        const email = sub.email || "";
+
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 2);
+
+        await sb.from("supervisor_tasks").insert({
+          project_id: po.project_id,
+          purchase_order_id,
+          subcontractor_id: po.subcontractor_id,
+          task_type: "find_backup_trade",
+          title: `Find backup ${po.trade} for ${jobAddress}`,
+          description: `${sub.business_name || po.trade} is ${response_status === "ghosted" ? "unresponsive" : "unavailable"}. Find an alternate ${po.trade} subcontractor.`,
+          due_date: dueDate.toISOString().slice(0, 10),
+        });
+
+        if (email) {
+          const logo = await getBrandingEmailLogo(sb).catch(() => "");
+          const tmpl = emailAvailabilityConflict({ contactName, jobAddress, trade: po.trade, logo });
+          sendPlainMail({ to: email, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })
+            .catch(e => console.warn("[trade-respond] conflict email:", e.message));
+
+          await sb.from("trade_communication_log").insert({
+            purchase_order_id,
+            project_id: po.project_id,
+            subcontractor_id: po.subcontractor_id,
+            event_type: "availability_conflict",
+            email_subject: tmpl.subject,
+          });
+        }
+      }
+
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error("[trade-communication/respond]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * PATCH /api/supervisor-tasks/:id
+   * Update a supervisor task status/due_date/description.
+   */
+  app.patch("/api/supervisor-tasks/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id } = req.params;
+    try {
+      const update = {};
+      if (req.body?.status !== undefined) update.status = req.body.status;
+      if (req.body?.due_date !== undefined) update.due_date = req.body.due_date;
+      if (req.body?.description !== undefined) update.description = req.body.description;
+      if (update.status === "done") update.completed_at = new Date().toISOString();
+      const { error } = await sb.from("supervisor_tasks").update(update).eq("id", id);
+      if (error) throw new Error(error.message);
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/projects/:id/supervisor-tasks
+   * Returns all supervisor_tasks for the project ordered by due_date ASC.
+   */
+  app.get("/api/projects/:id/supervisor-tasks", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { id: projectId } = req.params;
+    const statusFilter = req.query.status || "pending";
+    try {
+      const { data: tasks, error } = await sb
+        .from("supervisor_tasks")
+        .select(`
+          id, task_type, title, description, due_date, status, created_at, completed_at,
+          purchase_order_id, subcontractor_id,
+          purchase_orders ( id, po_number, trade ),
+          subcontractors ( id, business_name, contact, phone )
+        `)
+        .eq("project_id", projectId)
+        .in("status", statusFilter === "all" ? ["pending", "in_progress", "done", "dismissed"] : [statusFilter, "in_progress"])
+        .order("due_date", { ascending: true, nullsFirst: false });
+      if (error) throw new Error(error.message);
+      return res.json({ ok: true, tasks: tasks || [] });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * POST /api/cron/trade-ghost-check
+   * Manual trigger for testing ghost check (no auth — same pattern as rfq-reminders).
+   */
+  app.post("/api/cron/trade-ghost-check", async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    try {
+      const { runGhostCheck } = await import("./tradeCommitment.mjs");
+      const result = await runGhostCheck(sb);
+      return res.json(result);
+    } catch (e) {
+      console.error("[cron/trade-ghost-check]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });
 }

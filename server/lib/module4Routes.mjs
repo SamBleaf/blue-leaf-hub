@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { buildPurchaseOrderPdfBuffer, defaultStandardConditions } from "./poPdfKit.mjs";
 import { DEFAULT_PO_TERMS } from "./poDefaultTerms.mjs";
 import {
@@ -24,6 +25,7 @@ import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { quarterLabel, emailPoIssued } from "./tradeCommitment.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 
@@ -137,7 +139,7 @@ export function registerModule4Routes(app) {
     }
     try {
       const client = new Anthropic({ apiKey: key });
-      const completion = await client.messages.create({
+      const completion = await callAI(client, {
         model: MODEL,
         max_tokens: 1200,
         temperature: 0.4,
@@ -147,7 +149,7 @@ export function registerModule4Routes(app) {
             content: `You write professional, warm, concise emails for Blue Leaf Building (Adelaide residential builder).\n\nDraft a short follow-up email to a subcontractor regarding a quote request.\nJob address: ${address}\nTrade package: ${trade}\nExtra context from Sam: ${context || "(none)"}\n\nOutput only the email body text (no subject line). Australian English.`
           }
         ]
-      });
+      }, { module: "module4Routes" });
       const text = completion.content
         .filter((b) => b.type === "text")
         .map((b) => b.text)
@@ -559,27 +561,35 @@ export function registerModule4Routes(app) {
         .single();
       if (poIns) throw new Error(poIns.message);
 
-      const subject = `Purchase Order — ${jobAddress} — ${trade} — ${poNumber}`;
-      const footer =
-        String(req.body?.signatureFooter || "").trim() || "Kind regards,\nSam Morris\nBlue Leaf Building";
+      // Check if subcontractor is familiar (prior completed/accepted PO on different project)
+      let familiar = false;
+      if (subcontractorId && projectId) {
+        const { count: priorCount } = await sb
+          .from("purchase_orders")
+          .select("id", { count: "exact", head: true })
+          .eq("subcontractor_id", subcontractorId)
+          .neq("project_id", projectId)
+          .in("status", ["complete", "accepted"]);
+        familiar = (priorCount || 0) > 0;
+      }
+
+      const quarterTiming = quarterLabel(req.body?.tentative_start_date);
       const logoSig = String(req.body?.signatureLogoDataUrl || logoDataUrl || "").trim();
-      const baseBody =
-        `Hi ${contactName || "there"},\n\n` +
-        `Please find attached our Purchase Order for the ${trade} works at ${jobAddress}.\n\n` +
-        `Please review and sign the attached PO and return a copy to us prior to commencing works.\n\n` +
-        `Indicative timing for your works is ${tentativeStartLabel || "TBC"}. Sam will be in contact closer to the date to confirm your specific schedule.\n\n` +
-        `As noted on the PO, works are not to commence until:\n` +
-        `— All WH&S inductions are completed via HazardCo\n` +
-        `— You have received stamped construction drawings\n\n` +
-        `Looking forward to working with you on this one.`;
-      const text = `${baseBody}\n\n${footer}`;
-      const html = wrapPlainTextEmailHtml(baseBody, { footerText: footer, logoDataUrl: logoSig });
+      const poTmpl = emailPoIssued({
+        contactName: contactName || "there",
+        jobAddress,
+        trade,
+        poNumber,
+        quarterTiming,
+        familiar,
+        logo: logoSig
+      });
 
       await sendPlainMail({
         to: toEmail,
-        subject,
-        text,
-        html,
+        subject: poTmpl.subject,
+        text: poTmpl.text,
+        html: poTmpl.html,
         attachments: [{ filename: `${poNumber}.pdf`, content: pdfBuf, mimeType: "application/pdf" }]
       });
 
@@ -606,10 +616,84 @@ export function registerModule4Routes(app) {
         .update({ buildexact_last_sync: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", projectId);
 
+      // Trade Commitment Engine — record PO issued event (fire-and-forget)
+      const nowIso = new Date().toISOString();
+      sb.from("purchase_orders")
+        .update({ po_sent_at: nowIso, last_contact_at: nowIso })
+        .eq("id", poRow.id)
+        .then(() => {})
+        .catch(e => console.warn("[po/issue] tcl po update:", e.message));
+      sb.from("trade_communication_log")
+        .insert({
+          purchase_order_id: poRow.id,
+          project_id: projectId,
+          subcontractor_id: subcontractorId || null,
+          event_type: "po_issued",
+          email_subject: poTmpl.subject,
+          tentative_start_label: quarterTiming,
+        })
+        .then(() => {})
+        .catch(e => console.warn("[po/issue] tcl insert:", e.message));
+
       return res.json({ ok: true, purchase_order: { ...poRow, buildexact_po_id }, po_number: poNumber });
     } catch (e) {
       console.error("[po/issue]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/tender/batch-po-check/:jobId
+   * Returns accepted RFQs for the job that have no linked purchase_order row.
+   */
+  app.get("/api/tender/batch-po-check/:jobId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const { jobId } = req.params;
+    if (!jobId) return res.status(400).json({ ok: false, error: "jobId required" });
+    try {
+      // Find all accepted RFQs for this job
+      const { data: rfqs, error: rfqErr } = await sb
+        .from("rfqs")
+        .select(`
+          id, trade, subcontractor_id, total_amount,
+          subcontractors ( id, business_name, contact, email, phone )
+        `)
+        .eq("job_id", jobId)
+        .eq("status", "accepted");
+      if (rfqErr) throw new Error(rfqErr.message);
+
+      if (!rfqs || rfqs.length === 0) return res.json({ ok: true, trades: [] });
+
+      // Find which already have a PO (by rfq_id)
+      const rfqIds = rfqs.map(r => r.id);
+      const { data: existingPos } = await sb
+        .from("purchase_orders")
+        .select("rfq_id")
+        .in("rfq_id", rfqIds)
+        .not("rfq_id", "is", null);
+      const issuedRfqIds = new Set((existingPos || []).map(p => p.rfq_id));
+
+      const trades = rfqs
+        .filter(r => !issuedRfqIds.has(r.id))
+        .map(r => {
+          const sub = r.subcontractors || {};
+          return {
+            rfq_id: r.id,
+            trade: r.trade,
+            subcontractor_id: r.subcontractor_id,
+            business_name: sub.business_name || r.trade,
+            contact: sub.contact || "",
+            email: sub.email || "",
+            phone: sub.phone || "",
+            total_amount: r.total_amount || 0,
+          };
+        });
+
+      return res.json({ ok: true, trades });
+    } catch (e) {
+      console.error("[batch-po-check]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });
 }

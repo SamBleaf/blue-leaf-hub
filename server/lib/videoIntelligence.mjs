@@ -15,6 +15,7 @@ import { readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 import { BLUE_LEAF_IDENTITY, CONTENT_MODE_MODIFIERS } from "./marketingPrompts.mjs";
 
@@ -256,7 +257,7 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
     // Score with Claude Haiku
     let scoreData;
     try {
-      const resp = await client.messages.create({
+      const resp = await callAI(client, {
         model: HAIKU_MODEL,
         max_tokens: 512,
         messages: [{
@@ -266,7 +267,7 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
             { type: "text",  text: CLIP_SCORE_PROMPT },
           ],
         }],
-      });
+      }, { module: "videoIntelligence" });
 
       const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
       const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -388,12 +389,12 @@ async function _generateSequenceCaption(orderedClips, objective, projectContext,
   const userMessage = `Generate a caption and clip overlay texts for this ${objective} video sequence.\n\nClip sequence:\n${clipDescriptions}\n${contextBlock ? `\nContext:\n${contextBlock}` : ""}\n\nReturn ONLY valid JSON:\n{\n  "caption": "<Instagram caption, 2–4 sentences, no hashtags, follows Blue Leaf voice>",\n  "clip_overlays": ["<3–5 word overlay for clip 1>", "<overlay for clip 2>"],\n  "confidence_pct": 0-100\n}\nclip_overlays must have exactly ${orderedClips.length} entries, one per clip, in order.`;
 
   try {
-    const resp = await client.messages.create({
+    const resp = await callAI(client, {
       model:      SONNET_MODEL,
       max_tokens: 600,
       system:     systemPrompt,
       messages:   [{ role: "user", content: userMessage }],
-    });
+    }, { module: "videoIntelligence" });
 
     const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
     const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();

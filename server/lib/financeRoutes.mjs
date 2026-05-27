@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { config as dotenvConfig } from "dotenv";
@@ -55,7 +56,7 @@ async function inferTradeCategory(sb, { supplierAbn, supplierName, description }
       .map(c => `${c.id}: ${c.name}`)
       .join("\n");
     const client = new Anthropic({ apiKey: anthropicApiKey() });
-    const msg = await client.messages.create({
+    const msg = await callAI(client, {
       model: MODEL_FAST,
       max_tokens: 128,
       messages: [{
@@ -71,7 +72,7 @@ ${categoryList}
 Return JSON only: {"trade_category_id": "<uuid from the list above>", "confidence": <0-100>}
 Pick the single best matching category. If genuinely unclear, return confidence below 50.`
       }]
-    });
+    }, { module: "financeRoutes" });
     const text = msg.content[0]?.text || "";
     const m = text.match(/\{[\s\S]*?\}/);
     if (m) {
@@ -237,7 +238,7 @@ async function matchDocument(extracted, { jobs, subcontractors }) {
     try {
       const client = new Anthropic({ apiKey: anthropicApiKey() });
       const jobList = jobs.slice(0, 30).map(j => `ID:${j.id} | ${j.address} | ref:${j.arch_ref || ""}`).join("\n");
-      const msg = await client.messages.create({
+      const msg = await callAI(client, {
         model: MODEL,
         max_tokens: 256,
         messages: [{
@@ -255,7 +256,7 @@ ${jobList}
 Return JSON only: {"job_id": "<uuid or null>", "confidence": <0-100>, "reasoning": "<one line>"}
 If no reasonable match exists, return job_id: null.`
         }]
-      });
+      }, { module: "financeRoutes" });
       const text = msg.content[0]?.text || "";
       const m = text.match(/\{[\s\S]*\}/);
       if (m) {
@@ -393,11 +394,11 @@ async function claudeExtract(base64, mime, model) {
     ? { type: "image", source: { type: "base64", media_type: mime, data: base64 } }
     : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
 
-  const msg = await client.messages.create({
+  const msg = await callAI(client, {
     model,
     max_tokens: 1024,
     messages: [{ role: "user", content: [contentBlock, { type: "text", text: EXTRACT_PROMPT }] }]
-  });
+  }, { module: "financeRoutes" });
 
   const text = msg.content[0]?.text || "";
   const m = text.match(/\{[\s\S]*\}/);
@@ -1180,12 +1181,12 @@ export function registerFinanceRoutes(app) {
         { data: varsSummary },
       ] = await Promise.all([
         sb.from("jobs")
-          .select("id, address, original_contract_value, contract_value, target_margin_pct, floor_margin_pct, forecast_total_cost, financial_locked, last_wipaa_review_date, buildexact_job_id")
+          .select("id, address, original_contract_value, contract_value, target_margin_pct, floor_margin_pct, forecast_total_cost, financial_locked, last_wipaa_review_date")
           .eq("id", id).maybeSingle(),
-        sb.rpc("get_signed_variations_sum", { job_id_input: id }).maybeSingle().catch(() => ({})),
-        sb.rpc("get_claims_issued_sum", { job_id_input: id }).maybeSingle().catch(() => ({})),
-        sb.rpc("get_claims_paid_sum", { job_id_input: id }).maybeSingle().catch(() => ({})),
-        sb.rpc("get_actual_costs_sum", { job_id_input: id }).maybeSingle().catch(() => ({})),
+        sb.rpc("get_signed_variations_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
+        sb.rpc("get_claims_issued_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
+        sb.rpc("get_claims_paid_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
+        sb.rpc("get_actual_costs_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
         sb.from("job_budgets")
           .select(`*, trade_categories(name, sort_order)`)
           .eq("job_id", id)
@@ -1949,10 +1950,12 @@ export function registerFinanceRoutes(app) {
   app.put("/api/insights/:id/dismiss", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ error: "DB not configured" });
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: "Invalid insight ID" });
     const { data, error } = await sb.from("cost_intelligence_insights")
       .update({
         is_dismissed:  true,
-        dismissed_by:  req.user?.id || null,
+        dismissed_by:  req.caller?.id || null,
         dismissed_at:  new Date().toISOString(),
       })
       .eq("id", req.params.id)

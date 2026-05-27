@@ -17,6 +17,7 @@ import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { extractMeaningfulFrames, downloadFramesForAnalysis } from "./videoIntelligence.mjs";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
@@ -140,7 +141,7 @@ export async function analyseFramesWithClaude(framePaths, projectContext = {}) {
     projectContext.build_stage   && `Build stage: ${projectContext.build_stage}`,
   ].filter(Boolean).join("\n");
 
-  const response = await client.messages.create({
+  const response = await callAI(client, {
     model: VISION_MODEL,
     max_tokens: 2048,
     messages: [{
@@ -170,7 +171,7 @@ Analyse the construction progress and identify content opportunities. Return ONL
         },
       ],
     }],
-  });
+  }, { module: "marketingMedia" });
 
   const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();

@@ -10,6 +10,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 import {
   BLUE_LEAF_IDENTITY,
@@ -400,7 +401,7 @@ export async function generateContent(mode, context, userRequest, content_mode =
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
   const { systemPrompt, userMessage } = buildMarketingPrompt(mode, context, userRequest, content_mode);
   const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-  const response = await client.messages.create(
+  const response = await callAI(client,
     {
       model: MODEL,
       max_tokens: 2048,
@@ -408,6 +409,7 @@ export async function generateContent(mode, context, userRequest, content_mode =
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMessage }],
     },
+    { module: "marketingAgent" },
     { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
   );
   const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";

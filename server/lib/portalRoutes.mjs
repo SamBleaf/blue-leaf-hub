@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 import {
   dropboxConfigured,
   dropboxDownloadBuffer,
@@ -172,6 +173,9 @@ export function registerPortalRoutes(app) {
   });
 
   // ── Admin routes (register before :token) ──────────────────────────────────
+  // All /api/portal/admin/* routes require authentication
+  app.use("/api/portal/admin", requireAuth);
+
   app.post("/api/portal/admin/generate-token", async (req, res) => {
     try {
       const sb = getServiceSupabase();

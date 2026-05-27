@@ -397,7 +397,32 @@ export function registerFinanceCCRoutes(app) {
     const claims = claimsRes.data || [];
     const budgets = budgetsRes.data || [];
 
+    // ── Labour cost (from approved timesheets) ────────────────────────────────
+    let labourData = { total_cost: 0, by_category: [] };
+    try {
+      const { data: labourEntries } = await sb
+        .from("timesheet_entries")
+        .select("task_category, hours, cost_amount, timesheets!inner(job_id, status)")
+        .eq("timesheets.job_id", jobId)
+        .eq("timesheets.status", "approved");
+
+      if (labourEntries?.length) {
+        const grouped = {};
+        for (const e of labourEntries) {
+          const cat = e.task_category;
+          if (!grouped[cat]) grouped[cat] = { task_category: cat, cost: 0, hours: 0 };
+          grouped[cat].cost += Number(e.cost_amount || 0);
+          grouped[cat].hours += Number(e.hours || 0);
+        }
+        labourData = {
+          total_cost: Object.values(grouped).reduce((s, c) => s + c.cost, 0),
+          by_category: Object.values(grouped),
+        };
+      }
+    } catch { /* timesheet tables may not exist yet — graceful fallback */ }
+
     // ── KPIs ─────────────────────────────────────────────────────────────────
+    const labourCost = labourData.total_cost;
     const signedTotal = variations.filter(v => v.status === "signed").reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
     const sentTotal   = variations.filter(v => ["draft", "sent_to_client"].includes(v.status)).reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
     const draftCount  = variations.filter(v => v.status === "draft").length;
@@ -407,7 +432,7 @@ export function registerFinanceCCRoutes(app) {
     const claimsIssued  = claims.filter(c => c.status !== "draft").reduce((s, c) => s + Number(c.amount_ex_gst || 0), 0);
     // Payments nested in claims — no separate query needed
     const claimsPaid    = claims.reduce((s, c) => s + (c.progress_claim_payments || []).reduce((ps, p) => ps + Number(p.payment_amount || 0), 0), 0);
-    const actualCosts   = docs.reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0);
+    const actualCosts   = docs.reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0) + labourCost;
 
     const workingMarginPct = contractValue > 0 ? ((contractValue - actualCosts) / contractValue) * 100 : null;
     const forecastTotal    = Number(job.forecast_total_cost || job.estimated_total_cost || 0);
@@ -482,6 +507,10 @@ export function registerFinanceCCRoutes(app) {
       claims: claims.filter(c => c.status === "overdue"),
       pending_approvals: pendingInvoicesRes.data || [],
       recent_insights: recentInsights || [],
+      labour: {
+        total_cost: Math.round(labourData.total_cost * 100) / 100,
+        by_category: labourData.by_category,
+      },
     });
   });
 

@@ -146,6 +146,12 @@ export default function TenderDetail() {
   const [losePreviews, setLosePreviews] = useState([]);
   const [feeProposals, setFeeProposals] = useState([]);
   const [reextractBusy, setReextractBusy] = useState({});
+  const [batchPoTrades, setBatchPoTrades] = useState(null); // null = not checked, [] = all issued
+  const [batchPoOpen, setBatchPoOpen] = useState(false);
+  const [batchPoChecked, setBatchPoChecked] = useState({});
+  const [batchPoProgress, setBatchPoProgress] = useState({}); // rfq_id → 'pending'|'ok'|'error'
+  const [batchPoBusy, setBatchPoBusy] = useState(false);
+  const [batchPoDismissed, setBatchPoDismissed] = useState(false);
 
   const readOnly = job?.status === "archived";
 
@@ -459,6 +465,21 @@ export default function TenderDetail() {
       if (fj.project?.id) {
         setWinMessage("Tender marked won. Project created in Operations.");
       }
+      // Check for un-issued POs
+      try {
+        const bpRes = await authFetch(`/api/tender/batch-po-check/${job.id}`);
+        const bpj = await bpRes.json();
+        if (bpj.ok && bpj.trades?.length > 0) {
+          setBatchPoTrades(bpj.trades);
+          const checked = {};
+          for (const t of bpj.trades) checked[t.rfq_id] = true;
+          setBatchPoChecked(checked);
+          setBatchPoProgress({});
+          setBatchPoDismissed(false);
+        }
+      } catch {
+        // non-critical
+      }
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -532,6 +553,56 @@ export default function TenderDetail() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function issueBatchPos() {
+    if (!batchPoTrades?.length) return;
+    setBatchPoBusy(true);
+    const selected = batchPoTrades.filter(t => batchPoChecked[t.rfq_id]);
+    const progress = {};
+    for (const t of selected) progress[t.rfq_id] = "pending";
+    setBatchPoProgress({ ...progress });
+
+    for (const t of selected) {
+      try {
+        const res = await authFetch("/api/po/issue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: rfqs.find(r => r.id === t.rfq_id)?.project_id || "",
+            jobAddress: job?.address || "",
+            trade: t.trade,
+            toEmail: t.email,
+            contactName: t.contact,
+            subcontractorId: t.subcontractor_id,
+            rfqId: t.rfq_id,
+            jobId: job?.id || "",
+            totalExGst: t.total_amount,
+            tentative_start_date: job?.tentative_start_date || null,
+          })
+        });
+        const j = await res.json();
+        if (!res.ok || !j.ok) throw new Error(j.error || "Failed");
+        progress[t.rfq_id] = "ok";
+      } catch {
+        progress[t.rfq_id] = "error";
+      }
+      setBatchPoProgress({ ...progress });
+    }
+
+    // Refresh batch check
+    try {
+      const bpRes = await authFetch(`/api/tender/batch-po-check/${job.id}`);
+      const bpj = await bpRes.json();
+      if (bpj.ok) {
+        setBatchPoTrades(bpj.trades || []);
+        const checked = {};
+        for (const t of (bpj.trades || [])) checked[t.rfq_id] = true;
+        setBatchPoChecked(checked);
+      }
+    } catch { /* non-critical */ }
+
+    setBatchPoBusy(false);
   }
 
   async function draftQuery() {
@@ -750,6 +821,98 @@ export default function TenderDetail() {
       ) : null}
 
       {error ? <div className="rounded-lg border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div> : null}
+
+      {/* Batch PO banner — shown when accepted trades have no PO yet */}
+      {batchPoTrades && batchPoTrades.length > 0 && !batchPoDismissed ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm">
+          <div>
+            <span className="font-semibold text-primary">✅ Tender won — {job?.address}</span>
+            <span className="ml-2 text-ink">{batchPoTrades.length} accepted trade{batchPoTrades.length !== 1 ? "s" : ""} ready for PO issue.</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setBatchPoOpen(true)}
+              className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white"
+            >
+              Issue all POs →
+            </button>
+            <button
+              type="button"
+              onClick={() => setBatchPoDismissed(true)}
+              className="text-xs text-muted hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Batch PO slide-up sheet */}
+      {batchPoOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => { if (!batchPoBusy) setBatchPoOpen(false); }}>
+          <div className="w-full max-w-2xl rounded-t-2xl bg-surface p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-ink">Issue Purchase Orders — {job?.address}</h3>
+              {!batchPoBusy && (
+                <button type="button" onClick={() => setBatchPoOpen(false)} className="text-muted hover:text-ink text-lg">✕</button>
+              )}
+            </div>
+            <div className="mb-4 space-y-2 max-h-72 overflow-y-auto">
+              {batchPoTrades.map(t => {
+                const prog = batchPoProgress[t.rfq_id];
+                return (
+                  <div key={t.rfq_id} className="flex items-center gap-3 rounded-lg border border-hairline bg-page px-4 py-3">
+                    <input
+                      type="checkbox"
+                      disabled={batchPoBusy || prog === "ok"}
+                      checked={!!batchPoChecked[t.rfq_id]}
+                      onChange={e => setBatchPoChecked(prev => ({ ...prev, [t.rfq_id]: e.target.checked }))}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-ink truncate">{t.trade}</p>
+                      <p className="text-xs text-muted truncate">{t.business_name}{t.email ? ` · ${t.email}` : " · ⚠ no email"}</p>
+                    </div>
+                    <span className="text-sm text-muted font-mono">${(t.total_amount || 0).toLocaleString("en-AU", { minimumFractionDigits: 0 })}</span>
+                    {prog === "ok" && <span className="text-green-600 text-lg">✅</span>}
+                    {prog === "error" && <span className="text-danger text-lg">❌</span>}
+                    {prog === "pending" && (
+                      <svg className="h-4 w-4 animate-spin text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                        <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                      </svg>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {Object.keys(batchPoProgress).length > 0 && !batchPoBusy ? (
+              <div className="mb-4 rounded-lg bg-page border border-hairline px-4 py-3 text-sm text-ink">
+                {Object.values(batchPoProgress).filter(v => v === "ok").length} PO{Object.values(batchPoProgress).filter(v => v === "ok").length !== 1 ? "s" : ""} issued.{" "}
+                {Object.values(batchPoProgress).filter(v => v === "error").length > 0
+                  ? `${Object.values(batchPoProgress).filter(v => v === "error").length} failed — check email configuration.`
+                  : ""}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-3">
+              {!batchPoBusy && (
+                <button type="button" onClick={() => setBatchPoOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">
+                  Close
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={batchPoBusy || !Object.entries(batchPoChecked).some(([, v]) => v) || batchPoTrades.length === 0}
+                onClick={issueBatchPos}
+                className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {batchPoBusy ? "Issuing…" : `Issue ${Object.values(batchPoChecked).filter(Boolean).length} selected PO${Object.values(batchPoChecked).filter(Boolean).length !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {jobTab === "fee-proposal" ? (
         <section className="space-y-4 rounded-card border border-hairline bg-surface p-6 shadow-sm">

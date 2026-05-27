@@ -9,6 +9,7 @@
 
 import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
@@ -58,7 +59,7 @@ export async function generateInsight(deltaJson, insightType, apiKey) {
 
   try {
     const client = new Anthropic({ apiKey: key, maxRetries: 1 });
-    const resp = await client.messages.create(
+    const resp = await callAI(client,
       {
         model: HAIKU_MODEL,
         max_tokens: 256,
@@ -68,6 +69,7 @@ export async function generateInsight(deltaJson, insightType, apiKey) {
           content: `${JSON.stringify(deltaJson, null, 2)}\n\nInsight type: ${insightType}\n\nReturn JSON only: {"title": "...", "body": "..."}`,
         }],
       },
+      { module: "projectInsights" },
       { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } }
     );
 

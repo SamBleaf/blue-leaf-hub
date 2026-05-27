@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import expressions from "angular-expressions";
@@ -221,7 +222,7 @@ export function registerModule5Routes(app) {
 
       const client = new Anthropic({ apiKey: key, maxRetries: 0 });
       const runClaudeJson = async (prompt, pdfBase64) => {
-        const completion = await client.messages.create({
+        const completion = await callAI(client, {
           model: MODEL,
           max_tokens: 8192,
           temperature: 0.1,
@@ -238,7 +239,7 @@ export function registerModule5Routes(app) {
               ]
             }
           ]
-        });
+        }, { module: "module5Routes" });
         return completion.content
           .filter((b) => b.type === "text")
           .map((b) => b.text)

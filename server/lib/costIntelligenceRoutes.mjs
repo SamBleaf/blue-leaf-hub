@@ -3,6 +3,7 @@
  */
 import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import {
@@ -213,7 +214,7 @@ Definitions:
 - site_slope: assess from section drawings or site plan notation`;
 
     try {
-      const response = await client.messages.create({
+      const response = await callAI(client, {
         model: process.env.CLAUDE_MODEL || "claude-haiku-4-5",
         max_tokens: 1024,
         messages: [{
@@ -226,7 +227,7 @@ Definitions:
             { type: "text", text: prompt },
           ],
         }],
-      });
+      }, { module: "costIntelligenceRoutes" });
 
       const raw = response.content[0]?.text || "";
       const jsonMatch = raw.match(/\{[\s\S]*\}/);

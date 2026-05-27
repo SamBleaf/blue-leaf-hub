@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import {
@@ -25,6 +26,7 @@ import {
 } from "./module6PdfKit.mjs";
 import { toYmd, addDaysYmd } from "./dateYmd.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { handleMilestoneComplete, handleScheduleChange } from "./scheduleReminders.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
 
@@ -308,12 +310,12 @@ async function claudeText(prompt, maxTokens = 8192) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
   const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await client.messages.create({
+  const completion = await callAI(client, {
     model: MODEL,
     max_tokens: maxTokens,
     temperature: 0.2,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
-  });
+  }, { module: "scheduleRoutes" });
   return completion.content
     .filter((b) => b.type === "text")
     .map((b) => b.text)
@@ -1073,6 +1075,19 @@ export function registerScheduleRoutes(app) {
       if (!body.no_cascade && (body.start_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on))) {
         const more = await cascadeScheduleForward(sb, cur.project_id, id);
         updatedIds = [...new Set([...updatedIds, ...more])];
+      }
+
+      // Trade Commitment Engine — post-save hooks (fire-and-forget)
+      const statusChangedToComplete = body.status === "complete" && cur.status !== "complete";
+      if (statusChangedToComplete) {
+        handleMilestoneComplete(id, merged.project_id, sb)
+          .catch(e => console.error("[milestone-trigger]", e.message));
+      }
+
+      const startDateChanged = body.start_date != null && body.start_date !== cur.start_date;
+      if (startDateChanged) {
+        handleScheduleChange({ ...merged, project_id: merged.project_id }, cur.start_date, sb)
+          .catch(e => console.error("[schedule-change]", e.message));
       }
 
       // Fire-and-forget: schedule slip insight (only when baseline is set and dates/progress changed)

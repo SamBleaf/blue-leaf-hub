@@ -650,6 +650,300 @@ function MarginPanel({ lead, onSave }) {
   );
 }
 
+const DOCUMENT_TYPE_LABELS = {
+  brief: "Brief", blueprint: "Blueprint", survey: "Survey",
+  quote: "Quote", contract: "Contract", other: "Other",
+};
+const DOCUMENT_TYPE_COLORS = {
+  brief: "bg-blue-50 text-blue-700", blueprint: "bg-violet-50 text-violet-700",
+  survey: "bg-amber-50 text-amber-700", quote: "bg-green-50 text-green-700",
+  contract: "bg-teal-50 text-teal-700", other: "bg-slate-100 text-slate-600",
+};
+
+function formatFileSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function LeadNotesPanel({ leadId }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newBody, setNewBody] = useState("");
+  const [newType, setNewType] = useState("internal");
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editBody, setEditBody] = useState("");
+  const [err, setErr] = useState("");
+
+  const loadNotes = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/notes`).then(r => r.json());
+      setNotes(r.notes || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [leadId]);
+
+  useEffect(() => { loadNotes(); }, [loadNotes]);
+
+  async function addNote(e) {
+    e.preventDefault();
+    if (!newBody.trim()) return;
+    setSaving(true); setErr("");
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: newBody, note_type: newType }),
+      }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error);
+      setNewBody(""); setNewType("internal");
+      await loadNotes();
+    } catch (e2) { setErr(e2.message); }
+    finally { setSaving(false); }
+  }
+
+  async function saveEdit(noteId) {
+    if (!editBody.trim()) return;
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: editBody }),
+      }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error);
+      setEditingId(null); setEditBody("");
+      await loadNotes();
+    } catch { /* silent */ }
+  }
+
+  async function deleteNote(noteId) {
+    if (!confirm("Delete this note?")) return;
+    await authFetch(`/api/sales/leads/${leadId}/notes/${noteId}`, { method: "DELETE" });
+    await loadNotes();
+  }
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Notes</h3>
+
+      {/* Add note form */}
+      <form onSubmit={addNote} className="space-y-2 mb-4">
+        <textarea
+          className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none focus-ring"
+          rows={3}
+          placeholder="Add an internal note about this lead…"
+          value={newBody}
+          onChange={e => setNewBody(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <select
+            className="flex-1 rounded-lg border border-hairline px-3 py-1.5 text-sm bg-page text-ink"
+            value={newType}
+            onChange={e => setNewType(e.target.value)}
+          >
+            <option value="internal">Internal note</option>
+            <option value="client_facing">Client-facing note</option>
+          </select>
+          <button
+            type="submit"
+            disabled={saving || !newBody.trim()}
+            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Add"}
+          </button>
+        </div>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </form>
+
+      {/* Notes list */}
+      {loading ? (
+        <p className="text-xs text-muted italic">Loading…</p>
+      ) : notes.length === 0 ? (
+        <p className="text-xs text-muted italic">No notes yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {notes.map(note => (
+            <div key={note.id} className="rounded-lg border border-hairline bg-page p-3">
+              {editingId === note.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    autoFocus
+                    className="w-full rounded border border-hairline px-2 py-1.5 text-sm bg-surface text-ink resize-none focus-ring"
+                    rows={3}
+                    value={editBody}
+                    onChange={e => setEditBody(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={() => saveEdit(note.id)} className="text-xs font-semibold text-primary hover:opacity-70">Save</button>
+                    <button onClick={() => { setEditingId(null); setEditBody(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm text-ink whitespace-pre-wrap flex-1">{note.body}</p>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => { setEditingId(note.id); setEditBody(note.body); }}
+                        className="text-xs text-muted hover:text-ink"
+                        title="Edit"
+                      >✎</button>
+                      <button
+                        onClick={() => deleteNote(note.id)}
+                        className="text-xs text-muted hover:text-red-500"
+                        title="Delete"
+                      >✕</button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${note.note_type === "client_facing" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>
+                      {note.note_type === "client_facing" ? "Client-facing" : "Internal"}
+                    </span>
+                    <span className="text-[10px] text-muted">{note.author_name} · {relativeTime(note.created_at)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeadDocumentsPanel({ leadId }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadType, setUploadType] = useState("other");
+  const [err, setErr] = useState("");
+  const fileRef = useRef();
+
+  const loadDocs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/documents`).then(r => r.json());
+      setDocuments(r.documents || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [leadId]);
+
+  useEffect(() => { loadDocs(); }, [loadDocs]);
+
+  function handleFileSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    uploadFile(file);
+  }
+
+  async function uploadFile(file) {
+    setUploading(true); setErr("");
+    try {
+      const reader = new FileReader();
+      const b64 = await new Promise((resolve, reject) => {
+        reader.onload = ev => resolve(ev.target.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const r = await authFetch(`/api/sales/leads/${leadId}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          data: b64,
+          mime_type: file.type || "application/octet-stream",
+          document_type: uploadType,
+          file_size: file.size,
+        }),
+      }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error);
+      await loadDocs();
+    } catch (e2) { setErr(e2.message); }
+    finally { setUploading(false); }
+  }
+
+  async function deleteDoc(docId) {
+    if (!confirm("Remove this document?")) return;
+    await authFetch(`/api/sales/leads/${leadId}/documents/${docId}`, { method: "DELETE" });
+    await loadDocs();
+  }
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Documents</h3>
+
+      {/* Upload controls */}
+      <div className="flex items-center gap-2 mb-4">
+        <select
+          className="flex-1 rounded-lg border border-hairline px-3 py-1.5 text-sm bg-page text-ink"
+          value={uploadType}
+          onChange={e => setUploadType(e.target.value)}
+        >
+          {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+        >
+          {uploading ? "Uploading…" : "⬆ Upload"}
+        </button>
+        <input ref={fileRef} type="file" className="hidden" onChange={handleFileSelect} />
+      </div>
+      {err && <p className="text-xs text-red-600 mb-2">{err}</p>}
+
+      {/* Documents list */}
+      {loading ? (
+        <p className="text-xs text-muted italic">Loading…</p>
+      ) : documents.length === 0 ? (
+        <p className="text-xs text-muted italic">No documents attached yet. Upload blueprints, briefs, or site surveys.</p>
+      ) : (
+        <div className="space-y-2">
+          {documents.map(doc => (
+            <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-hairline bg-page px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${DOCUMENT_TYPE_COLORS[doc.document_type] || DOCUMENT_TYPE_COLORS.other}`}>
+                    {DOCUMENT_TYPE_LABELS[doc.document_type] || "Other"}
+                  </span>
+                  <span className="text-sm font-medium text-ink truncate">{doc.filename}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {doc.file_size && <span className="text-[10px] text-muted">{formatFileSize(doc.file_size)}</span>}
+                  <span className="text-[10px] text-muted">{relativeTime(doc.created_at)}</span>
+                </div>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                {doc.download_url && (
+                  <a
+                    href={doc.download_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary hover:opacity-70"
+                    title="Download"
+                  >↓</a>
+                )}
+                <button
+                  onClick={() => deleteDoc(doc.id)}
+                  className="text-xs text-muted hover:text-red-500"
+                  title="Remove"
+                >✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
@@ -1416,6 +1710,10 @@ export default function LeadDetail() {
                 )}
               </div>
             )}
+
+            <LeadNotesPanel leadId={leadId} />
+
+            <LeadDocumentsPanel leadId={leadId} />
 
             {!["won","lost"].includes(lead.stage) && (
               <div className="rounded-card border border-hairline bg-surface p-4">

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 
 const { parsed: _env = {} } = (await import("dotenv")).config();
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
@@ -44,11 +45,11 @@ Rules:
 - Return valid JSON only`;
 
     try {
-      const msg = await client.messages.create({
+      const msg = await callAI(client, {
         model: "claude-haiku-4-5-20251001", // small structured JSON parse — haiku is sufficient
         max_tokens: 512,
         messages: [{ role: "user", content: prompt }]
-      });
+      }, { module: "supervisorRoutes" });
       const raw = msg.content[0]?.text?.trim() || "{}";
       const parsed = JSON.parse(raw);
       res.json({ ok: true, result: parsed });

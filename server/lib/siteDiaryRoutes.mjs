@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import {
   getDropboxAccessToken,
@@ -17,12 +18,12 @@ async function claudeText(prompt) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
   const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await client.messages.create({
+  const completion = await callAI(client, {
     model: MODEL,
     max_tokens: 512,
     temperature: 0.2,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
-  });
+  }, { module: "siteDiaryRoutes" });
   return completion.content
     .filter((b) => b.type === "text")
     .map((b) => b.text)

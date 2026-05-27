@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { callAI, wrapStream } from "./aiGateway.mjs";
 import { createClient } from '@supabase/supabase-js';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
@@ -232,7 +233,7 @@ function safeKnowledgeFileName(value) {
 }
 
 async function formatKnowledge(content) {
-  const response = await getAnthropic().messages.create({
+  const response = await callAI(getAnthropic(), {
     model: MODEL,
     max_tokens: Math.min(MAX_TOKENS, 8000),
     temperature: 0.2,
@@ -242,7 +243,7 @@ async function formatKnowledge(content) {
         content: `${KNOWLEDGE_FORMAT_PROMPT}\n\nRAW CONTENT TO FORMAT:\n\n${content}`,
       },
     ],
-  });
+  }, { module: 'blueprintRoutes' });
   const text = response.content.find((b) => b.type === 'text')?.text?.trim();
   if (!text) throw new Error('Claude returned no formatted knowledge text');
   return text;
@@ -288,16 +289,20 @@ export function registerBlueprintRoutes(app) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
-      const stream = await getAnthropic().messages.stream(
-        {
-          model: MODEL,
-          max_tokens: Math.min(MAX_TOKENS, 8000),
-          system: systemPrompt
-            ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-            : undefined,
-          messages: chatMessages,
-        },
-        { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+      const stream = wrapStream(
+        await getAnthropic().messages.stream(
+          {
+            model: MODEL,
+            max_tokens: Math.min(MAX_TOKENS, 8000),
+            system: systemPrompt
+              ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+              : undefined,
+            messages: chatMessages,
+          },
+          { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+        ),
+        MODEL,
+        { module: 'blueprintRoutes' },
       );
       for await (const event of stream) {
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
@@ -317,7 +322,7 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  app.post('/api/blueprint/chat', async (req, res) => {
+  app.post('/api/blueprint/chat', requireAuth, async (req, res) => {
     try {
       const { messages, jobContext, attachments } = req.body;
       let { hubContext } = req.body;
@@ -433,7 +438,7 @@ export function registerBlueprintRoutes(app) {
         return res.status(400).json({ error: 'documentText is required' });
       }
 
-      const response = await getAnthropic().messages.create({
+      const response = await callAI(getAnthropic(), {
         model: MODEL,
         max_tokens: MAX_TOKENS,
         temperature: 0.2,
@@ -444,7 +449,7 @@ export function registerBlueprintRoutes(app) {
             content: `Document type: ${documentType}\n\n---\n\n${documentText}`,
           },
         ],
-      });
+      }, { module: 'blueprintRoutes' });
 
       const raw = response.content
         .filter((b) => b.type === 'text')

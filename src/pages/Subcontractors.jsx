@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "../lib/supabaseClient.js";
+import { authFetch } from "../lib/authFetch.js";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+// Use the app-wide singleton to avoid multiple GoTrueClient instances
+const supabase = getSupabase();
 
 const BASE_TRADES = [
   "excavation",
@@ -492,7 +491,7 @@ function AddModal({ onClose, onSaved, tradesList, colourMap }) {
     setLooking(true);
     setError("");
     try {
-      const res = await fetch("/api/subcontractor/lookup", {
+      const res = await authFetch("/api/subcontractor/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -859,7 +858,7 @@ function BulkImportModal({ onClose, onSaved }) {
       sheetWindow.document.write("<p style=\"font-family:sans-serif;padding:24px\">Creating Blue Leaf subcontractor template...</p>");
     }
     try {
-      const res = await fetch("/api/subcontractors/csv-template-sheet", {
+      const res = await authFetch("/api/subcontractors/csv-template-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csv: templateCsv })

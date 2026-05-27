@@ -144,7 +144,7 @@ function IntelligenceTab() {
   const fileRef = useRef(null);
 
   useEffect(() => {
-    authFetch("/api/jobs").then(r => r.json()).then(j => { if (j.ok || Array.isArray(j.jobs)) setJobs(j.jobs || j || []); }).catch(() => {});
+    authFetch("/api/finance/jobs").then(r => r.json()).then(j => { if (j.ok || Array.isArray(j.jobs)) setJobs(j.jobs || j || []); }).catch(() => {});
   }, []);
 
   const loadJobData = useCallback(async (jobId) => {
