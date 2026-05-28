@@ -250,10 +250,14 @@ Popup-blocker fix: `window.open("about:blank", "_blank")` before async fetch, th
 - Site diary → client update pipeline
 
 ### Known Bugs (active)
-- **BUG-UI-1**: Finance job detail "Job not found" — portfolio card uses wrong UUID (project.id not project.job_id) for the `/finance/jobs/:id` link. Operations → Financials tab has same problem.
-- **BUG-UI-2**: Finance forecast % shows -11832.8% — division by near-zero baseline. Guard required.
-- **BUG-S1**: Lead note author shows "Unknown" — `req.caller` shape from `requireAuth` middleware doesn't expose `.email` at top level.
-- **BUG-S2**: Blueprint Insight renders raw markdown — wrap response text in react-markdown.
+_All previously logged bugs (BUG-UI-1, BUG-UI-2, BUG-S1, BUG-S2) shipped in the 8-fix sprint (2026-05-28). See commit history for details._
+
+**Ongoing improvements:**
+- **BUG-schedule**: Fallback schedule duration now uses construction phase defaults map (not hardcoded 3 days) — `scheduleGenerate.mjs`.
+- **BUG-portal**: Portal conversation error messages now surface the actual error text rather than generic "Failed to send".
+- **BUG-portal-2**: `patchProject` in `PortalAdmin.jsx` now logs and early-returns on Supabase update errors.
+
+**react-markdown / typography:** `react-markdown` + `@tailwindcss/typography` added. Blueprint Insight panel now renders formatted markdown. PWA workbox `maximumFileSizeToCacheInBytes` bumped to 4 MiB to accommodate bundle growth.
 
 ---
 

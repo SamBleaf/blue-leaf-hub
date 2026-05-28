@@ -194,7 +194,7 @@ export default function Home() {
     const ids = new Set();
     if (projectsRes.ok && projectsRes.data?.ok) {
       for (const p of projectsRes.data.projects || []) {
-        const jid = p.jobs?.id;
+        const jid = p.job_id;
         if (jid) ids.add(jid);
       }
     }

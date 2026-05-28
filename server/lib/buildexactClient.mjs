@@ -37,8 +37,28 @@ function getApiKey() {
   return (_credentials?.apiKey || env("BUILDEXACT_API_KEY")).trim();
 }
 
+/**
+ * The Azure API Management subscription key — identifies Blue Leaf Building
+ * as an approved API subscriber to Buildxact's gateway.
+ *
+ * Buildxact issues this separately from the user's login apiKey:
+ *   1. Sign up at https://developer.buildxact.com, select a plan, await approval.
+ *   2. After approval, retrieve Primary/Secondary keys from your developer portal profile.
+ *
+ * Set BUILDEXACT_SUBSCRIPTION_KEY to this value.
+ * If it is NOT set, we fall back to BUILDEXACT_API_KEY (works when both are the same value,
+ * which is the case for some Buildxact account tiers).
+ */
+function getSubscriptionKey() {
+  return (
+    _credentials?.subscriptionKey ||
+    env("BUILDEXACT_SUBSCRIPTION_KEY") ||
+    getApiKey()
+  ).trim();
+}
+
 export function buildexactConfigured() {
-  return Boolean(getEmail() && getApiKey());
+  return Boolean(getEmail() && getApiKey() && getSubscriptionKey());
 }
 
 function apiBase() {
@@ -46,8 +66,8 @@ function apiBase() {
 }
 
 function subscriptionHeaders() {
-  const key = getApiKey();
-  if (!key) throw new Error("BUILDEXACT_API_KEY is not set.");
+  const key = getSubscriptionKey();
+  if (!key) throw new Error("BUILDEXACT_SUBSCRIPTION_KEY (or BUILDEXACT_API_KEY) is not set.");
   return {
     "Content-Type": "application/json",
     "Ocp-Apim-Subscription-Key": key,
@@ -90,7 +110,7 @@ export async function buildexactLogin(emailOverride, apiKeyOverride) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Ocp-Apim-Subscription-Key": apiKey,
+      "Ocp-Apim-Subscription-Key": getSubscriptionKey() || apiKey,
       Accept: "application/json"
     },
     body: JSON.stringify({ email, apiKey })
@@ -146,7 +166,7 @@ async function buildexactRefresh() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Ocp-Apim-Subscription-Key": apiKey,
+      "Ocp-Apim-Subscription-Key": getSubscriptionKey() || apiKey,
       Accept: "application/json"
     },
     body: JSON.stringify({ email, apiKey, refreshToken: _refreshToken })
@@ -214,12 +234,16 @@ export function getBuildexactTokenStatus() {
   const configured = buildexactConfigured();
   const hasToken = Boolean(_accessToken);
   const valid = Boolean(_accessToken && now < _accessExpiryMs - 60_000);
+  const hasSubscriptionKey = Boolean(
+    _credentials?.subscriptionKey || env("BUILDEXACT_SUBSCRIPTION_KEY")
+  );
   return {
     configured,
     hasCachedToken: hasToken,
     tokenValid: valid,
     expiresAt: _accessExpiryMs > 0 ? new Date(_accessExpiryMs).toISOString() : null,
-    credentialSource: _credentials ? "session_test" : configured ? "env" : "none"
+    credentialSource: _credentials ? "session_test" : configured ? "env" : "none",
+    subscriptionKeySeparate: hasSubscriptionKey
   };
 }
 
@@ -239,7 +263,6 @@ export async function beFetch(path, { method = "GET", body, query } = {}) {
     method,
     headers: {
       ...subscriptionHeaders(),
-      "Ocp-Apim-Subscription-Key": apiKey,
       Authorization: `Bearer ${token}`
     },
     body: body ? JSON.stringify(body) : undefined

@@ -93,7 +93,8 @@ export default function PortalAdmin() {
   const patchProject = async (patch) => {
     const sb = getSupabase();
     if (!sb) return;
-    await sb.from("projects").update(patch).eq("id", projectId);
+    const { error } = await sb.from("projects").update(patch).eq("id", projectId);
+    if (error) { console.error("Portal admin update failed:", error.message); return; }
     await loadSummary();
   };
 

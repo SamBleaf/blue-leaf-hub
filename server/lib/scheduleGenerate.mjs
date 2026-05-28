@@ -398,6 +398,29 @@ export function attachTaskDependenciesUuids(rows, insertedIdsOrdered) {
   });
 }
 
+// Realistic construction phase defaults (working days) when no Buildexact hints exist
+const PHASE_DURATION_DEFAULTS = {
+  preliminaries: 10, site_establishment: 10, demolition: 7,
+  concrete: 35, concrete_footings: 35,
+  structural_steel: 14, carpentry: 25, framing: 25,
+  windows: 5, external_cladding: 14, roof: 10, roofing: 10, roof_plumber: 10,
+  masonry: 14, electrical: 20, lighting: 5, plumbing: 20,
+  insulation: 5, internal_linings: 14, tiler: 10, joinery: 14,
+  painting: 14, garage_door: 2, plastering: 10, rendering: 10,
+  flooring: 7, glazing: 5, heating_cooling: 10, landscaping: 14,
+  paving: 7, fencing: 5, pool: 30, site_cleaner: 3,
+  fitout: 14, completion: 5, general: 5,
+};
+function fallbackDuration(phaseName, taskName) {
+  const normalize = (s) => String(s || "").toLowerCase().replace(/[\s/&_-]+/g, "_");
+  const phase = normalize(phaseName);
+  const task = normalize(taskName);
+  for (const [key, days] of Object.entries(PHASE_DURATION_DEFAULTS)) {
+    if (phase.includes(key) || task.includes(key)) return days;
+  }
+  return 10; // better default than 3 for any unmatched trade
+}
+
 /** Sequential fallback when Claude is unavailable: one short task per line item. */
 export function buildFallbackRowsFromCategories(projectId, startDate, categoryBlocks, opts = {}) {
   const sortedBlocks = categoryBlocks || [];
@@ -415,7 +438,9 @@ export function buildFallbackRowsFromCategories(projectId, startDate, categoryBl
       if (matchedHint) {
         console.log(`[schedule] using Buildexact duration for ${line}: ${matchedHint.duration_days} days`);
       }
-      const duration_days = matchedHint ? Math.max(1, Math.round(Number(matchedHint.duration_days))) : 3;
+      const duration_days = matchedHint
+        ? Math.max(1, Math.round(Number(matchedHint.duration_days)))
+        : fallbackDuration(block.phase, line);
       const end = addDaysYmd(start, duration_days - 1);
       chainCursor = addDaysYmd(end, 1);
       out.push({

@@ -39,7 +39,8 @@ export default defineConfig(({ mode }) => {
         workbox: {
           mode: "development",
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-          navigateFallbackDenylist: [/^\/api/]
+          navigateFallbackDenylist: [/^\/api/],
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024 // 4 MiB — main bundle grows with deps
         },
         devOptions: {
           /* PWA + workbox in dev can scan the tree for a long time with little console output — keep off for fast `npm run dev`. */

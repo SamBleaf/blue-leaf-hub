@@ -1243,7 +1243,9 @@ export function registerFinanceRoutes(app) {
           const actual = actualByTrade[row.trade_category_id] || 0;
           return {
             ...row,
+            name: row.trade_categories?.name || row.name || "Unknown category",
             actual_amount: actual,
+            forecast_amount: row.forecast_amount ?? null,
             variance: Number(row.budget_amount || 0) - actual,
             status: budgetStatus(Number(row.budget_amount || 0), actual),
           };
@@ -1257,7 +1259,12 @@ export function registerFinanceRoutes(app) {
       const varsSent = (variationsData).filter(v => v.status === "sent_to_client").reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
       const varsDraft = (variationsData).filter(v => v.status === "draft").length;
 
+      const daysSinceWipaa = daysSince(job.last_wipaa_review_date);
+      const forecastMarginPct = contractValue > 0 && forecastTotalCost != null
+        ? ((contractValue - forecastTotalCost) / contractValue * 100)
+        : null;
       res.json({
+        ok: true,
         job,
         kpis: {
           contract_value: contractValue,
@@ -1267,15 +1274,23 @@ export function registerFinanceRoutes(app) {
           working_margin_pct: contractValue > 0
             ? ((contractValue - actualCostsSum) / contractValue * 100)
             : null,
-          forecast_margin_pct: contractValue > 0 && forecastTotalCost != null
-            ? ((contractValue - forecastTotalCost) / contractValue * 100)
+          forecast_margin_pct: forecastMarginPct,
+          // Guard against near-zero denominator producing nonsense %
+          forecast_data_quality_warning: forecastMarginPct != null && Math.abs(forecastMarginPct) > 200
+            ? "Forecast margin outside normal range — review forecast cost"
             : null,
         },
-        budget_rows: enrichedBudget,
-        pending_invoices: pendingInvoices || [],
-        overdue_claims: overdueClaims || [],
+        // Field names the client (JobCommandCentre.jsx) expects:
+        budget_vs_actual: enrichedBudget,
+        pending_approvals: pendingInvoices || [],
+        claims: overdueClaims || [],
         variations: { signed_total: varsSigned, sent_total: varsSent, draft_count: varsDraft },
-        wipaa_overdue: daysSince(job.last_wipaa_review_date) > 30,
+        wipaa: {
+          wipaa_overdue: daysSinceWipaa > 30,
+        },
+        days_since_wipaa_review: daysSinceWipaa,
+        recent_insights: [],
+        labour: null,
       });
     } catch (err) {
       console.error("[finance/command-centre]", err.message);

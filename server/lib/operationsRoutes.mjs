@@ -18,7 +18,7 @@ export function registerOperationsRoutes(app) {
     try {
       const { data: projects, error: pe } = await sb
         .from("projects")
-        .select("id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)")
+        .select("id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)")
         .order("created_at", { ascending: false });
       if (pe) throw pe;
 

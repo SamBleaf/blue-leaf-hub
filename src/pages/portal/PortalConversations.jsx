@@ -59,8 +59,8 @@ export default function PortalConversations() {
     try {
       await sendPortalMessage(token, body);
       await load();
-    } catch {
-      setSendError("Failed to send");
+    } catch (e) {
+      setSendError(e?.message || "Failed to send. Please try again.");
       setMessages((m) => m.filter((x) => x.id !== optimistic.id));
     } finally {
       setSending(false);

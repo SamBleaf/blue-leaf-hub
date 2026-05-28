@@ -255,7 +255,7 @@ export default function JobDashboardSelector({ forcePortfolio = false }) {
                         </p>
                         <p className="text-xs text-muted shrink-0">
                           Forecast{" "}
-                          {kpis.forecast_margin_pct != null
+                          {kpis.forecast_margin_pct != null && !kpis.forecast_data_quality_warning
                             ? `${kpis.forecast_margin_pct.toFixed(1)}%`
                             : "—"}
                         </p>

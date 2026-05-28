@@ -1,6 +1,7 @@
 import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 
 const STAGES = [
@@ -1208,7 +1209,9 @@ export default function LeadDetail() {
                   {[55, 85, 65].map((w, i) => <div key={i} className="h-3 rounded bg-primary/10 animate-pulse" style={{ width: `${w}%` }} />)}
                 </div>
               ) : bpInsight ? (
-                <p className="text-sm text-ink leading-relaxed">{bpInsight}</p>
+                <div className="text-sm text-ink leading-relaxed prose prose-sm max-w-none">
+                  <ReactMarkdown>{bpInsight}</ReactMarkdown>
+                </div>
               ) : (
                 <p className="text-xs text-muted italic">Loading APB advice…</p>
               )}

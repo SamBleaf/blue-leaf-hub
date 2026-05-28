@@ -16,7 +16,7 @@ export async function requireAuth(req, res, next) {
     .eq("id", user.id)
     .maybeSingle();
   if (!profile?.is_active) return res.status(403).json({ ok: false, error: "Account inactive" });
-  req.caller = profile;
+  req.caller = { ...profile, email: user.email };
   next();
 }
 
