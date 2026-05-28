@@ -1,4 +1,5 @@
 import {
+  buildexactConfigured,
   getJobEstimateItems,
   getJobEstimates,
   updateEstimateItem,
@@ -52,14 +53,21 @@ function isSchedOrMetric(item) {
 }
 
 export async function pullBuildexactEstimate(buildexactJobId, opts = {}) {
+  if (!buildexactConfigured()) {
+    throw new Error("Buildxact is not configured — set BUILDEXACT_USERNAME and BUILDEXACT_API_KEY.");
+  }
   let raw = null;
   let rawSource = "estimateitems";
   try {
     raw = await getJobEstimateItems(buildexactJobId);
   } catch (err) {
     console.warn("[buildexact] estimateitems failed, trying estimates:", err?.message || err);
-    raw = await getJobEstimates(buildexactJobId);
-    rawSource = "estimates";
+    try {
+      raw = await getJobEstimates(buildexactJobId);
+      rawSource = "estimates";
+    } catch (err2) {
+      throw new Error(`Buildxact estimate fetch failed for job ${buildexactJobId}: ${err2?.message || err2}`);
+    }
   }
   const estimate = normaliseBuildexactEstimatePayload(raw, opts);
   const scheduleHints = parseSchedItems(estimate.categories);
@@ -69,6 +77,7 @@ export async function pullBuildexactEstimate(buildexactJobId, opts = {}) {
 
 export async function syncAcceptedQuoteToBuildexact({ buildexactJobId, trade, acceptedAmount }) {
   if (!buildexactJobId) return { skipped: true, reason: "missing_buildexact_job_id" };
+  if (!buildexactConfigured()) return { skipped: true, reason: "not_configured" };
   const amount = Number(acceptedAmount);
   if (!Number.isFinite(amount) || amount <= 0) return { skipped: true, reason: "missing_amount" };
 
@@ -117,10 +126,12 @@ export async function syncAcceptedQuoteToBuildexact({ buildexactJobId, trade, ac
 
 export async function syncFeeProposalSentToBuildexact({ buildexactJobId, estimateId }) {
   if (!buildexactJobId || !estimateId) return { skipped: true };
+  if (!buildexactConfigured()) return { skipped: true, reason: "not_configured" };
   return updateEstimateStatus(buildexactJobId, estimateId, "sent");
 }
 
 export async function syncFeeProposalAcceptedToBuildexact({ buildexactJobId, estimateId }) {
   if (!buildexactJobId || !estimateId) return { skipped: true };
+  if (!buildexactConfigured()) return { skipped: true, reason: "not_configured" };
   return acceptEstimate(buildexactJobId, estimateId);
 }

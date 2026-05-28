@@ -149,7 +149,7 @@ async function buildexactRefresh() {
       "Ocp-Apim-Subscription-Key": apiKey,
       Accept: "application/json"
     },
-    body: JSON.stringify({ email, refreshToken: _refreshToken })
+    body: JSON.stringify({ email, apiKey, refreshToken: _refreshToken })
   });
 
   const text = await res.text();

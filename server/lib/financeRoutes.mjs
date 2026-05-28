@@ -9,6 +9,7 @@ import { upsertNormalizedCost } from "./normalizedCosts.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
 import PDFDocument from "pdfkit";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
+import { buildexactConfigured } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 
 const { parsed: _dotenv = {} } = dotenvConfig();
@@ -1293,6 +1294,7 @@ export function registerFinanceRoutes(app) {
         .select("buildexact_job_id").eq("id", id).maybeSingle();
       const bxJobId = job?.buildexact_job_id;
       if (!bxJobId) return res.status(400).json({ error: "No Buildexact job linked" });
+      if (!buildexactConfigured()) return res.status(400).json({ error: "Buildxact is not configured — set BUILDEXACT_USERNAME and BUILDEXACT_API_KEY." });
 
       const { estimate } = await pullBuildexactEstimate(bxJobId);
       const categories = estimate?.categories || [];
@@ -1623,6 +1625,7 @@ export function registerFinanceRoutes(app) {
       const { data: job } = await sb.from("jobs")
         .select("buildexact_job_id").eq("id", id).maybeSingle();
       if (!job?.buildexact_job_id) return res.json({ ok: true, recipes: [] });
+      if (!buildexactConfigured()) return res.json({ ok: true, recipes: [] });
 
       const { estimate } = await pullBuildexactEstimate(job.buildexact_job_id);
       const recipes = (estimate?.categories || []).map((cat) => ({

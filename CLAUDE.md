@@ -46,9 +46,12 @@ Single-page app. Routes in `src/App.jsx`. Layout in `src/components/AppShell.jsx
 
 Modules (departments):
 - **Sales Manager** — `/sales/*` — Lead pipeline, qualifying, conversations, Blueprint Insight
-- **Tender Manager** — `/tender-manager/*` — RFQ, fee proposals
-- **Operations Manager** — `/operations/*` — Projects, schedule management
-- **Subcontractors** — `/subcontractors/*` — Trade directory, compliance tracking
+- **Tender Manager** — `/tender-manager/*` — RFQ, fee proposals, subcontractors, cost intelligence
+- **Operations Manager** — `/operations/*` — Projects, schedule management (Gantt/Sheet/Delays/Dep Map), site diary, WHS
+- **Workforce** — `/workforce/*` — Timesheets (Approvals/Mass Fill/History), Team Directory
+- **Finance** — `/finance/*` — Invoice inbox (IMAP + drag-drop), approvals, Director Portfolio job view
+- **Marketing** — `/marketing/*` — Content Studio: Create/Library/Campaigns/Media/Music Library (AI-assisted)
+- **Worker PWA** — `/worker` — Mobile timesheet + task check-in for site workers
 
 ### Server: Express route registration
 
@@ -78,9 +81,11 @@ Key tables:
 | 012 | `sequences` |
 | 013 | leads pipeline: `leads`, `pipeline_stages` |
 | 014 | `lead_qualifying_scores` |
-| 015 | `lead_documents`, `lead_notes` |
+| 015 | `buildexact_deep_integration` — Buildexact sync fields on `jobs` |
 | 016 | Blueprint Insight fields on `leads` |
 | 017 | `lead_conversations` (transcript, bp_suggestions, applied_suggestions JSONB) |
+| 018–059 | Various — workforce, finance, marketing, portal, WHS, schedule improvements |
+| 060 | `lead_notes`, `lead_documents` + Supabase Storage RLS for `lead-documents` bucket |
 
 ---
 
@@ -115,7 +120,7 @@ const apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.
 
 ### Schedule Manager
 
-**Views:** Dashboard, Gantt, Sheet, Calendar — toggled by tab.
+**Views:** Gantt, Sheet, Delays, Dep Map — toggled by tab.
 
 **Schedule generation:** AI generates tasks from project description via Claude in `module6Routes.mjs`. Ripple cascade (`previewRipple()` in `scheduleUtils.js`) propagates date shifts to downstream tasks via `depends_on` array. `RippleWarningModal` shown before applying.
 
@@ -129,7 +134,7 @@ const apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.
 
 **Context menu row detection:** `rowIndex = Math.floor((clientY - containerTop - lookaheadBannerH(52) - headerH(50)) / rowHeight(40))` → maps to `ganttTasks[rowIndex]`.
 
-**Sprint 2 (next):** Baseline ghost bars + EOT tracking (migration 018 needed — see sprint backlog).
+**Sprint 2 (shipped):** Baseline ghost bars + EOT tracking. Baseline lock banner shows "Baseline locked [date]" with "Reset baseline" action. Delays tab = EOT claims list with "+ Raise EOT".
 
 ### Colour Coding System
 
@@ -177,6 +182,29 @@ Current state: project list, schedule management per project, site diary, WHS ch
 
 Planned (Sprint 4): Rich project cards with schedule health badge + progress % + next milestone + active trade count. Card/list toggle. Global Gantt across all active projects, filterable by trade, colour-coded by project. Trade conflict detection across projects.
 
+### Marketing Agent / Content Studio
+
+Route: `/marketing/*`. Tabs: Create, Library, Campaigns, Media, Music Library.
+
+**Create tab** — AI content generation form:
+- Channel: Instagram / Facebook / Website Copy / Email / Client Guide / Landing Page
+- Content Pillar: How We Build / What to Expect / The Work / etc.
+- Content Type: Educate / Opinion / Behind it / For clients / Story / Authority / Vision
+- Topic/Brief (required) — e.g. "Slab pour at Stirling renovation — rainy day, great result"
+- Client Stage filter (maps to APB pipeline stages for targeting)
+- Additional Context (optional) — tone notes, client quotes, specific angles
+- "Generate Content" button — calls AI to produce channel-specific copy
+
+**Library tab** — stored AI-generated content pieces. Search by channel/status. "Group by photo" toggle.
+
+**Campaigns tab** — campaign management. Each campaign has channel tags (instagram/facebook/website/etc.) and date range. Content pieces are linked to campaigns.
+
+**Media tab** — photo/video library. DJI D-Log M drone footage auto-detected. Video pipeline runs in background. Drop zone for new uploads.
+
+**Music Library tab** — background music tracks for video content.
+
+Storage: `marketing-media` Supabase Storage bucket (see earlier migrations).
+
 ### Subcontractors
 
 Sortable sheet view with `SortableTableHead` component and `sheetSort` state. `sheetSortValue()` helper sorts by business, trade, RFQs, avg_quote, missing fields.
@@ -203,27 +231,29 @@ Popup-blocker fix: `window.open("about:blank", "_blank")` before async fetch, th
 
 ## Sprint Backlog
 
-### Sprint 2 — Schedule intelligence
-- **Baseline / ghost bars** — DB migration 018: add `baseline_start_date`, `baseline_end_date` to `schedule_tasks`; `schedule_baseline_locked_at` to `projects`. "Lock Baseline" button snapshots current dates. Gantt renders semi-transparent SVG overlay for drifted tasks.
-- **EOT (Extension of Time) tracking** — DB migration 018: new `schedule_eot` table. "Delays" tab in Schedule Manager. Raise EOT with reason code + days claimed → approve → optionally push schedule forward.
+### Sprint 2 — Schedule intelligence ✅ SHIPPED
+- **Baseline / ghost bars** — `baseline_start_date`, `baseline_end_date` on `schedule_tasks`. "Lock Baseline" banner with drift count badge. "Reset baseline" action.
+- **EOT (Extension of Time) tracking** — Delays tab in Schedule Manager. "+ Raise EOT" button. EOT claim list.
 
-### Sprint 3 — Dependencies overhaul
-- Migrate `depends_on` (simple array) → `task_dependencies` JSONB (`[{taskId, type, lag}]`)
-- Dependency types: FS / SS / FF / SF + lag days
-- Updated TaskDetailPanel dependency editor (table with type + lag per link)
-- Dependency Map view (network diagram)
-- Canonical residential construction dependency template in AI schedule generation
+### Sprint 3 — Dependencies overhaul ✅ SHIPPED
+- `task_dependencies` typed deps (FS/SS/FF/SF + lag). Solid arrows = typed, dashed = legacy `depends_on`.
+- **Dep Map** tab — React Flow network diagram with mini-map + zoom controls. Click node to open task.
 
-### Sprint 4 — Operations Manager overhaul
-- Rich project cards: schedule health badge, progress %, next milestone, active trade count
-- Card/list toggle (same pattern as Sales Pipeline)
-- Global Gantt: all active projects, filterable by trade, colour-coded by project
-- Trade conflict detection across projects
+### Sprint 4 — Operations Manager overhaul ✅ PARTIALLY SHIPPED
+- Global Gantt on Operations landing page (all projects, trade filter, month zoom) — **shipped**
+- Rich project cards with health badges — **pending**
+- Trade conflict detection — **pending**
 
 ### Sprint 5 — Client portal (deferred)
 - Token-based shareable schedule link (no login)
 - Variation + EOT approval workflow with client sign-off
 - Site diary → client update pipeline
+
+### Known Bugs (active)
+- **BUG-UI-1**: Finance job detail "Job not found" — portfolio card uses wrong UUID (project.id not project.job_id) for the `/finance/jobs/:id` link. Operations → Financials tab has same problem.
+- **BUG-UI-2**: Finance forecast % shows -11832.8% — division by near-zero baseline. Guard required.
+- **BUG-S1**: Lead note author shows "Unknown" — `req.caller` shape from `requireAuth` middleware doesn't expose `.email` at top level.
+- **BUG-S2**: Blueprint Insight renders raw markdown — wrap response text in react-markdown.
 
 ---
 
