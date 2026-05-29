@@ -2,6 +2,90 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## Standards (Law)
+
+**Read this section before touching any file. These rules apply to ALL code — new and modified.**
+`/check` will flag violations. No PRs pass without conformance.
+
+### Server responses — always use apiResponse.mjs
+```js
+import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+
+ok(res, { leads: data })          // { ok: true, leads: [...] }
+ok(res)                           // { ok: true }
+err(res, 400, "Name required")    // { ok: false, error: "Name required" }
+err(res, 404, "Lead not found", "NOT_FOUND")
+```
+- **Never** `res.json({ success: true })` — always `ok: true`
+- **Never** `res.json({ error: msg })` without `ok: false`
+- **Never** expose raw Supabase/Postgres error strings — use `translateDbError(error)` or write a plain English message
+
+### Frontend fetch — always use apiFetch.js
+```js
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/apiFetch.js";
+
+const { ok, data, error } = await apiFetch("/api/sales/leads");
+const { ok, data, error } = await apiPost("/api/sales/leads", { firstName: "Jane" });
+```
+- **Never** call `authFetch` directly in page components — only in `apiFetch.js` itself
+- **Never** do manual `.json()` + separate `.ok` checks in page components
+- All functions return `{ ok, data, error }` — never throw
+
+### camelCase across the API boundary
+- DB stores snake_case (`first_name`, `created_at`) — never change this
+- Server converts with `rowToCamel(row)` / `rowsToCamel(rows)` from `apiResponse.mjs` before sending
+- Frontend reads camelCase (`lead.firstName`, `doc.createdAt`) — never read raw snake_case from API responses
+
+### Response entity keys
+```js
+ok(res, { leads: [...] })    // ✅ plural collection
+ok(res, { lead: {...} })     // ✅ singular item
+ok(res, { ...result })       // ❌ never spread — unpredictable keys
+ok(res, { success: true })   // ❌ never
+```
+
+### Status values — always import from constants.js
+```js
+import { LEAD_STAGES, DOC_STATUSES, TIMESHEET_STATUSES } from "../lib/constants.js";
+if (lead.stage === LEAD_STAGES.WON) { ... }   // ✅
+if (lead.stage === "won") { ... }              // ❌ never hardcode
+```
+`src/lib/constants.js` — all status enums, `GST_RATE`, `incGst()`, `gstAmount()`.
+
+### Amounts
+- All amounts stored and returned **ex-GST**
+- Never hardcode `0.1` or `* 1.1` — use `GST_RATE`, `incGst()`, `gstAmount()` from `constants.js`
+- Never store amounts as strings
+
+### File storage paths
+```
+[bucket]/[entity_type]/[entity_id]/[YYYY-MM-DD]-[sanitised-filename]
+Examples:
+  lead-documents/leads/abc-123/2026-05-28-site-survey.pdf
+  marketing-media/jobs/xyz-789/2026-05-01-slab-pour.jpg
+```
+Sanitise: lowercase, spaces→hyphens, strip specials except `-` and `.`
+
+### Error messages
+- Plain English only — use `translateDbError(error)` for DB constraint errors
+- Raw Postgres strings must never reach the browser
+
+### Pagination
+New list endpoints accept `?limit=N&offset=N` and return `total`:
+```js
+const { data, count } = await paginate(
+  sb.from("leads").select("*", { count: "exact" }), req.query
+);
+ok(res, { leads: data, total: count });
+```
+
+### Dropbox sequential reads
+Never `Promise.all` for Dropbox file reads. Always a sequential `for` loop.
+
+---
+
 ## Commands
 
 ```bash

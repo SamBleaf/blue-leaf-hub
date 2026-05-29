@@ -146,29 +146,29 @@ export function registerPortalRoutes(app) {
     try {
       const token = String(req.query.token || "").trim();
       const photoId = String(req.params.photoId || "").trim();
-      if (!token || !photoId) return res.status(400).json({ error: "token and photoId required" });
+      if (!token || !photoId) return res.status(400).json({ ok: false, error: "token and photoId required" });
 
       const project = await resolveProject(token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
 
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { data: photo } = await sb
         .from("project_photos")
         .select("storage_path, project_id")
         .eq("id", photoId)
         .maybeSingle();
-      if (!photo || photo.project_id !== project.id) return res.status(404).json({ error: "Photo not found" });
+      if (!photo || photo.project_id !== project.id) return res.status(404).json({ ok: false, error: "Photo not found" });
 
-      if (!dropboxConfigured()) return res.status(503).json({ error: "Dropbox not configured" });
+      if (!dropboxConfigured()) return res.status(503).json({ ok: false, error: "Dropbox not configured" });
       const accessToken = await getDropboxAccessToken();
       const buf = await dropboxDownloadBuffer(accessToken, photo.storage_path);
       res.setHeader("Content-Type", guessContentType(photo.storage_path));
       res.setHeader("Cache-Control", "private, max-age=3600");
       return res.send(buf);
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to load photo" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to load photo" });
     }
   });
 
@@ -179,9 +179,9 @@ export function registerPortalRoutes(app) {
   app.post("/api/portal/admin/generate-token", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const projectId = String(req.body?.projectId || "").trim();
-      if (!projectId) return res.status(400).json({ error: "projectId required" });
+      if (!projectId) return res.status(400).json({ ok: false, error: "projectId required" });
 
       const portalToken = crypto.randomBytes(24).toString("base64url");
       const { data, error } = await sb
@@ -190,26 +190,26 @@ export function registerPortalRoutes(app) {
         .eq("id", projectId)
         .select("portal_token")
         .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json({ token: data?.portal_token || portalToken, portalUrl: `/portal/${portalToken}` });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to generate token" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to generate token" });
     }
   });
 
   app.post("/api/portal/admin/enable-test/:projectId", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const projectId = String(req.params.projectId || "").trim();
-      if (!projectId) return res.status(400).json({ error: "projectId required" });
+      if (!projectId) return res.status(400).json({ ok: false, error: "projectId required" });
 
       const { data: existing } = await sb
         .from("projects")
         .select("portal_token")
         .eq("id", projectId)
         .maybeSingle();
-      if (!existing) return res.status(404).json({ error: "Project not found" });
+      if (!existing) return res.status(404).json({ ok: false, error: "Project not found" });
 
       const portalToken = existing.portal_token || crypto.randomBytes(24).toString("base64url");
       const { data, error } = await sb
@@ -218,26 +218,26 @@ export function registerPortalRoutes(app) {
         .eq("id", projectId)
         .select("portal_token, portal_enabled")
         .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json({
         ok: true,
         portalToken: data?.portal_token || portalToken,
         portalEnabled: data?.portal_enabled ?? true
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to enable test portal" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to enable test portal" });
     }
   });
 
   app.post("/api/portal/admin/seed-test-data", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const projectId = String(req.body?.projectId || "").trim();
-      if (!projectId) return res.status(400).json({ error: "projectId required" });
+      if (!projectId) return res.status(400).json({ ok: false, error: "projectId required" });
 
       const { data: project } = await sb.from("projects").select("id").eq("id", projectId).maybeSingle();
-      if (!project) return res.status(404).json({ error: "Project not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Project not found" });
 
       let added = 0;
       const today = todayYmd();
@@ -321,17 +321,17 @@ export function registerPortalRoutes(app) {
 
       return res.json({ ok: true, added: added > 0, skipped: added === 0 });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to seed test data" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to seed test data" });
     }
   });
 
   app.post("/api/portal/admin/updates", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, weekOf, headline, body, authorName, published, videoUrl } = req.body || {};
       if (!projectId || !weekOf || !headline || !body) {
-        return res.status(400).json({ error: "projectId, weekOf, headline, body required" });
+        return res.status(400).json({ ok: false, error: "projectId, weekOf, headline, body required" });
       }
       const { data, error } = await sb
         .from("portal_updates")
@@ -346,17 +346,17 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save update" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save update" });
     }
   });
 
   app.patch("/api/portal/admin/updates/:updateId", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const patch = {};
       const b = req.body || {};
       if (b.headline != null) patch.headline = b.headline;
@@ -371,18 +371,18 @@ export function registerPortalRoutes(app) {
         .eq("id", req.params.updateId)
         .select()
         .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to update" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to update" });
     }
   });
 
   app.post("/api/portal/admin/photos/upload", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
-      if (!dropboxConfigured()) return res.status(503).json({ error: "Dropbox not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
+      if (!dropboxConfigured()) return res.status(503).json({ ok: false, error: "Dropbox not configured" });
 
       const {
         projectId,
@@ -396,11 +396,11 @@ export function registerPortalRoutes(app) {
         sortOrder
       } = req.body || {};
       if (!projectId || !fileName || !contentBase64) {
-        return res.status(400).json({ error: "projectId, fileName, contentBase64 required" });
+        return res.status(400).json({ ok: false, error: "projectId, fileName, contentBase64 required" });
       }
 
       const { data: project } = await sb.from("projects").select("id, address").eq("id", projectId).maybeSingle();
-      if (!project?.address) return res.status(404).json({ error: "Project not found" });
+      if (!project?.address) return res.status(404).json({ ok: false, error: "Project not found" });
 
       const buffer = Buffer.from(String(contentBase64), "base64");
       const { storagePath } = await uploadPortalPhoto({
@@ -424,7 +424,7 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
 
       const publicUrl = mediaPublicPath(inserted.id);
       const { data: updated, error: ue } = await sb
@@ -433,21 +433,21 @@ export function registerPortalRoutes(app) {
         .eq("id", inserted.id)
         .select()
         .single();
-      if (ue) return res.status(500).json({ error: ue.message });
+      if (ue) return res.status(500).json({ ok: false, error: ue.message });
       return res.json(rowToCamel(updated));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to upload photo" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to upload photo" });
     }
   });
 
   app.post("/api/portal/admin/photos", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, publicUrl, storagePath, caption, milestoneKey, updateId, isHero, takenAt, sortOrder } =
         req.body || {};
       if (!projectId || !publicUrl || !storagePath) {
-        return res.status(400).json({ error: "projectId, publicUrl, storagePath required" });
+        return res.status(400).json({ ok: false, error: "projectId, publicUrl, storagePath required" });
       }
       const { data, error } = await sb
         .from("project_photos")
@@ -464,19 +464,19 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save photo" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save photo" });
     }
   });
 
   app.post("/api/portal/admin/milestones", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, key, label, description, whatComesNext, achievedAt, eta, sortOrder } = req.body || {};
-      if (!projectId || !key || !label) return res.status(400).json({ error: "projectId, key, label required" });
+      if (!projectId || !key || !label) return res.status(400).json({ ok: false, error: "projectId, key, label required" });
       const { data, error } = await sb
         .from("portal_milestones")
         .upsert(
@@ -494,20 +494,20 @@ export function registerPortalRoutes(app) {
         )
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save milestone" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save milestone" });
     }
   });
 
   app.post("/api/portal/admin/decisions", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, type, title, description, dueDate, urgency, costDelta, scheduleDelta, options } =
         req.body || {};
-      if (!projectId || !type || !title) return res.status(400).json({ error: "projectId, type, title required" });
+      if (!projectId || !type || !title) return res.status(400).json({ ok: false, error: "projectId, type, title required" });
       const { data, error } = await sb
         .from("portal_decisions")
         .insert({
@@ -523,20 +523,20 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save decision" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save decision" });
     }
   });
 
   app.post("/api/portal/admin/claims", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, stageName, amount, status, dueApprox, sortOrder } = req.body || {};
       if (!projectId || !stageName || amount == null) {
-        return res.status(400).json({ error: "projectId, stageName, amount required" });
+        return res.status(400).json({ ok: false, error: "projectId, stageName, amount required" });
       }
       const { data, error } = await sb
         .from("portal_claims")
@@ -550,17 +550,17 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save claim" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save claim" });
     }
   });
 
   app.get("/api/portal/admin/:projectId/summary", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const projectId = req.params.projectId;
 
       const [
@@ -600,34 +600,34 @@ export function registerPortalRoutes(app) {
         photos: rowsToCamel(photosRes.data)
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to load summary" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to load summary" });
     }
   });
 
   app.post("/api/portal/admin/site-walks", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, availableDate } = req.body || {};
-      if (!projectId || !availableDate) return res.status(400).json({ error: "projectId, availableDate required" });
+      if (!projectId || !availableDate) return res.status(400).json({ ok: false, error: "projectId, availableDate required" });
       const { data, error } = await sb
         .from("site_walks")
         .insert({ project_id: projectId, available_date: availableDate })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to add site walk" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to add site walk" });
     }
   });
 
   app.post("/api/portal/admin/finishes", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, room, item, value, supplier, productCode, sortOrder } = req.body || {};
-      if (!projectId || !room || !item) return res.status(400).json({ error: "projectId, room, item required" });
+      if (!projectId || !room || !item) return res.status(400).json({ ok: false, error: "projectId, room, item required" });
       const { data, error } = await sb
         .from("home_finishes")
         .insert({
@@ -641,20 +641,20 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save finish" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save finish" });
     }
   });
 
   app.post("/api/portal/admin/warranty-periods", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, label, years, startDate } = req.body || {};
       if (!projectId || !label || years == null) {
-        return res.status(400).json({ error: "projectId, label, years required" });
+        return res.status(400).json({ ok: false, error: "projectId, label, years required" });
       }
       let expiresDate = null;
       if (startDate) {
@@ -673,17 +673,17 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to save warranty period" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to save warranty period" });
     }
   });
 
   app.patch("/api/portal/admin/warranty-items/:itemId", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const patch = {};
       const b = req.body || {};
       if (b.status != null) patch.status = b.status;
@@ -696,19 +696,19 @@ export function registerPortalRoutes(app) {
         .eq("id", req.params.itemId)
         .select()
         .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to update warranty item" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to update warranty item" });
     }
   });
 
   app.post("/api/portal/admin/builder-messages", async (req, res) => {
     try {
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
       const { projectId, body, senderName } = req.body || {};
-      if (!projectId || !body) return res.status(400).json({ error: "projectId, body required" });
+      if (!projectId || !body) return res.status(400).json({ ok: false, error: "projectId, body required" });
       const { data, error } = await sb
         .from("portal_messages")
         .insert({
@@ -719,10 +719,10 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json(rowToCamel(data));
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Failed to send message" });
+      return res.status(500).json({ ok: false, error: e.message || "Failed to send message" });
     }
   });
 
@@ -730,7 +730,7 @@ export function registerPortalRoutes(app) {
   app.get("/api/portal/:token", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       return res.json({
         projectId: project.id,
         clientName: project.portal_client_name,
@@ -739,16 +739,16 @@ export function registerPortalRoutes(app) {
         portalEnabled: project.portal_enabled
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/home", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const completionPercent = await scheduleCompletionPercent(sb, project.id);
       const homeCtx = await portalHomeContext(sb, project, completionPercent);
@@ -823,16 +823,16 @@ export function registerPortalRoutes(app) {
         upcomingSiteWalks: rowsToCamel(upcomingWalksRes.data)
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/timeline", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { data: milestones } = await sb
         .from("portal_milestones")
@@ -870,16 +870,16 @@ export function registerPortalRoutes(app) {
         onTrack
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/livesite", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { data: update } = await sb
         .from("portal_updates")
@@ -913,16 +913,16 @@ export function registerPortalRoutes(app) {
         activityLog: rowsToCamel(activityLog)
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/decisions", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const [pendingRes, completedRes] = await Promise.all([
         sb
@@ -945,16 +945,16 @@ export function registerPortalRoutes(app) {
         completed: rowsToCamel(completedRes.data)
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/budget", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const contractValue = Number(project.contract_value) || 0;
 
@@ -999,16 +999,16 @@ export function registerPortalRoutes(app) {
         variationsLog: rowsToCamel(variationsRes.data)
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/journal", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { data: milestones } = await sb
         .from("portal_milestones")
@@ -1030,29 +1030,29 @@ export function registerPortalRoutes(app) {
 
       return res.json({ milestones: enriched });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/documents", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       return res.json({
         documents: [],
         message: "Documents will appear here as they are added."
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/myhome", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const [finishesRes, warrantyRes] = await Promise.all([
         sb
@@ -1079,16 +1079,16 @@ export function registerPortalRoutes(app) {
         handoverDate: project.completion_date_est
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/conversations", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const [messagesRes, walksRes] = await Promise.all([
         sb
@@ -1112,20 +1112,20 @@ export function registerPortalRoutes(app) {
         builderContact: { name: "Sam Morris", email: "sam@blueleafbuilding.com.au" }
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.post("/api/portal/:token/conversations", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const body = String(req.body?.body || "").trim();
       if (!body || body.length > 2000) {
-        return res.status(400).json({ error: "Message body required (max 2000 characters)." });
+        return res.status(400).json({ ok: false, error: "Message body required (max 2000 characters)." });
       }
 
       const { data, error } = await sb
@@ -1138,23 +1138,23 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true, message: rowToCamel(data) });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true, message: rowToCamel(data) });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.post("/api/portal/:token/sitewalk", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const siteWalkId = String(req.body?.siteWalkId || "").trim();
       const { data: walk } = await sb.from("site_walks").select("id, project_id").eq("id", siteWalkId).maybeSingle();
-      if (!walk || walk.project_id !== project.id) return res.status(403).json({ error: "Invalid site walk" });
+      if (!walk || walk.project_id !== project.id) return res.status(403).json({ ok: false, error: "Invalid site walk" });
 
       const { error } = await sb
         .from("site_walks")
@@ -1163,24 +1163,24 @@ export function registerPortalRoutes(app) {
           client_name: project.portal_client_name || "Client"
         })
         .eq("id", siteWalkId);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.post("/api/portal/:token/decisions/:decisionId/respond", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const action = req.body?.action;
       const statusMap = { approve: "approved", decline: "declined", info: "info_requested" };
       const status = statusMap[action];
-      if (!status) return res.status(400).json({ error: "Invalid action" });
+      if (!status) return res.status(400).json({ ok: false, error: "Invalid action" });
 
       const { data: decision } = await sb
         .from("portal_decisions")
@@ -1188,7 +1188,7 @@ export function registerPortalRoutes(app) {
         .eq("id", req.params.decisionId)
         .maybeSingle();
       if (!decision || decision.project_id !== project.id || decision.status !== "pending") {
-        return res.status(403).json({ error: "Decision not found" });
+        return res.status(403).json({ ok: false, error: "Decision not found" });
       }
 
       const { error } = await sb
@@ -1200,24 +1200,24 @@ export function registerPortalRoutes(app) {
           responded_at: new Date().toISOString()
         })
         .eq("id", req.params.decisionId);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.post("/api/portal/:token/warranty", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { area, description, urgency, photoUrls } = req.body || {};
-      if (!area || !description) return res.status(400).json({ error: "area and description required" });
+      if (!area || !description) return res.status(400).json({ ok: false, error: "area and description required" });
       const allowed = ["can_wait", "this_week", "urgent"];
-      if (!allowed.includes(urgency)) return res.status(400).json({ error: "Invalid urgency" });
+      if (!allowed.includes(urgency)) return res.status(400).json({ ok: false, error: "Invalid urgency" });
 
       const { data, error } = await sb
         .from("warranty_items")
@@ -1230,19 +1230,19 @@ export function registerPortalRoutes(app) {
         })
         .select()
         .single();
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true, item: rowToCamel(data) });
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      return res.json({ ok: true, item: rowToCamel(data) });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 
   app.get("/api/portal/:token/warranty", async (req, res) => {
     try {
       const project = await resolveProject(req.params.token);
-      if (!project) return res.status(404).json({ error: "Portal not found" });
+      if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();
-      if (!sb) return res.status(500).json({ error: "DB not configured" });
+      if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
       const { data } = await sb
         .from("warranty_items")
@@ -1251,7 +1251,7 @@ export function registerPortalRoutes(app) {
         .order("created_at", { ascending: false });
       return res.json({ items: rowsToCamel(data) });
     } catch (e) {
-      return res.status(500).json({ error: e.message || "Request failed" });
+      return res.status(500).json({ ok: false, error: e.message || "Request failed" });
     }
   });
 }
