@@ -1,9 +1,10 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-20
-app_version: main
-screenshot_status: placeholders_only
+sop_version: 1.1
+last_reviewed: 2026-05-29
+app_version: 1.0 — built
+screenshot_status: not_applicable
 owner: Admin
+test_status: static_pass
 ---
 
 # SOP: Create a New Lead
@@ -81,8 +82,63 @@ The lead is now in the pipeline. Your next step is to qualify them — review th
 - The lead is automatically placed in the **Enquiry** stage when created
 - The system records the date the lead was created — this is used to calculate "days in stage" and flag inactive leads
 
-## 12. Owner of the process
-Admin / Director
+## 12. Automation notes
+- API: `POST /api/sales/leads` — creates lead with `stage = 'enquiry'`, `stage_entered_at = now()`, `last_activity_at = now()`
+- Name fields are auto-capitalised (title case) server-side on create and update
+- A `lead_activities` row with `activity_type = 'note'`, `summary = 'Lead created'` is inserted automatically on creation
+- Required fields enforced by DB constraints: `first_name` is NOT NULL
 
-## 13. Review date
-2026-11-20
+## 13. Owner of the process
+Admin / Director  
+Next review: 2026-11-29
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] Logged in as Admin
+- [ ] Sales Manager page is accessible
+
+### Test cases
+
+**TC-01 — Create lead (happy path)**
+1. Click Sales Manager in the sidebar
+2. Click **+ New lead**
+3. Fill in: First name = "Audit", Last name = "Test", Email = "auditltest@example.com", Phone = "0400000001", Suburb = "Burnside", Project type = New Build, Budget = 1500000
+4. Click Save / Create lead
+5. Expected result: lead card appears in the **Enquiry** column of the pipeline
+6. Expected DB: `leads` row with `stage = 'enquiry'`, `stage_entered_at` = now, `last_activity_at` = now
+7. Expected DB: `lead_activities` row with `activity_type = 'note'`, `summary = 'Lead created'`
+- [ ] Pass  [ ] Fail
+
+**TC-02 — First name required**
+1. Open the New lead form
+2. Leave First name blank, fill Last name = "Test"
+3. Click Save
+4. Expected result: validation error — form does not submit
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Name is title-cased automatically**
+1. Create a lead with first_name = "john" (lowercase)
+2. Expected DB: `first_name = 'John'` (title-cased server-side)
+- [ ] Pass  [ ] Fail
+
+**TC-04 — Lead appears in correct pipeline column**
+1. Create a lead
+2. Navigate to Sales Manager pipeline view
+3. Expected: lead appears under the "Enquiry" column header, not any other column
+- [ ] Pass  [ ] Fail
+
+**TC-05 — Minimal fields (no optional fields)**
+1. Create a lead with only first_name = "Minimal" and last_name = "Lead"
+2. Leave email, phone, suburb, project type, budget blank
+3. Expected: lead is created successfully — all optional fields are nullable
+- [ ] Pass  [ ] Fail
+
+### Post-test checklist
+- [ ] All test cases passed
+- [ ] Lead appears in Enquiry stage
+- [ ] Activity log auto-created
+- [ ] Update `test_status` in frontmatter
+- [ ] Add entry to SOP_CHANGELOG.md
