@@ -170,6 +170,11 @@ const BANNED_PHRASES = [
   { pattern: /book now/gi,                  label: '"book now" urgency CTA' },
   { pattern: /don.?t miss/gi,              label: 'fear-based "don\'t miss"' },
   { pattern: /^at blue leaf building,? we/im, label: 'opens with "At Blue Leaf Building, we..."' },
+  { pattern: /\bluxurious\b/gi,             label: '"luxurious" — generic luxury signalling' },
+  { pattern: /\bstunning\b/gi,              label: '"stunning" — vague superlative' },
+  { pattern: /\bbespoke\b/gi,               label: '"bespoke" — overused agency word' },
+  { pattern: /\bcurated\b/gi,               label: '"curated" — vague, not specific' },
+  { pattern: /\belevated\b/gi,              label: '"elevated" — vague lifestyle language' },
 ];
 
 const OVERPROMISE_PATTERNS = [

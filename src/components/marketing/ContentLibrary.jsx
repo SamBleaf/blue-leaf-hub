@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { authFetch } from "../../lib/authFetch.js";
+import { apiPost } from "../../lib/apiFetch.js";
 import { getSupabase } from "../../lib/supabaseClient.js";
+import { MARKETING_PLATFORMS } from "../../lib/constants.js";
 
 const STATUS_COLOURS = {
   draft:     "bg-slate-100 text-slate-600",
@@ -327,6 +329,105 @@ function PhotoGroup({ assetId, items, selected, onSelect }) {
   );
 }
 
+function PublishModal({ item, onConfirm, onCancel }) {
+  const [platform, setPlatform] = useState(MARKETING_PLATFORMS.INSTAGRAM);
+  const [postUrl, setPostUrl] = useState("");
+  const [caption, setCaption] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function confirm() {
+    setSubmitting(true);
+    setErr("");
+    const { ok, error } = await apiPost("/api/marketing/publishes", {
+      content_item_id: item.id,
+      platform,
+      platform_post_url: postUrl.trim() || null,
+      caption_used: caption.trim() || null,
+    });
+    setSubmitting(false);
+    if (!ok) { setErr(error || "Failed to record publish"); return; }
+    onConfirm();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-ink">Mark as Published</h3>
+          <button type="button" onClick={onCancel} className="text-muted hover:text-ink">
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-xs text-muted">Record where this was published so performance data can be tracked.</p>
+
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1.5">Platform *</label>
+          <div className="flex gap-2">
+            {Object.entries(MARKETING_PLATFORMS).map(([, v]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setPlatform(v)}
+                className={`flex-1 py-2 rounded-lg border text-xs font-medium capitalize transition-colors ${
+                  platform === v
+                    ? "border-primary bg-primary text-white"
+                    : "border-hairline text-muted hover:border-primary/40"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1.5">Post URL <span className="font-normal">(optional — enables reach tracking)</span></label>
+          <input
+            value={postUrl}
+            onChange={(e) => setPostUrl(e.target.value)}
+            placeholder="https://www.instagram.com/p/..."
+            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1.5">Caption used <span className="font-normal">(optional — snapshot of what was actually posted)</span></label>
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            rows={3}
+            placeholder="If the final caption differed from the generated body, paste it here"
+            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+          />
+        </div>
+
+        {err && <p className="text-xs text-red-600">{err}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-lg border border-hairline text-sm text-muted hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={submitting}
+            className="flex-1 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {submitting ? "Recording…" : "Mark as Published"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -338,6 +439,7 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
 
   useEffect(() => {
     setForm({
@@ -520,7 +622,13 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
               <button
                 key={s}
                 type="button"
-                onClick={() => onStatusChange(s)}
+                onClick={() => {
+                  if (s === "published" && item.status === "approved") {
+                    setShowPublishModal(true);
+                  } else {
+                    onStatusChange(s);
+                  }
+                }}
                 disabled={updating}
                 className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors disabled:opacity-50 ${
                   s === "approved" || s === "published"
@@ -535,6 +643,17 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
             ))}
           </div>
         </div>
+      )}
+
+      {showPublishModal && (
+        <PublishModal
+          item={item}
+          onConfirm={() => {
+            setShowPublishModal(false);
+            onStatusChange("published");
+          }}
+          onCancel={() => setShowPublishModal(false)}
+        />
       )}
     </div>
   );
