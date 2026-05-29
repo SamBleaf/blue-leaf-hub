@@ -1,9 +1,10 @@
 ---
 sop_version: 1.0
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-30
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
+test_status: untested
 ---
 
 # SOP: Sign in to Blue Leaf Hub
@@ -89,3 +90,57 @@ Admin
 
 ## 13. Review date
 2026-11-20
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] A valid staff account exists (email + password known)
+- [ ] The Hub is running (dev or production)
+
+### Test cases
+
+**TC-01 — Sign in (happy path)**
+1. Navigate to the Hub login URL
+2. Enter a valid email and password
+3. Click Sign in
+4. Expected result: redirect to the home/dashboard page
+5. Expected: left sidebar or navigation is visible
+- [ ] Pass  [ ] Fail
+
+**TC-02 — Wrong password rejected**
+1. Enter a valid email with an incorrect password
+2. Click Sign in
+3. Expected result: error message appears (e.g. "Invalid email or password")
+4. Expected: user stays on the login page, not redirected
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Empty fields rejected**
+1. Leave email and password blank
+2. Click Sign in
+3. Expected result: validation prevents submission or shows error
+4. Expected: no redirect
+- [ ] Pass  [ ] Fail
+
+**TC-04 — Forgot password flow**
+1. Click "Forgot password" on the login page
+2. Enter a valid email address
+3. Submit the reset request
+4. Expected result: confirmation message that reset email was sent
+5. Expected: reset email arrives in inbox (check spam if not immediate)
+- [ ] Pass  [ ] Fail  [ ] Skip (email delivery may be slow)
+
+**TC-05 — Session persists on refresh**
+1. Sign in successfully
+2. Refresh the browser tab (F5)
+3. Expected result: still signed in — not redirected back to login page
+- [ ] Pass  [ ] Fail
+
+### Post-test checklist
+- [ ] Login works with valid credentials
+- [ ] Invalid credentials show error (not blank page)
+- [ ] Forgot password flow initiates
+- [ ] Session persists across refresh
+- [ ] Update `test_status` in frontmatter to `passed` or `failed`
+- [ ] Add entry to SOP_CHANGELOG.md

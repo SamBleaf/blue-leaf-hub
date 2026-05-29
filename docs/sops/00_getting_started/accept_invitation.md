@@ -1,9 +1,10 @@
 ---
 sop_version: 1.0
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-30
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
+test_status: untested
 ---
 
 # SOP: Accept a Staff Invitation
@@ -85,3 +86,54 @@ Admin
 
 ## 13. Review date
 2026-11-20
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] Admin has sent an invitation to a test email address (see SOP 12-02)
+- [ ] The invitation email has been received
+
+### Test cases
+
+**TC-01 — Accept invitation (happy path)**
+1. Open the invitation email
+2. Click the "Accept invitation" link or button
+3. Expected result: browser opens to a password setup page
+4. Enter a password (8+ characters)
+5. Click Save / Accept
+6. Expected result: signed in and redirected to the Hub home page
+- [ ] Pass  [ ] Fail
+
+**TC-02 — Cannot access Hub before accepting invitation**
+1. Before clicking the invitation link, attempt to sign in with the invited email
+2. Expected result: sign-in fails — account not yet activated
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Correct role assigned after accepting**
+1. Accept an invitation sent as "Staff" role
+2. After signing in, check which sidebar sections are visible
+3. Expected result: Staff role = limited access (no Settings, no Finance Director views)
+4. Compare with Admin account to confirm difference
+- [ ] Pass  [ ] Fail
+
+**TC-04 — Expired invitation handled gracefully**
+1. Wait for an invitation link to expire (typically 48 hours) OR use a previously-used link
+2. Click the link
+3. Expected result: error page or message saying link is invalid or expired
+4. Expected: instructions to request a new invitation
+- [ ] Pass  [ ] Fail  [ ] Skip (requires waiting)
+
+**TC-05 — Cannot use invitation link twice**
+1. After successfully accepting an invitation, copy the invitation link URL
+2. Open the link again in a new tab
+3. Expected result: error or redirect to sign-in (link is one-time use only)
+- [ ] Pass  [ ] Fail
+
+### Post-test checklist
+- [ ] Invitation link works and sets up account
+- [ ] Role is correct after acceptance
+- [ ] Expired/used links are handled gracefully
+- [ ] Update `test_status` in frontmatter
+- [ ] Add entry to SOP_CHANGELOG.md

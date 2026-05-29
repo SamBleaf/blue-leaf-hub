@@ -1,9 +1,10 @@
 ---
 sop_version: 1.0
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-30
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
+test_status: untested
 ---
 
 # SOP: Navigate the App
@@ -101,3 +102,51 @@ Admin
 
 ## 13. Review date
 2026-11-20
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] Logged in as Admin (to see all sections)
+- [ ] At least 1 project exists
+
+### Test cases
+
+**TC-01 — All top-level sections are accessible (Admin)**
+1. Sign in as Admin
+2. Check the sidebar/navigation for: Home, Sales Manager, Tender Manager, Operations, Finance, Marketing, Settings
+3. Expected result: all major sections are clickable and load without error
+- [ ] Pass  [ ] Fail
+
+**TC-02 — Staff role has restricted access**
+1. Sign in as a Staff (non-admin) account
+2. Check which sections are visible in the navigation
+3. Expected result: Settings tab is NOT visible (admin-only)
+4. Expected: Finance Director views may be restricted
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Back navigation works**
+1. Navigate to a detail page (e.g. click a lead in Sales Manager)
+2. Click the Back arrow or link
+3. Expected result: returned to the list page (not the browser's previous page)
+- [ ] Pass  [ ] Fail
+
+**TC-04 — Mobile layout (if applicable)**
+1. Open the Hub in a mobile browser or narrow the desktop window to mobile width
+2. Expected result: sidebar collapses — bottom tab navigation or hamburger menu appears
+3. Expected: all sections still accessible via mobile navigation
+- [ ] Pass  [ ] Fail  [ ] Skip (mobile testing not available)
+
+**TC-05 — Page titles are correct**
+1. Navigate to several different sections
+2. For each page: check the browser tab title and/or the on-page heading
+3. Expected result: titles match the section you're in (not blank or showing a previous page's title)
+- [ ] Pass  [ ] Fail
+
+### Post-test checklist
+- [ ] All sections load without errors
+- [ ] Role-based navigation works (admin sees more than staff)
+- [ ] Navigation doesn't break on refresh or back button
+- [ ] Update `test_status` in frontmatter
+- [ ] Add entry to SOP_CHANGELOG.md

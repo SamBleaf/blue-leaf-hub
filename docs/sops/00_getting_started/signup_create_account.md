@@ -1,9 +1,10 @@
 ---
 sop_version: 1.0
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-30
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
+test_status: untested
 ---
 
 # SOP: Create a New Account (Admin Setup)
@@ -84,3 +85,55 @@ Admin (Director)
 
 ## 13. Review date
 2026-11-20
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] No existing account with the test email (or use a unique test email each run)
+- [ ] Self-signup is enabled on the Supabase project
+- [ ] Hub is running
+
+### Test cases
+
+**TC-01 — Create first account (happy path)**
+1. Navigate to the Hub login URL
+2. Click Sign up / Create account
+3. Fill in: full name, work email (unique test address), password (8+ chars)
+4. Click Create account
+5. Expected result: redirected to home page, signed in
+6. Expected: admin access granted (can see all sidebar sections)
+- [ ] Pass  [ ] Fail
+
+**TC-02 — Duplicate email rejected**
+1. Attempt to sign up with an email address that already has an account
+2. Expected result: error message "Email already in use" or equivalent
+3. Expected: not redirected, stays on sign-up page
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Weak password rejected**
+1. Attempt to sign up with a password shorter than 8 characters (e.g. "abc")
+2. Expected result: validation error shown — password requirements displayed
+3. Expected: form does not submit
+- [ ] Pass  [ ] Fail
+
+**TC-04 — Company details accessible after signup**
+1. After creating account, click Settings in the sidebar
+2. Expected result: Settings → Company section is accessible
+3. Expected: company name, ABN, address fields are editable
+- [ ] Pass  [ ] Fail
+
+**TC-05 — Invite flow is different from signup**
+1. Confirm that only the first account uses self-signup
+2. From Settings → Users, verify the Invite user button is present
+3. Expected: Invite user sends email (not creates account directly) — see SOP 12-02
+- [ ] Pass  [ ] Fail  [ ] Skip (tested in SOP 12-02)
+
+### Post-test checklist
+- [ ] Self-signup creates account and lands on home page
+- [ ] Duplicate email shows error
+- [ ] Weak password shows error
+- [ ] Settings accessible after signup
+- [ ] Update `test_status` in frontmatter
+- [ ] Add entry to SOP_CHANGELOG.md

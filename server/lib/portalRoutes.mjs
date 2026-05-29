@@ -643,7 +643,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, finish: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save finish" });
     }
@@ -675,7 +675,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, warrantyPeriod: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save warranty period" });
     }
@@ -698,7 +698,7 @@ export function registerPortalRoutes(app) {
         .select()
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, warrantyItem: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to update warranty item" });
     }

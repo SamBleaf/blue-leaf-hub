@@ -1,9 +1,10 @@
 ---
 sop_version: 1.0
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-30
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
+test_status: untested
 ---
 
 # SOP: Use the Global Project Selector
@@ -73,3 +74,54 @@ Admin
 
 ## 13. Review date
 2026-11-20
+
+---
+
+## 14. Troubleshoot Agent Test Script
+
+### Pre-test setup
+- [ ] At least 2 active projects exist
+- [ ] Logged in as Admin or Staff
+
+### Test cases
+
+**TC-01 — Project selector shows all active projects**
+1. Navigate to Operations (or any page with the project selector visible)
+2. Click the project selector dropdown
+3. Expected result: list of all active projects appears
+4. Expected: project names and addresses are readable
+- [ ] Pass  [ ] Fail
+
+**TC-02 — Selecting a project updates the context**
+1. Open the project selector
+2. Select a project
+3. Expected result: the page updates to show that project's data (schedule, diary, etc.)
+4. Expected: the selected project name appears in the selector or page header
+- [ ] Pass  [ ] Fail
+
+**TC-03 — Selected project persists across module navigation**
+1. Select a project in Operations
+2. Navigate to Finance → Job Dashboard
+3. Expected result: the same project is pre-selected (context carries across modules)
+- [ ] Pass  [ ] Fail
+
+**TC-04 — No project selected shows empty state**
+1. If no project is selected, navigate to a project-specific section
+2. Expected result: empty state message or prompt to select a project
+3. Expected: does not show data from a random project
+- [ ] Pass  [ ] Fail
+
+**TC-05 — Archived project not visible in selector**
+1. Archive a project (or use an already-archived project)
+2. Open the project selector
+3. Expected result: archived project does NOT appear in the active list
+4. Expected: the project is accessible via an "Archived" filter if needed
+- [ ] Pass  [ ] Fail
+
+### Post-test checklist
+- [ ] Project selector shows all active projects
+- [ ] Selection updates page context
+- [ ] Context persists across module navigation
+- [ ] Archived projects excluded from active selector
+- [ ] Update `test_status` in frontmatter
+- [ ] Add entry to SOP_CHANGELOG.md
