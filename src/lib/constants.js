@@ -57,25 +57,64 @@ export const CRM_CONTACT_TYPES = {
   OTHER:       "other",
 };
 
-export const CRM_WARMTH = {
-  COLD:        "cold",
-  WARM:        "warm",
-  HOT:         "hot",
-  NURTURE:     "nurture",
-  PAST_CLIENT: "past_client",
-  LOST:        "lost",
+/** CRM contact lifecycle status — replaces the old CRM_WARMTH enum */
+export const CRM_STATUS = {
+  NEW:          "new",
+  ACTIVE:       "active",
+  FUTURE:       "future",
+  CLIENT:       "client",
+  PAST_CLIENT:  "past_client",
+  LOST:         "lost",
+};
+
+export const CRM_STATUS_LABELS = {
+  new:          "New",
+  active:       "Active",
+  future:       "Future",
+  client:       "Client",
+  past_client:  "Past Client",
+  lost:         "Lost",
+};
+
+export const CRM_NEXT_ACTION_TYPES = {
+  CALL:    "call",
+  EMAIL:   "email",
+  MEETING: "meeting",
+  DM:      "dm",
+  NONE:    "none",
+  WAITING: "waiting",
 };
 
 export const CRM_INTERACTION_TYPES = {
-  CALL:          "call",
-  EMAIL:         "email",
-  SMS:           "sms",
-  DM:            "dm",
-  MEETING:       "meeting",
-  SITE_VISIT:    "site_visit",
-  NOTE:          "note",
-  FOLLOW_UP:     "follow_up",
-  CONTENT_SENT:  "content_sent",
+  CALL:           "call",
+  EMAIL:          "email",
+  SMS:            "sms",
+  DM:             "dm",
+  MEETING:        "meeting",
+  SITE_VISIT:     "site_visit",
+  NOTE:           "note",
+  FOLLOW_UP:      "follow_up",
+  CONTENT_SENT:   "content_sent",
+  EMAIL_CAMPAIGN: "email_campaign",
+};
+
+export const CRM_CONSENT_SOURCES = {
+  WEBSITE_FORM:    "website_form",
+  IN_PERSON:       "in_person",
+  PHONE:           "phone",
+  REFERRAL:        "referral",
+  PAST_CLIENT:     "past_client",
+  EVENT:           "event",
+  MANUALLY_ADDED:  "manually_added",
+};
+
+export const EMAIL_SEND_STATUSES = {
+  DRAFT:     "draft",
+  SCHEDULED: "scheduled",
+  SENDING:   "sending",
+  SENT:      "sent",
+  FAILED:    "failed",
+  CANCELLED: "cancelled",
 };
 
 // ─── Finance / Documents ──────────────────────────────────────────────────────
@@ -209,6 +248,76 @@ export const LEAD_SOURCES = {
   WORD_OF_MOUTH: "word_of_mouth",
   PAST_CLIENT:   "past_client",
   OTHER:         "other",
+};
+
+// ─── Marketing Intelligence ───────────────────────────────────────────────────
+
+export const MARKETING_PLATFORMS = {
+  INSTAGRAM: "instagram",
+  FACEBOOK:  "facebook",
+  LINKEDIN:  "linkedin",
+};
+
+export const ATTRIBUTION_SOURCES = {
+  ORGANIC:   "organic",
+  INSTAGRAM: "instagram",
+  FACEBOOK:  "facebook",
+  LINKEDIN:  "linkedin",
+  REFERRAL:  "referral",
+  DIRECT:    "direct",
+  EMAIL:     "email",
+  PAID:      "paid",
+};
+
+export const ATTRIBUTION_EVENTS = {
+  PAGE_VIEW:        "page_view",
+  CONTENT_VIEW:     "content_view",
+  VIDEO_PLAY:       "video_play",
+  ENQUIRY_START:    "enquiry_start",
+  ENQUIRY_SUBMIT:   "enquiry_submit",
+  CALL_CLICK:       "call_click",
+  EMAIL_CLICK:      "email_click",
+};
+
+export const CONTENT_ITEM_STATUSES = {
+  DRAFT:      "draft",
+  IN_REVIEW:  "in_review",
+  APPROVED:   "approved",
+  PUBLISHED:  "published",
+};
+
+export const KEYWORD_PRIORITIES = {
+  HIGH:   "high",
+  MEDIUM: "medium",
+  LOW:    "low",
+  WATCH:  "watch",
+};
+
+export const KEYWORD_INTENTS = {
+  COMMERCIAL:    "commercial",
+  INFORMATIONAL: "informational",
+  NAVIGATIONAL:  "navigational",
+};
+
+export const SEO_POTENTIALS = {
+  HIGH:   "high",
+  MEDIUM: "medium",
+  LOW:    "low",
+  NONE:   "none",
+};
+
+export const WEBSITE_PAGE_STATUSES = {
+  PLANNED:      "planned",
+  LIVE:         "live",
+  NEEDS_UPDATE: "needs_update",
+  ARCHIVED:     "archived",
+};
+
+export const QUESTION_STATUSES = {
+  QUEUED:      "queued",
+  IN_PROGRESS: "in_progress",
+  PUBLISHED:   "published",
+  DISMISSED:   "dismissed",
 };
 
 // ─── Finance ─────────────────────────────────────────────────────────────────

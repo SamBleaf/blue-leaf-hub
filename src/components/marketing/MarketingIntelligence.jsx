@@ -39,7 +39,7 @@ function AiSummary({ summary }) {
       <div className="flex items-start gap-3">
         <span className="text-blue-500 text-lg mt-0.5 shrink-0">✦</span>
         <div>
-          <p className="text-xs font-semibold text-blue-700 mb-1">This Week's Intelligence Summary</p>
+          <p className="text-xs font-semibold text-blue-700 mb-1">This Week&apos;s Intelligence Summary</p>
           <p className="text-sm text-blue-900 leading-relaxed">{summary}</p>
         </div>
       </div>

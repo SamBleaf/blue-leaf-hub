@@ -102,6 +102,7 @@ const MARKETING_MODULES = [
   { to: "/marketing/library",  label: "Library" },
   { to: "/marketing/campaigns",label: "Campaigns" },
   { to: "/marketing/media",    label: "Media" },
+  { to: "/marketing/lists",    label: "Lists" },
 ];
 
 const WORKFORCE_MODULES = [
@@ -110,7 +111,7 @@ const WORKFORCE_MODULES = [
 ];
 
 const BASE_DEPARTMENTS = [
-  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",      icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }, { to: "/sales/reference-projects", label: "Reference Projects" }], defaultTo: "/sales" },
+  { id: "sales_marketing",    label: "Sales",      tabShort: "Sales",      icon: "sales",      comingSoon: false, modules: [{ to: "/sales", label: "Pipeline" }, { to: "/sales/dashboard", label: "Relationships" }, { to: "/sales/contacts", label: "Contacts" }, { to: "/sales/reference-projects", label: "Reference Projects" }], defaultTo: "/sales" },
   { id: "tender",             label: "Tendering",  tabShort: "Tender",     icon: "tender",     comingSoon: false, modules: TENDER_MODULES,    defaultTo: "/tender-manager/rfq-engine" },
   { id: "operations_manager", label: "Operations", tabShort: "Ops",        icon: "operations", comingSoon: false, modules: null /* computed */ },
   { id: "workforce_manager",  label: "Workforce",  tabShort: "Workforce",  icon: "workforce",  comingSoon: false, modules: WORKFORCE_MODULES,  defaultTo: "/workforce" },

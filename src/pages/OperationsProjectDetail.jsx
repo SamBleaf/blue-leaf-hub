@@ -111,6 +111,7 @@ export default function OperationsProjectDetail() {
   const [siteTaskFilter, setSiteTaskFilter] = useState("All");
   const [newTaskForm, setNewTaskForm] = useState(null); // null | {}
   const [newTaskBusy, setNewTaskBusy] = useState(false);
+  const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [employees, setEmployees] = useState([]);
   const siteTaskFormRef = useRef(null);
 
@@ -215,6 +216,14 @@ export default function OperationsProjectDetail() {
       setNewTaskForm(null);
       loadSiteTasks();
     } catch (e) { setError(e?.message || String(e)); } finally { setNewTaskBusy(false); }
+  }
+
+  async function handleQuickAddTask(e) {
+    if (e.key !== "Enter") return;
+    const title = quickTaskTitle.trim();
+    if (!title || newTaskBusy) return;
+    setQuickTaskTitle("");
+    await createSiteTask({ title, priority: "normal", category: "general" });
   }
 
   async function completeSiteTask(taskId) {
@@ -1052,6 +1061,17 @@ export default function OperationsProjectDetail() {
                 + Add task
               </button>
             </div>
+
+            {/* Quick-add bar — always visible */}
+            <input
+              type="text"
+              placeholder="Add a task… (press Enter)"
+              value={quickTaskTitle}
+              onChange={e => setQuickTaskTitle(e.target.value)}
+              onKeyDown={handleQuickAddTask}
+              disabled={newTaskBusy}
+              className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+            />
 
             {/* New task form */}
             {newTaskForm && (

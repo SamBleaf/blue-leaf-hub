@@ -29,6 +29,7 @@ import FeeProposalList from "./pages/FeeProposalList.jsx";
 import FeeProposalWizard from "./pages/FeeProposalWizard.jsx";
 import FeeProposalTemplateGuide from "./pages/FeeProposalTemplateGuide.jsx";
 import SalesPipeline from "./pages/SalesPipeline.jsx";
+import SalesManager from "./pages/SalesManager.jsx";
 import LeadDetail from "./pages/LeadDetail.jsx";
 import ReferenceProjects from "./pages/ReferenceProjects.jsx";
 import FinanceManager from "./pages/FinanceManager.jsx";
@@ -119,6 +120,14 @@ export default function App() {
                 <Route
                   path="/sales"
                   element={<RoleRoute element={<SalesPipeline />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/sales/dashboard"
+                  element={<RoleRoute element={<SalesManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/sales/contacts"
+                  element={<RoleRoute element={<SalesManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/sales/reference-projects"
