@@ -1107,9 +1107,10 @@ export function registerFinanceCCRoutes(app) {
 
   // ── Client-facing progress claim PDF ─────────────────────────────────────────
   // Mirrors BlueLeaf_Client_Progress_Claim.docx structure.
-  // Sam to add branding/logo — swap pdfkit for docxtemplater+LibreOffice when styled template ready.
   async function generateClientProgressClaimPdf(t) {
     const PDFDocument = require("pdfkit");
+    const path = require("path");
+    const logoPath = path.resolve("public/brand/logo-black.png");
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50, size: "A4" });
       const chunks = [];
@@ -1123,18 +1124,24 @@ export function registerFinanceCCRoutes(app) {
       const CW  = W - M * 2; // content width
 
       // ── Header ─────────────────────────────────────────────────────
-      doc.rect(0, 0, W, 72).fill(PRI);
-      doc.fillColor("white")
-        .fontSize(20).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 18)
-        .fontSize(10).font("Helvetica").text("Client Progress Claim", M, 46);
-      // Claim number top-right
-      doc.fontSize(10).font("Helvetica-Bold")
-        .text(`Claim No. ${t.claim_number}`, M, 20, { align: "right", width: CW })
-        .fontSize(9).font("Helvetica")
-        .text(`Date: ${t.claim_date_short}`, M, 35, { align: "right", width: CW })
-        .text(`Due: ${t.due_date_short}`, M, 49, { align: "right", width: CW });
+      // Blue top accent bar
+      doc.rect(0, 0, W, 4).fill(PRI);
+      // Logo (left) — logo-black.png is the full Blue Leaf Building brand mark
+      try { doc.image(logoPath, M, 10, { width: 190 }); } catch (_) {
+        doc.fillColor(PRI).fontSize(18).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 18);
+      }
+      // Document type + metadata (right)
+      doc.fillColor(PRI).fontSize(13).font("Helvetica-Bold")
+        .text("PROGRESS CLAIM", M, 14, { align: "right", width: CW });
+      doc.fillColor("#000").fontSize(10).font("Helvetica-Bold")
+        .text(`No. ${t.claim_number}`, M, 32, { align: "right", width: CW });
+      doc.fillColor("#555").fontSize(9).font("Helvetica")
+        .text(`Date: ${t.claim_date_short}`, M, 46, { align: "right", width: CW })
+        .text(`Due: ${t.due_date_short}`, M, 58, { align: "right", width: CW });
+      // Blue bottom accent bar
+      doc.rect(0, 84, W, 2).fill(PRI);
 
-      let y = 90;
+      let y = 96;
 
       // ── Project Overview block ──────────────────────────────────────
       pdfSectionHeader(doc, "Project Overview", M, y, CW, PRI);
@@ -1239,6 +1246,8 @@ export function registerFinanceCCRoutes(app) {
   // Mirrors BlueLeaf_Internal_Progress_Claim.docx structure.
   async function generateInternalProgressClaimPdf(t) {
     const PDFDocument = require("pdfkit");
+    const path = require("path");
+    const logoPath = path.resolve("public/brand/logo-black.png");
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50, size: "A4" });
       const chunks = [];
@@ -1253,17 +1262,25 @@ export function registerFinanceCCRoutes(app) {
       const CW  = W - M * 2;
 
       // ── Header ─────────────────────────────────────────────────────
-      doc.rect(0, 0, W, 72).fill(PRI);
-      doc.fillColor("white")
-        .fontSize(18).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 16)
-        .fontSize(9).font("Helvetica").text("Internal Progress Claim  ·  APB / Financial Intelligence", M, 42);
-      doc.fontSize(10).font("Helvetica-Bold")
-        .text(`Claim No. ${t.claim_number}`, M, 20, { align: "right", width: CW });
-      doc.fontSize(9).font("Helvetica")
-        .text(`Date: ${t.claim_date_short}`, M, 35, { align: "right", width: CW })
-        .text(`INTERNAL — DO NOT DISTRIBUTE`, M, 49, { align: "right", width: CW });
+      // Blue top accent bar
+      doc.rect(0, 0, W, 4).fill(PRI);
+      // Logo (left)
+      try { doc.image(logoPath, M, 10, { width: 190 }); } catch (_) {
+        doc.fillColor(PRI).fontSize(18).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 18);
+      }
+      // Document type + metadata (right)
+      doc.fillColor(PRI).fontSize(13).font("Helvetica-Bold")
+        .text("PROGRESS CLAIM", M, 14, { align: "right", width: CW });
+      doc.fillColor("#000").fontSize(10).font("Helvetica-Bold")
+        .text(`No. ${t.claim_number}`, M, 32, { align: "right", width: CW });
+      doc.fillColor("#555").fontSize(9).font("Helvetica")
+        .text(`Date: ${t.claim_date_short}`, M, 46, { align: "right", width: CW });
+      doc.fillColor(RED).fontSize(8).font("Helvetica-Bold")
+        .text("INTERNAL — DO NOT DISTRIBUTE", M, 58, { align: "right", width: CW });
+      // Blue bottom accent bar
+      doc.rect(0, 84, W, 2).fill(PRI);
 
-      let y = 90;
+      let y = 96;
 
       // ── Project Information ─────────────────────────────────────────
       pdfSectionHeader(doc, "Project Information", M, y, CW, PRI);
@@ -1736,9 +1753,11 @@ export function registerFinanceCCRoutes(app) {
     res.json({ ok: true, variation: data });
   });
 
-  // ── Variation PDF (pdfkit placeholder — Sam's template pending) ───────────────
+  // ── Variation PDF ─────────────────────────────────────────────────────────────
   async function generateVariationPdf(t) {
     const PDFDocument = require("pdfkit");
+    const path = require("path");
+    const logoPath = path.resolve("public/brand/logo-black.png");
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50, size: "A4" });
       const chunks = [];
@@ -1751,17 +1770,28 @@ export function registerFinanceCCRoutes(app) {
       const M   = 50;
       const CW  = W - M * 2;
 
-      // Header
-      doc.rect(0, 0, W, 72).fill(PRI);
-      doc.fillColor("white")
-        .fontSize(20).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 18)
-        .fontSize(10).font("Helvetica").text("Variation", M, 46);
-      doc.fontSize(10).font("Helvetica-Bold")
-        .text(`Variation No. ${t.variation_number}`, M, 20, { align: "right", width: CW });
-      doc.fontSize(9).font("Helvetica")
-        .text(`Date: ${t.variation_date}`, M, 35, { align: "right", width: CW });
+      // ── Header ─────────────────────────────────────────────────────
+      // Blue top accent bar
+      doc.rect(0, 0, W, 4).fill(PRI);
+      // Logo (left)
+      try { doc.image(logoPath, M, 10, { width: 190 }); } catch (_) {
+        doc.fillColor(PRI).fontSize(18).font("Helvetica-Bold").text("BLUE LEAF BUILDING", M, 18);
+      }
+      // Document type + metadata (right)
+      doc.fillColor(PRI).fontSize(13).font("Helvetica-Bold")
+        .text("VARIATION", M, 14, { align: "right", width: CW });
+      doc.fillColor("#000").fontSize(10).font("Helvetica-Bold")
+        .text(`No. ${t.variation_number}`, M, 32, { align: "right", width: CW });
+      doc.fillColor("#555").fontSize(9).font("Helvetica")
+        .text(`Date: ${t.variation_date}`, M, 46, { align: "right", width: CW });
+      if (t.variation_reference) {
+        doc.fillColor("#555").fontSize(9).font("Helvetica")
+          .text(`Ref: ${t.variation_reference}`, M, 58, { align: "right", width: CW });
+      }
+      // Blue bottom accent bar
+      doc.rect(0, 84, W, 2).fill(PRI);
 
-      let y = 90;
+      let y = 96;
 
       // Project block
       pdfSectionHeader(doc, "Project Details", M, y, CW, PRI); y += 22;

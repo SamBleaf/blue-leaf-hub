@@ -4,6 +4,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## SOP Requirement (Law — applies to every module build)
+
+Every module build must include SOPs. This is not a post-build task — it is part of the build.
+
+**Rule:** A module is not considered done until all SOPs are written and each SOP contains a complete Section 14 (Troubleshoot Agent Test Script).
+
+**When building a new feature or module:**
+1. Write all SOPs for the module during the build — alongside the code, not after
+2. Place each SOP in the correct folder under `docs/sops/` using the existing folder structure
+3. Follow the full template from `docs/sops/SOP_MAINTENANCE.md` — all 14 sections required
+4. Section 14 must contain at minimum TC-01 through TC-05 plus at least one feature-specific test case
+5. Add every new SOP to `docs/sops/SOP_INDEX.md` with `test_status: untested`
+6. Add an entry to `docs/sops/SOP_CHANGELOG.md`
+
+**Two purposes every SOP must serve:**
+- **Staff training:** Plain English, numbered steps, written for someone who has never used the software
+- **Troubleshoot agent testing:** Section 14 is a structured test script the troubleshoot agent runs to verify every feature works and catch bugs
+
+**Trigger phrase:** "Run SOP audit" → scan app structure, compare against SOP_INDEX.md, write missing SOPs, update changed ones.
+
+**Existing SOP folders:**
+```
+docs/sops/
+  00_getting_started / 01_global_navigation / 02_sales / 03_tendering
+  04_rfq_engine / 05_operations / 06_scheduling / 07_site_diary / 08_whs
+  09_finance / 10_workforce / 11_client_portal / 12_admin_settings
+  13_subcontractors / 14_cost_intelligence
+```
+New modules: create a new numbered folder (e.g. `15_financial_command_centre/`).
+
+---
+
 ## Standards (Law)
 
 **Read this section before touching any file. These rules apply to ALL code — new and modified.**
