@@ -1,10 +1,10 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-05-30
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
-test_status: static_fail
+test_status: static_pass
 ---
 
 # SOP 11-04: Upload Progress Photos to the Portal
@@ -41,7 +41,8 @@ Uploads one or more photos to the project's portal. The photos appear in the cli
 7. Photos appear in the portal immediately
 
 ## 6. What happens after
-- Photos are stored in Supabase Storage
+- Photos are stored in Dropbox under the project's portal folder
+- A record is created in the database with the Dropbox storage path and a public URL for client access
 - They appear in the client's timeline ordered by upload date
 - If linked to a weekly update, they also appear within that update card
 
@@ -66,9 +67,25 @@ Uploads one or more photos to the project's portal. The photos appear in the cli
 - [View the portal as the client](portal_view_as_client.md) — SOP 11-02
 
 ## 10. Automation notes
-- API: `POST /api/portal/admin/photos/upload` — multipart/form-data with fields: `projectId`, `file` (one or more), `caption` (optional), `updateId` (optional)
-- DB effects: inserts rows into portal photos table with `project_id`, `file_url`, `caption`, `update_id` (if linked), `uploaded_at`
-- Files stored in Supabase Storage under `portal-photos/[projectId]/[YYYY-MM-DD]-[filename]`
+- API: `POST /api/portal/admin/photos/upload` — **JSON body** (not multipart/form-data):
+  ```
+  {
+    projectId:      string (required),
+    fileName:       string (required) — original filename including extension,
+    contentBase64:  string (required) — the photo file encoded as base64,
+    caption?:       string,
+    updateId?:      string — links the photo to a weekly update,
+    milestoneKey?:  string — links to a milestone,
+    isHero?:        boolean,
+    takenAt?:       ISO date string,
+    sortOrder?:     number
+  }
+  ```
+  - Each photo is a separate API call — upload multiple photos by calling the endpoint once per file
+  - Response: `{ ok: true, photo: { id, projectId, storagePath, publicUrl, caption, ... } }`
+- Storage backend: **Dropbox** — photos are uploaded to the project's Dropbox folder, not Supabase Storage
+- DB effects: inserts row into portal photos table with `project_id`, `storage_path` (Dropbox path), `public_url` (served via `/api/portal/media/:photoId`), `caption`, `update_id`, `taken_at`
+- Note: there is no `file_url` column — use `storage_path` (Dropbox) and `public_url` (served endpoint)
 
 ## 11. Owner of the process
 Admin  
@@ -87,33 +104,36 @@ Next review: 2026-11-30
 
 **TC-01 — Upload a single photo (happy path)**
 1. Portal Admin → project → Photos → + Upload Photos
-2. Select one JPEG, leave caption blank, click Upload
-3. Expected: success message
-4. Expected DB: new row in portal photos table with correct `project_id` and `file_url`
+2. Read a JPEG file, base64-encode it, send as JSON:
+   `{ projectId, fileName: "slab-pour.jpg", contentBase64: "<base64 string>" }`
+3. Expected: `{ ok: true, photo: { id, projectId, storagePath, publicUrl } }`
+4. Expected DB: new row in portal photos table with correct `project_id` and `storage_path` set (not null)
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Upload with caption**
-1. Upload a photo with caption "Slab pour completed"
-2. Expected DB: `caption = 'Slab pour completed'` on the new row
-3. Expected: caption visible in client portal timeline
+1. Upload a photo with `caption: "Slab pour completed"` in the JSON body
+2. Expected: `{ ok: true, photo: { ... caption: "Slab pour completed" } }`
+3. Expected DB: `caption = 'Slab pour completed'` on the new row
+4. Expected: caption visible in client portal timeline
 - [ ] Pass  [ ] Fail
 
-**TC-03 — Upload multiple photos at once**
-1. Select 3 photos and upload together
-2. Expected: all 3 photos appear in the Photos tab
-3. Expected DB: 3 new rows inserted with the same `uploaded_at` timestamp (within 1 second)
+**TC-03 — Upload multiple photos (sequential calls)**
+1. Make 3 separate `POST /api/portal/admin/photos/upload` calls, one per photo
+2. Expected: all 3 calls succeed and all 3 photos appear in the Photos tab
+3. Expected DB: 3 new rows each with distinct `storage_path`
 - [ ] Pass  [ ] Fail
 
 **TC-04 — Photo linked to weekly update**
-1. Create a weekly update first (SOP 11-03)
-2. Upload a photo and link it to that update via the `updateId` field
+1. Create a weekly update first (SOP 11-03) — note its ID
+2. Upload a photo with `updateId: <update_id>` in the JSON body
 3. Expected DB: `update_id` set on the photo row
 4. Expected: photo appears within the update card in the client portal
 - [ ] Pass  [ ] Fail
 
-**TC-05 — Missing projectId rejected**
-1. Call `POST /api/portal/admin/photos/upload` with no `projectId`
-2. Expected: HTTP 400 with plain English error
+**TC-05 — Missing required fields rejected**
+1. Call `POST /api/portal/admin/photos/upload` with no `projectId` — Expected: HTTP 400
+2. Call with no `fileName` — Expected: HTTP 400
+3. Call with no `contentBase64` — Expected: HTTP 400
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Photos appear in client portal timeline**

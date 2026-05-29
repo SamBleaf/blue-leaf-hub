@@ -1,10 +1,10 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-05-30
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
-test_status: static_fail
+test_status: static_pass
 ---
 
 # SOP 11-07: Send a Message to the Client
@@ -67,11 +67,19 @@ Sends a message from the builder to the client through the portal messaging syst
 - [Client guide — using your portal](portal_client_guide.md) — SOP 11-09
 
 ## 10. Automation notes
-- API (admin sends to client): `POST /api/portal/admin/builder-messages` — body: `{ projectId, message }`
-- API (client sends to builder): `POST /api/portal/:token/conversations` — body: `{ message }`
+- API (admin sends to client): `POST /api/portal/admin/builder-messages`
+  - Body: `{ projectId, body, senderName? }` — the message text goes in **`body`** (not `message`)
+  - `body` is required — omitting it returns HTTP 400 "projectId, body required"
+  - Max length: 2000 characters
+  - Response: `{ ok: true, message: { id, projectId, body, sender, sentAt, ... } }`
+- API (client sends to builder): `POST /api/portal/:token/conversations`
+  - Body: `{ body }` — the client's reply text goes in **`body`** (not `message`)
+  - `body` is required — omitting it returns HTTP 400 "Message body required (max 2000 characters)."
+  - Response: `{ ok: true, message: { ... } }`
 - API (admin reads conversation): `GET /api/portal/admin/:projectId/summary` (messages included) or via portal summary
 - API (client reads conversation): `GET /api/portal/:token/conversations`
-- DB effects: inserts message row with `project_id`, `sender_type` ('builder' or 'client'), `message`, `sent_at`
+- DB effects: inserts message row with `project_id`, `sender` ('builder' or 'client'), `body`, `sent_at`
+- Note: DB column is `sender` (not `sender_type`)
 
 ## 11. Owner of the process
 Admin  
@@ -90,19 +98,22 @@ Next review: 2026-11-30
 **TC-01 — Admin sends a message (happy path)**
 1. Portal Admin → project → Messages → type "The frame inspection is booked for Thursday at 10am." → Send
 2. Expected: message appears in the messages list immediately
-3. Expected API: `POST /api/portal/admin/builder-messages` returns `{ ok: true }`
-4. Expected DB: new row in messages table with `sender_type = 'builder'`, correct `project_id`
+3. Expected API: `POST /api/portal/admin/builder-messages` with body `{ projectId, body: "The frame inspection..." }`
+   - Note: message text goes in `body` field (not `message`)
+4. Expected response: `{ ok: true, message: { id, projectId, body, sender: 'builder', sentAt, ... } }`
+5. Expected DB: new row in messages table with `sender = 'builder'` (not `sender_type`), correct `project_id`
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Client sees the message**
 1. After TC-01, call `GET /api/portal/:token/conversations`
-2. Expected: returns array including the new message with `senderType: 'builder'` and the message text
+2. Expected: returns array including the new message with `sender: 'builder'` and the body text
 - [ ] Pass  [ ] Fail
 
 **TC-03 — Client sends a reply**
-1. Call `POST /api/portal/:token/conversations` with `{ message: 'Thanks, we will be there.' }`
-2. Expected: HTTP 200
-3. Expected DB: new row with `sender_type = 'client'`
+1. Call `POST /api/portal/:token/conversations` with `{ body: 'Thanks, we will be there.' }`
+   - Note: client message text also goes in `body` field (not `message`)
+2. Expected: HTTP 200, `{ ok: true, message: { ... } }`
+3. Expected DB: new row with `sender = 'client'`
 - [ ] Pass  [ ] Fail
 
 **TC-04 — Admin sees client reply**
@@ -110,9 +121,11 @@ Next review: 2026-11-30
 2. Expected: the client's reply appears in the conversation thread
 - [ ] Pass  [ ] Fail
 
-**TC-05 — Missing message body rejected**
-1. Call `POST /api/portal/admin/builder-messages` with no message field
-2. Expected: HTTP 400 with plain English error
+**TC-05 — Missing body field rejected**
+1. Call `POST /api/portal/admin/builder-messages` with no `body` field (or empty string)
+2. Expected: HTTP 400 "projectId, body required"
+3. Call `POST /api/portal/:token/conversations` with no `body` field
+4. Expected: HTTP 400 "Message body required (max 2000 characters)."
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Messages scoped to correct project**

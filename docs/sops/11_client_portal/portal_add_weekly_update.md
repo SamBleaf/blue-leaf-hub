@@ -1,10 +1,10 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-05-30
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
-test_status: static_fail
+test_status: static_pass
 ---
 
 # SOP 11-03: Add a Weekly Update
@@ -35,8 +35,11 @@ Creates a weekly update post that appears on the client's portal home page and i
 1. Go to **Portal Admin** → select the project → click the **Updates** tab
 2. Click **+ New Update**
 3. Fill in:
-   - **Title** — e.g. "Week 8 Update — Frame Complete"
-   - **Summary** — plain English description of progress, 2–5 sentences. What was completed? What is coming next week? Any notable items?
+   - **Week of** (required) — the week this update covers, e.g. "2026-05-26" (Monday of the week, ISO date)
+   - **Headline** (required) — a short summary line, e.g. "Frame Complete — Roof Sheeting Starting"
+   - **Body** (required) — plain English description of progress, 2–5 sentences. What was completed? What is coming next week? Any notable items?
+   - **Author name** (optional) — defaults to your logged-in name
+   - **Video URL** (optional) — a link to a site video for this week
 4. Optionally attach photos (or upload them separately via SOP 11-04)
 5. Click **Publish**
 6. The update appears immediately in the client's portal
@@ -60,7 +63,8 @@ Creates a weekly update post that appears on the client's portal home page and i
 |---------|----------|
 | Update published but not visible to client | Refresh the portal preview (SOP 11-02); check the update was saved with `published = true` |
 | Cannot find the Updates tab | Ensure the portal is enabled for the project — see SOP 11-01 |
-| Title or summary cleared after saving | Check for network timeout — re-enter and save again |
+| Headline or body cleared after saving | Check for network timeout — re-enter and save again |
+| "weekOf required" error | The week-of date is required — enter the Monday date for the week being reported (e.g. "2026-05-26") |
 
 ## 9. Related SOPs
 - [Enable the client portal for a project](portal_enable_for_client.md) — SOP 11-01
@@ -68,9 +72,13 @@ Creates a weekly update post that appears on the client's portal home page and i
 - [View the portal as the client](portal_view_as_client.md) — SOP 11-02
 
 ## 10. Automation notes
-- API: `POST /api/portal/admin/updates` — body: `{ projectId, title, summary, photos?: [] }`
-- API: `PATCH /api/portal/admin/updates/:updateId` — edit an existing update
-- DB effects: inserts row into portal updates table with `project_id`, `title`, `summary`, `published_at`, `created_by`
+- API (create): `POST /api/portal/admin/updates` — body: `{ projectId, weekOf, headline, body, authorName?, published?, videoUrl? }`
+  - Required: `projectId`, `weekOf`, `headline`, `body` — omitting any returns HTTP 400
+  - Response: `{ ok: true, update: { id, projectId, weekOf, headline, body, authorName, published, videoUrl, createdAt } }`
+- API (edit): `PATCH /api/portal/admin/updates/:updateId` — body: `{ headline?, body?, authorName?, published?, videoUrl? }`
+  - Response: `{ ok: true, update: { ...updatedFields } }`
+- DB effects: inserts/updates row in portal updates table with columns `project_id`, `week_of`, `headline`, `body`, `author_name`, `published`, `video_url`
+- Note: there is no `title` or `summary` field — the headline is the title and body is the content
 
 ## 11. Owner of the process
 Admin  
@@ -88,11 +96,14 @@ Next review: 2026-11-30
 
 **TC-01 — Create a weekly update (happy path)**
 1. Portal Admin → project → Updates → + New Update
-2. Enter title "Week 1 Update — Site Prep" and a summary paragraph
+2. Enter:
+   - weekOf = this Monday's date (e.g. "2026-05-26")
+   - headline = "Week 1 Update — Site Prep"
+   - body = "Excavation completed. Footings poured. Slab booked for next Thursday."
 3. Click Publish
 4. Expected: success confirmation
-5. Expected API: `POST /api/portal/admin/updates` returns `{ ok: true, update: { id, title, summary, publishedAt } }`
-6. Expected DB: new row in portal updates table with correct `project_id` and `published_at` set
+5. Expected API: `POST /api/portal/admin/updates` returns `{ ok: true, update: { id, projectId, weekOf, headline, body, published, ... } }`
+6. Expected DB: new row in portal updates table with `project_id`, `week_of`, `headline`, `body` all set correctly
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Update visible in client portal**
@@ -101,15 +112,16 @@ Next review: 2026-11-30
 - [ ] Pass  [ ] Fail
 
 **TC-03 — Edit an existing update**
-1. Find the update from TC-01 → click Edit → change the summary
+1. Find the update from TC-01 → click Edit → change the body text
 2. Click Save
-3. Expected API: `PATCH /api/portal/admin/updates/:updateId` returns `{ ok: true }`
-4. Expected DB: `summary` field updated on the row
+3. Expected API: `PATCH /api/portal/admin/updates/:updateId` returns `{ ok: true, update: { ...updatedFields } }`
+4. Expected DB: `body` field updated on the row
 - [ ] Pass  [ ] Fail
 
-**TC-04 — Missing title rejected**
-1. Attempt to publish an update with no title
-2. Expected: HTTP 400 with plain English error
+**TC-04 — Missing required fields rejected**
+1. Attempt to publish an update with no headline (leave blank)
+2. Expected: HTTP 400 "projectId, weekOf, headline, body required" (or equivalent plain English)
+3. Also test missing weekOf — same expected result
 - [ ] Pass  [ ] Fail
 
 **TC-05 — Multiple updates for same project stack chronologically**

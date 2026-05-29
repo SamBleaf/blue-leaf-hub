@@ -1,10 +1,10 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-05-30
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
-test_status: static_fail
+test_status: static_pass
 ---
 
 # SOP 11-05: Add a Client Decision Item
@@ -35,9 +35,11 @@ Creates a decision item in the client's portal. The client sees the question, an
 1. Go to **Portal Admin** → select the project → click the **Decisions** tab
 2. Click **+ Add Decision**
 3. Fill in:
-   - **Title** — e.g. "Exterior Paint Colour Selection"
+   - **Type** (required) — the category of decision: `selection` (client chooses a product/colour), `approval` (client approves a proposed action), or `variation` (scope change requiring sign-off)
+   - **Title** (required) — e.g. "Exterior Paint Colour Selection"
    - **Description** — explain the options and what you need from the client. Include any relevant details like supplier names, colour codes, or attached documents
    - **Due date** (optional but recommended)
+   - **Urgency** (optional) — flag if this is blocking site work
 4. Click **Save**
 5. The client can now see the decision in their portal and respond
 
@@ -63,6 +65,7 @@ Creates a decision item in the client's portal. The client sees the question, an
 | Client cannot see the decision | Confirm the portal is enabled and the client has the correct link; preview the portal yourself (SOP 11-02) |
 | Decision response not updating in admin view | Refresh the Decisions tab; if still not updating, check the client is using the correct portal URL |
 | Decision title appears garbled | May be a character encoding issue — avoid special characters in the title |
+| "type required" error | The `type` field is required — choose `selection`, `approval`, or `variation` |
 
 ## 9. Related SOPs
 - [Enable the client portal for a project](portal_enable_for_client.md) — SOP 11-01
@@ -70,9 +73,18 @@ Creates a decision item in the client's portal. The client sees the question, an
 - [Client guide — using your portal](portal_client_guide.md) — SOP 11-09
 
 ## 10. Automation notes
-- API (admin adds decision): `POST /api/portal/admin/decisions` — body: `{ projectId, title, description, dueDate? }`
-- API (client responds): `POST /api/portal/:token/decisions/:decisionId/respond` — body: `{ response: 'approved' | 'rejected', note? }`
-- DB effects: inserts into portal decisions table with `project_id`, `title`, `description`, `due_date`, `status = 'pending'`; client response updates `status`, `client_response`, `responded_at`
+- API (admin creates decision): `POST /api/portal/admin/decisions`
+  - Body: `{ projectId, type, title, description?, dueDate?, urgency?, costDelta?, scheduleDelta?, options? }`
+  - Required: `projectId`, `type`, `title` — omitting any returns HTTP 400 "projectId, type, title required"
+  - `type` values: `"selection"` | `"approval"` | `"variation"` | `"info"`
+  - Response: `{ ok: true, decision: { id, projectId, type, title, description, status, ... } }`
+- API (client responds): `POST /api/portal/:token/decisions/:decisionId/respond`
+  - Body: `{ action: 'approve' | 'decline' | 'info', clientNote? }`
+  - Note: field is `action` (not `response`); values are `'approve'`/`'decline'` (not `'approved'`/`'rejected'`)
+  - `clientNote` (not `note`) stores the client's reason
+  - Status after approve → `'approved'`; after decline → `'declined'` (not `'rejected'`)
+  - Response: `{ ok: true }`
+- DB effects: inserts into `portal_decisions` table with `project_id`, `type`, `title`, `description`, `due_date`, `status = 'pending'`; client response updates `status`, `client_note`, `responded_at`
 - Admin reads decisions via: `GET /api/portal/admin/:projectId/summary` (decisions included in summary)
 - Client reads decisions via: `GET /api/portal/:token/decisions`
 
@@ -92,10 +104,15 @@ Next review: 2026-11-30
 
 **TC-01 — Add a decision item (happy path)**
 1. Portal Admin → project → Decisions → + Add Decision
-2. Enter title "Tile Selection — Ensuite" and a description with options and due date
+2. Enter:
+   - type = "selection"
+   - title = "Tile Selection — Ensuite"
+   - description = "Choose between Option A (marble look) and Option B (slate grey)"
+   - dueDate = 2 weeks from today
 3. Click Save
 4. Expected: decision appears in Decisions tab with status "Pending"
-5. Expected DB: new row in portal decisions table with `status = 'pending'`, `project_id` correct
+5. Expected API: `POST /api/portal/admin/decisions` returns `{ ok: true, decision: { id, type, title, status: 'pending', ... } }`
+6. Expected DB: new row in `portal_decisions` with `type = 'selection'`, `status = 'pending'`, `project_id` correct
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Client sees the decision**
@@ -104,19 +121,22 @@ Next review: 2026-11-30
 - [ ] Pass  [ ] Fail
 
 **TC-03 — Client approves a decision**
-1. Call `POST /api/portal/:token/decisions/:decisionId/respond` with `{ response: 'approved' }`
+1. Call `POST /api/portal/:token/decisions/:decisionId/respond` with `{ action: 'approve' }`
+   - Note: field is `action` (not `response`), value is `'approve'` (not `'approved'`)
 2. Expected: HTTP 200 with `{ ok: true }`
 3. Expected DB: `status = 'approved'`, `responded_at` set on the decision row
 - [ ] Pass  [ ] Fail
 
-**TC-04 — Client rejects a decision with a note**
-1. Add a second decision, then call respond with `{ response: 'rejected', note: 'Would prefer Option B' }`
-2. Expected: `status = 'rejected'`, `client_note` stored
+**TC-04 — Client declines a decision with a note**
+1. Add a second decision, then call respond with `{ action: 'decline', clientNote: 'Would prefer Option B' }`
+   - Note: field is `action: 'decline'` (not `response: 'rejected'`); note field is `clientNote`
+2. Expected: `status = 'declined'` (not `'rejected'`), `client_note` stored in DB
 - [ ] Pass  [ ] Fail
 
-**TC-05 — Missing title rejected**
-1. Attempt to create a decision with no title
-2. Expected: HTTP 400 with plain English error
+**TC-05 — Missing required fields rejected**
+1. Attempt to create a decision with no title → Expected: HTTP 400
+2. Attempt to create with no type → Expected: HTTP 400 "projectId, type, title required"
+3. Attempt to create with no projectId → Expected: HTTP 400
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Responding to a decision with invalid projectId**

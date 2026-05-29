@@ -29,6 +29,9 @@ import { quarterLabel, emailPoIssued } from "./tradeCommitment.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 
+const GST_RATE = 0.10; // Never hardcode 0.1 inline — use this constant
+const gstAmount = (exGstAmt) => Math.round(Number(exGstAmt) * GST_RATE * 100) / 100;
+
 function safeFilePart(s, max = 48) {
   return (
     String(s || "X")
@@ -489,7 +492,7 @@ export function registerModule4Routes(app) {
     if (!(subtotal > 0)) {
       return res.status(400).json({ ok: false, error: "PO total must be greater than zero." });
     }
-      const gst = Math.round(subtotal * 0.1 * 100) / 100;
+      const gst = gstAmount(subtotal);
       const inc = Math.round((subtotal + gst) * 100) / 100;
 
       const std = defaultStandardConditions(tentativeStartLabel || "TBC");

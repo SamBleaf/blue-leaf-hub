@@ -191,7 +191,7 @@ export function registerPortalRoutes(app) {
         .select("portal_token")
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json({ token: data?.portal_token || portalToken, portalUrl: `/portal/${portalToken}` });
+      return res.json({ ok: true, token: data?.portal_token || portalToken, portalUrl: `/portal/${portalToken}` });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to generate token" });
     }
@@ -347,7 +347,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, update: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save update" });
     }
@@ -372,7 +372,7 @@ export function registerPortalRoutes(app) {
         .select()
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, update: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to update" });
     }
@@ -434,7 +434,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (ue) return res.status(500).json({ ok: false, error: ue.message });
-      return res.json(rowToCamel(updated));
+      return res.json({ ok: true, photo: rowToCamel(updated) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to upload photo" });
     }
@@ -465,7 +465,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, photo: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save photo" });
     }
@@ -495,7 +495,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, milestone: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save milestone" });
     }
@@ -524,7 +524,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, decision: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save decision" });
     }
@@ -551,7 +551,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, claim: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to save claim" });
     }
@@ -588,6 +588,7 @@ export function registerPortalRoutes(app) {
       ]);
 
       return res.json({
+        ok: true,
         project: rowToCamel(projectRes.data),
         updates: rowsToCamel(updatesRes.data),
         milestones: rowsToCamel(milestonesRes.data),
@@ -616,7 +617,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, siteWalk: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to add site walk" });
     }
@@ -720,7 +721,7 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json(rowToCamel(data));
+      return res.json({ ok: true, message: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to send message" });
     }
