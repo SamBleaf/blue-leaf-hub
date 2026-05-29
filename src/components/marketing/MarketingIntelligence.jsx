@@ -30,6 +30,23 @@ function SectionHeader({ title, subtitle }) {
   );
 }
 
+// ─── AI Summary banner ────────────────────────────────────────────────────────
+
+function AiSummary({ summary }) {
+  if (!summary) return null;
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
+      <div className="flex items-start gap-3">
+        <span className="text-blue-500 text-lg mt-0.5 shrink-0">✦</span>
+        <div>
+          <p className="text-xs font-semibold text-blue-700 mb-1">This Week's Intelligence Summary</p>
+          <p className="text-sm text-blue-900 leading-relaxed">{summary}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── This Month KPIs ─────────────────────────────────────────────────────────
 
 function ThisMonth({ data }) {
@@ -159,6 +176,46 @@ function GoogleOpportunity({ opportunities }) {
   );
 }
 
+// ─── Suburb Engagement ────────────────────────────────────────────────────────
+
+function SuburbEngagement({ suburbs }) {
+  if (!suburbs?.length) return null;
+  const max = suburbs[0]?.enquiries || 1;
+
+  return (
+    <div className="bg-surface border border-hairline rounded-xl p-5">
+      <SectionHeader
+        title="Suburb Engagement"
+        subtitle="Where your enquiries are coming from — last 90 days"
+      />
+      <div className="space-y-3">
+        {suburbs.map((s) => {
+          const pct = Math.round((s.enquiries / max) * 100);
+          return (
+            <div key={s.suburb} className="flex items-center gap-3">
+              <p className="text-sm text-ink font-medium w-28 shrink-0 truncate capitalize">
+                {s.suburb}
+              </p>
+              <div className="flex-1 bg-hairline rounded-full h-2">
+                <div
+                  className="bg-primary rounded-full h-2 transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted shrink-0 w-32 justify-end">
+                <span>{s.enquiries} enquiries</span>
+                {s.qualified > 0 && (
+                  <span className="text-emerald-600 font-medium">{s.qualified} qualified</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Follow Up Now ────────────────────────────────────────────────────────────
 
 function FollowUpNow({ contacts }) {
@@ -261,44 +318,237 @@ function CreateNext({ suggestions }) {
   );
 }
 
-// ─── Sync controls ───────────────────────────────────────────────────────────
+// ─── Website Pages (P1.8) ─────────────────────────────────────────────────────
 
-function SyncControls({ onRefresh }) {
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
+const PAGE_TYPE_LABELS = {
+  homepage:     "Home",
+  service:      "Service",
+  suburb:       "Suburb",
+  case_study:   "Case Study",
+  client_guide: "Client Guide",
+  faq:          "FAQ",
+  journal:      "Journal",
+  about:        "About",
+  process:      "Process",
+};
 
-  async function runSync(endpoint, label) {
-    setSyncing(true);
-    setSyncMsg("");
-    const { ok, data, error } = await apiPost(endpoint, {});
-    setSyncing(false);
-    if (ok) {
-      setSyncMsg(`${label} sync complete — ${data?.updated ?? 0} updated`);
-      setTimeout(() => setSyncMsg(""), 4000);
-      onRefresh();
+const PAGE_STATUS_STYLES = {
+  live:         "bg-emerald-100 text-emerald-700",
+  planned:      "bg-slate-100 text-slate-600",
+  needs_update: "bg-amber-100 text-amber-700",
+  archived:     "bg-red-100 text-red-500",
+};
+
+function WebsitePages() {
+  const [pages, setPages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [briefLoading, setBriefLoading] = useState({});
+  const [briefResults, setBriefResults] = useState({});
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const { ok, data } = await apiFetch("/api/intelligence/pages");
+      setLoading(false);
+      if (ok) setPages(data?.pages || []);
+    }
+    load();
+  }, []);
+
+  async function generateBrief(pageId) {
+    setBriefLoading((prev) => ({ ...prev, [pageId]: true }));
+    const { ok, data, error } = await apiPost(`/api/intelligence/pages/${pageId}/brief`, {});
+    setBriefLoading((prev) => ({ ...prev, [pageId]: false }));
+    if (ok && data?.brief) {
+      setBriefResults((prev) => ({ ...prev, [pageId]: data.brief }));
     } else {
-      setSyncMsg(`${label} sync failed: ${error}`);
+      setBriefResults((prev) => ({ ...prev, [pageId]: { error: error || "Brief generation failed" } }));
     }
   }
 
   return (
+    <div className="bg-surface border border-hairline rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <SectionHeader
+          title="Website Pages"
+          subtitle="Page inventory — manage SEO targets, clusters, and content briefs"
+        />
+        <span className="text-xs text-muted shrink-0">{pages.length} pages tracked</span>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-16 text-sm text-muted">
+          Loading pages…
+        </div>
+      ) : pages.length === 0 ? (
+        <EmptyCard text="No website pages tracked yet — add pages via the API or Hub settings" />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-hairline">
+                <th className="text-left text-xs font-semibold text-muted pb-2 pr-4">URL / Title</th>
+                <th className="text-left text-xs font-semibold text-muted pb-2 pr-4">Type</th>
+                <th className="text-left text-xs font-semibold text-muted pb-2 pr-4">Status</th>
+                <th className="text-left text-xs font-semibold text-muted pb-2 pr-4">Cluster</th>
+                <th className="text-right text-xs font-semibold text-muted pb-2 pr-4">Position</th>
+                <th className="text-right text-xs font-semibold text-muted pb-2 pr-4">Impressions</th>
+                <th className="text-right text-xs font-semibold text-muted pb-2">Brief</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pages.map((page) => {
+                const brief = briefResults[page.id];
+                return (
+                  <>
+                    <tr key={page.id} className="border-b border-hairline last:border-0">
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          {page.needsRefresh && (
+                            <span title="Stale — not updated in 6+ months" className="text-amber-500 shrink-0">⚠</span>
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-medium text-ink truncate max-w-[200px]">
+                              {page.title || page.urlPath}
+                            </p>
+                            <p className="text-xs text-muted truncate max-w-[200px]">{page.urlPath}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span className="text-xs text-muted">
+                          {PAGE_TYPE_LABELS[page.pageType] || page.pageType || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        {page.status ? (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PAGE_STATUS_STYLES[page.status] || "bg-slate-100 text-slate-600"}`}>
+                            {page.status.replace(/_/g, " ")}
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span className="text-xs text-muted">{page.cluster || "—"}</span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <span className={`text-xs font-medium ${page.currentAvgPosition && page.currentAvgPosition <= 10 ? "text-emerald-600" : "text-ink"}`}>
+                          {pos(page.currentAvgPosition)}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <span className="text-xs text-muted">{fmt(page.currentImpressions)}</span>
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => generateBrief(page.id)}
+                          disabled={briefLoading[page.id]}
+                          className="text-xs px-2.5 py-1 rounded-lg border border-hairline text-muted hover:border-primary/40 hover:text-primary disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {briefLoading[page.id] ? "Generating…" : brief ? "Regenerate" : "Generate brief"}
+                        </button>
+                      </td>
+                    </tr>
+                    {brief && (
+                      <tr key={`${page.id}-brief`} className="border-b border-hairline">
+                        <td colSpan={7} className="pb-4 pt-1 pr-4">
+                          {brief.error ? (
+                            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{brief.error}</p>
+                          ) : (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 space-y-2">
+                              {brief.recommendedTitle && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">Recommended title: </span>
+                                  <span className="text-xs text-blue-900">{brief.recommendedTitle}</span>
+                                </div>
+                              )}
+                              {brief.recommendedH1 && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">H1: </span>
+                                  <span className="text-xs text-blue-900">{brief.recommendedH1}</span>
+                                </div>
+                              )}
+                              {brief.recommendedH2s?.length > 0 && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">H2 headings: </span>
+                                  <span className="text-xs text-blue-900">{brief.recommendedH2s.join(" · ")}</span>
+                                </div>
+                              )}
+                              {brief.keyQuestionsToAnswer?.length > 0 && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">Questions to answer: </span>
+                                  <span className="text-xs text-blue-900">{brief.keyQuestionsToAnswer.slice(0, 3).join(" · ")}</span>
+                                </div>
+                              )}
+                              {brief.contentAngles?.length > 0 && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">Content angles: </span>
+                                  <span className="text-xs text-blue-900">{brief.contentAngles.slice(0, 2).join(" · ")}</span>
+                                </div>
+                              )}
+                              {brief.wordCountTarget && (
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-700">Target length: </span>
+                                  <span className="text-xs text-blue-900">{fmt(brief.wordCountTarget)} words</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sync controls ───────────────────────────────────────────────────────────
+
+function SyncControls({ onRefresh }) {
+  const [syncing, setSyncing] = useState(null);
+  const [syncMsg, setSyncMsg] = useState("");
+
+  async function runSync(endpoint, label) {
+    setSyncing(label);
+    setSyncMsg("");
+    const { ok, data, error } = await apiPost(endpoint, {});
+    setSyncing(null);
+    if (ok) {
+      setSyncMsg(`${label} sync complete — ${data?.updated ?? 0} updated`);
+      setTimeout(() => setSyncMsg(""), 5000);
+      onRefresh();
+    } else {
+      setSyncMsg(`${label} failed: ${error}`);
+      setTimeout(() => setSyncMsg(""), 6000);
+    }
+  }
+
+  const buttons = [
+    { label: "Social",         endpoint: "/api/intelligence/sync/meta" },
+    { label: "Search Console", endpoint: "/api/intelligence/sync/gsc"  },
+    { label: "GA4",            endpoint: "/api/intelligence/sync/ga4"  },
+    { label: "Google Business",endpoint: "/api/intelligence/sync/gbp"  },
+  ];
+
+  return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={() => runSync("/api/intelligence/sync/meta", "Social")}
-        disabled={syncing}
-        className="text-xs px-3 py-1.5 rounded-lg border border-hairline text-muted hover:border-primary/40 hover:text-ink disabled:opacity-50 transition-colors"
-      >
-        {syncing ? "Syncing…" : "Sync social data"}
-      </button>
-      <button
-        type="button"
-        onClick={() => runSync("/api/intelligence/sync/gsc", "GSC")}
-        disabled={syncing}
-        className="text-xs px-3 py-1.5 rounded-lg border border-hairline text-muted hover:border-primary/40 hover:text-ink disabled:opacity-50 transition-colors"
-      >
-        {syncing ? "Syncing…" : "Sync Search Console"}
-      </button>
+      {buttons.map(({ label, endpoint }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => runSync(endpoint, label)}
+          disabled={syncing !== null}
+          className="text-xs px-3 py-1.5 rounded-lg border border-hairline text-muted hover:border-primary/40 hover:text-ink disabled:opacity-50 transition-colors"
+        >
+          {syncing === label ? "Syncing…" : `Sync ${label}`}
+        </button>
+      ))}
       {syncMsg && (
         <p className="text-xs text-muted">{syncMsg}</p>
       )}
@@ -343,6 +593,8 @@ export default function MarketingIntelligence() {
     );
   }
 
+  const dash = data?.dashboard ?? {};
+
   return (
     <div className="space-y-6">
       {/* Controls row */}
@@ -351,20 +603,29 @@ export default function MarketingIntelligence() {
         <SyncControls onRefresh={load} />
       </div>
 
+      {/* AI summary banner — only shown when AI has produced a summary */}
+      {dash.ai_summary && <AiSummary summary={dash.ai_summary} />}
+
       {/* Section 1 — This Month */}
-      <ThisMonth data={data?.dashboard?.this_month} />
+      <ThisMonth data={dash.this_month} />
 
       {/* Section 2 — What's Working / Not */}
-      <WhatsWorking working={data?.dashboard?.working} notWorking={data?.dashboard?.not_working} />
+      <WhatsWorking working={dash.working} notWorking={dash.not_working} />
 
       {/* Section 3 — Google Opportunity */}
-      <GoogleOpportunity opportunities={data?.dashboard?.opportunities} />
+      <GoogleOpportunity opportunities={dash.opportunities} />
 
       {/* Section 4 — Follow Up Now */}
-      <FollowUpNow contacts={data?.dashboard?.follow_up?.contacts} />
+      <FollowUpNow contacts={dash.follow_up?.contacts} />
 
       {/* Section 5 — Create Next */}
-      <CreateNext suggestions={data?.dashboard?.create_next?.questions} />
+      <CreateNext suggestions={dash.create_next?.questions} />
+
+      {/* Section 6 — Suburb Engagement (P2.8) */}
+      <SuburbEngagement suburbs={dash.suburb_engagement} />
+
+      {/* Section 7 — Website Pages (P1.8) */}
+      <WebsitePages />
     </div>
   );
 }

@@ -40,6 +40,32 @@ import { config as dotenvConfig } from "dotenv";
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
+// ─── Module-level AI cache ───────────────────────────────────────────────────
+// Key: "YYYY-Www" — ISO year + week number. Invalidates weekly (5-min cache TTL).
+const _aiCache = new Map();
+
+function isoWeekKey(d = new Date()) {
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const week = Math.ceil(((d - jan4) / 86400000 + jan4.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// ─── Google OAuth helper (shared by GSC, GA4, GBP) ──────────────────────────
+async function getGoogleAccessToken() {
+  const refreshToken  = process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim()  || _env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim();
+  const clientId      = process.env.GOOGLE_DRIVE_CLIENT_ID?.trim()       || _env.GOOGLE_DRIVE_CLIENT_ID?.trim();
+  const clientSecret  = process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim()   || _env.GOOGLE_DRIVE_CLIENT_SECRET?.trim();
+  if (!refreshToken || !clientId || !clientSecret) throw new Error("Google OAuth not configured");
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
+  });
+  const j = await tokenRes.json();
+  if (!j.access_token) throw new Error(`Google OAuth failed: ${j.error || "no access_token"}`);
+  return j.access_token;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function sbClient() {
@@ -337,10 +363,11 @@ export function registerMarketingIntelligenceRoutes(app) {
       keywordsRes,
       questionsRes,
       publishesRes,
+      suburbLeadsRes,
     ] = await Promise.all([
       // Section 1: This Month KPIs — leads attributed to marketing this month
       sb.from("leads")
-        .select("id, stage, lead_source, first_touch_source")
+        .select("id, stage, lead_source, first_touch_source, suburb")
         .gte("created_at", monthStart),
 
       // Section 2: Content performance — published items with attribution data
@@ -371,6 +398,12 @@ export function registerMarketingIntelligenceRoutes(app) {
       sb.from("social_post_publishes")
         .select("id, platform, published_at, content_item_id")
         .gte("published_at", ninetyDaysAgo),
+
+      // Section 6: Suburb engagement — leads with suburb last 90 days
+      sb.from("leads")
+        .select("id, suburb, stage, first_touch_source, created_at")
+        .not("suburb", "is", null)
+        .gte("created_at", ninetyDaysAgo),
     ]);
 
     // ── Section 1: This Month KPIs ────────────────────────────────────────────
@@ -414,26 +447,89 @@ export function registerMarketingIntelligenceRoutes(app) {
     });
 
     // ── Section 4: Follow Up Now — CRM bridge ────────────────────────────────
-    // CRM not yet built — return empty with description of algorithm
-    const followUp = {
-      contacts: [],
-      algorithm_note: "Requires CRM module (mailing_list_members, crm_contacts) — not yet built.",
-    };
+    // Pulls from crm_contacts + mailing_list_members when CRM module is active
+    let followUp = { contacts: [] };
+    try {
+      const { data: crmContacts } = await sb.from("crm_contacts")
+        .select("id, first_name, last_name, contact_type, relationship_score, next_action_due_date, last_contact_date, email")
+        .eq("is_archived", false)
+        .lte("next_action_due_date", new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
+        .order("relationship_score", { ascending: false })
+        .limit(5);
+
+      followUp.contacts = (crmContacts || []).map(c => ({
+        contactId:       c.id,
+        name:            `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+        contactType:     c.contact_type,
+        score:           c.relationship_score,
+        nextActionDue:   c.next_action_due_date,
+        lastContactDate: c.last_contact_date,
+      }));
+    } catch { /* CRM tables may not exist yet — safe to skip */ }
 
     // ── Section 5: Create Next ────────────────────────────────────────────────
     const createNext = {
-      questions:   rowsToCamel(questionsRes.data || []),
+      questions:    rowsToCamel(questionsRes.data || []),
       keyword_gaps: opportunities.filter(k => !k.target_page_url).slice(0, 2),
     };
 
+    // ── Section 6: Suburb engagement (P2.8) ──────────────────────────────────
+    const suburbMap = {};
+    for (const lead of (suburbLeadsRes.data || [])) {
+      const s = (lead.suburb || "").trim().toLowerCase();
+      if (!s) continue;
+      if (!suburbMap[s]) suburbMap[s] = { suburb: lead.suburb, enquiries: 0, marketing: 0, qualified: 0 };
+      suburbMap[s].enquiries++;
+      if (lead.first_touch_source && lead.first_touch_source !== "direct") suburbMap[s].marketing++;
+      if (["qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage)) suburbMap[s].qualified++;
+    }
+    const suburbEngagement = Object.values(suburbMap)
+      .sort((a, b) => b.enquiries - a.enquiries)
+      .slice(0, 8);
+
+    // ── AI performance summary (P2.4) — Haiku, cached by ISO week ────────────
+    let aiSummary = null;
+    const weekKey = isoWeekKey();
+    if (_apiKey && !_aiCache.has(weekKey) && contentItems.length >= 3) {
+      try {
+        const topItems = contentItems.slice(0, 5).map(i => ({
+          title: i.title,
+          channel: i.channel,
+          attributed_enquiries: i.attributed_enquiries || 0,
+          total_reach: i.total_reach || 0,
+          performance_score: i.performance_score,
+        }));
+        const prompt = `You are a marketing analyst for Blue Leaf Building, a premium custom home builder in Adelaide.
+
+This week's top content performance data:
+${JSON.stringify(topItems, null, 2)}
+
+This Month KPIs: ${kpis.enquiries} marketing enquiries, ${kpis.qualified} qualified, ${kpis.tenders} tenders, ${kpis.signed} signed.
+
+Write a 3-sentence plain-English performance summary. Focus on what's working, what's trending, and one specific recommendation. Be concrete — mention content types and channels by name. No fluff.`;
+
+        const summary = await callAI({
+          model: "claude-haiku-20240307",
+          max_tokens: 150,
+          messages: [{ role: "user", content: prompt }],
+        });
+        aiSummary = summary?.content?.[0]?.text?.trim() || null;
+        if (aiSummary) _aiCache.set(weekKey, aiSummary);
+      } catch { /* non-fatal */ }
+    } else if (_aiCache.has(weekKey)) {
+      aiSummary = _aiCache.get(weekKey);
+    }
+
     return ok(res, {
       dashboard: {
-        this_month:    kpis,
-        working:       rowsToCamel(working),
-        not_working:   rowsToCamel(notWorking),
-        opportunities: rowsToCamel(opportunities),
-        follow_up:     followUp,
-        create_next:   createNext,
+        this_month:         kpis,
+        working:            rowsToCamel(working),
+        not_working:        rowsToCamel(notWorking),
+        opportunities:      rowsToCamel(opportunities),
+        follow_up:          followUp,
+        create_next:        createNext,
+        suburb_engagement:  suburbEngagement,
+        ai_summary:         aiSummary,
       },
     });
   });
@@ -708,6 +804,166 @@ export function registerMarketingIntelligenceRoutes(app) {
     }
 
     return ok(res, { inserted, failed });
+  });
+
+  // ── POST /api/intelligence/sync/ga4 — pull GA4 weekly report ───────────────
+  app.post("/api/intelligence/sync/ga4", requireAuth, requireRole("admin"), async (req, res) => {
+    const propertyId = process.env.GA4_PROPERTY_ID?.trim() || _env.GA4_PROPERTY_ID?.trim();
+    if (!propertyId) return err(res, 503, "GA4_PROPERTY_ID not configured — add it to Railway env vars");
+
+    const sb = sbClient();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    let accessToken;
+    try { accessToken = await getGoogleAccessToken(); }
+    catch (e) { return err(res, 503, e.message); }
+
+    const endDate   = new Date().toISOString().slice(0, 10);
+    const startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const reportUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
+
+    let inserted = 0;
+
+    // Source/medium breakdown
+    try {
+      const resp = await fetch(reportUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateRanges: [{ startDate, endDate }],
+          dimensions: [{ name: "sessionSource" }, { name: "sessionMedium" }],
+          metrics: [
+            { name: "sessions" },
+            { name: "engagedSessions" },
+            { name: "conversions" },
+            { name: "newUsers" },
+          ],
+        }),
+      });
+      const json = await resp.json();
+      if (json.error) return err(res, 502, `GA4 API error: ${json.error.message}`);
+
+      for (const row of (json.rows || [])) {
+        const [source, medium] = row.dimensionValues.map(d => d.value);
+        const [sessions, engagedSessions, conversions, newUsers] = row.metricValues.map(m => Number(m.value));
+        const engRate = sessions > 0 ? engagedSessions / sessions : null;
+        await sb.from("ga4_snapshots").upsert({
+          snapshot_date:    endDate,
+          page_url:         null,
+          source:           source || "unknown",
+          medium:           medium || "none",
+          sessions,
+          engaged_sessions: engagedSessions,
+          engagement_rate:  engRate,
+          conversions,
+          new_users:        newUsers,
+        }, { onConflict: "snapshot_date,COALESCE(page_url,'__site__'),COALESCE(source,'unknown'),COALESCE(medium,'none')" }).catch(() => {});
+        inserted++;
+      }
+    } catch (e) {
+      return err(res, 502, `GA4 fetch error: ${e.message}`);
+    }
+
+    // Top pages by sessions
+    try {
+      const resp = await fetch(reportUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateRanges: [{ startDate, endDate }],
+          dimensions: [{ name: "pagePath" }],
+          metrics: [{ name: "sessions" }, { name: "engagedSessions" }, { name: "conversions" }],
+          limit: 50,
+          orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+        }),
+      });
+      const json = await resp.json();
+      for (const row of (json.rows || [])) {
+        const pagePath = row.dimensionValues[0].value;
+        const [sessions, engagedSessions, conversions] = row.metricValues.map(m => Number(m.value));
+        const engRate = sessions > 0 ? engagedSessions / sessions : null;
+        await sb.from("ga4_snapshots").upsert({
+          snapshot_date:    endDate,
+          page_url:         pagePath,
+          source:           null,
+          medium:           null,
+          sessions,
+          engaged_sessions: engagedSessions,
+          engagement_rate:  engRate,
+          conversions,
+        }, { onConflict: "snapshot_date,COALESCE(page_url,'__site__'),COALESCE(source,'unknown'),COALESCE(medium,'none')" }).catch(() => {});
+        inserted++;
+      }
+    } catch { /* non-fatal */ }
+
+    return ok(res, { inserted, period: `${startDate} → ${endDate}` });
+  });
+
+  // ── POST /api/intelligence/sync/gbp — pull Google Business Profile ───────────
+  app.post("/api/intelligence/sync/gbp", requireAuth, requireRole("admin"), async (req, res) => {
+    const locationId = process.env.GBP_LOCATION_ID?.trim() || _env.GBP_LOCATION_ID?.trim();
+    if (!locationId) return err(res, 503, "GBP_LOCATION_ID not configured — add it to Railway env vars (format: locations/XXXXXXX)");
+
+    const sb = sbClient();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    let accessToken;
+    try { accessToken = await getGoogleAccessToken(); }
+    catch (e) { return err(res, 503, e.message); }
+
+    const today = new Date();
+    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const toDate   = { year: today.getFullYear(), month: today.getMonth() + 1, day: today.getDate() };
+    const fromDate = { year: start.getFullYear(),  month: start.getMonth() + 1,  day: start.getDate() };
+
+    const METRICS = [
+      "WEBSITE_CLICKS",
+      "CALL_CLICKS",
+      "BUSINESS_DIRECTION_REQUESTS",
+      "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",
+      "BUSINESS_IMPRESSIONS_DESKTOP_SEARCH",
+      "BUSINESS_IMPRESSIONS_MOBILE_MAPS",
+      "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
+    ];
+
+    const gbpUrl = `https://businessprofileperformance.googleapis.com/v1/${locationId}:fetchMultiDailyMetricsTimeSeries`;
+    const resp = await fetch(gbpUrl + `?dailyMetrics=${METRICS.join("&dailyMetrics=")}&dailyRange.startDate.year=${fromDate.year}&dailyRange.startDate.month=${fromDate.month}&dailyRange.startDate.day=${fromDate.day}&dailyRange.endDate.year=${toDate.year}&dailyRange.endDate.month=${toDate.month}&dailyRange.endDate.day=${toDate.day}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return err(res, 502, `GBP API error: ${errText}`);
+    }
+    const json = await resp.json();
+
+    // Aggregate all metric values across the period
+    const totals = { website_clicks: 0, phone_calls: 0, direction_requests: 0, search_impressions: 0, map_impressions: 0 };
+
+    for (const entry of (json.multiDailyMetricTimeSeries || [])) {
+      const metric = entry.dailyMetric;
+      let sum = 0;
+      for (const point of (entry.dailyMetricTimeSeries?.dailyMetrics || [])) {
+        sum += Number(point.value || 0);
+      }
+      if (metric === "WEBSITE_CLICKS")                         totals.website_clicks     += sum;
+      if (metric === "CALL_CLICKS")                            totals.phone_calls        += sum;
+      if (metric === "BUSINESS_DIRECTION_REQUESTS")            totals.direction_requests += sum;
+      if (["BUSINESS_IMPRESSIONS_DESKTOP_SEARCH", "BUSINESS_IMPRESSIONS_MOBILE_SEARCH"].includes(metric)) totals.search_impressions += sum;
+      if (["BUSINESS_IMPRESSIONS_DESKTOP_MAPS", "BUSINESS_IMPRESSIONS_MOBILE_MAPS"].includes(metric))     totals.map_impressions    += sum;
+    }
+
+    const snapshotDate = today.toISOString().slice(0, 10);
+    await sb.from("gbp_snapshots").upsert({
+      snapshot_date:     snapshotDate,
+      search_impressions: totals.search_impressions || null,
+      map_impressions:   totals.map_impressions    || null,
+      website_clicks:    totals.website_clicks     || null,
+      phone_calls:       totals.phone_calls        || null,
+      direction_requests: totals.direction_requests || null,
+    }, { onConflict: "snapshot_date" });
+
+    return ok(res, { snapshot_date: snapshotDate, ...totals });
   });
 
   // ── GET /api/intelligence/content-performance ────────────────────────────────
