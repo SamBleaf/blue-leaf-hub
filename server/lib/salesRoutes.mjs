@@ -134,10 +134,11 @@ APB objection-handling principles to apply when relevant:
 }
 
 // ── APB stage probability weights ────────────────────────────────────────────
+// APB stage probability weights — sourced from APB Pricing 4 Profit framework
 const STAGE_PROB = {
   enquiry: 0.05, qualify: 0.10, discovery: 0.20,
-  winning_offer: 0.40, fee_proposal: 0.60,
-  accepted: 0.80, tender: 0.90, won: 1.00
+  winning_offer: 0.35, fee_proposal: 0.50,
+  accepted: 0.65, tender: 0.80, won: 1.00
 };
 
 // ── APB benchmarks (from Pricing 4 Profit + presales knowledge) ──────────────

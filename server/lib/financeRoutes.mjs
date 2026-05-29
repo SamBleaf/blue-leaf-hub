@@ -5,6 +5,7 @@ import { simpleParser } from "mailparser";
 import { config as dotenvConfig } from "dotenv";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { translateDbError } from "./apiResponse.mjs";
 import { upsertNormalizedCost } from "./normalizedCosts.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
 import PDFDocument from "pdfkit";
@@ -755,7 +756,7 @@ export function registerFinanceRoutes(app) {
     const { data: updated, error } = await sb.from("financial_documents")
       .update({ status: newStatus, dropbox_path: newDropboxPath, updated_at: new Date().toISOString() })
       .eq("id", id).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
 
     await sb.from("financial_approvals").insert({ document_id: id, action: "approved", comment });
 
@@ -807,9 +808,47 @@ export function registerFinanceRoutes(app) {
     const { data, error } = await sb.from("financial_documents")
       .update({ status: "rejected", updated_at: new Date().toISOString() })
       .eq("id", id).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
 
     await sb.from("financial_approvals").insert({ document_id: id, action: "rejected", comment });
+    res.json({ ok: true, document: data });
+  });
+
+  // ── Hold ──────────────────────────────────────────────────────────────────
+  // Places an invoice on hold with a mandatory reason and optional follow-up date.
+  // The invoice stays visible in the Approval Queue until Approved or Rejected.
+  app.post("/api/finance/documents/:id/hold", requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { hold_reason, follow_up_date } = req.body || {};
+    if (!hold_reason?.trim()) {
+      return res.status(400).json({ ok: false, error: "hold_reason is required before placing a document on hold." });
+    }
+    const sb = getServiceSupabase();
+
+    const { data: current } = await sb.from("financial_documents")
+      .select("status").eq("id", id).single();
+    if (!current) return res.status(404).json({ ok: false, error: "Document not found." });
+    if (!["pending_approval", "unmatched"].includes(current.status)) {
+      return res.status(400).json({ ok: false, error: "Only documents in pending_approval or unmatched status can be placed on hold." });
+    }
+
+    const updates = {
+      status: "on_hold",
+      dispute_reason: hold_reason.trim(),
+      dispute_follow_up_date: follow_up_date || null,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await sb.from("financial_documents")
+      .update(updates).eq("id", id).select().single();
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    await sb.from("financial_approvals").insert({
+      document_id: id,
+      action: "on_hold",
+      comment: hold_reason.trim()
+    });
+
     res.json({ ok: true, document: data });
   });
 
@@ -840,46 +879,7 @@ export function registerFinanceRoutes(app) {
     res.json({ ok: true, job: data });
   });
 
-  // ── WIPAA calculation for a job ───────────────────────────────────────────
-  // cost_to_date = sum of approved/filed invoices; no Xero needed
-  app.get("/api/finance/jobs/:id/wipaa", requireAuth, async (req, res) => {
-    return res.redirect(307, `/api/finance/jobs/${req.params.id}/wipaa/current`);
-    const sb = getServiceSupabase();
-    const [jobRes, docsRes] = await Promise.all([
-      sb.from("jobs").select("id, address, arch_ref, contract_value, estimated_total_cost, progress_billed").eq("id", req.params.id).single(),
-      sb.from("financial_documents").select("amount_ex_gst, amount_total, status").eq("job_id", req.params.id).in("status", ["approved", "filed", "xero_synced"]),
-    ]);
-    if (jobRes.error) return res.status(500).json({ ok: false, error: jobRes.error.message });
-    const job = jobRes.data;
-    const cost_to_date = (docsRes.data || []).reduce((s, d) => s + Number(d.amount_ex_gst || d.amount_total || 0), 0);
-    const invoice_count = (docsRes.data || []).length;
-
-    const estimated_total_cost = Number(job.estimated_total_cost) || null;
-    const contract_value = Number(job.contract_value) || null;
-    const progress_billed = Number(job.progress_billed) || 0;
-
-    let pct_complete = null, earned_revenue = null, wipaa = null;
-    if (estimated_total_cost && estimated_total_cost > 0 && contract_value) {
-      pct_complete = Math.min(cost_to_date / estimated_total_cost, 1);
-      earned_revenue = pct_complete * contract_value;
-      wipaa = earned_revenue - progress_billed;
-    }
-
-    res.json({
-      ok: true,
-      job,
-      wipaa: {
-        cost_to_date,
-        invoice_count,
-        estimated_total_cost,
-        contract_value,
-        progress_billed,
-        pct_complete,
-        earned_revenue,
-        wipaa,
-      }
-    });
-  });
+  // ── WIPAA: served by GET /api/finance/jobs/:jobId/wipaa/current in financeCCRoutes.mjs ──
 
   // ── Xero status (Phase 2 stub) ────────────────────────────────────────────
   app.get("/api/finance/xero/status", requireAuth, async (req, res) => {
@@ -1164,141 +1164,13 @@ export function registerFinanceRoutes(app) {
   }
 
   // ── SECTION 1 — Command Centre Aggregate ─────────────────────────────────────
+  // NOTE: The full command-centre route lives in financeCCRoutes.mjs.
+  //       This duplicate was removed — it queried non-existent column "total_amount"
+  //       and would have been shadowed anyway since financeCCRoutes registers last.
 
-  app.get("/api/finance/jobs/:id/command-centre", requireAuth, async (req, res) => {
-    const sb = getServiceSupabase();
-    if (!sb) return res.status(503).json({ error: "DB not configured" });
-    const { id } = req.params;
-    try {
-      const [
-        { data: job, error: jobErr },
-        { data: signedVars },
-        { data: claimsIssued },
-        { data: claimsPaid },
-        { data: actualCosts },
-        { data: budgetRows },
-        { data: pendingInvoices },
-        { data: overdueClaims },
-        { data: varsSummary },
-      ] = await Promise.all([
-        sb.from("jobs")
-          .select("id, address, original_contract_value, contract_value, target_margin_pct, floor_margin_pct, forecast_total_cost, financial_locked, last_wipaa_review_date")
-          .eq("id", id).maybeSingle(),
-        sb.rpc("get_signed_variations_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
-        sb.rpc("get_claims_issued_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
-        sb.rpc("get_claims_paid_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
-        sb.rpc("get_actual_costs_sum", { job_id_input: id }).maybeSingle().then(r => r).catch(() => ({ data: null })),
-        sb.from("job_budgets")
-          .select(`*, trade_categories(name, sort_order)`)
-          .eq("job_id", id)
-          .order("trade_categories(sort_order)", { ascending: true }),
-        sb.from("financial_documents")
-          .select("id, supplier_name, total_amount, ai_trade_confidence, ai_job_match_confidence, trade_category_id, created_at")
-          .eq("job_id", id).eq("status", "pending_approval")
-          .order("created_at", { ascending: true }).limit(10),
-        sb.from("progress_claims")
-          .select("id, claim_number, amount_ex_gst, due_date, status")
-          .eq("job_id", id).in("status", ["issued", "overdue"])
-          .lt("due_date", new Date().toISOString().slice(0, 10))
-          .order("due_date", { ascending: true }),
-        sb.from("job_variations")
-          .select("amount_ex_gst, status")
-          .eq("job_id", id),
-      ]);
+  // REMOVED: app.get("/api/finance/jobs/:id/command-centre") — see financeCCRoutes.mjs
 
-      if (jobErr || !job) return res.status(404).json({ error: "Job not found" });
-
-      // Use raw SQL for aggregates since rpc wrappers may not exist
-      // Fall back to in-memory computation from Supabase queries
-      const [svRes, ciRes, cpRes, acRes] = await Promise.all([
-        sb.from("job_variations").select("amount_ex_gst").eq("job_id", id).eq("status", "signed"),
-        sb.from("progress_claims").select("amount_ex_gst").eq("job_id", id).not("status", "in", "(draft,void)"),
-        sb.from("progress_claim_payments").select("payment_amount, progress_claims!inner(job_id)").eq("progress_claims.job_id", id),
-        sb.from("financial_documents").select("approved_amount").eq("job_id", id).in("status", ["approved", "filed", "xero_synced"]).not("approved_amount", "is", null),
-      ]);
-
-      const signedVarsSum = (svRes.data || []).reduce((s, r) => s + Number(r.amount_ex_gst || 0), 0);
-      const claimsIssuedSum = (ciRes.data || []).reduce((s, r) => s + Number(r.amount_ex_gst || 0), 0);
-      const claimsPaidSum = (cpRes.data || []).reduce((s, r) => s + Number(r.payment_amount || 0), 0);
-      const actualCostsSum = (acRes.data || []).reduce((s, r) => s + Number(r.approved_amount || 0), 0);
-
-      // Budget rows with actual spend
-      const { data: fdByTrade } = await sb.from("financial_documents")
-        .select("trade_category_id, approved_amount")
-        .eq("job_id", id).in("status", ["approved", "filed", "xero_synced"])
-        .not("trade_category_id", "is", null).not("approved_amount", "is", null);
-
-      const actualByTrade = {};
-      for (const fd of fdByTrade || []) {
-        actualByTrade[fd.trade_category_id] = (actualByTrade[fd.trade_category_id] || 0) + Number(fd.approved_amount || 0);
-      }
-
-      const { data: budgetData } = await sb.from("job_budgets")
-        .select("*, trade_categories(name, sort_order)")
-        .eq("job_id", id);
-
-      const enrichedBudget = (budgetData || [])
-        .sort((a, b) => (a.trade_categories?.sort_order || 0) - (b.trade_categories?.sort_order || 0))
-        .map((row) => {
-          const actual = actualByTrade[row.trade_category_id] || 0;
-          return {
-            ...row,
-            name: row.trade_categories?.name || row.name || "Unknown category",
-            actual_amount: actual,
-            forecast_amount: row.forecast_amount ?? null,
-            variance: Number(row.budget_amount || 0) - actual,
-            status: budgetStatus(Number(row.budget_amount || 0), actual),
-          };
-        });
-
-      const contractValue = Number(job.original_contract_value || job.contract_value || 0) + signedVarsSum;
-      const forecastTotalCost = job.forecast_total_cost != null ? Number(job.forecast_total_cost) : null;
-
-      const variationsData = varsSummary || [];
-      const varsSigned = (variationsData).filter(v => v.status === "signed").reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
-      const varsSent = (variationsData).filter(v => v.status === "sent_to_client").reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
-      const varsDraft = (variationsData).filter(v => v.status === "draft").length;
-
-      const daysSinceWipaa = daysSince(job.last_wipaa_review_date);
-      const forecastMarginPct = contractValue > 0 && forecastTotalCost != null
-        ? ((contractValue - forecastTotalCost) / contractValue * 100)
-        : null;
-      res.json({
-        ok: true,
-        job,
-        kpis: {
-          contract_value: contractValue,
-          claims_issued: claimsIssuedSum,
-          claims_paid: claimsPaidSum,
-          actual_costs: actualCostsSum,
-          working_margin_pct: contractValue > 0
-            ? ((contractValue - actualCostsSum) / contractValue * 100)
-            : null,
-          forecast_margin_pct: forecastMarginPct,
-          // Guard against near-zero denominator producing nonsense %
-          forecast_data_quality_warning: forecastMarginPct != null && Math.abs(forecastMarginPct) > 200
-            ? "Forecast margin outside normal range — review forecast cost"
-            : null,
-        },
-        // Field names the client (JobCommandCentre.jsx) expects:
-        budget_vs_actual: enrichedBudget,
-        pending_approvals: pendingInvoices || [],
-        claims: overdueClaims || [],
-        variations: { signed_total: varsSigned, sent_total: varsSent, draft_count: varsDraft },
-        wipaa: {
-          wipaa_overdue: daysSinceWipaa > 30,
-        },
-        days_since_wipaa_review: daysSinceWipaa,
-        recent_insights: [],
-        labour: null,
-      });
-    } catch (err) {
-      console.error("[finance/command-centre]", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ── SECTION 2 — Budget ────────────────────────────────────────────────────────
+  // ── Budget seed (legacy — full budget CRUD in financeCCRoutes.mjs) ────────────
 
   app.post("/api/finance/jobs/:id/budget/seed", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();

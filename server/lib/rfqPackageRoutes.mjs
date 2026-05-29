@@ -7,6 +7,8 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqTradeIntelligence.mjs";
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
+import { requireAuth } from "./requireAuth.mjs";
+import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 
 const STANDARD_TRADES = [
   "excavation", "demolition", "termite_protection", "footings_concrete_formwork",
@@ -124,14 +126,14 @@ function buildFollowUpText({ name, address, deadline, trade, sigName, footer }) 
 }
 
 export function registerRfqPackageRoutes(app) {
-  const sb = () => getServiceSupabase();
+  const db = () => getServiceSupabase();
 
   // ── List all packages ────────────────────────────────────────────────────
-  app.get("/api/rfq-packages", async (_req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.get("/api/rfq-packages", requireAuth, async (_req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
-      const { data, error } = await db
+      const { data, error } = await s
         .from("rfq_packages")
         .select(`
           id, project_address, project_type, tender_deadline, architect_client,
@@ -143,32 +145,33 @@ export function registerRfqPackageRoutes(app) {
         `)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      res.json({ ok: true, packages: data || [] });
+      return ok(res, { packages: rowsToCamel(data || []) });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] list", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Create package (called from RfqEngine after successful send) ─────────
-  app.post("/api/rfq-packages", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.post("/api/rfq-packages", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const {
         job_id, project_address, project_type, tender_deadline, architect_client,
         dropbox_url, extraction_data, pdf_meta, trade_scopes
       } = req.body;
 
-      if (!project_address) return res.status(400).json({ error: "project_address required" });
-      if (!job_id) return res.status(400).json({ error: "job_id required — every RFQ package must be linked to a job" });
+      if (!project_address) return err(res, 400, "project_address required");
+      if (!job_id) return err(res, 400, "job_id required — every RFQ package must be linked to a job");
 
       const intel = await buildRfqTradeIntelligence({
-        db,
+        db: s,
         extraction: extraction_data || {},
         jobId: job_id
       });
 
-      const { data: pkg, error: pkgErr } = await db
+      const { data: pkg, error: pkgErr } = await s
         .from("rfq_packages")
         .insert({
           job_id,
@@ -192,7 +195,7 @@ export function registerRfqPackageRoutes(app) {
 
       // Insert trade scopes + recipients in batch
       for (const scope of trade_scopes || []) {
-        const { data: ts, error: tsErr } = await db
+        const { data: ts, error: tsErr } = await s
           .from("rfq_trade_scopes")
           .insert({
             package_id: pkg.id,
@@ -215,7 +218,7 @@ export function registerRfqPackageRoutes(app) {
         if (tsErr) throw tsErr;
 
         for (const r of scope.recipients || []) {
-          await db.from("rfq_recipients").insert({
+          await s.from("rfq_recipients").insert({
             trade_scope_id: ts.id,
             package_id: pkg.id,
             subcontractor_id: r.subcontractor_id || null,
@@ -230,21 +233,21 @@ export function registerRfqPackageRoutes(app) {
         }
       }
 
-      await reconcilePackageTradeCoverage(db, pkg.id);
+      await reconcilePackageTradeCoverage(s, pkg.id);
 
-      res.json({ ok: true, packageId: pkg.id });
+      return ok(res, { packageId: pkg.id });
     } catch (e) {
       console.error("[rfq-packages] create", e);
-      res.status(500).json({ error: e.message });
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Get single package with all detail ──────────────────────────────────
-  app.get("/api/rfq-packages/:id", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.get("/api/rfq-packages/:id", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
-      const { data: pkg, error } = await db
+      const { data: pkg, error } = await s
         .from("rfq_packages")
         .select(`
           *,
@@ -257,10 +260,10 @@ export function registerRfqPackageRoutes(app) {
         .eq("id", req.params.id)
         .single();
       if (error) throw error;
-      if (!pkg) return res.status(404).json({ error: "Package not found" });
+      if (!pkg) return err(res, 404, "Package not found");
       try {
-        await reconcilePackageTradeCoverage(db, req.params.id);
-        const { data: refreshed } = await db
+        await reconcilePackageTradeCoverage(s, req.params.id);
+        const { data: refreshed } = await s
           .from("rfq_packages")
           .select(`
             *,
@@ -272,37 +275,39 @@ export function registerRfqPackageRoutes(app) {
           `)
           .eq("id", req.params.id)
           .single();
-        return res.json({ ok: true, package: refreshed || pkg });
+        return ok(res, { package: rowToCamel(refreshed || pkg) });
       } catch (reconcileErr) {
         console.warn("[rfq-packages] reconcile on GET", reconcileErr?.message || reconcileErr);
       }
-      res.json({ ok: true, package: pkg });
+      return ok(res, { package: rowToCamel(pkg) });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] get", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Update package metadata ──────────────────────────────────────────────
-  app.patch("/api/rfq-packages/:id", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.patch("/api/rfq-packages/:id", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const allowed = ["tender_deadline", "architect_client", "dropbox_url", "status", "project_type"];
       const patch = {};
       for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
       patch.updated_at = new Date().toISOString();
-      const { error } = await db.from("rfq_packages").update(patch).eq("id", req.params.id);
+      const { error } = await s.from("rfq_packages").update(patch).eq("id", req.params.id);
       if (error) throw error;
-      res.json({ ok: true });
+      return ok(res);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] patch", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Update trade scope ───────────────────────────────────────────────────
-  app.patch("/api/rfq-packages/:packageId/scopes/:tradeId", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.patch("/api/rfq-packages/:packageId/scopes/:tradeId", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const allowed = [
         "scope_bullets", "exclusions", "questions", "internal_notes",
@@ -311,34 +316,35 @@ export function registerRfqPackageRoutes(app) {
       const patch = {};
       for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
       patch.updated_at = new Date().toISOString();
-      const { error } = await db
+      const { error } = await s
         .from("rfq_trade_scopes")
         .update(patch)
         .eq("package_id", req.params.packageId)
         .eq("trade_id", req.params.tradeId);
       if (error) throw error;
-      res.json({ ok: true });
+      return ok(res);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] patch-scope", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Add a new trade scope (for suggested/missing trades) ─────────────────
-  app.post("/api/rfq-packages/:packageId/scopes", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.post("/api/rfq-packages/:packageId/scopes", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const { trade_id, trade_label, scope_bullets, due_date } = req.body;
-      if (!trade_id) return res.status(400).json({ error: "trade_id required" });
+      if (!trade_id) return err(res, 400, "trade_id required");
 
       // Fetch package for deadline fallback
-      const { data: pkg } = await db
+      const { data: pkg } = await s
         .from("rfq_packages")
         .select("id, tender_deadline, suggested_trades")
         .eq("id", req.params.packageId)
         .single();
 
-      const { data: ts, error } = await db
+      const { data: ts, error } = await s
         .from("rfq_trade_scopes")
         .insert({
           package_id: req.params.packageId,
@@ -355,34 +361,35 @@ export function registerRfqPackageRoutes(app) {
 
       // Remove from suggested_trades
       if (pkg) {
-        const newSuggested = (pkg.suggested_trades || []).filter((s) => s.tradeId !== trade_id);
-        await db.from("rfq_packages")
+        const newSuggested = (pkg.suggested_trades || []).filter((sg) => sg.tradeId !== trade_id);
+        await s.from("rfq_packages")
           .update({ suggested_trades: newSuggested, updated_at: new Date().toISOString() })
           .eq("id", req.params.packageId);
       }
 
-      res.json({ ok: true, scope: ts });
+      return ok(res, { scope: rowToCamel(ts) });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] add-scope", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Send RFQ to additional recipients for a trade ────────────────────────
-  app.post("/api/rfq-packages/:packageId/scopes/:tradeId/send", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.post("/api/rfq-packages/:packageId/scopes/:tradeId/send", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const { recipients, email_subject, email_body, due_date } = req.body;
-      if (!recipients?.length) return res.status(400).json({ error: "recipients required" });
+      if (!recipients?.length) return err(res, 400, "recipients required");
 
       // Fetch scope
-      const { data: scope, error: scopeErr } = await db
+      const { data: scope, error: scopeErr } = await s
         .from("rfq_trade_scopes")
         .select("*, rfq_packages(project_address, tender_deadline, job_id)")
         .eq("package_id", req.params.packageId)
         .eq("trade_id", req.params.tradeId)
         .single();
-      if (scopeErr || !scope) return res.status(404).json({ error: "Trade scope not found" });
+      if (scopeErr || !scope) return err(res, 404, "Trade scope not found");
 
       const pkg = Array.isArray(scope.rfq_packages) ? scope.rfq_packages[0] : scope.rfq_packages;
       const address = pkg?.project_address || "";
@@ -397,7 +404,7 @@ export function registerRfqPackageRoutes(app) {
           await sendPlainMail({ to, subject: email_subject, text: email_body });
 
           // Insert recipient row
-          const { data: rec } = await db.from("rfq_recipients").insert({
+          const { data: rec } = await s.from("rfq_recipients").insert({
             trade_scope_id: scope.id,
             package_id: req.params.packageId,
             subcontractor_id: r.subcontractor_id || null,
@@ -411,7 +418,7 @@ export function registerRfqPackageRoutes(app) {
 
           // Also create an rfqs row so it appears in quote-tracker
           if (pkg?.job_id) {
-            const { data: rfqRow } = await db.from("rfqs").insert({
+            const { data: rfqRow } = await s.from("rfqs").insert({
               job_id: pkg.job_id,
               subcontractor_id: r.subcontractor_id || null,
               trade: scope.trade_label,
@@ -421,7 +428,7 @@ export function registerRfqPackageRoutes(app) {
               email_body: `Subject: ${email_subject || ""}\n\n${email_body || ""}`
             }).select("id").single();
             if (rfqRow && rec) {
-              await db.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
+              await s.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
             }
           }
 
@@ -431,29 +438,31 @@ export function registerRfqPackageRoutes(app) {
         }
       }
 
-      // Update scope status
+      // Update scope status — only when ALL sends succeeded
+      // NOTE: partial success leaves scope in prior status even if some recipients got the email.
+      // Staff should fix failing addresses and resend to resolve a partial failure.
       const allSent = results.every((r) => r.ok);
       if (allSent) {
-        await db.from("rfq_trade_scopes")
+        await s.from("rfq_trade_scopes")
           .update({ status: "sent", updated_at: sentAt })
           .eq("id", scope.id);
       }
 
       // Recalculate coverage
-      await recomputePackageCoverage(db, req.params.packageId);
+      await recomputePackageCoverage(s, req.params.packageId);
 
       const anyFailed = results.some((r) => !r.ok);
-      res.json({ ok: !anyFailed, partial: anyFailed, results });
+      return res.json({ ok: !anyFailed, partial: anyFailed, results });
     } catch (e) {
       console.error("[rfq-packages] send-scope", e);
-      res.status(500).json({ error: e.message });
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Update recipient (quote amount, status, etc.) ────────────────────────
-  app.patch("/api/rfq-packages/:packageId/recipients/:recipientId", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.patch("/api/rfq-packages/:packageId/recipients/:recipientId", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const allowed = [
         "status", "quote_amount", "quote_exclusions", "quote_pdf_path",
@@ -468,7 +477,7 @@ export function registerRfqPackageRoutes(app) {
         patch.quote_received_at = new Date().toISOString();
       }
 
-      const { data: rec, error } = await db
+      const { data: rec, error } = await s
         .from("rfq_recipients")
         .update(patch)
         .eq("id", req.params.recipientId)
@@ -477,40 +486,52 @@ export function registerRfqPackageRoutes(app) {
         .single();
       if (error) throw error;
 
-      // Mirror to rfqs table if linked
+      // Mirror status + quote_amount to rfqs table if linked
       if (rec?.rfq_id) {
         const rfqPatch = {};
-        if (patch.status === "received") rfqPatch.status = "received";
-        if (patch.status === "declined") rfqPatch.status = "declined";
+        if (patch.status === "received")  rfqPatch.status = "received";
+        if (patch.status === "declined")  rfqPatch.status = "declined";
+        if (patch.status === "accepted")  rfqPatch.status = "accepted";   // FIX: CRIT-002 — was missing
         if (patch.quote_amount !== undefined) rfqPatch.quote_amount = patch.quote_amount;
         if (patch.quote_received_at) rfqPatch.received_at = patch.quote_received_at;
+        if (patch.status === "accepted" && patch.quote_amount !== undefined) {
+          rfqPatch.accepted_at = new Date().toISOString();
+        }
         if (Object.keys(rfqPatch).length) {
-          await db.from("rfqs").update(rfqPatch).eq("id", rec.rfq_id);
+          await s.from("rfqs").update(rfqPatch).eq("id", rec.rfq_id);
         }
       }
 
       // Propagate "received" status to parent trade scope
       if (patch.status === "received") {
-        await db.from("rfq_trade_scopes")
-          .update({ status: "received", updated_at: new Date().toISOString() })
-          .eq("id", (await db.from("rfq_recipients").select("trade_scope_id").eq("id", req.params.recipientId).single())?.data?.trade_scope_id);
+        const { data: recRow } = await s
+          .from("rfq_recipients")
+          .select("trade_scope_id")
+          .eq("id", req.params.recipientId)
+          .single();
+        if (recRow?.trade_scope_id) {
+          await s.from("rfq_trade_scopes")
+            .update({ status: "received", updated_at: new Date().toISOString() })
+            .eq("id", recRow.trade_scope_id);
+        }
       }
 
-      res.json({ ok: true });
+      return ok(res);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] patch-recipient", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Send follow-up emails ────────────────────────────────────────────────
-  app.post("/api/rfq-packages/:packageId/follow-up", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.post("/api/rfq-packages/:packageId/follow-up", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const { recipient_ids } = req.body;
-      if (!recipient_ids?.length) return res.status(400).json({ error: "recipient_ids required" });
+      if (!recipient_ids?.length) return err(res, 400, "recipient_ids required");
 
-      const { data: recipients, error } = await db
+      const { data: recipients, error } = await s
         .from("rfq_recipients")
         .select("*, rfq_trade_scopes(trade_label, rfq_packages(project_address, tender_deadline))")
         .in("id", recipient_ids)
@@ -538,7 +559,7 @@ export function registerRfqPackageRoutes(app) {
           });
           const subject = `Follow-up — ${scope?.trade_label || "quote"} at ${pkg?.project_address || "project"}`;
           await sendPlainMail({ to, subject, text, html: wrapPlainTextEmailHtml(text, {}) });
-          await db.from("rfq_recipients")
+          await s.from("rfq_recipients")
             .update({ status: "followed_up", follow_up_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq("id", r.id);
           results.push({ id: r.id, ok: true });
@@ -547,22 +568,24 @@ export function registerRfqPackageRoutes(app) {
         }
       }
 
-      res.json({ ok: results.every((r) => r.ok), results });
+      return res.json({ ok: results.every((r) => r.ok), results });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] follow-up", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Addenda: create + send ───────────────────────────────────────────────
-  app.post("/api/rfq-packages/:packageId/addenda", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  // Eligible recipient statuses: sent, reminded, followed_up
+  app.post("/api/rfq-packages/:packageId/addenda", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
       const { name, affected_trades, send_emails } = req.body;
-      if (!name) return res.status(400).json({ error: "name required" });
+      if (!name) return err(res, 400, "name required");
 
       // Auto-number
-      const { data: existing } = await db
+      const { data: existing } = await s
         .from("rfq_addenda")
         .select("number")
         .eq("package_id", req.params.packageId)
@@ -570,7 +593,7 @@ export function registerRfqPackageRoutes(app) {
         .limit(1);
       const nextNum = (existing?.[0]?.number || 0) + 1;
 
-      const { data: addendum, error } = await db
+      const { data: addendum, error } = await s
         .from("rfq_addenda")
         .insert({
           package_id: req.params.packageId,
@@ -585,13 +608,13 @@ export function registerRfqPackageRoutes(app) {
       const results = [];
       if (send_emails && affected_trades?.length) {
         // Fetch recipients for affected trades in this package
-        const { data: scopes } = await db
+        const { data: scopes } = await s
           .from("rfq_trade_scopes")
           .select("id, trade_label, rfq_recipients(id, email, business_name, status)")
           .eq("package_id", req.params.packageId)
           .in("trade_id", affected_trades);
 
-        const { data: pkg } = await db
+        const { data: pkg } = await s
           .from("rfq_packages")
           .select("project_address")
           .eq("id", req.params.packageId)
@@ -600,6 +623,7 @@ export function registerRfqPackageRoutes(app) {
         const sigName = process.env.SAM_NAME?.trim() || "Blue Leaf Building";
         for (const scope of scopes || []) {
           for (const r of scope.rfq_recipients || []) {
+            // Eligible: sent, reminded, or followed_up (not draft, received, accepted, declined)
             if (!["sent", "reminded", "followed_up"].includes(r.status)) continue;
             const to = r.email?.trim();
             if (!to) continue;
@@ -626,44 +650,47 @@ export function registerRfqPackageRoutes(app) {
             }
           }
         }
-        await db.from("rfq_addenda")
+        await s.from("rfq_addenda")
           .update({ sent_at: new Date().toISOString() })
           .eq("id", addendum.id);
       }
 
-      res.json({ ok: true, addendum, emailResults: results });
+      return ok(res, { addendum: rowToCamel(addendum), emailResults: results });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] addenda", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Delete a recipient ───────────────────────────────────────────────────
-  app.delete("/api/rfq-packages/:packageId/recipients/:recipientId", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.delete("/api/rfq-packages/:packageId/recipients/:recipientId", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
-      const { error } = await db
+      const { error } = await s
         .from("rfq_recipients")
         .delete()
         .eq("id", req.params.recipientId)
         .eq("package_id", req.params.packageId);
       if (error) throw error;
-      res.json({ ok: true });
+      return ok(res);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] delete-recipient", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 
   // ── Delete a package ─────────────────────────────────────────────────────
-  app.delete("/api/rfq-packages/:id", async (req, res) => {
-    const db = sb();
-    if (!db) return res.status(503).json({ error: "DB unavailable" });
+  app.delete("/api/rfq-packages/:id", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
     try {
-      const { error } = await db.from("rfq_packages").delete().eq("id", req.params.id);
+      const { error } = await s.from("rfq_packages").delete().eq("id", req.params.id);
       if (error) throw error;
-      res.json({ ok: true });
+      return ok(res);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("[rfq-packages] delete", e);
+      return err(res, 500, translateDbError(e));
     }
   });
 }

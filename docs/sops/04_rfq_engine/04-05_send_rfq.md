@@ -80,12 +80,13 @@ The email is sent as plain text with a structured layout. It comes from the Blue
 |---------|----------|
 | "recipients required" error | Assign at least 1 subcontractor to the trade before sending |
 | Send fails for one recipient | Check the recipient's email address for typos; check Gmail integration is working |
-| Trade scope status stays "draft" after sending | The send returned an error for all recipients — check the results array in the response |
+| Trade scope status stays "draft" after sending | The scope only advances to "sent" when **all** recipients succeed. Even one failed recipient keeps the scope in "draft". Fix the failing address and resend — only the recipient whose email was wrong needs to be retried. |
 
 ## 10. Automation notes
 - API: `POST /api/rfq-packages/:packageId/scopes/:tradeId/send` with `{ recipients, email_subject, email_body, due_date }`
 - Sends via `sendPlainMail()` (Gmail OAuth) — falls back to SMTP if Gmail fails
 - Per-recipient results returned: `[{ email, ok, error? }]` — partial success possible
+- **Scope status rule:** scope only advances to `sent` when ALL recipients succeed. If any recipient fails, the scope stays in its prior status (`draft`) and `partial: true` is returned. Staff must fix the failing address and resend.
 - After successful send: creates `rfqs` row in legacy quote tracker for the job
 - Coverage score: `recomputePackageCoverage()` called after send
 

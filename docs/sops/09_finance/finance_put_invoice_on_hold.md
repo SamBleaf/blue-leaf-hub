@@ -81,7 +81,7 @@ Once you have the information you need:
 - [Job Command Centre — overview](finance_job_dashboard.md)
 
 ## 11. Automation notes
-- API: `PUT /api/financial-documents/:id/hold` with `{ hold_reason: string, follow_up_date?: date }`
+- API: `POST /api/finance/documents/:id/hold` with `{ hold_reason: string, follow_up_date?: date }`
 - `financial_documents.status` → 'on_hold'
 - `financial_documents.dispute_reason` stores the hold reason
 - `financial_documents.dispute_follow_up_date` stores the follow-up date

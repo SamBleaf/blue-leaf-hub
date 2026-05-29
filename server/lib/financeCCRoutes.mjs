@@ -14,6 +14,7 @@ import { buildexactConfigured } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { buildProgressClaimTokens, STAGE_LABELS as STAGE_LABELS_FROM_TOKENS } from "./docTokens.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
+import { translateDbError } from "./apiResponse.mjs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export function registerFinanceCCRoutes(app) {
       sb.from("trade_categories").select("id, name, sort_order, category_type").eq("is_active", true).order("sort_order"),
       sb.from("job_budgets").select("*").eq("job_id", jobId)
     ]);
-    if (catsRes.error) return res.status(500).json({ ok: false, error: catsRes.error.message });
+    if (catsRes.error) return res.status(500).json({ ok: false, error: translateDbError(catsRes.error) });
     const budgetMap = new Map((budgetsRes.data || []).map(b => [b.trade_category_id, b]));
     const categories = (catsRes.data || []).map(cat => ({
       ...cat,
@@ -124,7 +125,8 @@ export function registerFinanceCCRoutes(app) {
         budgets: budgets || []
       });
     } catch (e) {
-      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+      console.error("[budget/buildexact-import]", e?.message);
+      return res.status(502).json({ ok: false, error: translateDbError(e) });
     }
   });
 
@@ -176,7 +178,7 @@ export function registerFinanceCCRoutes(app) {
 
     const { error: upsertErr } = await sb.from("job_budgets")
       .upsert(upserts, { onConflict: "job_id,trade_category_id" });
-    if (upsertErr) return res.status(500).json({ ok: false, error: upsertErr.message });
+    if (upsertErr) return res.status(500).json({ ok: false, error: translateDbError(upsertErr) });
 
     const { data: budgets } = await sb.from("job_budgets").select("*").eq("job_id", jobId);
     res.json({ ok: true, imported: valid.length, unmatched: unmatched.length, unmatchedRows: unmatched, budgets: budgets || [] });
@@ -210,7 +212,7 @@ export function registerFinanceCCRoutes(app) {
         seeded_from: "manual",
         seeded_at: new Date().toISOString()
       }).select().single();
-      if (error) return res.status(500).json({ ok: false, error: error.message });
+      if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
       return res.json({ ok: true, budget: inserted });
     }
 
@@ -242,7 +244,7 @@ export function registerFinanceCCRoutes(app) {
 
     const { data: updated, error: upErr } = await sb.from("job_budgets")
       .update(updates).eq("id", existing.id).select().single();
-    if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+    if (upErr) return res.status(500).json({ ok: false, error: translateDbError(upErr) });
 
     if (historyRows.length) {
       await sb.from("job_budget_history").insert(historyRows);
@@ -260,7 +262,7 @@ export function registerFinanceCCRoutes(app) {
     if (!budget) return res.json({ ok: true, history: [] });
     const { data, error } = await sb.from("job_budget_history")
       .select("*").eq("job_budget_id", budget.id).order("changed_at", { ascending: false });
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, history: data || [] });
   });
 
@@ -530,7 +532,7 @@ export function registerFinanceCCRoutes(app) {
       .update(updates).eq("id", req.params.jobId)
       .select("id, address, contract_value, original_contract_value, target_margin_pct, floor_margin_pct, forecast_total_cost, financial_locked")
       .single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, job: data });
   });
 
@@ -543,7 +545,7 @@ export function registerFinanceCCRoutes(app) {
       sb.from("financial_documents").select("amount_ex_gst").eq("job_id", jobId).in("status", ["approved", "filed", "xero_synced"]),
       sb.from("job_variations").select("amount_ex_gst, status").eq("job_id", jobId)
     ]);
-    if (jobRes.error) return res.status(500).json({ ok: false, error: jobRes.error.message });
+    if (jobRes.error) return res.status(500).json({ ok: false, error: translateDbError(jobRes.error) });
     const job = jobRes.data;
     const cost_to_date = (docsRes.data || []).reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0);
 
@@ -620,7 +622,7 @@ export function registerFinanceCCRoutes(app) {
       projected_margin_pct: projected_margin_pct != null ? Math.round(projected_margin_pct * 10) / 10 : null,
       notes: notes || null
     }).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
 
     // Update job's last review date and forecast if provided
     const jobUpdates = { last_wipaa_review_date: review.review_date };
@@ -635,7 +637,7 @@ export function registerFinanceCCRoutes(app) {
     const sb = getServiceSupabase();
     const { data, error } = await sb.from("wipaa_reviews")
       .select("*").eq("job_id", req.params.jobId).order("review_date", { ascending: false });
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, reviews: data || [] });
   });
 
@@ -818,7 +820,7 @@ export function registerFinanceCCRoutes(app) {
       .select("*, progress_claim_payments(payment_amount, payment_date, payment_method, payment_reference)")
       .eq("job_id", req.params.jobId)
       .order("claim_number");
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
 
     const claims = (data || []).map(c => ({
       ...c,
@@ -874,7 +876,7 @@ export function registerFinanceCCRoutes(app) {
       }).select().single();
 
       if (!error) { claim = data; break; }
-      if (error.code !== "23505" || attempt === 2) return res.status(500).json({ ok: false, error: error.message });
+      if (error.code !== "23505" || attempt === 2) return res.status(500).json({ ok: false, error: translateDbError(error) });
     }
     if (!claim) return res.status(500).json({ ok: false, error: "Failed to assign claim number" });
     res.json({ ok: true, claim });
@@ -893,7 +895,7 @@ export function registerFinanceCCRoutes(app) {
     for (const k of allowed) if (k in req.body) updates[k] = req.body[k];
 
     const { data, error } = await sb.from("progress_claims").update(updates).eq("id", claimId).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, claim: data });
   });
 
@@ -990,7 +992,7 @@ export function registerFinanceCCRoutes(app) {
     const { data: updated, error: updErr } = await sb.from("progress_claims")
       .update({ status: "issued", issued_date: issuedDate, due_date: dueDate, updated_at: new Date().toISOString() })
       .eq("id", claimId).select().single();
-    if (updErr) return res.status(500).json({ ok: false, error: updErr.message });
+    if (updErr) return res.status(500).json({ ok: false, error: translateDbError(updErr) });
 
     // Email client PDF if address provided
     let emailSent = false;
@@ -1101,7 +1103,7 @@ export function registerFinanceCCRoutes(app) {
     const { data, error } = await sb.from("progress_claims")
       .update(voidUpdate)
       .eq("id", claimId).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, claim: data });
   });
 
@@ -1512,7 +1514,7 @@ export function registerFinanceCCRoutes(app) {
       .select("*, trade_categories(name)")
       .eq("job_id", req.params.jobId)
       .order("variation_number");
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     const variations = (data || []).map(v => ({
       ...v,
       trade_category_name: v.trade_categories?.name || null
@@ -1548,7 +1550,7 @@ export function registerFinanceCCRoutes(app) {
         status: "draft"
       }).select("*, trade_categories(name)").single();
       if (!error) { variation = data; break; }
-      if (error.code !== "23505" || attempt === 2) return res.status(500).json({ ok: false, error: error.message });
+      if (error.code !== "23505" || attempt === 2) return res.status(500).json({ ok: false, error: translateDbError(error) });
     }
     if (!variation) return res.status(500).json({ ok: false, error: "Failed to assign variation number" });
     res.json({ ok: true, variation: { ...variation, trade_category_name: variation.trade_categories?.name || null } });
@@ -1592,7 +1594,7 @@ export function registerFinanceCCRoutes(app) {
       res.json({ ok: true, recipes, source: "buildxact" });
     } catch (e) {
       console.error("[variations/recipes]", e?.message);
-      res.json({ ok: true, recipes: [], source: "error", message: e?.message });
+      res.json({ ok: true, recipes: [], source: "error", message: "Could not load cost recipes." });
     }
   });
 
@@ -1613,7 +1615,7 @@ export function registerFinanceCCRoutes(app) {
 
     const { data, error } = await sb.from("job_variations")
       .update(updates).eq("id", vid).select("*, trade_categories(name)").single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, variation: { ...data, trade_category_name: data.trade_categories?.name || null } });
   });
 
@@ -1642,7 +1644,7 @@ export function registerFinanceCCRoutes(app) {
     const { data: updated, error: updErr } = await sb.from("job_variations")
       .update({ status: "sent_to_client", sent_date: sentDate, updated_at: sentDate })
       .eq("id", vid).select().single();
-    if (updErr) return res.status(500).json({ ok: false, error: updErr.message });
+    if (updErr) return res.status(500).json({ ok: false, error: translateDbError(updErr) });
 
     let emailSent = false;
     let trackingId = null;
@@ -1713,7 +1715,7 @@ export function registerFinanceCCRoutes(app) {
     const { data: variation, error } = await sb.from("job_variations")
       .update({ status: "signed", signed_date: signedDate, updated_at: signedDate })
       .eq("id", vid).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
 
     // Update normalized_costs with variation amount
     if (variation.trade_category_id) {
@@ -1738,7 +1740,7 @@ export function registerFinanceCCRoutes(app) {
     const { data, error } = await sb.from("job_variations")
       .update({ status: "rejected", rejection_reason: reason || null, updated_at: new Date().toISOString() })
       .eq("id", vid).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, variation: data });
   });
 
@@ -1749,7 +1751,7 @@ export function registerFinanceCCRoutes(app) {
     const { data, error } = await sb.from("job_variations")
       .update({ status: "void", updated_at: new Date().toISOString() })
       .eq("id", vid).select().single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, variation: data });
   });
 
@@ -1928,9 +1930,9 @@ export function registerFinanceCCRoutes(app) {
         .eq("status", "sent_to_client"),
     ]);
 
-    if (claimsRes.error) return res.status(500).json({ ok: false, error: claimsRes.error.message });
-    if (invoicesRes.error) return res.status(500).json({ ok: false, error: invoicesRes.error.message });
-    if (variationsRes.error) return res.status(500).json({ ok: false, error: variationsRes.error.message });
+    if (claimsRes.error) return res.status(500).json({ ok: false, error: translateDbError(claimsRes.error) });
+    if (invoicesRes.error) return res.status(500).json({ ok: false, error: translateDbError(invoicesRes.error) });
+    if (variationsRes.error) return res.status(500).json({ ok: false, error: translateDbError(variationsRes.error) });
 
     let overdueClaimsCount = 0;
 
@@ -2079,7 +2081,7 @@ export function registerFinanceCCRoutes(app) {
       updated_at: new Date().toISOString(),
     }).select().single();
 
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, migrated: true, claim });
   });
 

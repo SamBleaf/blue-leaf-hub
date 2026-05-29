@@ -34,7 +34,7 @@ Creates a numbered addendum record against the RFQ package and optionally sends 
 Addenda are auto-numbered (Addendum 1, Addendum 2, etc.) based on how many already exist for this package.
 
 ## 4. Before you start
-- RFQ emails must already have been sent (recipients must exist with status `sent`, `followed_up`, or `received`)
+- RFQ emails must already have been sent (recipients must exist with status `sent`, `reminded`, or `followed_up`)
 - Know: what has changed, which trades are affected
 
 ## 5. Step-by-step process
@@ -69,7 +69,7 @@ The email is sent via the same Gmail integration used for RFQ sends.
 
 Only recipients matching ALL of these conditions receive the addendum email:
 - Their trade is in the `affected_trades` list you selected
-- Their status is `sent`, `followed_up`, or `received` (not `accepted`, `declined`, or `no_quote`)
+- Their status is `sent`, `reminded`, or `followed_up` (not `accepted`, `declined`, `received`, or `no_quote`)
 
 Subcontractors who have already been accepted or declined do not receive the addendum.
 
@@ -101,7 +101,7 @@ If `sent_emails = false` was chosen, the addendum shows as "Not sent" — useful
 |---------|----------|
 | Addendum number is wrong | Numbers are auto-assigned — the next available number is used. If an earlier addendum was deleted, the sequence may skip. This is by design. |
 | "Name required" error | The addendum name / description field cannot be blank |
-| Email not received by subcontractor | Check recipient status — only `sent`, `followed_up`, or `received` recipients get addendum emails. If status is `accepted` or `declined`, they are excluded. |
+| Email not received by subcontractor | Check recipient status — only `sent`, `reminded`, or `followed_up` recipients get addendum emails. Recipients with status `accepted`, `declined`, or `received` are excluded. |
 | Want to send emails later | Create the addendum with `send_emails` unticked, then contact recipients manually. There is no "send now" action for a saved addendum — emails can only be sent at creation time. |
 
 ## 12. Automation notes
@@ -109,7 +109,7 @@ If `sent_emails = false` was chosen, the addendum shows as "Not sent" — useful
 - Body: `{ name (required), affected_trades (array of trade_ids), send_emails (boolean) }`
 - Auto-numbers from `MAX(rfq_addenda.number) + 1` for this package (starts at 1)
 - Emails sent via `sendPlainMail()` (Gmail OAuth)
-- Only recipients with `status IN ('sent', 'followed_up', 'received')` receive the addendum email
+- Only recipients with `status IN ('sent', 'reminded', 'followed_up')` receive the addendum email
 - After sending: `rfq_addenda.sent_at` = now()
 - Response: `{ ok: true, addendum, emailResults: [{email, ok, error?}] }`
 
