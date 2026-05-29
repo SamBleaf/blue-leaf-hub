@@ -549,21 +549,26 @@ export function registerWorkforceRoutes(app) {
   // ── Worker-facing endpoints ───────────────────────────────────────────────
 
   async function resolveWorkerEmployee(userId, sb) {
-    // Find employee by user_id
-    let { data: emp } = await sb.from("employees").select("*").eq("user_id", userId).eq("is_active", true).maybeSingle();
-    if (!emp) {
-      // Fallback: match by email (after invite accepted but user_id not yet linked)
-      const { data: authUser } = await sb.auth.admin.getUserById(userId);
-      const email = authUser?.user?.email;
-      if (email) {
-        const { data: byEmail } = await sb.from("employees").select("*").ilike("name", "%" + email.split("@")[0] + "%").eq("is_active", true).maybeSingle();
-        if (byEmail && !byEmail.user_id) {
-          await sb.from("employees").update({ user_id: userId, updated_at: new Date().toISOString() }).eq("id", byEmail.id);
-          emp = { ...byEmail, user_id: userId };
+    // 1. Already linked by user_id (the normal case after first login)
+    const { data: linked } = await sb.from("employees").select("*").eq("user_id", userId).eq("is_active", true).maybeSingle();
+    if (linked) return linked;
+
+    // 2. First login after invite. The invite stores the employee_id in the auth
+    //    user's metadata (see POST /employees/:id/invite). Read it and link it back
+    //    to employees.user_id so every future lookup hits branch 1.
+    const { data: authUser } = await sb.auth.admin.getUserById(userId);
+    const metaEmployeeId = authUser?.user?.user_metadata?.employee_id;
+    if (metaEmployeeId) {
+      const { data: byMeta } = await sb.from("employees").select("*").eq("id", metaEmployeeId).eq("is_active", true).maybeSingle();
+      if (byMeta) {
+        if (!byMeta.user_id) {
+          await sb.from("employees").update({ user_id: userId, updated_at: new Date().toISOString() }).eq("id", byMeta.id);
         }
+        return { ...byMeta, user_id: userId };
       }
     }
-    return emp;
+
+    return null;
   }
 
   app.get("/api/worker/me", requireAuth, async (req, res) => {
@@ -612,6 +617,23 @@ export function registerWorkforceRoutes(app) {
     });
   });
 
+  app.get("/api/worker/projects", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
+    // Any job site: workers move between sites and may backdate hours to a site that
+    // is no longer "active", so return every project — active ones first for quick access.
+    const { data, error } = await sb
+      .from("projects")
+      .select("id, address, job_id, status")
+      .order("address", { ascending: true });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const list = (data || []).sort(
+      (a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1)
+    );
+    res.json({ ok: true, projects: list });
+  });
+
   app.post("/api/worker/timesheets", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const emp = await resolveWorkerEmployee(req.caller.id, sb);
@@ -620,6 +642,13 @@ export function registerWorkforceRoutes(app) {
     const { date, project_id, job_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] required" });
+    }
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (date > todayStr) {
+      return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
+    }
+    if (entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {
+      return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
     }
 
     // Check existing timesheet for today
@@ -688,6 +717,13 @@ export function registerWorkforceRoutes(app) {
     if (ts.status === "approved") return res.status(409).json({ ok: false, error: "Cannot edit approved timesheet" });
 
     const { entries, ...rest } = req.body;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (rest.date && rest.date > todayStr) {
+      return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
+    }
+    if (Array.isArray(entries) && entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {
+      return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
+    }
     await sb.from("timesheets").update({ ...rest, status: "submitted", submitted_at: new Date().toISOString(), rejection_notes: null, updated_at: new Date().toISOString() }).eq("id", ts.id);
     if (Array.isArray(entries)) {
       await sb.from("timesheet_entries").delete().eq("timesheet_id", ts.id);

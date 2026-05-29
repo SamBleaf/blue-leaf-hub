@@ -64,8 +64,14 @@ export default function WorkerLayout({ children, onBack }) {
           <div className="w-9 shrink-0" />
         )}
 
-        {/* Centred logo */}
-        <div className="flex-1 flex justify-center">
+        {/* Centred logo — white leaf + wordmark */}
+        <div className="flex-1 flex items-center justify-center gap-2">
+          <img
+            src="/brand/BLB_Icon_White.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-8 w-auto"
+          />
           <img
             src="/brand/logo-white.png"
             alt="Blue Leaf Building"

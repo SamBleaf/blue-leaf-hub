@@ -125,7 +125,7 @@ export default function WorkerHome() {
             <>
               <div className="flex items-center justify-between mb-3 text-sm">
                 <span className="text-muted">{projectName}</span>
-                <Link to="/worker/timesheet" className="text-primary font-medium text-xs">Change</Link>
+                <Link to="/worker/timesheet/log" className="text-primary font-medium text-xs">Change</Link>
               </div>
               {hasEntries && (
                 <div className="space-y-1 mb-3">
