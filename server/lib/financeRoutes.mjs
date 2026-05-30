@@ -1132,8 +1132,7 @@ export function registerFinanceRoutes(app) {
           // 1. Write to jobs (existing behaviour)
           await sb.from("jobs").update({
             original_contract_value: totalExGst,
-            contract_value: totalExGst,
-            updated_at: new Date().toISOString()
+            contract_value: totalExGst
           }).eq("id", proposal.job_id);
           contractValue = totalExGst;
 
@@ -1685,7 +1684,6 @@ export function registerFinanceRoutes(app) {
       await sb.from("jobs").update({
         original_contract_value: Number(originalContractValue),
         contract_value: newContractValue,
-        updated_at: new Date().toISOString(),
       }).eq("id", id);
 
       // Fire-and-forget: note the signed variation for Blueprint + Command Centre context
@@ -1802,7 +1800,6 @@ export function registerFinanceRoutes(app) {
       await sb.from("jobs").update({
         forecast_total_cost: forecastCost,
         last_wipaa_review_date: today,
-        updated_at: new Date().toISOString(),
       }).eq("id", id);
 
       const { data: updatedJob } = await sb.from("jobs")

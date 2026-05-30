@@ -335,7 +335,7 @@ export function registerModule4Routes(app) {
             ? (tax > 0 ? Math.round((inc - tax) * 100) / 100 : Math.round((inc / 1.1) * 100) / 100)
             : Number(best?.net_total || 0) + Number(best?.markup_amount || 0);
           if (cv > 0) {
-            await sb.from("jobs").update({ original_contract_value: cv, contract_value: cv, updated_at: now }).eq("id", jobId);
+            await sb.from("jobs").update({ original_contract_value: cv, contract_value: cv }).eq("id", jobId);
             await sb.from("projects").update({ contract_value: cv, updated_at: now }).eq("id", proj.id);
           }
         }
