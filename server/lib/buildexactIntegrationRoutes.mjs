@@ -83,9 +83,10 @@ export function registerBuildexactIntegrationRoutes(app) {
       const { data: project } = await sb.from("projects").select("id,job_id").eq("buildexact_job_id", buildexactJobId).maybeSingle();
       const jobId = job?.id || project?.job_id || null;
       const persisted = await persistPulledEstimate(sb, buildexactJobId, pulled, jobId);
-      if (project?.id && Object.keys(pulled.costMetrics || {}).length) {
-        await sb.from("projects").update({ project_metrics: pulled.costMetrics, updated_at: new Date().toISOString() }).eq("id", project.id);
-      }
+      // Previously wrote pulled.costMetrics to a projects.project_metrics jsonb column — which
+      // collided by NAME with the canonical `project_metrics` TABLE (building facts) and was never
+      // read by anything. Removed to kill the naming trap; costMetrics is still returned in the
+      // response below and persisted via persistPulledEstimate. (See MASTER_DATA_DICTIONARY §18.2.)
 
       return res.json({
         ok: true,
