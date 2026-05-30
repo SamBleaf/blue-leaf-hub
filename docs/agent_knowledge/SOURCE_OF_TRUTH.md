@@ -1,5 +1,7 @@
 # Blue Leaf Hub — Source of Truth
 
+> Field-level canonical authority is `MASTER_DATA_DICTIONARY.md`. This doc is the entity/lifecycle/module view; where they differ, the dictionary wins.
+
 > Last updated: 2026-05-21
 > Critical document. Every data point must have exactly one authoritative source.
 
@@ -9,20 +11,20 @@
 
 ### Job / Tender
 **Source of truth**: `jobs` table
-- `jobs.address` — canonical address. Syncs to `projects.address` via trigger.
-- `jobs.contract_value` — canonical contract value. Updated by `job_variations` trigger when variation is signed.
+- `jobs.address` — canonical address. Syncs **one-way only** to `projects.address` via the migration-036 trigger (jobs → projects). Editing `projects.address` does NOT flow back to `jobs`.
+- `jobs.contract_value` — contract value is currently **dual-sourced** (a known conflict): the migration-034 trigger stores it on `jobs.contract_value`, but the live finance KPI routes recompute it from `original_contract_value` + signed variations and distrust the stored value. The target is a single **Generated** fact. See `MASTER_DATA_DICTIONARY.md` §17/§20/§29.
 - `jobs.original_contract_value` — set once on win. Never updated by variations.
 - `jobs.buildexact_job_id` — Buildexact reference. Primary sync point.
 - `jobs.lead_id` — link back to Sales lead (nullable, backfilled).
 - `jobs.won_at`, `jobs.lost_at` — definitive win/loss timestamps.
 
-**DO NOT** read `contract_value` from `job_variations` directly — use `jobs.contract_value` which is trigger-maintained.
+**Until reconciled:** follow what the finance KPI routes do (recompute from `original_contract_value` + signed variations). Do **not** assume the stored `jobs.contract_value` is authoritative — it's the unresolved side of a known dual-source conflict.
 
 ---
 
 ### Project (Operations)
 **Source of truth**: `projects` table
-- `projects.address` — comes from `jobs.address` via trigger. Do NOT manually maintain separately.
+- `projects.address` — comes from `jobs.address` via the migration-036 trigger, which is **one-way only** (jobs → projects). Edits here do NOT propagate back to `jobs`. Do NOT manually maintain separately — change `jobs.address` instead.
 - `projects.job_id` — links to the winning tender. Foreign key.
 - `projects.portal_token` — generated UUID for client portal access. Unique per project.
 - `projects.buildexact_job_id` — redundant with `jobs.buildexact_job_id`. Watch for drift.
@@ -46,7 +48,7 @@
 ### Leads
 **Source of truth**: `leads` table
 - Stage: `leads.stage` — canonical pipeline stage.
-- Qualifying score: `lead_qualifying_scores` rows linked to lead.
+- Qualifying score: qualifying scores live as `qualify_*` columns on `leads` (migration 016) — `qualify_budget`, `qualify_timeframe`, `qualify_site`, `qualify_decision_maker`, and a generated `qualify_score`.
 - Applied suggestions from transcripts: `lead_conversations.applied_suggestions` JSONB.
 
 ---
@@ -66,15 +68,16 @@
 **Risk**: Two trade systems exist:
 1. `trade_categories` — 37 categories for financial tracking (Buildxact-aligned)
 2. `trade_master_library` — 37 trades with RFQ scope templates for tendering
-These are distinct but overlapping. They should align but are not formally linked. Watch for confusion.
+These are distinct but overlapping. They are now **formally linked**: migration 043 added a `trade_category_id` FK on `trade_master_library` (and `rfq_trade_scopes`). `trade_categories` is canonical; watch for confusion where free-text trade fields still bypass the FK.
 
 ---
 
 ### Contract Value
-**Source of truth**: `jobs.contract_value` (trigger-maintained)
+**Status**: `jobs.contract_value` is currently **dual-sourced** (known conflict, not yet resolved)
 - `jobs.original_contract_value` — original, never touched after win
-- `jobs.contract_value` — live value, updated when variation signed
-- **DO NOT** sum `job_variations` yourself — the trigger maintains `jobs.contract_value`
+- `jobs.contract_value` — the migration-034 trigger **stores** it, but the live finance KPI routes **recompute** it from `original_contract_value` + signed variations and **distrust the stored value**
+- Target state: a single **Generated** fact (one recompute mechanism, the other dropped) — see `MASTER_DATA_DICTIONARY.md` §17/§20/§29
+- Until reconciled, follow what the finance KPI routes do (recompute); do not assume the stored `jobs.contract_value` is authoritative
 
 ---
 
@@ -124,7 +127,7 @@ These are distinct but overlapping. They should align but are not formally linke
 2. **Don't assume buildexact_job_id is unique** — no DB constraint enforces uniqueness.
 3. **Don't assume portal_token is always set** — only set when portal is enabled for that project.
 4. **Don't read trade from text field alone** — `trade` text on subcontractors is legacy; prefer `trade_category_id`.
-5. **Don't compute contract value by summing variations** — use `jobs.contract_value` (trigger-maintained).
+5. **Don't assume `jobs.contract_value` is authoritative** — it's dual-sourced (034 trigger stores it; finance KPI routes recompute and distrust it). Follow the finance routes' recompute until it becomes a single Generated fact (`MASTER_DATA_DICTIONARY.md` §17/§20/§29).
 6. **Don't show deleted schedule tasks** — always filter `deleted_at IS NULL`.
 7. **Don't assume DOCX template exists server-side** — it only exists in client localStorage.
 8. **Don't write concurrent Dropbox reads** — always sequential for-loop, never Promise.all.

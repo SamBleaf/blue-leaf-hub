@@ -61,7 +61,7 @@ Migrations: applied via Supabase SQL editor in order. Current max = **047**. Nex
 
 **Route:** `/sales`, `/sales/:id`
 **Files:** `salesRoutes.mjs`, `SalesPipeline.jsx`, `LeadDetail.jsx`
-**DB:** `leads`, `pipeline_stages`, `lead_qualifying_scores`, `lead_documents`, `lead_notes`, `lead_conversations`
+**DB:** `leads`, `pipeline_stages`, `lead_documents`, `lead_notes`, `lead_conversations` (qualifying scores live as `qualify_*` columns on `leads` (migration 016), not a separate table)
 **Migration 045:** Adds PTSA fields to `leads` — UI built in Lead detail right column (contextual card, appears when stage ≥ winning_offer)
 
 **What's built:**

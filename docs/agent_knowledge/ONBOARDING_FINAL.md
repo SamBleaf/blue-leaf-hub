@@ -185,9 +185,8 @@ HOSTING (Production):
 
 ### Core Table Hierarchy
 ```
-leads (CRM entry point)
+leads (CRM entry point; qualifying scores are qualify_* columns on leads, migration 016)
   └── lead_conversations (transcript analysis)
-  └── lead_qualifying_scores
 
 jobs (tender/project core)
   ├── lead_id → leads (optional, backfilled)

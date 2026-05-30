@@ -198,8 +198,8 @@ Migrations in `supabase/migrations/`, applied in numeric order via Supabase SQL 
 | 011–012 | Schedule phase constraint, IMAP quote PDF URL |
 | 013 | `buildexact_estimates`, `job_knowledge` |
 | 014 | `schedule_templates` |
-| 015 | `lead_documents`, `lead_notes` |
-| 016 | `leads`, `lead_activities`, `pipeline_stages`, `lead_qualifying_scores` |
+| 015 | `buildexact_deep_integration` — Buildexact sync fields on `jobs` |
+| 016 | `leads`, `lead_activities`, `pipeline_stages` + qualifying-score columns on `leads` (`qualify_budget`, `qualify_timeframe`, `qualify_site`, `qualify_decision_maker`, generated `qualify_score`) |
 | 017 | `lead_conversations` |
 | 018–019 | Schedule baseline + EOT (`schedule_eot`), user profiles/invitations |
 | 020 | `financial_documents`, `financial_approvals`, `xero_credentials` |
@@ -216,6 +216,9 @@ Migrations in `supabase/migrations/`, applied in numeric order via Supabase SQL 
 | 043 | `trade_category_id` FK on `trade_master_library` + `rfq_trade_scopes` (backfilled 37/37) |
 | 044 | RLS tightened — all tables now require `authenticated` role (anon access removed) |
 | 045 | PTSA fields on `leads`: `ptsa_services` (JSONB), `ptsa_scope_notes`, `ptsa_validity_days` (default 14), `ptsa_status` (draft/sent/signed/declined), `ptsa_sent_date`, `ptsa_special_terms`, `ptsa_credit_to_contract` |
+| 046–059 | Various — workforce, finance, marketing, portal, WHS, schedule improvements |
+| 060 | `lead_notes`, `lead_documents` + Supabase Storage RLS for `lead-documents` bucket |
+| 061–068 | CRM/mailing list, marketing intelligence, website-enquiry lead fields, WHS engine, carpentry module + budgets/corrections (highest migration is **068**) |
 
 **Three trade taxonomy layers** (all linked by FK since migration 043):
 1. `trade_categories` (37) — finance, cost intelligence, job budgets

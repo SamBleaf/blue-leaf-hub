@@ -1,6 +1,8 @@
 # Blue Leaf Hub — Module 6 & 7 Build Spec
 ## Operations Manager + Buildexact Deep Integration
 
+> HISTORICAL build prompt — proposed tables (buildexact_categories, cost_allocations, category_mapping_templates) were NOT built; canon uses trade_categories + buildexactParser CATEGORY_MAPPING. See MASTER_DATA_DICTIONARY.md.
+
 This document is the Cursor build prompt for Modules 6 and 7. Add this to the
 existing project after Module 5 (Fee Proposal). All existing patterns apply:
 React + Vite frontend, Express server on port 8787, Supabase PostgreSQL,

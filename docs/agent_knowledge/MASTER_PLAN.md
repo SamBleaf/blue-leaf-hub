@@ -1,6 +1,8 @@
 # Blue Leaf Hub — Master Plan
 ## Live Planning Document
 
+> SUPERSEDED — see the repo-root MASTER_PLAN.md (newer) and MASTER_DATA_DICTIONARY.md for architecture.
+
 > **Last updated:** 2026-05-23 (Marketing module added)
 > **Maintained by:** Planning Agent
 > **Read this first.** Then read `AGENT_OVERVIEW.md` for technical orientation.
@@ -60,7 +62,7 @@ Migrations: applied via Supabase SQL editor in order. Current max = **045**. Nex
 
 **Route:** `/sales`, `/sales/:id`
 **Files:** `salesRoutes.mjs`, `SalesPipeline.jsx`, `LeadDetail.jsx`
-**DB:** `leads`, `pipeline_stages`, `lead_qualifying_scores`, `lead_documents`, `lead_notes`, `lead_conversations`
+**DB:** `leads`, `pipeline_stages`, `lead_documents`, `lead_notes`, `lead_conversations` (qualifying scores live as `qualify_*` columns on `leads` (migration 016), not a separate table)
 **Migration 045:** Adds PTSA fields to `leads` — UI not yet built
 
 **What's built:**

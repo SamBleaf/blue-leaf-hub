@@ -1,5 +1,7 @@
 # Blue Leaf Hub — Module Relationships
 
+> Field-level canonical authority is `MASTER_DATA_DICTIONARY.md`. This doc is the entity/lifecycle/module view; where they differ, the dictionary wins.
+
 > Last updated: 2026-05-21
 
 ---
@@ -89,7 +91,7 @@ BLUEPRINT AI (cross-cutting)
 ## Module Detail
 
 ### Sales Manager
-- **Tables**: `leads`, `lead_activities`, `lead_qualifying_scores`, `lead_documents`, `lead_notes`, `lead_conversations`
+- **Tables**: `leads`, `lead_activities`, `lead_documents`, `lead_notes`, `lead_conversations` (qualifying scores live as `qualify_*` columns on `leads` (migration 016), not a separate table)
 - **Depends on**: Nothing (entry point of system)
 - **Feeds into**: Tender Manager (via `lead_id` on `jobs`)
 - **AI**: Transcript analysis (claude-opus-4-5), Blueprint coaching (claude-sonnet-4-6)

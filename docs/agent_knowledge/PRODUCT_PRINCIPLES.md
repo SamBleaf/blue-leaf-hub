@@ -47,14 +47,19 @@ Office workflows (tendering, finance, portal admin) can be desktop-only. Site wo
 
 ---
 
-### 5. AI Augments, Never Replaces
-AI assists with extraction, generation, coaching, and QC. AI decisions always require human review. Never auto-apply AI output without user confirmation.
+### 5. AI Augments — Confirmation Is Consequence-Tiered
+AI assists with extraction, generation, coaching, and QC. Whether its output auto-applies is governed by the **consequence of being wrong**, not a flat "never auto-apply" rule:
+- 🔴 **Consequential facts** (safety/WHS, money, client-facing, compliance, consent) are **always human-confirmed** before they become canonical — even at high confidence.
+- 🟢 **Internal facts** (estimating/benchmarking/marketing metadata) **auto-apply at ≥0.90 confidence** — always with provenance (`source · confidence · status`) stamped and a one-click override.
+
+See `MASTER_DATA_DICTIONARY.md` §22 (the policy is LOCKED there).
 
 **In practice**:
-- RFQ extraction: AI extracts → user reviews → user sends
+- RFQ extraction: AI extracts → user reviews → user sends (client-facing/money → confirmed)
 - Schedule generation: AI generates → user reviews → user locks
-- Invoice extraction: AI extracts → user confirms → user approves
+- Invoice extraction: AI extracts → user confirms → user approves (money → confirmed)
 - Transcript analysis: AI suggests → user approves/rejects each suggestion
+- Internal benchmarking/marketing metadata: auto-applied at ≥0.90 with provenance stamped
 
 ---
 
@@ -75,7 +80,7 @@ Every record in the system must have a valid parent or be clearly marked as unma
 Financial numbers drive business decisions. They must be accurate, sourced from one place, and never double-counted.
 
 **In practice**:
-- `jobs.contract_value` is maintained by trigger — never computed ad-hoc
+- `jobs.contract_value` is currently **dual-sourced** (a known conflict): the migration-034 trigger stores it, but the live finance KPI routes recompute it from `original_contract_value` + signed variations and distrust the stored value. The target is a single **Generated** fact — see `MASTER_DATA_DICTIONARY.md` §17/§20/§29. Until reconciled, follow the finance routes' recompute; don't trust the stored value blindly.
 - Budget is imported from Buildexact — not manually entered and subject to drift
 - Invoice amounts come from AI extraction with human review — never entered without verification
 - Progress claims compute from approved invoices + payment records — not estimates
@@ -107,6 +112,13 @@ The client-facing portal must present a clean, confident, professional view of t
 Modules are connected. A change in one module must be assessed for impact on all others it integrates with.
 
 **In practice**: Before any change, consult `MODULE_RELATIONSHIPS.md` and `DATA_FLOW_MAP.md`. Never change a table without checking all modules that read or write it.
+
+---
+
+### 11. The Canonical Data Law Is Binding
+Facts belong to the project, not the module. The **Canonical Data Law** and the **Project Knowledge Core (Facts + Events + Documents)** are defined in `MASTER_DATA_DICTIONARY.md` and are **binding** — it is the field-level source of truth for data architecture; where any other doc differs, the dictionary wins.
+
+**In practice**: Before adding a column, check the Fact Registry (dictionary §11). Read canonical facts via `getJobProfile(jobId)` — never copy a canonical fact into your module's table. Facts key to one of three spines (Party / Lead / Job). All fact writes stamp provenance.
 
 ---
 

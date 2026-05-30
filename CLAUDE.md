@@ -41,6 +41,19 @@ New modules: create a new numbered folder (e.g. `15_financial_command_centre/`).
 **Read this section before touching any file. These rules apply to ALL code — new and modified.**
 `/check` will flag violations. No PRs pass without conformance.
 
+### Canonical Data Law — facts belong to the project, not the module
+**The single most important architectural rule. Full spec: `docs/agent_knowledge/MASTER_DATA_DICTIONARY.md` (Part 2).**
+
+1. **Before adding a column, check the Fact Registry** (`jobFactRegistry.mjs` / dictionary §11). If the fact already exists, **read it via `getJobProfile(jobId)`** — never copy a canonical fact into your module's table.
+2. A **new fact must be registered first** (canonical name, data type, creator, source, consumers, lifecycle, audit).
+3. Three data types: **Static** (set once), **Versioned** (changes → write `job_fact_history`), **Generated** (a function of other facts — **never stored as editable**; derive via a named function, mark dependents stale on input change).
+4. **All fact writes go through the facts service**, which stamps provenance (`source`, `confidence`, `status`).
+5. **Facts key to one of three spines — Party (`contact_id`), Lead (`lead_id`), or Job (`job_id`).** The Job spine is primary for construction facts; pre-job facts live on the Lead and **stamp forward** at conversion (never re-typed); people/orgs live on the Party spine and link via roles. Address is a normalised attribute of the job — never re-stored on another table.
+6. **Confirmation is consequence-tiered, and a fact's tier = the MAX consequence across its consumers.** A fact whose wrong value could cause harm, lost income, a client dispute, or a compliance/consent breach (safety/WHS, money, client-facing, compliance, consent) **must be human-confirmed** before it is canonical — regardless of confidence. Internal facts auto-apply at ≥0.90. Provenance (`source`=document_id, `confidence`, `status`) is always stamped.
+
+> The Knowledge Core is Facts + Events + Documents (one chain): see `docs/agent_knowledge/MASTER_DATA_DICTIONARY.md` Part 4.
+> Status: in force. The facts service + `getJobProfile` are being built in the foundation sprint. Until they land, **do not add duplicate fact columns** — register the fact in the dictionary §11 and flag it for the sprint.
+
 ### Server responses — always use apiResponse.mjs
 ```js
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
@@ -186,22 +199,30 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–017). Apply in order via Supabase dashboard SQL editor.
+Database migrations in `supabase/migrations/` (001–068). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |
 |---|---|
 | 001–004 | `jobs`, `subcontractors`, `rfqs`, `fee_proposals`, `cost_intelligence` |
-| 005–008 | `projects`, `purchase_orders`, `correspondence`, `schedule_tasks` |
+| 005–008 | `projects`, `sequences`, `purchase_orders`, `correspondence`, `schedule_tasks` (note: `sequences` is created in 006, not 012) |
 | 009–011 | `site_diary`, `contractor_compliance`, `site_inductions`, `unmatched_quote_emails` |
-| 012 | `sequences` |
+| 012 | IMAP quote PDF URL on `rfqs` + `correspondence.attachments` jsonb |
 | 013 | leads pipeline: `leads`, `pipeline_stages` |
-| 014 | `lead_qualifying_scores` |
+| 014 | `schedule_templates` |
 | 015 | `buildexact_deep_integration` — Buildexact sync fields on `jobs` |
-| 016 | Blueprint Insight fields on `leads` |
+| 016 | Blueprint Insight fields on `leads` + qualifying-score columns (`qualify_budget`, `qualify_timeframe`, `qualify_site`, `qualify_decision_maker`, generated `qualify_score`) |
 | 017 | `lead_conversations` (transcript, bp_suggestions, applied_suggestions JSONB) |
 | 018–059 | Various — workforce, finance, marketing, portal, WHS, schedule improvements |
 | 060 | `lead_notes`, `lead_documents` + Supabase Storage RLS for `lead-documents` bucket |
+| 061 | CRM + mailing list: `crm_contacts`, `crm_interactions`, `mailing_lists`, `mailing_list_members`, `email_sends`, `email_unsubscribes` |
+| 062 | Marketing Intelligence: `attribution_events`, `keyword_targets`, `website_pages`, `social_post_snapshots`, GSC/GA4/GBP snapshots + leads attribution fields |
+| 063 | `leads` website-enquiry fields — adds `name`, `project_description`; makes `first_name` nullable |
+| 064 | WHS engine: `whs_site_profiles`, `whs_documents` |
+| 065 | Carpentry module: `carpentry_jobs`, `carpentry_job_milestones`, `carpentry_job_costs`, `carpentry_site_diary` + `alloc_carpentry_sequence()`; adds `carpentry_job_id` to `timesheets`/marketing tables |
+| 066 | Carpentry schema corrections (project_type/status enums, drop `closeout_data`) + `carpentry_job_performance` |
+| 067 | `carpentry_job_budgets` (Phase 2 costing — budget vs actual) |
+| 068 | `site_tasks.carpentry_job_id` + makes `site_tasks.project_id` nullable |
 
 ---
 

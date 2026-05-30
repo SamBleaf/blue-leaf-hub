@@ -1,5 +1,7 @@
 # Blue Leaf Hub — Data Flow Map
 
+> Field-level canonical authority is `MASTER_DATA_DICTIONARY.md`. This doc is the entity/lifecycle/module view; where they differ, the dictionary wins.
+
 > Last updated: 2026-05-21
 
 ---
@@ -16,8 +18,8 @@ ENQUIRY
   ▼
 QUALIFICATION
   ├── APB scorecard completed
-  │   Tables: lead_qualifying_scores
-  │   Data created: weighted scores across 8 dimensions
+  │   Tables: leads (qualifying scores live as qualify_* columns on leads, migration 016)
+  │   Data created: qualify_budget, qualify_timeframe, qualify_site, qualify_decision_maker + generated qualify_score
   │
   ▼
 DISCOVERY / WINNING OFFER
