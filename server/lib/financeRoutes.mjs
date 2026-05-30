@@ -1108,7 +1108,7 @@ export function registerFinanceRoutes(app) {
     const { proposalId } = req.params;
     const sb = getServiceSupabase();
     const { data: proposal, error: pErr } = await sb.from("fee_proposals")
-      .select("id, job_id, data, status, fee_schedule")
+      .select("id, job_id, net_total, markup_amount, tax_amount, total_inc_gst, status, fee_schedule")
       .eq("id", proposalId).single();
     if (pErr || !proposal) return res.status(404).json({ ok: false, error: "Proposal not found" });
 
@@ -1118,12 +1118,13 @@ export function registerFinanceRoutes(app) {
 
     let contractValue = null;
     if (proposal.job_id) {
-      const totalExGst = Number(
-        proposal.data?.total_ex_gst ||
-        proposal.data?.totalExGst ||
-        proposal.data?.contract_value_ex_gst ||
-        0
-      );
+      // ex-GST contract value from the proposal's TYPED totals (no `data` column exists —
+      // this endpoint previously read proposal.data and silently failed to set anything).
+      const inc = Number(proposal.total_inc_gst || 0);
+      const tax = Number(proposal.tax_amount || 0);
+      const totalExGst = inc > 0
+        ? (tax > 0 ? Math.round((inc - tax) * 100) / 100 : Math.round((inc / 1.1) * 100) / 100)
+        : Number(proposal.net_total || 0) + Number(proposal.markup_amount || 0);
       if (totalExGst > 0) {
         const { data: job } = await sb.from("jobs")
           .select("original_contract_value").eq("id", proposal.job_id).single();

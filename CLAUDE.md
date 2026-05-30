@@ -199,7 +199,7 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–069). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
+Database migrations in `supabase/migrations/` (001–070). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |

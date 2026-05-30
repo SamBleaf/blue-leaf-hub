@@ -313,6 +313,36 @@ export function registerModule4Routes(app) {
       const { data: proj, error: pIns } = await sb.from("projects").insert(projectRow).select("*").single();
       if (pIns) throw new Error(pIns.message);
 
+      // ── Value-carry: ensure a won job has a contract value (ex-GST) ──────────────
+      // The fee-proposal-accept path historically read a non-existent `data` column, so
+      // contract value was never set → jobs started at $0 (the -11,832% margin cause).
+      // Derive from the proposal's TYPED totals: ex-GST = total_inc_gst - tax_amount.
+      // Pick accepted (else most recent) proposal. Only fills when unset; never overwrites.
+      try {
+        const { data: jobCv } = await sb.from("jobs")
+          .select("original_contract_value").eq("id", jobId).maybeSingle();
+        if (!jobCv?.original_contract_value || Number(jobCv.original_contract_value) <= 0) {
+          const { data: fps } = await sb.from("fee_proposals")
+            .select("net_total, markup_amount, tax_amount, total_inc_gst, status, updated_at")
+            .eq("job_id", jobId);
+          const best = (fps || []).slice().sort((a, b) =>
+            ((b.status === "accepted") - (a.status === "accepted")) ||
+            String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+          )[0];
+          const inc = Number(best?.total_inc_gst || 0);
+          const tax = Number(best?.tax_amount || 0);
+          const cv = inc > 0
+            ? (tax > 0 ? Math.round((inc - tax) * 100) / 100 : Math.round((inc / 1.1) * 100) / 100)
+            : Number(best?.net_total || 0) + Number(best?.markup_amount || 0);
+          if (cv > 0) {
+            await sb.from("jobs").update({ original_contract_value: cv, contract_value: cv, updated_at: now }).eq("id", jobId);
+            await sb.from("projects").update({ contract_value: cv, updated_at: now }).eq("id", proj.id);
+          }
+        }
+      } catch (e) {
+        console.warn("[win-finalize] contract value-carry skipped:", e?.message || e);
+      }
+
       const ci = req.body?.costIntel || {};
       const num = (v) => {
         const n = Number(v);
