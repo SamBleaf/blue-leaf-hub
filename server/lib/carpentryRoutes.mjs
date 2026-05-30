@@ -448,7 +448,14 @@ export function registerCarpentryRoutes(app) {
         raw: {
           quoteNumber: p.quote_number || "",
           buildingType: p.building_type || "",
-          categories: (p.categories || []).map((c) => ({ name: c.name, subtotalExGst: c.subtotal_ex_gst })),
+          // Classify each estimate category: names without "supply" are labour
+          // budget lines (actuals come from workforce timesheets); names with
+          // "supply" are material budget lines (actuals from carpentry_job_costs).
+          categories: (p.categories || []).map((c) => ({
+            name: c.name,
+            subtotalExGst: c.subtotal_ex_gst,
+            costType: /supply/i.test(c.name || "") ? "material" : "labour",
+          })),
         },
       });
     } catch (e) {
