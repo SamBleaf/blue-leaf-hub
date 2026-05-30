@@ -18,7 +18,7 @@ export function registerJobsApiRoutes(app) {
     try {
       const sb = getServiceSupabase();
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
-      const { address, client_name, project_type, arch_ref } = req.body || {};
+      const { address, client_name, client_email, client_phone, project_type, arch_ref } = req.body || {};
       if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
 
       // Dedup: prefer the canonical normalised key ("21 Folkestone Rd" == "21 Folkestone Road");
@@ -42,6 +42,8 @@ export function registerJobsApiRoutes(app) {
         address_state: addr.state,
         address_postcode: addr.postcode,
         client_name: client_name?.trim() || null,
+        client_email: client_email?.trim() || null,
+        client_phone: client_phone?.trim() || null,
         project_type: project_type || null,
         arch_ref: arch_ref?.trim() || null,
         status: "tendering",

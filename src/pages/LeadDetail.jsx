@@ -1073,6 +1073,8 @@ export default function LeadDetail() {
         body: JSON.stringify({
           address: lead.site_address || `${lead.first_name} ${lead.last_name} — ${lead.suburb || ""}`.trim(),
           client_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+          client_email: lead.email || null,
+          client_phone: lead.phone || null,
           project_type: lead.project_type || null,
         }),
       }).then(r => r.json());
