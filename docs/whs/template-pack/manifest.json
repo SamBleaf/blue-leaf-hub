@@ -1,0 +1,31 @@
+{
+  "name": "blue-leaf-whs-template-pack",
+  "created": "2026-05-30",
+  "status": "draft_for_review",
+  "batches": {
+    "batch_1": [
+      "03_project_whs_management_plan.md",
+      "04_emergency_management_plan.md",
+      "05_site_safety_plan.md"
+    ],
+    "batch_2": [
+      "swms/01_working_at_heights.md",
+      "swms/02_roof_work.md",
+      "swms/03_scaffold_use.md",
+      "swms/04_excavation_trenching.md",
+      "swms/05_demolition_stripout.md",
+      "swms/06_silica_dust_cutting.md",
+      "swms/07_mobile_plant_telehandler.md",
+      "swms/08_crane_lifting.md",
+      "swms/09_hot_works.md",
+      "swms/10_structural_carpentry.md"
+    ],
+    "batch_3": [
+      "config/claude_code_implementation_prompt.md",
+      "01_merge_field_register.md",
+      "02_questionnaire_map.md",
+      "config/whs_outputs_matrix.md",
+      "critique/99_legal_usability_critique.md"
+    ]
+  }
+}

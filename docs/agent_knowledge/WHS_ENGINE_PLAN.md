@@ -6,6 +6,19 @@
 
 ---
 
+## Content pack (imported 2026-05-30)
+
+The approved WHS content lives at **`docs/whs/template-pack/`** — the canonical source the engine consumes (3 core plan templates, 10 SWMS, 3 permits, 7 registers, merge-field register, questionnaire map, outputs matrix, legal/usability critique). Templates use **`{{merge_field}}`** (mustache-style) markdown — distinct from the fee-proposal docxtemplater single-brace flow.
+
+Build-time reconciliation notes (found while reading the pack):
+- **Extend the merge-field register.** The SWMS/permit/register templates use fields not yet in `01_merge_field_register.md` — e.g. `swms_scope_notes`, `plant_equipment_required`, `task_specific_controls`, `task_specific_emergency_response`, `permit_number`, `excavation_depth`, `contractor_name`, `check_*`/`notes_*`, and repeating-row fields (`swms_name`, `worker_name`, `signed_count`). The renderer must support **repeating rows** (registers, worker sign-on, work-step tables).
+- **Matrix canonical here.** `whsOutputsMatrix.md` (this folder) stays in sync with the pack's `config/whs_outputs_matrix.md`; mine adds Part A (Module 0 pre-select) + Part D (weather).
+- **Honour the critique.** `critique/99_legal_usability_critique.md` lists the legal gaps (confirm SA clause refs; review asbestos/silica/confined-space; notifiable-incident workflow) and the approval cycle: Draft → supervisor review → Director approval → locked PDF → worker sign-on → **stale on any profile change**.
+
+> **Critical (from the critique):** replacing HazardCo means Blue Leaf now owns template review, legislation monitoring, code updates, and subcontractor document review. Safe if maintained; dangerous if templates go stale.
+
+---
+
 ## The principle (read this first)
 
 **Do not build a document system. Build a data system that outputs documents.**
