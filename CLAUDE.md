@@ -385,15 +385,28 @@ _All previously logged bugs (BUG-UI-1, BUG-UI-2, BUG-S1, BUG-S2) shipped in the 
 
 ## External Integrations
 
-| Service | Env vars | Purpose |
-|---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` | RFQ extraction, schedule generation, transcript analysis, Blueprint AI |
-| Gmail OAuth | `GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN/SENDER_EMAIL` | Outbound email via Gmail |
-| Google Drive | `GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Fee proposal Google Docs workflow |
-| SMTP | `SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Email fallback |
-| IMAP | `IMAP_HOST/PORT/SECURE/USER/PASS` | Inbound quote email polling |
-| Dropbox | `DROPBOX_APP_KEY/SECRET/REFRESH_TOKEN` | Job folders, file uploads |
-| Buildexact | `BUILDEXACT_API_URL/USERNAME/API_KEY` | Sync jobs, create POs |
+| Service | Env vars | Purpose | Status |
+|---|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` | RFQ extraction, schedule generation, transcript analysis, Blueprint AI | Required |
+| Gmail OAuth | `GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN/SENDER_EMAIL` | Outbound email via Gmail | Required |
+| Google Drive | `GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Fee proposal Google Docs workflow + **shared OAuth base for GSC/GA4/GBP** | Required |
+| Google Search Console | `GOOGLE_SEARCH_CONSOLE_SITE_URL` (+ Drive OAuth) | Marketing Intelligence — keyword position tracking | Optional |
+| Google Analytics 4 | `GA4_PROPERTY_ID` (+ Drive OAuth) | Marketing Intelligence — traffic + conversion attribution | Optional |
+| Google Business Profile | `GBP_LOCATION_ID` (+ Drive OAuth) | Marketing Intelligence — calls, directions, review tracking | Optional |
+| Meta (Instagram/Facebook) | `META_ACCESS_TOKEN`, `META_IG_USER_ID`, `META_PAGE_ID` | Marketing Intelligence — post reach + engagement | Optional |
+| Resend | `RESEND_API_KEY` | CRM mailing list campaigns — bulk email with unsubscribe | Optional |
+| SMTP | `SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Email fallback | Optional |
+| IMAP | `IMAP_HOST/PORT/SECURE/USER/PASS` | Inbound quote email polling | Optional |
+| Dropbox | `DROPBOX_APP_KEY/SECRET/REFRESH_TOKEN` | Job folders, file uploads | Optional |
+| Buildexact | `BUILDEXACT_API_URL/USERNAME/API_KEY/SUBSCRIPTION_KEY` | Sync jobs, create POs | Optional |
+
+**Google OAuth scopes required for full Marketing Intelligence:**
+- `https://www.googleapis.com/auth/webmasters.readonly` (GSC)
+- `https://www.googleapis.com/auth/analytics.readonly` (GA4)
+- `https://www.googleapis.com/auth/business.manage` (GBP)
+- Add to existing Google Cloud OAuth app, re-run `npm run auth:drive`, update `GOOGLE_DRIVE_REFRESH_TOKEN` in Railway.
+
+**Integration status visible in app:** Settings page → each service shows configured/not-configured badge from `GET /api/integrations/status`.
 
 Mail transport (`server/lib/notifyMail.mjs`) prefers Gmail OAuth over SMTP — all sending via `sendPlainMail()`.
 
