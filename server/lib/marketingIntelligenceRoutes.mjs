@@ -29,6 +29,8 @@
  *     GET  /api/intelligence/questions
  *     POST /api/intelligence/questions/scan
  *     PATCH /api/intelligence/questions/:id
+ *     GET  /api/intelligence/strategy-suggestions
+ *     POST /api/intelligence/content-performance/sync
  */
 
 import { getServiceSupabase } from "./supabaseService.mjs";
@@ -43,6 +45,10 @@ const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?
 // ─── Module-level AI cache ───────────────────────────────────────────────────
 // Key: "YYYY-Www" — ISO year + week number. Invalidates weekly (5-min cache TTL).
 const _aiCache = new Map();
+
+// ─── Strategy suggestions cache (P2.5) ───────────────────────────────────────
+// Key: ISO week string. Value: { suggestions, cachedUntil } with 14-day TTL.
+const _strategyCache = new Map();
 
 function isoWeekKey(d = new Date()) {
   const jan4 = new Date(d.getFullYear(), 0, 4);
@@ -1391,6 +1397,226 @@ Return ONLY the JSON object.`;
       .update(patch).eq("id", req.params.id).select().single();
     if (error) return err(res, 500, translateDbError(error));
     return ok(res, { question: rowToCamel(data) });
+  });
+
+  // ── GET /api/intelligence/strategy-suggestions (P2.5) ───────────────────────
+  // AI-generated content strategy suggestions, cached for 14 days per ISO week.
+  app.get("/api/intelligence/strategy-suggestions", requireAuth, async (req, res) => {
+    if (!_apiKey) return err(res, 503, "AI not configured");
+    const sb = sbClient();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    // Check cache — 14-day TTL, keyed by ISO week
+    const weekKey = isoWeekKey();
+    const cached = _strategyCache.get(weekKey);
+    if (cached && new Date(cached.cachedUntil) > new Date()) {
+      return ok(res, { suggestions: cached.suggestions, cached_until: cached.cachedUntil });
+    }
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Pull all three data sources in parallel
+    const [topContentRes, keywordsRes, questionsRes] = await Promise.all([
+      // Top 3 content items by performance_score (computed from stored fields)
+      sb.from("marketing_content_items")
+        .select("id, title, channel, pillar, attributed_enquiries, total_reach, total_engagements, total_link_clicks, published_at")
+        .eq("status", "published")
+        .gte("published_at", thirtyDaysAgo),
+
+      // Keyword opportunities: position > 10 with meaningful impressions
+      sb.from("keyword_targets")
+        .select("id, keyword, current_position, monthly_impressions, intent")
+        .not("current_position", "is", null)
+        .gt("current_position", 10)
+        .gte("monthly_impressions", 50)
+        .order("monthly_impressions", { ascending: false })
+        .limit(5),
+
+      // Queued high/medium SEO-potential questions
+      sb.from("website_questions")
+        .select("id, question_text, seo_potential, suggested_content_type, suggested_keyword")
+        .eq("status", "queued")
+        .in("seo_potential", ["high", "medium"])
+        .order("created_at", { ascending: false })
+        .limit(5),
+    ]);
+
+    if (topContentRes.error) return err(res, 500, translateDbError(topContentRes.error));
+
+    // Compute performance scores and take top 3
+    const scoredContent = (topContentRes.data || []).map(item => {
+      const engRate = Number(item.total_reach || 0) > 0
+        ? Number(item.total_engagements || 0) / Number(item.total_reach)
+        : 0;
+      return {
+        title:             item.title,
+        channel:           item.channel,
+        pillar:            item.pillar,
+        performance_score: perfScore({ ...item, engagement_rate: engRate }),
+        attributed_enquiries: item.attributed_enquiries || 0,
+      };
+    }).sort((a, b) => b.performance_score - a.performance_score).slice(0, 3);
+
+    const opportunities = (keywordsRes.data || []).map(kw => ({
+      keyword:             kw.keyword,
+      current_position:    kw.current_position,
+      monthly_impressions: kw.monthly_impressions,
+      intent:              kw.intent,
+    }));
+
+    const questions = (questionsRes.data || []).map(q => ({
+      question_text:         q.question_text,
+      seo_potential:         q.seo_potential,
+      suggested_content_type: q.suggested_content_type,
+      suggested_keyword:     q.suggested_keyword,
+    }));
+
+    const prompt = `You are a marketing strategist for Blue Leaf Building, a premium custom home builder in Adelaide, South Australia.
+
+Based on the following marketing performance data, suggest 3 specific content pieces to create next.
+
+Top performing content (last 30 days):
+${JSON.stringify(scoredContent, null, 2)}
+
+Keyword opportunities (position >10, impressions >50/month):
+${JSON.stringify(opportunities, null, 2)}
+
+Queued website questions with high/medium SEO potential:
+${JSON.stringify(questions, null, 2)}
+
+Return a JSON array of exactly 3 objects. Each object:
+{
+  "title": "specific, actionable content title",
+  "content_type": "instagram_post|client_guide|website_page|journal_article",
+  "keyword": "target keyword or null",
+  "reason": "one sentence explaining why this piece will drive enquiries or rankings"
+}
+
+Prioritise content that closes the gap between current performance and opportunities. Be specific to Blue Leaf Building — no generic builder copy. Return ONLY the JSON array.`;
+
+    let suggestions;
+    try {
+      const response = await callAI({
+        model:      "claude-haiku-4-5",
+        max_tokens: 800,
+        messages:   [{ role: "user", content: prompt }],
+      });
+      const raw = response.content?.[0]?.text || "[]";
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      suggestions = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+      if (!Array.isArray(suggestions)) throw new Error("AI did not return an array");
+    } catch (e) {
+      return err(res, 502, `Strategy suggestion generation failed: ${e.message}`);
+    }
+
+    // Store in cache with 14-day TTL
+    const cachedUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    _strategyCache.set(weekKey, { suggestions, cachedUntil });
+
+    return ok(res, { suggestions, cached_until: cachedUntil });
+  });
+
+  // ── POST /api/intelligence/content-performance/sync (P2.6) ──────────────────
+  // Aggregates social snapshot data and enquiry attribution into marketing_content_items.
+  app.post("/api/intelligence/content-performance/sync", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    // Fetch all content items that have at least one publish record
+    const { data: publishes, error: pubErr } = await sb.from("social_post_publishes")
+      .select("id, content_item_id");
+    if (pubErr) return err(res, 500, translateDbError(pubErr));
+
+    // Group publish IDs by content item
+    const publishesByItem = {};
+    for (const pub of (publishes || [])) {
+      if (!pub.content_item_id) continue;
+      if (!publishesByItem[pub.content_item_id]) publishesByItem[pub.content_item_id] = [];
+      publishesByItem[pub.content_item_id].push(pub.id);
+    }
+
+    const contentItemIds = Object.keys(publishesByItem);
+    if (contentItemIds.length === 0) return ok(res, { ok: true, updated: 0 });
+
+    // Fetch all relevant snapshots for those publish IDs in one query
+    const allPublishIds = Object.values(publishesByItem).flat();
+    const { data: snapshots, error: snapErr } = await sb.from("social_post_snapshots")
+      .select("publish_id, reach, likes, comments, shares, saves, link_clicks")
+      .in("publish_id", allPublishIds);
+    if (snapErr) return err(res, 500, translateDbError(snapErr));
+
+    // Build snapshot aggregates keyed by content_item_id
+    const snapshotsByItem = {};
+    for (const snap of (snapshots || [])) {
+      // Find which content item this publish_id belongs to
+      const contentItemId = Object.keys(publishesByItem).find(
+        cid => publishesByItem[cid].includes(snap.publish_id)
+      );
+      if (!contentItemId) continue;
+      if (!snapshotsByItem[contentItemId]) {
+        snapshotsByItem[contentItemId] = { total_reach: 0, total_engagements: 0, total_link_clicks: 0 };
+      }
+      snapshotsByItem[contentItemId].total_reach        += Number(snap.reach        || 0);
+      snapshotsByItem[contentItemId].total_engagements  += Number(snap.likes        || 0)
+                                                         + Number(snap.comments     || 0)
+                                                         + Number(snap.shares       || 0)
+                                                         + Number(snap.saves        || 0);
+      snapshotsByItem[contentItemId].total_link_clicks  += Number(snap.link_clicks  || 0);
+    }
+
+    // Fetch enquiry attribution for all content items in one query
+    const { data: attrRows, error: attrErr } = await sb.from("enquiry_attribution")
+      .select("first_touch_content_item_id, assisted_content_item_ids")
+      .not("first_touch_content_item_id", "is", null);
+    if (attrErr) return err(res, 500, translateDbError(attrErr));
+
+    // Count attributed enquiries per content item (first-touch + assisted)
+    const enquiriesByItem = {};
+    for (const attr of (attrRows || [])) {
+      const ids = new Set();
+      if (attr.first_touch_content_item_id) ids.add(attr.first_touch_content_item_id);
+      for (const aid of (attr.assisted_content_item_ids || [])) ids.add(aid);
+      for (const id of ids) {
+        enquiriesByItem[id] = (enquiriesByItem[id] || 0) + 1;
+      }
+    }
+
+    // Also fetch attribution rows where content item appears only in assisted (no first_touch filter above)
+    const { data: assistedRows } = await sb.from("enquiry_attribution")
+      .select("assisted_content_item_ids")
+      .is("first_touch_content_item_id", null)
+      .not("assisted_content_item_ids", "is", null);
+    for (const attr of (assistedRows || [])) {
+      for (const aid of (attr.assisted_content_item_ids || [])) {
+        enquiriesByItem[aid] = (enquiriesByItem[aid] || 0) + 1;
+      }
+    }
+
+    // Upsert each content item with aggregated metrics
+    let updated = 0;
+    for (const contentItemId of contentItemIds) {
+      const agg = snapshotsByItem[contentItemId] || { total_reach: 0, total_engagements: 0, total_link_clicks: 0 };
+      const attributedEnquiries = enquiriesByItem[contentItemId] || 0;
+      const engagementRate = agg.total_reach > 0 ? agg.total_engagements / agg.total_reach : 0;
+      const score = Math.round(
+        (attributedEnquiries * 40) +
+        (engagementRate * 100 * 30) +
+        (agg.total_link_clicks * 30)
+      );
+
+      const { error: updateErr } = await sb.from("marketing_content_items").update({
+        total_reach:           agg.total_reach,
+        total_engagements:     agg.total_engagements,
+        total_link_clicks:     agg.total_link_clicks,
+        attributed_enquiries:  attributedEnquiries,
+        performance_score:     score,
+      }).eq("id", contentItemId);
+
+      if (!updateErr) updated++;
+      else console.error(`[perf-sync] failed for content_item ${contentItemId}:`, updateErr.message);
+    }
+
+    return ok(res, { ok: true, updated });
   });
 
   // ── GET /api/intelligence/attribution-summary ────────────────────────────────

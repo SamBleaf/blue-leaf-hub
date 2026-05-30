@@ -696,6 +696,113 @@ export function registerCarpentryRoutes(app) {
     }
   });
 
+  // ── GET /api/carpentry/jobs/:id/tasks ───────────────────────────────────────
+
+  app.get("/api/carpentry/jobs/:id/tasks", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data, error } = await sb
+        .from("site_tasks")
+        .select("*, employees!assigned_to(id, name)")
+        .eq("carpentry_job_id", req.params.id)
+        .neq("status", "wont_do")
+        .order("sort_order")
+        .order("created_at");
+      if (error) throw error;
+      return ok(res, { tasks: data || [] });
+    } catch (e) {
+      console.error("[carpentry/tasks GET]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/tasks ──────────────────────────────────────
+
+  app.post("/api/carpentry/jobs/:id/tasks", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { title, description, priority = "normal", dueDate } = req.body || {};
+      if (!title?.trim()) return err(res, 400, "title is required.");
+      const VALID_PRIORITY = ["urgent", "normal", "when_time_permits"];
+      if (!VALID_PRIORITY.includes(priority)) return err(res, 400, "Invalid priority.");
+
+      const row = {
+        carpentry_job_id: req.params.id,
+        project_id: null,
+        title: title.trim(),
+        description: description?.trim() || null,
+        priority,
+        due_date: dueDate || null,
+        created_by: req.caller.id,
+        created_via: "manual",
+        status: "open",
+        sort_order: 0,
+      };
+      const { data: task, error } = await sb
+        .from("site_tasks")
+        .insert(row)
+        .select("*, employees!assigned_to(id, name)")
+        .single();
+      if (error) throw error;
+      return ok(res, { task });
+    } catch (e) {
+      console.error("[carpentry/tasks POST]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── PATCH /api/carpentry/tasks/:id ──────────────────────────────────────────
+
+  app.patch("/api/carpentry/tasks/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { status, completionNotes } = req.body || {};
+      const patch = { updated_at: new Date().toISOString() };
+      if (status !== undefined) {
+        const VALID = ["open", "in_progress", "done", "wont_do"];
+        if (!VALID.includes(status)) return err(res, 400, "Invalid status.");
+        patch.status = status;
+        if (status === "done") {
+          patch.completed_at = new Date().toISOString();
+        }
+      }
+      if (completionNotes !== undefined) patch.completion_notes = completionNotes || null;
+      const { data: task, error } = await sb
+        .from("site_tasks")
+        .update(patch)
+        .eq("id", req.params.id)
+        .select("*, employees!assigned_to(id, name)")
+        .single();
+      if (error) throw error;
+      if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
+      return ok(res, { task });
+    } catch (e) {
+      console.error("[carpentry/tasks/:id PATCH]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── DELETE /api/carpentry/tasks/:id ─────────────────────────────────────────
+
+  app.delete("/api/carpentry/tasks/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { error } = await sb
+        .from("site_tasks")
+        .update({ status: "wont_do", updated_at: new Date().toISOString() })
+        .eq("id", req.params.id);
+      if (error) throw error;
+      return ok(res, {});
+    } catch (e) {
+      console.error("[carpentry/tasks/:id DELETE]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
   // ── GET /api/carpentry/jobs/:id/costs ───────────────────────────────────────
 
   app.get("/api/carpentry/jobs/:id/costs", requireAuth, async (req, res) => {

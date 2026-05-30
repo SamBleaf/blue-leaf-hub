@@ -52,6 +52,7 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.28.0",
     "recharts": "^3.8.1",
+    "resend": "^6.12.4",
     "ws": "^8.20.1",
     "xlsx": "^0.18.5"
   },

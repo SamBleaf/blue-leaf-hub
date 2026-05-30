@@ -596,6 +596,212 @@ function ScheduleTab({ jobId }) {
 
 // ── Diary Tab ─────────────────────────────────────────────────────────────────
 
+const TASK_PRIORITY_LABEL = {
+  urgent: "Urgent",
+  normal: "Normal",
+  when_time_permits: "When time permits",
+};
+const TASK_PRIORITY_BADGE = {
+  urgent: "bg-red-100 text-red-700",
+  normal: "bg-gray-100 text-gray-600",
+  when_time_permits: "bg-slate-50 text-slate-500",
+};
+
+function TasksPanel({ jobId }) {
+  const [tasks, setTasks]         = useState([]);
+  const [loadingT, setLoadingT]   = useState(true);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskPriority, setTaskPriority] = useState("normal");
+  const [taskDesc, setTaskDesc]   = useState("");
+  const [addingTask, setAddingTask] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
+  const [taskError, setTaskError] = useState(null);
+  const [showDone, setShowDone]   = useState(false);
+
+  const loadTasks = useCallback(async () => {
+    setLoadingT(true);
+    const { ok, data } = await apiFetch(`/api/carpentry/jobs/${jobId}/tasks`);
+    setLoadingT(false);
+    if (ok) setTasks(data?.tasks || []);
+  }, [jobId]);
+
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+
+  async function addTask() {
+    if (!taskTitle.trim()) return;
+    setAddingTask(true);
+    setTaskError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/tasks`, {
+      title: taskTitle.trim(),
+      description: taskDesc.trim() || undefined,
+      priority: taskPriority,
+    });
+    setAddingTask(false);
+    if (!ok) { setTaskError(e || "Failed to add task."); return; }
+    setTasks((prev) => [data.task, ...prev]);
+    setTaskTitle("");
+    setTaskDesc("");
+    setTaskPriority("normal");
+    setShowAddTask(false);
+  }
+
+  async function toggleDone(task) {
+    const newStatus = task.status === "done" ? "open" : "done";
+    setTogglingId(task.id);
+    const { ok, data } = await apiPatch(`/api/carpentry/tasks/${task.id}`, { status: newStatus });
+    setTogglingId(null);
+    if (ok) setTasks((prev) => prev.map((t) => t.id === task.id ? data.task : t));
+  }
+
+  async function deleteTask(task) {
+    if (!confirm(`Remove task "${task.title}"?`)) return;
+    const { ok } = await apiDelete(`/api/carpentry/tasks/${task.id}`);
+    if (ok) setTasks((prev) => prev.filter((t) => t.id !== task.id));
+  }
+
+  const openTasks = tasks.filter((t) => t.status !== "done");
+  const doneTasks = tasks.filter((t) => t.status === "done");
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-ink">Tasks for workers</h3>
+        <button
+          onClick={() => setShowAddTask((v) => !v)}
+          className="px-3 py-1.5 text-xs rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+        >
+          {showAddTask ? "Cancel" : "+ Add Task"}
+        </button>
+      </div>
+
+      {taskError && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-3">{taskError}</div>}
+
+      {showAddTask && (
+        <div className="mb-4 p-4 bg-slate-50 rounded-card border border-hairline space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Task *</label>
+            <input
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addTask()}
+              placeholder="e.g. Install LVL ridge beam"
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Details (optional)</label>
+            <textarea
+              value={taskDesc}
+              onChange={(e) => setTaskDesc(e.target.value)}
+              rows={2}
+              placeholder="Any extra context for the worker…"
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-ink mb-1">Priority</label>
+              <select
+                value={taskPriority}
+                onChange={(e) => setTaskPriority(e.target.value)}
+                className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
+              >
+                <option value="urgent">Urgent</option>
+                <option value="normal">Normal</option>
+                <option value="when_time_permits">When time permits</option>
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={addTask}
+                disabled={addingTask || !taskTitle.trim()}
+                className="px-5 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-40 transition-colors"
+              >
+                {addingTask ? "Adding…" : "Add Task"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loadingT ? (
+        <p className="text-sm text-muted">Loading tasks…</p>
+      ) : openTasks.length === 0 && doneTasks.length === 0 ? (
+        <p className="text-sm text-muted">No tasks yet. Add tasks for your workers to tick off on-site.</p>
+      ) : (
+        <>
+          {openTasks.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {openTasks.map((task) => (
+                <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-hairline bg-white">
+                  <button
+                    onClick={() => toggleDone(task)}
+                    disabled={togglingId === task.id}
+                    className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-primary flex items-center justify-center transition-colors disabled:opacity-40"
+                    aria-label="Mark done"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-ink leading-snug">{task.title}</p>
+                    {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
+                  </div>
+                  <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
+                    {TASK_PRIORITY_LABEL[task.priority] || task.priority}
+                  </span>
+                  <button
+                    onClick={() => deleteTask(task)}
+                    className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1"
+                    title="Remove task"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {doneTasks.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDone((v) => !v)}
+                className="text-xs text-muted font-medium mb-2 flex items-center gap-1"
+              >
+                <span className="text-emerald-600">✓</span> Done ({doneTasks.length}) {showDone ? "▲" : "▼"}
+              </button>
+              {showDone && (
+                <div className="space-y-2">
+                  {doneTasks.map((task) => (
+                    <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50">
+                      <button
+                        onClick={() => toggleDone(task)}
+                        disabled={togglingId === task.id}
+                        className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center transition-colors disabled:opacity-40"
+                        aria-label="Mark undone"
+                      >
+                        <span className="text-white text-xs leading-none">✓</span>
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-muted line-through leading-snug">{task.title}</p>
+                        {task.completed_at && (
+                          <p className="text-xs text-muted mt-0.5">
+                            Done {new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DiaryTab({ job }) {
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -677,6 +883,11 @@ function DiaryTab({ job }) {
 
   return (
     <div className="p-6">
+      {/* Tasks for workers — always visible at top */}
+      <TasksPanel jobId={job.id} />
+
+      <hr className="border-hairline -mx-6 mb-6" />
+
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-ink">Site Diary</h3>
         <button
@@ -1007,6 +1218,16 @@ function CostsTab({ jobId }) {
 function BudgetTab({ jobId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+  const [seedError, setSeedError] = useState("");
+
+  function reload() {
+    setLoading(true);
+    apiFetch(`/api/carpentry/jobs/${jobId}/budget`).then(({ ok, data: d }) => {
+      setLoading(false);
+      if (ok) setData(d);
+    });
+  }
 
   useEffect(() => {
     let stop = false;
@@ -1018,10 +1239,47 @@ function BudgetTab({ jobId }) {
     return () => { stop = true; };
   }, [jobId]);
 
+  async function handleXlsx(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setSeeding(true);
+    setSeedError("");
+    try {
+      const dataBase64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("read failed"));
+        r.onload = () => resolve(String(r.result).replace(/^data:.*;base64,/, ""));
+        r.readAsDataURL(file);
+      });
+      const { ok: parsed, data: pd, error: pe } = await apiPost("/api/carpentry/estimate/parse-xlsx", { dataBase64, filename: file.name });
+      if (!parsed) { setSeedError(pe || "Could not read the estimate file."); return; }
+      const categories = Array.isArray(pd?.raw?.categories) ? pd.raw.categories : [];
+      if (!categories.length) { setSeedError("No estimate categories found in that file."); return; }
+      const { ok: seeded, error: se } = await apiPost(`/api/carpentry/jobs/${jobId}/budget/seed`, { categories });
+      if (!seeded) { setSeedError(se || "Budget seed failed."); return; }
+      reload();
+    } catch {
+      setSeedError("Could not read that file — make sure it is the Buildexact estimate XLSX.");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   if (loading) return <div className="p-6 text-sm text-muted">Loading budget…</div>;
   const lines = data?.lines || [];
   if (!lines.length) {
-    return <div className="p-6 text-sm text-muted">No budget yet. Create the job from a Buildexact estimate XLSX to seed budget lines automatically.</div>;
+    return (
+      <div className="p-6 space-y-3">
+        <p className="text-sm text-muted">No budget lines yet. Import the Buildexact estimate XLSX to seed them automatically.</p>
+        <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition
+          ${seeding ? "bg-gray-100 text-muted" : "bg-primary text-white hover:bg-primary/90"}`}>
+          {seeding ? "Importing…" : "Import estimate XLSX"}
+          <input type="file" accept=".xlsx" className="hidden" disabled={seeding} onChange={handleXlsx} />
+        </label>
+        {seedError && <p className="text-sm text-red-600">{seedError}</p>}
+      </div>
+    );
   }
   const t = data.totals || {};
   const labour = lines.filter((l) => l.costType === "labour");

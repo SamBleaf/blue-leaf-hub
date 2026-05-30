@@ -273,7 +273,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade, hourly_rate, overtime_multiplier), projects(id, address), timesheet_entries(*)")
+      .select("*, employees(id, name, trade, hourly_rate, overtime_multiplier), projects(id, address), carpentry_jobs(id, reference, client_name), timesheet_entries(*)")
       .eq("status", "submitted")
       .order("submitted_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -285,7 +285,7 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { status, employee_id, project_id, date_from, date_to } = req.query;
     let q = sb.from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), timesheet_entries(*)")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name), timesheet_entries(*)")
       .order("date", { ascending: false });
     if (status) q = q.eq("status", status);
     if (employee_id) q = q.eq("employee_id", employee_id);
@@ -411,6 +411,32 @@ export function registerWorkforceRoutes(app) {
     // Reset cost_amount on entries so it gets re-computed on next approval
     await sb.from("timesheet_entries").update({ cost_amount: null, overtime_hours: 0 })
       .eq("timesheet_id", req.params.id);
+    res.json({ ok: true });
+  });
+
+  // Attribute (or clear) a carpentry job on a pending/submitted timesheet
+  app.patch("/api/workforce/timesheets/:id/carpentry-job", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { carpentryJobId } = req.body;
+    // Verify the timesheet exists and is editable (not yet approved)
+    const { data: ts, error: tsErr } = await sb
+      .from("timesheets")
+      .select("id, status")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (tsErr || !ts) return res.status(404).json({ ok: false, error: "Timesheet not found" });
+    if (ts.status === "approved") {
+      return res.status(400).json({ ok: false, error: "Cannot change carpentry job on an approved timesheet. Unapprove it first." });
+    }
+    // Validate carpentryJobId if provided
+    if (carpentryJobId) {
+      const { data: job } = await sb.from("carpentry_jobs").select("id").eq("id", carpentryJobId).maybeSingle();
+      if (!job) return res.status(400).json({ ok: false, error: "Carpentry job not found" });
+    }
+    const { error } = await sb.from("timesheets")
+      .update({ carpentry_job_id: carpentryJobId || null, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true });
   });
 
@@ -635,16 +661,31 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    // Any job site: workers move between sites and may backdate hours to a site that
-    // is no longer "active", so return every project — active ones first for quick access.
-    const { data, error } = await sb
-      .from("projects")
-      .select("id, address, job_id, status")
-      .order("address", { ascending: true });
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    const list = (data || []).sort(
-      (a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1)
-    );
+
+    // Fetch construction projects AND carpentry jobs in parallel
+    const [projRes, carpRes] = await Promise.all([
+      sb.from("projects").select("id, address, job_id, status").order("address", { ascending: true }),
+      sb.from("carpentry_jobs").select("id, address, client_name, status").order("address", { ascending: true }),
+    ]);
+    if (projRes.error) return res.status(500).json({ ok: false, error: projRes.error.message });
+
+    const projects = (projRes.data || []).map(p => ({ ...p, type: "project" }));
+    // Carpentry jobs surface as sites — show "address (client)" for clarity
+    const carpJobs = (carpRes.data || []).map(j => ({
+      id: j.id,
+      address: j.client_name ? `${j.address} (${j.client_name})` : j.address,
+      status: j.status,
+      type: "carpentry",
+    }));
+
+    // Active sites first, then alphabetical within each bucket
+    const list = [...projects, ...carpJobs].sort((a, b) => {
+      const aActive = a.status === "active" ? 0 : 1;
+      const bActive = b.status === "active" ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return a.address.localeCompare(b.address);
+    });
+
     res.json({ ok: true, projects: list });
   });
 
@@ -653,7 +694,7 @@ export function registerWorkforceRoutes(app) {
     const emp = await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    const { date, project_id, job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] required" });
     }
@@ -677,6 +718,7 @@ export function registerWorkforceRoutes(app) {
         employee_id: emp.id, date,
         project_id: project_id || null,
         job_id: job_id || null,
+        carpentry_job_id: carpentry_job_id || null,
         status: "submitted",
         submitted_at: new Date().toISOString(),
       }).select("id").single();
@@ -686,6 +728,7 @@ export function registerWorkforceRoutes(app) {
       await sb.from("timesheets").update({
         project_id: project_id || null,
         job_id: job_id || null,
+        carpentry_job_id: carpentry_job_id || null,
         status: "submitted",
         submitted_at: new Date().toISOString(),
         rejection_notes: null,
@@ -759,17 +802,40 @@ export function registerWorkforceRoutes(app) {
     const emp = await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    // Find current project from latest timesheet
-    const { data: latestTs } = await sb.from("timesheets").select("project_id").eq("employee_id", emp.id).in("status", ["submitted", "approved"]).order("date", { ascending: false }).limit(1).maybeSingle();
-    if (!latestTs?.project_id) return res.json({ ok: true, tasks: [], project_id: null });
+    // Find current context from latest timesheet (may be regular project or carpentry job)
+    const { data: latestTs } = await sb
+      .from("timesheets")
+      .select("project_id, carpentry_job_id")
+      .eq("employee_id", emp.id)
+      .in("status", ["submitted", "approved"])
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const { data: tasks } = await sb
-      .from("site_tasks")
-      .select("*, employees!assigned_to(id, name)")
-      .eq("project_id", latestTs.project_id)
-      .neq("status", "wont_do")
-      .order("sort_order")
-      .order("created_at");
+    if (!latestTs) return res.json({ ok: true, tasks: [], project_id: null });
+
+    let tasksQuery;
+    if (latestTs.carpentry_job_id) {
+      tasksQuery = sb
+        .from("site_tasks")
+        .select("*, employees!assigned_to(id, name)")
+        .eq("carpentry_job_id", latestTs.carpentry_job_id)
+        .neq("status", "wont_do")
+        .order("sort_order")
+        .order("created_at");
+    } else if (latestTs.project_id) {
+      tasksQuery = sb
+        .from("site_tasks")
+        .select("*, employees!assigned_to(id, name)")
+        .eq("project_id", latestTs.project_id)
+        .neq("status", "wont_do")
+        .order("sort_order")
+        .order("created_at");
+    } else {
+      return res.json({ ok: true, tasks: [], project_id: null });
+    }
+
+    const { data: tasks } = await tasksQuery;
 
     // Filter: open+in_progress tasks (unassigned OR assigned to this employee) + done tasks
     const visible = (tasks || []).filter(t =>
@@ -778,7 +844,7 @@ export function registerWorkforceRoutes(app) {
       t.assigned_to === emp.id
     );
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
-    res.json({ ok: true, tasks: sorted, project_id: latestTs.project_id });
+    res.json({ ok: true, tasks: sorted, project_id: latestTs.project_id, carpentry_job_id: latestTs.carpentry_job_id });
   });
 
   app.post("/api/worker/tasks/:id/complete", requireAuth, async (req, res) => {

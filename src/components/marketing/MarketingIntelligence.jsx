@@ -5,12 +5,16 @@ import { apiFetch, apiPost } from "../../lib/apiFetch.js";
 
 function fmt(n) {
   if (n == null) return "—";
-  return Number(n).toLocaleString("en-AU");
+  const v = Number(n);
+  if (isNaN(v)) return "—";
+  return v.toLocaleString("en-AU");
 }
 
 function pos(p) {
   if (p == null) return "—";
-  return `#${Number(p).toFixed(1)}`;
+  const v = Number(p);
+  if (isNaN(v)) return "—";
+  return `#${v.toFixed(1)}`;
 }
 
 function EmptyCard({ text }) {

@@ -1,5 +1,5 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-05-30
 app_version: 1.0 — built
 screenshot_status: not_applicable
@@ -46,9 +46,10 @@ The Workforce module has three tabs for managers and a separate mobile PWA for w
 ### Approving timesheets (Approvals tab)
 1. Go to **Workforce** → **Approvals**
 2. Timesheets waiting for approval are listed — employee name, project, date, hours
-3. Click a timesheet to review the detail
-4. Click **Approve** to approve, or **Reject** and enter a reason
-5. The worker is notified of the outcome
+3. Click a timesheet row to expand its detail
+4. **Optional — Carpentry Job attribution:** If the work was performed on a carpentry subsidiary job, select the correct job from the **Carpentry Job** dropdown at the top of the expanded row. This links the timesheet to that carpentry job so the hours appear in the job's Labour Actual total in the Costs tab. Select "— None —" to clear the attribution.
+5. Click **✓** to approve, or **✗** to reject and enter a reason
+6. The worker is notified of the outcome
 
 ### Bulk entry — Mass Fill tab
 1. Go to **Workforce** → **Mass Fill**
@@ -81,6 +82,7 @@ The Workforce module has three tabs for managers and a separate mobile PWA for w
 | Mass Fill entered for wrong week | Default date not changed | Always verify the week selector before submitting |
 | Worker cannot find themselves in the PWA | Not added to the employee list | Add the worker via Settings → Team Directory first |
 | Forgetting to approve timesheets before pay run | No reminder set | Check the Approvals tab every Monday morning |
+| Carpentry labour shows $0 in job Costs tab | Timesheet not attributed to the carpentry job | Expand the timesheet in Approvals → select the correct carpentry job before approving |
 
 ## 8. Troubleshooting
 
@@ -90,6 +92,7 @@ The Workforce module has three tabs for managers and a separate mobile PWA for w
 | Mass Fill submission fails | Check all required fields are filled — at least one employee and one day must have hours |
 | Worker PWA not loading | Check the `/worker` URL is correct; the worker may need to clear their browser cache |
 | Employee missing from Mass Fill grid | Add them to the Team Directory and link them to the project |
+| "Cannot change carpentry job on an approved timesheet" error | Timesheet was already approved | Unapprove the timesheet first (Admin role), assign the carpentry job, then re-approve |
 
 ## 9. Related SOPs
 - [Open a project in Operations](../05_operations/operations_open_project.md) — SOP 05-02
@@ -100,7 +103,17 @@ The Workforce module has three tabs for managers and a separate mobile PWA for w
 - API: `PATCH /api/workforce/timesheets/:id` — approve or reject (`{ status: 'approved' | 'rejected', rejectionReason? }`)
 - API: `GET /api/workforce/employees` — list all employees for dropdowns
 - API: `GET /api/workforce/site-tasks` — site tasks assigned to workers (shown in Worker PWA)
-- DB effects: writes to `timesheets` table with `employee_id`, `project_id`, `date`, `hours`, `status`, `submitted_at`, `approved_at`, `approved_by`
+- API: `PATCH /api/workforce/timesheets/:id/carpentry-job` — attribute a timesheet to a carpentry job (`{ carpentryJobId: "uuid" | null }`) — admin/supervisor only; timesheet must not be approved
+- DB effects: writes to `timesheets` table with `employee_id`, `project_id`, `date`, `hours`, `status`, `submitted_at`, `approved_at`, `approved_by`, `carpentry_job_id`
+
+## 10a. Version history
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-05-30 | Claude | Initial draft |
+| 1.1 | 2026-05-30 | Claude | Added carpentry job attribution — Approvals expanded row dropdown + PATCH endpoint docs |
+
+---
 
 ## 11. Owner of the process
 Admin  
@@ -163,11 +176,36 @@ Next review: 2026-11-30
 2. Expected: returns array of employees with at least `id` and `name` fields
 - [ ] Pass  [ ] Fail
 
+**TC-08 — Attribute a timesheet to a carpentry job**
+
+1. Prerequisite: at least one active carpentry job exists (status = 'active').
+2. Open a pending timesheet in the Approvals tab (click to expand).
+3. Expected: "Carpentry Job" dropdown is visible with "— None —" default.
+4. Expected API: `GET /api/carpentry/jobs?status=active` returns the active jobs in the dropdown.
+5. Select the carpentry job from the dropdown.
+6. Expected: `PATCH /api/workforce/timesheets/:id/carpentry-job` called with `{ carpentryJobId: "<id>" }`, returns `{ ok: true }`.
+7. "Carpentry job assigned ✓" toast shown.
+8. Approve the timesheet.
+9. In the Carpentry module, open that job's Costs tab → summary.
+10. Expected: `labourActual` is non-zero, `timesheetCount >= 1`.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — History tab shows carpentry job reference in Project column**
+
+1. After TC-08, go to Workforce → History.
+2. Find the approved timesheet for the carpentry job.
+3. Expected: Project column shows the carpentry job reference (e.g. "CJB-001") and client name.
+4. Expected: timesheets with a regular project_id still show the project address.
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Approvals queue shows pending timesheets
 - [ ] Approve and reject both work and persist to DB
 - [ ] Mass Fill creates correct DB rows
 - [ ] History tab shows approved records
 - [ ] Worker PWA submission lands in Approvals
+- [ ] Carpentry job attribution dropdown visible in expanded row (TC-08)
+- [ ] Attribution PATCH saves and appears in carpentry job Costs tab (TC-08)
+- [ ] History shows carpentry ref in project column (TC-09)
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md

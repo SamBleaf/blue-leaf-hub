@@ -40,14 +40,35 @@ function ApprovalsTab({ role }) {
   const [rejectModal, setRejectModal] = useState(null);
   const [rejectNotes, setRejectNotes] = useState("");
   const [toast, setToast] = useState(null);
+  // Carpentry job attribution
+  const [carpentryJobs, setCarpentryJobs] = useState([]);
+  const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
+  const [attribBusy, setAttribBusy] = useState(new Set());
 
   const load = useCallback(() => {
     setLoading(true);
     authFetch("/api/workforce/timesheets/pending")
       .then(r => r.json())
-      .then(j => { if (j.ok) setTimesheets(j.timesheets || []); })
+      .then(j => {
+        if (j.ok) {
+          const ts = j.timesheets || [];
+          setTimesheets(ts);
+          // Seed attribMap with any existing carpentry_job_id values
+          const m = {};
+          ts.forEach(t => { m[t.id] = t.carpentry_job_id || ""; });
+          setAttribMap(m);
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  // Load active carpentry jobs once for the attribution dropdown
+  useEffect(() => {
+    authFetch("/api/carpentry/jobs?status=active")
+      .then(r => r.json())
+      .then(j => { if (j.ok) setCarpentryJobs(j.jobs || []); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -70,6 +91,28 @@ function ApprovalsTab({ role }) {
       setSelected(new Set());
     } else {
       setSelected(new Set(timesheets.map(t => t.id)));
+    }
+  }
+
+  async function assignCarpentryJob(timesheetId, carpentryJobId) {
+    setAttribBusy(prev => new Set(prev).add(timesheetId));
+    try {
+      const res = await authFetch(`/api/workforce/timesheets/${timesheetId}/carpentry-job`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ carpentryJobId: carpentryJobId || null }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        setAttribMap(prev => ({ ...prev, [timesheetId]: carpentryJobId }));
+        showToast("Carpentry job assigned ✓");
+      } else {
+        showToast(`Could not assign: ${j.error || "Unknown error"}`, "error");
+      }
+    } catch {
+      showToast("Connection error — please try again", "error");
+    } finally {
+      setAttribBusy(prev => { const n = new Set(prev); n.delete(timesheetId); return n; });
     }
   }
 
@@ -213,7 +256,24 @@ function ApprovalsTab({ role }) {
                   </tr>,
                   expanded2 && (
                     <tr key={ts.id + "-detail"}>
-                      <td colSpan={isDirector ? 8 : 7} className="px-6 py-3 bg-gray-50 border-t border-hairline">
+                      <td colSpan={isDirector ? 8 : 7} className="px-6 py-4 bg-gray-50 border-t border-hairline">
+                        {/* Carpentry job attribution */}
+                        <div className="flex items-center gap-3 mb-3 pb-3 border-b border-hairline">
+                          <label className="text-xs font-semibold text-muted whitespace-nowrap">Carpentry Job</label>
+                          <select
+                            value={attribMap[ts.id] || ""}
+                            disabled={attribBusy.has(ts.id)}
+                            onChange={e => assignCarpentryJob(ts.id, e.target.value)}
+                            className="border border-hairline rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white disabled:opacity-50 min-w-[200px]"
+                          >
+                            <option value="">— None —</option>
+                            {carpentryJobs.map(cj => (
+                              <option key={cj.id} value={cj.id}>{cj.reference} — {cj.client_name}</option>
+                            ))}
+                          </select>
+                          {attribBusy.has(ts.id) && <span className="text-xs text-muted">Saving…</span>}
+                        </div>
+                        {/* Task entries */}
                         <div className="space-y-1">
                           {(ts.timesheet_entries || []).map(e => (
                             <div key={e.id} className="flex items-center gap-3 text-xs text-muted">
@@ -477,7 +537,11 @@ function HistoryTab({ role }) {
                   <tr key={ts.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 text-muted">{fmtDate(ts.date)}</td>
                     <td className="px-3 py-2 font-medium text-ink">{ts.employees?.name}</td>
-                    <td className="px-3 py-2 text-muted">{ts.projects?.address || "—"}</td>
+                    <td className="px-3 py-2 text-muted">
+                      {ts.carpentry_jobs
+                        ? <span>{ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.client_name})</span></span>
+                        : ts.projects?.address || "—"}
+                    </td>
                     <td className="px-3 py-2 text-right">{totalHrs}h</td>
                     <td className="px-3 py-2">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE[ts.status] || ""}`}>{ts.status}</span>

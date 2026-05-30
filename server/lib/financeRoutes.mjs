@@ -1691,6 +1691,23 @@ export function registerFinanceRoutes(app) {
       checkProjectInsights(id, "variation_signed", sb, process.env.ANTHROPIC_API_KEY)
         .catch(e => console.warn("[insights] variation_signed:", e.message));
 
+      // Fire-and-forget: update normalized_costs with total signed variation for this trade
+      if (variation.trade_category_id) {
+        // Re-fetch total signed variation amount for this job + trade
+        const { data: signedForTrade } = await sb.from("job_variations")
+          .select("amount_ex_gst")
+          .eq("job_id", id)
+          .eq("trade_category_id", variation.trade_category_id)
+          .eq("status", "signed");
+        const totalVariation = (signedForTrade || []).reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
+        upsertNormalizedCost(sb, {
+          jobId: id,
+          tradeCategoryId: variation.trade_category_id,
+          field: "variation",
+          amount: totalVariation,
+        }).catch(e => console.warn("[variation-sign] normalized_costs:", e.message));
+      }
+
       res.json({ ok: true, variation: signed, new_contract_value: newContractValue });
     } catch (err) {
       res.status(500).json({ error: err.message });

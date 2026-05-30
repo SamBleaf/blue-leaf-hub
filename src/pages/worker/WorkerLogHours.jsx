@@ -82,7 +82,11 @@ export default function WorkerLogHours() {
 
   function addTask(task) {
     const existing = entries.findIndex(e => e.task_category === task.value);
-    if (existing !== -1) { setExpandedIdx(existing); return; } // already added — open it
+    if (existing !== -1) {
+      // Already added — tap again to remove (toggle off)
+      removeEntry(existing);
+      return;
+    }
     setEntries(prev => [...prev, { task_category: task.value, label: task.label, hours: standardHours, notes: "", completion_photo_url: "" }]);
   }
   function patchEntry(idx, patch) {
@@ -132,7 +136,11 @@ export default function WorkerLogHours() {
       const res = await authFetch("/api/worker/timesheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, project_id: selectedProject.id, job_id: selectedProject.job_id || null, entries: payload }),
+        body: JSON.stringify(
+          selectedProject.type === "carpentry"
+            ? { date, carpentry_job_id: selectedProject.id, entries: payload }
+            : { date, project_id: selectedProject.id, job_id: selectedProject.job_id || null, entries: payload }
+        ),
       });
       const j = await res.json();
       if (j.ok) setSubmitted(true);

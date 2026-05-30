@@ -1358,6 +1358,214 @@ app.post("/api/cron/lead-time-notifications", async (req, res) => {
   }
 });
 
+// ── CI-3.2: Nightly AI insights batch ────────────────────────────────────────
+app.post("/api/cron/cost-insights", async (_req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return res.status(503).json({ ok: false, error: "ANTHROPIC_API_KEY not set" });
+
+  try {
+    // 1. Fetch all active jobs
+    const { data: activeJobs, error: jobsErr } = await sb.from("jobs")
+      .select("id, address, status")
+      .not("status", "in", '("practical_completion","archived","cancelled")');
+
+    if (jobsErr) throw new Error(jobsErr.message);
+    if (!activeJobs || activeJobs.length === 0) {
+      return res.json({ ok: true, jobs_processed: 0, insights_upserted: 0 });
+    }
+
+    const BATCH_SIZE = 5;
+    const INSIGHT_EXPIRES_DAYS = 30;
+    const SKIP_IF_RECENT_DAYS = 7;
+    const now = new Date();
+    const recentCutoff = new Date(now.getTime() - SKIP_IF_RECENT_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(now.getTime() + INSIGHT_EXPIRES_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    let totalInsightsUpserted = 0;
+    let jobsProcessed = 0;
+
+    // Process jobs in batches of up to 5
+    for (let batchStart = 0; batchStart < activeJobs.length; batchStart += BATCH_SIZE) {
+      const batch = activeJobs.slice(batchStart, batchStart + BATCH_SIZE);
+
+      // Filter out jobs that already have a recent un-expired insight (within last 7 days)
+      const { data: recentInsights } = await sb.from("cost_intelligence_insights")
+        .select("job_id")
+        .in("job_id", batch.map(j => j.id))
+        .gte("generated_at", recentCutoff)
+        .eq("is_dismissed", false);
+
+      const recentJobIds = new Set((recentInsights || []).map(r => r.job_id));
+      const jobsToProcess = batch.filter(j => !recentJobIds.has(j.id));
+      if (jobsToProcess.length === 0) continue;
+
+      // Fetch data for each job in this batch
+      const jobPayloads = [];
+      for (const job of jobsToProcess) {
+        const [budgetsRes, costsRes, metricsRes] = await Promise.all([
+          sb.from("job_budgets")
+            .select("trade_category_id, budget_amount, trade_categories(name)")
+            .eq("job_id", job.id),
+          sb.from("normalized_costs")
+            .select("trade_category_id, actual_amount, quoted_amount, budget_amount, variation_amount, final_amount, trade_categories(name)")
+            .eq("job_id", job.id),
+          sb.from("project_metrics")
+            .select("floor_area_m2, project_type, storeys")
+            .eq("job_id", job.id)
+            .maybeSingle(),
+        ]);
+
+        // Compute budget vs actual per trade
+        const budgetMap = new Map((budgetsRes.data || []).map(b => [
+          b.trade_category_id,
+          { name: b.trade_categories?.name || b.trade_category_id, budget: Number(b.budget_amount || 0) }
+        ]));
+        const tradeVariances = [];
+        for (const nc of (costsRes.data || [])) {
+          const actual = Number(nc.final_amount || nc.actual_amount || 0);
+          const budget = budgetMap.get(nc.trade_category_id)?.budget || Number(nc.budget_amount || 0);
+          if (actual > 0 || budget > 0) {
+            const variancePct = budget > 0 ? ((actual - budget) / budget) * 100 : null;
+            tradeVariances.push({
+              trade: nc.trade_categories?.name || nc.trade_category_id,
+              budget: Math.round(budget),
+              actual: Math.round(actual),
+              quoted: Math.round(Number(nc.quoted_amount || 0)),
+              variation: Math.round(Number(nc.variation_amount || 0)),
+              variance_pct: variancePct != null ? Math.round(variancePct * 10) / 10 : null,
+            });
+          }
+        }
+
+        jobPayloads.push({
+          job_id: job.id,
+          address: job.address,
+          status: job.status,
+          floor_area_m2: metricsRes.data?.floor_area_m2 || null,
+          project_type: metricsRes.data?.project_type || null,
+          trade_variances: tradeVariances,
+        });
+      }
+
+      if (jobPayloads.length === 0) continue;
+
+      // Call Claude Haiku once for this batch
+      const prompt = `You are a financial analyst for Blue Leaf Building (custom home builder). Analyse these active construction jobs and generate concise financial insights. For each job that has a notable issue, return a JSON array of insight objects: [{job_id, insight_type, severity, title, body}]. Focus on: budget overruns >10%, trades tracking significantly above/below historical norms, underclaim patterns (cost_to_date >> progress_billed). Maximum 2 insights per job. Only flag real issues — don't generate insights for healthy jobs. Return empty array if no issues.\n\nJobs data:\n${JSON.stringify(jobPayloads, null, 2)}\n\nValid insight_type values: "budget_risk", "trend", "similarity", "overrun_pattern", "benchmark", "underclaim"\nValid severity values: "info", "warning", "alert"\nReturn ONLY a valid JSON array, no other text.`;
+
+      let batchInsights = [];
+      try {
+        const client = new Anthropic({ apiKey, maxRetries: 1 });
+        const resp = await callAI(client, {
+          model: process.env.CLAUDE_MODEL || "claude-haiku-4-5",
+          max_tokens: 1024,
+          messages: [{ role: "user", content: prompt }],
+        }, { module: "cronCostInsights" });
+
+        const raw = resp.content.find(b => b.type === "text")?.text?.trim() || "[]";
+        const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(jsonStr);
+        if (Array.isArray(parsed)) batchInsights = parsed;
+      } catch (aiErr) {
+        console.warn("[cron/cost-insights] AI call failed:", aiErr.message);
+        // Continue — skip AI for this batch rather than failing the whole run
+      }
+
+      // Upsert each insight
+      for (const insight of batchInsights) {
+        const { job_id, insight_type, severity, title, body } = insight;
+        if (!job_id || !insight_type || !severity || !title || !body) continue;
+
+        // Validate values
+        const validTypes = ["budget_risk", "trend", "similarity", "overrun_pattern", "benchmark", "underclaim"];
+        const validSeverities = ["info", "warning", "alert"];
+        if (!validTypes.includes(insight_type) || !validSeverities.includes(severity)) continue;
+
+        const generatedAt = now.toISOString();
+        const { error: upsertErr } = await sb.from("cost_intelligence_insights").insert({
+          job_id,
+          trade_category_id: insight.trade_category_id || null,
+          insight_type,
+          severity,
+          title: String(title).slice(0, 120),
+          body: String(body).slice(0, 500),
+          trigger_type: "nightly_batch",
+          generated_at: generatedAt,
+          expires_at: expiresAt,
+        });
+
+        if (upsertErr) {
+          // Unique constraint = already exists, not a real error
+          if (!upsertErr.message?.includes("unique")) {
+            console.warn("[cron/cost-insights] insert error:", upsertErr.message);
+          }
+        } else {
+          totalInsightsUpserted++;
+        }
+      }
+
+      jobsProcessed += jobsToProcess.length;
+    }
+
+    return res.json({ ok: true, jobs_processed: jobsProcessed, insights_upserted: totalInsightsUpserted });
+  } catch (err) {
+    console.error("[cron/cost-insights]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// ── WIPAA first-Friday scheduler ──────────────────────────────────────────────
+function isFirstFriday(date = new Date()) {
+  // Must be a Friday (getDay() === 5) and day of month <= 7
+  return date.getDay() === 5 && date.getDate() <= 7;
+}
+
+app.post("/api/cron/wipaa-review-tasks", async (_req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+
+  try {
+    const today = new Date();
+
+    if (!isFirstFriday(today)) {
+      return res.json({ ok: true, skipped: true, reason: "not first Friday" });
+    }
+
+    // Start of current month (UTC midnight)
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+
+    // Fetch all active jobs
+    const { data: activeJobs, error: jobsErr } = await sb.from("jobs")
+      .select("id, address, status")
+      .not("status", "in", '("archived","cancelled")');
+
+    if (jobsErr) throw new Error(jobsErr.message);
+    if (!activeJobs || activeJobs.length === 0) {
+      return res.json({ ok: true, jobs_needing_review: [] });
+    }
+
+    // Check for existing wipaa_reviews this month for each job
+    const { data: existingReviews } = await sb.from("wipaa_reviews")
+      .select("job_id")
+      .in("job_id", activeJobs.map(j => j.id))
+      .gte("review_date", startOfMonth);
+
+    const reviewedJobIds = new Set((existingReviews || []).map(r => r.job_id));
+    const jobsNeedingReview = activeJobs
+      .filter(j => !reviewedJobIds.has(j.id))
+      .map(j => ({ job_id: j.id, job_address: j.address, status: j.status }));
+
+    console.log(`[cron/wipaa-review-tasks] First Friday of month. Jobs needing WIPAA review: ${jobsNeedingReview.length}`);
+
+    return res.json({ ok: true, jobs_needing_review: jobsNeedingReview });
+  } catch (err) {
+    console.error("[cron/wipaa-review-tasks]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 /** Unmatched quote emails (requires service role + migration 003). */
 app.post("/api/rfq/remind-one", async (req, res) => {
   const rfqId = req.body?.rfqId?.trim?.();

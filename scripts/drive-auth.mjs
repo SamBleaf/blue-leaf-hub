@@ -19,7 +19,12 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { google } from "googleapis";
 
-const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+const SCOPES = [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/webmasters.readonly",
+  "https://www.googleapis.com/auth/analytics.readonly",
+  "https://www.googleapis.com/auth/business.manage",
+];
 
 const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID?.trim();
 const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim();
