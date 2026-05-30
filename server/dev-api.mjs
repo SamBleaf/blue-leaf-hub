@@ -1143,13 +1143,46 @@ app.get("/api/integrations/status", (_req, res) => {
   const gmail = gmailSendConfigured();
   const smtp = smtpReady();
   const dropbox = dropboxConfigured();
+
+  // Google OAuth (shared creds used by Drive, GSC, GA4, GBP)
+  const googleConfigured = !!(
+    process.env.GOOGLE_DRIVE_CLIENT_ID &&
+    process.env.GOOGLE_DRIVE_CLIENT_SECRET &&
+    process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+  );
+
+  // Google Marketing Intelligence — additional env vars on top of base Google OAuth
+  const gscConfigured    = googleConfigured && !!process.env.GOOGLE_SEARCH_CONSOLE_SITE_URL;
+  const ga4Configured    = googleConfigured && !!process.env.GA4_PROPERTY_ID;
+  const gbpConfigured    = googleConfigured && !!process.env.GBP_LOCATION_ID;
+
+  // Meta (Instagram + Facebook)
+  const metaConfigured   = !!process.env.META_ACCESS_TOKEN;
+  const metaIgUserId     = process.env.META_IG_USER_ID?.trim() || null;
+  const metaPageId       = process.env.META_PAGE_ID?.trim()    || null;
+
+  // Resend (mailing list / CRM email)
+  const resendConfigured = !!process.env.RESEND_API_KEY;
+
   res.json({
     ok: true,
-    gmail: { configured: gmail, sender: process.env.GMAIL_SENDER_EMAIL?.trim() || null },
-    smtp: { configured: smtp },
-    dropbox: { configured: dropbox },
+    gmail:    { configured: gmail, sender: process.env.GMAIL_SENDER_EMAIL?.trim() || null },
+    smtp:     { configured: smtp },
+    dropbox:  { configured: dropbox },
     buildexact: { configured: buildexactConfigured() },
-    mail: { ready: gmail || smtp, transport: mailTransportName() }
+    mail:     { ready: gmail || smtp, transport: mailTransportName() },
+    google:   {
+      oauthConfigured: googleConfigured,
+      drive:         googleConfigured,
+      gsc:           gscConfigured,
+      ga4:           ga4Configured,
+      gbp:           gbpConfigured,
+      siteUrl:       process.env.GOOGLE_SEARCH_CONSOLE_SITE_URL?.trim() || null,
+      ga4PropertyId: process.env.GA4_PROPERTY_ID?.trim()                || null,
+      gbpLocationId: process.env.GBP_LOCATION_ID?.trim()                || null,
+    },
+    meta:   { configured: metaConfigured, igUserId: metaIgUserId, pageId: metaPageId },
+    resend: { configured: resendConfigured },
   });
 });
 

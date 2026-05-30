@@ -540,8 +540,165 @@ export default function Settings() {
         />
       ) : null}
 
+      {/* Google (Drive + Marketing Intelligence) */}
+      <GoogleIntegrationSection status={status} />
+
+      {/* Meta (Instagram + Facebook Insights) */}
+      <MetaIntegrationSection status={status} />
+
+      {/* Resend (mailing list + CRM email) */}
+      <ResendIntegrationSection status={status} />
+
       <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
     </div>
+  );
+}
+
+// ── Google Integration ────────────────────────────────────────────────────────
+
+function StatusBadge({ ok, label }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${ok ? "text-accent" : "text-warning"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-accent" : "bg-warning"}`} />
+      {ok ? `${label} connected` : `${label} not configured`}
+    </span>
+  );
+}
+
+function GoogleIntegrationSection({ status }) {
+  const g = status?.google;
+  return (
+    <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-primary">Google</h2>
+      <p className="mt-1 text-sm text-muted">
+        One OAuth credential set (<code className="text-xs">GOOGLE_DRIVE_*</code>) powers Google Drive, Search Console, GA4, and Google Business Profile.
+        All keys are set in Railway environment variables — not editable in the browser.
+      </p>
+
+      {/* OAuth base status */}
+      <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 space-y-2">
+        <p className="text-xs font-semibold text-ink mb-2">OAuth credential status</p>
+        <StatusBadge ok={g?.oauthConfigured} label="Google OAuth (GOOGLE_DRIVE_CLIENT_ID / SECRET / REFRESH_TOKEN)" />
+      </div>
+
+      {/* Per-service status */}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="rounded-lg border border-hairline bg-page px-4 py-3">
+          <p className="text-xs font-semibold text-ink mb-2">Google Drive</p>
+          <StatusBadge ok={g?.drive} label="Drive" />
+          <p className="mt-2 text-xs text-muted">Used for fee proposal DOCX export to Google Docs. Requires base OAuth above.</p>
+        </div>
+        <div className="rounded-lg border border-hairline bg-page px-4 py-3">
+          <p className="text-xs font-semibold text-ink mb-2">Search Console</p>
+          <StatusBadge ok={g?.gsc} label="GSC" />
+          {g?.siteUrl && <p className="mt-1 text-xs text-muted font-mono truncate">{g.siteUrl}</p>}
+          <p className="mt-2 text-xs text-muted">
+            Add <code className="text-xs">GOOGLE_SEARCH_CONSOLE_SITE_URL</code> to Railway (e.g. <code className="text-xs">https://www.blueleafbuilding.com.au/</code>).
+          </p>
+        </div>
+        <div className="rounded-lg border border-hairline bg-page px-4 py-3">
+          <p className="text-xs font-semibold text-ink mb-2">Google Analytics 4</p>
+          <StatusBadge ok={g?.ga4} label="GA4" />
+          {g?.ga4PropertyId && <p className="mt-1 text-xs text-muted font-mono">{g.ga4PropertyId}</p>}
+          <p className="mt-2 text-xs text-muted">
+            Add <code className="text-xs">GA4_PROPERTY_ID</code> to Railway — numeric property ID from your GA4 account (e.g. <code className="text-xs">123456789</code>).
+          </p>
+        </div>
+        <div className="rounded-lg border border-hairline bg-page px-4 py-3">
+          <p className="text-xs font-semibold text-ink mb-2">Google Business Profile</p>
+          <StatusBadge ok={g?.gbp} label="GBP" />
+          {g?.gbpLocationId && <p className="mt-1 text-xs text-muted font-mono">{g.gbpLocationId}</p>}
+          <p className="mt-2 text-xs text-muted">
+            Add <code className="text-xs">GBP_LOCATION_ID</code> to Railway — format must include prefix: <code className="text-xs">locations/XXXXXXX</code>.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
+        <p className="font-semibold">Adding Marketing Intelligence scopes to your existing Google OAuth</p>
+        <p>Your existing Google Cloud OAuth app (used for Drive) needs these additional scopes added:</p>
+        <ul className="list-disc list-inside mt-1 space-y-0.5">
+          <li><code>https://www.googleapis.com/auth/webmasters.readonly</code> — Search Console</li>
+          <li><code>https://www.googleapis.com/auth/analytics.readonly</code> — GA4</li>
+          <li><code>https://www.googleapis.com/auth/business.manage</code> — Google Business Profile</li>
+        </ul>
+        <p className="mt-1">After adding scopes: re-run <code>npm run auth:drive</code> to generate a new refresh token with the additional permissions, then update <code>GOOGLE_DRIVE_REFRESH_TOKEN</code> in Railway.</p>
+      </div>
+    </section>
+  );
+}
+
+// ── Meta Integration ──────────────────────────────────────────────────────────
+
+function MetaIntegrationSection({ status }) {
+  const m = status?.meta;
+  return (
+    <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-primary">Meta (Instagram + Facebook)</h2>
+      <p className="mt-1 text-sm text-muted">
+        Pulls post performance data (reach, engagement, saves) from Instagram and Facebook to populate the Marketing Intelligence dashboard.
+        All tokens are set in Railway — not editable in the browser.
+      </p>
+
+      <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 space-y-2">
+        <StatusBadge ok={m?.configured} label="META_ACCESS_TOKEN" />
+        {m?.igUserId && (
+          <p className="text-xs text-muted">Instagram User ID: <span className="font-mono">{m.igUserId}</span></p>
+        )}
+        {m?.pageId && (
+          <p className="text-xs text-muted">Facebook Page ID: <span className="font-mono">{m.pageId}</span></p>
+        )}
+      </div>
+
+      <div className="mt-4 space-y-2 text-xs text-muted">
+        <p><strong className="text-ink">Connect:</strong></p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Go to Meta Business Suite → Settings → Users → System Users</li>
+          <li>Create a System User with Admin role</li>
+          <li>Generate a long-lived access token with scopes: <code>instagram_basic</code>, <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>instagram_manage_insights</code></li>
+          <li>Add to Railway: <code>META_ACCESS_TOKEN</code> (the long-lived token)</li>
+          <li>Add to Railway: <code>META_IG_USER_ID</code> — find in Instagram → Settings → Account → Professional Account</li>
+          <li>Add to Railway: <code>META_PAGE_ID</code> — find in Facebook Page → About (numeric ID)</li>
+        </ol>
+        <p className="mt-2 text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          Long-lived tokens expire after 60 days. Set a calendar reminder to renew before expiry — expired token will cause Sync Social to fail silently.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ── Resend Integration ────────────────────────────────────────────────────────
+
+function ResendIntegrationSection({ status }) {
+  const r = status?.resend;
+  return (
+    <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-primary">Resend (mailing list email)</h2>
+      <p className="mt-1 text-sm text-muted">
+        Powers mailing list campaigns from the CRM module. Required for sending marketing emails to contacts at scale.
+        Gmail handles individual transactional emails (variations, claims, portal invites) — Resend handles bulk sends.
+      </p>
+
+      <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3">
+        <StatusBadge ok={r?.configured} label="RESEND_API_KEY" />
+      </div>
+
+      <div className="mt-4 space-y-2 text-xs text-muted">
+        <p><strong className="text-ink">Connect:</strong></p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Sign up at <strong>resend.com</strong> (free tier: 100 emails/day, 3,000/month)</li>
+          <li>Go to API Keys → Create API Key → Full access</li>
+          <li>Add to Railway: <code>RESEND_API_KEY</code></li>
+          <li>Verify your sending domain: Resend → Domains → Add → enter <code>blueleafbuilding.com.au</code></li>
+          <li>Add the DNS TXT and CNAME records that Resend provides to your domain registrar</li>
+          <li>Wait for verification (usually 10–30 minutes) — you cannot send until the domain is verified</li>
+        </ol>
+        <p className="mt-2 text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          Australian Spam Act compliance requirement: every marketing email must include an unsubscribe link. The Hub appends this automatically — do not send marketing emails from any other tool that bypasses this.
+        </p>
+      </div>
+    </section>
   );
 }
 
