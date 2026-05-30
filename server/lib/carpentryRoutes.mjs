@@ -151,7 +151,7 @@ export function registerCarpentryRoutes(app) {
         clientEmail,
         address,
         description,
-        projectType = "both",
+        projectType = "full_package",
         quotedValue,
         quotedCost,
         quotedMarginPct,
