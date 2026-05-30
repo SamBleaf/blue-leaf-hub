@@ -439,6 +439,14 @@ export function registerFinanceCCRoutes(app) {
     const workingMarginPct = contractValue > 0 ? ((contractValue - actualCosts) / contractValue) * 100 : null;
     const forecastTotal    = Number(job.forecast_total_cost || job.estimated_total_cost || 0);
     const forecastMarginPct = contractValue > 0 && forecastTotal > 0 ? ((contractValue - forecastTotal) / contractValue) * 100 : null;
+    // Guards: the working margin is valid whenever contract value > 0 (keep it). The forecast
+    // margin depends on job.forecast_total_cost, which can be stale/wrong (e.g. $1.42M on an
+    // $11,900 job → -11,832%). Flag an implausible forecast margin instead of displaying garbage.
+    const contractValueMissing = contractValue <= 0;
+    // The frontend (JobCommandCentre MarginIndicator) already handles this flag — it nulls the
+    // forecast margin and shows "⚠ Data mismatch — sync Buildexact". The command-centre endpoint
+    // simply wasn't sending it (only /summary computed it), so the raw -11,832% leaked through.
+    const forecastDataQualityWarning = forecastMarginPct != null && Math.abs(forecastMarginPct) > 200;
 
     // ── Budget vs Actual ─────────────────────────────────────────────────────
     const actualsByTrade = new Map();
@@ -489,8 +497,10 @@ export function registerFinanceCCRoutes(app) {
         claims_issued: Math.round(claimsIssued * 100) / 100,
         claims_paid: Math.round(claimsPaid * 100) / 100,
         actual_costs: Math.round(actualCosts * 100) / 100,
+        contract_value_missing: contractValueMissing,
+        forecast_data_quality_warning: forecastDataQualityWarning,
         working_margin_pct: workingMarginPct != null ? Math.round(workingMarginPct * 10) / 10 : null,
-        forecast_margin_pct: forecastMarginPct != null ? Math.round(forecastMarginPct * 10) / 10 : null,
+        forecast_margin_pct: (!forecastDataQualityWarning && forecastMarginPct != null) ? Math.round(forecastMarginPct * 10) / 10 : null,
       },
       budget_vs_actual: budgetVsActual,
       wipaa: {
@@ -498,7 +508,7 @@ export function registerFinanceCCRoutes(app) {
         forecast_total_cost: forecastTotal || null,
         estimated_total_cost: Number(job.estimated_total_cost || 0) || null,
         pct_complete,
-        projected_margin_pct: projectedMarginPct != null ? Math.round(projectedMarginPct * 10) / 10 : null,
+        projected_margin_pct: (!forecastDataQualityWarning && projectedMarginPct != null) ? Math.round(projectedMarginPct * 10) / 10 : null,
       },
       days_since_wipaa_review: daysSinceReview,
       variations: {
