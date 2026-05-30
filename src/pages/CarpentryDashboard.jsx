@@ -41,6 +41,7 @@ function NewJobModal({ onClose, onCreated }) {
   const [, setStep]                 = useState("form"); // "form" | "bxLookup" | "confirm"
   const [bxJobId, setBxJobId]       = useState("");
   const [bxLoading, setBxLoading]   = useState(false);
+  const [xlsxBusy, setXlsxBusy]     = useState(false);
   const [bxError, setBxError]       = useState(null);
   const [prefill, setPrefill]       = useState(null);
   const [saving, setSaving]         = useState(false);
@@ -92,6 +93,39 @@ function NewJobModal({ onClose, onCreated }) {
     setStep("form");
   }
 
+  async function handleXlsxFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setXlsxBusy(true);
+    setBxError(null);
+    try {
+      const dataBase64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("read failed"));
+        r.onload = () => resolve(String(r.result).replace(/^data:.*;base64,/, ""));
+        r.readAsDataURL(file);
+      });
+      const { ok: ok_, data, error } = await apiPost("/api/carpentry/estimate/parse-xlsx", { dataBase64, filename: file.name });
+      if (!ok_) { setBxError(error || "Could not read the estimate file."); return; }
+      const p = data?.prefill || {};
+      setPrefill(p);
+      const storey = /triple/i.test(p.buildingType) ? "3" : /double/i.test(p.buildingType) ? "2" : null;
+      setForm((f) => ({
+        ...f,
+        clientName:  p.clientName  || f.clientName,
+        address:     p.address     || f.address,
+        description: p.description || f.description,
+        quotedValue: p.quotedValue != null ? String(p.quotedValue) : f.quotedValue,
+        storeyCount: storey || f.storeyCount,
+      }));
+    } catch {
+      setBxError("Could not read that file — make sure it is the Buildexact estimate XLSX.");
+    } finally {
+      setXlsxBusy(false);
+    }
+  }
+
   async function handleSave() {
     setSaveError(null);
     if (!form.clientName.trim()) { setSaveError("Client name is required."); return; }
@@ -140,6 +174,14 @@ function NewJobModal({ onClose, onCreated }) {
             >
               {bxLoading ? "Fetching…" : "Fetch"}
             </button>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-hairline/60">
+            <p className="text-xs text-muted mb-2 font-medium">OR IMPORT THE ESTIMATE XLSX (no API needed)</p>
+            <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-primary text-primary text-sm font-medium cursor-pointer hover:bg-primary/5 transition-colors ${xlsxBusy ? "opacity-40 pointer-events-none" : ""}`}>
+              {xlsxBusy ? "Reading…" : "Choose estimate XLSX"}
+              <input type="file" accept=".xlsx,.xls" onChange={handleXlsxFile} className="hidden" />
+            </label>
           </div>
           {bxError && <p className="text-xs text-red-600 mt-1">{bxError}</p>}
           {prefill && (

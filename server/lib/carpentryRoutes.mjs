@@ -33,6 +33,7 @@ import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { buildexactConfigured, getJobById } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
+import { parseXLSX } from "./buildexactParser.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -420,6 +421,39 @@ export function registerCarpentryRoutes(app) {
     } catch (e) {
       console.error("[carpentry/buildexact/fetch POST]", e);
       return err(res, 502, e?.message || "Buildexact fetch failed.");
+    }
+  });
+
+  // ── POST /api/carpentry/estimate/parse-xlsx ─────────────────────────────────
+  // Parse an uploaded Buildexact estimate XLSX (no API needed). Returns the same
+  // prefill shape as /buildexact/fetch so the New Job modal reuses one code path.
+  app.post("/api/carpentry/estimate/parse-xlsx", requireAuth, async (req, res) => {
+    const b64 = String(req.body?.dataBase64 || "").trim();
+    if (!b64) return err(res, 400, "dataBase64 is required.");
+    try {
+      const buf = Buffer.from(b64.replace(/^data:.*,/, ""), "base64");
+      const p = parseXLSX(buf, String(req.body?.filename || ""));
+      const round2 = (v) => (v != null && v !== "" ? Math.round(Number(v) * 100) / 100 : null);
+      const desc = [p.quote_number, p.building_type].filter(Boolean).join(" — ");
+      return ok(res, {
+        prefill: {
+          clientName: p.client_name || "",
+          address: p.address || "",
+          description: desc,
+          quotedValue: round2(p.net_total),     // ex-GST sell price (what we charge the builder)
+          estimateTotal: round2(p.estimate_total),
+          quoteNumber: p.quote_number || "",
+          buildingType: p.building_type || "",
+        },
+        raw: {
+          quoteNumber: p.quote_number || "",
+          buildingType: p.building_type || "",
+          categories: (p.categories || []).map((c) => ({ name: c.name, subtotalExGst: c.subtotal_ex_gst })),
+        },
+      });
+    } catch (e) {
+      console.error("[carpentry/estimate/parse-xlsx POST]", e);
+      return err(res, 502, e?.message || "Could not read the estimate file.");
     }
   });
 
