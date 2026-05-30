@@ -199,7 +199,7 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–068). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
+Database migrations in `supabase/migrations/` (001–069). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |
@@ -223,6 +223,7 @@ Key tables:
 | 066 | Carpentry schema corrections (project_type/status enums, drop `closeout_data`) + `carpentry_job_performance` |
 | 067 | `carpentry_job_budgets` (Phase 2 costing — budget vs actual) |
 | 068 | `site_tasks.carpentry_job_id` + makes `site_tasks.project_id` nullable |
+| 069 | Knowledge Core foundation (Phase 0, additive): `job_documents`, `job_fact_history`, `job_events`, `contact_events`, `company_profile` + building-fact columns on `project_metrics`. Not yet wired — see `MASTER_DATA_DICTIONARY.md` + `factsService.mjs`/`jobFactRegistry.mjs` |
 
 ---
 
