@@ -21,11 +21,13 @@ export default function WhsEngine() {
   const [questionnaire, setQuestionnaire] = useState([]);
   const [answers, setAnswers] = useState({});
   const [profile, setProfile] = useState(null);
+  const [prefillKeys, setPrefillKeys] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [open, setOpen] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState(null);
 
   async function loadDocuments() {
@@ -40,10 +42,15 @@ export default function WhsEngine() {
       if (stop) return;
       if (ok) {
         setQuestionnaire(data.questionnaire || []);
-        if (data.profile) {
-          setProfile(data.profile);
-          setAnswers(data.profile.answers || {});
-        }
+        const savedAnswers = data.profile?.answers || {};
+        const prefill = data.prefill || {};
+        // Prefill fills any key that has no saved value — saved answers always win
+        const blended = { ...prefill, ...savedAnswers };
+        // Track which keys were actually applied from prefill (not overridden)
+        const applied = Object.keys(prefill).filter((k) => !savedAnswers[k] && prefill[k]);
+        setPrefillKeys(applied);
+        if (data.profile) setProfile(data.profile);
+        setAnswers(blended);
       }
       await loadDocuments();
       if (!stop) setLoading(false);
@@ -92,8 +99,37 @@ export default function WhsEngine() {
     }
   }
 
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   function renderQuestion(q) {
     const val = answers[q.key];
+
+    // Special rendering for induction URL — show as editable field + copy button
+    if (q.key === "site_qr_induction_url") {
+      return (
+        <div className="flex gap-2 items-center">
+          <input
+            type="url"
+            value={val || ""}
+            onChange={(e) => setAnswer(q.key, e.target.value)}
+            className="flex-1 rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => copyToClipboard(val || "")}
+            disabled={!val}
+            className="shrink-0 px-3 py-2 rounded-lg border border-hairline text-xs text-muted hover:bg-slate-50 disabled:opacity-40"
+          >
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+        </div>
+      );
+    }
     if (q.type === "yesno") {
       return (
         <div className="flex gap-2">
@@ -146,6 +182,12 @@ export default function WhsEngine() {
       <p className="text-sm text-muted mb-5">
         Answer once. The risk engine generates the WHS documents, SWMS, permits, inspections and registers.
       </p>
+
+      {prefillKeys.length > 0 && (
+        <div className="mb-4 rounded-lg px-4 py-2.5 text-sm border bg-blue-50 border-blue-200 text-blue-800">
+          ℹ️ Some fields were pre-filled from project data — review and adjust as needed.
+        </div>
+      )}
 
       {msg && (
         <div className={`mb-4 rounded-lg px-4 py-2.5 text-sm border ${

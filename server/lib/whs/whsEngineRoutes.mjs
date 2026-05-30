@@ -26,6 +26,23 @@ const TEMPLATES = {
 
 const BOOL_PROMOTED = new Set(["site_fenced", "temporary_fencing_required"]);
 
+// ── Prefill helpers ──
+function mapProjectType(raw) {
+  const t = String(raw || "").toLowerCase().replace(/[\s_-]+/g, "");
+  if (t.includes("new") || t === "newbuild" || t === "newbome") return "new_home";
+  if (t.includes("renov")) return "renovation";
+  if (t.includes("addit") || t.includes("extens")) return "addition";
+  return "";
+}
+
+function mapStoreys(n) {
+  const num = parseInt(n, 10);
+  if (num === 1) return "single";
+  if (num === 2) return "double";
+  if (num >= 3) return "triple";
+  return "";
+}
+
 function coerceBool(v) {
   if (v === true || v === "yes" || v === "true") return true;
   if (v === false || v === "no" || v === "false") return false;
@@ -59,6 +76,7 @@ export function registerWhsEngineRoutes(app) {
       let job = null;
       if (project.job_id) ({ data: job } = await sb.from("jobs").select("*").eq("id", project.job_id).maybeSingle());
 
+      const appUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
       const prefill = {
         project_name: project.address || "",
         project_address: project.address || "",
@@ -66,6 +84,9 @@ export function registerWhsEngineRoutes(app) {
         project_type: job?.project_type || project.project_type || "",
         site_supervisor_name: project.supervisor || "",
         principal_contractor: "Blue Leaf Building",
+        m0_project_type: mapProjectType(job?.project_type || project.project_type),
+        m0_storeys: mapStoreys(job?.storeys ?? project.storeys),
+        site_qr_induction_url: `${appUrl}/induct/${projectId}`,
       };
       return ok(res, { profile: profile ? rowToCamel(profile) : null, prefill, questionnaire: WHS_QUESTIONNAIRE });
     } catch (e) {
