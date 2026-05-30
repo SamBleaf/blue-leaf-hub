@@ -29,8 +29,7 @@ WITH proposal_cv AS (
 )
 UPDATE public.jobs j
 SET original_contract_value = pc.cv,
-    contract_value          = pc.cv,
-    updated_at              = now()
+    contract_value          = pc.cv
 FROM proposal_cv pc
 WHERE j.id = pc.job_id
   AND pc.cv > 0
