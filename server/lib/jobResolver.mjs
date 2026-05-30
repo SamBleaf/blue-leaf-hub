@@ -1,4 +1,5 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { normaliseAddress } from "./addressNormalise.mjs";
 
 /**
  * Given a freeform address string, find the best matching job in the database.
@@ -12,6 +13,14 @@ export async function resolveJobIdByAddress(rawAddress) {
   if (!addr) return null;
   const sb = getServiceSupabase();
   if (!sb) return null;
+
+  // Canonical normalised match first ("21 Folkestone Rd" == "21 Folkestone Road").
+  const norm = normaliseAddress(addr).normalised;
+  if (norm) {
+    const { data: nm } = await sb
+      .from("jobs").select("id, address").eq("address_normalised", norm).limit(1);
+    if (nm?.[0]) return { job_id: nm[0].id, address: nm[0].address };
+  }
 
   // Exact match
   let { data } = await sb

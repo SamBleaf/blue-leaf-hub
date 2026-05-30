@@ -1,4 +1,5 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { normaliseAddress } from "./addressNormalise.mjs";
 import {
   dropboxConfigured,
   mergeJobDataJsonFile,
@@ -20,15 +21,26 @@ export function registerJobsApiRoutes(app) {
       const { address, client_name, project_type, arch_ref } = req.body || {};
       if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
 
-      // Dedup: return existing job if same address already exists
-      const { data: existing } = await sb.from("jobs")
-        .select("*")
-        .ilike("address", address.trim())
-        .maybeSingle();
+      // Dedup: prefer the canonical normalised key ("21 Folkestone Rd" == "21 Folkestone Road");
+      // fall back to the legacy raw ilike for jobs not yet normalised.
+      const addr = normaliseAddress(address);
+      let existing = null;
+      if (addr.normalised) {
+        const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
+        existing = data?.[0] || null;
+      }
+      if (!existing) {
+        const { data } = await sb.from("jobs").select("*").ilike("address", address.trim()).limit(1);
+        existing = data?.[0] || null;
+      }
       if (existing) return res.json({ ok: true, job: existing, deduplicated: true });
 
       const { data, error } = await sb.from("jobs").insert({
         address: address.trim(),
+        address_normalised: addr.normalised,
+        address_suburb: addr.suburb,
+        address_state: addr.state,
+        address_postcode: addr.postcode,
         client_name: client_name?.trim() || null,
         project_type: project_type || null,
         arch_ref: arch_ref?.trim() || null,
