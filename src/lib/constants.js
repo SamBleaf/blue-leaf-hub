@@ -333,3 +333,54 @@ export const gstAmount = (exGst) => Number(exGst) * GST_RATE;
 
 /** Convenience: strip GST from inc-GST amount */
 export const exGst = (incGstAmount) => Number(incGstAmount) / (1 + GST_RATE);
+
+// ─── Carpentry Subsidiary ─────────────────────────────────────────────────────
+
+export const CARPENTRY_JOB_STATUSES = {
+  ACTIVE:    "active",
+  ON_HOLD:   "on_hold",
+  DEFECTS:   "defects",
+  COMPLETE:  "complete",
+  CANCELLED: "cancelled",
+};
+
+export const CARPENTRY_JOB_STATUS_LABELS = {
+  active:    "Active",
+  on_hold:   "On Hold",
+  defects:   "Defects",
+  complete:  "Complete",
+  cancelled: "Cancelled",
+};
+
+export const CARPENTRY_PROJECT_TYPES = {
+  FRAME:        "frame",
+  FITOFF:       "fitoff",
+  LOCKUP:       "lockup",
+  FULL_PACKAGE: "full_package",
+  OTHER:        "other",
+};
+
+export const CARPENTRY_PROJECT_TYPE_LABELS = {
+  frame:        "Frame Only",
+  fitoff:       "Fit-Off Only",
+  lockup:       "Lock-Up / Cladding",
+  full_package: "Full Package",
+  other:        "Other",
+};
+
+export const CARPENTRY_COST_TYPES = {
+  MATERIAL:    "material",
+  SUBCONTRACT: "subcontract",
+  OTHER:       "other",
+};
+
+export const CARPENTRY_COST_TYPE_LABELS = {
+  material:    "Material",
+  subcontract: "Subcontract",
+  other:       "Other",
+};
+
+export const CARPENTRY_MILESTONE_STATUSES = {
+  PENDING:  "pending",
+  COMPLETE: "complete",
+};

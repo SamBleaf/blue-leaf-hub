@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
 > Last updated: 2026-05-30  
-> Total SOPs: 100  
+> Total SOPs: 106  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -122,4 +122,13 @@
 
 ---
 
-*Last updated: 2026-05-30. Total SOPs: 100. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+| 15-01 | Carpentry Module — Overview and Navigation | [15-01_carpentry_overview.md](15_carpentry/15-01_carpentry_overview.md) | Carpentry | Admin, Supervisor | Draft | untested | No | High |
+| 15-02 | Create a Carpentry Job | [15-02_create_carpentry_job.md](15_carpentry/15-02_create_carpentry_job.md) | Carpentry | Admin, Supervisor | Draft | untested | No | High |
+| 15-03 | Manage Carpentry Job Milestones | [15-03_manage_milestones.md](15_carpentry/15-03_manage_milestones.md) | Carpentry | Admin, Supervisor | Draft | untested | No | High |
+| 15-04 | Write a Carpentry Site Diary Entry | [15-04_site_diary.md](15_carpentry/15-04_site_diary.md) | Carpentry | Admin, Supervisor | Draft | untested | No | High |
+| 15-05 | Track Carpentry Job Costs | [15-05_track_costs.md](15_carpentry/15-05_track_costs.md) | Carpentry | Admin, Supervisor | Draft | untested | No | High |
+| 15-06 | Close a Carpentry Job | [15-06_close_job.md](15_carpentry/15-06_close_job.md) | Carpentry | Admin, Supervisor | Draft | untested | Yes | High |
+
+---
+
+*Last updated: 2026-05-30. Total SOPs: 106. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*

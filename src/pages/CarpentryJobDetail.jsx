@@ -1,0 +1,1079 @@
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { apiFetch, apiPatch, apiPost, apiDelete } from "../lib/apiFetch.js";
+import {
+  CARPENTRY_JOB_STATUS_LABELS,
+  CARPENTRY_PROJECT_TYPES,
+  CARPENTRY_PROJECT_TYPE_LABELS,
+  CARPENTRY_COST_TYPES,
+  CARPENTRY_COST_TYPE_LABELS,
+  CARPENTRY_MILESTONE_STATUSES,
+} from "../lib/constants.js";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmt$(n) {
+  if (n == null) return "—";
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+}
+function fmtPct(n) { return n != null ? `${Number(n).toFixed(1)}%` : "—"; }
+function fmtDate(d) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return isNaN(dt) ? d : dt.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const STATUS_BADGE = {
+  active:    "bg-emerald-100 text-emerald-800",
+  on_hold:   "bg-amber-100   text-amber-800",
+  defects:   "bg-orange-100  text-orange-800",
+  complete:  "bg-blue-100    text-blue-800",
+  cancelled: "bg-gray-100    text-gray-500",
+};
+
+function Field({ label, value }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted mb-0.5">{label}</p>
+      <p className="text-sm text-ink">{value || <span className="text-muted">—</span>}</p>
+    </div>
+  );
+}
+
+// ── Closeout Modal ────────────────────────────────────────────────────────────
+
+function CloseoutModal({ job, onClose, onConfirm }) {
+  const [summary, setSummary]           = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [lessonsLearned, setLessonsLearned] = useState("");
+  const [closing, setClosing]           = useState(false);
+  const [error, setError]               = useState(null);
+
+  useEffect(() => {
+    apiFetch(`/api/carpentry/jobs/${job.id}/summary`).then(({ ok, data }) => {
+      setLoadingSummary(false);
+      if (ok) setSummary(data?.summary || null);
+    });
+  }, [job.id]);
+
+  async function handleClose() {
+    setClosing(true);
+    setError(null);
+    const { ok, error: e } = await apiPost(`/api/carpentry/jobs/${job.id}/closeout`, {
+      lessonsLearned: lessonsLearned.trim() || null,
+    });
+    setClosing(false);
+    if (!ok) { setError(e || "Could not close job."); return; }
+    onConfirm();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+        <h3 className="text-base font-semibold text-ink mb-1">Close Job — {job.reference}</h3>
+        <p className="text-sm text-muted mb-4">This will mark the job complete and lock editing. You cannot undo this without contacting an admin.</p>
+
+        {loadingSummary ? (
+          <div className="text-sm text-muted py-4 text-center">Loading summary…</div>
+        ) : summary ? (
+          <div className="bg-slate-50 rounded-lg border border-hairline p-4 mb-4 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-muted mb-0.5">Revenue</p>
+              <p className="font-semibold text-ink">{summary.revenue ? new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(summary.revenue) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted mb-0.5">Total Actual Cost</p>
+              <p className="font-semibold text-ink">{summary.totalActual != null ? new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(summary.totalActual) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted mb-0.5">Forecast Margin</p>
+              <p className={`font-semibold ${summary.forecastMarginPct != null && summary.forecastMarginPct < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                {summary.forecastMarginPct != null ? `${Number(summary.forecastMarginPct).toFixed(1)}%` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted mb-0.5">vs Budget</p>
+              <p className={`font-semibold ${summary.variance != null && summary.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                {summary.variance != null ? `${summary.variance >= 0 ? "+" : ""}${Number(summary.variance).toFixed(1)}%` : "—"}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-ink mb-1">Lessons learned <span className="text-muted font-normal">(optional)</span></label>
+          <textarea
+            value={lessonsLearned}
+            onChange={(e) => setLessonsLearned(e.target.value)}
+            rows={2}
+            placeholder="What went well? What would you do differently?"
+            className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
+          />
+        </div>
+
+        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleClose}
+            disabled={closing}
+            className="flex-1 py-2.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent/90 disabled:opacity-40 transition-colors"
+          >
+            {closing ? "Closing…" : "Confirm — Close Job"}
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-hairline text-sm text-ink hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Overview Tab ──────────────────────────────────────────────────────────────
+
+function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
+  const [editing, setEditing]   = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState(null);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [closeoutOpen, setCloseoutOpen] = useState(false);
+  const [form, setForm]         = useState(null);
+
+  // Jobs can always be edited — completed/cancelled shows a warning banner only
+  const isClosedStatus = job.status === "complete" || job.status === "cancelled";
+
+  function startEdit() {
+    setForm({
+      clientName:    job.clientName    || "",
+      clientContact: job.clientContact || "",
+      clientPhone:   job.clientPhone   || "",
+      clientEmail:   job.clientEmail   || "",
+      address:       job.address       || "",
+      description:   job.description   || "",
+      projectType:   job.projectType   || CARPENTRY_PROJECT_TYPES.BOTH,
+      quotedValue:   job.quotedValue   != null ? String(job.quotedValue)  : "",
+      quotedCost:    job.quotedCost    != null ? String(job.quotedCost)   : "",
+      quotedMarginPct: job.quotedMarginPct != null ? String(job.quotedMarginPct) : "",
+      startDate:     job.startDate     || "",
+      endDate:       job.endDate       || "",
+      floorAreaM2:   job.floorAreaM2   != null ? String(job.floorAreaM2) : "",
+      storeyCount:   job.storeyCount   != null ? String(job.storeyCount) : "1",
+      notes:         job.notes         || "",
+    });
+    setEditing(true);
+  }
+
+  function cancelEdit() { setEditing(false); setError(null); setForm(null); }
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    const { ok, error: e } = await apiPatch(`/api/carpentry/jobs/${job.id}`, {
+      ...form,
+      quotedValue:     form.quotedValue     ? Number(form.quotedValue)    : null,
+      quotedCost:      form.quotedCost      ? Number(form.quotedCost)     : null,
+      quotedMarginPct: form.quotedMarginPct ? Number(form.quotedMarginPct): null,
+      floorAreaM2:     form.floorAreaM2     ? Number(form.floorAreaM2)    : null,
+      storeyCount:     form.storeyCount     ? Number(form.storeyCount)    : 1,
+      startDate:       form.startDate       || null,
+      endDate:         form.endDate         || null,
+    });
+    setSaving(false);
+    if (!ok) { setError(e || "Save failed."); return; }
+    onUpdated();
+    setEditing(false);
+  }
+
+  async function changeStatus(newStatus) {
+    setStatusSaving(true);
+    const { ok, error: e } = await apiPatch(`/api/carpentry/jobs/${job.id}/status`, { status: newStatus });
+    setStatusSaving(false);
+    if (!ok) { setError(e || "Status change failed."); return; }
+    onStatusChange(newStatus);
+  }
+
+  if (editing && form) {
+    return (
+      <div className="p-6 space-y-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-ink">Edit Job Details</h3>
+          <div className="flex gap-2">
+            <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-hairline rounded-lg text-muted hover:text-ink transition-colors">Cancel</button>
+            <button onClick={save} disabled={saving} className="px-4 py-1.5 text-xs rounded-lg bg-accent text-white font-medium hover:bg-accent/90 disabled:opacity-40 transition-colors">
+              {saving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        </div>
+        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Client name *</label>
+            <input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Contact person</label>
+            <input value={form.clientContact} onChange={(e) => set("clientContact", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Phone</label>
+            <input value={form.clientPhone} onChange={(e) => set("clientPhone", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Email</label>
+            <input type="email" value={form.clientEmail} onChange={(e) => set("clientEmail", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-ink mb-1">Address *</label>
+          <input value={form.address} onChange={(e) => set("address", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-ink mb-1">Description</label>
+          <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={2} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Project type</label>
+            <select value={form.projectType} onChange={(e) => set("projectType", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
+              {Object.entries(CARPENTRY_PROJECT_TYPE_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Storeys</label>
+            <input type="number" min={1} value={form.storeyCount} onChange={(e) => set("storeyCount", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Quoted value (ex GST)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">$</span>
+              <input type="number" min={0} step={0.01} value={form.quotedValue} onChange={(e) => set("quotedValue", e.target.value)} className="w-full border border-hairline rounded-lg pl-7 pr-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Budgeted cost (ex GST)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">$</span>
+              <input type="number" min={0} step={0.01} value={form.quotedCost} onChange={(e) => set("quotedCost", e.target.value)} className="w-full border border-hairline rounded-lg pl-7 pr-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Floor area (m²)</label>
+            <input type="number" min={0} step={0.01} value={form.floorAreaM2} onChange={(e) => set("floorAreaM2", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Planned start</label>
+            <input type="date" value={form.startDate} onChange={(e) => set("startDate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Planned completion</label>
+            <input type="date" value={form.endDate} onChange={(e) => set("endDate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-ink mb-1">Notes</label>
+          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none" />
+        </div>
+      </div>
+    );
+  }
+
+  const statusOptions = Object.entries(CARPENTRY_JOB_STATUS_LABELS).filter(([v]) => v !== job.status);
+
+  return (
+    <div className="p-6">
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <h2 className="text-xl font-semibold text-ink">{job.clientName}</h2>
+            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE[job.status] || "bg-gray-100 text-gray-500"}`}>
+              {CARPENTRY_JOB_STATUS_LABELS[job.status] || job.status}
+            </span>
+          </div>
+          <p className="text-sm text-muted">{job.address}</p>
+          {job.buildexactJobId && (
+            <p className="text-xs text-muted mt-1">Buildexact Job ID: <span className="font-mono">{job.buildexactJobId}</span></p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {/* Close Job button — only for non-complete, non-cancelled jobs */}
+          {!isClosedStatus && (
+            <button
+              onClick={() => setCloseoutOpen(true)}
+              className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition-colors"
+            >
+              Close Job
+            </button>
+          )}
+          {/* Status change dropdown — always available */}
+          <div className="relative group">
+            <button
+              disabled={statusSaving}
+              className="px-3 py-1.5 text-xs border border-hairline rounded-lg text-muted hover:text-ink disabled:opacity-40 transition-colors"
+            >
+              {statusSaving ? "Updating…" : "Change Status ▾"}
+            </button>
+            <div className="absolute right-0 top-full mt-1 bg-white border border-hairline rounded-lg shadow-lg py-1 z-10 hidden group-hover:block min-w-[140px]">
+              {statusOptions.map(([v, l]) => (
+                <button
+                  key={v}
+                  onClick={() => changeStatus(v)}
+                  className="block w-full text-left px-3 py-2 text-sm text-ink hover:bg-slate-50"
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={startEdit}
+            className="px-4 py-1.5 text-xs rounded-lg border border-hairline text-muted hover:text-ink transition-colors"
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+
+      {/* Warning banner for completed / cancelled jobs */}
+      {isClosedStatus && (
+        <div className={`mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border ${job.status === "complete" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-gray-50 text-gray-500 border-hairline"}`}>
+          <span>{job.status === "complete" ? "✓ Job closed" : "✗ Job cancelled"}</span>
+          <span className="text-[11px] opacity-70">— edits are allowed but will not change the performance snapshot</span>
+        </div>
+      )}
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
+
+      {/* Key details grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Field label="Reference"      value={job.reference} />
+        <Field label="Project Type"   value={CARPENTRY_PROJECT_TYPE_LABELS[job.projectType] || job.projectType} />
+        <Field label="Storeys"        value={job.storeyCount} />
+        <Field label="Floor Area"     value={job.floorAreaM2 ? `${job.floorAreaM2} m²` : null} />
+      </div>
+
+      {/* Financials */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-slate-50 rounded-card border border-hairline">
+        <div>
+          <p className="text-xs text-muted font-medium mb-0.5">Quoted Value</p>
+          <p className="text-lg font-semibold text-ink">{fmt$(job.quotedValue)}</p>
+          <p className="text-xs text-muted">ex GST</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted font-medium mb-0.5">Budgeted Cost</p>
+          <p className="text-lg font-semibold text-ink">{fmt$(job.quotedCost)}</p>
+          <p className="text-xs text-muted">ex GST</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted font-medium mb-0.5">Budget Margin</p>
+          <p className="text-lg font-semibold text-ink">{fmtPct(job.quotedMarginPct)}</p>
+          <p className="text-xs text-muted">quoted</p>
+        </div>
+        <div />
+      </div>
+
+      {/* Contact + dates */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Field label="Contact"    value={job.clientContact} />
+        <Field label="Phone"      value={job.clientPhone} />
+        <Field label="Email"      value={job.clientEmail} />
+        <div />
+        <Field label="Planned Start"      value={fmtDate(job.startDate)} />
+        <Field label="Planned Completion" value={fmtDate(job.endDate)} />
+        <Field label="Actual Start"       value={fmtDate(job.actualStart)} />
+        <Field label="Actual End"         value={fmtDate(job.actualEnd)} />
+      </div>
+
+      {job.description && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-muted mb-1">Description</p>
+          <p className="text-sm text-ink whitespace-pre-wrap">{job.description}</p>
+        </div>
+      )}
+      {job.notes && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-muted mb-1">Notes</p>
+          <p className="text-sm text-ink whitespace-pre-wrap">{job.notes}</p>
+        </div>
+      )}
+
+      {/* Closeout performance snapshot (shown once job is complete) */}
+      {job.status === "complete" && performance && (
+        <div className="mt-2 p-4 bg-blue-50 rounded-card border border-blue-200">
+          <p className="text-xs font-semibold text-blue-800 mb-2 uppercase tracking-wide">Closeout Performance</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-blue-700 mb-0.5">Final Margin</p>
+              <p className="font-semibold text-ink">{performance.finalMarginPct != null ? `${Number(performance.finalMarginPct).toFixed(1)}%` : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-blue-700 mb-0.5">vs Budget</p>
+              <p className={`font-semibold ${performance.variancePct != null && performance.variancePct < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                {performance.variancePct != null ? `${performance.variancePct >= 0 ? "+" : ""}${Number(performance.variancePct).toFixed(1)}%` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-blue-700 mb-0.5">Total Cost</p>
+              <p className="font-semibold text-ink">{performance.finalTotalCost != null ? new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(performance.finalTotalCost) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-blue-700 mb-0.5">Duration</p>
+              <p className="font-semibold text-ink">{performance.durationDays != null ? `${performance.durationDays} days` : "—"}</p>
+            </div>
+          </div>
+          {performance.hoursPerM2 != null && (
+            <div className="mt-3 pt-3 border-t border-blue-200 flex gap-6 text-xs text-blue-800">
+              <span>Labour hours: <strong>{performance.labourHours}</strong></span>
+              {performance.floorAreaM2 && <span>Floor area: <strong>{performance.floorAreaM2} m²</strong></span>}
+              {performance.hoursPerM2 && <span>Hours/m²: <strong>{performance.hoursPerM2}</strong></span>}
+              {performance.costPerM2 && <span>Cost/m²: <strong>${performance.costPerM2}</strong></span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Closeout modal */}
+      {closeoutOpen && (
+        <CloseoutModal
+          job={job}
+          onClose={() => setCloseoutOpen(false)}
+          onConfirm={() => { setCloseoutOpen(false); onUpdated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Schedule Tab (milestones) ─────────────────────────────────────────────────
+
+function ScheduleTab({ jobId }) {
+  const [milestones, setMilestones] = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [addName, setAddName]       = useState("");
+  const [adding, setAdding]         = useState(false);
+  const [savingId, setSavingId]     = useState(null);
+  const [error, setError]           = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { ok, data } = await apiFetch(`/api/carpentry/jobs/${jobId}/milestones`);
+    setLoading(false);
+    if (ok) setMilestones(data?.milestones || []);
+  }, [jobId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function addMilestone() {
+    if (!addName.trim()) return;
+    setAdding(true);
+    const nextOrder = milestones.length ? Math.max(...milestones.map((m) => m.sortOrder || 0)) + 10 : 10;
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/milestones`, {
+      name: addName.trim(),
+      sortOrder: nextOrder,
+    });
+    setAdding(false);
+    if (!ok) { setError(e || "Failed to add milestone."); return; }
+    setMilestones((ms) => [...ms, data.milestone]);
+    setAddName("");
+  }
+
+  async function toggleComplete(m) {
+    const newStatus = m.status === CARPENTRY_MILESTONE_STATUSES.COMPLETE ? "pending" : "complete";
+    const actualDate = newStatus === "complete" ? new Date().toISOString().slice(0, 10) : null;
+    setSavingId(m.id);
+    const { ok, data } = await apiPatch(`/api/carpentry/milestones/${m.id}`, { status: newStatus, actualDate });
+    setSavingId(null);
+    if (ok) setMilestones((ms) => ms.map((x) => x.id === m.id ? data.milestone : x));
+  }
+
+  async function updateDate(m, field, value) {
+    const body = field === "target" ? { targetDate: value || null } : { actualDate: value || null };
+    setSavingId(m.id);
+    const { ok, data } = await apiPatch(`/api/carpentry/milestones/${m.id}`, body);
+    setSavingId(null);
+    if (ok) setMilestones((ms) => ms.map((x) => x.id === m.id ? data.milestone : x));
+  }
+
+  async function deleteMilestone(m) {
+    if (!confirm(`Delete milestone "${m.name}"?`)) return;
+    setSavingId(m.id);
+    const { ok } = await apiDelete(`/api/carpentry/milestones/${m.id}`);
+    setSavingId(null);
+    if (ok) setMilestones((ms) => ms.filter((x) => x.id !== m.id));
+  }
+
+  return (
+    <div className="p-6">
+      <h3 className="text-sm font-semibold text-ink mb-4">Schedule Milestones</h3>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : (
+        <div className="space-y-2 mb-6">
+          {milestones.length === 0 && (
+            <p className="text-sm text-muted">No milestones yet.</p>
+          )}
+          {milestones.map((m) => (
+            <div key={m.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${m.status === "complete" ? "bg-emerald-50 border-emerald-200" : "bg-white border-hairline"}`}>
+              <button
+                onClick={() => toggleComplete(m)}
+                disabled={savingId === m.id}
+                className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${m.status === "complete" ? "bg-emerald-500 border-emerald-500" : "border-slate-300 hover:border-emerald-400"}`}
+              >
+                {m.status === "complete" && <span className="text-white text-xs">✓</span>}
+              </button>
+              <span className={`flex-1 text-sm font-medium ${m.status === "complete" ? "line-through text-muted" : "text-ink"}`}>
+                {m.name}
+              </span>
+              <div className="flex items-center gap-2 text-xs text-muted">
+                <label className="flex items-center gap-1">
+                  <span>Target</span>
+                  <input
+                    type="date"
+                    value={m.targetDate || ""}
+                    onChange={(e) => updateDate(m, "target", e.target.value)}
+                    className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring"
+                  />
+                </label>
+                {m.status === "complete" && (
+                  <label className="flex items-center gap-1">
+                    <span>Actual</span>
+                    <input
+                      type="date"
+                      value={m.actualDate || ""}
+                      onChange={(e) => updateDate(m, "actual", e.target.value)}
+                      className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring"
+                    />
+                  </label>
+                )}
+              </div>
+              <button
+                onClick={() => deleteMilestone(m)}
+                disabled={savingId === m.id}
+                className="text-muted hover:text-red-500 text-xs transition-colors px-1"
+                title="Delete milestone"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add milestone */}
+      <div className="flex gap-2">
+        <input
+          value={addName}
+          onChange={(e) => setAddName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addMilestone()}
+          placeholder="Add a milestone… (press Enter)"
+          className="flex-1 border border-hairline rounded-lg px-3 py-2 text-sm focus-ring"
+        />
+        <button
+          onClick={addMilestone}
+          disabled={adding || !addName.trim()}
+          className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+        >
+          {adding ? "Adding…" : "Add"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Diary Tab ─────────────────────────────────────────────────────────────────
+
+function DiaryTab({ job }) {
+  const [entries, setEntries]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState(null);
+  const [structuring, setStructuring] = useState(false);
+
+  const [form, setForm] = useState({
+    entryDate: new Date().toISOString().slice(0, 10),
+    weather: "",
+    tradesOnsite: "",
+    workCompleted: "",
+    issues: "",
+    instructionsGiven: "",
+    visitors: "",
+    supervisor: "",
+    rawVoiceTranscript: "",
+  });
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { ok, data } = await apiFetch(`/api/carpentry/jobs/${job.id}/diary`);
+    setLoading(false);
+    if (ok) setEntries(data?.entries || []);
+  }, [job.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function structureWithAi() {
+    if (!form.rawVoiceTranscript.trim()) return;
+    setStructuring(true);
+    const { ok, data, error: e } = await apiPost("/api/diary/structure", {
+      transcript: form.rawVoiceTranscript,
+      projectAddress: job.address,
+    });
+    setStructuring(false);
+    if (!ok) { setError(e || "AI structuring failed."); return; }
+    const s = data?.structured || {};
+    const hasContent = s.weather || s.work_completed || s.issues || (Array.isArray(s.trades_onsite) && s.trades_onsite.length > 0);
+    if (!hasContent) {
+      setError("AI couldn't extract structure from this transcript. Fill the fields below manually.");
+      return;
+    }
+    if (s.weather)            set("weather", String(s.weather));
+    if (s.trades_onsite?.length) set("tradesOnsite", Array.isArray(s.trades_onsite) ? s.trades_onsite.join(", ") : s.trades_onsite);
+    if (s.work_completed)     set("workCompleted", String(s.work_completed));
+    if (s.issues)             set("issues", String(s.issues));
+    if (s.instructions_given) set("instructionsGiven", String(s.instructions_given));
+    if (s.visitors)           set("visitors", String(s.visitors));
+    setError(null);
+  }
+
+  async function saveEntry() {
+    if (!form.entryDate) { setError("Entry date is required."); return; }
+    setSaving(true);
+    setError(null);
+    const tradesOnsite = form.tradesOnsite
+      ? form.tradesOnsite.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${job.id}/diary`, {
+      ...form,
+      tradesOnsite,
+      structuredByAi: form.rawVoiceTranscript.trim().length > 0,
+    });
+    setSaving(false);
+    if (!ok) { setError(e || "Failed to save diary entry."); return; }
+    setEntries((es) => [data.entry, ...es]);
+    setShowForm(false);
+    setForm({
+      entryDate: new Date().toISOString().slice(0, 10),
+      weather: "", tradesOnsite: "", workCompleted: "",
+      issues: "", instructionsGiven: "", visitors: "",
+      supervisor: "", rawVoiceTranscript: "",
+    });
+  }
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-ink">Site Diary</h3>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="px-4 py-1.5 text-xs rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+        >
+          {showForm ? "Cancel" : "+ New Entry"}
+        </button>
+      </div>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
+
+      {showForm && (
+        <div className="mb-6 p-5 bg-slate-50 rounded-card border border-hairline space-y-4">
+          <h4 className="text-sm font-semibold text-ink">New Diary Entry</h4>
+
+          {/* Voice transcript + AI */}
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Voice transcript (optional)</label>
+            <textarea
+              value={form.rawVoiceTranscript}
+              onChange={(e) => set("rawVoiceTranscript", e.target.value)}
+              rows={4}
+              className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
+              placeholder="Paste or dictate a voice note — then click 'Structure with AI' to fill the fields below automatically…"
+            />
+            <button
+              onClick={structureWithAi}
+              disabled={structuring || !form.rawVoiceTranscript.trim()}
+              className="mt-2 px-3 py-1.5 text-xs rounded-lg border border-primary text-primary font-medium hover:bg-primary/5 disabled:opacity-40 transition-colors"
+            >
+              {structuring ? "Structuring…" : "✦ Structure with AI"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Date</label>
+              <input type="date" value={form.entryDate} onChange={(e) => set("entryDate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Weather</label>
+              <input value={form.weather} onChange={(e) => set("weather", e.target.value)} placeholder="e.g. Sunny 28°C" className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Trades on site</label>
+              <input value={form.tradesOnsite} onChange={(e) => set("tradesOnsite", e.target.value)} placeholder="e.g. Framers, Concreters" className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Supervisor</label>
+              <input value={form.supervisor} onChange={(e) => set("supervisor", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Work completed</label>
+            <textarea value={form.workCompleted} onChange={(e) => set("workCompleted", e.target.value)} rows={3} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Issues</label>
+            <textarea value={form.issues} onChange={(e) => set("issues", e.target.value)} rows={2} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Instructions given</label>
+              <textarea value={form.instructionsGiven} onChange={(e) => set("instructionsGiven", e.target.value)} rows={2} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Visitors</label>
+              <input value={form.visitors} onChange={(e) => set("visitors", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={saveEntry}
+              disabled={saving}
+              className="px-5 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-40 transition-colors"
+            >
+              {saving ? "Saving…" : "Save Entry"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading diary entries…</p>
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-muted">No diary entries yet.</p>
+      ) : (
+        <div className="space-y-4">
+          {entries.map((e) => (
+            <div key={e.id} className="bg-white rounded-card border border-hairline p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-ink">{new Date(e.entryDate).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</span>
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  {e.weather && <span>☁ {e.weather}</span>}
+                  {e.structuredByAi && <span className="text-primary font-medium">✦ AI</span>}
+                </div>
+              </div>
+              {e.tradesOnsite?.length > 0 && (
+                <p className="text-xs text-muted mb-2">Trades: {Array.isArray(e.tradesOnsite) ? e.tradesOnsite.join(", ") : e.tradesOnsite}</p>
+              )}
+              {e.workCompleted && <p className="text-sm text-ink mb-1">{e.workCompleted}</p>}
+              {e.issues && <p className="text-sm text-amber-700 mt-1">⚠ {e.issues}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Costs Tab ─────────────────────────────────────────────────────────────────
+
+function CostsTab({ jobId }) {
+  const [costs, setCosts]       = useState([]);
+  const [summary, setSummary]   = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState(null);
+  const [form, setForm]         = useState({
+    costType: CARPENTRY_COST_TYPES.MATERIAL,
+    description: "",
+    amount: "",
+    costDate: new Date().toISOString().slice(0, 10),
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [costsRes, summaryRes] = await Promise.all([
+      apiFetch(`/api/carpentry/jobs/${jobId}/costs`),
+      apiFetch(`/api/carpentry/jobs/${jobId}/summary`),
+    ]);
+    setLoading(false);
+    if (costsRes.ok) setCosts(costsRes.data?.costs || []);
+    if (summaryRes.ok) setSummary(summaryRes.data?.summary || null);
+  }, [jobId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function saveCost() {
+    if (!form.description.trim()) { setError("Description is required."); return; }
+    if (!form.amount || Number(form.amount) < 0) { setError("Amount must be a non-negative number."); return; }
+    setSaving(true);
+    setError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/costs`, {
+      costType: form.costType,
+      description: form.description.trim(),
+      amount: Number(form.amount),
+      costDate: form.costDate,
+    });
+    setSaving(false);
+    if (!ok) { setError(e || "Failed to add cost."); return; }
+    setCosts((cs) => [data.cost, ...cs]);
+    setForm({ costType: CARPENTRY_COST_TYPES.MATERIAL, description: "", amount: "", costDate: new Date().toISOString().slice(0, 10) });
+    setShowForm(false);
+    // Reload summary
+    const { ok: sOk, data: sData } = await apiFetch(`/api/carpentry/jobs/${jobId}/summary`);
+    if (sOk) setSummary(sData?.summary || null);
+  }
+
+  async function deleteCost(c) {
+    if (!confirm(`Delete cost entry "${c.description}"?`)) return;
+    const { ok } = await apiDelete(`/api/carpentry/costs/${c.id}`);
+    if (ok) {
+      setCosts((cs) => cs.filter((x) => x.id !== c.id));
+      const { ok: sOk, data: sData } = await apiFetch(`/api/carpentry/jobs/${jobId}/summary`);
+      if (sOk) setSummary(sData?.summary || null);
+    }
+  }
+
+  const varianceColor = (v) => {
+    if (v == null) return "text-muted";
+    return v >= 0 ? "text-emerald-700" : "text-red-600";
+  };
+
+  return (
+    <div className="p-6">
+      {/* Budget vs Actual card */}
+      {summary && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-slate-50 rounded-card border border-hairline">
+          <div>
+            <p className="text-xs text-muted font-medium mb-0.5">Revenue</p>
+            <p className="text-lg font-semibold text-ink">{fmt$(summary.revenue)}</p>
+            <p className="text-xs text-muted">quoted ex GST</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted font-medium mb-0.5">Total Actual Cost</p>
+            <p className="text-lg font-semibold text-ink">{fmt$(summary.totalActual)}</p>
+            <p className="text-xs text-muted">labour + materials</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted font-medium mb-0.5">Forecast Margin</p>
+            <p className={`text-lg font-semibold ${summary.forecastMarginPct != null && summary.forecastMarginPct < 0 ? "text-red-600" : "text-ink"}`}>
+              {fmtPct(summary.forecastMarginPct)}
+            </p>
+            <p className="text-xs text-muted">budget: {fmtPct(summary.budgetMarginPct)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted font-medium mb-0.5">Variance</p>
+            <p className={`text-lg font-semibold ${varianceColor(summary.variance)}`}>
+              {summary.variance != null ? (summary.variance >= 0 ? "+" : "") + fmtPct(summary.variance) : "—"}
+            </p>
+            <p className="text-xs text-muted">vs budget margin</p>
+          </div>
+        </div>
+      )}
+
+      {/* Labour breakdown */}
+      {summary && (
+        <div className="flex gap-6 mb-5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+            <span className="text-muted">Labour actual:</span>
+            <span className="font-medium text-ink">{fmt$(summary.labourActual)}</span>
+            <span className="text-xs text-muted">({summary.timesheetCount} timesheet{summary.timesheetCount !== 1 ? "s" : ""})</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+            <span className="text-muted">Materials + other:</span>
+            <span className="font-medium text-ink">{fmt$(summary.otherActual)}</span>
+            <span className="text-xs text-muted">({summary.costEntryCount} entr{summary.costEntryCount !== 1 ? "ies" : "y"})</span>
+          </div>
+        </div>
+      )}
+
+      {/* Cost entries */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-ink">Material &amp; Other Costs</h3>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="px-4 py-1.5 text-xs rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+        >
+          {showForm ? "Cancel" : "+ Add Cost"}
+        </button>
+      </div>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
+
+      {showForm && (
+        <div className="mb-4 p-4 bg-slate-50 rounded-card border border-hairline space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Type</label>
+              <select value={form.costType} onChange={(e) => set("costType", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
+                {Object.entries(CARPENTRY_COST_TYPE_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Amount (ex GST)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">$</span>
+                <input type="number" min={0} step={0.01} value={form.amount} onChange={(e) => set("amount", e.target.value)} className="w-full border border-hairline rounded-lg pl-7 pr-3 py-2 text-sm focus-ring" placeholder="0.00" />
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Description</label>
+              <input value={form.description} onChange={(e) => set("description", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" placeholder="e.g. LVL beams from Bowens" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Date</label>
+              <input type="date" value={form.costDate} onChange={(e) => set("costDate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={saveCost}
+              disabled={saving}
+              className="px-5 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-40 transition-colors"
+            >
+              {saving ? "Saving…" : "Add Cost"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : costs.length === 0 ? (
+        <p className="text-sm text-muted">No cost entries yet.</p>
+      ) : (
+        <div className="overflow-x-auto bg-white rounded-card border border-hairline">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-hairline bg-slate-50 text-left">
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase">Date</th>
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase">Type</th>
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase">Description</th>
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase text-right">Amount</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {costs.map((c) => (
+                <tr key={c.id}>
+                  <td className="px-4 py-3 text-muted whitespace-nowrap">{c.costDate}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">
+                      {CARPENTRY_COST_TYPE_LABELS[c.costType] || c.costType}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-ink">{c.description}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium text-ink">{fmt$(c.amount)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => deleteCost(c)} className="text-muted hover:text-red-500 text-xs transition-colors">Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
+const TABS = [
+  { id: "overview",  label: "Overview" },
+  { id: "schedule",  label: "Schedule" },
+  { id: "diary",     label: "Diary" },
+  { id: "costs",     label: "Costs" },
+];
+
+export default function CarpentryJobDetail() {
+  const { jobId } = useParams();
+  const navigate  = useNavigate();
+  const [tab, setTab]         = useState("overview");
+  const [job, setJob]         = useState(null);
+  const [performance, setPerformance] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
+
+  const loadJob = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const { ok, data, error: e } = await apiFetch(`/api/carpentry/jobs/${jobId}`);
+    setLoading(false);
+    if (!ok) { setError(e || "Could not load job."); return; }
+    setJob(data?.job || null);
+    setPerformance(data?.performance || null);
+  }, [jobId]);
+
+  useEffect(() => { loadJob(); }, [loadJob]);
+
+  if (loading) return <div className="p-10 text-center text-muted text-sm">Loading…</div>;
+  if (error)   return <div className="p-10 text-center text-red-600 text-sm">{error}</div>;
+  if (!job)    return <div className="p-10 text-center text-muted text-sm">Job not found.</div>;
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm text-muted mb-4">
+        <button onClick={() => navigate("/carpentry")} className="hover:text-ink transition-colors">Carpentry</button>
+        <span>›</span>
+        <span className="text-ink font-medium">{job.reference}</span>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-hairline mb-0 -mb-px">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+              tab === t.id
+                ? "border-primary text-primary"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="bg-white rounded-b-card border border-t-0 border-hairline">
+        {tab === "overview" && (
+          <OverviewTab
+            job={job}
+            performance={performance}
+            onUpdated={loadJob}
+            onStatusChange={(status) => setJob((j) => ({ ...j, status }))}
+          />
+        )}
+        {tab === "schedule" && <ScheduleTab jobId={job.id} />}
+        {tab === "diary"    && <DiaryTab job={job} />}
+        {tab === "costs"    && <CostsTab jobId={job.id} />}
+      </div>
+    </div>
+  );
+}

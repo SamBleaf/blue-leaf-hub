@@ -67,6 +67,13 @@ const ICONS = {
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   ),
+  carpentry: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 12l-8.5 8.5a2.121 2.121 0 01-3-3L12 9" />
+      <path d="M17.64 15L22 10.36 19.64 8l-3.64 3.64" />
+      <path d="M16 7l-1.5-1.5 2-2L18 5l.5-1.5L21 2l1 1-1.5 2.5L19 6l-2 2z" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M15 18l-6-6 6-6" />
@@ -118,6 +125,7 @@ const BASE_DEPARTMENTS = [
   { id: "finance_manager",    label: "Financials", tabShort: "Finance",    icon: "finance",    comingSoon: false, modules: null /* computed */, defaultTo: "/finance" },
   { id: "marketing_agent",    label: "Marketing",  tabShort: "Marketing",  icon: "marketing",  comingSoon: false, modules: MARKETING_MODULES, defaultTo: "/marketing" },
   { id: "client_portal",      label: "Clients",    tabShort: "Clients",    icon: "client",     comingSoon: false, modules: [], defaultTo: "/portal-admin" },
+  { id: "carpentry",          label: "Carpentry",  tabShort: "Carp",       icon: "carpentry",  comingSoon: false, modules: [{ to: "/carpentry", label: "Jobs", end: true }], defaultTo: "/carpentry" },
 ];
 
 const SIDEBAR_EXPANDED_W = 256;
@@ -185,6 +193,7 @@ export default function AppShell() {
         if (dept.id === "finance_manager") return can.accessFinance(role);
         if (dept.id === "marketing_agent") return can.accessMarketing(role);
         if (dept.id === "client_portal") return can.accessPortalAdmin(role);
+        if (dept.id === "carpentry") return can.accessOperations(role);
         return true;
       }),
     [DEPARTMENTS, role]
