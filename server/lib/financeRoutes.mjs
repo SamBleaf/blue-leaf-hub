@@ -1128,12 +1128,24 @@ export function registerFinanceRoutes(app) {
         const { data: job } = await sb.from("jobs")
           .select("original_contract_value").eq("id", proposal.job_id).single();
         if (!job?.original_contract_value) {
+          // 1. Write to jobs (existing behaviour)
           await sb.from("jobs").update({
             original_contract_value: totalExGst,
             contract_value: totalExGst,
             updated_at: new Date().toISOString()
           }).eq("id", proposal.job_id);
           contractValue = totalExGst;
+
+          // 2. Also propagate to projects table so the client portal shows the correct value.
+          // projects.job_id is the FK — look up via that column.
+          const { data: proj } = await sb.from("projects")
+            .select("id, contract_value").eq("job_id", proposal.job_id).maybeSingle();
+          if (proj && !proj.contract_value) {
+            await sb.from("projects").update({
+              contract_value: totalExGst,
+              updated_at: new Date().toISOString()
+            }).eq("id", proj.id);
+          }
         }
       }
     }

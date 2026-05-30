@@ -52,8 +52,8 @@ function ApprovalsTab({ role }) {
 
   useEffect(() => { load(); }, [load]);
 
-  function showToast(msg) {
-    setToast(msg);
+  function showToast(msg, type = "success") {
+    setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }
 
@@ -76,10 +76,20 @@ function ApprovalsTab({ role }) {
   async function approveOne(id) {
     setBusy(prev => new Set(prev).add(id));
     try {
-      await authFetch(`/api/workforce/timesheets/${id}/approve`, { method: "POST" });
-      showToast("Approved");
-      load();
-    } catch { /* ignore */ } finally {
+      const res = await authFetch(`/api/workforce/timesheets/${id}/approve`, { method: "POST" });
+      const j = await res.json();
+      if (j.ok) {
+        showToast("Approved ✓");
+        // Optimistic removal — don't wait for re-fetch to clear the row
+        setTimesheets(prev => prev.filter(ts => ts.id !== id));
+        setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+      } else {
+        showToast(`Could not approve: ${j.error || "Unknown error"}`, "error");
+      }
+    } catch (e) {
+      showToast("Connection error — please try again", "error");
+      console.error("approveOne failed:", e);
+    } finally {
       setBusy(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   }
@@ -98,14 +108,21 @@ function ApprovalsTab({ role }) {
 
   async function rejectSelected() {
     const ids = rejectModal === "selected" ? [...selected] : [rejectModal];
+    let failCount = 0;
     for (const id of ids) {
-      await authFetch(`/api/workforce/timesheets/${id}/reject`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: rejectNotes }),
-      });
+      try {
+        const res = await authFetch(`/api/workforce/timesheets/${id}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: rejectNotes }),
+        });
+        const j = await res.json();
+        if (!j.ok) failCount++;
+      } catch { failCount++; }
     }
-    showToast(`${ids.length} rejected`);
+    const succeeded = ids.length - failCount;
+    if (succeeded > 0) showToast(`${succeeded} rejected`);
+    if (failCount > 0) showToast(`${failCount} rejection(s) failed — check your connection`, "error");
     setRejectModal(null);
     setRejectNotes("");
     setSelected(new Set());
@@ -117,7 +134,7 @@ function ApprovalsTab({ role }) {
   return (
     <div>
       {toast && (
-        <div className="fixed top-4 right-4 z-50 bg-green-700 text-white px-4 py-2 rounded-lg text-sm shadow-lg">{toast}</div>
+        <div className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm shadow-lg text-white ${toast.type === "error" ? "bg-red-600" : "bg-green-700"}`}>{toast.msg}</div>
       )}
 
       <div className="flex items-center gap-3 mb-4">
@@ -449,6 +466,7 @@ function HistoryTab({ role }) {
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Project</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-muted">Hours</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Status</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Sync</th>
                 {isDirector && <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Actions</th>}
               </tr>
             </thead>
@@ -463,6 +481,30 @@ function HistoryTab({ role }) {
                     <td className="px-3 py-2 text-right">{totalHrs}h</td>
                     <td className="px-3 py-2">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE[ts.status] || ""}`}>{ts.status}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {ts.buildexactSyncError ? (
+                        <span
+                          title={ts.buildexactSyncError}
+                          className="inline-flex items-center gap-1 text-xs text-red-600 font-medium cursor-help"
+                        >
+                          ⚠ Sync failed
+                          <button
+                            type="button"
+                            className="underline ml-1"
+                            onClick={async () => {
+                              await authFetch(`/api/workforce/timesheets/${ts.id}/sync`, { method: "POST" });
+                              load();
+                            }}
+                          >
+                            Retry
+                          </button>
+                        </span>
+                      ) : ts.buildexactSyncedAt ? (
+                        <span className="text-xs text-green-600">✓ Synced</span>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
                     </td>
                     {isDirector && (
                       <td className="px-3 py-2">

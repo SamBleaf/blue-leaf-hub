@@ -124,7 +124,17 @@ function WhatsWorking({ working, notWorking }) {
             {notWorking.map((item, i) => <ContentTheme key={i} item={item} />)}
           </div>
         ) : (
-          <EmptyCard text="Not enough data — needs ≥ 5 published items with social snapshots" />
+          <div className="rounded-lg border-2 border-dashed border-hairline p-4 space-y-2">
+            <p className="text-sm text-muted">
+              Attribution tracking starts once you have 5+ published content pieces with social snapshots recorded.
+            </p>
+            <a
+              href="/marketing/library"
+              className="inline-block text-sm text-primary font-medium underline"
+            >
+              Go to Library to publish content →
+            </a>
+          </div>
         )}
       </div>
     </div>

@@ -118,12 +118,21 @@ export default function SiteDiary() {
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || "Structure failed");
       const s = j.structured || {};
-      setWeather(String(s.weather || ""));
-      setTradesOnsite(Array.isArray(s.trades_onsite) ? s.trades_onsite : []);
-      setWorkCompleted(String(s.work_completed || ""));
-      setIssues(String(s.issues || ""));
-      setInstructions(String(s.instructions_given || ""));
-      setVisitors(String(s.visitors || ""));
+      // Guard: only apply AI result if it contains at least one non-empty field.
+      // Prevents a silent empty response from wiping the user's manual input.
+      const hasContent = s.weather || s.work_completed || s.issues ||
+                         (Array.isArray(s.trades_onsite) && s.trades_onsite.length > 0);
+      if (!hasContent) {
+        setError("AI couldn't extract structure from this transcript. Fill the fields below manually.");
+        return;
+      }
+      // Only overwrite fields the AI actually populated — don't blank fields AI left empty
+      if (s.weather)              setWeather(String(s.weather));
+      if (s.trades_onsite?.length) setTradesOnsite(s.trades_onsite);
+      if (s.work_completed)       setWorkCompleted(String(s.work_completed));
+      if (s.issues)               setIssues(String(s.issues));
+      if (s.instructions_given)   setInstructions(String(s.instructions_given));
+      if (s.visitors)             setVisitors(String(s.visitors));
       setStructuredFlag(true);
     } catch (e) {
       setError(e?.message || String(e));

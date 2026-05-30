@@ -139,6 +139,22 @@ export default function PortalAdmin() {
       <h1 className="text-2xl font-bold text-ink mb-1">{proj.address || "Project"}</h1>
       <p className="text-sm text-muted mb-6">Portal administration</p>
 
+      {(!proj.contractValue || proj.contractValue === 0) && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 mb-4">
+          <span>⚠</span>
+          <span>
+            Contract value is not set — the portal Budget page will show $0.{" "}
+            <button
+              type="button"
+              className="underline font-medium"
+              onClick={() => setTab("settings")}
+            >
+              Set it in Settings →
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-6 border-b border-hairline pb-2">
         {TABS.map((t) => (
           <button
@@ -457,7 +473,7 @@ export default function PortalAdmin() {
       {tab === "settings" && (
         <div className="rounded-card border border-hairline bg-surface p-5 space-y-3">
           <label className="text-sm block">
-            Contract value
+            Contract value (ex. GST)
             <input
               type="number"
               className="mt-1 w-full border border-hairline rounded-lg px-3 py-2"
@@ -466,6 +482,9 @@ export default function PortalAdmin() {
                 patchProject({ contract_value: e.target.value ? Number(e.target.value) : null })
               }
             />
+            <p className="mt-1 text-xs text-muted">
+              Shown on the client portal Budget page. Auto-populated when a fee proposal is accepted.
+            </p>
           </label>
           <label className="text-sm block">
             Completion date (est.)
@@ -476,6 +495,34 @@ export default function PortalAdmin() {
               onBlur={(e) => patchProject({ completion_date_est: e.target.value || null })}
             />
           </label>
+
+          {/* Portal Access — Token Regeneration */}
+          <div className="mt-4 pt-4 border-t border-hairline">
+            <p className="text-sm font-semibold text-ink">Client portal access</p>
+            <p className="text-xs text-muted mt-1 mb-3">
+              If you need to revoke client access, regenerate the link — the old URL stops working immediately.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                readOnly
+                value={proj.portalToken
+                  ? `${window.location.origin}/portal/${proj.portalToken}`
+                  : "No portal link yet"}
+                className="flex-1 rounded-lg border border-hairline bg-page px-3 py-2 text-xs text-muted font-mono truncate"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!confirm("Regenerate portal link? The current link will stop working immediately.")) return;
+                  await generatePortalToken(projectId);
+                  await loadSummary();
+                }}
+                className="px-3 py-2 rounded-lg border border-hairline text-xs font-medium text-ink hover:bg-gray-50 whitespace-nowrap"
+              >
+                Regenerate link
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

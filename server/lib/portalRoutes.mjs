@@ -538,13 +538,21 @@ export function registerPortalRoutes(app) {
       if (!projectId || !stageName || amount == null) {
         return res.status(400).json({ ok: false, error: "projectId, stageName, amount required" });
       }
+      const VALID_CLAIM_STATUSES = ["upcoming", "invoiced", "paid"];
+      if (status && !VALID_CLAIM_STATUSES.includes(status)) {
+        return res.status(400).json({
+          ok: false,
+          error: `Invalid status "${status}". Must be one of: ${VALID_CLAIM_STATUSES.join(", ")}`
+        });
+      }
+      const resolvedStatus = VALID_CLAIM_STATUSES.includes(status) ? status : "upcoming";
       const { data, error } = await sb
         .from("portal_claims")
         .insert({
           project_id: projectId,
           stage_name: stageName,
           amount: Number(amount),
-          status: status || "upcoming",
+          status: resolvedStatus,
           due_approx: dueApprox || null,
           sort_order: sortOrder != null ? Number(sortOrder) : 0
         })

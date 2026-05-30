@@ -370,6 +370,20 @@ export function registerWorkforceRoutes(app) {
     }
   });
 
+  // Retry Buildexact sync for a specific approved timesheet
+  app.post("/api/workforce/timesheets/:id/sync", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data: ts } = await sb.from("timesheets")
+      .select("*, timesheet_entries(*)").eq("id", req.params.id).single();
+    if (!ts) return res.status(404).json({ ok: false, error: "Timesheet not found" });
+    try {
+      await syncTimesheetToBuildexact(ts, sb);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.post("/api/workforce/timesheets/:id/reject", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     const { notes } = req.body;

@@ -1107,10 +1107,29 @@ export default function BlueprintAgent({
   onIssueFound,
   onScoreReady,
 }) {
-  const [open, setOpen] = useState(false);
-  const [minimized, setMinimized] = useState(false);
-  const [panelPos, setPanelPos] = useState({ bottom: 80, right: 20 });
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem("blueprint_open") === "true"; } catch { return false; }
+  });
+  const [minimized, setMinimized] = useState(() => {
+    try { return localStorage.getItem("blueprint_minimized") === "true"; } catch { return false; }
+  });
+  const [panelPos, setPanelPos] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("blueprint_pos") || "null");
+      return saved || { bottom: 80, right: 20 };
+    } catch { return { bottom: 80, right: 20 }; }
+  });
   const dragRef = useRef(null);
+  const posRef = useRef(panelPos);
+
+  const handleSetOpen = (val) => {
+    setOpen(val);
+    try { localStorage.setItem("blueprint_open", String(val)); } catch { /* ignore */ }
+  };
+  const handleSetMinimized = (val) => {
+    setMinimized(val);
+    try { localStorage.setItem("blueprint_minimized", String(val)); } catch { /* ignore */ }
+  };
 
   const handleHeaderMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -1133,10 +1152,12 @@ export default function BlueprintAgent({
       const bottom = Math.max(margin, Math.min(maxBottom, dragRef.current.startBottom - dy));
       const right = Math.max(margin, Math.min(maxRight, dragRef.current.startRight - dx));
       setPanelPos({ bottom, right });
+      posRef.current = { bottom, right };
     };
 
     const onUp = () => {
       dragRef.current = null;
+      try { localStorage.setItem("blueprint_pos", JSON.stringify(posRef.current)); } catch { /* ignore */ }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -1225,8 +1246,8 @@ export default function BlueprintAgent({
           documentType={documentType}
           onSOPGenerated={onSOPGenerated}
           onIssueFound={onIssueFound}
-          onClose={() => setOpen(false)}
-          onMinimize={() => setMinimized(true)}
+          onClose={() => handleSetOpen(false)}
+          onMinimize={() => handleSetMinimized(true)}
           onHeaderMouseDown={handleHeaderMouseDown}
           isWidget
         />
@@ -1235,8 +1256,8 @@ export default function BlueprintAgent({
       {/* FAB */}
       <button
         onClick={() => {
-          setOpen((o) => !o);
-          setMinimized(false);
+          handleSetOpen(!open);
+          handleSetMinimized(false);
         }}
         className="blueprint-fab"
         style={{
