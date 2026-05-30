@@ -44,6 +44,7 @@ function NewJobModal({ onClose, onCreated }) {
   const [xlsxBusy, setXlsxBusy]     = useState(false);
   const [bxError, setBxError]       = useState(null);
   const [prefill, setPrefill]       = useState(null);
+  const [estimateCategories, setEstimateCategories] = useState([]);
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState(null);
 
@@ -110,6 +111,7 @@ function NewJobModal({ onClose, onCreated }) {
       if (!ok_) { setBxError(error || "Could not read the estimate file."); return; }
       const p = data?.prefill || {};
       setPrefill(p);
+      setEstimateCategories(Array.isArray(data?.raw?.categories) ? data.raw.categories : []);
       const storey = /triple/i.test(p.buildingType) ? "3" : /double/i.test(p.buildingType) ? "2" : null;
       setForm((f) => ({
         ...f,
@@ -141,8 +143,12 @@ function NewJobModal({ onClose, onCreated }) {
       startDate:    form.startDate    || undefined,
       endDate:      form.endDate      || undefined,
     });
+    if (!ok_) { setSaving(false); setSaveError(error || "Failed to create job."); return; }
+    // Seed budget lines from the imported estimate categories (labour vs material)
+    if (estimateCategories.length && data?.job?.id) {
+      await apiPost(`/api/carpentry/jobs/${data.job.id}/budget/seed`, { categories: estimateCategories });
+    }
     setSaving(false);
-    if (!ok_) { setSaveError(error || "Failed to create job."); return; }
     onCreated(data.job);
   }
 

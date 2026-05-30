@@ -777,6 +777,126 @@ export function registerCarpentryRoutes(app) {
     }
   });
 
+  // ── Budget helpers ──────────────────────────────────────────────────────────
+  const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const WORKFORCE_LABOUR_TASKS = [
+    { key: "first_fix_framing", label: "First Fix Framing" },
+    { key: "cladding", label: "Cladding" },
+    { key: "second_fix", label: "Second Fix" },
+    { key: "outdoor_works", label: "Outdoor Works" },
+    { key: "formwork_slab_prep", label: "Formwork Slab Prep" },
+    { key: "site_labouring", label: "Site Labouring" },
+    { key: "site_cleanup", label: "Site Cleanup" },
+    { key: "supervision", label: "Supervision" },
+  ];
+  const normaliseName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  function matchTaskCategory(categoryName) {
+    const n = normaliseName(categoryName);
+    if (!n) return null;
+    let best = null;
+    for (const t of WORKFORCE_LABOUR_TASKS) {
+      const tn = normaliseName(t.label);
+      if (n === tn || n.startsWith(tn) || n.includes(tn)) {
+        if (!best || tn.length > normaliseName(best.label).length) best = t;
+      }
+    }
+    return best ? best.key : null;
+  }
+
+  // ── POST /api/carpentry/jobs/:id/budget/seed ────────────────────────────────
+  // Seed budget lines from the imported estimate categories. Labour lines (names
+  // without "supply") map to a workforce task_category; material lines (with
+  // "supply") are budget-only. Idempotent — re-seeding replaces existing lines.
+  app.post("/api/carpentry/jobs/:id/budget/seed", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = req.params.id;
+    const categories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+    if (!categories.length) return err(res, 400, "categories[] is required.");
+    try {
+      const { data: job } = await sb.from("carpentry_jobs").select("id").eq("id", jobId).maybeSingle();
+      if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
+      await sb.from("carpentry_job_budgets").delete().eq("job_id", jobId);
+      const rows = categories.map((c, i) => {
+        const name = String(c.name || "").trim() || `Category ${i + 1}`;
+        const costType = c.costType === "labour" || c.costType === "material"
+          ? c.costType
+          : (/supply/i.test(name) ? "material" : "labour");
+        return {
+          job_id: jobId,
+          category_name: name,
+          cost_type: costType,
+          budget_ex_gst: round2(c.subtotalExGst ?? c.budgetExGst ?? 0),
+          workforce_task_category: costType === "labour" ? matchTaskCategory(name) : null,
+          sort_order: i,
+        };
+      });
+      const { data, error } = await sb.from("carpentry_job_budgets").insert(rows).select("*");
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res, { budgets: rowsToCamel(data || []) });
+    } catch (e) {
+      console.error("[carpentry/budget/seed POST]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── GET /api/carpentry/jobs/:id/budget ──────────────────────────────────────
+  // Per-category budget vs actual. Labour actuals come from approved timesheets
+  // (by mapped task_category); material actuals from carpentry_job_costs (total).
+  app.get("/api/carpentry/jobs/:id/budget", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = req.params.id;
+    try {
+      const { data: budgets } = await sb
+        .from("carpentry_job_budgets").select("*").eq("job_id", jobId).order("sort_order");
+
+      const { data: entries } = await sb
+        .from("timesheet_entries")
+        .select("task_category, cost_amount, timesheets!inner(carpentry_job_id, status)")
+        .eq("timesheets.carpentry_job_id", jobId)
+        .eq("timesheets.status", "approved");
+      const labourByTask = {};
+      for (const e of entries || []) {
+        labourByTask[e.task_category] = (labourByTask[e.task_category] || 0) + Number(e.cost_amount || 0);
+      }
+
+      const { data: costRows } = await sb.from("carpentry_job_costs").select("amount").eq("job_id", jobId);
+      const materialActualTotal = round2((costRows || []).reduce((s, c) => s + Number(c.amount || 0), 0));
+
+      const lines = (budgets || []).map((b) => {
+        const budget = round2(b.budget_ex_gst);
+        const actual = b.cost_type === "labour"
+          ? round2(labourByTask[b.workforce_task_category] || 0)
+          : 0; // material per-line actuals not tracked yet (see totals.materialActual)
+        return {
+          id: b.id,
+          categoryName: b.category_name,
+          costType: b.cost_type,
+          workforceTaskCategory: b.workforce_task_category,
+          budget,
+          actual,
+          variance: round2(budget - actual),
+        };
+      });
+
+      const sum = (pred, f) => round2(lines.filter(pred).reduce((s, l) => s + f(l), 0));
+      const labourBudget = sum((l) => l.costType === "labour", (l) => l.budget);
+      const labourActual = sum((l) => l.costType === "labour", (l) => l.actual);
+      const materialBudget = sum((l) => l.costType === "material", (l) => l.budget);
+      const totals = {
+        labourBudget, labourActual,
+        materialBudget, materialActual: materialActualTotal,
+        totalBudget: round2(labourBudget + materialBudget),
+        totalActual: round2(labourActual + materialActualTotal),
+      };
+      return ok(res, { lines, totals });
+    } catch (e) {
+      console.error("[carpentry/budget GET]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
   // ── GET /api/carpentry/jobs/:id/summary ─────────────────────────────────────
 
   app.get("/api/carpentry/jobs/:id/summary", requireAuth, async (req, res) => {

@@ -1002,11 +1002,100 @@ function CostsTab({ jobId }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+// ── Budget Tab ────────────────────────────────────────────────────────────────
+
+function BudgetTab({ jobId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let stop = false;
+    apiFetch(`/api/carpentry/jobs/${jobId}/budget`).then(({ ok, data: d }) => {
+      if (stop) return;
+      setLoading(false);
+      if (ok) setData(d);
+    });
+    return () => { stop = true; };
+  }, [jobId]);
+
+  if (loading) return <div className="p-6 text-sm text-muted">Loading budget…</div>;
+  const lines = data?.lines || [];
+  if (!lines.length) {
+    return <div className="p-6 text-sm text-muted">No budget yet. Create the job from a Buildexact estimate XLSX to seed budget lines automatically.</div>;
+  }
+  const t = data.totals || {};
+  const labour = lines.filter((l) => l.costType === "labour");
+  const material = lines.filter((l) => l.costType === "material");
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          ["Labour budget", t.labourBudget],
+          ["Labour actual", t.labourActual],
+          ["Material budget", t.materialBudget],
+          ["Material actual", t.materialActual],
+        ].map(([label, val]) => (
+          <div key={label} className="rounded-lg border border-hairline p-3">
+            <p className="text-xs text-muted">{label}</p>
+            <p className="text-lg font-bold text-ink">{fmt$(val)}</p>
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-ink mb-2">Labour — actuals from workforce timesheets</h3>
+        <table className="w-full text-sm">
+          <thead><tr className="text-xs text-muted border-b border-hairline">
+            <th className="text-left py-2 pr-3 font-medium">Category</th>
+            <th className="text-right py-2 px-3 font-medium">Budget</th>
+            <th className="text-right py-2 px-3 font-medium">Actual</th>
+            <th className="text-right py-2 pl-3 font-medium">Variance</th>
+          </tr></thead>
+          <tbody>
+            {labour.map((l) => (
+              <tr key={l.id} className="border-b border-hairline last:border-0">
+                <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
+                <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
+                <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
+                <td className={`py-2 pl-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {labour.some((l) => !l.workforceTaskCategory) && (
+          <p className="text-xs text-amber-600 mt-1">Some labour lines have no workforce task mapped — those actuals will not accrue until mapped.</p>
+        )}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-ink mb-2">Material / supply — budget</h3>
+        <table className="w-full text-sm">
+          <thead><tr className="text-xs text-muted border-b border-hairline">
+            <th className="text-left py-2 pr-3 font-medium">Category</th>
+            <th className="text-right py-2 px-3 font-medium">Budget</th>
+          </tr></thead>
+          <tbody>
+            {material.map((l) => (
+              <tr key={l.id} className="border-b border-hairline last:border-0">
+                <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
+                <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-muted mt-1">Material actuals are tracked in total ({fmt$(t.materialActual)}) under the Costs tab until cost entries are tagged per category.</p>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { id: "overview",  label: "Overview" },
   { id: "schedule",  label: "Schedule" },
   { id: "diary",     label: "Diary" },
   { id: "costs",     label: "Costs" },
+  { id: "budget",    label: "Budget" },
 ];
 
 export default function CarpentryJobDetail() {
@@ -1073,6 +1162,7 @@ export default function CarpentryJobDetail() {
         {tab === "schedule" && <ScheduleTab jobId={job.id} />}
         {tab === "diary"    && <DiaryTab job={job} />}
         {tab === "costs"    && <CostsTab jobId={job.id} />}
+        {tab === "budget"   && <BudgetTab jobId={job.id} />}
       </div>
     </div>
   );
