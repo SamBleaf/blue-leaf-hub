@@ -268,9 +268,14 @@ export default function WhsManager() {
       <Link to={`/operations/${projectId}`} className="text-sm font-semibold text-accent underline">
         ← Back to project
       </Link>
-      <header className="rounded-card border border-hairline bg-surface p-4 shadow-sm">
-        <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
-        <p className="text-sm text-muted">WHS</p>
+      <header className="rounded-card border border-hairline bg-surface p-4 shadow-sm flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
+          <p className="text-sm text-muted">WHS</p>
+        </div>
+        <Link to={`/operations/${projectId}/whs-setup`} className="text-sm font-semibold text-primary underline">
+          WHS Setup →
+        </Link>
       </header>
 
       {error ? <div className="text-sm text-danger">{error}</div> : null}

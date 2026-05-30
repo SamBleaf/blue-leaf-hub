@@ -22,6 +22,7 @@ import OperationsList from "./pages/OperationsList.jsx";
 import OperationsProjectDetail from "./pages/OperationsProjectDetail.jsx";
 import ScheduleManager from "./pages/ScheduleManager.jsx";
 import WhsManager from "./pages/WhsManager.jsx";
+import WhsEngine from "./pages/WhsEngine.jsx";
 import SiteDiary from "./pages/SiteDiary.jsx";
 import SiteInduction from "./pages/SiteInduction.jsx";
 import CostIntelligence from "./pages/CostIntelligence.jsx";
@@ -45,6 +46,8 @@ import WorkforceTeam from "./pages/WorkforceTeam.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
 import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
+import CarpentryDashboard from "./pages/CarpentryDashboard.jsx";
+import CarpentryJobDetail from "./pages/CarpentryJobDetail.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
@@ -115,6 +118,7 @@ export default function App() {
                 <Route path="/operations/:projectId" element={<OperationsProjectDetail />} />
                 <Route path="/operations/:projectId/schedule" element={<ScheduleManager />} />
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />
+                <Route path="/operations/:projectId/whs-setup" element={<WhsEngine />} />
                 <Route path="/operations/:projectId/diary" element={<SiteDiary />} />
 
                 <Route
@@ -180,6 +184,15 @@ export default function App() {
                 <Route
                   path="/portal-admin/:projectId"
                   element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+
+                <Route
+                  path="/carpentry"
+                  element={<RoleRoute element={<CarpentryDashboard />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/carpentry/:jobId"
+                  element={<RoleRoute element={<CarpentryJobDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route path="/rfq-engine" element={<Navigate to="/tender-manager/rfq-engine" replace />} />
