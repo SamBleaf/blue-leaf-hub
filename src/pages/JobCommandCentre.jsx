@@ -400,7 +400,7 @@ export default function JobCommandCentre() {
         <KpiCard label="Claims paid" value={fmt(kpis.claims_paid)} />
         <KpiCard label="Actual costs" value={fmt(kpis.actual_costs)} />
         <MarginIndicator label="Working margin" pct={kpis.working_margin_pct} target={target} floor={floor} />
-        <MarginIndicator label="Forecast margin" pct={kpis.forecast_data_quality_warning ? null : kpis.forecast_margin_pct} target={target} floor={floor} warning={kpis.forecast_data_quality_warning ? "⚠ Data mismatch — sync Buildexact" : null} />
+        <MarginIndicator label="Forecast margin" pct={kpis.forecast_data_quality_warning ? null : kpis.forecast_margin_pct} target={target} floor={floor} warning={kpis.forecast_data_quality_warning ? "⚠ Forecast cost doesn't match contract — review" : null} />
       </div>
 
       {/* Underclaim alert */}
