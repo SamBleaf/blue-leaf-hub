@@ -620,7 +620,6 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
               total_reach:       latest.reach,
               total_engagements: totalEngagements,
               total_link_clicks: latest.link_clicks,
-              engagement_rate:   latest.reach > 0 ? totalEngagements / latest.reach : null,
             }).eq("id", pub.content_item_id);
           }
         }
@@ -1609,7 +1608,6 @@ Prioritise content that closes the gap between current performance and opportuni
         total_engagements:     agg.total_engagements,
         total_link_clicks:     agg.total_link_clicks,
         attributed_enquiries:  attributedEnquiries,
-        performance_score:     score,
       }).eq("id", contentItemId);
 
       if (!updateErr) updated++;

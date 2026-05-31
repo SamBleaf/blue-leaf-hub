@@ -152,7 +152,7 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
       clientEmail:   job.clientEmail   || "",
       address:       job.address       || "",
       description:   job.description   || "",
-      projectType:   job.projectType   || CARPENTRY_PROJECT_TYPES.BOTH,
+      projectType:   job.projectType   || CARPENTRY_PROJECT_TYPES.FULL_PACKAGE,
       quotedValue:   job.quotedValue   != null ? String(job.quotedValue)  : "",
       quotedCost:    job.quotedCost    != null ? String(job.quotedCost)   : "",
       quotedMarginPct: job.quotedMarginPct != null ? String(job.quotedMarginPct) : "",

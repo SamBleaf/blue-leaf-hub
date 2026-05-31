@@ -2,6 +2,7 @@
  * RFQ trade intelligence API — merge, trade master library, package coverage.
  */
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 import {
   getTradeMasterSeed,
   loadTradeMaster,
@@ -20,7 +21,7 @@ import {
 export function registerRfqTradeRoutes(app) {
   const sb = () => getServiceSupabase();
 
-  app.get("/api/trade-master", async (_req, res) => {
+  app.get("/api/trade-master", requireAuth, async (_req, res) => {
     const db = sb();
     try {
       if (db) {
@@ -39,7 +40,7 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.post("/api/trade-master/seed", async (_req, res) => {
+  app.post("/api/trade-master/seed", requireAuth, async (_req, res) => {
     const db = sb();
     if (!db) return res.status(503).json({ error: "DB unavailable" });
     try {
@@ -50,7 +51,7 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.patch("/api/trade-master/:tradeId", async (req, res) => {
+  app.patch("/api/trade-master/:tradeId", requireAuth, async (req, res) => {
     const db = sb();
     if (!db) return res.status(503).json({ error: "DB unavailable" });
     const allowed = [
@@ -85,7 +86,7 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.get("/api/rfq/trade-config", async (_req, res) => {
+  app.get("/api/rfq/trade-config", requireAuth, async (_req, res) => {
     const db = sb();
     try {
       const config = await buildRfqTradeConfig(db);
@@ -95,14 +96,14 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.post("/api/rfq/trade-config/register", async (req, res) => {
+  app.post("/api/rfq/trade-config/register", requireAuth, async (req, res) => {
     const { trade_id, trade_name } = req.body || {};
     const row = registerAdHocTradeConfig(trade_id, trade_name);
     if (!row) return res.status(400).json({ error: "trade_id required" });
     res.json({ ok: true, trade: row });
   });
 
-  app.post("/api/rfq/trade-intelligence/merge", async (req, res) => {
+  app.post("/api/rfq/trade-intelligence/merge", requireAuth, async (req, res) => {
     const db = sb();
     try {
       const { extraction, job_id, buildexact_job_id } = req.body || {};
@@ -128,7 +129,7 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.post("/api/rfq-packages/:packageId/reconcile-coverage", async (req, res) => {
+  app.post("/api/rfq-packages/:packageId/reconcile-coverage", requireAuth, async (req, res) => {
     const db = sb();
     if (!db) return res.status(503).json({ error: "DB unavailable" });
     try {
@@ -140,7 +141,7 @@ export function registerRfqTradeRoutes(app) {
     }
   });
 
-  app.post("/api/rfq-packages/:packageId/generate-missing-scopes", async (req, res) => {
+  app.post("/api/rfq-packages/:packageId/generate-missing-scopes", requireAuth, async (req, res) => {
     const db = sb();
     if (!db) return res.status(503).json({ error: "DB unavailable" });
     try {
