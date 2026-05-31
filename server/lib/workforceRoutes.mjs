@@ -33,16 +33,38 @@ const TASK_CATEGORIES = Object.keys(TASK_LABELS);
 
 // ── Cost helpers ──────────────────────────────────────────────────────────────
 
+// Split a day's hours into three pay bands:
+//   regular   — up to overtime_threshold (paid at base rate)
+//   overtime  — between overtime_threshold and double_time_threshold (overtime_multiplier)
+//   doubletime — above double_time_threshold (double_time_multiplier)
+// A missing/invalid threshold means that band simply never applies (treated as Infinity).
 function splitOvertimeHours(totalHours, settings) {
-  const threshold = Number(settings.overtime_threshold);
-  if (totalHours <= threshold) return { regular: totalHours, overtime: 0 };
-  return { regular: threshold, overtime: totalHours - threshold };
+  const hours = Number(totalHours) || 0;
+  const otRaw = Number(settings?.overtime_threshold);
+  const dtRaw = Number(settings?.double_time_threshold);
+  const ot = Number.isFinite(otRaw) ? otRaw : Infinity;
+  const dt = Number.isFinite(dtRaw) ? dtRaw : Infinity;
+
+  const regular = Math.min(hours, ot);
+  const overtime = hours > ot ? Math.min(hours, dt) - ot : 0;
+  const doubletime = hours > dt ? hours - dt : 0;
+
+  return {
+    regular: Math.max(0, regular),
+    overtime: Math.max(0, overtime),
+    doubletime: Math.max(0, doubletime),
+  };
 }
 
-function computeCost(hours, overtimeHours, employee, settings) {
-  const base = (hours - overtimeHours) * Number(employee.hourly_rate);
-  const ot = overtimeHours * Number(employee.hourly_rate) * Number(employee.overtime_multiplier);
-  return Math.round((base + ot) * 100) / 100;
+function computeCost(bands, employee) {
+  const rate = Number(employee?.hourly_rate) || 0;
+  const otMult = Number(employee?.overtime_multiplier) || 1;
+  const dtMult = Number(employee?.double_time_multiplier) || 1;
+  const cost =
+    bands.regular * rate +
+    bands.overtime * rate * otMult +
+    bands.doubletime * rate * dtMult;
+  return Math.round(cost * 100) / 100;
 }
 
 // ── Monday of the current ISO week ───────────────────────────────────────────
@@ -136,10 +158,12 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
 
   // Compute cost for each entry
   for (const entry of entries || []) {
-    const { overtime } = splitOvertimeHours(Number(entry.hours), settings || { overtime_threshold: 8 });
-    const cost = computeCost(Number(entry.hours), overtime, ts.employees, settings || { overtime_threshold: 8 });
+    const bands = splitOvertimeHours(Number(entry.hours), settings || { overtime_threshold: 8, double_time_threshold: 10 });
+    const cost = computeCost(bands, ts.employees);
+    // overtime_hours stores all premium hours (overtime + double-time) — preserves the
+    // column's original meaning (hours paid above the base rate).
     await sb.from("timesheet_entries")
-      .update({ cost_amount: cost, overtime_hours: overtime })
+      .update({ cost_amount: cost, overtime_hours: bands.overtime + bands.doubletime })
       .eq("id", entry.id);
   }
 

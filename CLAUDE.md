@@ -199,7 +199,7 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–071). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
+Database migrations in `supabase/migrations/` (001–072). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |
@@ -224,6 +224,8 @@ Key tables:
 | 067 | `carpentry_job_budgets` (Phase 2 costing — budget vs actual) |
 | 068 | `site_tasks.carpentry_job_id` + makes `site_tasks.project_id` nullable |
 | 069 | Knowledge Core foundation (Phase 0, additive): `job_documents`, `job_fact_history`, `job_events`, `contact_events`, `company_profile` + building-fact columns on `project_metrics`. Not yet wired — see `MASTER_DATA_DICTIONARY.md` + `factsService.mjs`/`jobFactRegistry.mjs` |
+| 071 | `jobs.client_email`, `jobs.client_phone` (lead→job contact carry-forward, H14/H15) |
+| 072 | Widen `schedule_tasks.task_type` CHECK to include `build`/`approval`/`inspection` (C6 — AI schedule generator was rejected) |
 
 ---
 
