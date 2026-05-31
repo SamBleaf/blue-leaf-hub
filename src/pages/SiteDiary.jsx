@@ -229,7 +229,9 @@ export default function SiteDiary() {
                   </button>
                   {recording ? <span className="text-danger font-semibold">● Recording</span> : null}
                 </div>
-                <textarea readOnly value={transcript} rows={4} className="w-full rounded-lg border border-hairline bg-page p-3 text-sm" placeholder="Live transcript…" />
+                {/* Editable so the diary works even when voice isn't usable (noisy site, mic
+                    denied) — dictate with the mic and/or type/correct here. */}
+                <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} rows={4} className="w-full rounded-lg border border-hairline bg-page p-3 text-sm" placeholder="Speak using the mic, or type your entry here…" />
               </div>
             ) : (
               <label className="mt-2 block text-xs font-semibold text-muted">
