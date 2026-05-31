@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import App from "./App.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import "./index.css";
 
 async function clearDevServiceWorkers() {
@@ -24,7 +25,9 @@ registerSW({
 clearDevServiceWorkers().finally(() => {
   createRoot(document.getElementById("root")).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>
   );
 });
