@@ -1,5 +1,6 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
+import { ok, err, translateDbError } from "./apiResponse.mjs";
 import {
   dropboxConfigured,
   mergeJobDataJsonFile,
@@ -8,6 +9,29 @@ import {
 import { buildFeeProposalPdfBuffer } from "./feeProposalPdfKit.mjs";
 import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactClient.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+
+// Draft sentinel written by the RFQ Engine when an extraction has no address yet.
+const PLACEHOLDER_ADDRESS = "Address pending";
+
+// Columns the RFQ Engine may write to a job after extraction. Allowlisted so the
+// client can't patch arbitrary columns; `address` is re-normalised below when present.
+const JOB_PATCHABLE_FIELDS = [
+  "address",
+  "project_type",
+  "building_type",
+  "client_name",
+  "client_email",
+  "client_phone",
+  "architect_name",
+  "arch_ref",
+  "eng_ref",
+  "spec_ref",
+  "floor_area_m2",
+  "slab_area_m2",
+  "roof_area_m2",
+  "storeys",
+  "extracted_data",
+];
 
 /**
  * @param {import('express').Express} app
@@ -22,16 +46,21 @@ export function registerJobsApiRoutes(app) {
       if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
 
       // Dedup: prefer the canonical normalised key ("21 Folkestone Rd" == "21 Folkestone Road");
-      // fall back to the legacy raw ilike for jobs not yet normalised.
+      // fall back to the legacy raw ilike for jobs not yet normalised. The "Address pending"
+      // placeholder is a draft sentinel (extraction with no address yet) — never dedup on it,
+      // or unrelated drafts would collapse onto one shared job.
       const addr = normaliseAddress(address);
+      const isPlaceholder = address.trim().toLowerCase() === PLACEHOLDER_ADDRESS.toLowerCase();
       let existing = null;
-      if (addr.normalised) {
-        const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
-        existing = data?.[0] || null;
-      }
-      if (!existing) {
-        const { data } = await sb.from("jobs").select("*").ilike("address", address.trim()).limit(1);
-        existing = data?.[0] || null;
+      if (!isPlaceholder) {
+        if (addr.normalised) {
+          const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
+          existing = data?.[0] || null;
+        }
+        if (!existing) {
+          const { data } = await sb.from("jobs").select("*").ilike("address", address.trim()).limit(1);
+          existing = data?.[0] || null;
+        }
       }
       if (existing) return res.json({ ok: true, job: existing, deduplicated: true });
 
@@ -53,6 +82,45 @@ export function registerJobsApiRoutes(app) {
       return res.json({ ok: true, job: data });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Patch an existing job (used by the RFQ Engine to apply extracted fields). Allowlisted
+  // columns only; re-normalises `address` so address_normalised stays the canonical match key.
+  app.patch("/api/jobs/:id", requireAuth, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const id = String(req.params?.id || "").trim();
+      if (!id) return err(res, 400, "id required");
+
+      const body = req.body || {};
+      const updates = {};
+      for (const key of JOB_PATCHABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(body, key)) updates[key] = body[key];
+      }
+      if (Object.keys(updates).length === 0) return err(res, 400, "No updatable fields provided");
+
+      // Keep the canonical address attributes in sync whenever the address itself changes.
+      if (typeof updates.address === "string" && updates.address.trim()) {
+        const addr = normaliseAddress(updates.address);
+        updates.address = updates.address.trim();
+        updates.address_normalised = addr.normalised;
+        updates.address_suburb = addr.suburb;
+        updates.address_state = addr.state;
+        updates.address_postcode = addr.postcode;
+      }
+
+      const { data, error } = await sb.from("jobs").update(updates).eq("id", id).select().maybeSingle();
+      if (error) {
+        console.error("[jobs PATCH]", error);
+        return err(res, 400, translateDbError(error));
+      }
+      if (!data) return err(res, 404, "Job not found", "NOT_FOUND");
+      return ok(res, { job: data });
+    } catch (e) {
+      console.error("[jobs PATCH]", e);
+      return err(res, 500, "Failed to update job");
     }
   });
 

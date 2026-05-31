@@ -1,4 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
+import { apiPost, apiPatch } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { composeRfqEmail } from "../lib/rfqComposer";
@@ -949,55 +950,36 @@ export default function RfqEngine() {
   const persistJobFromExtraction = useCallback(
     async (extRaw) => {
       if (!supabaseConfigured) return;
-      const sb = getSupabase();
-      if (!sb) return;
       const ext = coerceExtraction(extRaw);
       const fields = buildJobFieldsFromExtraction(ext);
       const addr = String(fields.address || "").trim();
       try {
         const jid = extractionJobIdRef.current;
         if (jid) {
-          const { error } = await sb.from("jobs").update(fields).eq("id", jid);
-          if (error) throw error;
-        } else if (addr && addr !== "Address pending") {
+          // Existing extraction job — apply the latest extracted fields via the server,
+          // which re-normalises the address and keeps address_normalised canonical.
+          const { ok, error } = await apiPatch(`/api/jobs/${jid}`, fields);
+          if (!ok) throw new Error(error || "Failed to update job");
+        } else {
           // Create via the server so the address is normalised + deduped on address_normalised —
           // avoids duplicate jobs from formatting variants ("21 Folkestone Rd" vs "…Road") that
-          // the old raw-ilike check missed. The server returns the existing job if one matches.
-          const resp = await authFetch("/api/jobs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              address: addr,
-              client_name: fields.client_name || null,
-              client_email: fields.client_email || null,
-              client_phone: fields.client_phone || null,
-              project_type: fields.project_type || null,
-              arch_ref: fields.arch_ref || null,
-            }),
+          // the old raw-ilike check missed. The server returns the existing job if one matches;
+          // the "Address pending" placeholder is treated as a draft and never deduped.
+          const { ok, data, error } = await apiPost("/api/jobs", {
+            address: addr || "Address pending",
+            client_name: fields.client_name || null,
+            client_email: fields.client_email || null,
+            client_phone: fields.client_phone || null,
+            project_type: fields.project_type || null,
+            arch_ref: fields.arch_ref || null,
           });
-          const j = await resp.json().catch(() => ({}));
-          const newId = j?.job?.id;
-          if (!resp.ok || !newId) throw new Error(j?.error || "Failed to create job");
+          const newId = data?.job?.id;
+          if (!ok || !newId) throw new Error(error || "Failed to create job");
           extractionJobIdRef.current = newId;
           setExtractionJobId(newId);
           // Apply the remaining extracted fields to the new-or-matched job.
-          await sb.from("jobs").update(fields).eq("id", newId);
-        } else {
-          // No real address yet — nothing to normalise/dedup on; keep the direct insert.
-          const { data, error } = await sb
-            .from("jobs")
-            .insert({
-              ...fields,
-              dropbox_shared_link: "",
-              dropbox_internal_path: "",
-              dropbox_link: "",
-              status: "tendering"
-            })
-            .select("*")
-            .single();
-          if (error) throw error;
-          extractionJobIdRef.current = data.id;
-          setExtractionJobId(data.id);
+          const patchRes = await apiPatch(`/api/jobs/${newId}`, fields);
+          if (!patchRes.ok) throw new Error(patchRes.error || "Failed to update job");
         }
         if (addr && addr !== "Address pending") {
           const jidNow = extractionJobIdRef.current;
