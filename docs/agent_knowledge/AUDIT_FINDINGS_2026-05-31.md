@@ -6,8 +6,17 @@
 > Fix model: Claude fixes sequentially (single writer), verified with `npm test` + the seed job.
 
 ## STATUS
-**FIXED + shipped + verified (14):** C1, C2, C3, C4, C5, C7, H2, H3, H4, H9, H10, M (cost-intel), L (carpentry BOTH), L (recorded_by). Safe tags: `safe-2026-05-31`, `safe-audit-14fixed`.
-**REMAINING:** C6, C8, C9, H1, H5, H6, H7, H8, H11, H12, H13, H14, H15 + selected M. (Migration-gated → user applies: C6, H11, H12.)
+**FIXED + shipped + verified (first pass, 14):** C1, C2, C3, C4, C5, C7, H2, H3, H4, H9, H10, M (cost-intel), L (carpentry BOTH), L (recorded_by). Safe tags: `safe-2026-05-31`, `safe-audit-14fixed`.
+
+**FIXED + shipped + verified (second pass, this session):** C6 (mig 072), C8 (finance de-shadow — removed 19 dup handlers), C9 (portal reads jobs+job_variations), H1 (ad-hoc RFQ recipient), H5 (whsMergeFields), H6 (project_swms sync), H7 (workforce double-time), H8 (labour→trade in command-centre), H11 (GSC/GA4 upsertByKeys), H12 (mig 073 increment_send_stat), H13 (resend_email_id + email join), H14 (jobs.lead_id), H15 (lead→job value carry). Selected M: WIPAA reminder (status='won' + user_profiles), getAdminEmail (user_profiles).
+
+**RE-AUDIT (2026-05-31, second pass — 6 module + 1 integration agents, read-only):** all first/second-pass fixes verified correct (6/6 finance regression checks PASS; integration confirms 5/6 loops closed; the 6th — labour→trade — IS closed via the command-centre endpoint the FE actually reads, `/budget/actuals` is unused). New findings found + fixed: **module5Routes 10 routes missing `requireAuth`** (incl. client-email send + template/logo overwrite); **MI question-scan** read non-existent `lead_notes.content`/`site_diary.notes` (silent); **CRM create-contact** swallowed CHECK errors → now `translateDbError`.
+
+**MIGRATIONS to apply (user):** 072 (schedule task_type CHECK), 073 (increment_send_stat RPC). 071 already applied.
+
+**DEFERRED to follow-up tasks (structural, spawned):** RfqEngine job persistence via server `/api/jobs` (anon-client direct writes + raw-ilike dedup → duplicate jobs); marketing video-pipeline race on one asset.
+
+**REMAINING / not yet addressed:** none Critical/High open. Low/cosmetic: API-convention drift in whsRoutes/inductionRoutes (raw res.json vs apiResponse helpers); a few unchecked `{error}` on audit/timestamp (non-money) writes; increment_send_stat parity inside contact_id guard for complained/unsubscribed (rare counter drift).
 
 ## CRITICAL — broken workflows
 
