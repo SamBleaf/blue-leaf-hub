@@ -59,7 +59,17 @@ conflicts), APB stage gating (block + clear), WHS risk engine derivation.
 6. **✅ FIXED — Quote Tracker "Invalid Date".** Guarded null `created_at` with a safe formatter (→ "—"). (commit 9fa294c)
 7. **✅ FIXED — Site Diary voice-only.** Transcript field made editable (dictate and/or type) when SpeechRecognition is present. Verified: typed entry → Structure with AI populated weather/work/issues. (commit aa48aaf)
 
-**Still open (deferred / lower priority):** raw-error-string leaks (LOW, friendly-message polish); duplicate jobs via RfqEngine anon-client inserts (spawned follow-up task); marketing video-pipeline race (spawned task); "Unnamed project" label (data gap, acceptable fallback); H7/H8/H11/H12/H13 live validation (need timesheet/budget/GSC/CRM-email setup — now unblockable since CRM nav is fixed).
+**Full-fix pass (2026-06-01) — all applied + verified:**
+8. **✅ FIXED — CRM send marked "sent" on failure.** Now checks the Resend batch result; marks "failed" + returns 502 with a friendly reason. Verified: re-send returned 502 "Email send failed: domain … not verified" (was silently "sent"). (crmRoutes)
+9. **✅ FIXED — raw provider/DB error leaks.** Blueprint chat now maps credit/billing/auth/rate-limit → friendly messages + sensible status (no raw Anthropic string). Operations bad/stale project id → "Project not found." (verified) instead of raw "Cannot coerce…/invalid uuid". (blueprintRoutes, OperationsProjectDetail)
+10. **✅ FIXED — duplicate jobs (RfqEngine).** Job creation now routes through server `POST /api/jobs` (normalised dedup + sets address_normalised) instead of the raw-ilike anon insert. (RfqEngine)
+11. **✅ FIXED — marketing video-pipeline race.** The two video pipelines (drone + intelligence) now run sequentially on the same asset instead of concurrently. (marketingRoutes)
+12. **✅ FIXED — site_reports drift.** Migration 074 idempotently re-creates `site_reports` so WHS incidents self-heal on any drifted DB (apply 074 to dev + prod).
+13. **✅ FIXED — H7/H8/H12/H13** validated live (see findings log): H7 $1205.25 double-time, H8 Carpentry actual $1205.25, H12 RPC present, H13 send-flow + smart-lists.
+
+**Still open (deferred):** "Unnamed project" label (data gap, acceptable fallback); H11 GSC/GA4 sync (Google not configured in dev — code-verified); H13 resend-id/webhook round-trip (needs a verified Resend sender domain + a real deliverable inbox); the Resend error message passed through to the client is actionable but still semi-raw (acceptable).
+
+**Prod deploy to-dos:** push (done — main), deploy Railway + Vercel, apply migrations 071/072/073/074 to prod, and verify the Resend sender domain (blueleafbuilding.com.au) before live campaigns.
 
 ### Coverage map (ALL top-level modules visited)
 - **Validated live:** Sales (pipeline, lead create/detail, qualifying, APB gating), Finance (portfolio, command-centre, variations, claims, cashflow, inbox/approvals), Operations (overview, global Gantt, trade conflicts), Schedule (template + AI gen, alerts, baseline), WHS engine (prefill, profile, induction SWMS), Workforce (loads), Marketing (Content Studio + Intelligence + question-scan), Cost Intelligence (37 categories), Subcontractors (33, mobile), RFQ Engine (wizard), Quote Tracker, Tender Board, Carpentry (list + detail, FULL_PACKAGE), Users (admin), Settings, Site Diary (loads), Worker PWA (loads/gating), **Client Portal (C9 budget — full loop)**, lead→job conversion (H14 + address normalisation), Blueprint + AI.
