@@ -7,6 +7,13 @@ import { useProject } from "../lib/ProjectContext.jsx";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+// Safe date format — returns "—" for null/invalid dates instead of "Invalid Date".
+function fmtDateSafe(value, opts = { day: "numeric", month: "short", year: "numeric" }) {
+  if (!value) return "—";
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-AU", opts);
+}
+
 function isOverdueLegacy(deadline, status) {
   if (!deadline || ["received", "accepted", "declined"].includes(status)) return false;
   const d = new Date(`${deadline}T00:00:00`);
@@ -193,7 +200,7 @@ function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) 
 
             <div className="mt-3 pt-3 border-t border-hairline flex items-center justify-between">
               <span className="text-[10px] text-muted">
-                {new Date(pkg.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                {fmtDateSafe(pkg.created_at)}
               </span>
               <span className="text-xs font-semibold text-primary">Open →</span>
             </div>
