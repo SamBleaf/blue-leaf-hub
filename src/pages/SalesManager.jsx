@@ -11,7 +11,7 @@
  * the App.jsx route for /sales/:leadId takes priority (it's a separate route).
  */
 
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import SalesPipeline from "./SalesPipeline.jsx";
 import CrmDashboard from "../components/crm/CrmDashboard.jsx";
 import CrmContacts from "../components/crm/CrmContacts.jsx";
@@ -25,12 +25,14 @@ const TABS = [
 const CRM_TABS = new Set(["dashboard", "contacts"]);
 
 export default function SalesManager() {
-  const { tab } = useParams();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
-  // If tab param is not a known CRM tab, this component shouldn't be rendering —
-  // but guard anyway and fall through to pipeline.
-  const activeTab = CRM_TABS.has(tab) ? tab : "pipeline";
+  // App.jsx registers LITERAL routes (/sales/dashboard, /sales/contacts) with no `:tab`
+  // param, so useParams().tab is always undefined. Derive the tab from the path's second
+  // segment instead. Falls through to pipeline for anything unknown.
+  const seg = pathname.split("/").filter(Boolean)[1] || "";
+  const activeTab = CRM_TABS.has(seg) ? seg : "pipeline";
 
   function goTab(id) {
     if (id === "pipeline") navigate("/sales");
