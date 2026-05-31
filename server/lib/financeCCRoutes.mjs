@@ -28,6 +28,21 @@ function norm(s) {
     .trim();
 }
 
+// Map workforce timesheet task_category → trade_categories.name so in-house labour
+// lands in the per-trade budget-vs-actual (H8). 'other' has no clean trade home and
+// stays in the labour total only. Names must match migration 031 trade_categories.
+const TASK_CATEGORY_TO_TRADE_NAME = {
+  first_fix_framing: "Carpentry",
+  cladding: "External Cladding",
+  second_fix: "Carpentry",
+  outdoor_works: "Landscaping",
+  formwork_slab_prep: "Concrete & Footings",
+  site_labouring: "Site Establishment",
+  site_cleanup: "Site Cleaner",
+  supervision: "Preliminaries",
+  // other: intentionally unmapped
+};
+
 /**
  * Match a Buildxact category name to a trade_category row.
  * Strategy:
@@ -401,6 +416,8 @@ export function registerFinanceCCRoutes(app) {
 
     // ── Labour cost (from approved timesheets) ────────────────────────────────
     let labourData = { total_cost: 0, by_category: [] };
+    // Labour grouped by trade_category_id so it can fold into budget-vs-actual (H8).
+    const labourByTrade = new Map();
     try {
       const { data: labourEntries } = await sb
         .from("timesheet_entries")
@@ -420,6 +437,22 @@ export function registerFinanceCCRoutes(app) {
           total_cost: Object.values(grouped).reduce((s, c) => s + c.cost, 0),
           by_category: Object.values(grouped),
         };
+
+        // Resolve task_category → trade_category_id so labour shows in budget-vs-actual.
+        const tradeNames = [...new Set(
+          Object.keys(grouped).map(c => TASK_CATEGORY_TO_TRADE_NAME[c]).filter(Boolean)
+        )];
+        if (tradeNames.length) {
+          const { data: tradeRows } = await sb
+            .from("trade_categories").select("id, name").in("name", tradeNames);
+          const nameToId = new Map((tradeRows || []).map(t => [t.name, t.id]));
+          for (const g of Object.values(grouped)) {
+            const tradeName = TASK_CATEGORY_TO_TRADE_NAME[g.task_category];
+            const tradeId = tradeName && nameToId.get(tradeName);
+            if (!tradeId) continue;
+            labourByTrade.set(tradeId, (labourByTrade.get(tradeId) || 0) + g.cost);
+          }
+        }
       }
     } catch { /* timesheet tables may not exist yet — graceful fallback */ }
 
@@ -453,6 +486,29 @@ export function registerFinanceCCRoutes(app) {
     for (const doc of docs) {
       if (!doc.trade_category_id) continue;
       actualsByTrade.set(doc.trade_category_id, (actualsByTrade.get(doc.trade_category_id) || 0) + Number(doc.amount_ex_gst || 0));
+    }
+    // Fold in-house labour into the per-trade actuals (H8) so budget-vs-actual reflects
+    // labour, not just supplier invoices.
+    for (const [tradeId, cost] of labourByTrade) {
+      actualsByTrade.set(tradeId, (actualsByTrade.get(tradeId) || 0) + cost);
+    }
+    // Surface labour that maps to a trade with no budget row, so it isn't hidden.
+    const budgetedTradeIds = new Set(budgets.map(b => b.trade_category_id));
+    const labourOnlyTradeIds = [...labourByTrade.keys()].filter(id => !budgetedTradeIds.has(id));
+    if (labourOnlyTradeIds.length) {
+      const { data: extraTrades } = await sb
+        .from("trade_categories").select("id, name, sort_order, category_type").in("id", labourOnlyTradeIds);
+      for (const t of extraTrades || []) {
+        budgets.push({
+          trade_category_id: t.id,
+          budget_amount: 0,
+          original_budget: 0,
+          forecast_amount: 0,
+          forecast_notes: null,
+          seeded_from: "labour",
+          trade_categories: { name: t.name, sort_order: t.sort_order, category_type: t.category_type },
+        });
+      }
     }
     const budgetVsActual = budgets.map(b => {
       const actual  = actualsByTrade.get(b.trade_category_id) || 0;

@@ -59,6 +59,49 @@ function buildProfilePatch(answers, derived) {
   return patch;
 }
 
+function normName(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Sync project_swms links from the risk engine's derived applicable_swms (H6).
+// Induction reads project_swms; without this its SWMS list is always empty. swms_templates
+// has no seed and no management UI, so we auto-create a stub template per derived SWMS
+// activity (Sam attaches the actual PDF to the template later) and keep the links in sync.
+// No other code writes project_swms, so a full replace per project is safe.
+async function syncProjectSwms(sb, projectId, applicableSwms) {
+  const names = Array.isArray(applicableSwms)
+    ? [...new Set(applicableSwms.filter(Boolean).map(String))]
+    : [];
+  try {
+    const { data: templates } = await sb.from("swms_templates").select("id, trade, title, is_active");
+    const pool = templates || [];
+    const byTitle = new Map(pool.map((t) => [normName(t.title), t]));
+    const linkRows = [];
+    for (const name of names) {
+      let tpl =
+        byTitle.get(normName(name)) ||
+        pool.find((t) => normName(t.trade) === normName(name)) ||
+        pool.find((t) => normName(t.title) === normName(`${name} SWMS`));
+      if (!tpl) {
+        const { data: created, error: ce } = await sb
+          .from("swms_templates")
+          .insert({ trade: name, title: `${name} SWMS`, is_active: true })
+          .select("id, trade, title").single();
+        if (ce || !created) continue;
+        tpl = created;
+        pool.push(created);
+        byTitle.set(normName(created.title), created);
+      }
+      if (tpl.is_active === false) continue;
+      linkRows.push({ project_id: projectId, swms_template_id: tpl.id, trade: tpl.trade || name });
+    }
+    await sb.from("project_swms").delete().eq("project_id", projectId);
+    if (linkRows.length) await sb.from("project_swms").insert(linkRows);
+  } catch (e) {
+    console.warn("[whs/project_swms-sync]", e?.message);
+  }
+}
+
 export function registerWhsEngineRoutes(app) {
   // ── Questionnaire definition (drives the UI) ──
   app.get("/api/whs/questionnaire", requireAuth, (_req, res) =>
@@ -130,6 +173,8 @@ export function registerWhsEngineRoutes(app) {
         if (error) return err(res, 500, translateDbError(error));
         row = data;
       }
+      // Keep induction SWMS in sync with the risk engine's derived list (H6).
+      await syncProjectSwms(sb, projectId, row?.applicable_swms);
       return ok(res, { profile: rowToCamel(row) });
     } catch (e) {
       return err(res, 500, e?.message || "Failed to save WHS profile");
