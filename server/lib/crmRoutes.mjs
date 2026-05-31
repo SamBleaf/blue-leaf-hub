@@ -29,7 +29,7 @@
  */
 
 import { requireAuth } from "./requireAuth.mjs";
-import { ok, err, rowToCamel, rowsToCamel } from "./apiResponse.mjs";
+import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import jwt from "jsonwebtoken";
 
@@ -430,12 +430,11 @@ export function registerCrmRoutes(app) {
       estimated_value: estimatedValue || null,
       lead_source: contact.lead_source,
       referred_by_contact_id: id,
-      notes: notes || null,
+      discovery_notes: notes || null,
       stage: "enquiry",
-      created_by: req.user?.id || null,
     }).select().single();
 
-    if (lErr) return err(res, 500, "Failed to create lead");
+    if (lErr) return err(res, 500, translateDbError(lErr));
 
     // Update contact
     await sb().from("crm_contacts").update({

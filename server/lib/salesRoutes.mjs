@@ -35,7 +35,7 @@ Analyse the transcript carefully and extract structured data to update the lead 
   "project": {
     "project_type": null,
     "estimated_value": null,
-    "floor_area_m2": null,
+    "floor_area_estimate": null,
     "design_stage": null,
     "desired_start_date": null,
     "discovery_notes": null
@@ -62,7 +62,7 @@ Rules:
 - Only include fields where you found clear evidence in the transcript — use null for fields you cannot determine
 - project_type must be one of: new_build, extension, renovation, knockdown_rebuild — or null
 - estimated_value must be a number in dollars (no $ sign) — or null
-- floor_area_m2 must be a number — or null
+- floor_area_estimate must be a number — or null
 - design_stage must be one of: concept, da_approved, construction_drawings — or null
 - desired_start_date must be ISO date format YYYY-MM-DD if determinable — or null
 - Qualifying scores use the APB framework:
@@ -503,7 +503,7 @@ export function registerSalesRoutes(app) {
       }
 
       const LEAD_FIELDS = ["first_name","last_name","email","phone","suburb"];
-      const PROJECT_FIELDS = ["project_type","estimated_value","floor_area_m2","design_stage","desired_start_date","discovery_notes"];
+      const PROJECT_FIELDS = ["project_type","estimated_value","floor_area_estimate","design_stage","desired_start_date","discovery_notes"];
       const QUALIFY_FIELDS = ["qualify_budget","qualify_timeframe","qualify_site","qualify_decision_maker"];
       const WINNING_FIELDS = ["preconstruction_fee","inclusions_summary"];
 
@@ -516,7 +516,8 @@ export function registerSalesRoutes(app) {
       if (flat.next_action_date) leadUpdates.next_action_date = flat.next_action_date;
       leadUpdates.last_activity_at = now;
 
-      await sb.from("leads").update(leadUpdates).eq("id", req.params.id);
+      const { error: leadUpdErr } = await sb.from("leads").update(leadUpdates).eq("id", req.params.id);
+      if (leadUpdErr) return res.status(400).json({ ok: false, error: "Could not apply suggestions: " + leadUpdErr.message });
 
       // Add to activity log
       const activitySummary = bp_suggestions?.activity?.summary

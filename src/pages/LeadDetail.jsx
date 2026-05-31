@@ -168,7 +168,7 @@ function fmt(key, val) {
   if (val == null) return "—";
   if (key === "estimated_value" || key === "preconstruction_fee")
     return `$${Number(val).toLocaleString("en-AU")}`;
-  if (key === "floor_area_m2") return `${val} m²`;
+  if (key === "floor_area_estimate") return `${val} m²`;
   if (key === "desired_start_date" || key === "next_action_date")
     return new Date(val).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
   if (QUALIFY_LABELS[key]) return `${QUALIFY_LABELS[key][Number(val)]} (${val}/2)`;
@@ -280,7 +280,7 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
       const applied = {};
       const s = suggestions || {};
       [["lead","first_name"],["lead","last_name"],["lead","email"],["lead","phone"],["lead","suburb"],
-       ["project","project_type"],["project","estimated_value"],["project","floor_area_m2"],
+       ["project","project_type"],["project","estimated_value"],["project","floor_area_estimate"],
        ["project","design_stage"],["project","desired_start_date"],["project","discovery_notes"],
        ["qualifying","qualify_budget"],["qualifying","qualify_timeframe"],
        ["qualifying","qualify_site"],["qualifying","qualify_decision_maker"],
@@ -323,7 +323,7 @@ function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations
   const DESIGN_STAGE_LABEL = t => ({ concept:"Concept", da_approved:"DA Approved", construction_drawings:"Construction Drawings" })[t] || t;
   const fieldLabel = k => ({
     first_name:"First name", last_name:"Last name", email:"Email", phone:"Phone", suburb:"Suburb",
-    project_type:"Project type", estimated_value:"Est. value", floor_area_m2:"Floor area",
+    project_type:"Project type", estimated_value:"Est. value", floor_area_estimate:"Floor area",
     design_stage:"Design stage", desired_start_date:"Desired start", discovery_notes:"Discovery notes",
     qualify_budget:"Budget", qualify_timeframe:"Timeframe", qualify_site:"Site", qualify_decision_maker:"Decision maker",
     preconstruction_fee:"Pre-construction fee", inclusions_summary:"Inclusions", next_action:"Next action", next_action_date:"Next action date"
