@@ -5,6 +5,10 @@
 > reading/writing **columns that don't exist** and **unchecked Supabase errors that fail silently**.
 > Fix model: Claude fixes sequentially (single writer), verified with `npm test` + the seed job.
 
+## STATUS
+**FIXED + shipped + verified (14):** C1, C2, C3, C4, C5, C7, H2, H3, H4, H9, H10, M (cost-intel), L (carpentry BOTH), L (recorded_by). Safe tags: `safe-2026-05-31`, `safe-audit-14fixed`.
+**REMAINING:** C6, C8, C9, H1, H5, H6, H7, H8, H11, H12, H13, H14, H15 + selected M. (Migration-gated → user applies: C6, H11, H12.)
+
 ## CRITICAL — broken workflows
 
 | # | Cluster | file:line | Bug | Fix | Status |

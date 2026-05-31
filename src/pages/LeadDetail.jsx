@@ -1076,6 +1076,7 @@ export default function LeadDetail() {
           client_email: lead.email || null,
           client_phone: lead.phone || null,
           project_type: lead.project_type || null,
+          lead_id: lead.id || null,
         }),
       }).then(r => r.json());
       if (r.ok) {
