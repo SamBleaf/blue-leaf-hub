@@ -1842,7 +1842,7 @@ export function registerFinanceRoutes(app) {
       score:       Number(score),
       comment:     comment || null,
       surveyed_by: surveyed_by || null,
-      recorded_by: req.user?.id || null,
+      recorded_by: req.caller?.id || null,
     }).select().single();
     if (error) return res.status(500).json({ error: error.message });
     // Fire insight check — NPS threshold gate is inside checkProjectInsights

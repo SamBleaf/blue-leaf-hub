@@ -1299,7 +1299,7 @@ export function registerMarketingRoutes(app) {
     const stage = merged.build_stage && merged.build_stage !== "null" ? merged.build_stage : null;
     const { data, error } = await sb
       .from("marketing_media_assets")
-      .update({ analysis: merged, stage_detected: stage, updated_at: new Date().toISOString() })
+      .update({ analysis: merged, stage_detected: stage })
       .eq("id", req.params.id)
       .select()
       .single();

@@ -88,7 +88,7 @@ export function registerCostIntelligenceRoutes(app) {
 
     // Pull latest cost_intelligence row for this job
     const { data: ci } = await db.from("cost_intelligence")
-      .select("roof_area, wall_area, wet_areas, floor_area_m2, storeys")
+      .select("roof_area_m2, wall_area_m2, wet_areas, floor_area_m2, storeys")
       .eq("job_id", jobId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -99,8 +99,8 @@ export function registerCostIntelligenceRoutes(app) {
     const patch = {
       job_id: jobId,
       floor_area_m2: job?.floor_area_m2 || ci?.floor_area_m2 || null,
-      roof_area_m2: ci?.roof_area || null,
-      wall_area_m2: ci?.wall_area || null,
+      roof_area_m2: ci?.roof_area_m2 || null,
+      wall_area_m2: ci?.wall_area_m2 || null,
       wet_areas: ci?.wet_areas || null,
       project_type: job?.project_type || null,
       storeys: job?.storeys || ci?.storeys || null,

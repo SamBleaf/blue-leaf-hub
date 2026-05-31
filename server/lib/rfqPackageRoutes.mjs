@@ -494,9 +494,7 @@ export function registerRfqPackageRoutes(app) {
         if (patch.status === "accepted")  rfqPatch.status = "accepted";   // FIX: CRIT-002 — was missing
         if (patch.quote_amount !== undefined) rfqPatch.quote_amount = patch.quote_amount;
         if (patch.quote_received_at) rfqPatch.received_at = patch.quote_received_at;
-        if (patch.status === "accepted" && patch.quote_amount !== undefined) {
-          rfqPatch.accepted_at = new Date().toISOString();
-        }
+        // (rfqs has no accepted_at column — accept state lives on rfq_recipients.status)
         if (Object.keys(rfqPatch).length) {
           await s.from("rfqs").update(rfqPatch).eq("id", rec.rfq_id);
         }
