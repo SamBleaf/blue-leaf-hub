@@ -60,5 +60,14 @@ PASS = worked + data verified · WARN = worked but issue · FAIL = broken · GAP
 2. **HIGH** — WHS incident reports broken on dev: `site_reports` not in schema cache (missing table / stale cache).
 3. **LOW** — Raw provider/DB errors leak to the UI in 2 spots: blueprint/chat returns the raw Anthropic string + 500 for a billing error; `/operations/<bad-id>` shows raw "invalid input syntax for type uuid". Both should be friendly messages (CLAUDE.md).
 
+### Wave 1 (CRM) — MAJOR FINDING
+- **FAIL / HIGH — CRM Relationship Dashboard + Contacts are unreachable (whole module inaccessible).** Clicking "Relationships" or "Contacts" (sidebar links or top tabs) and navigating to `/sales/dashboard` or `/sales/contacts` always renders the **Sales Pipeline** instead. Reproduced with and without a project selected; the CRM JS modules (CrmDashboard.jsx, CrmContacts.jsx, MailingLists.jsx) DO lazy-load (200) but never render. No console error.
+  - **Root cause (exact):** `SalesManager.jsx:28` does `const { tab } = useParams()` and `:33` `activeTab = CRM_TABS.has(tab) ? tab : "pipeline"`. But `App.jsx:129,133` register **literal** routes `path="/sales/dashboard"` and `path="/sales/contacts"` (no `:tab` param). So `useParams().tab` is always `undefined` → `activeTab` is always `"pipeline"`. The component's own header comment assumes a `/sales/:tab` route that doesn't exist.
+  - **Fix (small):** derive the tab from `useLocation().pathname` (last segment) in SalesManager, OR change App.jsx to a `/sales/:tab` param route (careful: must not collide with `/sales/:leadId`). 
+  - **Impact:** entire CRM surface (relationship dashboard, contacts, mailing lists, log-interaction, send-campaign) cannot be opened from the UI → blocks live testing of H12/H13 too. Likely a routing regression.
+
+### Wave 4 (partial) — Workforce
+- PASS (loads) — Workforce: Approvals/Mass Fill/History tabs; Timesheets + Team sub-nav; "No pending timesheets" (none seeded). H7 (double-time) is a calc fix verified in code by the re-audit; live test needs an employee + a >10h timesheet then approval — deferred (setup-heavy, non-blocking).
+
 ### Session checkpoint (1)
 Environment + the highest-risk post-audit fixes validated LIVE: **C8** (command-centre served by financeCCRoutes, 200), the **−11,832% margin fix** (sane margins in portfolio + CC), the **underclaim automation**, and **C9 contract-math** (original + signed variations). Sales lead lifecycle (create + detail data-carry) PASS. Remaining fixes (H6/H7/H8 live render, H11/H12/H13, portal client view, schedule C6) + the full 106-SOP / 12-month multi-job simulation are a larger continuous effort — see checkpoint note to Sam.
