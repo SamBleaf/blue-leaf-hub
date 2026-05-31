@@ -13,6 +13,10 @@
 - [ ] Have the prod Supabase SQL editor open (the PROD project — **not** the dev `khehclrwppjvrogyxmdb`).
 
 ## 1. Apply prod database migrations (do this FIRST)
+> **STATUS (2026-06-01): DONE.** Verified against prod — 069, 071, 072, 073, 074 all present. No
+> migration work needed on prod. (The `site_reports` gap was a **dev-only** drift on
+> `khehclrwppjvrogyxmdb`; apply 074 there if you want WHS incidents to work in dev.) Skip to §2.
+
 In the **prod** Supabase SQL editor, run any migrations not yet applied to prod, in order. From this
 work the deploy-critical ones are **071, 072, 073, 074** — all written to be **idempotent (safe to
 re-run even if already applied)**:
