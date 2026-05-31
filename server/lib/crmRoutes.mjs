@@ -842,6 +842,17 @@ export function registerCrmRoutes(app) {
       const sentItems = Array.isArray(batchResult?.data)
         ? batchResult.data
         : (Array.isArray(batchResult?.data?.data) ? batchResult.data.data : []);
+      // Resend reports failures in the result object (it doesn't throw). If the provider rejected
+      // the batch — or returned no delivery IDs — mark the send failed rather than silently "sent"
+      // (which would leave recipients stuck "pending" with no resend_email_id to match webhooks).
+      if (batchResult?.error || (recipients.length > 0 && sentItems.length === 0)) {
+        await sb().from("email_sends").update({
+          status: "failed",
+          updated_at: new Date().toISOString(),
+        }).eq("id", sid);
+        const msg = batchResult?.error?.message || "the email provider returned no delivery IDs (check recipient addresses)";
+        return err(res, 502, "Email send failed: " + msg);
+      }
       for (let i = 0; i < recipients.length; i++) {
         const resendId = sentItems[i]?.id;
         const recRowId = recipientRowIdByContact.get(recipients[i].id);

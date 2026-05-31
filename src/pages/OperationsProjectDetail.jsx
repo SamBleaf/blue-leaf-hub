@@ -123,7 +123,15 @@ export default function OperationsProjectDetail() {
       .select(`*, jobs ( id, address, won_at, dropbox_shared_link, dropbox_link, dropbox_internal_path )`)
       .eq("id", projectId)
       .single();
-    if (e1) { setError(e1.message); return; }
+    // A bad/stale projectId yields a raw Postgres error ("invalid input syntax for type uuid",
+    // "Cannot coerce the result to a single JSON object"). Show a friendly not-found instead of
+    // leaking the DB string (CLAUDE.md).
+    if (e1) {
+      const raw = e1.message || "";
+      const notFound = /invalid input syntax|coerce the result|0 rows|JSON object/i.test(raw);
+      setError(notFound ? "Project not found." : "Couldn't load this project. Please try again.");
+      return;
+    }
     setProject(p);
     if (p) selectProject({ id: p.id, address: p.address, status: p.status ?? null, job_id: p.job_id ?? null });
     setBeId(p?.buildexact_job_id || "");

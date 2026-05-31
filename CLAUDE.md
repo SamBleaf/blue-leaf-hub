@@ -199,7 +199,7 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–073). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
+Database migrations in `supabase/migrations/` (001–074). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |
@@ -227,6 +227,7 @@ Key tables:
 | 071 | `jobs.client_email`, `jobs.client_phone` (lead→job contact carry-forward, H14/H15) |
 | 072 | Widen `schedule_tasks.task_type` CHECK to include `build`/`approval`/`inspection` (C6 — AI schedule generator was rejected) |
 | 073 | `increment_send_stat(text,text)` RPC for atomic CRM email_sends counters (H12 — webhook called a missing function) |
+| 074 | Idempotent `site_reports` self-heal (WHS incidents) — re-creates the table if a DB drifted from migration 010 |
 
 ---
 

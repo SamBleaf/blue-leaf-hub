@@ -370,10 +370,20 @@ export function registerBlueprintRoutes(app) {
     } catch (err) {
       console.error('[blueprint/chat]', err.message);
       const msg = err?.message || 'Request failed';
-      const status = /rate_limit/i.test(msg) ? 429 : 500;
-      const friendly = /rate_limit/i.test(msg)
-        ? 'Anthropic rate limit — wait ~30 seconds and try again. Large PDFs are now reviewed as extracted text (smaller request). Restart Hub after updating if this persists.'
-        : msg;
+      // Map known provider failures to friendly messages + a sensible status; never leak the raw
+      // provider error string to the browser (CLAUDE.md).
+      let status = 500;
+      let friendly = 'Blueprint hit an unexpected error. Try again in a moment.';
+      if (/rate_limit/i.test(msg)) {
+        status = 429;
+        friendly = 'Anthropic rate limit — wait ~30 seconds and try again.';
+      } else if (/credit balance|billing|quota|payment/i.test(msg)) {
+        status = 503;
+        friendly = 'The AI service is unavailable (account credit/billing). Top up the Anthropic account, then try again.';
+      } else if (/api key|authentication|unauthorized|invalid x-api-key/i.test(msg)) {
+        status = 503;
+        friendly = 'The AI service is not configured correctly (API key). Check ANTHROPIC_API_KEY.';
+      }
       res.status(status).json({ error: friendly });
     }
   });

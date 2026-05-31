@@ -959,36 +959,45 @@ export default function RfqEngine() {
         if (jid) {
           const { error } = await sb.from("jobs").update(fields).eq("id", jid);
           if (error) throw error;
+        } else if (addr && addr !== "Address pending") {
+          // Create via the server so the address is normalised + deduped on address_normalised —
+          // avoids duplicate jobs from formatting variants ("21 Folkestone Rd" vs "…Road") that
+          // the old raw-ilike check missed. The server returns the existing job if one matches.
+          const resp = await authFetch("/api/jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              address: addr,
+              client_name: fields.client_name || null,
+              client_email: fields.client_email || null,
+              client_phone: fields.client_phone || null,
+              project_type: fields.project_type || null,
+              arch_ref: fields.arch_ref || null,
+            }),
+          });
+          const j = await resp.json().catch(() => ({}));
+          const newId = j?.job?.id;
+          if (!resp.ok || !newId) throw new Error(j?.error || "Failed to create job");
+          extractionJobIdRef.current = newId;
+          setExtractionJobId(newId);
+          // Apply the remaining extracted fields to the new-or-matched job.
+          await sb.from("jobs").update(fields).eq("id", newId);
         } else {
-          // Dedup: check for existing job at same address before creating
-          let existingId = null;
-          if (addr && addr !== "Address pending") {
-            const { data: existing } = await sb.from("jobs")
-              .select("id")
-              .ilike("address", addr)
-              .maybeSingle();
-            if (existing?.id) existingId = existing.id;
-          }
-          if (existingId) {
-            extractionJobIdRef.current = existingId;
-            setExtractionJobId(existingId);
-            await sb.from("jobs").update(fields).eq("id", existingId);
-          } else {
-            const { data, error } = await sb
-              .from("jobs")
-              .insert({
-                ...fields,
-                dropbox_shared_link: "",
-                dropbox_internal_path: "",
-                dropbox_link: "",
-                status: "tendering"
-              })
-              .select("*")
-              .single();
-            if (error) throw error;
-            extractionJobIdRef.current = data.id;
-            setExtractionJobId(data.id);
-          }
+          // No real address yet — nothing to normalise/dedup on; keep the direct insert.
+          const { data, error } = await sb
+            .from("jobs")
+            .insert({
+              ...fields,
+              dropbox_shared_link: "",
+              dropbox_internal_path: "",
+              dropbox_link: "",
+              status: "tendering"
+            })
+            .select("*")
+            .single();
+          if (error) throw error;
+          extractionJobIdRef.current = data.id;
+          setExtractionJobId(data.id);
         }
         if (addr && addr !== "Address pending") {
           const jidNow = extractionJobIdRef.current;

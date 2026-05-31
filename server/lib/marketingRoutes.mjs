@@ -992,24 +992,21 @@ export function registerMarketingRoutes(app) {
     if (error) return res.status(400).json({ ok: false, error: error.message });
 
     if (isVideo) {
-      try {
-        const { runFullDronePipeline } = await import("./marketingMedia.mjs");
-        runFullDronePipeline(asset.id, storage_path, { project_id, job_id }).catch((e) => {
-          console.error("[marketing/pipeline] async error for asset", asset.id, e.message);
-        });
-      } catch (e) {
-        console.warn("[marketing/pipeline] marketingMedia.mjs not available:", e.message);
-      }
-
+      // Run the two video pipelines SEQUENTIALLY on the same asset (drone → intelligence).
+      // Previously both fired concurrently and raced on marketing_media_assets writes
+      // (clobbering analysis_status/results). Still fire-and-forget overall (response returns
+      // immediately with status "processing").
       (async () => {
         try {
-          const {
-            runVideoIntelligencePipeline,
-          } = await import("./videoIntelligence.mjs");
+          const { runFullDronePipeline } = await import("./marketingMedia.mjs");
+          await runFullDronePipeline(asset.id, storage_path, { project_id, job_id });
+        } catch (e) {
+          console.error("[marketing/pipeline] drone pipeline error for asset", asset.id, e.message);
+        }
+        try {
+          const { runVideoIntelligencePipeline } = await import("./videoIntelligence.mjs");
           const campaignObjective = req.body.campaign_objective || "educate";
-          await runVideoIntelligencePipeline(
-            asset.id, storage_path, sb, _apiKey, campaignObjective,
-          );
+          await runVideoIntelligencePipeline(asset.id, storage_path, sb, _apiKey, campaignObjective);
         } catch (e) {
           console.error("[videoIntelligence pipeline]", e.message);
           await sb.from("marketing_media_assets")
