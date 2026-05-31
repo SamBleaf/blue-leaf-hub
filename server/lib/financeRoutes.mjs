@@ -1171,7 +1171,10 @@ export function registerFinanceRoutes(app) {
   async function getAdminEmail(sb) {
     const env = process.env.ADMIN_EMAIL?.trim();
     if (env) return env;
-    const { data } = await sb.from("profiles").select("email").eq("role", "admin").limit(1).maybeSingle();
+    // The user table is user_profiles (has email); "profiles" doesn't exist, so admin
+    // notifications were silently going nowhere.
+    const { data } = await sb.from("user_profiles")
+      .select("email").eq("role", "admin").eq("is_active", true).limit(1).maybeSingle();
     return data?.email || null;
   }
 

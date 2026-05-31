@@ -2166,29 +2166,27 @@ export function registerFinanceCCRoutes(app) {
     if (!isFirstFriday()) return;
     lastWipaaReminderDate = today;
 
-    // Get all active jobs with no WIPAA review in last 30 days
+    // Get all active (under-construction) jobs with no WIPAA review in last 30 days.
+    // jobs.status CHECK is ('tendering','won','lost','archived') — a job under contract/
+    // construction is 'won'. The old filter used active/in_progress/construction, none of
+    // which are valid, so this always returned empty and the reminder never sent.
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
     const { data: jobs } = await sb.from("jobs")
       .select("id, address, last_wipaa_review_date")
-      .in("status", ["active", "in_progress", "construction"])
+      .eq("status", "won")
       .or(`last_wipaa_review_date.is.null,last_wipaa_review_date.lt.${thirtyDaysAgo}`);
 
     if (!jobs?.length) return;
 
-    // Get admin emails
+    // Admin emails live on user_profiles directly (auth.users is not queryable via PostgREST).
     const { data: admins } = await sb.from("user_profiles")
-      .select("id").eq("role", "admin").eq("is_active", true);
-
-    if (!admins?.length) return;
-
-    const { data: users } = await sb.from("auth.users")
-      .select("email").in("id", admins.map(a => a.id));
+      .select("email").eq("role", "admin").eq("is_active", true);
 
     // Send one summary email
     const jobList = jobs.map(j => `• ${j.address} (last review: ${j.last_wipaa_review_date || "never"})`).join("\n");
     try {
       await sendPlainMail({
-        to: (users || []).map(u => u.email).filter(Boolean).join(", ") || "accounts@blueleafbuilding.com.au",
+        to: (admins || []).map(u => u.email).filter(Boolean).join(", ") || "accounts@blueleafbuilding.com.au",
         subject: `WIPAA Review Due — ${jobs.length} job${jobs.length > 1 ? "s" : ""} (${today})`,
         text: `Monthly WIPAA review is due for the following jobs:\n\n${jobList}\n\nLogin to Blue Leaf Hub to complete each review.\n${(process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "")}/finance/jobs`,
       });
