@@ -10,7 +10,11 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(false);
+  // True once the profile (and therefore role) has been resolved for the current session.
+  // Starts false so that the brief window after getSession() sets a session but before the
+  // profile-fetch effect runs still counts as "loading" — otherwise RoleRoute sees role=null
+  // for one render and wrongly redirects to /home on a hard refresh / deep-link.
+  const [profileResolved, setProfileResolved] = useState(false);
   const [clientNonce, setClientNonce] = useState(0);
 
   const signOut = useCallback(async () => {
@@ -70,14 +74,14 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!session?.user?.id) {
       setProfile(null);
-      setProfileLoading(false);
+      setProfileResolved(true); // no session → nothing to resolve
       return;
     }
     const sb = getSupabase();
     if (!sb) return;
 
     let cancelled = false;
-    setProfileLoading(true);
+    setProfileResolved(false); // re-resolving role for this session
 
     sb.from("user_profiles")
       .select("id, email, full_name, role, is_active")
@@ -90,12 +94,12 @@ export function AuthProvider({ children }) {
           return;
         }
         setProfile(data || null);
-        setProfileLoading(false);
+        setProfileResolved(true);
       })
       .catch(() => {
         if (!cancelled) {
           setProfile(null);
-          setProfileLoading(false);
+          setProfileResolved(true);
         }
       });
 
@@ -108,12 +112,14 @@ export function AuthProvider({ children }) {
     () => ({
       user: session?.user ?? null,
       session,
-      loading: loading || (!!session && profileLoading),
+      // Stay "loading" until the profile/role is resolved for an active session, so guards
+      // never see role=null mid-resolution and wrongly redirect on hard refresh / deep-link.
+      loading: loading || (!!session && !profileResolved),
       profile,
       role: profile?.role ?? null,
       signOut
     }),
-    [session, loading, profileLoading, profile, signOut]
+    [session, loading, profileResolved, profile, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
