@@ -35,8 +35,8 @@ corruption or money-math errors observed.
 | −11,832% margin bug | ✅ FIXED | portfolio + CC show sane margins (37%, 82.2%, 28.1%) |
 | H5 — WHS prefill from project | ✅ PASS | "pre-filled from project data": project type/storeys populated |
 | H6 — project_swms from applicable_swms | ✅ PASS (end-to-end) | hazard→`applicable_swms`→induction shows "Working at Heights SWMS" |
-| H7 — workforce double-time | ⏳ code-verified | calc + columns confirmed by re-audit; live needs a >10h timesheet (deferred) |
-| H8 — labour into per-trade budget | ⏳ code-verified | needs a seeded budget + approved timesheets to render (deferred) |
+| H7 — workforce double-time | ✅ PASS (exact) | 12h entry approved → $1205.25 (regular+OT 1.5×+DT 2.0×); old bug = $1124.90 |
+| H8 — labour into per-trade budget | ✅ PASS (live) | command-centre Carpentry actual = $1,205.25 (labour folded per-trade) |
 | H11 — GSC/GA4 upsert | ⏳ code-verified | GSC/GA4 not configured in dev (can't drive sync) |
 | H12/H13 — CRM email | ⛔ blocked by CRM-nav bug (below) — CRM module unreachable |
 | H14 — lead_id carry on conversion | ✅ PASS | `POST /api/jobs` persists lead_id + client fields + normalised address |
@@ -68,6 +68,17 @@ conflicts), APB stage gating (block + clear), WHS risk engine derivation.
 
 ## Findings log
 <!-- appended live, newest at bottom -->
+
+### H7 + H8 — validated LIVE with exact numbers (post-AI-credit)
+- **PASS — H7 (double-time), exact.** Created a 12h timesheet entry for Sam Morris ($80.35/h, OT 1.5×, DT 2.0×; thresholds 8/10) → approved via `POST /api/workforce/timesheets/:id/approve` (200). Approved entry `cost_amount = $1205.25`, `overtime_hours = 4`. Matches the H7 three-band formula exactly (regular 8h + OT 2h×1.5 + **DT 2h×2.0**); the pre-fix value would have been $1124.90 (everything >8h at 1.5×). Double-time band correctly applied.
+- **PASS — H8 (labour into per-trade budget), live.** That approved timesheet is on the 21 Folkestone job; command-centre `budget_vs_actual` now shows **Carpentry: budget $0, actual $1,205.25** (first_fix_framing → Carpentry), alongside invoice actuals (Electrical & Data budget $2,150 / actual $7,500). `labour.total_cost = $1205.25`, `labour.by_category = [{first_fix_framing, 1205.25, 12h}]`. Before H8, labour was summed into the total but not attributed per-trade (Carpentry actual would be 0). Confirms task_category→trade mapping + labour-row append.
+
+### CRM email pipeline (H12/H13) — post-fix live test
+- PASS — **CRM now fully reachable + functional** (after the nav fix): created contact "Mark Colton" (architect, active, consent ✓) → `POST /api/crm/contacts` 200; detail drawer renders; **next-action automation fired** (auto "Call, due 01/06"). 
+- PASS — **Smart-list auto-population**: Mark Colton auto-appeared in "Referrers & Partners" (type=architect), "Active Prospects" (status=active), "Full Active Database" (opted-in) and "New This Month" — live-query membership works.
+- PASS — **H12 RPC exists**: `increment_send_stat(text,text)` callable via service client (migration 073 applied).
+- PARTIAL — **H13 send flow**: send modal → `POST /api/crm/sends` 200 + `/send` 200; `email_sends` row created (status "sent", 1 recipient) + `email_send_recipients` row created. BUT `resend_email_id` is **null** — the `.test` inbox is undeliverable so Resend returns no per-email id to capture. The resend-id round-trip (H13's purpose) + webhook→counter path (H12) **can't be exercised without a real deliverable test inbox**; both remain code-verified.
+- **NEW (LOW) — send marked "sent" without checking the Resend batch result.** With the undeliverable recipient, `resend.batch.send` returned no ids/an error but didn't throw, so the code still set `email_sends.status='sent'` and left the recipient "pending". Recommend checking `batchResult.error` (and empty `data`) → mark "failed" so failed blasts aren't recorded as sent. (crmRoutes send handler.)
 
 ### Wave 4 — Finance inbox, Site Diary, Worker PWA
 - PASS — **Finance Inbox** (`/finance`): KPIs (Unmatched 0 / Pending 0 / Filed this month 1 / Total approved $14,871), Inbox/Approvals/Job View/Settings tabs, drag-drop zone, IMAP "connected · last check 09:50pm", filed doc list (Adelaide Concrete Co). NOTE — AI invoice extraction not driven (needs an uploaded invoice file; none available in this session).
