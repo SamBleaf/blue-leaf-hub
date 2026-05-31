@@ -608,7 +608,9 @@ export default function SalesPipeline() {
     load();
   }
 
-  const activeLeads = leads.filter(l => !["nurture", "lost"].includes(l.stage));
+  // Active pipeline excludes won (already a job, tracked separately below), plus nurture/lost —
+  // matches the server scorecard the home dashboard uses, so the two KPIs agree.
+  const activeLeads = leads.filter(l => !["nurture", "lost", "won"].includes(l.stage));
   const nurtureLeads = leads.filter(l => l.stage === "nurture");
   const wonLeads = leads.filter(l => l.stage === "won");
   const totalValue = activeLeads.reduce((s, l) => s + (Number(l.estimated_value) || 0), 0);
