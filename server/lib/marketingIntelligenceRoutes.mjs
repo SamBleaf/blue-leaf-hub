@@ -36,11 +36,13 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
+const _anthropic = _apiKey ? new Anthropic({ apiKey: _apiKey, maxRetries: 1 }) : null;
 
 // ─── Module-level AI cache ───────────────────────────────────────────────────
 // Key: "YYYY-Www" — ISO year + week number. Invalidates weekly (5-min cache TTL).
@@ -514,7 +516,7 @@ This Month KPIs: ${kpis.enquiries} marketing enquiries, ${kpis.qualified} qualif
 
 Write a 3-sentence plain-English performance summary. Focus on what's working, what's trending, and one specific recommendation. Be concrete — mention content types and channels by name. No fluff.`;
 
-        const summary = await callAI({
+        const summary = await callAI(_anthropic, {
           model: "claude-haiku-20240307",
           max_tokens: 150,
           messages: [{ role: "user", content: prompt }],
@@ -1206,7 +1208,7 @@ Return ONLY the JSON object.`;
 
     let briefData;
     try {
-      const response = await callAI({
+      const response = await callAI(_anthropic, {
         model:      "claude-sonnet-4-6",
         system:     seoBriefSystemPrompt(),
         max_tokens: 2000,
@@ -1348,7 +1350,7 @@ Return ONLY the JSON object.`;
     for (let i = 0; i < items.length; i += 20) {
       const batch = items.slice(i, i + 20);
       try {
-        const response = await callAI({
+        const response = await callAI(_anthropic, {
           model:      "claude-haiku-4-5",
           max_tokens: 2000,
           messages:   [{ role: "user", content: questionScanPrompt(batch) }],
@@ -1495,7 +1497,7 @@ Prioritise content that closes the gap between current performance and opportuni
 
     let suggestions;
     try {
-      const response = await callAI({
+      const response = await callAI(_anthropic, {
         model:      "claude-haiku-4-5",
         max_tokens: 800,
         messages:   [{ role: "user", content: prompt }],
