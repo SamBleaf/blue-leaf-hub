@@ -58,6 +58,22 @@ conflicts), APB stage gating (block + clear), WHS risk engine derivation.
 ## Findings log
 <!-- appended live, newest at bottom -->
 
+### Wave 2/3 — Tender cluster
+- PASS — **RFQ Engine** loads: 4-stage wizard (Upload PDFs → Review extraction → Recipients & packaging → Preview & send), Settings, RFQ-readiness meter. (Full send flow needs a PDF upload + AI extract + recipients — deferred; H1/H3 are server-side + code-verified.)
+- PASS — **Quote Tracker** loads: Packages/Direct RFQs/Unmatched tabs, Active/Archived/All filter, package card with trades/recipients/pending/quotes-in + coverage%. 
+  - LOW — package card shows **"Unnamed project"** (missing name) and **"Invalid Date"** (a null/malformed date rendered raw to the user). Minor display/data-quality bugs.
+- PASS — **Tender Board** loads: All/Tendering/Won/Lost/Archived filters, search, cards with RFQs-sent / trades / quotes% / status (12 Test St = WON).
+  - **Corroborates duplicate-jobs bug** — several near-identical "21 Folkestone Road, South Brighton" cards ("…SA 5048", "…SA", "21 Folkestone Rd…"). This is the real-world symptom of the RfqEngine raw-`ilike` dedup (already flagged + spawned as a follow-up task). The address normaliser exists but RfqEngine's direct anon-client inserts bypass it.
+
+### Wave 4/5 — Carpentry, Users, Settings
+- PASS — **Carpentry** list + detail load clean. Seed job CJB-001 (Denberger Built, 5A Gibson St, **Full Package**, Active, quoted $237,705 / budgeted $172,187 ex GST, 2 storeys, 300 m²). Detail tabs: Overview/Schedule/Diary/Costs/Budget. "Full Package" renders → confirms the L fix (`CARPENTRY_PROJECT_TYPES.BOTH`→`FULL_PACKAGE`); no undefined-enum error.
+- PASS — **User Management** (`/settings/users`): Team/Invitations tabs; AI Test Director (test user) = **Admin/Active**, Sam Morris = Admin/Active. Confirms the test user is admin → the earlier role-gated `/home` bounce is a guard-timing race, not a permission denial.
+- PASS — **Settings** (`/tender-manager/settings`): Email signature, Gmail (Configured Yes, sender admin@blueleafbuilding.com.au, SMTP fallback Yes), Dropbox status. Loads clean.
+
+### C9 — client portal view PASS (the loop closes)
+- **PASS — C9 fully validated end-to-end (finance ⇄ portal).** Portal token fetched for 21 Folkestone (portal_enabled, job_id 7e997298…). `GET /api/portal/:token/budget` returns `{contractValue:0, approvedVariationsTotal:11900, pendingVariationsTotal:0, currentTotal:11900, variationsLog:[{title:"Additional retaining wall…", costDelta:11900, status:"signed"}]}` — read from `jobs` + `job_variations` (NOT stale `projects.contract_value` / `portal_decisions`), camelCase `costDelta` matching the FE. Job row confirms: original_contract_value/contract_value null, one signed $11,900 variation. The portal UI renders it ("Your Investment → Original $0, Approved variations $11,900, Current total $11,900; Variations: retaining wall $11,900 Signed"). **Matches the finance command-centre's $11,900 exactly** — both derive contract = base + signed variations from the same source. Pre-fix the portal summed portal_decisions + read a stale contract. Portal app (Home/Timeline/Live Site/Decisions/Your Investment/Journal/Your Home/Conversations) loads token-only, no errors.
+- NOTE — 21 Folkestone has null base contract (original_contract_value), so its "contract" is entirely the $11,900 signed variation — consistent across finance + portal (data-completeness, not a bug).
+
 ### Wave 1/5 — Marketing + Marketing Intelligence + Cost Intelligence
 - PASS — **Marketing Content Studio** loads (Create/Library/Campaigns/Media/Lists/Intelligence/Music Library). Channel + Content Pillar selectors render. (Earlier `/marketing`→`/home` on direct URL was a transient auth-timing bounce; nav works.)
 - PASS — **MI question-scan 2nd-pass fix**: `POST /api/intelligence/questions/scan` → 200 `{scanned:1, inserted:0}`. Reads `lead_notes.body` + `site_diary.work_completed/issues` (the corrected columns) with no error and runs the AI classify; pre-fix it read non-existent columns and scanned nothing.
