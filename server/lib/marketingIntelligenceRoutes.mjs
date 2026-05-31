@@ -58,6 +58,24 @@ function isoWeekKey(d = new Date()) {
   return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
+// Emulated upsert keyed on plain columns (H11). The snapshot tables dedupe on
+// expression-based unique indexes (COALESCE(query,'__page__') etc.) which PostgREST's
+// onConflict cannot target — so .upsert() failed silently and snapshots never deduped.
+// Select-then-write matches the same row (null-safe), preserving the null semantics the
+// reads depend on. Returns { error } like a Supabase call.
+async function upsertByKeys(sb, table, keyCols, row) {
+  let q = sb.from(table).select("id");
+  for (const c of keyCols) {
+    q = row[c] == null ? q.is(c, null) : q.eq(c, row[c]);
+  }
+  const { data: existing, error: selErr } = await q.maybeSingle();
+  if (selErr) return { error: selErr };
+  if (existing?.id) {
+    return await sb.from(table).update(row).eq("id", existing.id);
+  }
+  return await sb.from(table).insert(row);
+}
+
 // ─── Google OAuth helper (shared by GSC, GA4, GBP) ──────────────────────────
 async function getGoogleAccessToken() {
   const refreshToken  = process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim()  || _env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim();
@@ -696,16 +714,17 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
       if (json.error) return err(res, 502, `GSC API error: ${json.error.message}`);
 
       for (const row of (json.rows || [])) {
-        const { error: upsErr } = await sb.from("search_console_snapshots").upsert({
-          snapshot_date: endDate,
-          page_url:      row.keys[0],
-          query:         null,
-          impressions:   row.impressions,
-          clicks:        row.clicks,
-          ctr:           row.ctr,
-          avg_position:  row.position,
-          device:        "all",
-        }, { onConflict: "snapshot_date,page_url,COALESCE(query,'__page__'),device" });
+        const { error: upsErr } = await upsertByKeys(sb, "search_console_snapshots",
+          ["snapshot_date", "page_url", "query", "device"], {
+            snapshot_date: endDate,
+            page_url:      row.keys[0],
+            query:         null,
+            impressions:   row.impressions,
+            clicks:        row.clicks,
+            ctr:           row.ctr,
+            avg_position:  row.position,
+            device:        "all",
+          });
         if (upsErr) { failed++; } else { inserted++; }
       }
     } catch (e) {
@@ -726,16 +745,17 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
       });
       const json = await resp.json();
       for (const row of (json.rows || [])) {
-        await sb.from("search_console_snapshots").upsert({
-          snapshot_date: endDate,
-          page_url:      row.keys[1],
-          query:         row.keys[0],
-          impressions:   row.impressions,
-          clicks:        row.clicks,
-          ctr:           row.ctr,
-          avg_position:  row.position,
-          device:        "all",
-        }, { onConflict: "snapshot_date,page_url,COALESCE(query,'__page__'),device" }).catch(() => {});
+        await upsertByKeys(sb, "search_console_snapshots",
+          ["snapshot_date", "page_url", "query", "device"], {
+            snapshot_date: endDate,
+            page_url:      row.keys[1],
+            query:         row.keys[0],
+            impressions:   row.impressions,
+            clicks:        row.clicks,
+            ctr:           row.ctr,
+            avg_position:  row.position,
+            device:        "all",
+          }).catch(() => {});
         inserted++;
       }
     } catch { /* non-fatal */ }
@@ -854,17 +874,18 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
         const [source, medium] = row.dimensionValues.map(d => d.value);
         const [sessions, engagedSessions, conversions, newUsers] = row.metricValues.map(m => Number(m.value));
         const engRate = sessions > 0 ? engagedSessions / sessions : null;
-        await sb.from("ga4_snapshots").upsert({
-          snapshot_date:    endDate,
-          page_url:         null,
-          source:           source || "unknown",
-          medium:           medium || "none",
-          sessions,
-          engaged_sessions: engagedSessions,
-          engagement_rate:  engRate,
-          conversions,
-          new_users:        newUsers,
-        }, { onConflict: "snapshot_date,COALESCE(page_url,'__site__'),COALESCE(source,'unknown'),COALESCE(medium,'none')" }).catch(() => {});
+        await upsertByKeys(sb, "ga4_snapshots",
+          ["snapshot_date", "page_url", "source", "medium"], {
+            snapshot_date:    endDate,
+            page_url:         null,
+            source:           source || "unknown",
+            medium:           medium || "none",
+            sessions,
+            engaged_sessions: engagedSessions,
+            engagement_rate:  engRate,
+            conversions,
+            new_users:        newUsers,
+          }).catch(() => {});
         inserted++;
       }
     } catch (e) {
@@ -889,16 +910,17 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
         const pagePath = row.dimensionValues[0].value;
         const [sessions, engagedSessions, conversions] = row.metricValues.map(m => Number(m.value));
         const engRate = sessions > 0 ? engagedSessions / sessions : null;
-        await sb.from("ga4_snapshots").upsert({
-          snapshot_date:    endDate,
-          page_url:         pagePath,
-          source:           null,
-          medium:           null,
-          sessions,
-          engaged_sessions: engagedSessions,
-          engagement_rate:  engRate,
-          conversions,
-        }, { onConflict: "snapshot_date,COALESCE(page_url,'__site__'),COALESCE(source,'unknown'),COALESCE(medium,'none')" }).catch(() => {});
+        await upsertByKeys(sb, "ga4_snapshots",
+          ["snapshot_date", "page_url", "source", "medium"], {
+            snapshot_date:    endDate,
+            page_url:         pagePath,
+            source:           null,
+            medium:           null,
+            sessions,
+            engaged_sessions: engagedSessions,
+            engagement_rate:  engRate,
+            conversions,
+          }).catch(() => {});
         inserted++;
       }
     } catch { /* non-fatal */ }
