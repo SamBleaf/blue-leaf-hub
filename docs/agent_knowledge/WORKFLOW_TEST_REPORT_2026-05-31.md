@@ -19,6 +19,41 @@ PASS = worked + data verified · WARN = worked but issue · FAIL = broken · GAP
 
 ---
 
+## ════════ EXECUTIVE SUMMARY (interim — live walkthrough) ════════
+
+**Verdict:** Core spine is healthy. A full lead→handover flow is navigable; the high-risk post-audit
+fixes that could be reached without extra setup all hold up live. One HIGH UI bug makes the whole
+CRM module unreachable, and there are a few dev-environment + raw-error-handling items. No data
+corruption or money-math errors observed.
+
+### Post-audit fixes — live validation
+| Fix | Result | Evidence |
+|---|---|---|
+| C6 — schedule task_type CHECK | ✅ PASS (both paths) | template load 200 + AI generate 200 ("39 tasks / 124 days") |
+| C8 — finance route de-shadow | ✅ PASS | `/command-centre` 200 (CC version serves); PDF/claim/variation UI live |
+| C9 — portal/finance contract math | ✅ PASS (finance side) | contract "$862,000 incl $12,000 signed variations"; variations Signed $12k agrees |
+| −11,832% margin bug | ✅ FIXED | portfolio + CC show sane margins (37%, 82.2%, 28.1%) |
+| H5 — WHS prefill from project | ✅ PASS | "pre-filled from project data": project type/storeys populated |
+| H6 — project_swms from applicable_swms | ✅ PASS (end-to-end) | hazard→`applicable_swms`→induction shows "Working at Heights SWMS" |
+| H7 — workforce double-time | ⏳ code-verified | calc + columns confirmed by re-audit; live needs a >10h timesheet (deferred) |
+| H8 — labour into per-trade budget | ⏳ code-verified | needs a seeded budget + approved timesheets to render (deferred) |
+| H11/H12/H13 — CRM/MI | ⛔ blocked by CRM-nav bug (below) + need GSC/Resend sends |
+| Blueprint + AI features | ✅ PASS | after credit top-up, blueprint/chat 200; AI schedule-gen 200 |
+
+### Automations confirmed firing
+Underclaim alert (~$213k), schedule hold-point alert, cross-project trade-conflict detection (21
+conflicts), APB stage gating (block + clear), WHS risk engine derivation. 
+
+### Bugs / issues (prioritised)
+1. **HIGH — CRM module unreachable.** `/sales/dashboard` + `/sales/contacts` always render the Pipeline. Root cause: `SalesManager.jsx` reads `useParams().tab` but `App.jsx` routes are literal (no `:tab`) → tab always undefined → defaults to pipeline. Fix: derive tab from `useLocation().pathname`. (~3 lines.) Blocks CRM + H12/H13 live test.
+2. **HIGH (dev env) — WHS incidents broken:** "Could not find the table 'public.site_reports' in the schema cache". `site_reports` missing/uncached in the dev DB (swms_templates etc. from the same migration work). Re-apply migration 010 to dev + reload PostgREST schema cache.
+3. **LOW (pattern) — raw errors leak to UI** (3 spots: blueprint billing error, bad project id ×2) + **no top-level React error boundary** (one broken import white-screens the whole app). Add friendly not-found + an error boundary.
+4. **WATCH — KPI definition mismatch:** home "8 leads / $5.6M pipeline" vs Sales header "9 leads / $7.1M". Likely a stage-inclusion difference (Tender-stage $1.5M lead) — confirm the two use the same definition.
+
+### Coverage map
+- **Validated live:** Sales (pipeline, lead create/detail, qualifying, gating), Finance (portfolio, command-centre, variations, claims, cashflow), Operations (overview, global Gantt, trade conflicts), Schedule (template + AI gen, alerts, baseline), WHS engine (prefill, profile, induction SWMS), Workforce (loads), Marketing (Content Studio loads), Blueprint AI.
+- **Not yet tested:** lead→job conversion (H14/H15) end-to-end, RFQ engine + PO issue, fee-proposal generate/send, Cost Intelligence, Subcontractors, Tendering/Tender board, Portal client view (token), Carpentry, Users/Settings, and the AI content/extract/transcript/MI-question-scan flows. Recommend a follow-up pass (now that AI credit is restored) + fixing the CRM-nav bug first to unblock CRM/MI.
+
 ## Findings log
 <!-- appended live, newest at bottom -->
 
@@ -58,7 +93,7 @@ PASS = worked + data verified · WARN = worked but issue · FAIL = broken · GAP
 ### Bugs / issues found so far (running tally)
 1. **BLOCKED (env)** — All Claude AI features 500 ("Anthropic credit balance too low"). Top up credit to test AI (Blueprint, transcript, schedule-generate, content-gen, invoice-extract, MI question-scan/summary).
 2. **HIGH** — WHS incident reports broken on dev: `site_reports` not in schema cache (missing table / stale cache).
-3. **LOW** — Raw provider/DB errors leak to the UI in 2 spots: blueprint/chat returns the raw Anthropic string + 500 for a billing error; `/operations/<bad-id>` shows raw "invalid input syntax for type uuid". Both should be friendly messages (CLAUDE.md).
+3. **LOW (pattern)** — Raw provider/DB errors leak to the UI in several spots (CLAUDE.md says never show raw provider/Postgres strings): blueprint/chat returns the raw Anthropic string + 500 for a billing error; `/operations/<bad-id>` → raw "invalid input syntax for type uuid"; `/operations/<valid-but-not-a-project-id>/schedule` → raw "Cannot coerce the result to a single JSON object" (a `.single()` on a missing project). Recommend: friendly not-found handling on project-scoped routes + a top-level React error boundary.
 
 ### Wave 1 (CRM) — MAJOR FINDING
 - **FAIL / HIGH — CRM Relationship Dashboard + Contacts are unreachable (whole module inaccessible).** Clicking "Relationships" or "Contacts" (sidebar links or top tabs) and navigating to `/sales/dashboard` or `/sales/contacts` always renders the **Sales Pipeline** instead. Reproduced with and without a project selected; the CRM JS modules (CrmDashboard.jsx, CrmContacts.jsx, MailingLists.jsx) DO lazy-load (200) but never render. No console error.
@@ -68,6 +103,16 @@ PASS = worked + data verified · WARN = worked but issue · FAIL = broken · GAP
 
 ### Wave 4 (partial) — Workforce
 - PASS (loads) — Workforce: Approvals/Mass Fill/History tabs; Timesheets + Team sub-nav; "No pending timesheets" (none seeded). H7 (double-time) is a calc fix verified in code by the re-audit; live test needs an employee + a >10h timesheet then approval — deferred (setup-heavy, non-blocking).
+
+### AI unblocked (credit restored)
+- PASS — Anthropic credit topped up. `POST /api/blueprint/chat` now returns 200 `{"reply":"OK"}`. Blueprint chat works. AI features now testable: schedule-generate, content-gen, invoice-extract, transcript-analyse, MI question-scan. (Tally item #1 resolved.)
+
+### C6 — AI schedule generation (true path) PASS
+- PASS — "Generate with AI" (no legacy template) → `POST /api/schedule/generate` **200** → "Schedule generated — 39 tasks across 124 days, 8 procurement items need ordering". This is the exact scenario the original C6 finding flagged as broken (scheduleGenerate writes build/approval/inspection task_types that the old CHECK rejected). Now inserts cleanly. C6 validated both ways (template load + AI generate). Confirms AI fully working post-credit.
+
+### Operations (cont.)
+- PASS — **Cross-project trade-conflict detection (Sprint 4)**: Operations overview shows "2 projects · 78 tasks · 21 trade conflicts" with a full "Trade Scheduling Conflicts" list (admin, engineering, demolition, earthworks, concreting, carpentry, roofing, windows, cladding, plumbing, etc.) flagged where both projects book the same trade on overlapping dates. Working as designed (both projects now share the loaded template schedule).
+- WARN/LOW (transient) — hit a momentary white-screen: stale Vite HMR module error "Marketing.jsx does not provide an export named 'default'". Git confirms Marketing.jsx is **unmodified** (default export present); app recovers on a fresh load. Underlying minor: there's no top-level React error boundary, so any single broken import white-screens the whole app — worth adding an error boundary.
 
 ### Session checkpoint (1)
 Environment + the highest-risk post-audit fixes validated LIVE: **C8** (command-centre served by financeCCRoutes, 200), the **−11,832% margin fix** (sane margins in portfolio + CC), the **underclaim automation**, and **C9 contract-math** (original + signed variations). Sales lead lifecycle (create + detail data-carry) PASS. Remaining fixes (H6/H7/H8 live render, H11/H12/H13, portal client view, schedule C6) + the full 106-SOP / 12-month multi-job simulation are a larger continuous effort — see checkpoint note to Sam.
