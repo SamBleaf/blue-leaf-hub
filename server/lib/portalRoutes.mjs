@@ -9,7 +9,7 @@ import {
 } from "./dropboxClient.mjs";
 
 const PROJECT_SELECT =
-  "id, address, portal_client_name, portal_client_email, contract_value, completion_date_est, portal_enabled, portal_token";
+  "id, job_id, address, portal_client_name, portal_client_email, contract_value, completion_date_est, portal_enabled, portal_token";
 
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
@@ -965,38 +965,64 @@ export function registerPortalRoutes(app) {
       const sb = getServiceSupabase();
       if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
 
-      const contractValue = Number(project.contract_value) || 0;
-
-      const [approvedRes, pendingRes, claimsRes, allowancesRes, variationsRes] = await Promise.all([
-        sb
-          .from("portal_decisions")
-          .select("cost_delta")
-          .eq("project_id", project.id)
-          .eq("type", "variation")
-          .eq("status", "approved"),
-        sb
-          .from("portal_decisions")
-          .select("cost_delta")
-          .eq("project_id", project.id)
-          .eq("type", "variation")
-          .eq("status", "pending"),
+      // Claims + allowances are portal-owned and always read from the portal tables.
+      const [claimsRes, allowancesRes] = await Promise.all([
         sb.from("portal_claims").select("*").eq("project_id", project.id).order("sort_order", { ascending: true }),
         sb.from("portal_allowances").select("*").eq("project_id", project.id).order("sort_order", { ascending: true }),
-        sb
-          .from("portal_decisions")
-          .select("id, title, cost_delta, status, created_at")
-          .eq("project_id", project.id)
-          .eq("type", "variation")
       ]);
 
-      const approvedVariationsTotal = (approvedRes.data || []).reduce(
-        (s, r) => s + (Number(r.cost_delta) || 0),
-        0
-      );
-      const pendingVariationsTotal = (pendingRes.data || []).reduce(
-        (s, r) => s + (Number(r.cost_delta) || 0),
-        0
-      );
+      // C9: contract money is owned by Finance. Read the canonical contract value and
+      // variations from the linked job (jobs + job_variations), not the stale
+      // projects.contract_value / portal_decisions copies. All amounts ex-GST, matching
+      // the Finance command-centre. Fall back to the legacy portal copies only when the
+      // portal isn't linked to a job.
+      let contractValue = Number(project.contract_value) || 0;
+      let approvedVariationsTotal = 0;
+      let pendingVariationsTotal = 0;
+      let variationsLog = [];
+
+      let job = null;
+      if (project.job_id) {
+        const { data } = await sb
+          .from("jobs")
+          .select("contract_value, original_contract_value")
+          .eq("id", project.job_id)
+          .maybeSingle();
+        job = data || null;
+      }
+
+      if (job) {
+        // Base contract = original (immutable); variations are tracked separately so the
+        // client sees the breakdown. original_contract_value || contract_value mirrors the
+        // command-centre fallback for older jobs that predate original_contract_value.
+        contractValue = Number(job.original_contract_value ?? job.contract_value ?? project.contract_value) || 0;
+        const { data: variations } = await sb
+          .from("job_variations")
+          .select("id, title, amount_ex_gst, status, created_at")
+          .eq("job_id", project.job_id);
+        const v = variations || [];
+        approvedVariationsTotal = v
+          .filter((x) => x.status === "signed")
+          .reduce((s, x) => s + (Number(x.amount_ex_gst) || 0), 0);
+        pendingVariationsTotal = v
+          .filter((x) => x.status === "sent_to_client")
+          .reduce((s, x) => s + (Number(x.amount_ex_gst) || 0), 0);
+        // Client only ever sees sent/signed variations — never internal drafts.
+        // camelCase to match the legacy rowsToCamel shape the frontend (PortalBudget) reads.
+        variationsLog = v
+          .filter((x) => ["sent_to_client", "signed", "rejected"].includes(x.status))
+          .map((x) => ({ id: x.id, title: x.title, costDelta: x.amount_ex_gst, status: x.status, createdAt: x.created_at }));
+      } else {
+        // Legacy fallback: portal not linked to a job → use the portal_decisions copies.
+        const [approvedRes, pendingRes, variationsRes] = await Promise.all([
+          sb.from("portal_decisions").select("cost_delta").eq("project_id", project.id).eq("type", "variation").eq("status", "approved"),
+          sb.from("portal_decisions").select("cost_delta").eq("project_id", project.id).eq("type", "variation").eq("status", "pending"),
+          sb.from("portal_decisions").select("id, title, cost_delta, status, created_at").eq("project_id", project.id).eq("type", "variation"),
+        ]);
+        approvedVariationsTotal = (approvedRes.data || []).reduce((s, r) => s + (Number(r.cost_delta) || 0), 0);
+        pendingVariationsTotal = (pendingRes.data || []).reduce((s, r) => s + (Number(r.cost_delta) || 0), 0);
+        variationsLog = rowsToCamel(variationsRes.data);
+      }
 
       return res.json({
         contractValue,
@@ -1005,7 +1031,7 @@ export function registerPortalRoutes(app) {
         currentTotal: contractValue + approvedVariationsTotal,
         claims: rowsToCamel(claimsRes.data),
         allowances: rowsToCamel(allowancesRes.data),
-        variationsLog: rowsToCamel(variationsRes.data)
+        variationsLog
       });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Request failed" });
