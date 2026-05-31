@@ -37,7 +37,13 @@ corruption or money-math errors observed.
 | H6 — project_swms from applicable_swms | ✅ PASS (end-to-end) | hazard→`applicable_swms`→induction shows "Working at Heights SWMS" |
 | H7 — workforce double-time | ⏳ code-verified | calc + columns confirmed by re-audit; live needs a >10h timesheet (deferred) |
 | H8 — labour into per-trade budget | ⏳ code-verified | needs a seeded budget + approved timesheets to render (deferred) |
-| H11/H12/H13 — CRM/MI | ⛔ blocked by CRM-nav bug (below) + need GSC/Resend sends |
+| H11 — GSC/GA4 upsert | ⏳ code-verified | GSC/GA4 not configured in dev (can't drive sync) |
+| H12/H13 — CRM email | ⛔ blocked by CRM-nav bug (below) — CRM module unreachable |
+| H14 — lead_id carry on conversion | ✅ PASS | `POST /api/jobs` persists lead_id + client fields + normalised address |
+| Address normalisation (Phase 1) | ✅ PASS | job created with `address_normalised` canonical key |
+| H4 — subcontractor mobile | ✅ PASS | directory renders mobile numbers |
+| L — carpentry FULL_PACKAGE | ✅ PASS | carpentry job type renders "Full Package" |
+| MI question-scan (2nd-pass) | ✅ PASS | reads lead_notes.body + site_diary cols, 200 |
 | Blueprint + AI features | ✅ PASS | after credit top-up, blueprint/chat 200; AI schedule-gen 200 |
 
 ### Automations confirmed firing
@@ -51,12 +57,23 @@ conflicts), APB stage gating (block + clear), WHS risk engine derivation.
 4. **MEDIUM — role-gated routes bounce to /home on hard load / deep-link.** `RoleRoute` redirects before the session role resolves (user IS admin — admin endpoint returned 200). Refresh/deep-link to `/portal-admin/:id`, `/marketing` etc. kicks to home. Fix: wait for a "role loaded" state before redirecting.
 5. **WATCH — KPI definition mismatch:** home "8 leads / $5.6M pipeline" vs Sales header "9 leads / $7.1M". Likely a stage-inclusion difference (Tender-stage $1.5M lead) — confirm both use the same definition.
 
-### Coverage map
-- **Validated live:** Sales (pipeline, lead create/detail, qualifying, APB gating), Finance (portfolio, command-centre, variations, claims, cashflow), Operations (overview, global Gantt, trade conflicts), Schedule (template + AI gen, alerts, baseline), WHS engine (prefill, profile, induction SWMS), Workforce (loads), Marketing (Content Studio + Intelligence dashboard + question-scan), Cost Intelligence (37 categories), Subcontractors (33), Blueprint AI.
-- **Not yet driven:** lead→job conversion (H14/H15) end-to-end, RFQ engine + PO issue/send, fee-proposal generate/send, Tender board, Quote Tracker, Portal client view (needs token), Carpentry, Users/Settings, AI content-gen/invoice-extract/transcript. Recommend a focused follow-up pass; fixing the CRM-nav + role-guard bugs first will unblock CRM/MI deep-links.
+### Coverage map (ALL top-level modules visited)
+- **Validated live:** Sales (pipeline, lead create/detail, qualifying, APB gating), Finance (portfolio, command-centre, variations, claims, cashflow, inbox/approvals), Operations (overview, global Gantt, trade conflicts), Schedule (template + AI gen, alerts, baseline), WHS engine (prefill, profile, induction SWMS), Workforce (loads), Marketing (Content Studio + Intelligence + question-scan), Cost Intelligence (37 categories), Subcontractors (33, mobile), RFQ Engine (wizard), Quote Tracker, Tender Board, Carpentry (list + detail, FULL_PACKAGE), Users (admin), Settings, Site Diary (loads), Worker PWA (loads/gating), **Client Portal (C9 budget — full loop)**, lead→job conversion (H14 + address normalisation), Blueprint + AI.
+- **Could NOT drive (env/setup, not defects):** AI invoice extraction (needs an uploaded invoice file), fee-proposal generate/send + full RFQ send (need estimate import / would email — guardrail), worker timesheet entry (needs employee-linked login), site-diary entry (voice-only), H11 GSC/GA4 sync (Google not configured in dev), H7 double-time + H8 labour-in-budget (need a >10h timesheet + seeded budget). CRM module **blocked by the nav bug** (H12/H13 untestable until fixed).
+- **Test artifacts created in dev:** lead "Daniel Foster", template+AI schedules on 12 Test St, a WHS profile on 12 Test St, test job "99 Conversion Test Ave". All safe to clean up.
 
 ## Findings log
 <!-- appended live, newest at bottom -->
+
+### Wave 4 — Finance inbox, Site Diary, Worker PWA
+- PASS — **Finance Inbox** (`/finance`): KPIs (Unmatched 0 / Pending 0 / Filed this month 1 / Total approved $14,871), Inbox/Approvals/Job View/Settings tabs, drag-drop zone, IMAP "connected · last check 09:50pm", filed doc list (Adelaide Concrete Co). NOTE — AI invoice extraction not driven (needs an uploaded invoice file; none available in this session).
+- PASS (loads) — **Site Diary** (`/operations/:id/diary`): Record (Mic) → live transcript → Structure with AI → Review; Past Entries panel.
+  - **MEDIUM (UX) — diary transcript is voice-only.** Both keyboard typing and `form_input` failed to populate the transcript field (driven by the Web Speech API). On a desktop without a mic, with mic permission denied, or in any non-voice context, a user can't create a diary entry — there's no manual-text fallback. Recommend allowing typed entry.
+- PASS — **Worker PWA** (`/worker`): loads, PWA "Install" prompt, and gracefully shows "No employee record found" for the admin test user (not a linked employee) — correct gating, no crash. Full timesheet flow needs an employee-linked login.
+
+### H14 + address normalisation PASS (lead→job spine)
+- **PASS — H14 (lead_id carry) + address normalisation, validated live.** `POST /api/jobs` with `lead_id` (Daniel Foster) + client fields → 200; created job persists `lead_id: a7b20e47…`, `client_email`, `client_phone`, and `address_normalised: "99 conversion test avenue stirling"` ("Ave"→"avenue", lowercased, state/postcode stripped). Confirms: jobs created via the server endpoint get the normalised dedup key + the lead reverse-link. This is precisely the path RfqEngine bypasses (→ the duplicate-jobs bug). H15 (FE value-carry estimated_value→original_contract_value) remains code-verified.
+  - CLEANUP NOTE — created one test job "99 Conversion Test Ave, Stirling" as the H14 probe; safe to delete (Tender → job-delete).
 
 ### Wave 2/3 — Tender cluster
 - PASS — **RFQ Engine** loads: 4-stage wizard (Upload PDFs → Review extraction → Recipients & packaging → Preview & send), Settings, RFQ-readiness meter. (Full send flow needs a PDF upload + AI extract + recipients — deferred; H1/H3 are server-side + code-verified.)
