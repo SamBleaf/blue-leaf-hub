@@ -37,6 +37,26 @@ const UNSUBSCRIBE_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SE
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// Map a raw Resend provider message to a plain-English, actionable one. Resend's
+// strings are usable but technical; the most common campaign failure (an unverified
+// sending domain) needs a clear "what to do next" so staff aren't left guessing.
+function friendlyResendError(raw) {
+  const msg = String(raw || "").trim();
+  if (/not verified|domain.*verif|verify.*domain/i.test(msg)) {
+    return "the sending domain (blueleafbuilding.com.au) isn't verified in Resend yet. Verify it at resend.com/domains — campaigns can't go out until then.";
+  }
+  if (/\bfrom\b.*(invalid|not allowed|rejected)|invalid.*from/i.test(msg)) {
+    return "the 'from' address was rejected. Use an address on a verified domain (e.g. marketing@blueleafbuilding.com.au).";
+  }
+  if (/rate.?limit|too many requests/i.test(msg)) {
+    return "Resend's rate limit was hit. Wait a minute and try again.";
+  }
+  if (/api.?key|unauthor|forbidden|401|403/i.test(msg)) {
+    return "the Resend API key was rejected. Check RESEND_API_KEY in the Railway environment variables.";
+  }
+  return msg || "the email provider returned no delivery IDs (check recipient addresses).";
+}
+
 function scoreContact(interactions, referralCount, referralJobValue, status) {
   let score = 0;
   const now = Date.now();
@@ -850,8 +870,7 @@ export function registerCrmRoutes(app) {
           status: "failed",
           updated_at: new Date().toISOString(),
         }).eq("id", sid);
-        const msg = batchResult?.error?.message || "the email provider returned no delivery IDs (check recipient addresses)";
-        return err(res, 502, "Email send failed: " + msg);
+        return err(res, 502, "Email send failed — " + friendlyResendError(batchResult?.error?.message));
       }
       for (let i = 0; i < recipients.length; i++) {
         const resendId = sentItems[i]?.id;
@@ -874,7 +893,7 @@ export function registerCrmRoutes(app) {
         status: "failed",
         updated_at: new Date().toISOString(),
       }).eq("id", sid);
-      return err(res, 500, "Failed to send emails: " + sendErr.message);
+      return err(res, 500, "Email send failed — " + friendlyResendError(sendErr.message));
     }
   });
 
