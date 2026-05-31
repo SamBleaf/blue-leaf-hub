@@ -263,7 +263,9 @@ export function registerCrmRoutes(app) {
       created_by: req.user?.id || null,
     }).select().single();
 
-    if (error) return err(res, 500, "Failed to create contact");
+    // Surface the real cause (e.g. an out-of-range status/contact_type/budget_range enum)
+    // instead of a generic 500 the user can't act on.
+    if (error) return err(res, 400, translateDbError(error));
     ok(res, { contact: rowToCamel(data) });
   });
 

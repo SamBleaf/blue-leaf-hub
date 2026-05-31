@@ -25,6 +25,7 @@ import {
   getBrandingEmailLogo,
   invalidateBrandingLogoCache
 } from "./brandingAssets.mjs";
+import { requireAuth } from "./requireAuth.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -118,7 +119,7 @@ function normaliseDocxTemplate(zip) {
  * @param {import('express').Express} app
  */
 export function registerModule5Routes(app) {
-  app.post("/api/fee-proposal/parse-xlsx", async (req, res) => {
+  app.post("/api/fee-proposal/parse-xlsx", requireAuth, async (req, res) => {
     try {
       const b64 = String(req.body?.dataBase64 || "").trim();
       if (!b64) return res.status(400).json({ ok: false, error: "dataBase64 required." });
@@ -197,7 +198,7 @@ export function registerModule5Routes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/parse-pdf", async (req, res) => {
+  app.post("/api/fee-proposal/parse-pdf", requireAuth, async (req, res) => {
     const key = process.env.ANTHROPIC_API_KEY?.trim();
     if (!key) return res.status(503).json({ ok: false, error: "ANTHROPIC_API_KEY not configured." });
     try {
@@ -307,7 +308,7 @@ export function registerModule5Routes(app) {
   const TEMPLATE_PATH   = "fee-proposal-template.docx";
 
   /** Upload DOCX template to Supabase Storage (+ optionally Dropbox). */
-  app.post("/api/settings/fee-proposal-template", async (req, res) => {
+  app.post("/api/settings/fee-proposal-template", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const b64 = String(req.body?.dataBase64 || "").trim();
@@ -341,7 +342,7 @@ export function registerModule5Routes(app) {
   });
 
   /** Fetch DOCX template from Supabase Storage → returns base64. */
-  app.get("/api/settings/fee-proposal-template", async (req, res) => {
+  app.get("/api/settings/fee-proposal-template", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
 
@@ -364,7 +365,7 @@ export function registerModule5Routes(app) {
    * Body: { filename: "BLB_Icon_Blue.png"|"BLB_Primary_Logo_White.png", dataBase64: string }
    * Uploads a branding asset to Supabase Storage bucket "branding".
    */
-  app.post("/api/settings/branding-logo", async (req, res) => {
+  app.post("/api/settings/branding-logo", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const filename = String(req.body?.filename || BRANDING_EMAIL_LOGO_PATH).trim();
@@ -388,7 +389,7 @@ export function registerModule5Routes(app) {
    * Returns { ok, dataBase64, size } for the requested brand asset.
    * Defaults to BLB_Icon_Blue.png (email logo).
    */
-  app.get("/api/settings/branding-logo", async (req, res) => {
+  app.get("/api/settings/branding-logo", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const filename = String(req.query?.file || BRANDING_EMAIL_LOGO_PATH).trim();
@@ -405,7 +406,7 @@ export function registerModule5Routes(app) {
     return res.json({ ok: true, filename, dataBase64: buf.toString("base64"), size: buf.length });
   });
 
-  app.post("/api/fee-proposal/generate-docx", async (req, res) => {
+  app.post("/api/fee-proposal/generate-docx", requireAuth, async (req, res) => {
     try {
       let templateBase64 = String(req.body?.templateBase64 || "").trim();
       const proposalData = req.body?.proposalData;
@@ -446,7 +447,7 @@ export function registerModule5Routes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/upload-to-drive", async (req, res) => {
+  app.post("/api/fee-proposal/upload-to-drive", requireAuth, async (req, res) => {
     if (!driveConfigured()) {
       return res.status(503).json({ ok: false, error: "Google Drive not configured. Add GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN to .env, then run: npm run auth:drive" });
     }
@@ -486,7 +487,7 @@ export function registerModule5Routes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/docx-to-pdf", async (req, res) => {
+  app.post("/api/fee-proposal/docx-to-pdf", requireAuth, async (req, res) => {
     try {
       const driveFileId = String(req.body?.driveFileId || "").trim();
       const docxBase64 = String(req.body?.docxBase64 || "").trim();
@@ -536,7 +537,7 @@ export function registerModule5Routes(app) {
     }
   });
 
-  app.post("/api/fee-proposal/send", async (req, res) => {
+  app.post("/api/fee-proposal/send", requireAuth, async (req, res) => {
     if (!mailTransportName()) {
       return res.status(503).json({ ok: false, error: "Mail not configured." });
     }

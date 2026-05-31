@@ -1347,21 +1347,23 @@ Return ONLY the JSON object.`;
     const since = req.body.since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const [notesRes, convsRes, diaryRes] = await Promise.all([
-      sb.from("lead_notes").select("id, content, created_at").gte("created_at", since).limit(50),
+      // lead_notes column is `body` (not content); site_diary has work_completed/issues (no `notes`).
+      sb.from("lead_notes").select("id, body, created_at").gte("created_at", since).limit(50),
       sb.from("lead_conversations").select("id, transcript_text, created_at").gte("created_at", since).limit(20),
-      sb.from("site_diary").select("id, notes, created_at").gte("created_at", since).limit(30),
+      sb.from("site_diary").select("id, work_completed, issues, created_at").gte("created_at", since).limit(30),
     ]);
 
     // Build batch items for Haiku to classify
     const items = [];
     for (const n of (notesRes.data || [])) {
-      if (n.content?.trim()) items.push({ id: n.id, source_type: "lead_note", text: n.content.slice(0, 500) });
+      if (n.body?.trim()) items.push({ id: n.id, source_type: "lead_note", text: n.body.slice(0, 500) });
     }
     for (const c of (convsRes.data || [])) {
       if (c.transcript_text?.trim()) items.push({ id: c.id, source_type: "lead_conversation", text: c.transcript_text.slice(0, 800) });
     }
     for (const d of (diaryRes.data || [])) {
-      if (d.notes?.trim()) items.push({ id: d.id, source_type: "site_diary", text: d.notes.slice(0, 500) });
+      const diaryText = [d.work_completed, d.issues].filter(s => s && String(s).trim()).join(" — ");
+      if (diaryText) items.push({ id: d.id, source_type: "site_diary", text: diaryText.slice(0, 500) });
     }
 
     if (items.length === 0) return ok(res, { scanned: 0, inserted: 0 });
