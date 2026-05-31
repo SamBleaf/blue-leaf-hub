@@ -1,9 +1,16 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 async function post(endpoint, body) {
+  // Attach the Supabase bearer token — the server's requireAuth rejects tokenless requests
+  // with "Unauthorised". (Previously only the streaming path sent auth, so the non-streaming
+  // chat + the streaming-failed fallback 401'd in production where SSE doesn't pass through.)
+  const authHeader = await getAuthHeader();
   const res = await fetch(`${BASE}/api/blueprint/${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authHeader ? { Authorization: authHeader } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
