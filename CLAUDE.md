@@ -199,7 +199,7 @@ Modules (departments):
 
 Both return `null` if env vars missing — all callers must guard.
 
-Database migrations in `supabase/migrations/` (001–072). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
+Database migrations in `supabase/migrations/` (001–073). Apply in order via Supabase dashboard SQL editor. (Note: 018 and 019 were never created — numbering jumps 017 → 020.)
 
 Key tables:
 | Migration | Tables added |
@@ -226,6 +226,7 @@ Key tables:
 | 069 | Knowledge Core foundation (Phase 0, additive): `job_documents`, `job_fact_history`, `job_events`, `contact_events`, `company_profile` + building-fact columns on `project_metrics`. Not yet wired — see `MASTER_DATA_DICTIONARY.md` + `factsService.mjs`/`jobFactRegistry.mjs` |
 | 071 | `jobs.client_email`, `jobs.client_phone` (lead→job contact carry-forward, H14/H15) |
 | 072 | Widen `schedule_tasks.task_type` CHECK to include `build`/`approval`/`inspection` (C6 — AI schedule generator was rejected) |
+| 073 | `increment_send_stat(text,text)` RPC for atomic CRM email_sends counters (H12 — webhook called a missing function) |
 
 ---
 

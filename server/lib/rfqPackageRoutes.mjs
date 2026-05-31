@@ -416,18 +416,23 @@ export function registerRfqPackageRoutes(app) {
             email_body: email_body || ""
           }).select("id").single();
 
-          // Also create an rfqs row so it appears in quote-tracker
-          if (pkg?.job_id) {
-            const { data: rfqRow } = await s.from("rfqs").insert({
+          // Also create an rfqs row so it appears in quote-tracker. rfqs.subcontractor_id is
+          // NOT NULL, so this is only possible for known subcontractors — ad-hoc email-only
+          // recipients are tracked via rfq_recipients alone (H1). Previously the insert was
+          // attempted with a null id and failed silently, dropping the recipient from tracking.
+          if (pkg?.job_id && r.subcontractor_id) {
+            const { data: rfqRow, error: rfqErr } = await s.from("rfqs").insert({
               job_id: pkg.job_id,
-              subcontractor_id: r.subcontractor_id || null,
+              subcontractor_id: r.subcontractor_id,
               trade: scope.trade_label,
               status: "sent",
               sent_at: sentAt,
               deadline: due_date || scope.due_date || pkg.tender_deadline || null,
               email_body: `Subject: ${email_subject || ""}\n\n${email_body || ""}`
             }).select("id").single();
-            if (rfqRow && rec) {
+            if (rfqErr) {
+              console.warn("[rfq-package/send] rfqs insert failed:", rfqErr.message);
+            } else if (rfqRow && rec) {
               await s.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
             }
           }

@@ -597,8 +597,9 @@ export function registerCrmRoutes(app) {
   app.delete("/api/crm/lists/:id/members/:mid", requireAuth, async (req, res) => {
     const { id, mid } = req.params;
 
+    // email lives on crm_contacts, not mailing_list_members (H13) — join it for the audit trail.
     const { data: member } = await sb()
-      .from("mailing_list_members").select("*").eq("id", mid).eq("list_id", id).single();
+      .from("mailing_list_members").select("*, crm_contacts(email)").eq("id", mid).eq("list_id", id).single();
 
     if (!member) return err(res, 404, "Member not found");
 
@@ -611,7 +612,7 @@ export function registerCrmRoutes(app) {
     // Spam Act audit trail
     await sb().from("email_unsubscribes").insert({
       contact_id: member.contact_id,
-      email_address: member.email_address || "",
+      email_address: member.crm_contacts?.email || "",
       list_id: id,
       unsubscribed_via: "manual",
     });
@@ -793,14 +794,16 @@ export function registerCrmRoutes(app) {
       updated_at: new Date().toISOString(),
     }).eq("id", sid);
 
-    // Create recipient rows
+    // Create recipient rows (keep ids so we can store Resend's per-email id for webhook matching, H13)
     const recipientRows = recipients.map(r => ({
       email_send_id: sid,
       contact_id: r.id,
       email_address: r.email,
       status: "pending",
     }));
-    await sb().from("email_send_recipients").insert(recipientRows);
+    const { data: insertedRecipients } = await sb()
+      .from("email_send_recipients").insert(recipientRows).select("id, contact_id");
+    const recipientRowIdByContact = new Map((insertedRecipients || []).map(x => [x.contact_id, x.id]));
 
     // Build unsubscribe-footer HTML
     const unsubFooter = (contactId, listId) => {
@@ -832,6 +835,19 @@ export function registerCrmRoutes(app) {
 
     try {
       const batchResult = await resend.batch.send(emails);
+      // Resend returns per-email ids in input order. Store each on its recipient row so the
+      // webhook (which matches on resend_email_id) can attribute delivery/open/bounce events (H13).
+      const sentItems = Array.isArray(batchResult?.data)
+        ? batchResult.data
+        : (Array.isArray(batchResult?.data?.data) ? batchResult.data.data : []);
+      for (let i = 0; i < recipients.length; i++) {
+        const resendId = sentItems[i]?.id;
+        const recRowId = recipientRowIdByContact.get(recipients[i].id);
+        if (resendId && recRowId) {
+          await sb().from("email_send_recipients")
+            .update({ resend_email_id: resendId }).eq("id", recRowId);
+        }
+      }
       await sb().from("email_sends").update({
         status: "sent",
         sent_at: new Date().toISOString(),
@@ -937,16 +953,19 @@ export function registerCrmRoutes(app) {
         await getServiceSupabase().from("email_send_recipients")
           .update({ status: "opened", opened_at: new Date().toISOString() })
           .eq("resend_email_id", emailId);
+        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "opened_count" }).maybeSingle();
 
       } else if (type === "email.clicked") {
         await getServiceSupabase().from("email_send_recipients")
           .update({ status: "clicked", clicked_at: new Date().toISOString() })
           .eq("resend_email_id", emailId);
+        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "clicked_count" }).maybeSingle();
 
       } else if (type === "email.bounced") {
         await getServiceSupabase().from("email_send_recipients")
           .update({ status: "bounced", bounce_reason: data.bounce?.message || null })
           .eq("resend_email_id", emailId);
+        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "bounced_count" }).maybeSingle();
 
         // Hard bounce = remove from all lists
         const { data: recipient } = await getServiceSupabase()
@@ -973,6 +992,7 @@ export function registerCrmRoutes(app) {
             unsubscribed_via: "complaint",
             resend_event_id: data.event_id || null,
           });
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "complained_count" }).maybeSingle();
         }
 
       } else if (type === "email.unsubscribed") {
@@ -990,6 +1010,7 @@ export function registerCrmRoutes(app) {
             unsubscribed_via: "link",
             resend_event_id: data.event_id || null,
           });
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "unsubscribed_count" }).maybeSingle();
         }
       }
     } catch (e) {
