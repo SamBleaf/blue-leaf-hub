@@ -171,7 +171,7 @@ export function registerOperationsRoutes(app) {
           last_contact_at, response_received_at,
           follow_up_1_sent_at, follow_up_2_sent_at,
           subcontractor_id,
-          subcontractors ( id, business_name, contact, phone, email )
+          subcontractors ( id, business_name, contact, mobile, email )
         `)
         .eq("project_id", projectId)
         .order("created_at", { ascending: true });
@@ -180,7 +180,7 @@ export function registerOperationsRoutes(app) {
       // Fetch accepted RFQs with no PO (to show "PO not issued" rows)
       const { data: acceptedRfqs } = await sb
         .from("rfqs")
-        .select("id, trade, subcontractor_id, subcontractors(id, business_name, contact, phone, email)")
+        .select("id, trade, subcontractor_id, subcontractors(id, business_name, contact, mobile, email)")
         .eq("project_id", projectId)
         .eq("status", "accepted");
 
@@ -333,7 +333,7 @@ export function registerOperationsRoutes(app) {
         .from("purchase_orders")
         .update({ response_received_at: nowIso, last_contact_at: nowIso })
         .eq("id", purchase_order_id)
-        .select("id, project_id, subcontractor_id, trade, subcontractors(contact, email, business_name, phone), projects(address)")
+        .select("id, project_id, subcontractor_id, trade, subcontractors(contact, email, business_name, mobile), projects(address)")
         .single();
       if (poErr) throw new Error(poErr.message);
 
@@ -429,7 +429,7 @@ export function registerOperationsRoutes(app) {
           id, task_type, title, description, due_date, status, created_at, completed_at,
           purchase_order_id, subcontractor_id,
           purchase_orders ( id, po_number, trade ),
-          subcontractors ( id, business_name, contact, phone )
+          subcontractors ( id, business_name, contact, mobile )
         `)
         .eq("project_id", projectId)
         .in("status", statusFilter === "all" ? ["pending", "in_progress", "done", "dismissed"] : [statusFilter, "in_progress"])

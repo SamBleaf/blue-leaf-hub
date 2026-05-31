@@ -208,7 +208,7 @@ export function registerWhsRoutes(app) {
 
       const reportedAt = new Date().toISOString();
       const { data: inserted, error: ie } = await sb
-        .from("whs_reports")
+        .from("site_reports")
         .insert({
           project_id: projectId,
           report_type: reportType,
@@ -243,13 +243,13 @@ export function registerWhsRoutes(app) {
           await ensureParentFoldersForFile(token, pdfPath);
           await dropboxUploadBuffer(token, pdfPath, pdfBuf, { autorename: true });
           dropbox_pdf_path = pdfPath;
-          await sb.from("whs_reports").update({ dropbox_pdf_path }).eq("id", inserted.id);
+          await sb.from("site_reports").update({ dropbox_pdf_path }).eq("id", inserted.id);
         } catch (err) {
           console.warn("[whs/reports] PDF Dropbox:", err?.message || err);
         }
       }
 
-      const { data: report } = await sb.from("whs_reports").select("*").eq("id", inserted.id).single();
+      const { data: report } = await sb.from("site_reports").select("*").eq("id", inserted.id).single();
       return res.json({ ok: true, report });
     } catch (e) {
       console.error("[whs/reports post]", e);
@@ -262,7 +262,7 @@ export function registerWhsRoutes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
       const projectId = String(req.params.projectId || "").trim();
-      const { data, error } = await sb.from("whs_reports").select("*").eq("project_id", projectId).order("reported_at", { ascending: false });
+      const { data, error } = await sb.from("site_reports").select("*").eq("project_id", projectId).order("reported_at", { ascending: false });
       if (error) throw error;
       return res.json({ ok: true, reports: data || [] });
     } catch (e) {
@@ -280,7 +280,7 @@ export function registerWhsRoutes(app) {
       if (!id || status !== "resolved") return res.status(400).json({ ok: false, error: "Invalid request." });
       const now = new Date().toISOString();
       const { data, error } = await sb
-        .from("whs_reports")
+        .from("site_reports")
         .update({ status: "resolved", resolved_at: now })
         .eq("id", id)
         .select("*")

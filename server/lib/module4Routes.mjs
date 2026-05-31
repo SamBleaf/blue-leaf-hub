@@ -689,8 +689,8 @@ export function registerModule4Routes(app) {
       const { data: rfqs, error: rfqErr } = await sb
         .from("rfqs")
         .select(`
-          id, trade, subcontractor_id, total_amount,
-          subcontractors ( id, business_name, contact, email, phone )
+          id, trade, subcontractor_id, quote_amount,
+          subcontractors ( id, business_name, contact, email, mobile )
         `)
         .eq("job_id", jobId)
         .eq("status", "accepted");
@@ -718,8 +718,8 @@ export function registerModule4Routes(app) {
             business_name: sub.business_name || r.trade,
             contact: sub.contact || "",
             email: sub.email || "",
-            phone: sub.phone || "",
-            total_amount: r.total_amount || 0,
+            phone: sub.mobile || "",
+            total_amount: r.quote_amount || 0,
           };
         });
 
