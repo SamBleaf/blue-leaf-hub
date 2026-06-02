@@ -3,19 +3,50 @@
  */
 import { getBuildexactCategoryMapping } from "./buildexactParser.mjs";
 
-/** AI extraction canonical keys (must match dev-api + rfqExtraction.js). */
+/** AI extraction canonical keys (must match dev-api + rfqExtraction.js RFQ_TRADE_ORDER). */
 export const RFQ_TRADE_ORDER = [
+  // Site & civil
+  "site_establishment",
   "excavation",
   "demolition",
   "termite_protection",
-  "footings_concrete_formwork",
+  // Structure
+  "concrete_footings",
+  "structural_steel",
+  "carpentry",
+  // Envelope
+  "external_cladding",
+  "windows_skylights",
+  "roof_plumber",
+  "masonry",
+  "glazing",
+  // Mechanical / electrical
+  "electrical_data",
+  "lighting_automation",
   "plumbing",
-  "electrical",
+  "sanitary_ware",
+  "heating_cooling",
+  "solar_batteries",
+  // Interior fit-out
+  "insulation",
   "internal_linings",
+  "plastering_rendering",
+  "painting",
   "stairs",
+  "joinery",
   "tiling",
   "flooring",
-  "metal_roofing"
+  "window_furnishings",
+  "garage_door",
+  "appliances",
+  "door_hardware",
+  "fixtures_fittings",
+  // External
+  "landscaping",
+  "paving",
+  "fencing",
+  "pool_works",
+  "site_cleaner"
 ];
 
 /** @typedef {{ trade_id: string, trade_name: string, trade_category: string, subcategory?: string, buildxact_category?: string, buildxact_trade_key?: string, quote_required?: boolean, priority?: number, contractor_tags?: string[], default_rfq_template?: string[], default_attachments?: string[] }} TradeMasterRow */
@@ -98,100 +129,93 @@ export const TRADE_LABELS = {
   preliminaries: "Preliminaries (PC only)"
 };
 
-/** Buildxact tradeKey → RFQ package trade_id */
+/** Buildxact tradeKey (buildexactParser CATEGORY_MAPPING) → canonical RFQ package trade_id */
 export const BUILDXACT_KEY_TO_RFQ = {
   preliminaries: null,
-  hire: "scaffolding",
+  hire: "site_establishment",
   site_establishment: "site_establishment",
   demolition: "demolition",
-  concrete: "footings_concrete_formwork",
+  concrete: "concrete_footings",
   termite: "termite_protection",
   steel: "structural_steel",
-  carpentry: "carpentry_joinery",
-  windows: "glazing_windows",
+  carpentry: "carpentry",
+  windows: "windows_skylights",
   cladding: "external_cladding",
-  roofing: "metal_roofing",
-  masonry: "brickwork",
-  electrical: "electrical",
-  lighting: "lighting",
+  roofing: "roof_plumber",
+  masonry: "masonry",
+  electrical: "electrical_data",
+  lighting: "lighting_automation",
   plumbing: "plumbing",
-  sanitary: "sanitary",
+  sanitary: "sanitary_ware",
   stairs: "stairs",
   insulation: "insulation",
   linings: "internal_linings",
   tiling: "tiling",
-  waterproofing: "waterproofing",
-  joinery: "cabinetry",
+  waterproofing: "tiling",
+  joinery: "joinery",
   painting: "painting",
-  garage_door: "garage_doors",
-  plastering: "plastering",
+  garage_door: "garage_door",
+  plastering: "plastering_rendering",
   flooring: "flooring",
-  blinds: "blinds_curtains",
+  blinds: "window_furnishings",
   appliances: "appliances",
   door_hardware: "door_hardware",
-  fixtures: "fixtures",
-  glazing: "glazing_windows",
-  solar: "solar",
-  hvac: "hvac",
+  fixtures: "fixtures_fittings",
+  glazing: "glazing",
+  solar: "solar_batteries",
+  hvac: "heating_cooling",
   landscaping: "landscaping",
-  paving: "driveways",
+  paving: "paving",
   fencing: "fencing",
-  pool: "pool",
-  cleaning: "cleaning"
+  pool: "pool_works",
+  cleaning: "site_cleaner"
 };
 
+// One row per canonical trade_id (matching RFQ_TRADE_ORDER / rfqExtraction.js).
+// [trade_id, trade_name, trade_category, subcategory, buildxact_category, buildxact_trade_key, quote_required, priority]
 const SEED_ROWS = [
+  // Site & civil
+  ["site_establishment", "Site Establishment", "site_works", "establishment", "Site Establishment", "site_establishment", false, 40],
   ["excavation", "Excavation", "site_works", "earthworks", "Demolition / Civil", "demolition", true, 90],
   ["demolition", "Demolition / Civil", "site_works", "demolition", "Demolition / Civil", "demolition", true, 88],
-  ["site_establishment", "Site Establishment", "site_works", "establishment", "Site Establishment", "site_establishment", false, 40],
   ["termite_protection", "Termite Treatment", "substructure", "termite", "Termite Protection", "termite", true, 85],
-  ["footings_concrete_formwork", "Concrete & Footings", "substructure", "concrete", "Concrete & Footings", "concrete", true, 92],
+  // Structure
+  ["concrete_footings", "Concrete & Footings", "substructure", "concrete", "Concrete & Footings", "concrete", true, 92],
   ["structural_steel", "Structural Steel", "frame", "steel", "Structural Steel", "steel", true, 80],
-  ["scaffolding", "Scaffolding", "frame", "access", "Hire Items", "hire", true, 82],
-  ["carpentry_joinery", "Framing / Carpentry", "frame", "framing", "Carpentry", "carpentry", true, 95],
-  ["metal_roofing", "Roofing", "envelope", "roof", "Roof Plumber", "roofing", true, 90],
-  ["roof_plumbing", "Roof Plumbing", "envelope", "roof_plumber", "Roof Plumber", "roofing", true, 78],
-  ["glazing_windows", "Windows & Glazing", "envelope", "windows", "Windows / Skylights", "windows", true, 88],
+  ["carpentry", "Carpentry", "frame", "framing", "Carpentry", "carpentry", true, 95],
+  // Envelope
   ["external_cladding", "External Cladding", "envelope", "cladding", "External Cladding", "cladding", true, 86],
-  ["brickwork", "Brickwork / Masonry", "envelope", "masonry", "Masonry", "masonry", true, 84],
-  ["rendering", "Render", "envelope", "render", "Plastering & Rendering", "plastering", true, 80],
-  ["stormwater", "Stormwater / Drainage", "site_works", "drainage", "Demolition / Civil", "demolition", true, 83],
+  ["windows_skylights", "Windows / Skylights", "envelope", "windows", "Windows / Skylights", "windows", true, 88],
+  ["roof_plumber", "Roof Plumber", "envelope", "roof", "Roof Plumber", "roofing", true, 90],
+  ["masonry", "Masonry", "envelope", "masonry", "Masonry", "masonry", true, 84],
+  ["glazing", "Glazing", "envelope", "glass", "Glazing", "glazing", true, 72],
+  // Mechanical / electrical
+  ["electrical_data", "Electrical & Data", "services", "electrical", "Electrical & Data", "electrical", true, 94],
+  ["lighting_automation", "Lighting & Automation", "services", "lighting", "Lighting & Automation", "lighting", false, 58],
   ["plumbing", "Plumbing", "services", "hydraulics", "Plumbing", "plumbing", true, 94],
-  ["electrical", "Electrical", "services", "electrical", "Electrical & Data", "electrical", true, 94],
-  ["hvac", "Heating & Cooling", "services", "hvac", "Heating & Cooling", "hvac", true, 82],
-  ["solar", "Solar & Batteries", "services", "solar", "Solar & Batteries", "solar", true, 70],
+  ["sanitary_ware", "Sanitary Ware", "fitout", "sanitary", "Sanitary Ware", "sanitary", false, 55],
+  ["heating_cooling", "Heating & Cooling", "services", "hvac", "Heating & Cooling", "hvac", true, 82],
+  ["solar_batteries", "Solar & Batteries", "services", "solar", "Solar & Batteries", "solar", true, 70],
+  // Interior fit-out
   ["insulation", "Insulation", "fitout", "insulation", "Insulation", "insulation", true, 78],
   ["internal_linings", "Internal Linings", "fitout", "linings", "Internal Linings", "linings", true, 88],
-  ["waterproofing", "Waterproofing", "fitout", "wet areas", "Waterproofing", "waterproofing", true, 91],
-  ["tiling", "Tiling", "fitout", "tiles", "Tiler", "tiling", true, 88],
-  ["cabinetry", "Cabinetry / Kitchen", "fitout", "joinery", "Joinery", "joinery", true, 86],
-  ["stone_benchtops", "Stone Benchtops", "fitout", "stone", "Joinery", "joinery", true, 75],
-  ["flooring", "Floor Coverings", "fitout", "floors", "Flooring", "flooring", true, 87],
+  ["plastering_rendering", "Plastering & Rendering", "fitout", "plaster", "Plastering & Rendering", "plastering", true, 80],
   ["painting", "Painting", "fitout", "paint", "Painting", "painting", true, 90],
-  ["shower_screens", "Shower Screens", "fitout", "glass", "Shower Screens & Mirrors", "fixtures", true, 72],
-  ["mirrors", "Mirrors", "fitout", "glass", "Shower Screens & Mirrors", "fixtures", true, 68],
-  ["balustrade", "Balustrades", "fitout", "metal", "Stairs", "stairs", true, 76],
   ["stairs", "Stairs", "fitout", "stairs", "Stairs", "stairs", true, 74],
-  ["garage_doors", "Garage Doors", "envelope", "garage", "Garage Door", "garage_door", true, 72],
-  ["plastering", "Plastering", "fitout", "plaster", "Plastering & Rendering", "plastering", true, 80],
-  ["suspended_ceilings", "Suspended Ceilings", "fitout", "ceilings", "Internal Linings", "linings", true, 65],
-  ["skylights", "Skylights", "envelope", "skylight", "Windows / Skylights", "windows", true, 68],
-  ["blinds_curtains", "Window Furnishings", "fitout", "blinds", "Window Furnishings", "blinds", true, 70],
-  ["landscaping", "Landscaping", "external", "landscape", "Landscaping", "landscaping", true, 85],
-  ["driveways", "Driveways & Paving", "external", "paving", "Paving", "paving", true, 80],
-  ["fencing", "Fencing", "external", "fence", "Fencing", "fencing", true, 78],
-  ["retaining_walls", "Retaining Walls", "external", "retaining", "Landscaping", "landscaping", true, 76],
-  ["pergolas", "Pergolas", "external", "pergola", "Landscaping", "landscaping", true, 60],
-  ["decking", "Decking", "external", "deck", "Landscaping", "landscaping", true, 62],
-  ["pool", "Pool Works", "external", "pool", "Pool Works", "pool", true, 55],
-  ["cleaning", "Final Clean", "completion", "clean", "Site Cleaner", "cleaning", true, 88],
-  ["site_safety", "Site Safety / Hoarding", "preliminaries", "safety", "Site Establishment", "site_establishment", false, 45],
+  ["joinery", "Joinery", "fitout", "joinery", "Joinery", "joinery", true, 86],
+  ["tiling", "Tiling", "fitout", "tiles", "Tiler", "tiling", true, 88],
+  ["flooring", "Floor Coverings", "fitout", "floors", "Flooring", "flooring", true, 87],
+  ["window_furnishings", "Window Furnishings", "fitout", "blinds", "Window Furnishings", "blinds", true, 70],
+  ["garage_door", "Garage Door", "envelope", "garage", "Garage Door", "garage_door", true, 72],
   ["appliances", "Appliances", "fitout", "appliances", "Appliances", "appliances", false, 50],
   ["door_hardware", "Door Hardware", "fitout", "hardware", "Door Hardware", "door_hardware", false, 48],
-  ["fixtures", "Fixtures & Fittings", "fitout", "fixtures", "Fixtures & Fittings", "fixtures", false, 52],
-  ["sanitary", "Sanitary Ware", "fitout", "sanitary", "Sanitary Ware", "sanitary", false, 55],
-  ["lighting", "Lighting & Automation", "services", "lighting", "Lighting & Automation", "lighting", false, 58],
-  ["preliminaries", "Preliminaries", "preliminaries", "prelim", "Preliminaries", "preliminaries", false, 10]
+  ["fixtures_fittings", "Fixtures & Fittings", "fitout", "fixtures", "Fixtures & Fittings", "fixtures", false, 52],
+  // External
+  ["landscaping", "Landscaping", "external", "landscape", "Landscaping", "landscaping", true, 85],
+  ["paving", "Paving", "external", "paving", "Paving", "paving", true, 80],
+  ["fencing", "Fencing", "external", "fence", "Fencing", "fencing", true, 78],
+  ["pool_works", "Pool Works", "external", "pool", "Pool Works", "pool", true, 55],
+  ["site_cleaner", "Site Cleaner", "completion", "clean", "Site Cleaner", "cleaning", true, 88]
 ];
 
 /** @returns {TradeMasterRow[]} */
