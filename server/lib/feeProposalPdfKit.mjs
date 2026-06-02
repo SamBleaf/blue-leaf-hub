@@ -1,4 +1,5 @@
-import PDFDocument from "pdfkit";
+// pdfkit is imported lazily inside the builder below — its cold import (~13s here, font
+// decompression) must NOT run at module load, or it blocks the whole API server's startup.
 
 const BRAND = "#006c9b";
 
@@ -21,7 +22,8 @@ function fmt$(n) {
  * @param {{ proposal: object, logoDataUrl?: string }} opts
  * @returns {Promise<Buffer>}
  */
-export function buildFeeProposalPdfBuffer(opts) {
+export async function buildFeeProposalPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   const p = opts.proposal || {};
   const summaryRows =
     Array.isArray(p.SUMMARY_ROWS) && p.SUMMARY_ROWS.length

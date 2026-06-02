@@ -1,4 +1,4 @@
-import PDFDocument from "pdfkit";
+// pdfkit imported lazily inside each builder (cold import is ~13s; must not block server boot).
 
 const BRAND = "#006c9b";
 
@@ -25,7 +25,8 @@ function rowTable(doc, x, y, labelW, rows, bodyFont) {
   return cy;
 }
 
-export function buildSiteDiaryPdfBuffer(opts) {
+export async function buildSiteDiaryPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: "Site Diary", Author: "Blue Leaf Building" } });
@@ -58,7 +59,8 @@ export function buildSiteDiaryPdfBuffer(opts) {
   });
 }
 
-export function buildIncidentReportPdfBuffer(opts) {
+export async function buildIncidentReportPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: "Site Report", Author: "Blue Leaf Building" } });
@@ -85,7 +87,8 @@ export function buildIncidentReportPdfBuffer(opts) {
   });
 }
 
-export function buildInductionPdfBuffer(opts) {
+export async function buildInductionPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: "Site Induction", Author: "Blue Leaf Building" } });
@@ -147,7 +150,8 @@ export function buildInductionPdfBuffer(opts) {
   });
 }
 
-export function buildScheduleGanttPdfBuffer(opts) {
+export async function buildScheduleGanttPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 36, layout: "landscape", info: { Title: "Schedule Gantt", Author: "Blue Leaf Building" } });
@@ -204,7 +208,8 @@ export function buildScheduleGanttPdfBuffer(opts) {
   });
 }
 
-export function buildScheduleAnalysisPdfBuffer(opts) {
+export async function buildScheduleAnalysisPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: "Schedule AI Analysis", Author: "Blue Leaf Building" } });

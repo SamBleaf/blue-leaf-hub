@@ -1,5 +1,5 @@
 import fs from "fs";
-import PDFDocument from "pdfkit";
+// pdfkit imported lazily inside the builder (cold import is ~13s; must not block server boot).
 import { DEFAULT_PO_TERMS } from "./poDefaultTerms.mjs";
 
 const BRAND = "#006c9b";
@@ -46,7 +46,8 @@ function pickBodyFont(doc) {
  * @param {string} [opts.termsPage2]
  * @param {string} [opts.logoDataUrl]
  */
-export function buildPurchaseOrderPdfBuffer(opts) {
+export async function buildPurchaseOrderPdfBuffer(opts) {
+  const { default: PDFDocument } = await import("pdfkit");
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: "Purchase Order", Author: opts.company?.companyName || "Blue Leaf Building" } });

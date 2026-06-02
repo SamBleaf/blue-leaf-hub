@@ -1,19 +1,29 @@
-import { google } from "googleapis";
+// googleapis is a very large package whose cold import takes ~10s+ — load it lazily so it never
+// blocks API server startup. Only the actual send path below needs it.
+let _google = null;
+async function getGoogle() {
+  if (!_google) ({ google: _google } = await import("googleapis"));
+  return _google;
+}
 
-function gmailOAuth2Client() {
+async function gmailOAuth2Client() {
   const cid = process.env.GMAIL_CLIENT_ID?.trim();
   const cs = process.env.GMAIL_CLIENT_SECRET?.trim();
   const rt = process.env.GMAIL_REFRESH_TOKEN?.trim();
   if (!cid || !cs || !rt) return null;
   const redirect = process.env.GMAIL_REDIRECT_URI?.trim() || "http://localhost:8787/auth/gmail/callback";
+  const google = await getGoogle();
   const oauth2 = new google.auth.OAuth2(cid, cs, redirect);
   oauth2.setCredentials({ refresh_token: rt });
   return oauth2;
 }
 
 export function gmailSendConfigured() {
+  const cid = process.env.GMAIL_CLIENT_ID?.trim();
+  const cs = process.env.GMAIL_CLIENT_SECRET?.trim();
+  const rt = process.env.GMAIL_REFRESH_TOKEN?.trim();
   const from = process.env.GMAIL_SENDER_EMAIL?.trim();
-  return Boolean(gmailOAuth2Client() && from);
+  return Boolean(cid && cs && rt && from);
 }
 
 function formatOptionalMimeHeaders(headers) {
@@ -159,12 +169,13 @@ export function encodeGmailMixedWithAttachments({ from, to, cc, bcc, subject, te
 }
 
 export async function sendViaGmail({ to, cc, bcc, subject, text, html, attachments, headers }) {
-  const auth = gmailOAuth2Client();
+  const auth = await gmailOAuth2Client();
   const fromAddr = process.env.GMAIL_SENDER_EMAIL?.trim();
   if (!auth || !fromAddr) {
     throw new Error("Gmail is not configured (missing client, secret, refresh token, or GMAIL_SENDER_EMAIL).");
   }
   const from = fromAddr.includes("<") ? fromAddr : `${process.env.SAM_NAME || "Sam Morris"} <${fromAddr}>`;
+  const google = await getGoogle();
   const gmail = google.gmail({ version: "v1", auth });
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a?.content?.length) : [];
   let raw;

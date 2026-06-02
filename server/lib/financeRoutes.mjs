@@ -8,7 +8,8 @@ import { requireAuth } from "./requireAuth.mjs";
 import { translateDbError } from "./apiResponse.mjs";
 import { upsertNormalizedCost } from "./normalizedCosts.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
-import PDFDocument from "pdfkit";
+// (removed) unused top-level `import PDFDocument from "pdfkit"` — it forced pdfkit's ~13s cold
+// import at server boot for nothing (no PDFDocument usage in this file).
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
