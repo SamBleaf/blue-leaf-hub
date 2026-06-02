@@ -43,6 +43,27 @@ function mapStoreys(n) {
   return "";
 }
 
+/** project_metrics.frame_type → m0_frame_type questionnaire value. */
+function mapFrameType(raw) {
+  const t = String(raw || "").toLowerCase().trim();
+  if (t === "timber") return "timber";
+  if (t === "steel") return "steel";
+  if (t.includes("mixed") || t.includes("combo")) return "mixed";
+  return "";
+}
+
+/** project_metrics.site_slope → yesno for "steep site?". */
+function mapSteepSite(slope) {
+  return ["steep", "very_steep"].includes(String(slope || "").toLowerCase()) ? "yes" : "";
+}
+
+/** boolean/null project_metrics flag → yesno string ("" = unknown, leave for the user to decide). */
+function metricBool(v) {
+  if (v === true) return "yes";
+  if (v === false) return "no";
+  return "";
+}
+
 function coerceBool(v) {
   if (v === true || v === "yes" || v === "true") return true;
   if (v === false || v === "no" || v === "false") return false;
@@ -118,6 +139,9 @@ export function registerWhsEngineRoutes(app) {
       if (!project) return err(res, 404, "Project not found");
       let job = null;
       if (project.job_id) ({ data: job } = await sb.from("jobs").select("*").eq("id", project.job_id).maybeSingle());
+      // Construction facts the Cost Intelligence AI extraction already pulls from architectural PDFs.
+      let metrics = null;
+      if (project.job_id) ({ data: metrics } = await sb.from("project_metrics").select("*").eq("job_id", project.job_id).maybeSingle());
 
       const appUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
       const prefill = {
@@ -128,8 +152,20 @@ export function registerWhsEngineRoutes(app) {
         site_supervisor_name: project.supervisor || job?.supervisor || "",
         principal_contractor: "Blue Leaf Building",
         m0_project_type: mapProjectType(job?.project_type || project.project_type),
-        m0_storeys: mapStoreys(job?.storeys ?? project.storeys),
+        m0_storeys: mapStoreys(metrics?.storeys ?? job?.storeys ?? project.storeys),
         site_qr_induction_url: `${appUrl}/induct/${projectId}`,
+        // ── Module 0 construction facts from project_metrics (AI-extracted via Cost Intelligence) ──
+        // Blank ("") when no metrics row / unknown, so the user still decides. m0_roof_type is
+        // skipped intentionally — metrics.roof_type is CLADDING type, not roof STRUCTURE.
+        m0_frame_type: mapFrameType(metrics?.frame_type),
+        m0_retaining_walls: metricBool(metrics?.has_retaining_walls),
+        m0_basement: metricBool(metrics?.has_basement),
+        m0_suspended_slab: metricBool(metrics?.has_suspended_slab),
+        m0_structural_steel: metricBool(metrics?.has_structural_steel),
+        m0_demolition_scope: metricBool(metrics?.has_demolition),
+        m0_steep_site: mapSteepSite(metrics?.site_slope),
+        m0_bushfire_zone: metrics?.bal_rating ? "yes" : "",
+        m0_pre_1990: (metrics?.building_age && metrics.building_age < 1990) ? "yes" : "",
       };
       return ok(res, { profile: profile ? rowToCamel(profile) : null, prefill, questionnaire: WHS_QUESTIONNAIRE });
     } catch (e) {
