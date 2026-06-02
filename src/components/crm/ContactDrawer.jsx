@@ -191,14 +191,20 @@ function AddToListModal({ contactId, onClose, onAdded }) {
           <button onClick={onClose} className="text-muted hover:text-ink text-xl">×</button>
         </div>
         <form onSubmit={submit} className="space-y-3">
+          <p className="text-xs text-muted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+            Smart lists (Referrers &amp; Partners, Active Prospects, Past Clients…) fill <strong>automatically</strong> from contact type &amp; status — set those on the contact, not here. This adds to a <strong>manual</strong> list only.
+          </p>
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">List *</label>
+            <label className="block text-xs font-medium text-muted mb-1">Manual list *</label>
             <select className="input w-full" value={selectedList} onChange={e => setSelectedList(e.target.value)}>
               <option value="">— select list —</option>
               {lists.filter(l => l.listType === "manual").map(l => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
             </select>
+            {lists.length > 0 && lists.filter(l => l.listType === "manual").length === 0 && (
+              <p className="text-xs text-muted mt-1">No manual lists exist yet — create one in Marketing → Lists.</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-muted mb-1">Consent source * <span className="text-muted font-normal">(Spam Act required)</span></label>
@@ -229,6 +235,7 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [contact, setContact] = useState(null);
   const [interactions, setInteractions] = useState([]);
   const [listMemberships, setListMemberships] = useState([]);
+  const [smartLists, setSmartLists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [logOpen, setLogOpen] = useState(false);
   const [addListOpen, setAddListOpen] = useState(false);
@@ -243,6 +250,7 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
       setContact(data.contact);
       setInteractions(data.interactions || []);
       setListMemberships(data.listMemberships || []);
+      setSmartLists(data.smartLists || []);
     }
     setLoading(false);
   }, [contactId]);
@@ -455,14 +463,33 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
             )}
           </div>
 
-          {/* Mailing list memberships */}
+          {/* Mailing lists — smart (auto) + manual memberships */}
           <div>
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
-              Mailing Lists ({listMemberships.length})
-            </p>
-            {listMemberships.length === 0 ? (
-              <p className="text-sm text-muted">Not on any list. <button onClick={() => setAddListOpen(true)} className="text-primary hover:underline">Add to list →</button></p>
-            ) : (
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+                Mailing Lists ({smartLists.length + listMemberships.length})
+              </p>
+              <button onClick={() => setAddListOpen(true)} className="text-xs font-semibold text-primary hover:underline">
+                + Add to list
+              </button>
+            </div>
+
+            {/* Smart lists — automatic, based on contact type/status. Read-only. */}
+            {smartLists.length > 0 && (
+              <div className="space-y-1.5 mb-2">
+                {smartLists.map(l => (
+                  <div key={l.id} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5">
+                    <span className="text-sm text-ink">{l.name}</span>
+                    <span className="text-[11px] font-medium text-primary bg-white border border-blue-200 rounded-full px-2 py-0.5">
+                      Auto · from {typeLabel(contact.contactType)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Manual list memberships */}
+            {listMemberships.length > 0 && (
               <div className="space-y-1.5">
                 {listMemberships.map(m => (
                   <div key={m.id} className="flex items-center justify-between bg-page rounded-lg px-3 py-1.5">
@@ -483,6 +510,12 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
                   </div>
                 ))}
               </div>
+            )}
+
+            {smartLists.length === 0 && listMemberships.length === 0 && (
+              <p className="text-sm text-muted">
+                Not on any list yet. Smart lists (Referrers, Active Prospects…) fill automatically from the contact type &amp; status above — or <button onClick={() => setAddListOpen(true)} className="text-primary hover:underline">add to a manual list</button>.
+              </p>
             )}
           </div>
         </div>

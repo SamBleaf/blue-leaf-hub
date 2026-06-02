@@ -123,6 +123,34 @@ async function smartListMembers(sb, smartFilter) {
   return data;
 }
 
+/**
+ * The smart lists a given contact currently qualifies for (auto-membership).
+ * Smart lists have no member rows — membership is computed live from the contact's
+ * fields (contact_type / status / created_this_month), mirroring smartListMembers().
+ * Returns [{ id, name }]. Archived contacts qualify for nothing.
+ */
+async function smartListsForContact(sb, contact) {
+  if (!contact || contact.is_archived) return [];
+  const { data, error } = await sb
+    .from("mailing_lists")
+    .select("id, name, smart_filter")
+    .eq("list_type", "smart")
+    .eq("is_archived", false);
+  if (error || !data) return [];
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  return data
+    .filter((list) => {
+      const f = list.smart_filter || {};
+      if (f.status && !f.status.includes(contact.status)) return false;
+      if (f.contact_type && !f.contact_type.includes(contact.contact_type)) return false;
+      if (f.created_this_month && (!contact.created_at || new Date(contact.created_at) < monthStart)) return false;
+      return true;
+    })
+    .map((l) => ({ id: l.id, name: l.name }));
+}
+
 // ─── registration ─────────────────────────────────────────────────────────────
 
 export function registerCrmRoutes(app) {
@@ -309,10 +337,15 @@ export function registerCrmRoutes(app) {
 
     if (contactRes.error || !contactRes.data) return err(res, 404, "Contact not found");
 
+    // Smart lists this contact auto-belongs to (computed, read-only — e.g. a referrer
+    // is automatically in "Referrers & Partners"). Surfaced so the UI can show it.
+    const smartLists = await smartListsForContact(sb(), contactRes.data);
+
     ok(res, {
       contact: rowToCamel(contactRes.data),
       interactions: rowsToCamel(interactionsRes.data || []),
       listMemberships: rowsToCamel(membershipsRes.data || []),
+      smartLists,
     });
   });
 

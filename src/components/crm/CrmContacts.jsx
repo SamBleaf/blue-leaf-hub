@@ -48,10 +48,28 @@ function NewContactModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", phone: "", contactType: "prospect",
     suburb: "", status: "new", budgetRange: "", interestTimeline: "",
-    consentToEmail: false, consentSource: "in_person",
+    consentToEmail: false, consentSource: "in_person", notes: "",
   });
+  const [smartListDefs, setSmartListDefs] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Load smart-list definitions so we can show, live, which lists this contact will
+  // auto-join based on the type/status chosen (mirrors the server smart_filter logic).
+  useEffect(() => {
+    apiFetch("/api/crm/lists").then(({ ok, data }) => {
+      if (ok) setSmartListDefs((data.lists || []).filter(l => l.listType === "smart"));
+    });
+  }, []);
+
+  // smartFilter comes back camelCase (rowToCamel deep-converts the JSONB): contactType,
+  // createdThisMonth. A new contact is created "this month", so those filters match by default.
+  const willJoin = smartListDefs.filter((l) => {
+    const ff = l.smartFilter || {};
+    if (ff.status && !ff.status.includes(form.status)) return false;
+    if (ff.contactType && !ff.contactType.includes(form.contactType)) return false;
+    return true;
+  });
 
   function f(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
@@ -111,6 +129,12 @@ function NewContactModal({ onClose, onCreated }) {
               </select>
             </div>
           </div>
+          {willJoin.length > 0 && (
+            <p className="text-xs text-primary bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+              Based on this type &amp; status, this contact will automatically appear in:{" "}
+              <strong>{willJoin.map(l => l.name).join(", ")}</strong>
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1">Suburb</label>
@@ -138,6 +162,16 @@ function NewContactModal({ onClose, onCreated }) {
               <option value="2_years">2 years</option>
               <option value="just_researching">Just researching</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Notes</label>
+            <textarea
+              className="input w-full h-20 resize-none"
+              placeholder="e.g. Builder, hit insurance limit — referring new jobs; acting as consultant on those clients."
+              value={form.notes}
+              onChange={e => f("notes", e.target.value)}
+            />
           </div>
 
           <div className="border-t border-hairline pt-3">
