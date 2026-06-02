@@ -299,7 +299,7 @@ export function registerBlueprintRoutes(app) {
               : undefined,
             messages: chatMessages,
           },
-          { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+          { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31,web-search-2025-03-05' } },
         ),
         MODEL,
         { module: 'blueprintRoutes' },
@@ -383,6 +383,12 @@ export function registerBlueprintRoutes(app) {
       } else if (/api key|authentication|unauthorized|invalid x-api-key/i.test(msg)) {
         status = 503;
         friendly = 'The AI service is not configured correctly (API key). Check ANTHROPIC_API_KEY.';
+      } else if (/overloaded/i.test(msg)) {
+        status = 503;
+        friendly = 'Anthropic is temporarily overloaded — wait a moment and try again.';
+      } else if (/beta|anthropic-beta|not.*enabled|must include/i.test(msg)) {
+        status = 503;
+        friendly = 'Blueprint API feature flag error — a required beta header is missing. Check the server deployment.';
       }
       res.status(status).json({ error: friendly });
     }

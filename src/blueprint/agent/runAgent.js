@@ -159,7 +159,7 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
           ? [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }]
           : undefined,
       },
-      { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+      { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31,web-search-2025-03-05' } },
     );
 
     lastResponse = response;
