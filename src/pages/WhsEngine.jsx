@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { apiFetch, apiPut, apiPost } from "../lib/apiFetch.js";
+import FactField from "../components/FactField.jsx";
 
 const isYes = (v) => v === "yes" || v === true || v === "true";
 
@@ -23,6 +24,8 @@ export default function WhsEngine() {
   const [answers, setAnswers] = useState({});
   const [profile, setProfile] = useState(null);
   const [prefillKeys, setPrefillKeys] = useState([]);
+  const [jobId, setJobId] = useState(null);
+  const [m0Facts, setM0Facts] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [open, setOpen] = useState({});
   const [loading, setLoading] = useState(true);
@@ -37,23 +40,29 @@ export default function WhsEngine() {
     if (ok) setDocuments(data.documents || []);
   }
 
+  // Load (or reload) the WHS profile + Module-0 canonical construction facts.
+  const loadProfile = useCallback(async () => {
+    const { ok, data } = await apiFetch(`/api/whs/projects/${projectId}/profile`);
+    if (!ok) return;
+    setQuestionnaire(data.questionnaire || []);
+    const savedAnswers = data.profile?.answers || {};
+    const prefill = data.prefill || {};
+    // Prefill fills any key that has no saved value — saved answers always win
+    const blended = { ...prefill, ...savedAnswers };
+    // Track which keys were actually applied from prefill (not overridden)
+    const applied = Object.keys(prefill).filter((k) => !savedAnswers[k] && prefill[k]);
+    setPrefillKeys(applied);
+    if (data.profile) setProfile(data.profile);
+    setAnswers(blended);
+    setJobId(data.jobId || null);
+    setM0Facts(data.m0ConstructionFacts || []);
+  }, [projectId]);
+
   useEffect(() => {
     let stop = false;
     (async () => {
-      const { ok, data } = await apiFetch(`/api/whs/projects/${projectId}/profile`);
+      await loadProfile();
       if (stop) return;
-      if (ok) {
-        setQuestionnaire(data.questionnaire || []);
-        const savedAnswers = data.profile?.answers || {};
-        const prefill = data.prefill || {};
-        // Prefill fills any key that has no saved value — saved answers always win
-        const blended = { ...prefill, ...savedAnswers };
-        // Track which keys were actually applied from prefill (not overridden)
-        const applied = Object.keys(prefill).filter((k) => !savedAnswers[k] && prefill[k]);
-        setPrefillKeys(applied);
-        if (data.profile) setProfile(data.profile);
-        setAnswers(blended);
-      }
       await loadDocuments();
       if (!stop) setLoading(false);
     })();
@@ -62,6 +71,14 @@ export default function WhsEngine() {
   }, [projectId]);
 
   const setAnswer = (key, val) => setAnswers((a) => ({ ...a, [key]: val }));
+
+  // A construction fact was confirmed/overridden/dismissed via <FactField>. Reload the
+  // profile so the canonical value + provenance refresh from the facts service.
+  async function onFactChange({ action } = {}) {
+    if (action === "dismiss") return; // no canonical change — leave as-is
+    await loadProfile();
+    setMsg({ kind: "ok", text: "Construction fact updated and re-read from the project record." });
+  }
 
   const moduleVisible = (m) =>
     !m.appliesWhen || (m.appliesWhen.anyOf || []).some((k) => isYes(answers[k]));
@@ -235,6 +252,30 @@ export default function WhsEngine() {
               {isOpen && (
                 <div className="px-4 pb-4 space-y-4 border-t border-hairline pt-3">
                   {m.note && <p className="text-xs text-muted">{m.note}</p>}
+                  {m.id === "m0" && jobId && m0Facts.length > 0 && (
+                    <div className="rounded-card border border-hairline bg-page p-3">
+                      <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+                        Canonical construction facts
+                      </p>
+                      <p className="text-[11px] text-muted mb-3">
+                        Read from the project record with provenance. Confirm a flagged suggestion or override it —
+                        the change is stamped to the job&apos;s fact history.
+                      </p>
+                      <div className="space-y-2">
+                        {m0Facts.map((f) => (
+                          <FactField
+                            key={f.factKey}
+                            jobId={jobId}
+                            fieldKey={f.factKey}
+                            label={f.label}
+                            value={f.rawValue}
+                            provenance={f.provenance}
+                            onChange={onFactChange}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {m.questions.map((q) => (
                     <div key={q.key}>
                       <label className="block text-sm text-ink mb-1">{q.label}</label>

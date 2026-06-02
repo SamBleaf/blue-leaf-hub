@@ -7,6 +7,7 @@ import path from "node:path";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "../apiResponse.mjs";
 import { requireAuth } from "../requireAuth.mjs";
 import { getServiceSupabase } from "../supabaseService.mjs";
+import { getJobProfile } from "../factsService.mjs";
 import { WHS_QUESTIONNAIRE, PROMOTED_FIELDS } from "./whsQuestionnaire.mjs";
 import { deriveOutputs } from "./whsRiskRules.mjs";
 import { buildMergeContext } from "./whsMergeFields.mjs";
@@ -68,6 +69,65 @@ function coerceBool(v) {
   if (v === true || v === "yes" || v === "true") return true;
   if (v === false || v === "no" || v === "false") return false;
   return null;
+}
+
+// ── Module-0 facts-service bridge (Phase-0 first proof) ──
+// Maps each Module-0 construction question to the canonical fact it reads, plus how the raw
+// fact value is mapped into the questionnaire answer. This is the read-via-getJobProfile path —
+// the values are identical to the existing direct-from-project_metrics prefill, but now they
+// carry provenance and can be Confirmed/Overridden through the facts service via <FactField>.
+const M0_FACT_BRIDGE = [
+  { questionKey: "m0_project_type", factKey: "project_type", map: mapProjectType },
+  { questionKey: "m0_storeys", factKey: "storeys", map: mapStoreys },
+  { questionKey: "m0_frame_type", factKey: "frame_type", map: mapFrameType },
+  { questionKey: "m0_retaining_walls", factKey: "has_retaining_walls", map: metricBool },
+  { questionKey: "m0_basement", factKey: "has_basement", map: metricBool },
+  { questionKey: "m0_suspended_slab", factKey: "has_suspended_slab", map: metricBool },
+  { questionKey: "m0_structural_steel", factKey: "has_structural_steel", map: metricBool },
+  { questionKey: "m0_demolition_scope", factKey: "has_demolition", map: metricBool },
+  { questionKey: "m0_steep_site", factKey: "site_slope", map: mapSteepSite },
+  { questionKey: "m0_bushfire_zone", factKey: "bal_rating", map: (v) => (v ? "yes" : "") },
+  { questionKey: "m0_pre_1990", factKey: "building_age", map: (v) => (v && Number(v) < 1990 ? "yes" : "") },
+];
+
+// Flatten a getJobProfile() payload to a { factKey: { value, provenance, tier } } lookup.
+function indexProfileFacts(profile) {
+  const byKey = {};
+  for (const fam of Object.values(profile?.families || {})) {
+    for (const f of fam) byKey[f.key] = f;
+  }
+  return byKey;
+}
+
+// Build the Module-0 construction facts, read THROUGH the facts service (getJobProfile),
+// each carrying provenance + the mapped questionnaire answer. Additive: the legacy `prefill`
+// is unchanged; this is the new, canonical read path the UI renders as <FactField>s.
+function buildM0ConstructionFacts(profile) {
+  if (!profile) return [];
+  const byKey = indexProfileFacts(profile);
+  const out = [];
+  for (const { questionKey, factKey, map } of M0_FACT_BRIDGE) {
+    const fact = byKey[factKey];
+    if (!fact) continue;
+    out.push({
+      questionKey,
+      factKey,
+      label: fact.label,
+      tier: fact.tier,
+      rawValue: fact.value ?? null,
+      answerValue: map(fact.value),
+      provenance: fact.provenance
+        ? {
+            source: fact.provenance.source ?? null,
+            confidence: fact.provenance.confidence ?? null,
+            status: fact.provenance.status ?? null,
+            sourceDocumentId: fact.provenance.source_document_id ?? null,
+            changedAt: fact.provenance.changed_at ?? null,
+          }
+        : null,
+    });
+  }
+  return out;
 }
 
 // Build the row patch: promoted answers -> columns, full set -> answers jsonb, derived -> columns.
@@ -167,7 +227,27 @@ export function registerWhsEngineRoutes(app) {
         m0_bushfire_zone: metrics?.bal_rating ? "yes" : "",
         m0_pre_1990: (metrics?.building_age && metrics.building_age < 1990) ? "yes" : "",
       };
-      return ok(res, { profile: profile ? rowToCamel(profile) : null, prefill, questionnaire: WHS_QUESTIONNAIRE });
+
+      // Phase-0 first proof: surface the Module-0 construction facts THROUGH the facts service
+      // (getJobProfile) so each one carries provenance and is Confirm/Override-able via <FactField>.
+      // Additive — the legacy `prefill` above is unchanged and still drives the questionnaire.
+      let m0ConstructionFacts = [];
+      if (project.job_id) {
+        try {
+          const jobProfile = await getJobProfile(project.job_id);
+          m0ConstructionFacts = buildM0ConstructionFacts(jobProfile);
+        } catch (e) {
+          console.warn("[whs/m0-facts]", e?.message);
+        }
+      }
+
+      return ok(res, {
+        profile: profile ? rowToCamel(profile) : null,
+        prefill,
+        questionnaire: WHS_QUESTIONNAIRE,
+        jobId: project.job_id || null,
+        m0ConstructionFacts,
+      });
     } catch (e) {
       return err(res, 500, e?.message || "Failed to load WHS profile");
     }

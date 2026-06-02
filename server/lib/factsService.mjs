@@ -232,6 +232,55 @@ export async function getJobProfile(jobId) {
   return profile;
 }
 
+/**
+ * List the pending (unconfirmed) suggestions for a job: the latest job_fact_history
+ * row per fact_key whose status is 'extracted_flagged', BUT only where that flagged
+ * row is the most-recent row for the key (i.e. not already superseded by a later
+ * 'confirmed' / 'manual' / 'extracted_applied' write). Feeds the Confirm queue (Phase 3)
+ * and the 🔴 suggestions rendered by <FactField>.
+ */
+export async function getPendingFacts(jobId) {
+  const sb = getServiceSupabase();
+  if (!sb) return [];
+  const { data: history, error } = await sb.from("job_fact_history")
+    .select("fact_key, new_value, value_type, source, source_document_id, confidence, status, reason, changed_by, changed_at")
+    .eq("job_id", jobId)
+    .order("changed_at", { ascending: false });
+  if (error) throw error;
+
+  const pending = [];
+  const seen = new Set();
+  for (const row of history || []) {
+    if (seen.has(row.fact_key)) continue; // only consider the latest row per key
+    seen.add(row.fact_key);
+    if (row.status !== "extracted_flagged") continue; // latest is applied/confirmed → not pending
+    const def = getFactDef(row.fact_key);
+    if (!def) continue;
+    let value = row.new_value;
+    if (row.value_type === "number") value = Number(value);
+    else if (row.value_type === "boolean") value = value === "true";
+    else if (row.value_type === "json") { try { value = JSON.parse(value); } catch { /* keep raw */ } }
+    pending.push({
+      key: row.fact_key,
+      label: def.label,
+      family: def.family,
+      type: def.type,
+      tier: def.tier,
+      value,
+      provenance: {
+        source: row.source,
+        sourceDocumentId: row.source_document_id,
+        confidence: row.confidence,
+        status: row.status,
+        changedBy: row.changed_by,
+        changedAt: row.changed_at,
+        reason: row.reason,
+      },
+    });
+  }
+  return pending;
+}
+
 // Lead/Party profiles — minimal v1 (core rows). Expand as those spines migrate.
 export async function getLeadProfile(leadId) {
   const sb = getServiceSupabase();

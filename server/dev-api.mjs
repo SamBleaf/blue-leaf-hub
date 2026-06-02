@@ -56,6 +56,7 @@ import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligence
 import { registerCrmRoutes } from "./lib/crmRoutes.mjs";
 import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
+import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 
@@ -791,6 +792,7 @@ registerMarketingIntelligenceRoutes(app);
 registerCrmRoutes(app);
 registerWhsEngineRoutes(app);
 registerCarpentryRoutes(app);
+registerFactsRoutes(app);
 
 app.get("/api/health",(_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
