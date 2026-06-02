@@ -43,7 +43,9 @@ const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
  * @returns flat map of merge-field key -> string | string[]
  */
 export function buildMergeContext({ project = {}, job = {}, profile = {}, documentMeta = {} } = {}) {
-  const supervisor = profile.site_supervisor_name || project.supervisor || "";
+  // site_supervisor_name has no dedicated column — check answers JSONB first,
+  // then fall back to project.supervisor set from the project record.
+  const supervisor = profile.answers?.site_supervisor_name || profile.site_supervisor_name || project.supervisor || "";
   const ctx = {
     ...COMPANY,
 
@@ -66,7 +68,7 @@ export function buildMergeContext({ project = {}, job = {}, profile = {}, docume
     principal_contractor: str(profile.principal_contractor || COMPANY.company_name),
     pcbu_name: str(profile.pcbu_name || COMPANY.company_name),
     site_supervisor_name: str(supervisor),
-    site_supervisor_phone: str(profile.site_supervisor_phone || ""),
+    site_supervisor_phone: str(profile.answers?.site_supervisor_phone || profile.site_supervisor_phone || ""),
     site_supervisor_email: str(profile.site_supervisor_email || ""),
 
     // ── Site setup (profile) ──

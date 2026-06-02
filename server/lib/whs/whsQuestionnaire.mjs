@@ -56,6 +56,8 @@ export const WHS_QUESTIONNAIRE = [
     title: "Project Verification",
     note: "Confirm imported project data. Prefilled from the job — change only if wrong.",
     questions: [
+      { key: "site_supervisor_name", label: "Site supervisor name", type: TEXT },
+      { key: "site_supervisor_phone", label: "Site supervisor phone", type: TEXT },
       { key: "m1_confirmed", label: "Project details confirmed correct", type: YESNO },
     ],
   },
@@ -78,6 +80,7 @@ export const WHS_QUESTIONNAIRE = [
       { key: "spill_kit_location", label: "Spill kit location", type: TEXT },
       { key: "assembly_point", label: "Emergency assembly point", type: TEXT },
       { key: "site_qr_induction_url", label: "Site induction QR URL", type: TEXT },
+      { key: "site_rules", label: "Site rules", type: LIST },
     ],
   },
   {

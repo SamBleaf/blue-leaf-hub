@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import { apiFetch, apiPut, apiPost } from "../lib/apiFetch.js";
 
 const isYes = (v) => v === "yes" || v === true || v === "true";
@@ -28,6 +29,7 @@ export default function WhsEngine() {
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [viewDoc, setViewDoc] = useState(null); // document being previewed in modal
   const [msg, setMsg] = useState(null);
 
   async function loadDocuments() {
@@ -173,6 +175,27 @@ export default function WhsEngine() {
 
   if (loading) return <div className="p-6 text-sm text-muted">Loading WHS setup…</div>;
 
+  // ── Document preview modal ──
+  if (viewDoc) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 flex flex-col">
+        <div className="bg-white flex items-center justify-between px-4 py-3 border-b border-hairline shrink-0">
+          <h2 className="text-sm font-semibold text-ink">{viewDoc.documentTitle}</h2>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted">v{viewDoc.profileVersion} · {viewDoc.status?.replace(/_/g, " ")}</span>
+            <button type="button" onClick={() => setViewDoc(null)}
+              className="text-sm text-primary hover:underline">✕ Close</button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-white px-6 py-6 max-w-4xl w-full mx-auto">
+          <div className="prose prose-sm max-w-none">
+            <ReactMarkdown>{viewDoc.renderedMarkdown || "_No content generated._"}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 pb-28">
       <div className="flex items-center justify-between mb-1">
@@ -253,10 +276,15 @@ export default function WhsEngine() {
           <ul className="divide-y divide-hairline">
             {documents.map((d) => (
               <li key={d.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-ink">{d.documentTitle}</span>
+                <button type="button" onClick={() => setViewDoc(d)}
+                  className="text-primary hover:underline text-left">
+                  {d.documentTitle}
+                </button>
                 <span className="flex items-center gap-2">
                   {d.isStale && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Stale</span>}
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-muted capitalize">{d.status?.replace(/_/g, " ")}</span>
+                  <button type="button" onClick={() => setViewDoc(d)}
+                    className="text-xs text-primary hover:underline">View</button>
                 </span>
               </li>
             ))}

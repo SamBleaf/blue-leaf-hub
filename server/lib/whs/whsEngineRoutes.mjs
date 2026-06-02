@@ -125,7 +125,7 @@ export function registerWhsEngineRoutes(app) {
         project_address: project.address || "",
         client_name: project.client_name || project.portal_client_name || job?.client_name || "",
         project_type: job?.project_type || project.project_type || "",
-        site_supervisor_name: project.supervisor || "",
+        site_supervisor_name: project.supervisor || job?.supervisor || "",
         principal_contractor: "Blue Leaf Building",
         m0_project_type: mapProjectType(job?.project_type || project.project_type),
         m0_storeys: mapStoreys(job?.storeys ?? project.storeys),
