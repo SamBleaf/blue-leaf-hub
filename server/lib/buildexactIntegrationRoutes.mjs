@@ -75,8 +75,9 @@ export function registerBuildexactIntegrationRoutes(app) {
         console.warn("[buildexact/pull] job metadata skipped:", err?.message || err);
       }
       const pulled = await pullBuildexactEstimate(buildexactJobId, {
-        address: jobMeta?.Address || jobMeta?.address || jobMeta?.Name || jobMeta?.name || "",
-        clientName: jobMeta?.ClientName || jobMeta?.clientName || jobMeta?.CustomerName || jobMeta?.customerName || ""
+        // JobDto (v3) fields are camelCase: worksLocationAddress / clientAddress / clientName.
+        address: jobMeta?.worksLocationAddress || jobMeta?.clientAddress || jobMeta?.address || "",
+        clientName: jobMeta?.clientName || ""
       });
 
       const { data: job } = await sb.from("jobs").select("id,address").eq("buildexact_job_id", buildexactJobId).maybeSingle();

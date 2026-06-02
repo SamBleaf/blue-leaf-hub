@@ -281,59 +281,115 @@ export async function beFetch(path, { method = "GET", body, query } = {}) {
   return json;
 }
 
+// ─── OData response helpers (v3 collections may be a bare array or { value: [...] }) ──────
+export function beList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.value)) return res.value;
+  return [];
+}
+export function beFirst(res) {
+  return beList(res)[0] || null;
+}
+
+// ─── Jobs (server prefix: /jobs) ──────────────────────────────────────────────────────
+// JobDto has no "Name" field — filter on clientName when a term is given. OData property names
+// follow the JSON DTOs (camelCase); GUID equality is unquoted. Verify casing live (Test Connection).
 export async function getJobs(searchTerm) {
   const q = searchTerm
-    ? { $filter: `contains(Name,'${String(searchTerm).replace(/'/g, "''")}')` }
+    ? { $filter: `contains(clientName,'${String(searchTerm).replace(/'/g, "''")}')` }
     : {};
   return beFetch("/jobs", { query: q });
 }
 
+// No bare GET /jobs/{id} exists in v3 — resolve a single job via the OData collection.
 export async function getJobById(id) {
-  return beFetch(`/jobs/${encodeURIComponent(id)}`);
+  return beFirst(await beFetch("/jobs", { query: { $filter: `jobId eq ${id}` } }));
 }
 
-export async function createPurchaseOrder(jobId, poData) {
-  return beFetch(`/jobs/${encodeURIComponent(jobId)}/purchase_orders`, {
-    method: "POST",
-    body: poData
-  });
+export async function getJobItems(jobId) {            // actuals/committed costs (JobItemDto)
+  return beFetch(`/jobs/${encodeURIComponent(jobId)}/items`);
 }
-
+export async function getJobVariations(jobId) {
+  return beFetch(`/jobs/${encodeURIComponent(jobId)}/variations`);
+}
+export async function getJobInvoices(jobId) {
+  return beFetch(`/jobs/${encodeURIComponent(jobId)}/invoices`);
+}
 export async function getPurchaseOrders(jobId) {
-  return beFetch(`/jobs/${encodeURIComponent(jobId)}/purchase_orders`);
+  return beFetch(`/jobs/${encodeURIComponent(jobId)}/purchaseorders`);
 }
 
-export async function syncQuotesToJob(buildexactJobId, acceptedTrades) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/costs/sync`, {
-    method: "POST",
-    body: { accepted_trades: acceptedTrades }
-  });
+// POST /jobs/purchaseorders/create — PurchaseOrderCreateOptionsDto (jobId is IN THE BODY).
+// options: { jobId, orderType:'Purchase'|'Work', contactId?, description?, requiredByDate?,
+//   items:[{ costItemType:'Material'|'Labour'|'SubContractor'|'Equipment'|'MatLab', description,
+//            quantity, unitCost, totalCost, uom, itemCode?, notes? }] }
+export async function createPurchaseOrder(options) {
+  return beFetch("/jobs/purchaseorders/create", { method: "POST", body: options });
 }
 
-export async function getJobEstimateItems(buildexactJobId) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimateitems`);
+// POST /jobs/create — JobCreateOptionsDto.
+export async function createJob(options) {
+  return beFetch("/jobs/create", { method: "POST", body: options });
 }
 
-export async function getJobEstimates(buildexactJobId) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates`);
+// ─── Estimates (server prefix: /estimates) ──────────────────────────────────────────────
+export async function getEstimatesByJob(jobId) {
+  return beList(await beFetch("/estimates", { query: { $filter: `jobId eq ${jobId}` } }));
+}
+export async function getEstimateItems(estimateId) {  // EstimateItemDto (costCategory, unitCost, total…)
+  return beFetch(`/estimates/${encodeURIComponent(estimateId)}/items`);
 }
 
-export async function updateEstimateItem(buildexactJobId, itemId, updates) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimateitems/${encodeURIComponent(itemId)}`, {
-    method: "PATCH",
-    body: updates
-  });
+// ─── Clients / Customers (server prefix: /clients) ──────────────────────────────────────
+export async function getCustomers() {
+  return beFetch("/clients");
+}
+export async function createCustomer(options) {       // CreateCustomerOptionsDto { name, email, ... }
+  return beFetch("/clients", { method: "POST", body: options });
+}
+export async function getCustomerContacts(customerId) {
+  return beFetch(`/clients/${encodeURIComponent(customerId)}/contacts`);
+}
+export async function createCustomerContact(customerId, options) {  // { firstName, lastName, email?, ... }
+  return beFetch(`/clients/${encodeURIComponent(customerId)}/contacts`, { method: "POST", body: options });
 }
 
-export async function acceptEstimate(buildexactJobId, estimateId) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates/${encodeURIComponent(estimateId)}/accept`, {
-    method: "POST"
-  });
+// ─── Contacts: suppliers / subcontractors (server prefix: /contacts) ────────────────────
+export async function getContacts() {
+  return beFetch("/contacts");
+}
+export async function createContact(options) {        // CreateContactOptionsDto { contactType, name, ... }
+  return beFetch("/contacts", { method: "POST", body: options });
 }
 
-export async function updateEstimateStatus(buildexactJobId, estimateId, status) {
-  return beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/estimates/${encodeURIComponent(estimateId)}`, {
-    method: "PATCH",
-    body: { status }
-  });
+// ─── Leads (server prefix: /leads) ──────────────────────────────────────────────────────
+export async function getLeads() {
+  return beFetch("/leads");
+}
+export async function createLead(options) {           // CreateLeadOptionsDto { clientName, customerId, customerContactId, ... }
+  return beFetch("/leads", { method: "POST", body: options });
+}
+export async function updateLead(options) {           // PUT /leads — OverwriteLeadOptionsDto (id in body; overwrite)
+  return beFetch("/leads", { method: "PUT", body: options });
+}
+
+// ─── Catalogues: recipe / price-book (server prefix: /catalogues) ───────────────────────
+export async function getCatalogues() {
+  return beFetch("/catalogues");
+}
+export async function getCatalogueItems(catalogueId) {
+  return beFetch(`/catalogues/${encodeURIComponent(catalogueId)}/items`);
+}
+export async function searchCatalogueItems({ text, catalogueIds, categoryIds, top = 50, skip = 0 } = {}) {
+  return beFetch("/catalogues/items/search", { query: { text, catalogueIds, categoryIds, top, skip } });
+}
+
+// ─── Documents (server prefix: /metadata/storage) ───────────────────────────────────────
+export async function listDocuments(reference) {
+  return beFetch("/metadata/storage/documents/list", { query: { reference } });
+}
+
+// ─── Schedules (server prefix: /metadata) — referenceType: 'Job' | 'Estimate' ──────────
+export async function getSchedule(referenceType, referenceId) {
+  return beFetch(`/metadata/schedules/${encodeURIComponent(referenceType)}/${encodeURIComponent(referenceId)}`);
 }

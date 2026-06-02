@@ -629,13 +629,23 @@ export function registerModule4Routes(app) {
       let buildexact_po_id = null;
       if (buildexactJobId && buildexactConfigured()) {
         try {
-          const remote = await createPurchaseOrder(buildexactJobId, {
-            reference: poNumber,
-            title: trade,
-            total_ex_tax: subtotal
+          // POST /jobs/purchaseorders/create — PurchaseOrderCreateOptionsDto (jobId in body).
+          const remote = await createPurchaseOrder({
+            jobId: buildexactJobId,
+            orderType: "Purchase",
+            description: trade,
+            items: [{
+              costItemType: "SubContractor",
+              description: trade,
+              quantity: 1,
+              unitCost: subtotal,
+              totalCost: subtotal,
+              uom: "ea"
+            }]
           });
           buildexact_po_id =
-            remote?.id != null ? String(remote.id) : remote?.Id != null ? String(remote.Id) : null;
+            remote?.purchaseOrderId != null ? String(remote.purchaseOrderId)
+              : remote?.id != null ? String(remote.id) : null;
         } catch (e) {
           console.warn("[po/issue] Buildexact sync skipped:", e?.message);
         }
