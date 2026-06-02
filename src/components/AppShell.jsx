@@ -74,6 +74,12 @@ const ICONS = {
       <path d="M16 7l-1.5-1.5 2-2L18 5l.5-1.5L21 2l1 1-1.5 2.5L19 6l-2 2z" />
     </svg>
   ),
+  review: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M15 18l-6-6 6-6" />
@@ -214,6 +220,7 @@ export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unmatchedQuoteCount, setUnmatchedQuoteCount] = useState(0);
   const [unmatchedDocCount, setUnmatchedDocCount] = useState(0);
+  const [pendingFactCount, setPendingFactCount] = useState(0);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // Touch swipe refs
@@ -270,6 +277,21 @@ export default function AppShell() {
         if (stop || !res.ok || !j?.ok) { setUnmatchedDocCount(0); return; }
         setUnmatchedDocCount(j.count ?? 0);
       } catch { if (!stop) setUnmatchedDocCount(0); }
+    }
+    refresh();
+    const id = setInterval(refresh, 60_000);
+    return () => { stop = true; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+    async function refresh() {
+      try {
+        const res = await authFetch("/api/facts/pending");
+        const j = await res.json().catch(() => null);
+        if (stop || !res.ok || !j?.ok || !Array.isArray(j.pending)) { setPendingFactCount(0); return; }
+        setPendingFactCount(j.pending.length);
+      } catch { if (!stop) setPendingFactCount(0); }
     }
     refresh();
     const id = setInterval(refresh, 60_000);
@@ -344,6 +366,36 @@ export default function AppShell() {
                     {ICONS.home}
                   </span>
                   {showFull && <span className="text-[13px] font-semibold">Home</span>}
+                </>
+              )}
+            </NavLink>
+          ) : null}
+
+          {can.accessHome(role) ? (
+            <NavLink
+              to="/confirm-queue"
+              title={!showFull ? "Confirm Queue" : undefined}
+              className={({ isActive }) =>
+                `group relative flex w-full items-center transition ${
+                  showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"
+                } ${isActive ? "text-white" : "text-white/60 hover:text-white"}`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r bg-accent" />}
+                  <span className={`relative shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition ${isActive ? "bg-white/15 text-white" : "group-hover:bg-white/10 text-white/70"}`}>
+                    {ICONS.review}
+                    {!showFull && pendingFactCount > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500" />
+                    )}
+                  </span>
+                  {showFull && <span className="flex-1 text-[13px] font-semibold">Confirm Queue</span>}
+                  {showFull && pendingFactCount > 0 && (
+                    <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
+                      {pendingFactCount}
+                    </span>
+                  )}
                 </>
               )}
             </NavLink>

@@ -48,6 +48,7 @@ import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
 import CarpentryDashboard from "./pages/CarpentryDashboard.jsx";
 import CarpentryJobDetail from "./pages/CarpentryJobDetail.jsx";
+import ConfirmQueue from "./pages/ConfirmQueue.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
 
@@ -193,6 +194,11 @@ export default function App() {
                 <Route
                   path="/carpentry/:jobId"
                   element={<RoleRoute element={<CarpentryJobDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+
+                <Route
+                  path="/confirm-queue"
+                  element={<RoleRoute element={<ConfirmQueue />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route path="/rfq-engine" element={<Navigate to="/tender-manager/rfq-engine" replace />} />

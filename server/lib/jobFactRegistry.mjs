@@ -26,6 +26,12 @@ export const FACT_REGISTRY = [
     store: { table: "jobs", column: "address" }, sourceDocs: ["contract"], consumers: ["all"] },
   { key: "address_suburb", label: "Suburb", family: "identity", spine: "job", type: "versioned", tier: "internal",
     store: { table: "jobs", column: "address_suburb" }, consumers: ["marketing", "lookup"] },
+  { key: "address_normalised", label: "Normalised address (match key)", family: "identity", spine: "job", type: "versioned", tier: "internal",
+    store: { table: "jobs", column: "address_normalised" }, consumers: ["lookup", "buildexact", "dedup"] },
+  { key: "address_postcode", label: "Postcode", family: "identity", spine: "job", type: "versioned", tier: "internal",
+    store: { table: "jobs", column: "address_postcode" }, consumers: ["marketing", "lookup"] },
+  { key: "address_state", label: "State", family: "identity", spine: "job", type: "versioned", tier: "internal",
+    store: { table: "jobs", column: "address_state" }, consumers: ["marketing", "lookup"] },
   { key: "client_name", label: "Client name", family: "identity", spine: "job", type: "versioned", tier: "consequential",
     store: { table: "jobs", column: "client_name" }, consumers: ["finance", "portal", "marketing"] },
   { key: "project_type", label: "Project type", family: "identity", spine: "job", type: "versioned", tier: "consequential",
@@ -73,8 +79,48 @@ export const FACT_REGISTRY = [
     store: { table: "project_metrics", column: "energy_rating" }, sourceDocs: ["energy_report"], consumers: ["compliance"] },
   { key: "building_height_m", label: "Building height (m)", family: "facts", spine: "job", type: "static", tier: "consequential",
     store: { table: "project_metrics", column: "building_height_m" }, sourceDocs: ["architectural"], consumers: ["whs", "compliance"] },
+  // Foundation type drives WHS controls (excavation/formwork) + cost — 🔴 (§26 frame/slab family).
+  // Column added by mig 069 (project_metrics.foundation_type).
+  { key: "foundation_type", label: "Foundation type", family: "facts", spine: "job", type: "static", tier: "consequential",
+    store: { table: "project_metrics", column: "foundation_type" }, sourceDocs: ["structural", "geotech"], consumers: ["whs", "cost"] },
+  // Planning/compliance overlays — wrong value → non-compliant build/WHS gaps. §26 lists
+  // "bushfire/flood overlay" as 🔴. Columns added by mig 069 (project_metrics.{bushfire,flood,heritage}_overlay).
+  { key: "bushfire_overlay", label: "Bushfire overlay", family: "facts", spine: "job", type: "static", tier: "consequential",
+    store: { table: "project_metrics", column: "bushfire_overlay" }, sourceDocs: ["bal_report", "planning"], consumers: ["whs", "compliance", "rfq"] },
+  { key: "flood_overlay", label: "Flood overlay", family: "facts", spine: "job", type: "static", tier: "consequential",
+    store: { table: "project_metrics", column: "flood_overlay" }, sourceDocs: ["planning", "survey"], consumers: ["whs", "compliance"] },
+  { key: "heritage_overlay", label: "Heritage overlay", family: "facts", spine: "job", type: "static", tier: "consequential",
+    store: { table: "project_metrics", column: "heritage_overlay" }, sourceDocs: ["planning"], consumers: ["compliance"] },
+  // Internal area / count metrics extracted from plans (Phase 4). Pure cost-estimation
+  // inputs — none drive WHS/compliance/money, so tier 'internal' (auto-apply at >=0.90).
+  // Columns all exist on project_metrics (mig 032). Registered so the plan-extraction
+  // writer can route them through setFact with provenance.
+  { key: "garage_area_m2", label: "Garage area (m²)", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "garage_area_m2" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "alfresco_area_m2", label: "Alfresco area (m²)", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "alfresco_area_m2" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "deck_area_m2", label: "Deck area (m²)", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "deck_area_m2" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "wall_area_m2", label: "Wall area (m²)", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "wall_area_m2" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "wet_areas", label: "Wet areas (count)", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "wet_areas" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "number_of_windows", label: "Number of windows", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "number_of_windows" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "number_of_doors", label: "Number of doors", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "number_of_doors" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
+  { key: "has_raked_ceilings", label: "Raked ceilings", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "has_raked_ceilings" }, sourceDocs: ["architectural"], consumers: ["cost"] },
+  { key: "has_skillion_roof", label: "Skillion roof", family: "facts", spine: "job", type: "static", tier: "internal",
+    store: { table: "project_metrics", column: "has_skillion_roof" }, sourceDocs: ["architectural"], consumers: ["cost", "rfq"] },
 
   // ── Metrics (job spine) ─────────────────────────────────────────────────────
+  // Deal-value estimate carried from the lead at conversion (Phase 2). Internal tier:
+  // it's a sales/forecasting figure, NOT the contract money. The consequential money
+  // facts are original_contract_value / contract_value (set at WIN by Phase 5) — keep
+  // estimated_value separate so the carry never touches them.
+  { key: "estimated_value", label: "Estimated value (lead)", family: "metrics", spine: "job", type: "versioned", tier: "internal",
+    store: { table: "jobs", column: "estimated_value" }, consumers: ["sales", "pipeline", "reporting"] },
   { key: "original_contract_value", label: "Original contract value", family: "metrics", spine: "job", type: "static", tier: "consequential",
     store: { table: "jobs", column: "original_contract_value" }, sourceDocs: ["contract"], consumers: ["finance", "margin"] },
   { key: "contract_value", label: "Contract value", family: "metrics", spine: "job", type: "generated", tier: "consequential",

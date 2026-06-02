@@ -4,6 +4,7 @@
 // These are the four endpoints that back <FactField> and (later) the Confirm queue.
 // All auth-guarded, all ok()/err(), camelCase across the boundary.
 //
+//   GET  /api/facts/pending                    → getAllPendingFacts (🔴 suggestions across ALL jobs — Confirm Queue)
 //   GET  /api/facts/job/:jobId/profile        → getJobProfile  (read every job-spine fact + provenance)
 //   GET  /api/facts/job/:jobId/pending         → getPendingFacts (🔴 suggestions awaiting confirmation)
 //   POST /api/facts/job/:jobId/:key            → setFact   (manual write / override)
@@ -11,9 +12,22 @@
 
 import { ok, err } from "./apiResponse.mjs";
 import { requireAuth } from "./requireAuth.mjs";
-import { getJobProfile, getPendingFacts, setFact, confirmFact } from "./factsService.mjs";
+import { getJobProfile, getPendingFacts, getAllPendingFacts, setFact, confirmFact } from "./factsService.mjs";
 
 export function registerFactsRoutes(app) {
+  // ── Portfolio-wide pending suggestions (Phase 3 Confirm Queue) ──
+  // Every 🔴 extracted_flagged fact awaiting confirmation across all jobs, each
+  // enriched with jobId + a human job label. Optional ?jobId= narrows to one job.
+  app.get("/api/facts/pending", requireAuth, async (req, res) => {
+    const jobId = req.query.jobId ? String(req.query.jobId) : null;
+    try {
+      const pending = await getAllPendingFacts({ jobId });
+      return ok(res, { pending });
+    } catch (e) {
+      return err(res, 500, e?.message || "Failed to load pending facts");
+    }
+  });
+
   // ── Read the full job profile (every job-spine fact, grouped by family, with provenance) ──
   app.get("/api/facts/job/:jobId/profile", requireAuth, async (req, res) => {
     const jobId = String(req.params.jobId);

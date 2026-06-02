@@ -9,6 +9,9 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { normaliseAddress } from "./addressNormalise.mjs";
+import { setFact } from "./factsService.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -392,6 +395,126 @@ export function registerSalesRoutes(app) {
     const { data, error } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
     res.json({ ok: true, lead: data });
+  });
+
+  // ── Lead → Job conversion (Phase 2: non-lossy, server-side, provenance-stamped) ──
+  // Replaces the old client-side column copy in LeadDetail.jsx createJobFromLead().
+  // Creates the job (mirroring POST /api/jobs — same dedup + inline address
+  // normalisation, NO Dropbox side-effects since that path has none) and then stamps
+  // each carried lead fact via setFact(... source:'system', reason:'lead_conversion')
+  // so job_fact_history records the value came from the lead (Canonical Data Law:
+  // facts stamp forward, never re-typed). DOES NOT write original_contract_value —
+  // that is set at WIN by Phase 5. Returns the new job in camelCase.
+  app.post("/api/sales/leads/:id/convert-to-job", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const leadId = String(req.params.id || "").trim();
+    if (!leadId) return err(res, 400, "Lead id required.");
+    const actorId = req.caller?.id || null;
+
+    try {
+      // 1. Load the lead.
+      const { data: lead, error: leadErr } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (leadErr) return err(res, 400, translateDbError(leadErr));
+      if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+      if (lead.job_id) {
+        // Already converted — return the existing job (idempotent).
+        const { data: existingJob } = await sb.from("jobs").select("*").eq("id", lead.job_id).maybeSingle();
+        if (existingJob) return ok(res, { job: rowToCamel(existingJob), alreadyConverted: true });
+      }
+
+      // 2. Resolve the canonical address + client name (mirror the old UI copy).
+      const clientName = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+      const rawAddress =
+        (lead.site_address && lead.site_address.trim()) ||
+        `${clientName || "Unnamed"}${lead.suburb ? ` — ${lead.suburb}` : ""}`.trim();
+      const addr = normaliseAddress(rawAddress);
+
+      // 3. Dedup exactly like POST /api/jobs: prefer the normalised key, then raw ilike.
+      let job = null;
+      if (addr.normalised) {
+        const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
+        job = data?.[0] || null;
+      }
+      if (!job) {
+        const { data } = await sb.from("jobs").select("*").ilike("address", rawAddress).limit(1);
+        job = data?.[0] || null;
+      }
+
+      // 4. Create the job if no match (same column shape + inline normalisation as POST /api/jobs).
+      if (!job) {
+        const { data: created, error: insErr } = await sb.from("jobs").insert({
+          address: rawAddress,
+          address_normalised: addr.normalised,
+          address_suburb: addr.suburb,
+          address_state: addr.state,
+          address_postcode: addr.postcode,
+          client_name: clientName || null,
+          client_email: lead.email?.trim() || null,
+          client_phone: lead.phone?.trim() || null,
+          project_type: lead.project_type || null,
+          lead_id: lead.id,
+          status: "tendering",
+        }).select().single();
+        if (insErr) return err(res, 400, translateDbError(insErr));
+        job = created;
+      }
+
+      // 5. Stamp each carried lead fact via the facts service (provenance = the lead).
+      //    The address fact's Phase-1 hook derives suburb/postcode/state — we never
+      //    write those ourselves. Skipped if the value is empty. setFact failures are
+      //    non-fatal (the job already exists) — logged so the conversion still returns.
+      const carry = [
+        ["address", rawAddress],
+        ["client_name", clientName || null],
+        ["client_email", lead.email?.trim() || null],
+        ["client_phone", lead.phone?.trim() || null],
+        ["project_type", lead.project_type || null],
+        ["architect_name", lead.architect_name?.trim() || null],
+        // Lead's deal-value estimate → job estimate fact. NOT original_contract_value
+        // (Phase 5 sets that at WIN from the accepted proposal).
+        ["estimated_value", lead.estimated_value != null ? Number(lead.estimated_value) : null],
+      ];
+      const stamped = [];
+      for (const [key, value] of carry) {
+        if (value === null || value === undefined || value === "") continue;
+        const r = await setFact(job.id, key, value, {
+          source: "system",
+          reason: "lead_conversion",
+          actorId,
+        });
+        if (r?.ok) stamped.push(key);
+        else console.warn(`[convert-to-job] setFact ${key}:`, r?.error);
+      }
+
+      // 6. Link the lead to the new job (so the UI/CRM read the job).
+      await sb.from("leads").update({ job_id: job.id, updated_at: new Date().toISOString() }).eq("id", lead.id);
+
+      // 7. Link the matching CRM contact to the job (by lead linkage, else by email).
+      try {
+        let contact = null;
+        const { data: byLead } = await sb.from("crm_contacts").select("id").eq("converted_lead_id", lead.id).limit(1);
+        contact = byLead?.[0] || null;
+        if (!contact && lead.email?.trim()) {
+          const { data: byEmail } = await sb.from("crm_contacts").select("id").ilike("email", lead.email.trim()).limit(1);
+          contact = byEmail?.[0] || null;
+        }
+        if (contact) {
+          await sb.from("crm_contacts")
+            .update({ linked_job_id: job.id, updated_at: new Date().toISOString() })
+            .eq("id", contact.id);
+        }
+      } catch (e) {
+        console.warn("[convert-to-job] crm link:", e?.message || e);
+      }
+
+      // 8. Re-read the job so the response reflects any applied fact writes.
+      const { data: fresh } = await sb.from("jobs").select("*").eq("id", job.id).maybeSingle();
+      return ok(res, { job: rowToCamel(fresh || job), stampedFacts: stamped });
+    } catch (e) {
+      console.error("[convert-to-job]", e);
+      return err(res, 500, "Failed to convert lead to job.");
+    }
   });
 
   app.post("/api/sales/leads/:id/activities", requireAuth, async (req, res) => {

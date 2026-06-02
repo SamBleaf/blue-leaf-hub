@@ -6,11 +6,41 @@ import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { setFact, emitEvent } from "./factsService.mjs";
+import { getFactDef } from "./jobFactRegistry.mjs";
 import {
   getBuildxactTemplateCatalog,
   pullJobEstimateForCostIntelligence,
   syncEstimateToCostIntelligence
 } from "./costIntelligenceEstimate.mjs";
+
+// Phase 4 — building facts the plan extractor produces that are REGISTERED canonical
+// facts (jobFactRegistry). Each extracted field whose key matches a registered fact is
+// routed through setFact() so it lands in project_metrics WITH provenance (source=document,
+// confidence, status) + a job_fact_history row + a job_events emission. Consequential facts
+// (storeys, frame_type, site_slope, has_suspended_slab, …) surface as flagged suggestions
+// needing confirmation; internal area/count metrics auto-apply at >=0.90. The legacy direct
+// project_metrics write is kept ALONGSIDE (additive) so the API response shape the frontend
+// reads (j.metrics) is unchanged — this routes the canonical provenance, it does NOT change
+// any extracted value. Extraction fields with no registered fact (e.g. garage/alfresco area
+// only if unregistered) simply skip the setFact path and rely on the legacy column write.
+async function stampExtractedFacts(jobId, fields, { sourceDocumentId, actorId } = {}) {
+  if (!jobId || !fields) return;
+  for (const [key, item] of Object.entries(fields)) {
+    if (!item || item.value == null) continue;
+    if (!getFactDef(key)) continue; // not a registered canonical fact — legacy column write only
+    // Claude returns confidence 0-100; setFact expects a 0-1 fraction.
+    const confidence = item.confidence != null ? Number(item.confidence) / 100 : null;
+    const r = await setFact(jobId, key, item.value, {
+      source: "extraction",
+      confidence,
+      sourceDocumentId: sourceDocumentId || null,
+      actorId: actorId || null,
+      reason: "plan_extraction",
+    });
+    if (!r.ok) console.warn(`[cost-intel/extract] setFact ${key}:`, r.error);
+  }
+}
 
 export function registerCostIntelligenceRoutes(app) {
   app.use("/api/cost-intelligence", requireAuth);
@@ -264,6 +294,38 @@ Definitions:
           extraction_confidence: overallConfidence, extracted_at: now, created_at: now,
           updated_at: now, source_hash: incomingHash,
         });
+      }
+
+      // ── Phase 4: provenance via the facts service (additive) ─────────────────────
+      // Register the uploaded plan as a job_documents row (the provenance source), then
+      // route each REGISTERED extracted fact through setFact pointing at that document.
+      // Best-effort: a failure here never breaks the extraction response the frontend reads.
+      try {
+        let sourceDocumentId = null;
+        const { data: docRow, error: docErr } = await db.from("job_documents").insert([{
+          job_id: jobId,
+          document_type: "architectural",
+          direction: "inbound",
+          title: filename || "Plan extraction",
+          source: "upload",
+          status: "current",
+        }]).select("id").maybeSingle();
+        if (docErr) console.warn("[cost-intel/extract] job_documents insert:", docErr.message);
+        else sourceDocumentId = docRow?.id || null;
+
+        await emitEvent(jobId, "document.uploaded", {
+          actorId: req.caller?.id || null,
+          source: "upload",
+          entityType: "document",
+          entityId: sourceDocumentId,
+          metadata: { document_type: "architectural", filename: filename || null },
+        });
+
+        // Stamp the FULL extracted field set (not just the >=40% patch) so each registered
+        // fact carries its own confidence; setFact's tier logic decides applied vs flagged.
+        await stampExtractedFacts(jobId, fields, { sourceDocumentId, actorId: req.caller?.id || null });
+      } catch (e) {
+        console.warn("[cost-intel/extract] facts provenance:", e?.message || e);
       }
 
       const { data: updated } = await db.from("project_metrics").select("*").eq("job_id", jobId).maybeSingle();

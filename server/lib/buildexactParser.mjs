@@ -128,6 +128,54 @@ export function getBuildexactCategoryMapping(categoryName) {
   return best ? { name: best.name, phase: best.phase, tradeKey: best.tradeKey, hasQuoteLine: best.hasQuoteLine } : null;
 }
 
+/**
+ * Resolve a Buildxact category name OR a free-text trade label to the canonical
+ * trade_categories.id (Phase 6 — trade taxonomy convergence). FK-first, additive:
+ *
+ *   1. getBuildexactCategoryMapping() maps the input to a canonical trade name
+ *      (the existing fuzzy/alias path), then we look that canonical name up in
+ *      trade_categories by EXACT case-insensitive match → trade_category_id.
+ *   2. Fallback: EXACT case-insensitive match of the RAW input against
+ *      trade_categories.name (handles values that are already a canonical name but
+ *      have no CATEGORY_MAPPING alias).
+ *
+ * Returns the uuid string, or null if nothing resolves exactly — callers must keep
+ * any existing `trade` text write and leave trade_category_id NULL rather than
+ * guess (spend attribution; a NULL is cheaper than a wrong category). The fuzzy
+ * getBuildexactCategoryMapping path is preserved as the canonical-name source —
+ * this only adds the FK lookup on top of it; nothing here removes the name-based
+ * behaviour relied on elsewhere.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} sb  service-role client
+ * @param {string} tradeText  Buildxact category name or free-text trade label
+ * @returns {Promise<string|null>} trade_category_id, or null when no EXACT match
+ */
+export async function resolveTradeCategoryId(sb, tradeText) {
+  const raw = String(tradeText || "").trim();
+  if (!sb || !raw) return null;
+  try {
+    const { data, error } = await sb
+      .from("trade_categories")
+      .select("id, name");
+    if (error || !Array.isArray(data) || !data.length) return null;
+
+    const eq = (a, b) => normCategoryName(a) === normCategoryName(b);
+
+    // 1. Canonical-name resolution via the existing Buildxact category mapping.
+    const mapping = getBuildexactCategoryMapping(raw);
+    if (mapping?.name) {
+      const viaMapping = data.find((c) => eq(c.name, mapping.name));
+      if (viaMapping) return viaMapping.id;
+    }
+    // 2. Fallback: exact (case-insensitive) match on the raw input itself.
+    const direct = data.find((c) => eq(c.name, raw));
+    return direct ? direct.id : null;
+  } catch (e) {
+    console.warn("[buildexactParser] resolveTradeCategoryId:", e?.message || e);
+    return null;
+  }
+}
+
 function cellStr(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number" && Number.isFinite(v)) return String(v);

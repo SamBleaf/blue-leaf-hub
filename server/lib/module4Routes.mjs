@@ -26,6 +26,8 @@ import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { quarterLabel, emailPoIssued } from "./tradeCommitment.mjs";
+import { setFact } from "./factsService.mjs";
+import { resolveTradeCategoryId } from "./buildexactParser.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 
@@ -335,7 +337,23 @@ export function registerModule4Routes(app) {
             ? (tax > 0 ? Math.round((inc - tax) * 100) / 100 : Math.round((inc / 1.1) * 100) / 100)
             : Number(best?.net_total || 0) + Number(best?.markup_amount || 0);
           if (cv > 0) {
-            await sb.from("jobs").update({ original_contract_value: cv, contract_value: cv }).eq("id", jobId);
+            // Phase 5: carry original_contract_value through the facts service so the
+            // write is provenance-stamped (source='system', reason='win_finalize') in
+            // job_fact_history + emits a job_events row. Value is IDENTICAL to the prior
+            // ad-hoc column write. setFact handles the jobs.original_contract_value column.
+            const fr = await setFact(jobId, "original_contract_value", cv, {
+              source: "system",
+              reason: "win_finalize",
+              actorId: req.caller?.id || null,
+            });
+            if (!fr.ok) {
+              // Defensive fallback — never leave a won job without a contract value.
+              console.warn("[win-finalize] setFact original_contract_value:", fr.error);
+              await sb.from("jobs").update({ original_contract_value: cv }).eq("id", jobId);
+            }
+            // contract_value (Generated) stays a direct column write here until migration
+            // 079 drops the mig-034 sync trigger; projects mirror unchanged (portal reads it).
+            await sb.from("jobs").update({ contract_value: cv }).eq("id", jobId);
             await sb.from("projects").update({ contract_value: cv, updated_at: now }).eq("id", proj.id);
           }
         }
@@ -369,6 +387,44 @@ export function registerModule4Routes(app) {
         notes: ci.notes ? String(ci.notes).slice(0, 2000) : null,
         source: "tender"
       };
+      // ── Phase 4: route the BUILDING-FACT fields through setFact (additive) ───────
+      // The cost_intelligence insert below is the genuine per-trade quote row (quote_amount,
+      // trade, project_type, rates) and is LEFT INTACT. But it also duplicates building facts
+      // (floor/roof/wall area, storeys, wet_areas) — a second write path for canonical facts.
+      // Route those registered facts through setFact into project_metrics so they carry
+      // provenance (source='system', reason='win_finalize') + job_fact_history + a job_events
+      // row. source='system' resolves to status 'manual' (auto-applied), matching the prior
+      // direct write — value is IDENTICAL, only the provenance is added. The legacy
+      // cost_intelligence building-fact columns are left in place and FLAGGED for follow-up
+      // (entangled with the genuine quote row; tile_area_*/solar_system_kw are NOT canonical
+      // facts and stay only in cost_intelligence). Best-effort: never breaks win-finalize.
+      const storeysCanon =
+        num(ci.storeys) != null
+          ? Math.round(num(ci.storeys))
+          : job.storeys != null && Number.isFinite(Number(job.storeys))
+            ? Math.round(Number(job.storeys))
+            : null;
+      const buildingFacts = {
+        floor_area_m2: floorM2,
+        storeys: storeysCanon,
+        roof_area_m2: ciRow.roof_area_m2,
+        wall_area_m2: ciRow.wall_area_m2,
+        wet_areas: ciRow.wet_areas,
+      };
+      for (const [key, value] of Object.entries(buildingFacts)) {
+        if (value == null) continue;
+        try {
+          const fr = await setFact(jobId, key, value, {
+            source: "system",
+            reason: "win_finalize",
+            actorId: req.caller?.id || null,
+          });
+          if (!fr.ok) console.warn(`[win-finalize] setFact ${key}:`, fr.error);
+        } catch (e) {
+          console.warn(`[win-finalize] setFact ${key}:`, e?.message || e);
+        }
+      }
+
       for (const t of acceptedTrades) {
         const amt = t.quote_amount != null ? Number(t.quote_amount) : null;
         if (amt == null || !Number.isFinite(amt) || amt <= 0) continue;
@@ -593,6 +649,24 @@ export function registerModule4Routes(app) {
         .select("*")
         .single();
       if (poIns) throw new Error(poIns.message);
+
+      // Phase 6 — stamp the canonical trade_category_id by EXACT name match.
+      // Additive + non-breaking: done as a tolerant follow-up update (NOT in the
+      // insert above) so PO creation still works before migration 081 adds the
+      // column. No exact match → left NULL for manual review, never guessed
+      // (spend attribution). The `trade` text column is the unchanged source/fallback.
+      try {
+        const tradeCategoryId = await resolveTradeCategoryId(sb, trade);
+        if (tradeCategoryId) {
+          const { error: tcErr } = await sb
+            .from("purchase_orders")
+            .update({ trade_category_id: tradeCategoryId })
+            .eq("id", poRow.id);
+          if (tcErr) console.warn("[po/issue] trade_category_id set skipped:", tcErr.message);
+        }
+      } catch (e) {
+        console.warn("[po/issue] trade_category_id resolve skipped:", e?.message || e);
+      }
 
       // Check if subcontractor is familiar (prior completed/accepted PO on different project)
       let familiar = false;

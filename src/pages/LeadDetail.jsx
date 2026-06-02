@@ -1,4 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
+import { apiPost } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -1067,23 +1068,14 @@ export default function LeadDetail() {
     if (creatingJob || lead.job_id) return;
     setCreatingJob(true);
     try {
-      const r = await authFetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address: lead.site_address || `${lead.first_name} ${lead.last_name} — ${lead.suburb || ""}`.trim(),
-          client_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
-          client_email: lead.email || null,
-          client_phone: lead.phone || null,
-          project_type: lead.project_type || null,
-          lead_id: lead.id || null,
-        }),
-      }).then(r => r.json());
-      if (r.ok) {
-        await patch({ job_id: r.job.id });
+      // Phase 2: server-side, non-lossy conversion. The endpoint creates the job,
+      // stamps every carried lead fact via the facts service (provenance), links the
+      // lead + CRM contact, and returns the new job in camelCase. UX unchanged.
+      const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/convert-to-job`, {});
+      if (ok && data?.job) {
         await load();
       } else {
-        alert("Failed to create job: " + r.error);
+        alert("Failed to create job: " + (error || "Unknown error"));
       }
     } finally {
       setCreatingJob(false);

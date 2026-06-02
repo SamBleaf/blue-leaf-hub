@@ -12,6 +12,7 @@
 
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { getFactDef, factsForSpine } from "./jobFactRegistry.mjs";
+import { normaliseAddress } from "./addressNormalise.mjs";
 
 const APPLIED_STATUSES = new Set(["manual", "confirmed", "extracted_applied"]);
 
@@ -120,6 +121,40 @@ async function computeGenerated(sb, jobId, def) {
   return fn ? fn(sb, jobId) : null;
 }
 
+// ── Address derivation hook (Phase 1) ───────────────────────────────────────
+// When the canonical `address` fact is applied, derive + stamp the normalised
+// match key and the suburb/postcode/state attributes from it via normaliseAddress().
+// These are all `internal`-tier facts, so a system-sourced write auto-applies and
+// each gets its own job_fact_history provenance row (reason='derived_from_address').
+// ADDITIVE — never re-stored on another table; never changes the behaviour of any
+// other fact. Best-effort: a derivation failure must not fail the address write.
+const ADDRESS_DERIVED = [
+  { key: "address_normalised", field: "normalised" },
+  { key: "address_suburb", field: "suburb" },
+  { key: "address_postcode", field: "postcode" },
+  { key: "address_state", field: "state" },
+];
+
+async function onAddressWrite(jobId, rawAddress, opts = {}) {
+  let parsed;
+  try {
+    parsed = normaliseAddress(rawAddress);
+  } catch (e) {
+    console.warn("[factsService] onAddressWrite normalise:", e?.message || e);
+    return;
+  }
+  for (const { key, field } of ADDRESS_DERIVED) {
+    const derived = parsed?.[field] ?? null;
+    if (derived === null || derived === undefined) continue; // don't clobber with nulls
+    const r = await setFact(jobId, key, derived, {
+      source: "system",
+      reason: "derived_from_address",
+      actorId: opts.actorId || null,
+    });
+    if (!r.ok) console.warn(`[factsService] onAddressWrite ${key}:`, r.error);
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -155,6 +190,13 @@ export async function setFact(jobId, key, value, opts = {}) {
       actorId: opts.actorId, source: opts.source || "manual",
       entityType: "fact", metadata: { fact_key: key, status, tier: def.tier },
     });
+
+    // Phase 1: when the canonical address is applied, derive + stamp the
+    // normalised key + suburb/postcode/state. Best-effort — never fails the address write.
+    if (apply && key === "address") {
+      try { await onAddressWrite(jobId, value, opts); }
+      catch (e) { console.warn("[factsService] onAddressWrite:", e?.message || e); }
+    }
 
     return { ok: true, applied: apply, status, value: apply ? value : oldValue };
   } catch (e) {
@@ -278,6 +320,78 @@ export async function getPendingFacts(jobId) {
       },
     });
   }
+  return pending;
+}
+
+/**
+ * Portfolio-wide pending suggestions across ALL jobs (Phase 3 Confirm Queue).
+ * Returns every fact whose LATEST job_fact_history row (per job_id + fact_key) is
+ * status 'extracted_flagged' (i.e. a 🔴 suggestion not yet superseded by a
+ * confirmed / manual / extracted_applied write), enriched with a human job label.
+ *
+ * Efficient: two reads only (history ordered newest-first + one jobs lookup) —
+ * no per-job round-trip. Optional `jobId` narrows to a single job.
+ * Generalises getPendingFacts() rather than duplicating its dedup logic.
+ */
+export async function getAllPendingFacts({ jobId = null } = {}) {
+  const sb = getServiceSupabase();
+  if (!sb) return [];
+
+  let query = sb.from("job_fact_history")
+    .select("job_id, fact_key, new_value, value_type, source, source_document_id, confidence, status, reason, changed_by, changed_at")
+    .order("changed_at", { ascending: false });
+  if (jobId) query = query.eq("job_id", jobId);
+
+  const { data: history, error } = await query;
+  if (error) throw error;
+
+  // Keep only the latest row per (job_id, fact_key); pending if that row is flagged.
+  const pending = [];
+  const seen = new Set();
+  for (const row of history || []) {
+    const dedupKey = `${row.job_id}::${row.fact_key}`;
+    if (seen.has(dedupKey)) continue; // only the most-recent row per (job, fact)
+    seen.add(dedupKey);
+    if (row.status !== "extracted_flagged") continue; // latest is applied/confirmed → not pending
+    const def = getFactDef(row.fact_key);
+    if (!def) continue;
+    let value = row.new_value;
+    if (row.value_type === "number") value = Number(value);
+    else if (row.value_type === "boolean") value = value === "true";
+    else if (row.value_type === "json") { try { value = JSON.parse(value); } catch { /* keep raw */ } }
+    pending.push({
+      jobId: row.job_id,
+      key: row.fact_key,
+      label: def.label,
+      family: def.family,
+      type: def.type,
+      tier: def.tier,
+      value,
+      provenance: {
+        source: row.source,
+        sourceDocumentId: row.source_document_id,
+        confidence: row.confidence,
+        status: row.status,
+        changedBy: row.changed_by,
+        changedAt: row.changed_at,
+        reason: row.reason,
+      },
+    });
+  }
+
+  if (!pending.length) return [];
+
+  // Enrich with a human job label (address, falling back to client_name) — one query.
+  const jobIds = [...new Set(pending.map((p) => p.jobId))];
+  const { data: jobs, error: jobsErr } = await sb
+    .from("jobs").select("id, address, client_name").in("id", jobIds);
+  if (jobsErr) throw jobsErr;
+  const labelById = {};
+  for (const j of jobs || []) {
+    labelById[j.id] = (j.address && j.address.trim()) || (j.client_name && j.client_name.trim()) || "Unlabelled job";
+  }
+  for (const p of pending) p.jobLabel = labelById[p.jobId] || "Unlabelled job";
+
   return pending;
 }
 

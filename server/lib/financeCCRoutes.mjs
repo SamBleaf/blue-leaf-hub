@@ -15,6 +15,7 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { buildProgressClaimTokens, STAGE_LABELS as STAGE_LABELS_FROM_TOKENS } from "./docTokens.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { translateDbError } from "./apiResponse.mjs";
+import { getFact } from "./factsService.mjs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,26 @@ function parseBudgetCsv(csvText, tradeCategories) {
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerFinanceCCRoutes(app) {
+
+  // ── Canonical contract value (Phase 5) ───────────────────────────────────────
+  // contract_value is a GENERATED fact = original_contract_value + Σ(signed variations
+  // ex-GST). The single source of truth is factsService's contractValue computer (read
+  // here via getFact); the reconcile tool's Hub side uses the identical formula
+  // (buildexactReconcile.mjs). We pass the already-fetched job row + signed-variation
+  // total so the value is byte-identical to the old inline formula even if the facts
+  // service is unavailable (defensive fallback — money must never silently zero out).
+  async function contractValueOf(jobId, jobRow, signedVariationsTotal) {
+    const inline = Number(jobRow?.original_contract_value ?? jobRow?.contract_value ?? 0)
+      + Number(signedVariationsTotal || 0);
+    try {
+      const fact = await getFact(jobId, "contract_value");
+      const computed = fact?.value;
+      if (computed != null && Number.isFinite(Number(computed))) return Number(computed);
+    } catch (e) {
+      console.warn("[financeCC] contractValueOf getFact fallback:", e?.message || e);
+    }
+    return inline;
+  }
 
   // ── Budget: list ──────────────────────────────────────────────────────────
   // Returns all 37 trade categories with their job_budget row (or nulls if not seeded)
@@ -305,7 +326,8 @@ export function registerFinanceCCRoutes(app) {
       .filter(v => v.status === "signed")
       .reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
 
-    const contractValue = Number(job.original_contract_value || job.contract_value || 0) + signedVariationsTotal;
+    // contract_value via the canonical Generated fact (Phase 5). Identical formula.
+    const contractValue = await contractValueOf(jobId, job, signedVariationsTotal);
 
     const claimsIssued = claims
       .filter(c => !["draft", "void"].includes(c.status))
@@ -415,6 +437,14 @@ export function registerFinanceCCRoutes(app) {
     const budgets = budgetsRes.data || [];
 
     // ── Labour cost (from approved timesheets) ────────────────────────────────
+    // Labour is keyed on timesheets.job_id ONLY (direct builder-job attribution).
+    // Phase 7 (carpentry de-island) flag: if this rollup is ever made
+    // carpentry-aware (i.e. also follows carpentry_jobs.job_id == jobId to fold in
+    // carpentry labour), it MUST run the carpentry timesheet set through
+    // excludeDoubleCounted() from server/lib/labourAttribution.mjs first — a
+    // timesheet carrying BOTH job_id and carpentry_job_id is already counted here
+    // and the builder job is its canonical home. Not done now: additive only, no
+    // number change this phase (see labourAttribution.mjs CALL SITES).
     let labourData = { total_cost: 0, by_category: [] };
     // Labour grouped by trade_category_id so it can fold into budget-vs-actual (H8).
     const labourByTrade = new Map();
@@ -462,7 +492,8 @@ export function registerFinanceCCRoutes(app) {
     const sentTotal   = variations.filter(v => ["draft", "sent_to_client"].includes(v.status)).reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
     const draftCount  = variations.filter(v => v.status === "draft").length;
 
-    const contractValue = Number(job.original_contract_value || job.contract_value || 0) + signedTotal;
+    // contract_value via the canonical Generated fact (Phase 5). Identical formula.
+    const contractValue = await contractValueOf(jobId, job, signedTotal);
     // Spec: claims_issued = SUM(claims WHERE status NOT IN draft/void). Void already excluded by query.
     const claimsIssued  = claims.filter(c => c.status !== "draft").reduce((s, c) => s + Number(c.amount_ex_gst || 0), 0);
     // Payments nested in claims — no separate query needed
@@ -619,7 +650,8 @@ export function registerFinanceCCRoutes(app) {
       .filter(v => v.status === "signed")
       .reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
 
-    const contract_value = Number(job.original_contract_value || job.contract_value || 0) + signedVariations;
+    // contract_value via the canonical Generated fact (Phase 5). Identical formula.
+    const contract_value = await contractValueOf(jobId, job, signedVariations);
     const estimated_total_cost = Number(job.estimated_total_cost) || null;
     // Use forecast_total_cost (editable) when set; fall back to original estimate
     const forecast_total_cost = Number(job.forecast_total_cost) || estimated_total_cost;
@@ -910,7 +942,8 @@ export function registerFinanceCCRoutes(app) {
     ]);
     const job = jobRes.data || {};
     const signedVarsTotal = (varsRes.data || []).reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
-    const contractValue = Number(job.original_contract_value || job.contract_value || 0) + signedVarsTotal;
+    // Revised contract = canonical contract_value Generated fact (Phase 5). Identical formula.
+    const contractValue = await contractValueOf(jobId, job, signedVarsTotal);
 
     // Race-safe auto-increment: retry on unique constraint collision
     let claim = null;
@@ -990,7 +1023,8 @@ export function registerFinanceCCRoutes(app) {
     const signedVariations = variations.filter(v => v.status === "signed");
     const signedVariationsTotal = signedVariations.reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
     const originalContract = Number(job.original_contract_value || job.contract_value || 0);
-    const revisedContract = originalContract + signedVariationsTotal;
+    // Revised contract = canonical contract_value Generated fact (Phase 5). Identical formula.
+    const revisedContract = await contractValueOf(jobId, job, signedVariationsTotal);
 
     // Prior non-draft non-void claims (exclude this claim)
     const priorClaims = priorClaimsRes.data || [];
