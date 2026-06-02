@@ -1,5 +1,6 @@
-import { getJobById } from "./buildexactClient.mjs";
+import { getJobById, getCatalogues, getCatalogueItems, searchCatalogueItems } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate, syncAcceptedQuoteToBuildexact, syncFeeProposalAcceptedToBuildexact } from "./buildexactDeepIntegration.mjs";
+import { syncBuildexactJob } from "./buildexactSync.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { upsertJobKnowledge } from "./jobResolver.mjs";
 import { requireAuth } from "./requireAuth.mjs";
@@ -162,6 +163,53 @@ export function registerBuildexactIntegrationRoutes(app) {
       return res.json({ ok: true, proposal });
     } catch (e) {
       console.error("[fee-proposal/accept]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ── Sync a Buildxact job's headline financials into the Hub mirror (buildexact_job_sync).
+  //    Phase-1 pull: Buildxact = system of record, Hub mirrors for reconciliation. Requires migration 075. ──
+  app.post("/api/buildexact/sync/:buildexactJobId", requireAuth, async (req, res) => {
+    try {
+      const id = String(req.params.buildexactJobId || "").trim();
+      if (!id) return res.status(400).json({ ok: false, error: "buildexactJobId required." });
+      const snapshot = await syncBuildexactJob(id);
+      return res.json({ ok: true, snapshot });
+    } catch (e) {
+      console.error("[buildexact/sync]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ── Recipe / price-book catalogues (read-only) — for variation pricing ──
+  app.get("/api/buildexact/catalogues", requireAuth, async (_req, res) => {
+    try {
+      return res.json({ ok: true, catalogues: await getCatalogues() });
+    } catch (e) {
+      console.error("[buildexact/catalogues]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/buildexact/catalogues/search", requireAuth, async (req, res) => {
+    try {
+      const items = await searchCatalogueItems({
+        text: req.query.text || "",
+        catalogueIds: req.query.catalogueIds || undefined,
+        top: req.query.top ? Number(req.query.top) : 50,
+      });
+      return res.json({ ok: true, items });
+    } catch (e) {
+      console.error("[buildexact/catalogues/search]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get("/api/buildexact/catalogues/:catalogueId/items", requireAuth, async (req, res) => {
+    try {
+      return res.json({ ok: true, items: await getCatalogueItems(String(req.params.catalogueId)) });
+    } catch (e) {
+      console.error("[buildexact/catalogues/items]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
     }
   });

@@ -327,6 +327,11 @@ export async function createPurchaseOrder(options) {
   return beFetch("/jobs/purchaseorders/create", { method: "POST", body: options });
 }
 
+// DELETE /jobs/purchaseorders/{id} — only 'Unsent' orders can be deleted (soft delete).
+export async function deletePurchaseOrder(id) {
+  return beFetch(`/jobs/purchaseorders/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 // POST /jobs/create — JobCreateOptionsDto.
 export async function createJob(options) {
   return beFetch("/jobs/create", { method: "POST", body: options });
