@@ -8,6 +8,34 @@
 
 ---
 
+## 0. Handoff state for the troubleshoot agent (added 2026-06-03)
+
+> **The troubleshoot agent owns ALL 17 fixes.** Read this section first — work has shipped since the triage that
+> changes *where* and *how* some bugs must be fixed. Everything in §2–§5 still stands except where noted here.
+
+**Repo / migrations state:**
+- **Universal Data Phases 1–7 are shipped** (facts service wired across the job spine). Migrations **077, 078, 079,
+  081, 082 are applied**. **`083_job_contact_roles.sql` is NEW and NOT yet applied — apply it before testing the
+  CRM referrer/consultant feature.**
+- The **CRM `job_contact_roles` feature may be UNCOMMITTED** in the working tree (`crmRoutes.mjs`, `salesRoutes.mjs`,
+  `ContactDrawer.jsx`, `CrmContacts.jsx`, `JobCommandCentre.jsx`, `083`). If so, commit/stash it before starting so
+  your bug-fix diff stays separate.
+
+**Bug-specific corrections (these SUPERSEDE §2):**
+- **BUG-009** now lives in **TWO** places: the original `jobsApiRoutes.mjs:79` **AND** the new Phase-2 endpoint
+  `salesRoutes.mjs` `POST /api/sales/leads/:id/convert-to-job`, which **also hardcodes `status:"tendering"`**. Fix
+  **both**; derive status from the lead's stage; use `constants.js` (never the literal).
+- **BUG-010** — the new `convert-to-job` endpoint builds the unmatchable `"Name — Suburb"` fallback address when
+  `site_address` is empty. Add the require-`site_address` guard **inside that endpoint** (and the old create path).
+- **BUG-003** — the **address-match half is already shipped** (Phase 1): `address_normalised`/suburb/postcode/state
+  derive via the `onAddressWrite` hook in `factsService.mjs`; backfill script `scripts/backfill-address-facts.mjs`;
+  resolver `jobResolver.resolveJobIdByAddress()`. **Do NOT hand-roll a parallel matcher.** The explicit
+  **"Link to Buildxact job" picker (BUG-003b) is still needed.**
+- **BUG-005 / BUG-006 / BUG-008** — their UDM *areas* were touched, but the specific UI symptoms are **untouched** —
+  fix exactly as §2 describes (and per §2, don't add new `projects` client columns for 005/006 — Phase 2 owns client identity).
+
+---
+
 ## 1. Severity rollup (as reported in AUDIT_REPORT_2026-06-02.md)
 
 | Severity | Count | IDs |
