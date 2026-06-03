@@ -4,6 +4,55 @@
 > 12-month builder lifecycle, exercises **every module and every Buildxact API**, reconciles the
 > numbers, and produces a report in the same shape as `AUDIT_REPORT_2026-05-30.md`.
 > Updated 2026-06-02 to require full Buildxact API coverage + reconciliation.
+> Updated 2026-06-03 with the **DELTA SCOPE** below — re-audit everything, with extra scrutiny on what shipped since `AUDIT_REPORT_2026-06-02.md`.
+
+---
+
+## DELTA SCOPE — what changed since the last audit (`AUDIT_REPORT_2026-06-02.md`)
+
+> The last full audit baseline is **`AUDIT_REPORT_2026-06-02.md`** (+ its triage `AUDIT_2026-06-02_TRIAGE.md`).
+> Run the full lifecycle audit again, but **treat the following newly-shipped work as the highest-risk areas** —
+> verify each works, didn't break upstream/downstream flows, and conforms to CLAUDE.md (facts via the service,
+> camelCase, `ok()/err()`, ex-GST, no raw errors). Migrations **077, 078, 079, 081, 082, 083 are applied**
+> (080 was not needed).
+>
+> **Knowledge Core / Universal Data (now wired across the job spine):**
+> - **Phase 1 (address identity):** `setFact(jobId,'address')` derives `address_normalised/suburb/postcode/state`
+>   via the `onAddressWrite` hook in `factsService.mjs`; backfill `scripts/backfill-address-facts.mjs`. Verify
+>   suburb/postcode populate, matching uses the normalised key, and the **Buildxact reconcile still links by address**.
+> - **Phase 2 (lead→job carry):** `POST /api/sales/leads/:id/convert-to-job` stamps client/address/project facts via
+>   `setFact` (`reason='lead_conversion'`), links `crm_contacts.linked_job_id`, de-lossified `LeadDetail.jsx`; mig 078
+>   added `jobs.estimated_value`. ⚠ **Known carried-forward bugs to confirm:** BUG-009 (`status:"tendering"` hardcoded
+>   — now in BOTH `jobsApiRoutes.mjs` and this new endpoint) and BUG-010 (unmatchable `"Name — Suburb"` fallback address).
+> - **Phase 5 (contract value):** finance reads `contract_value` via the canonical Generated fact (`contractValueOf`
+>   in `financeCCRoutes.mjs`); win-carry via `setFact`; **mig 079 dropped the contract_value sync trigger.** ⚠ **HIGHEST
+>   PRIORITY reconcile:** with the trigger gone, confirm Hub `contract_value` (= original + Σ signed variations) still
+>   equals Buildxact within **$1** for every linked job, and that no stale stored value is trusted anywhere.
+> - **Phase 4 (building facts):** plan extraction + win-finalize write building facts via `setFact(source:'extraction')`
+>   into `project_metrics` with `job_documents` provenance; consequential facts surface as `extracted_flagged`. Note
+>   legacy direct writes were kept ALONGSIDE — verify no value divergence.
+> - **Phase 3 (confirm queue):** `GET /api/facts/pending` + the **Confirm Queue** screen + registry tier matrix.
+> - **Phase 6 (trade taxonomy):** `trade_category_id` FK on `purchase_orders`/`cost_intelligence`/`rfqs` (mig 081);
+>   `resolveTradeCategoryId` (fuzzy fallback kept); PO-issue stamps it. Verify spend attribution + no mis-categorised PO.
+> - **Phase 7 (carpentry):** `carpentry_jobs.job_id` FK (mig 082) + `labourAttribution.js` double-count guard
+>   (builder `job_id` wins). Verify no double-counted labour once rollups use it.
+>
+> **CRM:**
+> - **Smart-list visibility:** `smartListsForContact` + `smartLists` on the contact detail; contact-drawer auto-list chips;
+>   New Contact "will appear in" hint + Notes field + "Referred by" picker.
+> - **`job_contact_roles` (mig 083) — referrer/consultant tracking, FINANCE/ADMIN ONLY.** Verify: all 5 endpoints
+>   `requireRole("admin")` → **non-admin gets 403** (test with a non-admin login — the previous audit only had admin);
+>   the **Key People** panel (Finance Job Command Centre) + **Jobs & Referrals** panel (contact drawer) are hidden for
+>   non-admin; `valueBroughtIn` (Σ distinct credited-job contract value) and `consultingFees` (Σ fee_amount, ex-GST)
+>   compute correctly; the referral rollup + relationship score recompute on role change and on lead→job convert.
+>
+> **Pluggable scope engine (seam only):** `server/lib/scopeIntelligence/` (`HubScopeIntelligence` + `expectedScopeFloor`)
+> — not yet wired into the RFQ route; confirm it's inert/no regression.
+>
+> **If running as a BACKGROUND (non-Chrome) agent:** you can't drive the UI. Do a deep **code + authenticated-API +
+> Supabase-data** audit instead — read every changed file, hit the new/changed endpoints with the admin JWT (and a
+> non-admin where 403 matters), query Supabase to validate the data lands right, and run the Buildxact reconcile.
+> Note clearly in the report which findings are code/API-verified vs need a human UI pass.
 
 ---
 
