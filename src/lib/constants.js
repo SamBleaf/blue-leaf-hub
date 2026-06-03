@@ -5,6 +5,16 @@
  * Always import from here. See CLAUDE.md § Standards.
  */
 
+// ─── Jobs ────────────────────────────────────────────────────────────────────
+
+/** Valid values for jobs.status (CHECK constraint in migration 001). */
+export const JOB_STATUSES = {
+  TENDERING: "tendering",
+  WON:       "won",
+  LOST:      "lost",
+  ARCHIVED:  "archived",
+};
+
 // ─── Sales / CRM ─────────────────────────────────────────────────────────────
 
 export const LEAD_STAGES = {

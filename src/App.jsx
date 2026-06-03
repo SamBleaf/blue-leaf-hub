@@ -138,6 +138,8 @@ export default function App() {
                   path="/sales/reference-projects"
                   element={<RoleRoute element={<ReferenceProjects />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
+                {/* Guard: /sales/pipeline would otherwise match :leadId and trigger a UUID parse error */}
+                <Route path="/sales/pipeline" element={<Navigate to="/sales" replace />} />
                 <Route
                   path="/sales/:leadId"
                   element={<RoleRoute element={<LeadDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}

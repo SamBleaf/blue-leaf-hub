@@ -1,6 +1,8 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, translateDbError } from "./apiResponse.mjs";
+// Job status constants (mirrors migration 001 CHECK constraint)
+const JOB_STATUSES_VALID = ["tendering", "won", "lost", "archived"];
 import {
   dropboxConfigured,
   mergeJobDataJsonFile,
@@ -42,7 +44,7 @@ export function registerJobsApiRoutes(app) {
     try {
       const sb = getServiceSupabase();
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
-      const { address, client_name, client_email, client_phone, project_type, arch_ref, lead_id } = req.body || {};
+      const { address, client_name, client_email, client_phone, project_type, arch_ref, lead_id, status: statusInput } = req.body || {};
       if (!address?.trim()) return res.status(400).json({ ok: false, error: "address required" });
 
       // Dedup: prefer the canonical normalised key ("21 Folkestone Rd" == "21 Folkestone Road");
@@ -76,7 +78,8 @@ export function registerJobsApiRoutes(app) {
         project_type: project_type || null,
         arch_ref: arch_ref?.trim() || null,
         lead_id: lead_id || null,
-        status: "tendering",
+        // Accept a caller-supplied status (e.g. "won" when converting a won lead) but validate it.
+        status: JOB_STATUSES_VALID.includes(statusInput) ? statusInput : "tendering",
       }).select().single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
       return res.json({ ok: true, job: data });

@@ -207,6 +207,9 @@ export default function PortalAdmin() {
                   try {
                     await enableTestPortal(projectId);
                     await loadSummary();
+                  } catch (e) {
+                    setSeedMsg(`Could not enable portal: ${e?.message || "Unknown error"}`);
+                    setTimeout(() => setSeedMsg(""), 5000);
                   } finally {
                     setTestBusy(false);
                   }

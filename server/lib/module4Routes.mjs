@@ -65,14 +65,17 @@ async function insertCorrespondence(sb, row) {
  */
 export function registerModule4Routes(app) {
   app.get("/api/buildexact/status", requireAuth, (_req, res) => {
-    const host = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "";
-    const port = process.env.PORT_API || 8787;
-    const local = `http://127.0.0.1:${port}`;
-    const base = host || local;
+    // Prefer an explicit API_BASE_URL (set this in Railway env vars to the Railway public URL).
+    // Falls back to RAILWAY_PUBLIC_DOMAIN if injected, then localhost for local dev.
+    // VERCEL_URL is the *frontend* domain and must not be used here.
+    const apiBase =
+      process.env.API_BASE_URL?.trim() ||
+      (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "") ||
+      `http://127.0.0.1:${process.env.PORT_API || 8787}`;
     res.json({
       ok: true,
       configured: buildexactConfigured(),
-      webhookUrl: `${base.replace(/\/$/, "")}/api/webhooks/buildexact`,
+      webhookUrl: `${apiBase.replace(/\/$/, "")}/api/webhooks/buildexact`,
       token: getBuildexactTokenStatus()
     });
   });

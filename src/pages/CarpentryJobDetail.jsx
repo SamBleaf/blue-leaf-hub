@@ -364,24 +364,35 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
       </div>
 
       {/* Financials */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-slate-50 rounded-card border border-hairline">
-        <div>
-          <p className="text-xs text-muted font-medium mb-0.5">Quoted Value</p>
-          <p className="text-lg font-semibold text-ink">{fmt$(job.quotedValue)}</p>
-          <p className="text-xs text-muted">ex GST</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted font-medium mb-0.5">Budgeted Cost</p>
-          <p className="text-lg font-semibold text-ink">{fmt$(job.quotedCost)}</p>
-          <p className="text-xs text-muted">ex GST</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted font-medium mb-0.5">Budget Margin</p>
-          <p className="text-lg font-semibold text-ink">{fmtPct(job.quotedMarginPct)}</p>
-          <p className="text-xs text-muted">quoted</p>
-        </div>
-        <div />
-      </div>
+      {(() => {
+        // Derive margin when not explicitly stored but both value + cost are present.
+        const displayMarginPct =
+          job.quotedMarginPct != null
+            ? job.quotedMarginPct
+            : job.quotedValue && job.quotedCost
+              ? Math.round(((job.quotedValue - job.quotedCost) / job.quotedValue) * 1000) / 10
+              : null;
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-slate-50 rounded-card border border-hairline">
+            <div>
+              <p className="text-xs text-muted font-medium mb-0.5">Quoted Value</p>
+              <p className="text-lg font-semibold text-ink">{fmt$(job.quotedValue)}</p>
+              <p className="text-xs text-muted">ex GST</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted font-medium mb-0.5">Budgeted Cost</p>
+              <p className="text-lg font-semibold text-ink">{fmt$(job.quotedCost)}</p>
+              <p className="text-xs text-muted">ex GST</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted font-medium mb-0.5">Budget Margin</p>
+              <p className="text-lg font-semibold text-ink">{fmtPct(displayMarginPct)}</p>
+              <p className="text-xs text-muted">{job.quotedMarginPct != null ? "quoted" : "derived"}</p>
+            </div>
+            <div />
+          </div>
+        );
+      })()}
 
       {/* Contact + dates */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

@@ -424,11 +424,15 @@ export function registerSalesRoutes(app) {
         if (existingJob) return ok(res, { job: rowToCamel(existingJob), alreadyConverted: true });
       }
 
-      // 2. Resolve the canonical address + client name (mirror the old UI copy).
+      // 2. Require a real site address — the "Name — Suburb" fallback produces an unmatchable
+      //    address that orphans the job from Operations and Finance selectors. (BUG-010)
+      if (!lead.site_address?.trim()) {
+        return err(res, 400, "A site address is required before creating a project. Please add the site address to the lead first.");
+      }
+
+      // Resolve the canonical address + client name.
       const clientName = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
-      const rawAddress =
-        (lead.site_address && lead.site_address.trim()) ||
-        `${clientName || "Unnamed"}${lead.suburb ? ` — ${lead.suburb}` : ""}`.trim();
+      const rawAddress = lead.site_address.trim();
       const addr = normaliseAddress(rawAddress);
 
       // 3. Dedup exactly like POST /api/jobs: prefer the normalised key, then raw ilike.
@@ -455,7 +459,9 @@ export function registerSalesRoutes(app) {
           client_phone: lead.phone?.trim() || null,
           project_type: lead.project_type || null,
           lead_id: lead.id,
-          status: "tendering",
+          // Derive status from lead stage: a won lead → won job; everything else → tendering.
+          // Valid job statuses (migration 001 CHECK): tendering | won | lost | archived.
+          status: lead.stage === "won" ? "won" : "tendering",
         }).select().single();
         if (insErr) return err(res, 400, translateDbError(insErr));
         job = created;
