@@ -31,6 +31,7 @@
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { getCanonicalContractValue } from "./factsService.mjs";
 import jwt from "jsonwebtoken";
 
 const UNSUBSCRIBE_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || "blhub-unsubscribe-secret";
@@ -182,16 +183,12 @@ export async function recomputeReferralRollup(sb, contactId) {
     // De-dup to DISTINCT credited jobs (a job credited once is counted once).
     const jobIds = [...new Set((roles || []).map((r) => r.job_id).filter(Boolean))];
 
+    // Sum the CANONICAL contract value (original + Σ signed variations) per credited job —
+    // not the stale stored jobs.contract_value column (N2 fix: post-mig-079 that column
+    // no longer reflects post-win signed variations).
     let referralJobValue = 0;
-    if (jobIds.length) {
-      const { data: jobs } = await sb
-        .from("jobs")
-        .select("id, contract_value, original_contract_value")
-        .in("id", jobIds);
-      referralJobValue = (jobs || []).reduce(
-        (sum, j) => sum + Number(j.contract_value ?? j.original_contract_value ?? 0),
-        0
-      );
+    for (const jid of jobIds) {
+      referralJobValue += await getCanonicalContractValue(jid);
     }
 
     const referralCount = jobIds.length;
@@ -585,34 +582,35 @@ export function registerCrmRoutes(app) {
 
     const { data: roles, error } = await sb()
       .from("job_contact_roles")
-      .select("*, jobs(id, address, contract_value, original_contract_value)")
+      .select("*, jobs(id, address)")
       .eq("contact_id", id)
       .order("created_at", { ascending: false });
     if (error) return err(res, 500, "Failed to load contact job roles");
 
     // Summary:
-    //   valueBroughtIn  = Σ over DISTINCT credited jobs of contract value
-    //                     (contract_value ?? original_contract_value ?? 0)
+    //   valueBroughtIn  = Σ over DISTINCT credited jobs of the CANONICAL contract value
+    //                     (Phase 5 fact = original + Σ signed variations) — N2 fix: not the
+    //                     stale stored jobs.contract_value (post-mig-079 it omits post-win variations).
     //   consultingFees  = Σ fee_amount across ALL the contact's roles
     //   jobsCount       = number of DISTINCT credited jobs
     // A job credited once is counted once even with multiple roles on it.
-    const creditedJobValue = new Map();
+    const creditedJobIds = new Set();
     let consultingFees = 0;
     for (const r of roles || []) {
       consultingFees += Number(r.fee_amount || 0);
-      if (r.credits_referral && r.job_id && r.jobs) {
-        const v = Number(r.jobs.contract_value ?? r.jobs.original_contract_value ?? 0);
-        creditedJobValue.set(r.job_id, v); // dedup by job_id — same job → same value
-      }
+      if (r.credits_referral && r.job_id) creditedJobIds.add(r.job_id);
     }
-    const valueBroughtIn = [...creditedJobValue.values()].reduce((s, v) => s + v, 0);
+    let valueBroughtIn = 0;
+    for (const jid of creditedJobIds) {
+      valueBroughtIn += await getCanonicalContractValue(jid);
+    }
 
     ok(res, {
       roles: rowsToCamel(roles || []),
       summary: {
         valueBroughtIn,
         consultingFees,
-        jobsCount: creditedJobValue.size,
+        jobsCount: creditedJobIds.size,
       },
     });
   });

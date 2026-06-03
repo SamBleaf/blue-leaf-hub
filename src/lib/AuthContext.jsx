@@ -10,11 +10,14 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  // True once the profile (and therefore role) has been resolved for the current session.
-  // Starts false so that the brief window after getSession() sets a session but before the
-  // profile-fetch effect runs still counts as "loading" — otherwise RoleRoute sees role=null
-  // for one render and wrongly redirects to /home on a hard refresh / deep-link.
-  const [profileResolved, setProfileResolved] = useState(false);
+  // The user id the currently-loaded profile belongs to (null = none resolved yet). We compare
+  // this against the live session's user id to know whether the role is resolved for THIS session.
+  // A plain boolean leaked across the cold-load gap: the profile effect runs once on mount with no
+  // session and marked itself "resolved", so the window after getSession() sets a session but
+  // before the re-fetch ran looked already-resolved with role=null → RoleRoute wrongly redirected
+  // to /home on hard refresh / deep-link. Keying on the user id closes that gap and also avoids a
+  // loading flash on token refresh (same uid stays resolved).
+  const [profileUserId, setProfileUserId] = useState(null);
   const [clientNonce, setClientNonce] = useState(0);
 
   const signOut = useCallback(async () => {
@@ -72,20 +75,20 @@ export function AuthProvider({ children }) {
   }, [clientNonce]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    const uid = session?.user?.id;
+    if (!uid) {
       setProfile(null);
-      setProfileResolved(true); // no session → nothing to resolve
+      setProfileUserId(null); // no session → nothing to resolve
       return;
     }
     const sb = getSupabase();
     if (!sb) return;
 
     let cancelled = false;
-    setProfileResolved(false); // re-resolving role for this session
 
     sb.from("user_profiles")
       .select("id, email, full_name, role, is_active")
-      .eq("id", session.user.id)
+      .eq("id", uid)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled) return;
@@ -94,12 +97,12 @@ export function AuthProvider({ children }) {
           return;
         }
         setProfile(data || null);
-        setProfileResolved(true);
+        setProfileUserId(uid); // role resolved for this session's user
       })
       .catch(() => {
         if (!cancelled) {
           setProfile(null);
-          setProfileResolved(true);
+          setProfileUserId(uid); // resolved (to no profile) — don't hang in loading forever
         }
       });
 
@@ -108,19 +111,19 @@ export function AuthProvider({ children }) {
     };
   }, [session?.user?.id, signOut]);
 
-  const value = useMemo(
-    () => ({
+  const value = useMemo(() => {
+    const sessionUserId = session?.user?.id ?? null;
+    return {
       user: session?.user ?? null,
       session,
-      // Stay "loading" until the profile/role is resolved for an active session, so guards
+      // Stay "loading" until the profile/role is resolved for THIS session's user, so guards
       // never see role=null mid-resolution and wrongly redirect on hard refresh / deep-link.
-      loading: loading || (!!session && !profileResolved),
+      loading: loading || (!!sessionUserId && profileUserId !== sessionUserId),
       profile,
       role: profile?.role ?? null,
       signOut
-    }),
-    [session, loading, profileResolved, profile, signOut]
-  );
+    };
+  }, [session, loading, profileUserId, profile, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -15,7 +15,7 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { buildProgressClaimTokens, STAGE_LABELS as STAGE_LABELS_FROM_TOKENS } from "./docTokens.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { translateDbError } from "./apiResponse.mjs";
-import { getFact } from "./factsService.mjs";
+import { getCanonicalContractValue } from "./factsService.mjs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -102,22 +102,15 @@ export function registerFinanceCCRoutes(app) {
 
   // ── Canonical contract value (Phase 5) ───────────────────────────────────────
   // contract_value is a GENERATED fact = original_contract_value + Σ(signed variations
-  // ex-GST). The single source of truth is factsService's contractValue computer (read
-  // here via getFact); the reconcile tool's Hub side uses the identical formula
-  // (buildexactReconcile.mjs). We pass the already-fetched job row + signed-variation
-  // total so the value is byte-identical to the old inline formula even if the facts
-  // service is unavailable (defensive fallback — money must never silently zero out).
+  // ex-GST). Single source of truth = factsService.getCanonicalContractValue (shared by the
+  // finance KPIs, WIPAA-save, and the CRM referral rollup); the reconcile tool's Hub side
+  // uses the identical formula (buildexactReconcile.mjs). This thin wrapper preserves the
+  // call signature used across the KPI handlers and passes the already-fetched job row +
+  // signed-variation total as the defensive fallback (money must never silently zero out).
   async function contractValueOf(jobId, jobRow, signedVariationsTotal) {
     const inline = Number(jobRow?.original_contract_value ?? jobRow?.contract_value ?? 0)
       + Number(signedVariationsTotal || 0);
-    try {
-      const fact = await getFact(jobId, "contract_value");
-      const computed = fact?.value;
-      if (computed != null && Number.isFinite(Number(computed))) return Number(computed);
-    } catch (e) {
-      console.warn("[financeCC] contractValueOf getFact fallback:", e?.message || e);
-    }
-    return inline;
+    return getCanonicalContractValue(jobId, { fallback: inline });
   }
 
   // ── Budget: list ──────────────────────────────────────────────────────────
@@ -695,14 +688,22 @@ export function registerFinanceCCRoutes(app) {
     const sb = getServiceSupabase();
 
     // Fetch current state for snapshot
-    const [jobRes, docsRes, claimsRes] = await Promise.all([
+    const [jobRes, docsRes, claimsRes, variationsRes] = await Promise.all([
       sb.from("jobs").select("contract_value, original_contract_value, estimated_total_cost").eq("id", jobId).single(),
       sb.from("financial_documents").select("amount_ex_gst").eq("job_id", jobId).in("status", ["approved", "filed", "xero_synced"]),
-      sb.from("progress_claims").select("amount_ex_gst").eq("job_id", jobId).in("status", ["issued","overdue","partially_paid","paid","disputed"])
+      sb.from("progress_claims").select("amount_ex_gst").eq("job_id", jobId).in("status", ["issued","overdue","partially_paid","paid","disputed"]),
+      sb.from("job_variations").select("amount_ex_gst, status").eq("job_id", jobId)
     ]);
     const job = jobRes.data || {};
     const cost_to_date = (docsRes.data || []).reduce((s, d) => s + Number(d.amount_ex_gst || 0), 0);
-    const contract_value = Number(job.original_contract_value || job.contract_value || 0);
+    const signedVariationsTotal = (variationsRes.data || [])
+      .filter(v => v.status === "signed")
+      .reduce((s, v) => s + Number(v.amount_ex_gst || 0), 0);
+    // Canonical contract value (Phase 5 Generated fact = original + Σ signed variations).
+    // mig 079 dropped the storage trigger, so the stored jobs.contract_value is unmaintained —
+    // route through contractValueOf (shared helper) so the WIPAA snapshot matches the Command
+    // Centre + reconcile (N1 fix). The fetched signed-variations total is the defensive fallback.
+    const contract_value = await contractValueOf(jobId, job, signedVariationsTotal);
     const forecast = forecast_total_cost ? Number(forecast_total_cost) : null;
     const projected_margin_pct = forecast && contract_value > 0
       ? ((contract_value - forecast) / contract_value) * 100 : null;

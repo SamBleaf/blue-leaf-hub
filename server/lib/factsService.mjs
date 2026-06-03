@@ -1,8 +1,9 @@
 // factsService.mjs — the single read/write path for canonical facts (Phase 0 foundation).
 // See docs/agent_knowledge/MASTER_DATA_DICTIONARY.md (Parts 2-5) + CLAUDE.md Canonical Data Law.
 //
-// NOT WIRED YET. No route imports this until the Phase 1+ cutover (verified with the app).
-// Provenance authority = latest job_fact_history row per (job_id, fact_key).
+// WIRED (Phases 1-7, 2026-06): consumed by factsRoutes, salesRoutes (lead→job convert),
+// financeCCRoutes (contract value), costIntelligenceRoutes + module4Routes (building facts),
+// and crmRoutes (referral rollup). Provenance authority = latest job_fact_history row per (job_id, fact_key).
 //
 // Rules enforced here:
 //  - Generated facts are never written (computed live).
@@ -238,6 +239,29 @@ export async function getFact(jobId, key) {
     ? { type: "generated", computed: true }
     : await latestProvenance(sb, jobId, key);
   return { key, label: def.label, family: def.family, type: def.type, tier: def.tier, value, provenance };
+}
+
+/**
+ * Canonical contract value for a job = the Phase 5 Generated `contract_value` fact
+ * (original_contract_value + Σ signed variations, ex-GST). The single source of truth for
+ * every money rollup — finance KPIs, the WIPAA snapshot, and the CRM referral "value brought
+ * in". mig 079 dropped the storage trigger, so the stored jobs.contract_value column is
+ * unmaintained and must never be read directly for money.
+ *
+ * Pass { fallback } (e.g. original + Σ signed variations the caller already summed) to return
+ * a known-good value if the facts read is unavailable, so money never silently zeroes out.
+ * With no fallback, returns 0 on any failure.
+ */
+export async function getCanonicalContractValue(jobId, { fallback } = {}) {
+  try {
+    const fact = await getFact(jobId, "contract_value");
+    const v = Number(fact?.value);
+    if (Number.isFinite(v)) return v;
+  } catch (e) {
+    console.warn("[factsService] getCanonicalContractValue:", e?.message || e);
+  }
+  const fb = Number(fallback);
+  return Number.isFinite(fb) ? fb : 0;
 }
 
 /** Assemble the full job profile: every job-spine fact grouped by family, with provenance. */
