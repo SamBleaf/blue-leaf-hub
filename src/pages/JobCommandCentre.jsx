@@ -2,8 +2,233 @@ import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../lib/ProjectContext.jsx";
+import { useRole } from "../lib/useRole.js";
+import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/apiFetch.js";
 import ProgressClaims from "../components/finance/ProgressClaims.jsx";
 import Variations from "../components/finance/Variations.jsx";
+
+// ── Key People (consultants / referrers) — ADMIN ONLY ──────────────────────────
+
+const KP_ROLE_TYPES = ["referrer", "consultant", "architect", "designer", "agent", "engineer", "other"];
+const KP_ROLE_STATUSES = ["active", "completed", "inactive"];
+
+function kpName(c) {
+  if (!c) return "—";
+  return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "—";
+}
+
+function KeyPeopleRoleForm({ role, onSave, onCancel, saving }) {
+  // contact picker (searchable) — only needed when adding a new role
+  const [contactQuery, setContactQuery] = useState("");
+  const [contactResults, setContactResults] = useState([]);
+  const [contactPicked, setContactPicked] = useState(role ? role.crmContacts : null);
+  const [form, setForm] = useState({
+    contactId: role?.contactId || "",
+    role: role?.role || "consultant",
+    status: role?.status || "active",
+    feeAmount: role?.feeAmount ?? "",
+    creditsReferral: role ? !!role.creditsReferral : false,
+    feeArrangement: role?.feeArrangement || "",
+    startDate: role?.startDate || "",
+    endDate: role?.endDate || "",
+    notes: role?.notes || "",
+  });
+  function f(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  useEffect(() => {
+    if (role || contactPicked) return; // editing: contact is fixed
+    const term = contactQuery.trim();
+    if (term.length < 2) { setContactResults([]); return; }
+    let active = true;
+    const t = setTimeout(async () => {
+      const { ok, data } = await apiFetch(`/api/crm/contacts?q=${encodeURIComponent(term)}&limit=8`);
+      if (active && ok) setContactResults(data.contacts || []);
+    }, 250);
+    return () => { active = false; clearTimeout(t); };
+  }, [contactQuery, contactPicked, role]);
+
+  function pick(c) {
+    setContactPicked(c);
+    setContactResults([]);
+    f("contactId", c.id);
+  }
+
+  return (
+    <div className="space-y-2 border border-hairline rounded-lg p-3 bg-page">
+      {!role && (
+        <div>
+          <label className="block text-xs text-muted mb-1">Contact</label>
+          {contactPicked ? (
+            <div className="flex items-center justify-between bg-surface border border-hairline rounded-lg px-3 py-2">
+              <span className="text-sm text-ink">{kpName(contactPicked)}</span>
+              <button type="button" onClick={() => { setContactPicked(null); f("contactId", ""); }} className="text-xs text-red-500 hover:underline">Clear</button>
+            </div>
+          ) : (
+            <div className="relative">
+              <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                placeholder="Type a name to find the contact…" value={contactQuery} onChange={e => setContactQuery(e.target.value)} />
+              {contactResults.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full bg-surface border border-hairline rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {contactResults.map(c => (
+                    <button type="button" key={c.id} onClick={() => pick(c)} className="block w-full text-left px-3 py-2 text-sm text-ink hover:bg-page">
+                      {kpName(c)}{c.email && <span className="text-muted text-xs ml-2">{c.email}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Role</label>
+          <select className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" value={form.role} onChange={e => f("role", e.target.value)}>
+            {KP_ROLE_TYPES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Status</label>
+          <select className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" value={form.status} onChange={e => f("status", e.target.value)}>
+            {KP_ROLE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Consulting fee (ex GST)</label>
+          <input type="number" className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" placeholder="e.g. 1500" value={form.feeAmount} onChange={e => f("feeAmount", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Fee arrangement</label>
+          <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" placeholder="5% of contract / $1500 day rate" value={form.feeArrangement} onChange={e => f("feeArrangement", e.target.value)} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Start date</label>
+          <input type="date" className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" value={form.startDate} onChange={e => f("startDate", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">End date</label>
+          <input type="date" className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" value={form.endDate} onChange={e => f("endDate", e.target.value)} />
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-ink">
+        <input type="checkbox" className="w-4 h-4" checked={form.creditsReferral} onChange={e => f("creditsReferral", e.target.checked)} />
+        Credits referral (counts this job&apos;s contract value as value brought in)
+      </label>
+      <div>
+        <label className="block text-xs text-muted mb-1">Notes</label>
+        <input className="w-full rounded-lg border border-hairline px-3 py-2 text-sm" value={form.notes} onChange={e => f("notes", e.target.value)} />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="text-sm text-muted hover:text-ink px-3 py-1.5">Cancel</button>
+        <button type="button" disabled={saving || (!role && !form.contactId)} onClick={() => onSave(form)}
+          className="px-4 py-1.5 bg-primary text-white text-sm rounded-lg font-semibold disabled:opacity-50">
+          {saving ? "Saving…" : "Save Role"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function KeyPeoplePanel({ jobId }) {
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { ok, data } = await apiFetch(`/api/crm/jobs/${jobId}/contact-roles`);
+    if (ok) setRoles(data.roles || []);
+    setLoading(false);
+  }, [jobId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function add(form) {
+    setSaving(true); setError("");
+    const { ok, error: e } = await apiPost(`/api/crm/jobs/${jobId}/contact-roles`, form);
+    setSaving(false);
+    if (!ok) return setError(e || "Failed to add role");
+    setAdding(false);
+    await load();
+  }
+
+  async function saveEdit(roleId, form) {
+    setSaving(true); setError("");
+    const { ok, error: e } = await apiPut(`/api/crm/contact-roles/${roleId}`, form);
+    setSaving(false);
+    if (!ok) return setError(e || "Failed to save role");
+    setEditingId(null);
+    await load();
+  }
+
+  async function remove(roleId) {
+    const { ok, error: e } = await apiDelete(`/api/crm/contact-roles/${roleId}`);
+    if (!ok) return setError(e || "Failed to remove role");
+    await load();
+  }
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface px-4 py-4">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-bold text-ink">Key People</h2>
+        {!adding && (
+          <button type="button" onClick={() => setAdding(true)} className="text-xs text-primary font-semibold hover:underline">
+            + Add person
+          </button>
+        )}
+      </div>
+
+      {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+
+      {adding && (
+        <div className="mb-3">
+          <KeyPeopleRoleForm saving={saving} onCancel={() => setAdding(false)} onSave={add} />
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : roles.length === 0 && !adding ? (
+        <p className="text-sm text-muted">No consultants, referrers or other key people on this job yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {roles.map(r => (
+            <div key={r.id} className="border border-hairline rounded-lg px-3 py-2">
+              {editingId === r.id ? (
+                <KeyPeopleRoleForm role={r} saving={saving} onCancel={() => setEditingId(null)} onSave={(form) => saveEdit(r.id, form)} />
+              ) : (
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-ink truncate">{kpName(r.crmContacts)}</div>
+                    <div className="text-xs text-muted mt-0.5 capitalize">
+                      {r.role} · {r.status}
+                      {r.creditsReferral && <span className="text-primary"> · credits referral</span>}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5">
+                      {r.feeAmount != null ? `Fee ${fmt(r.feeAmount)} ex GST` : "No fee"}
+                      {r.feeArrangement && ` · ${r.feeArrangement}`}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0 text-right">
+                    <button type="button" onClick={() => setEditingId(r.id)} className="text-xs text-primary hover:underline">Edit</button>
+                    <button type="button" onClick={() => remove(r.id)} className="text-xs text-red-500 hover:underline">Remove</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -256,6 +481,7 @@ export default function JobCommandCentre() {
   const { jobId } = useParams();
   const navigate = useNavigate();
   const { allProjects, selectProject } = useProject();
+  const { role } = useRole();
 
   const [summary, setSummary] = useState(null);
   const [actuals, setActuals] = useState(null);
@@ -571,6 +797,9 @@ export default function JobCommandCentre() {
         <h2 className="text-sm font-bold text-ink mb-4">Variations</h2>
         <Variations jobId={jobId} onUpdate={load} />
       </div>
+
+      {/* Key People — ADMIN ONLY (consultants/referrers + consulting fees) */}
+      {role === "admin" && <KeyPeoplePanel jobId={jobId} />}
 
       {/* Cashflow Forecast */}
       <div className="rounded-card border border-hairline bg-surface overflow-hidden">

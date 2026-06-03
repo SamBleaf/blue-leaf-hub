@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch, apiPost, apiDelete } from "../../lib/apiFetch.js";
+import { apiFetch, apiPost, apiPut, apiDelete } from "../../lib/apiFetch.js";
+import { useRole } from "../../lib/useRole.js";
 import {
   CRM_STATUS_LABELS, CRM_NEXT_ACTION_TYPES,
   CRM_INTERACTION_TYPES, CRM_CONSENT_SOURCES,
 } from "../../lib/constants.js";
+
+const CONTACT_ROLE_TYPES = ["referrer", "consultant", "architect", "designer", "agent", "engineer", "other"];
+const CONTACT_ROLE_STATUSES = ["active", "completed", "inactive"];
+
+function fmtMoney(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "$0";
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(Number(n));
+}
 
 const STATUS_COLORS = {
   new:         "bg-slate-100 text-slate-700",
@@ -231,6 +240,178 @@ function AddToListModal({ contactId, onClose, onAdded }) {
   );
 }
 
+// Add / edit form for a single job-contact role (admin-only — exposes fees).
+function RoleForm({ role, onSave, onCancel, saving }) {
+  const [form, setForm] = useState({
+    role: role?.role || "consultant",
+    status: role?.status || "active",
+    feeAmount: role?.feeAmount ?? "",
+    creditsReferral: role ? !!role.creditsReferral : false,
+    feeArrangement: role?.feeArrangement || "",
+    startDate: role?.startDate || "",
+    endDate: role?.endDate || "",
+    notes: role?.notes || "",
+  });
+  function f(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  return (
+    <div className="space-y-2 border border-hairline rounded-lg p-3 bg-page">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Role</label>
+          <select className="input w-full text-sm" value={form.role} onChange={e => f("role", e.target.value)}>
+            {CONTACT_ROLE_TYPES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Status</label>
+          <select className="input w-full text-sm" value={form.status} onChange={e => f("status", e.target.value)}>
+            {CONTACT_ROLE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Consulting fee (ex GST)</label>
+          <input type="number" className="input w-full text-sm" placeholder="e.g. 1500" value={form.feeAmount} onChange={e => f("feeAmount", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Fee arrangement</label>
+          <input className="input w-full text-sm" placeholder="5% of contract / $1500 day rate" value={form.feeArrangement} onChange={e => f("feeArrangement", e.target.value)} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-muted mb-1">Start date</label>
+          <input type="date" className="input w-full text-sm" value={form.startDate} onChange={e => f("startDate", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">End date</label>
+          <input type="date" className="input w-full text-sm" value={form.endDate} onChange={e => f("endDate", e.target.value)} />
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-ink">
+        <input type="checkbox" className="w-4 h-4" checked={form.creditsReferral} onChange={e => f("creditsReferral", e.target.checked)} />
+        Credits referral (counts this job&apos;s contract value as value brought in)
+      </label>
+      <div>
+        <label className="block text-xs text-muted mb-1">Notes</label>
+        <input className="input w-full text-sm" value={form.notes} onChange={e => f("notes", e.target.value)} />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="text-sm text-muted hover:text-ink px-3 py-1.5">Cancel</button>
+        <button type="button" disabled={saving} onClick={() => onSave(form)} className="px-4 py-1.5 bg-primary text-white text-sm rounded-lg font-semibold disabled:opacity-50">
+          {saving ? "Saving…" : "Save Role"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// "Jobs & Referrals" — ADMIN-ONLY (renders only when role === "admin"). Shows the
+// value-brought-in vs consulting-fees summary plus per-job roles with add/edit/remove.
+function JobsAndReferralsSection({ contactId, onChanged }) {
+  const [roles, setRoles] = useState([]);
+  const [summary, setSummary] = useState({ valueBroughtIn: 0, consultingFees: 0, jobsCount: 0 });
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { ok, data } = await apiFetch(`/api/crm/contacts/${contactId}/job-roles`);
+    if (ok) {
+      setRoles(data.roles || []);
+      setSummary(data.summary || { valueBroughtIn: 0, consultingFees: 0, jobsCount: 0 });
+    }
+    setLoading(false);
+  }, [contactId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function saveEdit(roleId, form) {
+    setSaving(true); setError("");
+    const { ok, error: e } = await apiPut(`/api/crm/contact-roles/${roleId}`, form);
+    setSaving(false);
+    if (!ok) return setError(e || "Failed to save role");
+    setEditingId(null);
+    await load();
+    onChanged?.();
+  }
+
+  async function remove(roleId) {
+    const { ok, error: e } = await apiDelete(`/api/crm/contact-roles/${roleId}`);
+    if (!ok) return setError(e || "Failed to remove role");
+    await load();
+    onChanged?.();
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Jobs &amp; Referrals</p>
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="rounded-lg bg-page px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Value brought in</div>
+              <div className="text-sm font-bold text-ink mt-0.5">{fmtMoney(summary.valueBroughtIn)}</div>
+            </div>
+            <div className="rounded-lg bg-page px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Consulting fees</div>
+              <div className="text-sm font-bold text-ink mt-0.5">{fmtMoney(summary.consultingFees)}</div>
+            </div>
+            <div className="rounded-lg bg-page px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Jobs</div>
+              <div className="text-sm font-bold text-ink mt-0.5">{summary.jobsCount}</div>
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+          {roles.length === 0 ? (
+            <p className="text-sm text-muted">No job roles yet. Roles are added per job from the Job Command Centre, or auto-created when a referred lead converts to a job.</p>
+          ) : (
+            <div className="space-y-2">
+              {roles.map(r => (
+                <div key={r.id} className="border border-hairline rounded-lg px-3 py-2">
+                  {editingId === r.id ? (
+                    <RoleForm
+                      role={r}
+                      saving={saving}
+                      onCancel={() => setEditingId(null)}
+                      onSave={(form) => saveEdit(r.id, form)}
+                    />
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-ink truncate">
+                          {r.jobs?.address || "No job linked"}
+                        </div>
+                        <div className="text-xs text-muted mt-0.5 capitalize">
+                          {r.role} · {r.status}
+                          {r.creditsReferral && <span className="text-primary"> · credits referral</span>}
+                        </div>
+                        <div className="text-xs text-muted mt-0.5">
+                          {r.feeAmount != null ? `Fee ${fmtMoney(r.feeAmount)} ex GST` : "No fee"}
+                          {r.feeArrangement && ` · ${r.feeArrangement}`}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1 shrink-0 text-right">
+                        <button type="button" onClick={() => setEditingId(r.id)} className="text-xs text-primary hover:underline">Edit</button>
+                        <button type="button" onClick={() => remove(r.id)} className="text-xs text-red-500 hover:underline">Remove</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [contact, setContact] = useState(null);
   const [interactions, setInteractions] = useState([]);
@@ -242,6 +423,7 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState("");
   const navigate = useNavigate();
+  const { role } = useRole();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -423,6 +605,11 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
                 </span></div>
               </div>
             </div>
+          )}
+
+          {/* Jobs & Referrals — ADMIN ONLY (exposes consulting fees / cost data) */}
+          {role === "admin" && (
+            <JobsAndReferralsSection contactId={contactId} onChanged={() => { load(); onSaved?.(); }} />
           )}
 
           {/* Notes */}

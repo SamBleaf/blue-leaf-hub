@@ -49,10 +49,44 @@ function NewContactModal({ onClose, onCreated }) {
     firstName: "", lastName: "", email: "", phone: "", contactType: "prospect",
     suburb: "", status: "new", budgetRange: "", interestTimeline: "",
     consentToEmail: false, consentSource: "in_person", notes: "",
+    referredByContactId: "",
   });
   const [smartListDefs, setSmartListDefs] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // "Referred by" searchable picker — type a name → query the contacts list
+  // (the endpoint supports ?q=). Non-sensitive: shows no fees, available to all
+  // CRM users. Selecting a contact sets referredByContactId on the form (the POST
+  // /api/crm/contacts endpoint already accepts it).
+  const [refQuery, setRefQuery] = useState("");
+  const [refResults, setRefResults] = useState([]);
+  const [refSelected, setRefSelected] = useState(null);
+  const [refOpen, setRefOpen] = useState(false);
+
+  useEffect(() => {
+    const term = refQuery.trim();
+    if (refSelected || term.length < 2) { setRefResults([]); return; }
+    let active = true;
+    const t = setTimeout(async () => {
+      const { ok, data } = await apiFetch(`/api/crm/contacts?q=${encodeURIComponent(term)}&limit=8`);
+      if (active && ok) setRefResults(data.contacts || []);
+    }, 250);
+    return () => { active = false; clearTimeout(t); };
+  }, [refQuery, refSelected]);
+
+  function pickReferrer(c) {
+    setRefSelected(c);
+    setRefOpen(false);
+    setRefResults([]);
+    setForm(p => ({ ...p, referredByContactId: c.id }));
+  }
+
+  function clearReferrer() {
+    setRefSelected(null);
+    setRefQuery("");
+    setForm(p => ({ ...p, referredByContactId: "" }));
+  }
 
   // Load smart-list definitions so we can show, live, which lists this contact will
   // auto-join based on the type/status chosen (mirrors the server smart_filter logic).
@@ -162,6 +196,45 @@ function NewContactModal({ onClose, onCreated }) {
               <option value="2_years">2 years</option>
               <option value="just_researching">Just researching</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Referred by</label>
+            {refSelected ? (
+              <div className="flex items-center justify-between bg-page rounded-lg px-3 py-2">
+                <span className="text-sm text-ink">
+                  {[refSelected.firstName, refSelected.lastName].filter(Boolean).join(" ") || refSelected.email || "—"}
+                </span>
+                <button type="button" onClick={clearReferrer} className="text-xs text-red-500 hover:underline">
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  className="input w-full"
+                  placeholder="Type a name to find the referrer…"
+                  value={refQuery}
+                  onChange={e => { setRefQuery(e.target.value); setRefOpen(true); }}
+                  onFocus={() => setRefOpen(true)}
+                />
+                {refOpen && refResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-surface border border-hairline rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {refResults.map(c => (
+                      <button
+                        type="button"
+                        key={c.id}
+                        onClick={() => pickReferrer(c)}
+                        className="block w-full text-left px-3 py-2 text-sm text-ink hover:bg-page"
+                      >
+                        {[c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "—"}
+                        {c.email && <span className="text-muted text-xs ml-2">{c.email}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

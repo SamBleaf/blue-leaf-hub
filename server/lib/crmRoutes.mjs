@@ -28,7 +28,7 @@
  *  POST /api/webhooks/resend            Resend delivery webhooks
  */
 
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import jwt from "jsonwebtoken";
@@ -149,6 +149,77 @@ async function smartListsForContact(sb, contact) {
       return true;
     })
     .map((l) => ({ id: l.id, name: l.name }));
+}
+
+/**
+ * Recompute a contact's referral rollup from job_contact_roles, keeping
+ * crm_contacts.referral_count / referral_job_value (and the relationship score)
+ * accurate after any role change.
+ *
+ *   referral_count     = number of DISTINCT jobs the contact credits a referral on
+ *                        (credits_referral=true AND job_id IS NOT NULL)
+ *   referral_job_value = Σ over those DISTINCT jobs of the job's contract value
+ *                        (jobs.contract_value ?? original_contract_value ?? 0)
+ *
+ * A job credited once is counted once even if the contact has multiple roles on it.
+ * EX-GST throughout (jobs.contract_value is stored ex-GST per CLAUDE.md § Amounts).
+ * Best-effort + non-fatal: returns { ok } and never throws — callers (incl. the
+ * lead→job convert flow) must not break if this fails.
+ */
+export async function recomputeReferralRollup(sb, contactId) {
+  try {
+    if (!sb || !contactId) return { ok: false };
+
+    // Credited roles that point at a real job.
+    const { data: roles, error: rErr } = await sb
+      .from("job_contact_roles")
+      .select("job_id")
+      .eq("contact_id", contactId)
+      .eq("credits_referral", true)
+      .not("job_id", "is", null);
+    if (rErr) return { ok: false };
+
+    // De-dup to DISTINCT credited jobs (a job credited once is counted once).
+    const jobIds = [...new Set((roles || []).map((r) => r.job_id).filter(Boolean))];
+
+    let referralJobValue = 0;
+    if (jobIds.length) {
+      const { data: jobs } = await sb
+        .from("jobs")
+        .select("id, contract_value, original_contract_value")
+        .in("id", jobIds);
+      referralJobValue = (jobs || []).reduce(
+        (sum, j) => sum + Number(j.contract_value ?? j.original_contract_value ?? 0),
+        0
+      );
+    }
+
+    const referralCount = jobIds.length;
+
+    // Persist the rollup, then refresh the relationship score off the new numbers.
+    await sb.from("crm_contacts").update({
+      referral_count: referralCount,
+      referral_job_value: referralJobValue,
+      updated_at: new Date().toISOString(),
+    }).eq("id", contactId);
+
+    const { data: contact } = await sb
+      .from("crm_contacts").select("status").eq("id", contactId).single();
+    const { data: interactions } = await sb
+      .from("crm_interactions").select("interaction_type, created_at").eq("contact_id", contactId);
+    if (contact) {
+      const newScore = scoreContact(interactions || [], referralCount, referralJobValue, contact.status);
+      await sb.from("crm_contacts").update({
+        relationship_score: newScore,
+        relationship_score_updated_at: new Date().toISOString(),
+      }).eq("id", contactId);
+    }
+
+    return { ok: true, referralCount, referralJobValue };
+  } catch (e) {
+    console.warn("[recomputeReferralRollup]", e?.message || e);
+    return { ok: false };
+  }
 }
 
 // ─── registration ─────────────────────────────────────────────────────────────
@@ -500,6 +571,136 @@ export function registerCrmRoutes(app) {
     }).eq("id", id);
 
     ok(res, { lead: rowToCamel(lead) });
+  });
+
+  // ─── Job ↔ contact roles (Party spine) — FINANCE/ADMIN ONLY ────────────────
+  //
+  // ⚠️ COST / MARGIN-SENSITIVE. Consulting fees live here. EVERY endpoint below is
+  // requireAuth + requireRole("admin"). Non-admin users must never see fees.
+  // Amounts are EX-GST (CLAUDE.md § Amounts). camelCase across the boundary.
+
+  // A contact's roles across all jobs + a computed value/fees summary.
+  app.get("/api/crm/contacts/:id/job-roles", requireAuth, requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+
+    const { data: roles, error } = await sb()
+      .from("job_contact_roles")
+      .select("*, jobs(id, address, contract_value, original_contract_value)")
+      .eq("contact_id", id)
+      .order("created_at", { ascending: false });
+    if (error) return err(res, 500, "Failed to load contact job roles");
+
+    // Summary:
+    //   valueBroughtIn  = Σ over DISTINCT credited jobs of contract value
+    //                     (contract_value ?? original_contract_value ?? 0)
+    //   consultingFees  = Σ fee_amount across ALL the contact's roles
+    //   jobsCount       = number of DISTINCT credited jobs
+    // A job credited once is counted once even with multiple roles on it.
+    const creditedJobValue = new Map();
+    let consultingFees = 0;
+    for (const r of roles || []) {
+      consultingFees += Number(r.fee_amount || 0);
+      if (r.credits_referral && r.job_id && r.jobs) {
+        const v = Number(r.jobs.contract_value ?? r.jobs.original_contract_value ?? 0);
+        creditedJobValue.set(r.job_id, v); // dedup by job_id — same job → same value
+      }
+    }
+    const valueBroughtIn = [...creditedJobValue.values()].reduce((s, v) => s + v, 0);
+
+    ok(res, {
+      roles: rowsToCamel(roles || []),
+      summary: {
+        valueBroughtIn,
+        consultingFees,
+        jobsCount: creditedJobValue.size,
+      },
+    });
+  });
+
+  // Add a role to a job (consultant/referrer/etc.). Defaults creditsReferral=true
+  // for role='referrer'. Recomputes the contact's referral rollup after insert.
+  app.post("/api/crm/jobs/:jobId/contact-roles", requireAuth, requireRole("admin"), async (req, res) => {
+    const { jobId } = req.params;
+    const {
+      contactId, role, status = "active", startDate, endDate,
+      feeAmount, creditsReferral, feeArrangement, notes,
+    } = req.body;
+
+    if (!contactId) return err(res, 400, "contactId is required");
+    if (!role) return err(res, 400, "role is required");
+
+    const credits = creditsReferral !== undefined ? !!creditsReferral : role === "referrer";
+
+    const { data, error } = await sb().from("job_contact_roles").insert({
+      job_id: jobId,
+      contact_id: contactId,
+      role,
+      status,
+      start_date: startDate || null,
+      end_date: endDate || null,
+      fee_amount: feeAmount != null && feeAmount !== "" ? Number(feeAmount) : null,
+      credits_referral: credits,
+      fee_arrangement: feeArrangement || null,
+      notes: notes || null,
+      created_by: req.caller?.id || null,
+    }).select().single();
+
+    if (error) return err(res, 400, translateDbError(error));
+
+    await recomputeReferralRollup(sb(), contactId);
+    ok(res, { role: rowToCamel(data) });
+  });
+
+  // Edit any field on a role; recompute the affected contact's rollup.
+  app.put("/api/crm/contact-roles/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const {
+      role, status, startDate, endDate,
+      feeAmount, creditsReferral, feeArrangement, notes,
+    } = req.body;
+
+    const updates = { updated_at: new Date().toISOString() };
+    if (role !== undefined) updates.role = role;
+    if (status !== undefined) updates.status = status;
+    if (startDate !== undefined) updates.start_date = startDate || null;
+    if (endDate !== undefined) updates.end_date = endDate || null;
+    if (feeAmount !== undefined) updates.fee_amount = feeAmount != null && feeAmount !== "" ? Number(feeAmount) : null;
+    if (creditsReferral !== undefined) updates.credits_referral = !!creditsReferral;
+    if (feeArrangement !== undefined) updates.fee_arrangement = feeArrangement || null;
+    if (notes !== undefined) updates.notes = notes || null;
+
+    const { data, error } = await sb()
+      .from("job_contact_roles").update(updates).eq("id", id).select().single();
+    if (error) return err(res, 400, translateDbError(error));
+
+    if (data?.contact_id) await recomputeReferralRollup(sb(), data.contact_id);
+    ok(res, { role: rowToCamel(data) });
+  });
+
+  // Remove a role; recompute the affected contact's rollup.
+  app.delete("/api/crm/contact-roles/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+
+    const { data, error } = await sb()
+      .from("job_contact_roles").delete().eq("id", id).select("contact_id").single();
+    if (error) return err(res, 500, "Failed to remove role");
+
+    if (data?.contact_id) await recomputeReferralRollup(sb(), data.contact_id);
+    ok(res);
+  });
+
+  // Everyone with a role on a given job (for the finance command-centre panel).
+  app.get("/api/crm/jobs/:jobId/contact-roles", requireAuth, requireRole("admin"), async (req, res) => {
+    const { jobId } = req.params;
+
+    const { data, error } = await sb()
+      .from("job_contact_roles")
+      .select("*, crm_contacts(id, first_name, last_name, contact_type, email, phone)")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false });
+    if (error) return err(res, 500, "Failed to load job roles");
+
+    ok(res, { roles: rowsToCamel(data || []) });
   });
 
   // ─── Unified search ───────────────────────────────────────────────────────

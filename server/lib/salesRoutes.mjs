@@ -12,6 +12,7 @@ import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { setFact } from "./factsService.mjs";
+import { recomputeReferralRollup } from "./crmRoutes.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -506,6 +507,35 @@ export function registerSalesRoutes(app) {
         }
       } catch (e) {
         console.warn("[convert-to-job] crm link:", e?.message || e);
+      }
+
+      // 7b. Close the referral loop: if this lead was referred by a CRM contact,
+      //     materialise a 'referrer' role on the Party spine (credits_referral=true,
+      //     so it credits the new job's contract value as "value brought in"), then
+      //     recompute that referrer's rollup. Idempotent via the UNIQUE(job_id,
+      //     contact_id, role) constraint. Additive + NON-FATAL — a failure here must
+      //     never break the conversion (the job already exists).
+      if (lead.referred_by_contact_id) {
+        try {
+          // upsert-style: the UNIQUE(job_id, contact_id, role) constraint makes a
+          // re-convert a no-op rather than a duplicate. We swallow the duplicate-key
+          // error and still recompute below so the rollup stays correct.
+          const { error: roleErr } = await sb.from("job_contact_roles").insert({
+            job_id: job.id,
+            lead_id: lead.id,
+            contact_id: lead.referred_by_contact_id,
+            role: "referrer",
+            status: "active",
+            credits_referral: true,
+            created_by: actorId,
+          });
+          if (roleErr && !/duplicate key|unique constraint/i.test(String(roleErr.message || roleErr))) {
+            console.warn("[convert-to-job] referrer role insert:", roleErr.message || roleErr);
+          }
+          await recomputeReferralRollup(sb, lead.referred_by_contact_id);
+        } catch (e) {
+          console.warn("[convert-to-job] referrer role:", e?.message || e);
+        }
       }
 
       // 8. Re-read the job so the response reflects any applied fact writes.
