@@ -1,10 +1,14 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 
-function timingSafeEqualHex(a, b) {
+/**
+ * Buildxact signature: HMACSHA256 → Base64 (per developer portal docs).
+ * The secret is UTF-8 encoded; the hash is Base64, NOT hex.
+ */
+function timingSafeEqualBase64(a, b) {
   try {
-    const ba = Buffer.from(String(a).trim(), "hex");
-    const bb = Buffer.from(String(b).trim(), "hex");
+    const ba = Buffer.from(String(a).trim(), "base64");
+    const bb = Buffer.from(String(b).trim(), "base64");
     if (ba.length !== bb.length || ba.length === 0) return false;
     return crypto.timingSafeEqual(ba, bb);
   } catch {
@@ -15,13 +19,12 @@ function timingSafeEqualHex(a, b) {
 function verifyBuildexactSignature(rawBody, headerValue, secret) {
   if (!secret) return { ok: true, skipped: true };
   if (!headerValue || typeof headerValue !== "string") return { ok: false, reason: "missing_signature_header" };
-  const hmac = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  // Buildxact serialises using camelCase + signs with HMAC-SHA256, output = Base64 string (not hex).
+  const hmac = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
   const trimmed = headerValue.trim();
-  if (trimmed.toLowerCase().startsWith("sha256=")) {
-    const hex = trimmed.slice(7).trim();
-    return { ok: timingSafeEqualHex(hex, hmac), reason: "hmac_mismatch" };
-  }
-  return { ok: timingSafeEqualHex(trimmed, hmac), reason: "hmac_mismatch" };
+  // Header may be prefixed "sha256=" — strip if present.
+  const sig = trimmed.toLowerCase().startsWith("sha256=") ? trimmed.slice(7).trim() : trimmed;
+  return { ok: timingSafeEqualBase64(sig, hmac), reason: "hmac_mismatch" };
 }
 
 function normalizeAddressKey(s) {
@@ -43,10 +46,16 @@ function addressesLikelyMatch(a, b) {
   return A.slice(0, slice) === B.slice(0, slice);
 }
 
+/**
+ * Buildxact uses camelCase naming policy (per developer portal docs).
+ * Most likely field is `eventType`; keep PascalCase + snake_case fallbacks for safety.
+ * Known event names: "Estimate Accepted", "Lead Created", "Lead Updated", etc.
+ */
 function extractEventType(body) {
   return (
-    body?.event_type ||
-    body?.EventType ||
+    body?.eventType ||   // camelCase — Buildxact developer portal naming policy
+    body?.EventType ||   // PascalCase fallback
+    body?.event_type ||  // snake_case fallback
     body?.type ||
     body?.Type ||
     body?.event ||
@@ -136,6 +145,10 @@ export async function handleBuildexactWebhook(req, res) {
     return res.status(200).json({ ok: true, ignored: true, reason: "invalid_json" });
   }
 
+  // Log top-level keys so we can confirm the real field names from Railway logs.
+  console.log("[buildexact webhook] top-level keys:", Object.keys(body || {}));
+  console.log("[buildexact webhook] raw body (first 500 chars):", JSON.stringify(body).slice(0, 500));
+
   const eventType = String(extractEventType(body) || "").trim() || "unknown";
   const payload = extractJobPayload(body);
   const jobId = extractJobId(payload);
@@ -165,6 +178,9 @@ export async function handleBuildexactWebhook(req, res) {
   const eventRowId = inserted?.id;
 
   const et = eventType.toLowerCase();
+
+  // Known Buildxact event categories (per developer portal docs).
+  // Estimate events: "Estimate Accepted" etc. — logged, stub handler for now.
   if (et.includes("estimate")) {
     if (eventRowId) {
       await sb.from("buildexact_webhook_events").update({ processed: true }).eq("id", eventRowId);
@@ -172,7 +188,16 @@ export async function handleBuildexactWebhook(req, res) {
     return res.status(200).json({ ok: true, handled: "estimate_stub" });
   }
 
+  // Lead events: "Lead Created", "Lead Updated" — log and return ok (no Hub action yet).
+  if (et.includes("lead")) {
+    if (eventRowId) {
+      await sb.from("buildexact_webhook_events").update({ processed: true }).eq("id", eventRowId);
+    }
+    return res.status(200).json({ ok: true, handled: "lead_stub" });
+  }
+
   if (!et.includes("job")) {
+    console.log("[buildexact webhook] unrecognised event type:", eventType, "— stored, not processed");
     return res.status(200).json({ ok: true, ignored: true, event_type: eventType });
   }
 
