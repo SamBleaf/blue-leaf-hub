@@ -37,7 +37,7 @@ function getPxPerDay(viewMode, colWidth) {
   return colWidth / 30;
 }
 
-function GhostBars({ tasks, ganttTasks, showColumns, viewMode, colWidth }) {
+function GhostBars({ tasks, ganttTasks, showColumns, viewMode, colWidth, scrollLeft = 0 }) {
   const drifted = tasks.filter(
     (t) =>
       t.baseline_start_date &&
@@ -60,7 +60,9 @@ function GhostBars({ tasks, ganttTasks, showColumns, viewMode, colWidth }) {
         if (rowIdx < 0) return null;
         const bStart = new Date(`${task.baseline_start_date}T12:00:00`);
         const bEnd   = new Date(`${task.baseline_end_date}T12:00:00`);
-        const ghostX = Math.round((bStart - chartStart) / 86400000 * pxPerDay);
+        // Subtract the container's horizontal scroll so the ghost bar tracks
+        // the same visual column as the corresponding Gantt task bar.
+        const ghostX = Math.round((bStart - chartStart) / 86400000 * pxPerDay) - scrollLeft;
         const ghostW = Math.max(4, Math.round((bEnd - bStart) / 86400000 * pxPerDay + pxPerDay));
         const ghostY = HEADER_HEIGHT + rowIdx * ROW_HEIGHT + Math.round((ROW_HEIGHT - 8) / 2);
         return (
@@ -290,6 +292,7 @@ export default function ScheduleGantt({
   clickToEdit = false,
 }) {
   const [ctxMenu, setCtxMenu] = useState(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
   const containerRef   = useRef(null);
   // After a drag/resize the library fires onClick for the same task.
   // Guard against that so the detail panel never pops open uninvited.
@@ -409,6 +412,7 @@ export default function ScheduleGantt({
           ref={containerRef}
           className="relative overflow-x-auto rounded-card border border-hairline bg-surface p-2"
           onContextMenu={handleContextMenu}
+          onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
         >
           {baselineLocked && (
             <GhostBars
@@ -417,6 +421,7 @@ export default function ScheduleGantt({
               showColumns={showColumns}
               viewMode={viewMode}
               colWidth={colWidth}
+              scrollLeft={scrollLeft}
             />
           )}
           <Gantt
