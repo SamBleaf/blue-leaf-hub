@@ -1,5 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import ScheduleGantt from "../components/schedule/ScheduleGantt.jsx";
 import ScheduleSheet from "../components/schedule/ScheduleSheet.jsx";
@@ -80,6 +80,7 @@ export default function ScheduleManager() {
   const [taskAdvice, setTaskAdvice] = useState("");
   const [ripple, setRipple] = useState(null);
   const [loading, setLoading] = useState(true);
+  const hasLoadedTasksRef = useRef(false); // after first successful fetch, don't remount Gantt on reload
   const [error, setError] = useState("");
   const [busy, setBusy] = useState({});
   const [showGanttColumns, setShowGanttColumns] = useState(() => {
@@ -148,13 +149,17 @@ export default function ScheduleManager() {
   }, [projectId]);
 
   const loadTasks = useCallback(async () => {
-    setLoading(true);
+    // Only show the full-screen spinner on the very first load.
+    // Subsequent background refreshes (after saves, ripple confirms, etc.) run
+    // silently so the Gantt chart stays mounted and the scroll position is preserved.
+    if (!hasLoadedTasksRef.current) setLoading(true);
     setError("");
     try {
       const res = await authFetch(`/api/schedule/${projectId}`);
       const j = await readApiJson(res);
       if (!res.ok || !j.ok) throw new Error(j.error || "Failed to load schedule");
       setTasks((j.tasks || []).map(normalizeTask));
+      hasLoadedTasksRef.current = true;
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -542,7 +547,22 @@ export default function ScheduleManager() {
         return;
       }
     }
-    await patchTask(id, { start_date: newStartDate, end_date: newEndDate, duration_days: newDuration });
+    // Optimistic update — reflect the new position immediately so the Gantt
+    // never unmounts/scroll-resets while the PATCH is in-flight.
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? { ...t, start_date: newStartDate, end_date: newEndDate, duration_days: newDuration }
+          : t
+      )
+    );
+    try {
+      await patchTask(id, { start_date: newStartDate, end_date: newEndDate, duration_days: newDuration }, { skipReload: true });
+    } catch (e) {
+      // On failure roll back to server truth
+      setError(e?.message || "Save failed — dates restored");
+      await loadTasks();
+    }
   }
 
   async function confirmRipple(noCascade = false) {
