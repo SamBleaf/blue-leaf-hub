@@ -287,9 +287,13 @@ export default function ScheduleGantt({
   onLockBaseline,
   onResetBaseline,
   canEdit = true,
+  clickToEdit = false,
 }) {
   const [ctxMenu, setCtxMenu] = useState(null);
-  const containerRef = useRef(null);
+  const containerRef   = useRef(null);
+  // After a drag/resize the library fires onClick for the same task.
+  // Guard against that so the detail panel never pops open uninvited.
+  const justDraggedRef = useRef(false);
 
   const today        = new Date().toISOString().slice(0, 10);
   const lookaheadEnd = new Date();
@@ -423,13 +427,20 @@ export default function ScheduleGantt({
             TaskListHeader={showColumns ? GanttListHeader : undefined}
             TaskListTable={showColumns  ? GanttListTable  : undefined}
             onClick={(task) => {
-              if (!String(task.id).startsWith("phase:")) onOpenTask?.(task.id);
+              // Skip if we just finished a drag/resize — the library fires onClick
+              // for the same task immediately after onDateChange, which would open
+              // the detail panel uninvited. Also skip when clickToEdit is off.
+              if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+              if (clickToEdit && !String(task.id).startsWith("phase:")) onOpenTask?.(task.id);
             }}
             onDoubleClick={(task) => {
               if (String(task.id).startsWith("phase:")) onAddTask?.(String(task.id).replace("phase:", ""));
             }}
             onDateChange={(task) => {
               if (!canEdit || String(task.id).startsWith("phase:")) return false;
+              // Mark that a drag/resize just happened so the following onClick is ignored.
+              justDraggedRef.current = true;
+              setTimeout(() => { justDraggedRef.current = false; }, 500);
               onDateChange?.(task.id, toYmdFromDate(task.start), toYmdFromDate(task.end));
               return true;
             }}

@@ -86,6 +86,9 @@ export default function ScheduleManager() {
   const [showGanttColumns, setShowGanttColumns] = useState(() => {
     try { return localStorage.getItem("blhub_gantt_columns") === "true"; } catch { return false; }
   });
+  const [clickToEdit, setClickToEdit] = useState(() => {
+    try { return localStorage.getItem("blhub_gantt_click_to_edit") === "true"; } catch { return false; }
+  });
   const [eots, setEots] = useState([]);
   const [dismissedAlerts, setDismissedAlerts] = useState(() => new Set());
   const [intelligenceOpen, setIntelligenceOpen] = useState(true);
@@ -95,6 +98,14 @@ export default function ScheduleManager() {
     setShowGanttColumns((v) => {
       const next = !v;
       try { localStorage.setItem("blhub_gantt_columns", String(next)); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
+
+  const toggleClickToEdit = useCallback(() => {
+    setClickToEdit((v) => {
+      const next = !v;
+      try { localStorage.setItem("blhub_gantt_click_to_edit", String(next)); } catch { /* noop */ }
       return next;
     });
   }, []);
@@ -767,6 +778,8 @@ export default function ScheduleManager() {
         tradeOptions={tradeOptions}
         alertCount={intelligenceAlerts.filter((a) => !dismissedAlerts.has(a.id)).length}
         onToggleAlerts={() => setIntelligenceOpen((v) => !v)}
+        clickToEdit={clickToEdit}
+        onToggleClickToEdit={toggleClickToEdit}
         busy={busy}
       />
 
@@ -859,6 +872,7 @@ export default function ScheduleManager() {
           onLockBaseline={lockBaseline}
           onResetBaseline={resetBaseline}
           canEdit={canEdit}
+          clickToEdit={clickToEdit}
         />
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (

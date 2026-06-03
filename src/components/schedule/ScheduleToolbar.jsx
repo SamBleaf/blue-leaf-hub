@@ -19,6 +19,8 @@ export default function ScheduleToolbar({
   tradeOptions = [],
   alertCount = 0,
   onToggleAlerts,
+  clickToEdit = false,
+  onToggleClickToEdit,
   busy = {},
   canEdit = true
 }) {
@@ -82,6 +84,16 @@ export default function ScheduleToolbar({
         <button type="button" onClick={onToggleLookahead} className={`rounded-lg border px-3 py-1.5 font-semibold ${lookahead ? "border-primary bg-primary/10 text-primary" : "border-hairline text-muted"}`}>
           3-week lookahead
         </button>
+        {onToggleClickToEdit ? (
+          <button
+            type="button"
+            onClick={onToggleClickToEdit}
+            title={clickToEdit ? "Click to edit is ON — clicking a task opens its detail panel" : "Click to edit is OFF — drag tasks silently, right-click to open options"}
+            className={`rounded-lg border px-3 py-1.5 font-semibold ${clickToEdit ? "border-accent bg-accent/10 text-accent" : "border-hairline text-muted"}`}
+          >
+            {clickToEdit ? "✏️ Click to edit" : "Click to edit"}
+          </button>
+        ) : null}
         <label className="flex items-center gap-2 text-muted">
           Filter trade
           <select value={filterTrade} onChange={(e) => onFilterTradeChange(e.target.value)} className="rounded-lg border border-hairline bg-surface px-2 py-1 text-ink">
