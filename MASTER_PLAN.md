@@ -95,14 +95,29 @@ Surfaces in the **Fee Proposal wizard (Module 5), just before the proposal is dr
 - **Internal memory + continuous improvement (Sam's spec):** absorbs & analyses ALL retrievable data per job; keeps an internal memory to spot **trends** across jobs; continuously improves as data arrives; and **feeds deep analysis back to the other modules** (warn Cost Intelligence of drift, flag Procurement risk, nudge Scope coverage). It both *scores* a proposal and *teaches* the rest of the system.
 - Hub-only v1 can run today on RFQ coverage + cost benchmarks + pre-tender confidence; full version waits on the Bestimator/Buildxact feeds.
 
-### BQ-10 — Procurement Intelligence (Hub · Operations) — PLANNING IN PROGRESS
+### BQ-10 — Procurement Intelligence (Hub · Operations) — PLAN FINALISED 2026-06-03
 Goal: a **one-stop procurement hub** — every material ordered through it, **no lead-time surprises** (shortages, catalogue clearances).
-- **Trigger (decided):** kick off the procurement plan the moment a **contract is signed + the job is locked** (win/lock event) — proactive. Each item still gets an order-by date = required-on-site − lead time; long-lead items flagged for immediate order.
-- **Scope (decided):** **every PO** — all materials, one hub (not just long-lead).
-- **Lives (decided):** **Operations** (alongside POs + schedule).
-- **Source of "what to order" (TO DECIDE):** Buildxact estimate line items vs RFQ packages vs build-type procurement template vs hybrid — options under discussion.
-- **Output format (TO DECIDE):** procurement calendar vs "order this week" worklist vs auto-draft POs vs all-three-layered — options under discussion.
-- Likely data model: `procurement_items` (job_id, category, item, qty, unit, supplier, lead_time_days, required_on_site, order_by, status, po_id, source) + `procurement_templates` (build_type → standard items + lead times).
+
+**Decisions (locked 2026-06-03):**
+- **Trigger:** generate the full procurement plan at **job-lock** (contract signed + won). `order_by_date = required-on-site − lead time`; long-lead items flagged "order now".
+- **Scope:** **every PO** — all materials, one hub.
+- **Lives:** **Operations** (alongside POs + schedule).
+- **Source = HYBRID:** a **build-type procurement template** provides the skeleton (categories, lead times, order sequence, builder-supplied vs subbie-supplied vs PC); the **Buildxact estimate** fills real items / quantities / costs. Template works at job-lock even before a detailed estimate; the estimate enriches.
+- **Output = LAYERED:** P1 = "order this week" **worklist** (daily action) + procurement **calendar** (horizon) + status tracking; P2 = **auto-draft POs** into the existing PO flow.
+
+**Data model (~mig 084):**
+- `procurement_templates` — build_type, trade_category_id, item_name, default_unit, supply_type (`builder_supplied`|`subbie_supplied`|`pc_item`), default_lead_time_days, order_sequence/phase, is_active.
+- `procurement_items` — job_id, trade_category_id, item_name, quantity, unit, supply_type, supplier_id?, lead_time_days, required_on_site_date, order_by_date (computed), status (`pending`|`to_order`|`ordered`|`confirmed`|`delivered`|`cancelled`), source (`template`|`estimate`|`manual`), buildexact_line_ref?, unit_cost?, total_cost?, purchase_order_id?, notes.
+
+**Generation (at job-lock):** seed items from the build-type template → enrich from the Buildxact estimate (map by `trade_category_id` + name; classify orderable vs subbie-supplied) → compute required-on-site from the schedule phase the item feeds → `order_by = on-site − lead time` → flag long-lead.
+
+**Endpoints (Operations):** `POST .../jobs/:jobId/procurement/generate` · `GET .../jobs/:jobId/procurement` · `GET .../procurement/worklist` (cross-job "order this week") · `PUT .../procurement/items/:id` · `POST .../procurement/items/:id/draft-po` (P2) · template CRUD.
+
+**Integrations:** trigger off win-finalize (`module4Routes`); source = Buildxact estimate + `trade_category_id` FK (Phase 6); dates from `schedule_tasks` (+ `procurementStatus` util); P2 auto-draft → existing `purchase_orders` + Buildxact PO create; emit `procurement.generated` / `item.ordered` events.
+
+**Phasing:** P1 = schema + generation (template→estimate) + worklist + calendar + status. P2 = auto-draft POs + lead-time learning (actual vs expected lead times feed back).
+
+**Human input needed (gates P1 usefulness):** seed the **build-type procurement templates** — Blue Leaf's standard items + typical lead times + supply-type per build type (new build / reno / extension).
 
 ### BQ-11 — Trade Intelligence (subbie market) — Hub collects → feeds Bestimator
 Hub captures (byproduct of RFQ / Quote-Tracker): avg quote per trade, award rate, response rate, lead time, region, capacity → **feeds Bestimator** as a pricing/market signal ("roofing avg $26k → this quote +46%"). Pricing tenant-private; anonymised patterns poolable.
