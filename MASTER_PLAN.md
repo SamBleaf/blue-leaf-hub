@@ -50,6 +50,62 @@ Migrations: applied via Supabase SQL editor in order. Current max = **047**. Nex
 - [ ] **BQ-5** Finance cashflow — Cursor prompt written 2026-05-23 (3-month accordion in JobCommandCentre)
 - [ ] **BQ-6** Director portfolio — Cursor prompt written 2026-05-23 (ranked JobDashboardSelector with risk scoring)
 - [ ] **BQ-8** Marketing Stage 2 — FinalAssembly.jsx + marketingMedia.mjs exist, verify full wiring + test pipeline
+- [ ] **BQ-9** Estimate Confidence Score — Hub OS-level feature, surfaced at the FEE-PROPOSAL stage (see ESTIMATING OS section)
+- [ ] **BQ-10** Procurement Intelligence — one-stop procurement hub in Operations, triggered at job-lock (see ESTIMATING OS section) — PLANNING
+- [ ] **BQ-11** Trade Intelligence (subbie market) — collect in Hub, feed to Bestimator (see ESTIMATING OS section)
+
+---
+
+## ESTIMATING OPERATING SYSTEM — division of labour + data flows
+
+> Added 2026-06-03. **Blue Leaf Hub is the Estimating Operating System.** It consumes the external
+> engines (Bestimator = the autonomous QS/estimator Sam is building; Buildxact) and adds the
+> history / relationship / ops / confidence layer that turns an estimate into a managed outcome.
+> The estimate is one output of a much larger system:
+>
+> `Lead → Project Intelligence → Scope Intelligence → Building Elements → Quantity Intelligence`
+> `→ Recipe Intelligence → Estimate → RFQ → Quote Returns → Cost/Budget Intelligence`
+> `→ Construction → Actual Costs → Historical Learning`
+
+### Who owns what (locked 2026-06-03)
+
+| Layer | Owner | Notes |
+|---|---|---|
+| Project Intelligence (building facts) | Hub stores · Bestimator extracts | `project_metrics` + facts service — **built** |
+| Scope Intelligence (trades/scope/packages) | **Bestimator** | Hub RFQ extractor = v1; Bestimator = v2 |
+| Building Element Engine (substructure/frame/bathrooms…) | **Bestimator** | the scope→quantity bridge; NOT a Hub concern |
+| Quantity Intelligence (takeoff) | **Bestimator / Buildxact** | remote |
+| Recipe Intelligence (qty→materials/labour/subs) | **Buildxact** | Hub consumes |
+| Historical / Cost Intelligence (benchmarks, similar, trends) | **Hub** | **built** (Module 2 — Cost Intelligence) |
+| Cost Plan (pre-takeoff budget) | **Hub** | = the **Pre-Tender assistant** (built) |
+| Trade Intelligence (subbie market) | **Hub collects → feeds Bestimator** | BQ-11 |
+| Procurement Intelligence | **Hub (Operations)** | BQ-10 |
+| Estimate Review (cost critique) | Hub (cost) + Bestimator (scope) | split |
+| Estimate Confidence Score | **Hub** | BQ-9 — composes all signals |
+
+### Data flows (engines run externally; they intertwine via interfaces)
+- **Bestimator → Hub:** extracted scope, building facts, element/quantity candidates, confidence + provenance — via the `ScopeIntelligence` adapter (`server/lib/scopeIntelligence/`). Hub renders/confirms via the facts service + Confirm Queue.
+- **Hub → Bestimator:** learning outcomes — final RFQ set, accepted quotes, **trade-market data (BQ-11)**, POs, invoices, actuals — via the adapter's LearningAdapter / `submitOutcome`. Pricing stays **tenant-private**; only anonymised market patterns may be pooled.
+- **Buildxact ↔ Hub:** estimate line items, recipes, POs, claims, variations — via the Buildxact client + reconcile (within $1).
+
+### BQ-9 — Estimate Confidence Score (Hub, at the fee-proposal stage)
+Surfaces in the **Fee Proposal wizard (Module 5), just before the proposal is drafted/presented to the client** — the OS-level output, the only point that sees every signal.
+- **Composes:** scope coverage % (RFQ) · quantity confidence (Bestimator) · recipe/cost confidence (Buildxact) · historical validation (`cost_benchmarks` similar-project delta) · risk factors (missing-trade/floor + below-p25 allowances).
+- **Outputs:** a composite confidence % (with sub-scores) + a **likely-final-build-cost range** ($X–$Y).
+- **Internal memory + continuous improvement (Sam's spec):** absorbs & analyses ALL retrievable data per job; keeps an internal memory to spot **trends** across jobs; continuously improves as data arrives; and **feeds deep analysis back to the other modules** (warn Cost Intelligence of drift, flag Procurement risk, nudge Scope coverage). It both *scores* a proposal and *teaches* the rest of the system.
+- Hub-only v1 can run today on RFQ coverage + cost benchmarks + pre-tender confidence; full version waits on the Bestimator/Buildxact feeds.
+
+### BQ-10 — Procurement Intelligence (Hub · Operations) — PLANNING IN PROGRESS
+Goal: a **one-stop procurement hub** — every material ordered through it, **no lead-time surprises** (shortages, catalogue clearances).
+- **Trigger (decided):** kick off the procurement plan the moment a **contract is signed + the job is locked** (win/lock event) — proactive. Each item still gets an order-by date = required-on-site − lead time; long-lead items flagged for immediate order.
+- **Scope (decided):** **every PO** — all materials, one hub (not just long-lead).
+- **Lives (decided):** **Operations** (alongside POs + schedule).
+- **Source of "what to order" (TO DECIDE):** Buildxact estimate line items vs RFQ packages vs build-type procurement template vs hybrid — options under discussion.
+- **Output format (TO DECIDE):** procurement calendar vs "order this week" worklist vs auto-draft POs vs all-three-layered — options under discussion.
+- Likely data model: `procurement_items` (job_id, category, item, qty, unit, supplier, lead_time_days, required_on_site, order_by, status, po_id, source) + `procurement_templates` (build_type → standard items + lead times).
+
+### BQ-11 — Trade Intelligence (subbie market) — Hub collects → feeds Bestimator
+Hub captures (byproduct of RFQ / Quote-Tracker): avg quote per trade, award rate, response rate, lead time, region, capacity → **feeds Bestimator** as a pricing/market signal ("roofing avg $26k → this quote +46%"). Pricing tenant-private; anonymised patterns poolable.
 
 ---
 
@@ -1605,7 +1661,7 @@ These items need planning before they can be built:
 
 1. **SOP documentation** — 82 SOPs planned, 6 written. Planning Agent to prioritise and draft Finance (09) + Operations (05-08) SOPs before staff onboarding.
 2. **Xero integration** — Full planning needed. `xero_credentials` table exists. Need API OAuth flow + AP bill push + payment pull.
-3. **Procurement Intelligence** — Alert system when trade lead times are approaching. Based on `schedule_tasks.procurement_lead_days` + historical data.
+3. **Procurement Intelligence** — superseded → see **BQ-10** in the ESTIMATING OPERATING SYSTEM section (one-stop procurement hub in Operations, triggered at job-lock; source + output options under discussion 2026-06-03).
 4. **Sprint 3 Dependencies** — Full planning in CLAUDE.md. Need to migrate `depends_on` array → `task_dependencies` JSONB with FS/SS/FF/SF types.
 5. **Winning Offer — Phase 4 (proposal web page)** — See WINNING OFFER SYSTEM section above. Revisit when first Blue Leaf builds reach practical completion.
 
