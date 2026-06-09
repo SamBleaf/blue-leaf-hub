@@ -95,7 +95,10 @@ Surfaces in the **Fee Proposal wizard (Module 5), just before the proposal is dr
 - **Internal memory + continuous improvement (Sam's spec):** absorbs & analyses ALL retrievable data per job; keeps an internal memory to spot **trends** across jobs; continuously improves as data arrives; and **feeds deep analysis back to the other modules** (warn Cost Intelligence of drift, flag Procurement risk, nudge Scope coverage). It both *scores* a proposal and *teaches* the rest of the system.
 - Hub-only v1 can run today on RFQ coverage + cost benchmarks + pre-tender confidence; full version waits on the Bestimator/Buildxact feeds.
 
-### BQ-10 — Procurement Intelligence (Hub · Operations) — PLAN FINALISED 2026-06-03
+### BQ-10 — Procurement Intelligence (Hub · Operations) — FULL PLAN 2026-06-10
+> **Full module plan → `docs/agent_knowledge/PROCUREMENT_INTELLIGENCE_PLAN.md`** (A–T: purpose, roles, workflow, data model, statuses, views, schedule/supplier/finance/selection integration, AI, phases, risks, testing).
+> It's a core operations module (a **procurement command centre**), not a side feature.
+> **Grounding finding:** the Hub already has a procurement layer — `schedule_tasks.procurement_*` (mig 011/014), `portal_decisions` for client selections (mig 027), `purchase_orders`, `subcontractors`/`supplier_trade_defaults`. So P1 **consolidates** these (the new `procurement_items` register = single source of truth) rather than rebuilding; the one genuinely-new entity is a material `suppliers` table.
 Goal: a **one-stop procurement hub** — every material ordered through it, **no lead-time surprises** (shortages, catalogue clearances).
 
 **Decisions (locked 2026-06-03):**
