@@ -113,3 +113,23 @@ The seeder classifies labour vs material with `/supply/i.test(name) → material
 - **P4 — Cross-module.** Real actuals → **Cost Intelligence** benchmarks (category $/m², labour rates); PO/supplier data → **Procurement (BQ-10)** supplier performance.
 
 Each phase ships independently. Everything is read-only against Buildexact except the two write paths — the labour Work Order push (built) and the material Purchase Order push (P2) — both human-approved before they fire.
+
+---
+
+## 8. Cross-module impact — this is a PATTERN, not just carpentry
+
+The carpentry build is the **pilot** of one Buildexact pattern: *pull $ actuals (POs/WOs) tagged by category · push approved labour/material · reconcile to keep one number across both systems.* ~27 server files already touch Buildexact, so the same pattern reshapes the rest of the platform. Build the carpentry pull/push as **shared, job-type-agnostic services** so these reuse them:
+
+| Module | Today | With the Buildexact pattern |
+|---|---|---|
+| **Finance Command Centre** (construction) | budget-vs-actual from `financial_documents` (approved invoices) only | + pull BX **POs/WOs as actuals** + **committed cost** (sent POs) = the BQ-10 committed layer that's currently *deferred*. The same invoice→PO and labour→WO pushes apply to construction jobs, not just carpentry. |
+| **Cost Intelligence** (Module 2) | benchmarks from estimates + quotes | **real BX actuals** ($/m² + labour rates by category) become the benchmark source — far better training data than estimates |
+| **Procurement (BQ-10)** | planned committed-cost + supplier perf | **BX POs ARE the committed/actual ledger**; supplier on-time/spend comes straight from PO data. The procurement plan's committed layer = this BX PO pull. |
+| **RFQ engine** (Module 4) | RFQ → PO, syncs to BX on quote acceptance (partial) | RFQ-accepted POs push to BX via the **same write path** as the material push |
+| **Facts / contract value** | contract value = Generated fact (original + signed variations) | reconcile vs BX `contractTotal` / `variationTotal`; the reconcile tool already flags drift (within $1) |
+| **Variations & Progress Claims** | `job_variations`, `progress_claims` (Hub) | BX holds `variationTotal` + claims/outgoing invoices → sync/reconcile so it's **one number** (the Portal reads it) |
+| **Client Portal** | shows contract, variations, claims | reflects BX-sourced truth once reconciled |
+| **Estimating OS / Bestimator** | learns from Hub outcomes | **BX actuals (POs, invoices, real costs) are the single best training signal** for the learning loop — warns Cost Intelligence of drift, flags Procurement risk |
+| **Schedule** | BX estimate → schedule generation | unchanged; procurement lead-times tie to BX POs |
+
+**Build implication:** the carpentry helpers — `pullActualsByCategory(bxJobId)`, `pushWorkOrder(...)`, `pushPurchaseOrder(...)` — should live as **shared Buildexact-actuals services** (not carpentry-only), and the **`buildexact_job_sync` mirror (mig 075) is the natural home for the pulled-actuals snapshot**, consumed by Finance, Cost Intelligence, and Procurement alike. Build once in carpentry, reuse everywhere.
