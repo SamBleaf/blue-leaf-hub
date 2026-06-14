@@ -49,6 +49,10 @@ export default defineConfig(({ mode }) => {
       })
     ],
     server: {
+      // Pinned to 5174 so the Hub never collides with the blue-leaf-website (Laravel) Vite on 5173.
+      // strictPort: true → fail loudly if 5174 is taken rather than silently moving to a surprise port.
+      port: 5174,
+      strictPort: true,
       proxy: {
         "/api": {
           target: apiTarget,
