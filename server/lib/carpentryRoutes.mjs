@@ -232,6 +232,17 @@ export function registerCarpentryRoutes(app) {
         if (me) console.warn("[carpentry/jobs POST] milestone seed error:", me.message);
       }
 
+      // Auto-seed budget categories from the Buildexact estimate (labour categories drive the
+      // workforce labour push). Non-fatal — job creation still succeeds if Buildexact is unreachable.
+      if (buildexactJobId) {
+        try {
+          const r = await seedBudgetsFromBuildexact(sb, job.id, buildexactJobId);
+          console.log(`[carpentry/jobs POST] auto-seeded ${r.seeded} budget categories for ${job.reference}`);
+        } catch (e) {
+          console.warn("[carpentry/jobs POST] budget auto-seed failed:", e?.message);
+        }
+      }
+
       return ok(res, { job: rowToCamel(job) });
     } catch (e) {
       console.error("[carpentry/jobs POST]", e);
@@ -920,6 +931,32 @@ export function registerCarpentryRoutes(app) {
       }
     }
     return best ? best.key : null;
+  }
+
+  // Pull the Buildexact estimate categories and (re)seed a carpentry job's labour/material budget
+  // lines. Labour categories get a workforce_task_category — the labour→Buildexact push reads
+  // category_name from here to set each Work Order line's cost category. Used by job creation
+  // (auto-seed) and the manual seed endpoint / one-off backfills.
+  async function seedBudgetsFromBuildexact(sb, carpentryJobId, buildexactJobId) {
+    const pulled = await pullBuildexactEstimate(buildexactJobId);
+    const cats = pulled?.estimate?.categories || [];
+    if (!cats.length) return { seeded: 0 };
+    await sb.from("carpentry_job_budgets").delete().eq("job_id", carpentryJobId);
+    const rows = cats.map((c, i) => {
+      const name = String(c.name || "").trim() || `Category ${i + 1}`;
+      const costType = /supply/i.test(name) ? "material" : "labour";
+      return {
+        job_id: carpentryJobId,
+        category_name: name,
+        cost_type: costType,
+        budget_ex_gst: round2(c.subtotal_ex_gst ?? 0),
+        workforce_task_category: costType === "labour" ? matchTaskCategory(name) : null,
+        sort_order: i,
+      };
+    });
+    const { error } = await sb.from("carpentry_job_budgets").insert(rows);
+    if (error) throw error;
+    return { seeded: rows.length };
   }
 
   // ── POST /api/carpentry/jobs/:id/budget/seed ────────────────────────────────
