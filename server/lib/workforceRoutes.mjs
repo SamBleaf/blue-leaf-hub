@@ -128,9 +128,12 @@ async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
 async function syncTimesheetToBuildexact(timesheet, sb) {
   if (!buildexactConfigured()) return { synced: false, skipped: true };
   const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
-  if (!emp?.buildexact_employee_id) {
-    await sb.from("timesheets").update({ buildexact_sync_error: "No Buildexact employee ID" }).eq("id", timesheet.id);
-    return { synced: false, error: "No Buildexact employee ID" };
+  // Buildexact labour actuals are keyed by NAME + date + hours + category (no employee-ID match,
+  // per Sam). So we never block on buildexact_employee_id — it's optional metadata, sent only if
+  // a standard API call turns out to use it. We do need the employee record (for the name).
+  if (!emp) {
+    await sb.from("timesheets").update({ buildexact_sync_error: "Employee record not found" }).eq("id", timesheet.id);
+    return { synced: false, error: "Employee record not found" };
   }
   const { buildexactJobId, error: resolveErr } = await resolveBuildexactJobIdForTimesheet(timesheet, sb);
   if (!buildexactJobId) {
@@ -145,11 +148,15 @@ async function syncTimesheetToBuildexact(timesheet, sb) {
     const costCodeKey = `cost_code_${entry.task_category}`;
     const payload = {
       date: timesheet.date,
-      employeeId: emp.buildexact_employee_id,
+      employeeName: emp.name,                                   // BX labour is name-based
+      ...(emp.buildexact_employee_id ? { employeeId: emp.buildexact_employee_id } : {}),
       description: TASK_LABELS[entry.task_category] || entry.task_category,
       hours: entry.hours,
       rate: Number(emp.hourly_rate),
       amount: entry.cost_amount,
+      // The category that the actual must land in (BX "Actuals Category"). Until a live push
+      // confirms the exact field, we send the global cost code here; the diagnostic log shows
+      // whether BX honours it. The per-job quote-category mapping replaces this after verification.
       costCode: settings?.[costCodeKey] || null,
     };
     try {

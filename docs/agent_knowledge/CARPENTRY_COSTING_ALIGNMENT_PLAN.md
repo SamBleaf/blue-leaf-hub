@@ -18,18 +18,23 @@
 3. **Future depth:** break each quote category into finer **sub-tasks** — e.g. "Cladding & Soffit Lining" → *wall cladding type* · *soffit linings* · … . Categories become headers; sub-tasks are what hours log against.
 4. Approved hours for a category (or sub-task) push to **that** Buildexact cost category.
 
-## The blocker — verify FIRST (why we don't build yet)
-**No timesheet has ever successfully pushed to Buildexact (0/6).** Buildexact's API returns estimate categories **by name only** — `costCategory` is empty on live accounts, no per-line cost code/ID. The current push sends a `costCode` string we've **never seen land anywhere**. If we build the per-job mapping on the wrong field, hours go to the wrong cost line and corrupt real costings.
+## How Buildexact records labour (Sam, 2026-06-14)
+A Buildexact labour actual is **name + date + hours + the correct category** — there is **NO employee-ID match**. So:
+- The push is **name-based**: send the employee's **name**, not an ID. `buildexact_employee_id` is optional metadata (sent only if a standard API call turns out to use it); it **must never block a push** (the old "No Buildexact employee ID" gate was wrong and is removed).
+- Buildexact organises cost by **Category → Sub Category**, and each recipe/cost line has a **Type (Material/Labour)** and an **"Actuals Category"**. **The "Actuals Category" is where a labour actual lands** — that is the alignment target. The carpentry quote's labour categories (already pulled into `carpentry_job_budgets`) are these.
 
-So: **land one real labour push, observe how Buildexact attaches it to a category, THEN build the mapping on the proven mechanism.**
+## The blocker — verify FIRST (why we don't build the mapping yet)
+**No timesheet has ever successfully pushed to Buildexact (0/6).** The estimate API returns categories **by name only** (`costCategory` empty on live accounts; no per-line code/ID), and the `labourentries` endpoint contract is **unverified** (earlier flagged as possibly not exposed). We don't yet know the exact field that drives the **Actuals Category** on a pushed labour entry. Build the per-job mapping on the wrong field → hours hit the wrong cost line → corrupt costings.
+
+So: **land one real labour push, observe how it attaches to an Actuals Category, THEN build the mapping.**
 
 ### Test-push runbook (Sam)
-1. **Team Directory** → edit an employee → set their **Buildexact Employee ID** (from Buildexact `GET /employees`).
+1. (Optional) Team Directory → an employee → Buildexact Employee ID — **not required** (labour is name-based); only set it if we later find a standard API call that uses it.
 2. Make sure a carpentry (or construction) job has its **Buildexact job ID** set (carpentry jobs created from a BX quote already have it).
-3. **Mass Fill** (or worker PWA) → log a small amount of hours against that job → **Approve** it (Auto mode fires the push; or hit **Sync to Buildexact**).
-4. Read the server log line **`[workforce/buildexact-sync] PUSHED …`** — it now logs the **exact payload sent** + **Buildexact's full response** (added 2026-06-14). On failure it logs **`PUSH FAILED`** with the real Buildexact error.
-5. In **Buildexact**, check **which cost category** the labour entry landed in (or didn't).
-6. Tell me: did it land? which field drove the category — the `costCode`, a cost-item / estimate-line id, or the category name? → that determines the push mapping.
+3. **Mass Fill** (or worker PWA) → log a small amount of hours against that job → **Approve** (Auto fires the push; or hit **Sync to Buildexact**).
+4. Read the server log line **`[workforce/buildexact-sync] PUSHED …`** — it logs the **exact payload sent** (now `employeeName` + date + hours + category) + **Buildexact's full response**. On failure it logs **`PUSH FAILED`** with the real Buildexact error.
+5. In **Buildexact**, check **which Actuals Category** the labour landed in (or whether the endpoint even accepted it).
+6. Tell me: did it land? which field drove the Actuals Category — the `costCode`, a category name, a cost-item / estimate-line id? → that determines the mapping (and whether `labourentries` is even the right endpoint).
 
 ## Build plan (AFTER verification)
 - **Schema:** add a per-job labour-category store the timesheet entry can reference. Likely:
