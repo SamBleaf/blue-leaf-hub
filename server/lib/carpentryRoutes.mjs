@@ -171,10 +171,22 @@ export function registerCarpentryRoutes(app) {
         return err(res, 400, `projectType must be one of: ${PROJECT_TYPES.join(", ")}.`);
       }
 
-      // Generate CJB-NNN reference
-      const { data: seqVal, error: seqErr } = await sb.rpc("alloc_carpentry_sequence");
-      if (seqErr) throw seqErr;
-      const reference = `CJB-${String(seqVal).padStart(3, "0")}`;
+      // Reference: prefer the Buildexact job number (e.g. "J1171") so the carpentry ref matches
+      // Buildexact 1:1; fall back to the CJB-NNN sequence when there's no linked Buildexact job.
+      let reference = null;
+      if (buildexactJobId) {
+        try {
+          const bxJob = await getJobById(buildexactJobId);
+          if (bxJob?.number) reference = String(bxJob.number).trim();
+        } catch (e) {
+          console.warn("[carpentry/create] couldn't read Buildexact job number:", e?.message);
+        }
+      }
+      if (!reference) {
+        const { data: seqVal, error: seqErr } = await sb.rpc("alloc_carpentry_sequence");
+        if (seqErr) throw seqErr;
+        reference = `CJB-${String(seqVal).padStart(3, "0")}`;
+      }
 
       const now = new Date().toISOString();
       const { data: job, error: je } = await sb
