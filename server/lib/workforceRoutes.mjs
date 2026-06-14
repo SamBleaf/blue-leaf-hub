@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
-import { buildexactConfigured, beFetch } from "./buildexactClient.mjs";
+import { buildexactConfigured, createPurchaseOrder, createContact, getContacts, beList } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 
@@ -123,14 +123,58 @@ async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
   return { buildexactJobId: null, error: "Linked job has no Buildexact ID" };
 }
 
-// Returns { synced: bool, error?: string, skipped?: bool } so callers (approve / bulk) can count.
-// Always writes buildexact_sync_error on a skip so History never shows a misleading "—".
-async function syncTimesheetToBuildexact(timesheet, sb) {
+// Resolve the worker's reusable "[Name] (HUB)" Buildexact contact — create ONCE, reuse forever
+// (never a new contact per push, the way Deputy ended up duplicating). Returns the contactId, or
+// null if creation isn't possible (the Work Order still works without it — the name is on the line).
+export async function ensureBuildexactContact(emp, sb) {
+  if (emp.buildexact_contact_id) return emp.buildexact_contact_id;
+  const wantName = `${emp.name} (HUB)`;
+  try {
+    const existing = beList(await getContacts()).find(c => (c.name || "").trim().toLowerCase() === wantName.toLowerCase());
+    let contactId = existing?.contactId || existing?.id || null;
+    if (!contactId) {
+      const created = await createContact({
+        contactType: "Person",
+        name: wantName,
+        email: emp.email || undefined,
+        mobile: emp.phone || undefined,
+      });
+      contactId = created?.contactId || created?.id || null;
+    }
+    if (contactId) {
+      await sb.from("employees").update({ buildexact_contact_id: contactId, updated_at: new Date().toISOString() }).eq("id", emp.id);
+    }
+    return contactId;
+  } catch (e) {
+    console.warn("[workforce/buildexact-contact]", e?.message);
+    return null;
+  }
+}
+
+// The Buildexact "Actuals Category" (a Work-Order line's `parentTask`) for a labour line. For a
+// carpentry job, use the per-job category mapped from the task (carpentry_job_budgets, mig 067);
+// otherwise fall back to the task label.
+export async function resolveCostCategory(timesheet, entry, sb) {
+  if (timesheet.carpentry_job_id) {
+    const { data: b } = await sb.from("carpentry_job_budgets")
+      .select("category_name")
+      .eq("job_id", timesheet.carpentry_job_id)
+      .eq("cost_type", "labour")
+      .eq("workforce_task_category", entry.task_category)
+      .order("sort_order").limit(1).maybeSingle();
+    if (b?.category_name) return b.category_name;
+  }
+  return TASK_LABELS[entry.task_category] || entry.task_category;
+}
+
+// Push an approved timesheet to Buildexact as a WORK ORDER (orderType 'Work') — the mechanism
+// Deputy used (proven live 2026-06-14): one Work Order per timesheet, a Labour line per entry,
+// each line's `parentTask` set to the job's cost category (the "Actuals Category"), description
+// "[Name] (HUB)". Returns { synced, error?, skipped?, workOrderId? } so callers can count.
+export async function syncTimesheetToBuildexact(timesheet, sb) {
   if (!buildexactConfigured()) return { synced: false, skipped: true };
+  if (timesheet.buildexact_work_order_id) return { synced: true, skipped: "already_pushed" }; // idempotent — never duplicate
   const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
-  // Buildexact labour actuals are keyed by NAME + date + hours + category (no employee-ID match,
-  // per Sam). So we never block on buildexact_employee_id — it's optional metadata, sent only if
-  // a standard API call turns out to use it. We do need the employee record (for the name).
   if (!emp) {
     await sb.from("timesheets").update({ buildexact_sync_error: "Employee record not found" }).eq("id", timesheet.id);
     return { synced: false, error: "Employee record not found" };
@@ -141,44 +185,46 @@ async function syncTimesheetToBuildexact(timesheet, sb) {
     return { synced: false, error: resolveErr };
   }
   const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheet.id);
-  const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
+  if (!entries?.length) return { synced: false, skipped: "no_entries" };
 
-  let allOk = true;
-  for (const entry of entries || []) {
-    const costCodeKey = `cost_code_${entry.task_category}`;
-    const payload = {
-      date: timesheet.date,
-      employeeName: emp.name,                                   // BX labour is name-based
-      ...(emp.buildexact_employee_id ? { employeeId: emp.buildexact_employee_id } : {}),
-      description: TASK_LABELS[entry.task_category] || entry.task_category,
-      hours: entry.hours,
-      rate: Number(emp.hourly_rate),
-      amount: entry.cost_amount,
-      // The category that the actual must land in (BX "Actuals Category"). Until a live push
-      // confirms the exact field, we send the global cost code here; the diagnostic log shows
-      // whether BX honours it. The per-job quote-category mapping replaces this after verification.
-      costCode: settings?.[costCodeKey] || null,
-    };
-    try {
-      const resp = await beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/labourentries`, { method: "POST", body: payload });
-      // VERIFY-FIRST diagnostic: log exactly what we sent and what Buildexact returned, so the
-      // first real push reveals how a labour entry attaches to a cost category (costCode? a cost
-      // item / estimate-line id? category name?) before we build the per-job category mapping.
-      console.log("[workforce/buildexact-sync] PUSHED", JSON.stringify({ bxJob: buildexactJobId, payload, response: resp }));
-    } catch (e) {
-      console.warn("[workforce/buildexact-sync] PUSH FAILED", JSON.stringify({
-        bxJob: buildexactJobId, payload,
-        error: e?.message, detail: e?.responseText || e?.serverResponseCode || null,
-      }));
-      allOk = false;
-    }
+  const contactId = await ensureBuildexactContact(emp, sb);
+
+  const items = [];
+  for (const entry of entries) {
+    const parentTask = await resolveCostCategory(timesheet, entry, sb);
+    items.push({
+      costItemType: "Labour",
+      description: `${emp.name} (HUB)`,
+      quantity: Number(entry.hours),
+      unitCost: Number(emp.hourly_rate),
+      totalCost: Number(entry.cost_amount ?? 0),
+      uom: "hr",
+      parentTask: parentTask || undefined,
+      notes: "Imported from Blue Leaf Hub",
+    });
   }
 
-  const update = allOk
-    ? { buildexact_synced_at: new Date().toISOString(), buildexact_sync_error: null }
-    : { buildexact_sync_error: "Partial sync failure — check server logs" };
-  await sb.from("timesheets").update(update).eq("id", timesheet.id);
-  return { synced: allOk, error: allOk ? null : "Partial sync failure — check server logs" };
+  try {
+    const order = await createPurchaseOrder({
+      jobId: buildexactJobId,
+      orderType: "Work",
+      ...(contactId ? { contactId } : {}),
+      description: `Blue Leaf Hub labour — ${emp.name} — ${timesheet.date}`,
+      items,
+    });
+    const woId = order?.purchaseOrderId || order?.id || null;
+    await sb.from("timesheets").update({
+      buildexact_synced_at: new Date().toISOString(),
+      buildexact_sync_error: null,
+      buildexact_work_order_id: woId,
+    }).eq("id", timesheet.id);
+    console.log("[workforce/buildexact-sync] WORK ORDER created", JSON.stringify({ orderNumber: order?.orderNumber, id: woId, job: buildexactJobId, lines: items.length }));
+    return { synced: true, workOrderId: woId };
+  } catch (e) {
+    console.warn("[workforce/buildexact-sync] WORK ORDER failed", JSON.stringify({ job: buildexactJobId, error: e?.message }));
+    await sb.from("timesheets").update({ buildexact_sync_error: e?.message || "Work Order create failed" }).eq("id", timesheet.id);
+    return { synced: false, error: e?.message };
+  }
 }
 
 // ── Labour budget update (fire-and-forget) ────────────────────────────────────
