@@ -36,7 +36,19 @@ So: **land one real labour push, observe how it attaches to an Actuals Category,
 5. In **Buildexact**, check **which Actuals Category** the labour landed in (or whether the endpoint even accepted it).
 6. Tell me: did it land? which field drove the Actuals Category — the `costCode`, a category name, a cost-item / estimate-line id? → that determines the mapping (and whether `labourentries` is even the right endpoint).
 
-## Build plan (AFTER verification)
+## ⚠️ VERIFICATION RESULT (2026-06-14, read-only API probe) — BLOCKER
+Probed the live Buildexact API (read-only) against real jobs:
+- ❌ `GET /jobs/{id}/labourentries` → **404 "Resource not found"** on every job. **The endpoint the Hub's push assumed does NOT exist.** Same for `/jobs/{id}/{costs,actuals,actualcosts,labour,labourcosts,timesheets,timeentries,costentries,bills,transactions}` — all 404.
+- ✅ `GET /jobs/{id}/purchaseorders` → 200 (50 POs on the test job). **POs are the only job-level "actual" the API exposes.**
+- ⚠️ `GET /timesheets`, `/employees`, `/costcategories` (top-level) → 200 but **empty body `{}`** — this account has no BX employees, no BX timesheets, no global cost categories via the API (consistent with labour having always lived in Deputy, never Buildexact). POST-ability unknown/untested.
+- ✅ Per-job estimate **categories** are still readable via `getEstimatesByJob`/`pullBuildexactEstimate` (parent-header names) — so the *category list* exists per job; what's missing is a way to **post a labour actual against one**.
+
+**Conclusion:** there is **no proven Buildexact API path to push approved labour as an actual cost.** The whole "auto-push labour to BX actuals via `labourentries`" premise (from the original audit) is built on an endpoint that isn't there. **This must be resolved before any further build.** (Doing the test push first caught this *before* building the per-job category feature on a dead endpoint.)
+
+### Open question for Sam — how should approved labour reach Buildexact?
+Candidates: (a) as a **Purchase Order** to the job's labour cost category (POs work via API); (b) via **Xero** (Hub/payroll → Xero → BX pulls actuals from Xero — i.e. not a direct Hub→BX push at all); (c) **manual / report** (Hub is the labour system of record, totals keyed into BX); (d) a **BX feature/endpoint** not yet found. The answer decides the entire mechanism.
+
+## Build plan (AFTER the mechanism is resolved)
 - **Schema:** add a per-job labour-category store the timesheet entry can reference. Likely:
   - `carpentry_job_budgets`: add `is_labour_relevant boolean` (the selection) + (if BX needs it) the category's `buildexact_cost_code` / `buildexact_cost_item_id`.
   - timesheet entries: store the chosen carpentry budget category (new nullable `carpentry_budget_id` / category ref) so carpentry entries aren't limited to the 9-value `task_category` enum.
