@@ -66,6 +66,14 @@ async function hubSide(sb, bxJob) {
   const byLink = await sb.from("jobs").select("*").eq("buildexact_job_id", bxJob.jobId).maybeSingle();
   if (byLink.data) { hubJob = byLink.data; matchedBy = "buildexact_job_id"; }
   if (!hubJob) {
+    // BUG-N4: legacy links may sit on projects.buildexact_job_id (webhook). Resolve via project.job_id.
+    const byProj = await sb.from("projects").select("job_id").eq("buildexact_job_id", bxJob.jobId).not("job_id", "is", null).maybeSingle();
+    if (byProj.data?.job_id) {
+      const { data } = await sb.from("jobs").select("*").eq("id", byProj.data.job_id).maybeSingle();
+      if (data) { hubJob = data; matchedBy = "projects.buildexact_job_id"; }
+    }
+  }
+  if (!hubJob) {
     const addr = normaliseAddress(bxJob.worksLocationAddress || bxJob.clientAddress || "");
     if (addr.normalised) {
       const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);

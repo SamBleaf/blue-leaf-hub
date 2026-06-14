@@ -56,6 +56,8 @@ function extractEventType(body) {
     body?.eventType ||   // camelCase — Buildxact developer portal naming policy
     body?.EventType ||   // PascalCase fallback
     body?.event_type ||  // snake_case fallback
+    body?.eventName ||   // dotted-name shape, e.g. "job.created" (BUG-004)
+    body?.EventName ||
     body?.type ||
     body?.Type ||
     body?.event ||
@@ -65,7 +67,8 @@ function extractEventType(body) {
 }
 
 function extractJobPayload(body) {
-  return body?.payload ?? body?.Payload ?? body?.job ?? body?.Job ?? body?.data ?? body;
+  // `eventData` is the companion of the `eventName` shape, e.g. { eventName, eventData: { jobId } } (BUG-004)
+  return body?.payload ?? body?.Payload ?? body?.eventData ?? body?.EventData ?? body?.job ?? body?.Job ?? body?.data ?? body;
 }
 
 function extractJobId(payload) {
@@ -208,7 +211,7 @@ export async function handleBuildexactWebhook(req, res) {
 
   const { data: projects, error: pErr } = await sb
     .from("projects")
-    .select("id, address, buildexact_job_id")
+    .select("id, job_id, address, buildexact_job_id")
     .is("buildexact_job_id", null)
     .eq("status", "active")
     .limit(50);
@@ -235,6 +238,16 @@ export async function handleBuildexactWebhook(req, res) {
       updated_at: now
     })
     .eq("id", match.id);
+
+  // BUG-N4: buildexact_job_id is consumed primarily from the `jobs` table (resolveBuildxactJobId,
+  // the reconcile tool, finance + cost-intel all read jobs first). The project row keeps the link
+  // provenance (linked_at / link_source); propagate the id to the linked job so those readers see it.
+  if (match.job_id) {
+    await sb
+      .from("jobs")
+      .update({ buildexact_job_id: String(jobId), buildexact_synced_at: now, updated_at: now })
+      .eq("id", match.job_id);
+  }
 
   if (eventRowId) {
     await sb
