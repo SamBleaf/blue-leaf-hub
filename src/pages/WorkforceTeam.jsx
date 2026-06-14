@@ -29,6 +29,8 @@ export default function WorkforceTeam() {
   const [toast, setToast] = useState(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [workerLink, setWorkerLink] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -62,6 +64,7 @@ export default function WorkforceTeam() {
       buildexact_employee_id: emp.buildexact_employee_id || "",
     });
     setInviteEmail("");
+    setWorkerLink("");
     setPanel(emp);
   }
 
@@ -111,6 +114,24 @@ export default function WorkforceTeam() {
       if (j.ok) { showToast("Invite sent"); load(); }
       else { alert(j.error || "Invite failed"); }
     } catch { alert("Network error"); } finally { setInviting(false); }
+  }
+
+  async function genWorkerLink(empId, regenerate = false) {
+    setLinkBusy(true);
+    try {
+      const res = await authFetch(`/api/workforce/employees/${empId}/worker-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        const url = `${window.location.origin}${j.path}`;
+        setWorkerLink(url);
+        try { await navigator.clipboard.writeText(url); showToast("Worker link copied"); }
+        catch { showToast("Worker link ready"); }
+      } else { alert(j.error || "Could not create link"); }
+    } catch { alert("Network error"); } finally { setLinkBusy(false); }
   }
 
   return (
@@ -246,6 +267,25 @@ export default function WorkforceTeam() {
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Worker magic link — no Supabase account needed (W01) */}
+              {panel !== "new" && panel?.is_active && (
+                <div className="pt-2 border-t border-hairline">
+                  <label className="text-xs text-muted block mb-1">Worker link (no login)</label>
+                  <p className="text-[11px] text-muted mb-2">A personal link the worker opens on their phone to log hours — no account needed. Keep it private; reset to revoke the old one.</p>
+                  {workerLink && (
+                    <input readOnly value={workerLink} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
+                  )}
+                  <div className="flex gap-1">
+                    <button type="button" onClick={() => genWorkerLink(panel.id, false)} disabled={linkBusy} className="flex-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
+                      {linkBusy ? "…" : workerLink ? "Copy again" : "Get worker link"}
+                    </button>
+                    {workerLink && (
+                      <button type="button" onClick={() => genWorkerLink(panel.id, true)} disabled={linkBusy} className="px-3 py-1.5 rounded-lg border border-hairline text-xs font-medium">Reset</button>
+                    )}
+                  </div>
                 </div>
               )}
 

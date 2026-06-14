@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
-import { authFetch } from "../../lib/authFetch.js";
+import { workerFetch } from "../../lib/workerFetch.js";
 
 const FILTER_TABS = ["All", "My tasks", "Urgent", "Done"];
 
@@ -29,8 +29,8 @@ export default function WorkerTasks() {
   useEffect(() => {
     let stop = false;
     Promise.all([
-      authFetch("/api/worker/tasks").then(r => r.json()),
-      authFetch("/api/worker/me").then(r => r.json()),
+      workerFetch("/api/worker/tasks").then(r => r.json()),
+      workerFetch("/api/worker/me").then(r => r.json()),
     ]).then(([tasksJ, meJ]) => {
       if (stop) return;
       if (tasksJ.ok) setTasks(tasksJ.tasks || []);
@@ -64,7 +64,7 @@ export default function WorkerTasks() {
     setCompleting(true);
     try {
       const body = { notes: notes || undefined };
-      const res = await authFetch(`/api/worker/tasks/${taskId}/complete`, {
+      const res = await workerFetch(`/api/worker/tasks/${taskId}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

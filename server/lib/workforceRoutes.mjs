@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { buildexactConfigured, beFetch } from "./buildexactClient.mjs";
@@ -79,24 +80,48 @@ function weekStart(dateStr) {
 
 // ── Buildexact sync ───────────────────────────────────────────────────────────
 
+// Resolve a timesheet's Buildexact job id through the full chain:
+//   timesheet.job_id → jobs.buildexact_job_id
+//   else project_id → projects.job_id → jobs.buildexact_job_id   (Mass Fill saves project_id, not job_id)
+//   else the buildexact_job_sync mirror (job_id → buildexact_job_id), which can carry the link
+//   even when jobs.buildexact_job_id is still null (mig 075).
+// Returns { buildexactJobId, error } — error is a plain-English reason when it can't resolve.
+async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
+  let jobId = timesheet.job_id || null;
+  if (!jobId && timesheet.project_id) {
+    const { data: proj } = await sb.from("projects").select("job_id").eq("id", timesheet.project_id).maybeSingle();
+    jobId = proj?.job_id || null;
+  }
+  if (!jobId) return { buildexactJobId: null, error: "No job linked to this timesheet (or its project)" };
+  const { data: job } = await sb.from("jobs").select("buildexact_job_id").eq("id", jobId).maybeSingle();
+  if (job?.buildexact_job_id) return { buildexactJobId: job.buildexact_job_id, error: null };
+  const { data: mirror } = await sb.from("buildexact_job_sync").select("buildexact_job_id").eq("job_id", jobId).maybeSingle();
+  if (mirror?.buildexact_job_id) return { buildexactJobId: mirror.buildexact_job_id, error: null };
+  return { buildexactJobId: null, error: "Linked job has no Buildexact ID" };
+}
+
+// Returns { synced: bool, error?: string, skipped?: bool } so callers (approve / bulk) can count.
+// Always writes buildexact_sync_error on a skip so History never shows a misleading "—".
 async function syncTimesheetToBuildexact(timesheet, sb) {
-  if (!buildexactConfigured()) return;
+  if (!buildexactConfigured()) return { synced: false, skipped: true };
   const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
   if (!emp?.buildexact_employee_id) {
     await sb.from("timesheets").update({ buildexact_sync_error: "No Buildexact employee ID" }).eq("id", timesheet.id);
-    return;
+    return { synced: false, error: "No Buildexact employee ID" };
+  }
+  const { buildexactJobId, error: resolveErr } = await resolveBuildexactJobIdForTimesheet(timesheet, sb);
+  if (!buildexactJobId) {
+    await sb.from("timesheets").update({ buildexact_sync_error: resolveErr }).eq("id", timesheet.id);
+    return { synced: false, error: resolveErr };
   }
   const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheet.id);
   const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
-  if (!timesheet.job_id) return;
-  const { data: job } = await sb.from("jobs").select("buildexact_job_id").eq("id", timesheet.job_id).maybeSingle();
-  if (!job?.buildexact_job_id) return;
 
   let allOk = true;
   for (const entry of entries || []) {
     const costCodeKey = `cost_code_${entry.task_category}`;
     try {
-      await beFetch(`/jobs/${encodeURIComponent(job.buildexact_job_id)}/labourentries`, {
+      await beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/labourentries`, {
         method: "POST",
         body: {
           date: timesheet.date,
@@ -118,6 +143,7 @@ async function syncTimesheetToBuildexact(timesheet, sb) {
     ? { buildexact_synced_at: new Date().toISOString(), buildexact_sync_error: null }
     : { buildexact_sync_error: "Partial sync failure — check server logs" };
   await sb.from("timesheets").update(update).eq("id", timesheet.id);
+  return { synced: allOk, error: allOk ? null : "Partial sync failure — check server logs" };
 }
 
 // ── Labour budget update (fire-and-forget) ────────────────────────────────────
@@ -131,7 +157,11 @@ async function updateJobLabourBudget(jobId, sb) {
       .eq("timesheets.job_id", jobId)
       .eq("timesheets.status", "approved");
     if (!entries?.length) return;
-    // Group by phase/category — future: upsert job_budgets labour rows
+    // BX05 — INTENTIONAL no-op write. The Financial Command Centre already derives labour
+    // budget-vs-actual by reading approved timesheets live and resolving task_category →
+    // trade_category (financeCCRoutes.mjs). Persisting these totals into job_budgets here
+    // would DOUBLE-COUNT labour against that live read. Kept as an observability log only —
+    // do not "complete" this into a job_budgets upsert without first removing the live read.
     const grouped = {};
     for (const e of entries) {
       const cat = e.task_category;
@@ -174,7 +204,11 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
     updated_at: new Date().toISOString(),
   }).eq("id", timesheetId);
 
-  syncTimesheetToBuildexact(ts, sb).catch(e => console.error("[workforce/sync]", e?.message));
+  // Auto-feed pushes to Buildexact on approval; manual-feed waits for an explicit
+  // "Sync to Buildexact" action (workforce_settings.buildexact_sync_mode).
+  if ((settings?.buildexact_sync_mode || "auto") === "auto") {
+    syncTimesheetToBuildexact(ts, sb).catch(e => console.error("[workforce/sync]", e?.message));
+  }
   updateJobLabourBudget(ts.job_id, sb).catch(e => console.error("[workforce/labour-budget]", e?.message));
 }
 
@@ -203,6 +237,7 @@ export function registerWorkforceRoutes(app) {
       "cost_code_first_fix_framing", "cost_code_cladding", "cost_code_second_fix",
       "cost_code_outdoor_works", "cost_code_formwork_slab_prep", "cost_code_site_labouring",
       "cost_code_site_cleanup", "cost_code_supervision", "cost_code_other",
+      "buildexact_sync_mode",
     ];
     const update = {};
     for (const k of allowed) {
@@ -408,6 +443,37 @@ export function registerWorkforceRoutes(app) {
     }
   });
 
+  // Bulk-push all approved timesheets not yet synced to Buildexact (manual-feed / catch-up button)
+  app.post("/api/workforce/timesheets/sync-pending", requireAuth, requireRole("admin"), async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!buildexactConfigured()) return res.status(400).json({ ok: false, error: "Buildexact is not configured." });
+    const { data: rows, error } = await sb.from("timesheets")
+      .select("*, timesheet_entries(*)")
+      .eq("status", "approved")
+      .is("buildexact_synced_at", null);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    let synced = 0, failed = 0;
+    for (const ts of rows || []) {
+      try {
+        const r = await syncTimesheetToBuildexact(ts, sb);
+        if (r?.synced) synced++; else failed++;
+      } catch (e) {
+        console.warn("[workforce/sync-pending]", e?.message);
+        failed++;
+      }
+    }
+    res.json({ ok: true, synced, failed, total: (rows || []).length });
+  });
+
+  // Admin delete (test cleanup / erroneous entries) — cascades to timesheet_entries
+  app.delete("/api/workforce/timesheets/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    await sb.from("timesheet_entries").delete().eq("timesheet_id", req.params.id);
+    const { error } = await sb.from("timesheets").delete().eq("id", req.params.id);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    res.json({ ok: true });
+  });
+
   app.post("/api/workforce/timesheets/:id/reject", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     const { notes } = req.body;
@@ -610,6 +676,21 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true });
   });
 
+  // Generate (or rotate) a worker's magic-link token and return the shareable path. (W01)
+  // Admin issues this once per worker and sends them the link; regenerate to revoke the old one.
+  app.post("/api/workforce/employees/:id/worker-link", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data: emp } = await sb.from("employees").select("id, name, worker_token").eq("id", req.params.id).maybeSingle();
+    if (!emp) return res.status(404).json({ ok: false, error: "Employee not found" });
+    let token = emp.worker_token;
+    if (!token || req.body?.regenerate) {
+      token = crypto.randomBytes(24).toString("base64url");
+      const { error } = await sb.from("employees").update({ worker_token: token, updated_at: new Date().toISOString() }).eq("id", emp.id);
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+    }
+    res.json({ ok: true, token, path: `/worker?token=${encodeURIComponent(token)}` });
+  });
+
   // ── Worker-facing endpoints ───────────────────────────────────────────────
 
   async function resolveWorkerEmployee(userId, sb) {
@@ -635,9 +716,24 @@ export function registerWorkforceRoutes(app) {
     return null;
   }
 
-  app.get("/api/worker/me", requireAuth, async (req, res) => {
+  // Worker auth: accept a per-worker magic-link token (?token= or x-worker-token header)
+  // so field workers use the PWA without a Supabase account. Falls back to normal Supabase
+  // auth when no token is present (logged-in admin/worker). A token resolves to exactly ONE
+  // active employee and grants only that worker's own endpoints — never admin/supervisor ones.
+  async function workerAuth(req, res, next) {
+    const token = String(req.query.token || req.get("x-worker-token") || "").trim();
+    if (token) {
+      const sb = getServiceSupabase();
+      const { data: emp } = await sb.from("employees").select("*").eq("worker_token", token).eq("is_active", true).maybeSingle();
+      if (emp) { req.workerEmployee = emp; return next(); }
+      return res.status(401).json({ ok: false, error: "This worker link is invalid or has been reset." });
+    }
+    return requireAuth(req, res, next);
+  }
+
+  app.get("/api/worker/me", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     const today = new Date().toISOString().slice(0, 10);
@@ -667,7 +763,7 @@ export function registerWorkforceRoutes(app) {
     }
 
     // Return employee without rate
-    const { hourly_rate: _r, overtime_multiplier: _om, double_time_multiplier: _dm, ...safeEmp } = emp;
+    const { hourly_rate: _r, overtime_multiplier: _om, double_time_multiplier: _dm, worker_token: _wt, ...safeEmp } = emp;
 
     res.json({
       ok: true,
@@ -681,9 +777,9 @@ export function registerWorkforceRoutes(app) {
     });
   });
 
-  app.get("/api/worker/projects", requireAuth, async (req, res) => {
+  app.get("/api/worker/projects", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     // Fetch construction projects AND carpentry jobs in parallel
@@ -713,9 +809,9 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, projects: list });
   });
 
-  app.post("/api/worker/timesheets", requireAuth, async (req, res) => {
+  app.post("/api/worker/timesheets", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     const { date, project_id, job_id, carpentry_job_id, entries } = req.body;
@@ -779,17 +875,17 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, timesheet_id: timesheetId });
   });
 
-  app.get("/api/worker/timesheets/:date", requireAuth, async (req, res) => {
+  app.get("/api/worker/timesheets/:date", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
     const { data } = await sb.from("timesheets").select("*, timesheet_entries(*)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
     res.json({ ok: true, timesheet: data || null });
   });
 
-  app.put("/api/worker/timesheets/:id", requireAuth, async (req, res) => {
+  app.put("/api/worker/timesheets/:id", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     const { data: ts } = await sb.from("timesheets").select("id, employee_id, status").eq("id", req.params.id).single();
@@ -821,9 +917,9 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true });
   });
 
-  app.get("/api/worker/tasks", requireAuth, async (req, res) => {
+  app.get("/api/worker/tasks", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     // Find current context from latest timesheet (may be regular project or carpentry job)
@@ -871,9 +967,9 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, tasks: sorted, project_id: latestTs.project_id, carpentry_job_id: latestTs.carpentry_job_id });
   });
 
-  app.post("/api/worker/tasks/:id/complete", requireAuth, async (req, res) => {
+  app.post("/api/worker/tasks/:id/complete", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const emp = await resolveWorkerEmployee(req.caller.id, sb);
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
     const update = {

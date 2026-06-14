@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
-import { authFetch } from "../../lib/authFetch.js";
+import { workerFetch } from "../../lib/workerFetch.js";
 
 // Read an image file, downscale it, and return a compressed JPEG data URL so a
 // completion photo stays small enough to store inline (a few hundred KB).
@@ -58,8 +58,8 @@ export default function WorkerLogHours() {
   useEffect(() => {
     let stop = false;
     Promise.all([
-      authFetch("/api/worker/me").then(r => r.json()).catch(() => null),
-      authFetch("/api/worker/projects").then(r => r.json()).catch(() => null),
+      workerFetch("/api/worker/me").then(r => r.json()).catch(() => null),
+      workerFetch("/api/worker/projects").then(r => r.json()).catch(() => null),
     ]).then(([meRes, projRes]) => {
       if (stop) return;
       if (meRes?.ok) setMe(meRes);
@@ -133,7 +133,7 @@ export default function WorkerLogHours() {
         notes: e.notes || null,
         completion_photo_url: e.completion_photo_url || null,
       }));
-      const res = await authFetch("/api/worker/timesheets", {
+      const res = await workerFetch("/api/worker/timesheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(

@@ -98,9 +98,17 @@ The Workforce module has three tabs for managers and a separate mobile PWA for w
 - [Open a project in Operations](../05_operations/operations_open_project.md) — SOP 05-02
 
 ## 10. Automation notes
-- API: `GET /api/workforce/timesheets` — list timesheets (supports `?status=pending&projectId=&employeeId=`)
-- API: `POST /api/workforce/timesheets` — create timesheet entry (from worker PWA or Mass Fill)
-- API: `PATCH /api/workforce/timesheets/:id` — approve or reject (`{ status: 'approved' | 'rejected', rejectionReason? }`)
+- API: `GET /api/workforce/timesheets` — list timesheets (supports `?status=submitted&project_id=&employee_id=&date_from=&date_to=`)
+- API: `GET /api/workforce/timesheets/pending` — the Approvals queue (status = submitted)
+- API: `POST /api/workforce/timesheets/mass-fill` — admin/supervisor bulk entry (one row per employee+task)
+- API: `POST /api/worker/timesheets` — worker PWA self-log (magic-link `?token=` or logged-in worker)
+- API: `POST /api/workforce/timesheets/:id/approve` — approve (admin); fires the Buildexact push in Auto mode
+- API: `POST /api/workforce/timesheets/:id/reject` — reject (`{ notes }`, admin/supervisor)
+- API: `POST /api/workforce/timesheets/:id/sync` — retry the Buildexact push for one timesheet (admin)
+- API: `POST /api/workforce/timesheets/sync-pending` — push all approved-but-unsynced timesheets (admin; Manual mode)
+- API: `DELETE /api/workforce/timesheets/:id` — delete a timesheet + its entries (admin, cleanup)
+- Setting: `workforce_settings.buildexact_sync_mode` (`auto` | `manual`) — toggled from the Workforce page
+- API: `POST /api/workforce/employees/:id/worker-link` — issue/rotate a worker's magic-link (admin)
 - API: `GET /api/workforce/employees` — list all employees for dropdowns
 - API: `GET /api/workforce/site-tasks` — site tasks assigned to workers (shown in Worker PWA)
 - API: `PATCH /api/workforce/timesheets/:id/carpentry-job` — attribute a timesheet to a carpentry job (`{ carpentryJobId: "uuid" | null }`) — admin/supervisor only; timesheet must not be approved
@@ -134,7 +142,7 @@ Next review: 2026-11-30
 **TC-01 — Approvals tab lists pending timesheets**
 1. Go to Workforce → Approvals
 2. Expected: pending timesheets are listed with employee name, project, date, hours
-3. Expected API: `GET /api/workforce/timesheets?status=pending` returns array with at least one item
+3. Expected API: `GET /api/workforce/timesheets/pending` returns array with at least one item
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Approve a timesheet**

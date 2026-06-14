@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
-import { authFetch } from "../../lib/authFetch.js";
+import { workerFetch } from "../../lib/workerFetch.js";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -25,7 +25,7 @@ export default function WorkerHome() {
 
   useEffect(() => {
     let stop = false;
-    authFetch("/api/worker/me")
+    workerFetch("/api/worker/me")
       .then(r => r.json())
       .then(j => {
         if (stop) return;

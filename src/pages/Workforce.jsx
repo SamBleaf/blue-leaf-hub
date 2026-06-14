@@ -242,7 +242,11 @@ function ApprovalsTab({ role }) {
                     <td className="px-3 py-3 text-muted">{fmtDate(ts.date)}</td>
                     <td className="px-3 py-3 text-right">{totalHrs}h</td>
                     {isDirector && (
-                      <td className="px-3 py-3 text-right text-muted">—</td>
+                      <td className="px-3 py-3 text-right text-muted">
+                        {ts.employees?.hourly_rate
+                          ? `~$${(totalHrs * Number(ts.employees.hourly_rate)).toFixed(2)}`
+                          : "—"}
+                      </td>
                     )}
                     <td className="px-3 py-3">
                       {otHrs > 0 && <span className="text-xs text-amber-600 font-medium">⚠ +{otHrs}h OT</span>}
@@ -268,7 +272,7 @@ function ApprovalsTab({ role }) {
                           >
                             <option value="">— None —</option>
                             {carpentryJobs.map(cj => (
-                              <option key={cj.id} value={cj.id}>{cj.reference} — {cj.client_name}</option>
+                              <option key={cj.id} value={cj.id}>{cj.reference}{cj.client_name ? ` — ${cj.client_name}` : ""}</option>
                             ))}
                           </select>
                           {attribBusy.has(ts.id) && <span className="text-xs text-muted">Saving…</span>}
@@ -333,7 +337,7 @@ function MassFillTab() {
 
   useEffect(() => {
     authFetch("/api/workforce/employees").then(r => r.json()).then(j => { if (j.ok) setEmployees(j.employees || []); }).catch(() => {});
-    authFetch("/api/projects").then(r => r.json()).then(j => {
+    authFetch("/api/operations/projects").then(r => r.json()).then(j => {
       if (Array.isArray(j)) setProjects(j);
       else if (j.projects) setProjects(j.projects);
     }).catch(() => {});
@@ -547,9 +551,9 @@ function HistoryTab({ role }) {
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE[ts.status] || ""}`}>{ts.status}</span>
                     </td>
                     <td className="px-3 py-2">
-                      {ts.buildexactSyncError ? (
+                      {ts.buildexact_sync_error ? (
                         <span
-                          title={ts.buildexactSyncError}
+                          title={ts.buildexact_sync_error}
                           className="inline-flex items-center gap-1 text-xs text-red-600 font-medium cursor-help"
                         >
                           ⚠ Sync failed
@@ -564,8 +568,10 @@ function HistoryTab({ role }) {
                             Retry
                           </button>
                         </span>
-                      ) : ts.buildexactSyncedAt ? (
+                      ) : ts.buildexact_synced_at ? (
                         <span className="text-xs text-green-600">✓ Synced</span>
+                      ) : ts.status === "approved" ? (
+                        <span className="text-xs text-muted">Not synced</span>
                       ) : (
                         <span className="text-xs text-muted">—</span>
                       )}
@@ -595,6 +601,77 @@ function HistoryTab({ role }) {
   );
 }
 
+// ── Buildexact sync control (auto / manual + on-demand push) ──────────────────
+
+function BuildexactSyncControl() {
+  const [mode, setMode] = useState(null);   // 'auto' | 'manual' | null while loading
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    authFetch("/api/workforce/settings").then(r => r.json())
+      .then(j => { if (j.ok) setMode(j.settings?.buildexact_sync_mode || "auto"); })
+      .catch(() => {});
+  }, []);
+
+  function flash(msg, type = "success") { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); }
+
+  async function setSyncMode(next) {
+    if (next === mode) return;
+    const prev = mode;
+    setMode(next);            // optimistic
+    setSaving(true);
+    try {
+      const res = await authFetch("/api/workforce/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buildexact_sync_mode: next }),
+      });
+      const j = await res.json();
+      if (!j.ok) { setMode(prev); flash(j.error || "Could not save", "error"); }
+    } catch { setMode(prev); flash("Connection error", "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const res = await authFetch("/api/workforce/timesheets/sync-pending", { method: "POST" });
+      const j = await res.json();
+      if (j.ok) flash(`Synced ${j.synced} to Buildexact${j.failed ? ` · ${j.failed} failed (see History)` : ""}`, j.failed ? "error" : "success");
+      else flash(j.error || "Sync failed", "error");
+    } catch { flash("Connection error", "error"); }
+    finally { setSyncing(false); }
+  }
+
+  if (mode === null) return null;
+
+  return (
+    <div className="flex items-center gap-3 mb-5 p-3 rounded-lg border border-hairline bg-white flex-wrap">
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm shadow-lg text-white ${toast.type === "error" ? "bg-red-600" : "bg-green-700"}`}>{toast.msg}</div>
+      )}
+      <span className="text-xs font-semibold text-muted uppercase tracking-wide">Buildexact sync</span>
+      <div className="flex rounded-lg border border-hairline overflow-hidden text-xs">
+        <button type="button" disabled={saving} onClick={() => setSyncMode("auto")}
+          className={`px-3 py-1.5 font-medium ${mode === "auto" ? "bg-primary text-white" : "text-muted hover:text-ink"}`}>Auto</button>
+        <button type="button" disabled={saving} onClick={() => setSyncMode("manual")}
+          className={`px-3 py-1.5 font-medium ${mode === "manual" ? "bg-primary text-white" : "text-muted hover:text-ink"}`}>Manual</button>
+      </div>
+      <span className="text-xs text-muted">
+        {mode === "auto"
+          ? "Approved timesheets push to Buildexact automatically."
+          : "Approved timesheets wait — push them on demand."}
+      </span>
+      <button type="button" disabled={syncing} onClick={syncNow}
+        className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent text-white disabled:opacity-50">
+        {syncing ? "Syncing…" : "⟳ Sync to Buildexact"}
+      </button>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const TABS = ["Approvals", "Mass Fill", "History"];
@@ -606,6 +683,8 @@ export default function Workforce() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-xl font-bold text-ink mb-5">Workforce</h1>
+
+      {role === "admin" && <BuildexactSyncControl />}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-hairline mb-6">
