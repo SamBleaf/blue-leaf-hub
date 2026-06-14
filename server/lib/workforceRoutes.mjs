@@ -143,21 +143,26 @@ async function syncTimesheetToBuildexact(timesheet, sb) {
   let allOk = true;
   for (const entry of entries || []) {
     const costCodeKey = `cost_code_${entry.task_category}`;
+    const payload = {
+      date: timesheet.date,
+      employeeId: emp.buildexact_employee_id,
+      description: TASK_LABELS[entry.task_category] || entry.task_category,
+      hours: entry.hours,
+      rate: Number(emp.hourly_rate),
+      amount: entry.cost_amount,
+      costCode: settings?.[costCodeKey] || null,
+    };
     try {
-      await beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/labourentries`, {
-        method: "POST",
-        body: {
-          date: timesheet.date,
-          employeeId: emp.buildexact_employee_id,
-          description: TASK_LABELS[entry.task_category] || entry.task_category,
-          hours: entry.hours,
-          rate: Number(emp.hourly_rate),
-          amount: entry.cost_amount,
-          costCode: settings?.[costCodeKey] || null,
-        },
-      });
+      const resp = await beFetch(`/jobs/${encodeURIComponent(buildexactJobId)}/labourentries`, { method: "POST", body: payload });
+      // VERIFY-FIRST diagnostic: log exactly what we sent and what Buildexact returned, so the
+      // first real push reveals how a labour entry attaches to a cost category (costCode? a cost
+      // item / estimate-line id? category name?) before we build the per-job category mapping.
+      console.log("[workforce/buildexact-sync] PUSHED", JSON.stringify({ bxJob: buildexactJobId, payload, response: resp }));
     } catch (e) {
-      console.warn("[workforce/buildexact-sync]", e?.message);
+      console.warn("[workforce/buildexact-sync] PUSH FAILED", JSON.stringify({
+        bxJob: buildexactJobId, payload,
+        error: e?.message, detail: e?.responseText || e?.serverResponseCode || null,
+      }));
       allOk = false;
     }
   }
