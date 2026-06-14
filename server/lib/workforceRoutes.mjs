@@ -104,6 +104,11 @@ async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
 // Always writes buildexact_sync_error on a skip so History never shows a misleading "—".
 async function syncTimesheetToBuildexact(timesheet, sb) {
   if (!buildexactConfigured()) return { synced: false, skipped: true };
+  // Carpentry-job labour is costed inside the carpentry module (not Buildexact) — skip cleanly
+  // (no error) so a carpentry timesheet never shows as a Buildexact "sync failed".
+  if (timesheet.carpentry_job_id && !timesheet.job_id && !timesheet.project_id) {
+    return { synced: false, skipped: true };
+  }
   const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
   if (!emp?.buildexact_employee_id) {
     await sb.from("timesheets").update({ buildexact_sync_error: "No Buildexact employee ID" }).eq("id", timesheet.id);
@@ -358,7 +363,7 @@ export function registerWorkforceRoutes(app) {
 
   app.post("/api/workforce/timesheets/mass-fill", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
-    const { date, project_id, job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] are required" });
     }
@@ -377,6 +382,7 @@ export function registerWorkforceRoutes(app) {
             employee_id, date,
             project_id: project_id || null,
             job_id: job_id || null,
+            carpentry_job_id: carpentry_job_id || null,
             status: "submitted",
             submitted_at: new Date().toISOString(),
           }).select("id").single();

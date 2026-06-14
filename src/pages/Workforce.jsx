@@ -329,8 +329,8 @@ function MassFillTab() {
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [projectId, setProjectId] = useState("");
-  const [jobId] = useState("");
+  const [carpJobs, setCarpJobs] = useState([]);
+  const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>"
   const [rows, setRows] = useState([{ employee_id: "", task_category: "", hours: "8", notes: "" }]);
   const [results, setResults] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -341,6 +341,7 @@ function MassFillTab() {
       if (Array.isArray(j)) setProjects(j);
       else if (j.projects) setProjects(j.projects);
     }).catch(() => {});
+    authFetch("/api/carpentry/jobs?status=active").then(r => r.json()).then(j => { if (j.ok) setCarpJobs(j.jobs || []); }).catch(() => {});
   }, []);
 
   function addRow() {
@@ -360,10 +361,13 @@ function MassFillTab() {
         notes: r.notes || undefined,
       }));
       if (!entries.length) { alert("No valid entries"); return; }
+      const payload = { date, entries };
+      if (site.startsWith("project:")) payload.project_id = site.slice(8);
+      else if (site.startsWith("carpentry:")) payload.carpentry_job_id = site.slice(10);
       const res = await authFetch("/api/workforce/timesheets/mass-fill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, project_id: projectId || undefined, job_id: jobId || undefined, entries }),
+        body: JSON.stringify(payload),
       });
       const j = await res.json();
       setResults(j.results || []);
@@ -378,10 +382,19 @@ function MassFillTab() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
         </div>
         <div>
-          <label className="text-xs text-muted block mb-1">Project</label>
-          <select value={projectId} onChange={e => setProjectId(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
-            <option value="">— Select project —</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.address || p.name}</option>)}
+          <label className="text-xs text-muted block mb-1">Site / job</label>
+          <select value={site} onChange={e => setSite(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+            <option value="">— Select site —</option>
+            {projects.length > 0 && (
+              <optgroup label="Projects">
+                {projects.map(p => <option key={p.id} value={`project:${p.id}`}>{p.address || p.name}</option>)}
+              </optgroup>
+            )}
+            {carpJobs.length > 0 && (
+              <optgroup label="Carpentry jobs">
+                {carpJobs.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{j.reference}{j.client_name ? ` — ${j.client_name}` : (j.address ? ` — ${j.address}` : "")}</option>)}
+              </optgroup>
+            )}
           </select>
         </div>
       </div>
