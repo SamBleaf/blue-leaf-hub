@@ -3,6 +3,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { buildexactConfigured, beFetch } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
+import { normaliseAddress } from "./addressNormalise.mjs";
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
 
@@ -80,23 +81,45 @@ function weekStart(dateStr) {
 
 // ── Buildexact sync ───────────────────────────────────────────────────────────
 
-// Resolve a timesheet's Buildexact job id through the full chain:
-//   timesheet.job_id → jobs.buildexact_job_id
-//   else project_id → projects.job_id → jobs.buildexact_job_id   (Mass Fill saves project_id, not job_id)
-//   else the buildexact_job_sync mirror (job_id → buildexact_job_id), which can carry the link
-//   even when jobs.buildexact_job_id is still null (mig 075).
+// Match a site address to a Buildexact job id — via the buildexact_job_sync mirror first
+// (one row per BX job, small), then Hub jobs by normalised address. This is the "linked by
+// job address" path used when a record has no direct buildexact_job_id stored.
+async function resolveBuildexactJobIdByAddress(rawAddress, sb) {
+  const addr = normaliseAddress(rawAddress || "");
+  if (!addr.normalised) return null;
+  const { data: mirrors } = await sb.from("buildexact_job_sync").select("buildexact_job_id, address").not("buildexact_job_id", "is", null);
+  const m = (mirrors || []).find(r => normaliseAddress(r.address || "").normalised === addr.normalised);
+  if (m?.buildexact_job_id) return m.buildexact_job_id;
+  const { data: jrow } = await sb.from("jobs").select("buildexact_job_id").eq("address_normalised", addr.normalised).not("buildexact_job_id", "is", null).maybeSingle();
+  return jrow?.buildexact_job_id || null;
+}
+
+// Resolve a timesheet's Buildexact job id. Carpentry jobs ARE Buildexact jobs (created from
+// accepted BX quotes) — they carry buildexact_job_id directly (source of truth), falling back
+// to an address match. Construction timesheets resolve job_id (or project_id → projects.job_id)
+// → jobs.buildexact_job_id, then the buildexact_job_sync mirror, then address.
 // Returns { buildexactJobId, error } — error is a plain-English reason when it can't resolve.
 async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
+  if (timesheet.carpentry_job_id) {
+    const { data: cj } = await sb.from("carpentry_jobs").select("buildexact_job_id, address").eq("id", timesheet.carpentry_job_id).maybeSingle();
+    if (cj?.buildexact_job_id) return { buildexactJobId: cj.buildexact_job_id, error: null };
+    const byAddr = await resolveBuildexactJobIdByAddress(cj?.address, sb);
+    if (byAddr) return { buildexactJobId: byAddr, error: null };
+    return { buildexactJobId: null, error: "No Buildexact job for this carpentry job — set its Buildexact job ID or match the site address" };
+  }
+
   let jobId = timesheet.job_id || null;
   if (!jobId && timesheet.project_id) {
     const { data: proj } = await sb.from("projects").select("job_id").eq("id", timesheet.project_id).maybeSingle();
     jobId = proj?.job_id || null;
   }
   if (!jobId) return { buildexactJobId: null, error: "No job linked to this timesheet (or its project)" };
-  const { data: job } = await sb.from("jobs").select("buildexact_job_id").eq("id", jobId).maybeSingle();
+  const { data: job } = await sb.from("jobs").select("buildexact_job_id, address").eq("id", jobId).maybeSingle();
   if (job?.buildexact_job_id) return { buildexactJobId: job.buildexact_job_id, error: null };
   const { data: mirror } = await sb.from("buildexact_job_sync").select("buildexact_job_id").eq("job_id", jobId).maybeSingle();
   if (mirror?.buildexact_job_id) return { buildexactJobId: mirror.buildexact_job_id, error: null };
+  const byAddr = await resolveBuildexactJobIdByAddress(job?.address, sb);
+  if (byAddr) return { buildexactJobId: byAddr, error: null };
   return { buildexactJobId: null, error: "Linked job has no Buildexact ID" };
 }
 
@@ -104,11 +127,6 @@ async function resolveBuildexactJobIdForTimesheet(timesheet, sb) {
 // Always writes buildexact_sync_error on a skip so History never shows a misleading "—".
 async function syncTimesheetToBuildexact(timesheet, sb) {
   if (!buildexactConfigured()) return { synced: false, skipped: true };
-  // Carpentry-job labour is costed inside the carpentry module (not Buildexact) — skip cleanly
-  // (no error) so a carpentry timesheet never shows as a Buildexact "sync failed".
-  if (timesheet.carpentry_job_id && !timesheet.job_id && !timesheet.project_id) {
-    return { synced: false, skipped: true };
-  }
   const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
   if (!emp?.buildexact_employee_id) {
     await sb.from("timesheets").update({ buildexact_sync_error: "No Buildexact employee ID" }).eq("id", timesheet.id);
