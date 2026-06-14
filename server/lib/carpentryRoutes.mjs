@@ -42,6 +42,18 @@ const PROJECT_TYPES   = ["frame", "fitoff", "lockup", "full_package", "other"];
 const COST_TYPES      = ["material", "subcontract", "other"];
 const MILESTONE_STATUSES = ["pending", "complete"];
 
+// Classify a Buildexact estimate category as labour vs material for the budget split.
+// "install"/"installation" in the name → labour even if it also says "supply" (e.g.
+// "AAC and foam supply and installation" is a combined supply+install line); a pure
+// "… supply" → material; otherwise labour. (Actuals self-sort by parentTask regardless;
+// this only drives the budget display.)
+function classifyCostType(name) {
+  const n = String(name || "").toLowerCase();
+  if (/install/.test(n)) return "labour";
+  if (/supply/.test(n)) return "material";
+  return "labour";
+}
+
 // ── Default milestone templates ───────────────────────────────────────────────
 
 function defaultMilestones(projectType) {
@@ -477,7 +489,7 @@ export function registerCarpentryRoutes(app) {
           categories: (p.categories || []).map((c) => ({
             name: c.name,
             subtotalExGst: c.subtotal_ex_gst,
-            costType: /supply/i.test(c.name || "") ? "material" : "labour",
+            costType: classifyCostType(c.name),
           })),
         },
       });
@@ -944,7 +956,7 @@ export function registerCarpentryRoutes(app) {
     await sb.from("carpentry_job_budgets").delete().eq("job_id", carpentryJobId);
     const rows = cats.map((c, i) => {
       const name = String(c.name || "").trim() || `Category ${i + 1}`;
-      const costType = /supply/i.test(name) ? "material" : "labour";
+      const costType = classifyCostType(name);
       return {
         job_id: carpentryJobId,
         category_name: name,
@@ -977,7 +989,7 @@ export function registerCarpentryRoutes(app) {
         const name = String(c.name || "").trim() || `Category ${i + 1}`;
         const costType = c.costType === "labour" || c.costType === "material"
           ? c.costType
-          : (/supply/i.test(name) ? "material" : "labour");
+          : classifyCostType(name);
         return {
           job_id: jobId,
           category_name: name,
