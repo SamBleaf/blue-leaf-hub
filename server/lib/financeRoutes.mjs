@@ -942,11 +942,18 @@ export function registerFinanceRoutes(app) {
         return { account: cfg.auth.user, ok: true, initialized: true, at: new Date().toISOString() };
       }
 
-      const msgs = [];
+      // Drain the IMAP fetch stream FIRST (buffer raw source only) — never await slow work
+      // (simpleParser on large PDF attachments) inside the fetch iterator, or the server-side
+      // FETCH stalls and ImapFlow throws "Command failed". Parse AFTER the stream closes —
+      // the same pattern the quote poller uses. [invoice-imap Command-failed fix]
+      const rawMsgs = [];
       for await (const msg of client.fetch(`${lastUid + 1}:*`, { uid: true, envelope: true, source: true }, { uid: true })) {
-        const parsed = await simpleParser(msg.source);
-        msgs.push({ uid: msg.uid, parsed });
-        if (msgs.length >= 50) break;
+        rawMsgs.push({ uid: msg.uid, source: msg.source });
+        if (rawMsgs.length >= 50) break;
+      }
+      const msgs = [];
+      for (const r of rawMsgs) {
+        msgs.push({ uid: r.uid, parsed: await simpleParser(r.source) });
       }
 
       let highestUid = lastUid;
@@ -1037,8 +1044,16 @@ export function registerFinanceRoutes(app) {
       return { account: cfg.auth.user, ok: true, processed, skipped, failed, at: new Date().toISOString() };
     } catch (err) {
       try { await client.logout(); } catch { /* ignore */ }
-      console.error(`[invoice-imap] poll error [${cfg.auth.user}]:`, err?.message);
-      return { account: cfg.auth.user, ok: false, error: err?.message, at: new Date().toISOString() };
+      // Surface the real IMAP failure (ImapFlow buries the server response under a generic
+      // "Command failed" .message) so a recurring poll error is diagnosable from the logs.
+      const detail = [
+        err?.message,
+        err?.responseText,
+        err?.serverResponseCode && `code=${err.serverResponseCode}`,
+        err?.command && `cmd=${err.command}`,
+      ].filter(Boolean).join(" | ");
+      console.error(`[invoice-imap] poll error [${cfg.auth.user}]:`, detail);
+      return { account: cfg.auth.user, ok: false, error: detail || "poll failed", at: new Date().toISOString() };
     }
   }
 
