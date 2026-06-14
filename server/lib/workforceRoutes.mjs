@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
-import { buildexactConfigured, createPurchaseOrder, createContact, getContacts, beList } from "./buildexactClient.mjs";
+import { buildexactConfigured, createPurchaseOrder, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 
@@ -213,12 +213,25 @@ export async function syncTimesheetToBuildexact(timesheet, sb) {
       items,
     });
     const woId = order?.purchaseOrderId || order?.id || null;
+    // Verify the line items actually landed. Buildexact has been seen to create the order
+    // header but drop the lines — and a Work Order with 0 items can't be marked Completed.
+    // Catch it loudly instead of silently reporting success.
+    let landed = items.length;
+    if (woId) {
+      try { const back = await beFetch(`/jobs/purchaseorders/${woId}/items`); landed = (Array.isArray(back) ? back : (back.items || [])).length; }
+      catch { /* keep the sent count */ }
+    }
+    if (woId && items.length > 0 && landed === 0) {
+      await sb.from("timesheets").update({ buildexact_sync_error: "Work Order created but its line items didn't land in Buildexact", buildexact_work_order_id: woId }).eq("id", timesheet.id);
+      console.warn("[workforce/buildexact-sync] WORK ORDER has NO line items", JSON.stringify({ id: woId, sentLines: items.length }));
+      return { synced: false, error: "Work Order line items didn't land in Buildexact", workOrderId: woId };
+    }
     await sb.from("timesheets").update({
       buildexact_synced_at: new Date().toISOString(),
       buildexact_sync_error: null,
       buildexact_work_order_id: woId,
     }).eq("id", timesheet.id);
-    console.log("[workforce/buildexact-sync] WORK ORDER created", JSON.stringify({ orderNumber: order?.orderNumber, id: woId, job: buildexactJobId, lines: items.length }));
+    console.log("[workforce/buildexact-sync] WORK ORDER created", JSON.stringify({ orderNumber: order?.orderNumber, id: woId, job: buildexactJobId, lines: landed }));
     return { synced: true, workOrderId: woId };
   } catch (e) {
     console.warn("[workforce/buildexact-sync] WORK ORDER failed", JSON.stringify({ job: buildexactJobId, error: e?.message }));
