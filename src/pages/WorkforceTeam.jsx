@@ -11,9 +11,9 @@ function fmtDate(d) {
 }
 
 const EMPTY_FORM = {
-  name: "", trade: "carpenter", employment_type: "full_time",
+  name: "", email: "", phone: "", trade: "carpenter", employment_type: "full_time",
   hourly_rate: "", overtime_multiplier: "1.5", double_time_multiplier: "2.0",
-  is_leading_hand: false, buildexact_employee_id: "",
+  is_leading_hand: false, staff_code: "", buildexact_employee_id: "",
 };
 
 export default function WorkforceTeam() {
@@ -55,6 +55,9 @@ export default function WorkforceTeam() {
   function openEdit(emp) {
     setForm({
       name: emp.name || "",
+      email: emp.email || "",
+      phone: emp.phone || "",
+      staff_code: emp.staff_code || "",
       trade: emp.trade || "carpenter",
       employment_type: emp.employment_type || "full_time",
       hourly_rate: emp.hourly_rate != null ? String(emp.hourly_rate) : "",
@@ -184,7 +187,7 @@ export default function WorkforceTeam() {
                     <td className="px-3 py-3 text-muted capitalize">{emp.trade?.replace(/_/g, " ")}</td>
                     {isDirector && (
                       <td className="px-3 py-3 text-right text-muted">
-                        {emp.hourly_rate != null ? `$${Number(emp.hourly_rate).toFixed(0)}/h` : "—"}
+                        {emp.hourly_rate != null ? `$${Number(emp.hourly_rate).toFixed(2)}/h` : "—"}
                       </td>
                     )}
                     <td className="px-3 py-3">
@@ -220,6 +223,15 @@ export default function WorkforceTeam() {
                 <input type="text" value={form.name} onChange={e => setField("name", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div>
+                <label className="text-xs text-muted block mb-1">Email</label>
+                <input type="email" value={form.email} onChange={e => setField("email", e.target.value)} placeholder="name@example.com" className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="text-xs text-muted block mb-1">Phone</label>
+                <input type="tel" value={form.phone} onChange={e => setField("phone", e.target.value)} placeholder="0400 000 000" className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <p className="text-[11px] text-muted mt-1">For urgent contact outside the app.</p>
+              </div>
+              <div>
                 <label className="text-xs text-muted block mb-1">Trade</label>
                 <select value={form.trade} onChange={e => setField("trade", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm">
                   {TRADE_OPTIONS.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
@@ -234,7 +246,7 @@ export default function WorkforceTeam() {
               {isDirector && (
                 <div>
                   <label className="text-xs text-muted block mb-1">Hourly rate ($)</label>
-                  <input type="number" min="0" step="0.5" value={form.hourly_rate} onChange={e => setField("hourly_rate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={e => setField("hourly_rate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" />
                 </div>
               )}
               <div className="flex items-center gap-2">
@@ -242,9 +254,14 @@ export default function WorkforceTeam() {
                 <label htmlFor="lh" className="text-sm text-ink">Leading hand (enables photo logging)</label>
               </div>
               <div>
-                <label className="text-xs text-muted block mb-1">Buildexact Employee ID</label>
+                <label className="text-xs text-muted block mb-1">Staff code</label>
+                <input type="text" value={form.staff_code} onChange={e => setField("staff_code", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. EMP-001" />
+                <p className="text-[11px] text-muted mt-1">Internal staff ID used across the Hub. Optional.</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted block mb-1">Buildexact Employee ID <span className="text-muted">(optional)</span></label>
                 <input type="text" value={form.buildexact_employee_id} onChange={e => setField("buildexact_employee_id", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. 12345" />
-                <p className="text-[11px] text-muted mt-1">Used to sync approved timesheets to Buildexact. Find this in Buildexact under Staff settings.</p>
+                <p className="text-[11px] text-muted mt-1">Not required — Buildexact labour is recorded by name + Work Order, not an employee-ID match.</p>
               </div>
 
               {/* Invite section */}

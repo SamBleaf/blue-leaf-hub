@@ -290,7 +290,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const isDirector = ["admin"].includes(req.caller.role);
     const includeInactive = req.query.include_inactive === "true";
-    let q = sb.from("employees").select("id, user_id, name, trade, employment_type, is_leading_hand, is_active, buildexact_employee_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : ""));
+    let q = sb.from("employees").select("id, user_id, name, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : ""));
     if (!includeInactive) q = q.eq("is_active", true);
     q = q.order("name");
     const { data, error } = await q;
@@ -300,7 +300,7 @@ export function registerWorkforceRoutes(app) {
 
   app.post("/api/workforce/employees", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
-    const { name, trade, employment_type, hourly_rate, overtime_multiplier, double_time_multiplier, is_leading_hand, buildexact_employee_id } = req.body;
+    const { name, trade, employment_type, hourly_rate, overtime_multiplier, double_time_multiplier, is_leading_hand, buildexact_employee_id, email, phone, staff_code } = req.body;
     if (!name) return res.status(400).json({ ok: false, error: "name is required" });
     const { data, error } = await sb.from("employees").insert({
       name, trade: trade || "carpenter",
@@ -310,6 +310,9 @@ export function registerWorkforceRoutes(app) {
       double_time_multiplier: double_time_multiplier || 2.0,
       is_leading_hand: !!is_leading_hand,
       buildexact_employee_id: buildexact_employee_id || null,
+      email: email?.trim() || null,
+      phone: phone?.trim() || null,
+      staff_code: staff_code?.trim() || null,
     }).select().single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, employee: data });
@@ -317,7 +320,7 @@ export function registerWorkforceRoutes(app) {
 
   app.put("/api/workforce/employees/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
-    const allowed = ["name", "trade", "employment_type", "hourly_rate", "overtime_multiplier", "double_time_multiplier", "is_leading_hand", "buildexact_employee_id"];
+    const allowed = ["name", "trade", "employment_type", "hourly_rate", "overtime_multiplier", "double_time_multiplier", "is_leading_hand", "buildexact_employee_id", "buildexact_contact_id", "email", "phone", "staff_code"];
     const update = { updated_at: new Date().toISOString() };
     for (const k of allowed) {
       if (req.body[k] !== undefined) update[k] = req.body[k];
