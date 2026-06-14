@@ -1,7 +1,7 @@
 # Blue Leaf Hub — Master Plan
 ## Live Planning Document
 
-> **Last updated:** 2026-05-24 (Winning Offer system designed, Phase 1 prompt written)
+> **Last updated:** 2026-06-10 (reconciled — BUILD QUEUE BQ-1…8 complete; shipped since: Universal Data Phases 1–7, CRM job_contact_roles + smart-lists, contract-value/role-guard fixes; added: Estimating-OS division + Procurement Intelligence plan). Prior: 2026-05-24 (Winning Offer).
 > **Maintained by:** Planning Agent
 > **Read this first.** Then read `AGENT_OVERVIEW.md` for technical orientation.
 
@@ -24,18 +24,31 @@ Migrations: applied via Supabase SQL editor in order. Current max = **047**. Nex
 | Sales Manager | 🟡 Winning Offer extended | Phase 1 (data + form + ref projects) prompt ready to run |
 | Tender Manager — RFQ | ✅ Complete | — |
 | Tender Manager — Fee Proposals | ✅ Complete | — |
-| Tender Manager — Cost Intelligence | 🟡 Partial | Intelligence tab done. Trends/Pre-Tender = stubs. Benchmarks computation + historical comparison = not built |
+| Tender Manager — Cost Intelligence | ✅ Complete | Benchmarks/comparison/similar/trends/pre-tender endpoints all built (Phase J shipped, verified 2026-06-10). Nightly AI-insight batch (CI-3.2/3.3) still pending |
 | Operations — Schedule | ✅ Complete (Sprint 2) | Baseline ghost bars + EOT fully built |
 | Operations — WHS / Diary | ✅ Complete | — |
 | Finance — Invoice Inbox | ✅ Complete | — |
-| Finance — Command Centre | 🟡 Core built | Cashflow forecast + Director portfolio view not built |
+| Finance — Command Centre | ✅ Built | Cashflow forecast + Director portfolio both built (verified 2026-06-10); contract value now a single Generated fact (Phase 5). Xero + committed-cost (BQ-10) deferred |
 | Client Portal | ✅ Complete | Variation signing (deferred to Stage 3) |
 | Blueprint AI | ✅ Complete | Proactive alerts (deferred) |
-| Home Dashboard | 🔴 Stub | 112-line static link page — needs real director/staff landing |
+| Home Dashboard | ✅ Built | Live KPIs (pipeline value, weighted forecast, won, hit rate) + pipeline stages + active jobs + quick links (verified 2026-06-10) |
 | PTSA Module | ✅ Complete | Built into Lead detail right column |
 | Marketing Stage 1 | ✅ Complete | ContentGenerator, ContentLibrary, CampaignManager, MediaUpload, marketingAgent — all built + routed |
 | Marketing Stage 2 | 🟡 Partial | FinalAssembly.jsx + marketingMedia.mjs built — verify wiring |
 | Xero Integration | 🔴 Not started | Deferred |
+
+---
+
+## RECENTLY SHIPPED (2026-06) — not in the original snapshot
+
+All on `main`, since the 2026-05-24 snapshot:
+- **Universal Data Architecture / Knowledge Core — Phases 1–7** (migs 077–083 applied): facts service wired across the job spine — address-as-identity, non-lossy lead→job carry, **contract value as a single Generated fact** (mig 079 dropped the storage trigger), building facts via `setFact` into `project_metrics` + **Confirm Queue**, trade-category FKs everywhere, carpentry `job_id` de-island + labour double-count guard.
+- **CRM**: smart-list membership visibility + Notes + "Referred by" picker; **`job_contact_roles`** (referrer/consultant — value brought in vs consulting fees, admin-only, mig 083).
+- **Fixes**: 2026-06-02 audit triage (10/17 incl. BUG-009/010); contract-value-truth N1/N2 (canonical via `getCanonicalContractValue`); role-guard deep-link/refresh race (`AuthContext`).
+- **Buildxact**: client corrected + verified live; reconcile tool + job→Hub sync. Linking is a data-state thing (auto-links by normalised address once real jobs flow in) — see `AUDIT_2026-06-02_TRIAGE.md`.
+- **Estimating platform planning**: Bestimator scope-intelligence adapter (`server/lib/scopeIntelligence/`) + full engine brief; **Estimating Operating System** division-of-labour + **BQ-9** Estimate Confidence Score, **BQ-10** Procurement Intelligence (full plan → `docs/agent_knowledge/PROCUREMENT_INTELLIGENCE_PLAN.md`), **BQ-11** Trade Intelligence (see ESTIMATING OPERATING SYSTEM section).
+
+Audit trail: `AUDIT_REPORT_2026-06-02.md`, `AUDIT_REPORT_2026-06-03.md` (+ a full 2026-06-10 re-audit in progress).
 
 ---
 
@@ -45,11 +58,13 @@ Migrations: applied via Supabase SQL editor in order. Current max = **047**. Nex
 - [x] **BQ-1** PTSA — built in Lead detail right column. Tiny fix: auto-set ptsa_sent_date on status → sent
 - [x] **BQ-4** Schedule Sprint 2 — baseline ghost bars + EOT tab fully built (DelaysTab.jsx, scheduleRoutes.mjs)
 - [x] **BQ-7** Marketing Stage 1 — ContentGenerator, ContentLibrary, CampaignManager, MediaUpload, marketingAgent all built + routed
-- [ ] **BQ-2** Home dashboard — Cursor prompt written 2026-05-23 (live KPIs, pipeline stages, quick links)
-- [ ] **BQ-3** Cost Intelligence Phase J — HUB BUILDER prompt written 2026-05-23 (benchmarks compute, comparison, similar projects, trends, pre-tender)
-- [ ] **BQ-5** Finance cashflow — Cursor prompt written 2026-05-23 (3-month accordion in JobCommandCentre)
-- [ ] **BQ-6** Director portfolio — Cursor prompt written 2026-05-23 (ranked JobDashboardSelector with risk scoring)
-- [ ] **BQ-8** Marketing Stage 2 — FinalAssembly.jsx + marketingMedia.mjs exist, verify full wiring + test pipeline
+- [x] **BQ-2** Home dashboard — ✅ BUILT (verified rendering 2026-06-10: live KPIs, weighted forecast, active jobs, pipeline stages, quick links)
+- [x] **BQ-3** Cost Intelligence Phase J — ✅ BUILT (benchmarks/comparison/similar-projects/trends/pre-tender endpoints all live in `costIntelligenceRoutes.mjs`, verified 2026-06-10)
+- [x] **BQ-5** Finance cashflow — ✅ BUILT (Cashflow Forecast accordion in JobCommandCentre + `financeCCRoutes.mjs`, verified present 2026-06-10)
+- [x] **BQ-6** Director portfolio — ✅ BUILT (`JobDashboardSelector` "Director Portfolio" ranked by Risk/Value/A–Z, verified rendering 2026-06-10)
+- [x] **BQ-8** Marketing Stage 2 — `FinalAssembly.jsx` + `marketingMedia.mjs` built (full pipeline wiring being confirmed in the 2026-06-10 audit)
+
+> **Reconciled 2026-06-10:** BUILD QUEUE BQ-1…8 all complete. Major work shipped since 2026-05-24 is captured in **RECENTLY SHIPPED (2026-06)** below + the **ESTIMATING OPERATING SYSTEM** section (BQ-9/10/11 are the live planning items).
 - [ ] **BQ-9** Estimate Confidence Score — Hub OS-level feature, surfaced at the FEE-PROPOSAL stage (see ESTIMATING OS section)
 - [ ] **BQ-10** Procurement Intelligence — one-stop procurement hub in Operations, triggered at job-lock (see ESTIMATING OS section) — PLANNING
 - [ ] **BQ-11** Trade Intelligence (subbie market) — collect in Hub, feed to Bestimator (see ESTIMATING OS section)
