@@ -2,7 +2,7 @@ import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../lib/ProjectContext.jsx";
-import { useRole } from "../lib/useRole.js";
+import { useAuth } from "../lib/useAuth.js";
 import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/apiFetch.js";
 import ProgressClaims from "../components/finance/ProgressClaims.jsx";
 import Variations from "../components/finance/Variations.jsx";
@@ -481,7 +481,9 @@ export default function JobCommandCentre() {
   const { jobId } = useParams();
   const navigate = useNavigate();
   const { allProjects, selectProject } = useProject();
-  const { role } = useRole();
+  // Admin gate uses user_profiles.role (via useAuth) — same source as RoleRoute + server
+  // requireRole("admin"). NOT useRole()/localStorage, which holds a separate director/supervisor label.
+  const { role } = useAuth();
 
   const [summary, setSummary] = useState(null);
   const [actuals, setActuals] = useState(null);

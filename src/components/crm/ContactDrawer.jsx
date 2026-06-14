@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch, apiPost, apiPut, apiDelete } from "../../lib/apiFetch.js";
-import { useRole } from "../../lib/useRole.js";
+import { useAuth } from "../../lib/useAuth.js";
 import {
   CRM_STATUS_LABELS, CRM_NEXT_ACTION_TYPES,
   CRM_INTERACTION_TYPES, CRM_CONSENT_SOURCES,
@@ -423,7 +423,9 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState("");
   const navigate = useNavigate();
-  const { role } = useRole();
+  // Admin gate uses user_profiles.role (via useAuth) — same source as RoleRoute + server
+  // requireRole("admin"). NOT useRole()/localStorage, which holds a separate director/supervisor label.
+  const { role } = useAuth();
 
   const load = useCallback(async () => {
     setLoading(true);
