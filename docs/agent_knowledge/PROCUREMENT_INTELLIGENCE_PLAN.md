@@ -45,7 +45,7 @@ Contract signed / job locked
  → delivery date confirmed → schedule risk monitored → delivered → closed
 ```
 
-## D. Data model (~mig 084)
+## D. Data model (~mig 085)
 **`suppliers`** (NEW — material suppliers, distinct from subcontractors): id, name, contact_person, email, phone, trade_category_id?, usual_lead_time_days, account_terms, is_preferred, is_backup_for?, usual_products text, notes, performance (denormalised: on_time_rate, avg_lead_variance — P3), created_at. Reconcile/seed against `supplier_trade_defaults`.
 
 **`procurement_templates`** (ONE master template — NOT per build type; decided 2026-06-10): id, trade_category_id, item_name, default_unit, supply_type (`builder_supplied`|`subbie_supplied`|`client_supplied`|`pc_item`), default_lead_time_days, default_supplier_id?, order_sequence/phase, selection_required bool, **`applies_to_build_types` text[]** (e.g. `{new_build,knockdown_rebuild,extension}` for trusses; `{renovation,knockdown_rebuild}` for strip-out; empty/null = always), **`match_existing` bool** (reno/extension special-order — highest discontinued/long-lead risk), is_active.
