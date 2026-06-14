@@ -36,13 +36,36 @@
 
 ---
 
-## 3. Carpentry section-by-section — push / pull map
+## 3. Material cost capture — the biggest real-world gap (Sam, 2026-06-14)
+
+**The problem:** material invoices get saved to Dropbox as you pay them, but aren't entered into Buildexact until end-of-job, all at once — so cost-to-date is blind mid-job and the two systems drift. **Fix: reuse the Finance invoice pipeline for carpentry.**
+
+The Hub already runs this for construction: `accounts@blueleafbuilding.com.au` IMAP → AI extraction (supplier / amount / trade) → job match → approval (`financial_documents`). Extend it to carpentry:
+1. **Allocate to a carpentry job** — an extracted invoice can be matched/assigned to a `carpentry_job_id` (today only construction jobs), with a cost category.
+2. **Approve in the carpentry job** — same approve step; the invoice becomes a material actual on the job (the Dropbox PDF is the source doc).
+3. **Push to Buildexact as a Purchase Order** — on approval, create a BX Purchase Order (orderType `Purchase`, costItemType `Material`, `parentTask` = the supply category), supplier = a BX contact, amount = the invoice total.
+
+**This is the material twin of the labour push — same mechanism, both tag to categories so the numbers line up automatically:**
+
+| | Source (Hub) | Buildexact object | Line type | Category (`parentTask`) |
+|---|---|---|---|---|
+| **Labour** | approved timesheet | **Work Order** (`Work`) | Labour | labour category |
+| **Material** | approved invoice (accounts@ inbox) | **Purchase Order** (`Purchase`) | Material | supply category |
+
+So invoices flow in **as you pay** → allocate + approve → land in Buildexact against the right cost line. No more end-of-job manual entry; Buildexact actuals and the Hub stay in sync continuously.
+
+> **Mixed categories** like *"AAC and foam supply and installation"* receive BOTH a material PO (the AAC invoice) **and** labour Work Orders (install hours), tagged to the same category. So the labour/material classifier only drives the **budget-split display** — the **actuals self-sort by `parentTask`** regardless. (Still worth fixing the classifier so the budget line reads sensibly: "install" in the name → labour-ish.)
+
+## 3b. Work Order status fix (immediate)
+The labour push currently creates Work Orders as **"Unsent"** (e.g. order #1900), but Deputy's imports land as **"Completed"** (they're done/approved). Approved Hub labour = done work → the push should mark the Work Order **Completed** (and the material PO **received**) so they count as actuals immediately, matching Deputy. *(Mechanism to confirm with one test: a create-time status field, or a follow-up "complete order" call — neither is in the client yet.)*
+
+## 4. Carpentry section-by-section — push / pull map
 
 | Carpentry section (Hub) | Pull from Buildexact | Push to Buildexact | Hub-only |
 |---|---|---|---|
 | **Overview / Financials** | contract value, estimate, **actualTotal**, markup, claims, variations → live margin | — | quoted margin override, notes |
 | **Budget vs Actual** (`/budget`) | budgets ← estimate categories (✅ done); **actuals ← PO/WO line items by `parentTask`** (NEW — replaces manual) | — | — |
-| **Costs** (`carpentry_job_costs`, manual today) | **material actuals ← Purchase Orders** (auto, with received status) | — | ad-hoc/non-BX costs only |
+| **Costs / material** | **actuals ← Purchase Orders** (P1, incl. legacy BX-entered) | **approved invoices → Purchase Orders** (P2, via the accounts@ pipeline) | ad-hoc/non-BX costs only |
 | **Labour** (timesheets) | (optional) read back Work Orders for reconciliation | ✅ **Work Order per approved timesheet** (built) | hours, approvals |
 | **Milestones / Schedule** | (BX job has no real schedule API) | — | ✅ Hub-managed |
 | **Tasks / Site Diary / Photos** | — | — | ✅ Hub-only |
@@ -53,7 +76,9 @@
 
 ---
 
-## 4. Analysis layers worth building (on the pulled data)
+## 5. Analysis layers — ALL confirmed (Sam: yes to all)
+
+> **Guiding principle (Sam): maximise cross-module data sharing.** Finance ↔ Carpentry ↔ Buildexact ↔ Cost Intelligence ↔ Procurement — the more each module feeds the others, the smarter every system gets. Build all six layers; design each to also emit data the others consume (e.g. real actuals → Cost Intelligence benchmarks; supplier data → Procurement).
 
 1. **Live Budget vs Actual vs Committed, per category** — budget (estimate) vs actual (received POs/WOs) vs committed (sent-but-unreceived orders). The single most useful view; today it's manual/partial.
 2. **Live margin** — quoted value − actual cost-to-date, updating as POs/Work Orders land. Replaces the static quotedMargin.
@@ -66,7 +91,7 @@
 
 ---
 
-## 5. Categorisation refinement — the AAC issue (Sam, 2026-06-14)
+## 6. Categorisation refinement — the AAC issue (Sam, 2026-06-14)
 
 The seeder classifies labour vs material with `/supply/i.test(name) → material`. That mis-files **"AAC and foam supply and installation"** as material, but it **includes labour** (supply + install combined).
 
@@ -79,10 +104,12 @@ The seeder classifies labour vs material with `/supply/i.test(name) → material
 
 ---
 
-## 6. Recommended build sequence
+## 7. Recommended build sequence
 
-- **P1 — Pull actuals.** Read `/jobs/{id}/purchaseorders` + `/purchaseorders/{id}/items`, roll up `totalCost` by `parentTask` (+ received vs committed). Surface in the Budget tab as real cost-to-date per category. Fix the AAC/labour classifier. *(This is the high-value core.)*
-- **P2 — Live margin + labour productivity.** Overview shows live actual margin; budget tab shows hours-vs-budget per category.
-- **P3 — Benchmarking + supplier performance.** Push category $/m² + labour rates to Cost Intelligence; supplier on-time/spend from PO data (ties to Procurement BQ-10).
+- **P0 — Quick fixes (now).** Work Order status → **Completed** (matching Deputy); AAC/"install" classifier; clean up the test order #1900.
+- **P1 — Pull actuals (foundation).** Read `/jobs/{id}/purchaseorders` + `/purchaseorders/{id}/items`, roll up `totalCost` by `parentTask` (received vs committed). Surface in the Budget tab as **live Budget vs Actual vs Committed** per category. Read-only against Buildexact = safe.
+- **P2 — Material invoice capture (the biggest gap).** Extend the Finance `accounts@` invoice pipeline to **allocate + approve invoices against carpentry jobs**, then **push approved invoices to Buildexact as Purchase Orders** (the material twin of the labour push). Invoices captured as you pay, not at end-of-job.
+- **P3 — Analytics.** Live margin · labour productivity (hours vs budget per category, $/m²) · cost-to-complete forecast.
+- **P4 — Cross-module.** Real actuals → **Cost Intelligence** benchmarks (category $/m², labour rates); PO/supplier data → **Procurement (BQ-10)** supplier performance.
 
-Each phase is independently shippable and read-only against Buildexact (safe), except the already-built labour Work Order push.
+Each phase ships independently. Everything is read-only against Buildexact except the two write paths — the labour Work Order push (built) and the material Purchase Order push (P2) — both human-approved before they fire.
