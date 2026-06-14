@@ -42,14 +42,15 @@ export default function AICostWidget() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Check role — only directors see this widget
+  // Check role — only admins see this widget (user_profiles.role = 'admin', the same source
+  // RoleRoute + the server requireRole use). NOTE: not "director" — that value never exists here.
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) { setIsDirector(false); return; }
     sb.auth.getUser().then(({ data: { user } }) => {
       if (!user) { setIsDirector(false); return; }
       sb.from("user_profiles").select("role").eq("id", user.id).maybeSingle().then(({ data: profile }) => {
-        setIsDirector(profile?.role === "director");
+        setIsDirector(profile?.role === "admin");
       });
     });
   }, []);
@@ -100,7 +101,7 @@ export default function AICostWidget() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-primary">AI Usage &amp; Cost</h2>
-          <p className="mt-0.5 text-xs text-muted">Director view — Anthropic API spend by module and model.</p>
+          <p className="mt-0.5 text-xs text-muted">Admin view — Anthropic API spend by module and model.</p>
         </div>
         {/* Month navigation */}
         <div className="flex items-center gap-2 text-sm">

@@ -1,6 +1,6 @@
 /**
  * adminRoutes.mjs — Admin-only endpoints
- * Director-gated. Currently exposes AI cost summary for Settings widget.
+ * Admin-gated (user_profiles.role = 'admin'). Exposes AI cost summary for the Settings widget.
  */
 
 import { getServiceSupabase } from "./supabaseService.mjs";
@@ -15,7 +15,7 @@ export function registerAdminRoutes(app) {
   app.get(
     "/api/ai-costs/summary",
     requireAuth,
-    requireRole("director"),
+    requireRole("admin"),
     async (req, res) => {
       try {
         const sb = getServiceSupabase();

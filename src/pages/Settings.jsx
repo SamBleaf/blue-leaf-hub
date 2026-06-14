@@ -6,6 +6,7 @@ import RfqSettingsModal from "../components/RfqSettingsModal.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { loadNotificationPrefs, saveNotificationPrefs } from "../lib/notificationPrefs.js";
 import { loadCompanySettings, persistCompanyLogoDataUrl, saveCompanySettings } from "../lib/companySettings.js";
+import AICostWidget from "../components/settings/AICostWidget.jsx";
 const BE_UI_STORAGE = "blhub_buildexact_ui_v1";
 
 async function syncUserSetting(key, value) {
@@ -131,6 +132,9 @@ export default function Settings() {
           ← Back to RFQ Engine
         </Link>
       </header>
+
+      {/* Admin-only — Anthropic API spend by module/model (self-hides for non-admins) */}
+      <AICostWidget />
 
       <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Email signature</h2>
