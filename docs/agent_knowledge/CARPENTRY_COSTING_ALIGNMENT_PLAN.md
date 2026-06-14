@@ -61,7 +61,28 @@ createPurchaseOrder({
 ```
 **This IS the carpentry alignment** the user asked for: Cost Category = the quote sub-category = the Deputy "Area" = the Work-Order line's category. The pieces line up.
 
-**Remaining detail (nail at build time):** exactly which field attaches a Work-Order *line* to a specific **cost category** (likely `itemCode` or a costCategory field on the item — estimate items expose `costCategory`). Confirm with one test Work Order create + delete (delete works for 'Unsent').
+### ✅✅ PROVEN RECIPE (2026-06-14 — live test Work Order created + read back + deleted)
+Read a **real Deputy-imported labour line** off job J1171, then created + verified + deleted our own. The exact, working recipe:
+```js
+createPurchaseOrder({
+  jobId: <buildexact_job_id>,
+  orderType: "Work",
+  contactId: <reusable per-worker "[Name] (HUB)" contact>,   // optional for an Unsent draft; set for "Assigned To"
+  description: "Blue Leaf Hub labour — <period/job>",
+  items: [{
+    costItemType: "Labour",          // stored as "1" (labour)
+    description: "<Worker Name> (HUB)",   // Deputy used "Name (date)"; Sam wants the (HUB) marker
+    quantity: <hours>, unitCost: <rate>, totalCost: <cost>, uom: "hr",
+    parentTask: "<cost category name>",   // ★ THE field that sets the Actuals Category (e.g. "First Fix Framing")
+    notes: "Imported from Blue Leaf Hub",
+  }],
+})
+→ POST /jobs/purchaseorders/create   (read lines back via GET /jobs/purchaseorders/{id}/items;
+                                       delete via deletePurchaseOrder while 'Unsent')
+```
+- **`parentTask` (a category-name string) is the Actuals Category** — and the job's categories are the estimate **parent rows**: e.g. `First Fix Framing`, `Cladding and Soffit Lining`, `Second Fix` (the *Supply* ones are material — excluded in the selection step). This IS the carpentry alignment.
+- `contactId` is **optional** for an Unsent draft (the form's "required" is UI-only). Sam wants a **reusable per-worker contact "[Name] (HUB)"** (create once, store `buildexact_contact_id`, never duplicate per push).
+- Verified that a sent `costItemType: "Labour"` stores as `"1"`, and a real Deputy line marks origin via `notes: "Imported from Deputy"` — Hub uses `"Imported from Blue Leaf Hub"`.
 
 **Corrected build:** replace the dead `POST /jobs/{id}/labourentries` push with `createPurchaseOrder({ orderType:'Work', items:[{costItemType:'Labour', …}] })`, the line tagged to the job's cost category. Aggregation granularity (one Work Order per timesheet? per job+category per pay period?) is a design choice — Deputy aggregated per Area.
 
