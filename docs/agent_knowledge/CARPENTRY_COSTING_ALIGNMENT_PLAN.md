@@ -45,8 +45,27 @@ Probed the live Buildexact API (read-only) against real jobs:
 
 **Conclusion:** there is **no proven Buildexact API path to push approved labour as an actual cost.** The whole "auto-push labour to BX actuals via `labourentries`" premise (from the original audit) is built on an endpoint that isn't there. **This must be resolved before any further build.** (Doing the test push first caught this *before* building the per-job category feature on a dead endpoint.)
 
-### Open question for Sam — how should approved labour reach Buildexact?
-Candidates: (a) as a **Purchase Order** to the job's labour cost category (POs work via API); (b) via **Xero** (Hub/payroll → Xero → BX pulls actuals from Xero — i.e. not a direct Hub→BX push at all); (c) **manual / report** (Hub is the labour system of record, totals keyed into BX); (d) a **BX feature/endpoint** not yet found. The answer decides the entire mechanism.
+### ✅ MECHANISM RESOLVED (2026-06-14) — labour = a Work Order against the cost category
+Per the Buildxact Help Center, the **Deputy↔Buildxact** integration works like this:
+- A Buildxact **Job** = a Deputy **Location**; the job's **Cost Categories** = Deputy **Areas**.
+- Staff log hours against an Area (= cost category). On approval, **the cost syncs into Buildxact as a Work Order** against that Job Cost Category. The worker is auto-added to Buildxact **contacts** on first approval.
+
+So Deputy never used a labour endpoint — **approved hours become a Work Order** (the only writable job actual). And the Hub **already wraps the exact endpoint**:
+```
+createPurchaseOrder({
+  jobId, orderType: 'Work', contactId?, description?,
+  items: [{ costItemType: 'Labour', description, quantity, unitCost, totalCost, uom, itemCode?, notes? }]
+})
+→ POST /jobs/purchaseorders/create   (verified live: GET /jobs/{id}/purchaseorders returns POs;
+                                       deletePurchaseOrder exists for cleanup of 'Unsent' orders)
+```
+**This IS the carpentry alignment** the user asked for: Cost Category = the quote sub-category = the Deputy "Area" = the Work-Order line's category. The pieces line up.
+
+**Remaining detail (nail at build time):** exactly which field attaches a Work-Order *line* to a specific **cost category** (likely `itemCode` or a costCategory field on the item — estimate items expose `costCategory`). Confirm with one test Work Order create + delete (delete works for 'Unsent').
+
+**Corrected build:** replace the dead `POST /jobs/{id}/labourentries` push with `createPurchaseOrder({ orderType:'Work', items:[{costItemType:'Labour', …}] })`, the line tagged to the job's cost category. Aggregation granularity (one Work Order per timesheet? per job+category per pay period?) is a design choice — Deputy aggregated per Area.
+
+> Alternative to evaluate later: Buildxact's **new native Timesheets** feature (`/timesheets` endpoint exists but empty; API-create support unconfirmed). Work Orders are the proven path today.
 
 ## Build plan (AFTER the mechanism is resolved)
 - **Schema:** add a per-job labour-category store the timesheet entry can reference. Likely:
