@@ -11,6 +11,24 @@ const sheetId = () => process.env.GOOGLE_COST_MODEL_SHEET_ID?.trim() || _env.GOO
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
+// Match a sheet name to an employee record — exact first, then fuzzy: same surname + a first-name
+// nickname/prefix overlap (handles "Samuel Morris" ↔ "Sam Morris", "Benjamin Regan" ↔ "Ben Regan").
+function matchEmployeeId(sheetName, employees) {
+  const n = String(sheetName || "").trim().toLowerCase();
+  if (!n) return null;
+  const exact = employees.find((e) => String(e.name || "").trim().toLowerCase() === n);
+  if (exact) return exact.id;
+  const [sFirst, ...sRest] = n.split(/\s+/);
+  const sSur = sRest.join(" ");
+  if (!sSur || !sFirst) return null;
+  for (const e of employees) {
+    const [eFirst, ...eRest] = String(e.name || "").trim().toLowerCase().split(/\s+/);
+    const eSur = eRest.join(" ");
+    if (eSur && eSur === sSur && eFirst && (sFirst.startsWith(eFirst) || eFirst.startsWith(sFirst))) return e.id;
+  }
+  return null;
+}
+
 // OperatingParams range = rows of [label, value]
 function parseParams(rows) {
   const p = {};
@@ -70,11 +88,9 @@ export function registerCompanyCostModelRoutes(app) {
 
       // Match each sheet name to an employee record (name-based, like the labour push)
       const { data: emps } = await sb.from("employees").select("id, name");
-      const byName = {};
-      (emps || []).forEach((e) => { byName[String(e.name || "").trim().toLowerCase()] = e.id; });
       const unmatched = [];
       for (const rr of rateRows) {
-        rr.employee_id = byName[rr.employee_name.toLowerCase()] || null;
+        rr.employee_id = matchEmployeeId(rr.employee_name, emps || []);
         if (!rr.employee_id) unmatched.push(rr.employee_name);
       }
 
