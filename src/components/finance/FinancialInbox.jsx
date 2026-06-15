@@ -59,6 +59,27 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [carpentryJobs, setCarpentryJobs] = useState([]);
+  const [selCarpentry, setSelCarpentry] = useState(doc.carpentry_job_id || "");
+  const [assigningCj, setAssigningCj] = useState(false);
+
+  useEffect(() => {
+    authFetch("/api/finance/carpentry-jobs").then(r => r.json())
+      .then(j => { if (j.ok) setCarpentryJobs(j.carpentryJobs || []); })
+      .catch(() => {});
+  }, []);
+
+  async function assignCarpentry(cjId) {
+    setAssigningCj(true);
+    try {
+      const r = await authFetch(`/api/finance/documents/${doc.id}/carpentry-job`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ carpentry_job_id: cjId || null })
+      });
+      const j = await r.json();
+      if (j.ok) { onUpdate(j.document); if (cjId) setSelJob(""); }
+    } finally { setAssigningCj(false); }
+  }
 
   async function rematch() {
     setSaving(true);
@@ -166,6 +187,28 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
                 <option key={j.id} value={j.id}>{j.address}{j.arch_ref ? ` (${j.arch_ref})` : ""}</option>
               ))}
             </select>
+
+            {/* …or allocate to a carpentry job — material cost pushes to Buildexact as a Purchase Order */}
+            <label className="mt-3 mb-1 block text-xs text-muted">…or a carpentry job (material cost → Buildexact PO)</label>
+            <select
+              value={selCarpentry}
+              onChange={e => { setSelCarpentry(e.target.value); assignCarpentry(e.target.value); }}
+              disabled={assigningCj}
+              className="w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+            >
+              <option value="">— Not a carpentry job —</option>
+              {carpentryJobs.map(c => (
+                <option key={c.id} value={c.id}>{c.reference} — {c.address}{!c.buildexact_job_id ? " (no BX link)" : ""}</option>
+              ))}
+            </select>
+
+            {doc.carpentry_job_id && (doc.buildexact_purchase_order_id || doc.buildexact_push_error) && (
+              <p className={`mt-2 text-xs ${doc.buildexact_push_error ? "text-danger" : "text-accent"}`}>
+                {doc.buildexact_push_error
+                  ? `⚠ Buildexact push failed: ${doc.buildexact_push_error}`
+                  : "✓ Pushed to Buildexact as a Purchase Order (set the supply category + complete it there)"}
+              </p>
+            )}
           </section>
 
           <section>
@@ -199,10 +242,14 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
               <button
                 type="button"
                 onClick={approve}
-                disabled={approving || !doc.job_id}
+                disabled={approving || (!doc.job_id && !doc.carpentry_job_id)}
                 className="w-full rounded-lg bg-accent py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-40"
               >
-                {approving ? "Approving…" : "Approve & File to Dropbox"}
+                {approving
+                  ? "Approving…"
+                  : doc.carpentry_job_id
+                    ? "Approve & push to Buildexact"
+                    : "Approve & File to Dropbox"}
               </button>
             )}
             {canReject && (
