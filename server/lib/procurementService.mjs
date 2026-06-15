@@ -103,7 +103,9 @@ export async function computeCommittedCost(sb, jobId) {
   let committed = 0, lines = 0;
   for (const it of data) {
     if ((STATUS_RANK[it.status] ?? 0) >= RANK_PO_SENT) {
-      const amt = Number(it.approved_amount ?? it.quoted_amount ?? it.cost_allowance ?? 0);
+      // Committed = firm commitment: approved amount, or quoted if not yet approved.
+      // NOT cost_allowance (a budget reserve) — that would overstate committed cost.
+      const amt = Number(it.approved_amount ?? it.quoted_amount ?? 0);
       if (Number.isFinite(amt)) { committed += amt; lines++; }
     }
   }
@@ -197,7 +199,10 @@ export async function generateProcurementPlan(sb, jobId, { mode = "manual", acto
       for (const line of lines) {
         const desc = line.description || line.categoryName || "";
         const amount = Number(line.amount);
-        if (!desc || !Number.isFinite(amount)) continue;
+        if (!desc || !Number.isFinite(amount)) {
+          console.warn("[procurement] estimate line skipped (no desc/amount):", JSON.stringify(line).slice(0, 200));
+          continue;
+        }
         const tradeId = await resolveTradeCategoryId(sb, line.categoryName || desc);
 
         // de-dup: an existing non-cancelled item, same trade + fuzzy name → enrich, don't duplicate

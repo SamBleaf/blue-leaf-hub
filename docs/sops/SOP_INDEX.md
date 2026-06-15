@@ -137,7 +137,11 @@
 | 16-04 | Triage the Command Centre | [16-04_command_centre_triage.md](16_procurement/16-04_command_centre_triage.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
 | 16-05 | Clear a Selection Blocker | [16-05_clear_selection_blocker.md](16_procurement/16-05_clear_selection_blocker.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
 | 16-06 | Request a Quote and Track to Delivered | [16-06_request_quote_to_delivered.md](16_procurement/16-06_request_quote_to_delivered.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-07 | Manage Suppliers & Performance | [16-07_manage_suppliers.md](16_procurement/16-07_manage_suppliers.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-08 | Procurement Views — Board, Calendar, Long-Lead | [16-08_procurement_views.md](16_procurement/16-08_procurement_views.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | Medium |
+| 16-09 | AI Drafts (Supplier Email, Selection Reminder, Reply Summary) | [16-09_ai_drafts.md](16_procurement/16-09_ai_drafts.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | Medium |
+| 16-10 | Draft a Purchase Order from a Procurement Item | [16-10_draft_purchase_order.md](16_procurement/16-10_draft_purchase_order.md) | Procurement | Admin | Draft | untested | Yes | Medium |
 
 ---
 
-*Last updated: 2026-06-16. Total SOPs: 112. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+*Last updated: 2026-06-16. Total SOPs: 116. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*

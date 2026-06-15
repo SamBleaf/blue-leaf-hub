@@ -11,6 +11,9 @@ import {
   PROCUREMENT_STATUS, PROCUREMENT_STATUS_LABELS, PROCUREMENT_RISK_LABELS,
   SUPPLY_TYPE, SUPPLY_TYPE_LABELS,
 } from "../lib/constants.js";
+import {
+  CalendarTab, BoardTab, SuppliersTab, LongLeadTab, AiDraftModal,
+} from "../components/procurement/ProcurementExtras.jsx";
 
 // ── small presentational helpers ─────────────────────────────────────────────
 const RISK_PILL = {
@@ -90,6 +93,10 @@ export default function Procurement() {
           { id: "command", label: "Command Centre" },
           { id: "register", label: "Register" },
           { id: "selections", label: "Selections" },
+          { id: "calendar", label: "Calendar" },
+          { id: "board", label: "Board" },
+          { id: "longlead", label: "Long-Lead" },
+          { id: "suppliers", label: "Suppliers" },
         ].map((t) => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
             className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition -mb-px ${
@@ -107,6 +114,10 @@ export default function Procurement() {
         />
       )}
       {tab === "selections" && <Selections jobOptions={jobOptions} onOpenItem={openInRegister} />}
+      {tab === "calendar" && <CalendarTab jobOptions={jobOptions} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} />}
+      {tab === "board" && <BoardTab jobOptions={jobOptions} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} canEdit={canEdit} />}
+      {tab === "longlead" && <LongLeadTab onOpenItem={openInRegister} />}
+      {tab === "suppliers" && <SuppliersTab canEdit={canEdit} isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -198,16 +209,20 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const [rowErr, setRowErr] = useState(null);
+  const [missing, setMissing] = useState([]);
+  const [aiDraft, setAiDraft] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirmRegen, setConfirmRegen] = useState(false);
 
   const load = useCallback(async (jobId) => {
-    if (!jobId) { setItems([]); return; }
+    if (!jobId) { setItems([]); setMissing([]); return; }
     setLoading(true); setErr(null);
     const { ok, data, error } = await apiFetch(`/api/procurement/jobs/${jobId}/items`);
     if (ok) { setItems(data.items || []); setCommitted(data.committed || 0); }
     else setErr(error || "Failed to load register");
     setLoading(false);
+    apiFetch(`/api/procurement/jobs/${jobId}/missing-items`).then(({ ok: mok, data: md }) => setMissing(mok ? md.missing || [] : []));
   }, []);
 
   useEffect(() => { load(selectedJobId); }, [selectedJobId, load]);
@@ -216,8 +231,19 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
   }, []);
 
   const patchItem = async (id, patch) => {
-    const { ok, data } = await apiPatch(`/api/procurement/items/${id}`, patch);
+    setRowErr(null);
+    const { ok, data, error } = await apiPatch(`/api/procurement/items/${id}`, patch);
     if (ok && data.item) setItems((arr) => arr.map((r) => (r.id === id ? data.item : r)));
+    else setRowErr(error || "Couldn't save that change — please retry.");
+  };
+  const draftPo = async (id) => {
+    const { ok, data, error } = await apiPost(`/api/procurement/items/${id}/draft-po`, {});
+    if (ok) { load(selectedJobId); window.alert(data.note || "Draft PO created."); } else window.alert(error || "Draft PO failed");
+  };
+  const aiOrderEmail = async (it) => {
+    if (!it.supplierId) { window.alert("Set a supplier on this item first."); return; }
+    const { ok, data } = await apiPost("/api/procurement/ai/supplier-email", { supplierId: it.supplierId, itemIds: [it.id], kind: "order" });
+    if (ok && data.draft) setAiDraft({ title: `Order email — ${it.itemName}`, draft: data.draft });
   };
   const removeItem = async (id) => {
     if (!window.confirm("Remove this item from the register? (Regenerate won't bring it back.)")) return;
@@ -255,6 +281,18 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
           </>
         )}
       </div>
+
+      <AiDraftModal title={aiDraft?.title} draft={aiDraft?.draft} onClose={() => setAiDraft(null)} />
+
+      {rowErr && <div className="rounded-card border border-red-200 bg-red-50 text-red-700 text-sm p-3 mb-3 flex items-center justify-between"><span>{rowErr}</span><button type="button" onClick={() => setRowErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
+
+      {selectedJobId && missing.length > 0 && (
+        <div className="rounded-card border border-amber-200 bg-amber-50 p-3 mb-3 text-sm">
+          <span className="font-semibold text-amber-800">Possibly missing ({missing.length}):</span>
+          <span className="text-amber-700"> {missing.slice(0, 6).map((m) => `${m.itemName} (${m.frequency}%)`).join(", ")}{missing.length > 6 ? "…" : ""}</span>
+          <span className="text-xs text-amber-600 block mt-0.5">Common on similar past jobs but not on this register. Add via “+ Add item” if relevant.</span>
+        </div>
+      )}
 
       {confirmRegen && (
         <div className="rounded-card border border-warning/40 bg-warning/5 p-4 mb-4 text-sm">
@@ -362,7 +400,9 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
                     </td>
                   )}
                   {canEdit && (
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {it.supplyType === "builder_supplied" && <button type="button" onClick={() => aiOrderEmail(it)} className="text-xs text-muted hover:text-primary mr-2" title="Draft an order/RFQ email (review before sending)">✉</button>}
+                      {isAdmin && it.supplyType === "builder_supplied" && <button type="button" onClick={() => draftPo(it.id)} className="text-xs text-muted hover:text-primary mr-2" title="Create a draft PO and link it">PO</button>}
                       <button type="button" onClick={() => removeItem(it.id)} className="text-xs text-muted hover:text-red-600" title="Remove from register">✕</button>
                     </td>
                   )}
@@ -391,17 +431,23 @@ function Selections({ jobOptions, onOpenItem }) {
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
+  const [aiDraft, setAiDraft] = useState(null);
+  const [drafting, setDrafting] = useState(null);
   const confirmSelection = async (id) => {
     await apiPatch(`/api/procurement/items/${id}`, { selection_status: "confirmed" });
     load();
   };
-  const draftReminder = (it) => {
-    // Drafts only — sending is explicit/manual via the client portal or email (never auto-send).
-    window.alert(`Reminder draft for "${it.itemName}":\n\nThis selection is needed by ${fmtDate(it.orderByDate)} to keep the order on schedule. Please confirm your choice.\n\n(Send this via the client portal or your email — the Hub does not auto-send.)`);
+  const draftReminder = async (it) => {
+    // AI-drafted, client-safe — sending stays manual (the Hub never auto-sends).
+    setDrafting(it.id);
+    const { ok, data } = await apiPost(`/api/procurement/items/${it.id}/ai/selection-reminder`, {});
+    setDrafting(null);
+    if (ok && data.draft) setAiDraft({ title: `Selection reminder — ${it.itemName}`, draft: data.draft });
   };
 
   return (
     <div>
+      <AiDraftModal title={aiDraft?.title} draft={aiDraft?.draft} onClose={() => setAiDraft(null)} />
       <div className="flex items-center gap-3 mb-4">
         <select value={jobId} onChange={(e) => setJobId(e.target.value)} className="rounded-lg border border-hairline px-3 py-2 text-sm bg-surface focus-ring">
           <option value="">All jobs</option>
@@ -432,7 +478,7 @@ function Selections({ jobOptions, onOpenItem }) {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button type="button" onClick={() => draftReminder(it)} className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-page">Draft reminder</button>
+                <button type="button" onClick={() => draftReminder(it)} disabled={drafting === it.id} className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-50">{drafting === it.id ? "Drafting…" : "Draft reminder"}</button>
                 <button type="button" onClick={() => confirmSelection(it.id)} className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-semibold text-white hover:opacity-90">Mark confirmed</button>
                 <button type="button" onClick={() => onOpenItem(it.jobId)} className="text-xs text-primary font-semibold">Open →</button>
               </div>

@@ -350,12 +350,13 @@ async function cascadeScheduleForward(sb, projectId, rootTaskId) {
       if (!t.start_date || t.start_date < requiredStart) {
         t.start_date = requiredStart;
         t.end_date = computeTaskEnd(t.start_date, t.duration_days, t.is_hold_point);
+        // schedule_tasks.procurement_order_by is FROZEN (migration 085) — the
+        // procurement_items register owns order-by now. Keep the legacy order_by_date
+        // (mig 010) for the Gantt; do NOT write procurement_order_by.
         if (t.procurement_lead_days && t.procurement_lead_days > 0) {
           t.order_by_date = addDays(t.start_date, -t.procurement_lead_days);
-          t.procurement_order_by = t.order_by_date;
         } else if (t.lead_time_weeks != null && Number(t.lead_time_weeks) > 0) {
           t.order_by_date = addDays(t.start_date, -Math.round(Number(t.lead_time_weeks) * 7));
-          t.procurement_order_by = t.order_by_date;
         }
         byId.set(t.id, t);
         if (!updated.has(t.id)) {
@@ -375,7 +376,6 @@ async function cascadeScheduleForward(sb, projectId, rootTaskId) {
         start_date: row.start_date,
         end_date: row.end_date,
         order_by_date: row.order_by_date ?? null,
-        procurement_order_by: row.procurement_order_by ?? row.order_by_date ?? null,
         updated_at: nowIso
       })
       .eq("id", id);

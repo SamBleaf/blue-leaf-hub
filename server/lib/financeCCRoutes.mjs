@@ -588,7 +588,7 @@ export function registerFinanceCCRoutes(app) {
         forecast_data_quality_warning: forecastDataQualityWarning,
         working_margin_pct: workingMarginPct != null ? Math.round(workingMarginPct * 10) / 10 : null,
         forecast_margin_pct: (!forecastDataQualityWarning && forecastMarginPct != null) ? Math.round(forecastMarginPct * 10) / 10 : null,
-        committed_cost: Math.round(committedCost * 100) / 100,
+        committed_cost: ["admin", "supervisor"].includes(req.caller?.role) ? Math.round(committedCost * 100) / 100 : null,
       },
       budget_vs_actual: budgetVsActual,
       wipaa: {
