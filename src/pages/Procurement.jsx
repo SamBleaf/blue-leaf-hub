@@ -117,7 +117,7 @@ export default function Procurement() {
       {tab === "calendar" && <CalendarTab jobOptions={jobOptions} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} />}
       {tab === "board" && <BoardTab jobOptions={jobOptions} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} canEdit={canEdit} />}
       {tab === "longlead" && <LongLeadTab onOpenItem={openInRegister} />}
-      {tab === "suppliers" && <SuppliersTab canEdit={canEdit} isAdmin={isAdmin} />}
+      {tab === "suppliers" && <SuppliersTab canEdit={canEdit} />}
     </div>
   );
 }

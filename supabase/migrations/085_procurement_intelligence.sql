@@ -244,15 +244,15 @@ ON CONFLICT (job_id, source, source_ref) WHERE source_ref IS NOT NULL DO NOTHING
 --    migration once the register is proven live (traceability matrix row 25).
 -- ─────────────────────────────────────────────────────────────────────────────
 COMMENT ON COLUMN public.schedule_tasks.procurement_item IS
-  'FROZEN (migration 085): superseded by procurement_items register. Read order-by from procurement_items.order_by_date via related_schedule_task_id. Do not write.';
+  'DEPRECATED (migration 085): superseded by procurement_items register. Read order-by from procurement_items.order_by_date via related_schedule_task_id. The procurement module reads the register; the legacy schedule procurement-task endpoints (scheduleRoutes) still maintain this for backward compat until a cleanup migration retires them.';
 COMMENT ON COLUMN public.schedule_tasks.procurement_supplier IS
-  'FROZEN (migration 085): superseded by procurement_items.supplier_id. Do not write.';
+  'DEPRECATED (migration 085): superseded by procurement_items.supplier_id. The procurement module reads the register; the legacy schedule procurement-task endpoints (scheduleRoutes) still maintain this for backward compat until a cleanup migration retires them.';
 COMMENT ON COLUMN public.schedule_tasks.procurement_lead_days IS
-  'FROZEN (migration 085): superseded by procurement_items.lead_time_days. Do not write.';
+  'DEPRECATED (migration 085): superseded by procurement_items.lead_time_days. The procurement module reads the register; the legacy schedule procurement-task endpoints (scheduleRoutes) still maintain this for backward compat until a cleanup migration retires them.';
 COMMENT ON COLUMN public.schedule_tasks.procurement_order_by IS
-  'FROZEN (migration 085): superseded by procurement_items.order_by_date (GENERATED). Do not write.';
+  'DEPRECATED (migration 085): superseded by procurement_items.order_by_date (GENERATED). The procurement module reads the register; the legacy schedule procurement-task endpoints (scheduleRoutes) still maintain this for backward compat until a cleanup migration retires them.';
 COMMENT ON COLUMN public.schedule_tasks.procurement_order_status IS
-  'FROZEN (migration 085): superseded by procurement_items.status. Do not write.';
+  'DEPRECATED (migration 085): superseded by procurement_items.status. The procurement module reads the register; the legacy schedule procurement-task endpoints (scheduleRoutes) still maintain this for backward compat until a cleanup migration retires them.';
 
 COMMENT ON TABLE public.procurement_items IS
   'Procurement register (BQ-10) — single source of truth for order-by dates, selection blockers, and committed cost. order_by_date is GENERATED. Idempotency key: (job_id, source, source_ref).';

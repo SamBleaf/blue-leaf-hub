@@ -1236,6 +1236,18 @@ export function registerPortalRoutes(app) {
         })
         .eq("id", req.params.decisionId);
       if (error) return res.status(500).json({ ok: false, error: error.message });
+
+      // Procurement (BQ-10 §K): an approved selection decision auto-clears the
+      // linked procurement item's selection blocker. Non-fatal; risk re-evaluates
+      // on next register/command-centre read.
+      if (status === "approved") {
+        try {
+          await sb.from("procurement_items")
+            .update({ selection_status: "confirmed", updated_at: new Date().toISOString() })
+            .eq("selection_decision_id", req.params.decisionId);
+        } catch (pe) { console.warn("[procurement] selection sync skipped:", pe?.message || pe); }
+      }
+
       return res.json({ ok: true });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Request failed" });

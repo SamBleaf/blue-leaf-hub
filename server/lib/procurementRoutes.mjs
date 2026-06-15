@@ -199,6 +199,10 @@ export function registerProcurementRoutes(app) {
       let upd;
       try { upd = buildItemUpdate({ ...b, item_name: b.itemName || b.item_name }); }
       catch (ve) { return err(res, 400, ve.message); }
+      // Cost fields are admin-only (plan §P) — also on the manual-create path, not just PATCH.
+      if (req.caller?.role !== "admin") {
+        for (const k of ["cost_allowance", "quoted_amount", "approved_amount"]) delete upd[k];
+      }
       const insert = {
         job_id: jobId, project_id: project?.id || null,
         source: "manual", user_modified: true, required: true,
@@ -343,7 +347,7 @@ export function registerProcurementRoutes(app) {
       const gst = Math.round(amount * GST_RATE * 100) / 100;
       const poRow = {
         project_id: project?.id || null, job_id: item.job_id, subcontractor_id: null,
-        po_number: `PO-D-${String(item.job_id).slice(0, 4)}-${Date.now().toString(36)}`.toUpperCase(),
+        po_number: `PO-D-${String(item.job_id).slice(0, 4)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
         trade: trade?.name || item.category || null,
         scope_of_work: `${supplier?.name ? supplier.name + " — " : ""}${item.item_name}${item.quantity ? ` ×${item.quantity}${item.uom ? " " + item.uom : ""}` : ""}`,
         line_items: [{ description: item.item_name, quantity: item.quantity || 1, uom: item.uom || null, unit_cost: amount, total: amount }],
@@ -439,7 +443,7 @@ export function registerProcurementRoutes(app) {
     if (!sb) return err(res, 503, "Database not configured.");
     try {
       const r = await refreshSupplierPerformance(sb, req.params.id);
-      return ok(res, { performance: r });
+      return ok(res, { performance: r ? rowToCamel(r) : null });
     } catch (e) { return err(res, 502, translateDbError(e)); }
   });
 
