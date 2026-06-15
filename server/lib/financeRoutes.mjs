@@ -11,7 +11,7 @@ import { checkProjectInsights } from "./projectInsights.mjs";
 // (removed) unused top-level `import PDFDocument from "pdfkit"` — it forced pdfkit's ~13s cold
 // import at server boot for nothing (no PDFDocument usage in this file).
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
-import { buildexactConfigured } from "./buildexactClient.mjs";
+import { buildexactConfigured, createPurchaseOrder, beFetch } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 
 const { parsed: _dotenv = {} } = dotenvConfig();
@@ -505,6 +505,71 @@ async function moveDropboxFile(token, fromPath, toPath) {
   return j?.metadata?.path_display || toPath;
 }
 
+// ── Carpentry material invoice → Buildexact Purchase Order ─────────────────────
+// The material twin of the labour Work Order push (workforceRoutes.syncTimesheetToBuildexact).
+// Fires when an APPROVED invoice is allocated to a carpentry job. Idempotent via
+// financial_documents.buildexact_purchase_order_id; same item-landed safety net.
+// Recipe proven live 2026-06-15: orderType 'Purchase', costItemType 'Material', isTaxFree:false.
+// v1 does not set a line category (parentTask) — the supply category is chosen when the order is
+// completed in Buildexact; a category picker is a follow-up. No supplier contact in v1 either
+// (supplier name is in the line description) — both are set at completion.
+async function pushInvoiceToBuildexactPO(doc, sb) {
+  if (!buildexactConfigured()) return { pushed: false, skipped: "not_configured" };
+  if (doc.buildexact_purchase_order_id) return { pushed: true, skipped: "already_pushed" };
+  if (!doc.carpentry_job_id) return { pushed: false, skipped: "not_carpentry" };
+
+  const { data: cj } = await sb.from("carpentry_jobs")
+    .select("buildexact_job_id, reference").eq("id", doc.carpentry_job_id).maybeSingle();
+  if (!cj?.buildexact_job_id) {
+    await sb.from("financial_documents").update({ buildexact_push_error: "Carpentry job has no Buildexact link" }).eq("id", doc.id);
+    return { pushed: false, error: "Carpentry job has no Buildexact link" };
+  }
+  const amount = Number(doc.amount_ex_gst || doc.amount_total || 0);
+  if (!(amount > 0)) {
+    await sb.from("financial_documents").update({ buildexact_push_error: "No amount to push" }).eq("id", doc.id);
+    return { pushed: false, error: "No amount to push" };
+  }
+
+  try {
+    const order = await createPurchaseOrder({
+      jobId: cj.buildexact_job_id,
+      orderType: "Purchase",
+      isTaxFree: false, // apply GST like the labour push (ex-GST cost drives margin either way)
+      description: `Blue Leaf Hub material — ${doc.supplier_name || ""} — ${doc.invoice_number || doc.id}`,
+      items: [{
+        costItemType: "Material",
+        description: `${doc.supplier_name || "Supplier"}${doc.invoice_number ? ` — Inv ${doc.invoice_number}` : ""} (HUB)`,
+        quantity: 1,
+        unitCost: amount,
+        totalCost: amount,
+        uom: "ea",
+        notes: "Imported from Blue Leaf Hub",
+      }],
+    });
+    const poId = order?.purchaseOrderId || order?.id || null;
+    let landed = 1;
+    if (poId) {
+      try { const back = await beFetch(`/jobs/purchaseorders/${poId}/items`); landed = (Array.isArray(back) ? back : (back.items || [])).length; }
+      catch { /* keep the sent count */ }
+    }
+    if (poId && landed === 0) {
+      await sb.from("financial_documents").update({ buildexact_purchase_order_id: poId, buildexact_push_error: "Purchase Order created but its line item didn't land in Buildexact" }).eq("id", doc.id);
+      return { pushed: false, error: "PO line item didn't land in Buildexact", purchaseOrderId: poId };
+    }
+    await sb.from("financial_documents").update({
+      buildexact_purchase_order_id: poId,
+      buildexact_pushed_at: new Date().toISOString(),
+      buildexact_push_error: null,
+    }).eq("id", doc.id);
+    console.log("[finance/buildexact-po] created", JSON.stringify({ orderNumber: order?.orderNumber, id: poId, job: cj.reference, amount }));
+    return { pushed: true, purchaseOrderId: poId };
+  } catch (e) {
+    console.warn("[finance/buildexact-po] failed", JSON.stringify({ doc: doc.id, error: e?.message }));
+    await sb.from("financial_documents").update({ buildexact_push_error: e?.message || "Purchase Order create failed" }).eq("id", doc.id);
+    return { pushed: false, error: e?.message };
+  }
+}
+
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerFinanceRoutes(app) {
@@ -529,6 +594,31 @@ export function registerFinanceRoutes(app) {
       .eq("id", req.params.id).select().single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, document: data });
+  });
+
+  // ── Allocate a document to a CARPENTRY job (material costs that push to Buildexact as a PO) ──
+  // A document is either a tender-job cost or a carpentry-job cost — never both, so setting one
+  // clears the other. Pass carpentry_job_id: null to un-allocate.
+  app.put("/api/finance/documents/:id/carpentry-job", requireAuth, async (req, res) => {
+    const { carpentry_job_id } = req.body || {};
+    const sb = getServiceSupabase();
+    const update = carpentry_job_id
+      ? { carpentry_job_id, job_id: null, status: "pending_approval", updated_at: new Date().toISOString() }
+      : { carpentry_job_id: null, updated_at: new Date().toISOString() };
+    const { data, error } = await sb.from("financial_documents")
+      .update(update).eq("id", req.params.id).select().single();
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+    res.json({ ok: true, document: data });
+  });
+
+  // List carpentry jobs for the allocation picker (id, reference, address)
+  app.get("/api/finance/carpentry-jobs", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("carpentry_jobs")
+      .select("id, reference, address, buildexact_job_id")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+    res.json({ ok: true, carpentryJobs: data || [] });
   });
 
   // ── Upload + extract + match ──────────────────────────────────────────────
@@ -718,11 +808,14 @@ export function registerFinanceRoutes(app) {
       .select("*")
       .eq("id", id).single();
     if (!doc) return res.status(404).json({ ok: false, error: "Not found" });
-    if (!doc.job_id) return res.status(400).json({ ok: false, error: "Document must be matched to a job before approval" });
+    // A document is allocated to EITHER a tender job (job_id) or a carpentry job (carpentry_job_id).
+    const isCarpentry = !doc.job_id && !!doc.carpentry_job_id;
+    if (!doc.job_id && !doc.carpentry_job_id) return res.status(400).json({ ok: false, error: "Document must be matched to a job before approval" });
 
-    // Allow trade to be patched in the approval payload (UI sends it)
+    // Allow trade to be patched in the approval payload (UI sends it). Trade is only required for
+    // tender jobs (drives normalized_costs); carpentry pushes to a Buildexact supply category instead.
     const finalTradeId = bodyTrade || doc.trade_category_id;
-    if (!finalTradeId) {
+    if (doc.job_id && !finalTradeId) {
       return res.status(400).json({ ok: false, error: "Trade category is required before approval. Select the trade this invoice belongs to." });
     }
 
@@ -779,12 +872,14 @@ export function registerFinanceRoutes(app) {
 
     await sb.from("financial_approvals").insert({ document_id: id, action: "approved", comment });
 
-    // Update supplier trade learning (increment confirmed_count, auto_tag at ≥ 3)
-    await recordTradeConfirmation(sb, {
-      supplierAbn: doc.supplier_abn,
-      supplierName: doc.supplier_name,
-      tradeCategoryId: finalTradeId
-    });
+    // Update supplier trade learning (increment confirmed_count, auto_tag at ≥ 3) — tender only
+    if (finalTradeId) {
+      await recordTradeConfirmation(sb, {
+        supplierAbn: doc.supplier_abn,
+        supplierName: doc.supplier_name,
+        tradeCategoryId: finalTradeId
+      });
+    }
 
     // Update normalized_costs with actual amount
     if (doc.job_id && doc.trade_category_id) {
@@ -815,7 +910,13 @@ export function registerFinanceRoutes(app) {
         .catch(e => console.warn("[insights] invoice_approved:", e.message));
     }
 
-    res.json({ ok: true, document: updated });
+    // Carpentry invoice → push to Buildexact as a Purchase Order (material twin of the labour push)
+    let buildexactPush = null;
+    if (isCarpentry) {
+      buildexactPush = await pushInvoiceToBuildexactPO({ ...updated, status: newStatus }, sb);
+    }
+
+    res.json({ ok: true, document: updated, buildexactPush });
   });
 
   // ── Reject ────────────────────────────────────────────────────────────────
@@ -984,15 +1085,16 @@ export function registerFinanceRoutes(app) {
           const messageId = (parsed.messageId || `imap-inv-uid-${msg.uid}`).trim();
           const receivedAt = (parsed.date || new Date()).toISOString();
 
+          // PDFs ONLY for the email poller. Real invoices/receipts arrive as PDFs; image
+          // attachments off email are almost always signature logos / letterhead headers
+          // (the Blue Leaf logo, supplier header graphics) and pollute the inbox. Manual
+          // photo uploads (UploadZone) keep image support — this restriction is poll-only.
           const attachments = (parsed.attachments || []).filter(a => {
             const mime = (a.contentType || "").toLowerCase().split(";")[0].trim();
             const fname = (a.filename || "").toLowerCase();
-            return INVOICE_ATTACHMENT_MIMES.has(mime) ||
-              fname.endsWith(".pdf") || fname.endsWith(".jpg") || fname.endsWith(".jpeg") ||
-              fname.endsWith(".png") || fname.endsWith(".heic");
+            return mime === "application/pdf" || fname.endsWith(".pdf"); // catches octet-stream .pdf too
           });
 
-          if (!attachments.length && !INVOICE_SUBJECT_RE.test(subject)) { skipped++; continue; }
           if (!attachments.length) { skipped++; continue; }
 
           for (const att of attachments) {
@@ -1005,6 +1107,16 @@ export function registerFinanceRoutes(app) {
 
             const base64 = att.content.toString("base64");
             const extracted = await extractDocument(base64, mime);
+
+            // Not every PDF is an invoice. Account-approval letters, statements with no total,
+            // header-only scans etc. have no monetary value AND no invoice number — they are not
+            // payables, so don't surface them in the inbox. (Manual upload can still force one in.)
+            const hasAmount = Number(extracted.amount_total || extracted.amount_ex_gst || 0) > 0;
+            if (!hasAmount && !extracted.invoice_number) {
+              console.log(`[invoice-imap] skipped non-invoice PDF: ${filename} from ${from} [${cfg.auth.user}]`);
+              skipped++; continue;
+            }
+
             const [match, tradeInference] = await Promise.all([
               matchDocument(extracted, { jobs, subcontractors, subjectHint: subject }),
               tradeCategories.length
