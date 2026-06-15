@@ -394,3 +394,85 @@ export const CARPENTRY_MILESTONE_STATUSES = {
   PENDING:  "pending",
   COMPLETE: "complete",
 };
+
+// ── Procurement Intelligence (BQ-10) — values match migration 085 CHECK constraints ──
+export const PROCUREMENT_STATUS = {
+  NOT_STARTED:             "not_started",
+  SCOPE_REQUIRED:          "scope_required",
+  QUOTE_REQUESTED:         "quote_requested",
+  QUOTE_RECEIVED:          "quote_received",
+  WAITING_ON_SELECTION:    "waiting_on_selection",
+  WAITING_ON_CLARIFICATION:"waiting_on_clarification",
+  READY_FOR_APPROVAL:      "ready_for_approval",
+  APPROVED:                "approved",
+  PO_DRAFTED:              "po_drafted",
+  PO_SENT:                 "po_sent",
+  ORDER_CONFIRMED:         "order_confirmed",
+  DELIVERY_BOOKED:         "delivery_booked",
+  DELIVERED:               "delivered",
+  CLOSED:                  "closed",
+  DELAYED:                 "delayed",
+  CANCELLED:               "cancelled",
+};
+
+// Linear progress rank for risk math (delayed/cancelled are off-rail → -1).
+export const PROCUREMENT_STATUS_RANK = {
+  not_started: 0, scope_required: 1, quote_requested: 2, quote_received: 3,
+  waiting_on_selection: 3, waiting_on_clarification: 3, ready_for_approval: 4,
+  approved: 5, po_drafted: 6, po_sent: 7, order_confirmed: 8, delivery_booked: 9,
+  delivered: 10, closed: 11, delayed: -1, cancelled: -1,
+};
+
+export const PROCUREMENT_STATUS_LABELS = {
+  not_started: "Not started", scope_required: "Scope required",
+  quote_requested: "Quote requested", quote_received: "Quote received",
+  waiting_on_selection: "Waiting on selection", waiting_on_clarification: "Waiting on clarification",
+  ready_for_approval: "Ready for approval", approved: "Approved",
+  po_drafted: "PO drafted", po_sent: "PO sent", order_confirmed: "Order confirmed",
+  delivery_booked: "Delivery booked", delivered: "Delivered", closed: "Closed",
+  delayed: "Delayed", cancelled: "Cancelled",
+};
+
+export const PROCUREMENT_RISK = {
+  ON_TRACK: "on_track",
+  WATCH:    "watch",
+  AT_RISK:  "at_risk",
+  CRITICAL: "critical",
+  BLOCKED:  "blocked",
+};
+
+export const PROCUREMENT_RISK_LABELS = {
+  on_track: "On track", watch: "Watch", at_risk: "At risk",
+  critical: "Critical", blocked: "Blocked",
+};
+
+export const SUPPLY_TYPE = {
+  BUILDER_SUPPLIED: "builder_supplied",
+  SUBBIE_SUPPLIED:  "subbie_supplied",
+  CLIENT_SUPPLIED:  "client_supplied",
+  PC_ITEM:          "pc_item",
+};
+
+export const SUPPLY_TYPE_LABELS = {
+  builder_supplied: "Builder supplied",
+  subbie_supplied:  "Subbie supplied",
+  client_supplied:  "Client supplied",
+  pc_item:          "PC item",
+};
+
+// supply types the builder actually orders (others are not orderable by us)
+export const BUILDER_ORDERABLE_SUPPLY_TYPES = ["builder_supplied"];
+
+export const PROCUREMENT_ITEM_SOURCE = {
+  TEMPLATE:             "template",
+  ESTIMATE:             "estimate",
+  RFQ:                  "rfq",
+  PROJECT_INTELLIGENCE: "project_intelligence",
+  SCHEDULE:             "schedule",
+  MANUAL:               "manual",
+  TEMPLATE_ESTIMATE:    "template+estimate",
+};
+
+// Default order-by buffers (mirror migration 085 column defaults)
+export const PROCUREMENT_APPROVAL_BUFFER_DAYS = 5;
+export const PROCUREMENT_REVIEW_BUFFER_DAYS = 3;

@@ -508,7 +508,7 @@ export default function FinancialInbox({ onUploaded }) {
           <div className="rounded-lg border border-danger bg-surface px-4 py-2.5 text-xs text-danger">
             <span className="font-semibold">⚠ Inbox login failing — </span>
             {failed.map(f => `${f.account}: ${f.error || "authentication failed"}`).join(" · ")}
-            <span className="opacity-80"> · check that mailbox's password (IMAP) in the server env, then “Check now”.</span>
+            <span className="opacity-80"> · check that mailbox&apos;s password (IMAP) in the server env, then “Check now”.</span>
           </div>
         );
       })()}

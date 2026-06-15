@@ -159,9 +159,13 @@ export default function AppShell() {
         { to: `/operations/${project.id}/schedule`, label: "Schedule" },
         { to: `/operations/${project.id}/diary`,    label: "Site Diary" },
         { to: `/operations/${project.id}/whs`,      label: "WHS" },
+        { to: "/operations/procurement",            label: "Procurement" },
       ];
     }
-    return [{ to: "/operations", label: "Projects", end: true }];
+    return [
+      { to: "/operations", label: "Projects", end: true },
+      { to: "/operations/procurement", label: "Procurement" },
+    ];
   }, [project]);
 
   const financeModules = useMemo(() => [

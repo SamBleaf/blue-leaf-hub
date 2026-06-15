@@ -19,6 +19,7 @@ import Subcontractors from "./pages/Subcontractors.jsx";
 import TenderBoard from "./pages/TenderBoard.jsx";
 import TenderDetail from "./pages/TenderDetail.jsx";
 import OperationsList from "./pages/OperationsList.jsx";
+import Procurement from "./pages/Procurement.jsx";
 import OperationsProjectDetail from "./pages/OperationsProjectDetail.jsx";
 import ScheduleManager from "./pages/ScheduleManager.jsx";
 import WhsManager from "./pages/WhsManager.jsx";
@@ -115,7 +116,7 @@ export default function App() {
 
                 <Route path="/operations" element={<OperationsList />} />
                 <Route path="/operations/site" element={<Navigate to="/operations" replace />} />
-                <Route path="/operations/procurement" element={<Navigate to="/operations" replace />} />
+                <Route path="/operations/procurement" element={<Procurement />} />
                 <Route path="/operations/:projectId" element={<OperationsProjectDetail />} />
                 <Route path="/operations/:projectId/schedule" element={<ScheduleManager />} />
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />

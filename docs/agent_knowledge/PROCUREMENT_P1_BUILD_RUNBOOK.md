@@ -1,6 +1,17 @@
 # Procurement Intelligence — P1 Build Runbook (BQ-10)
 
-> **Status:** PLANNING — the airtight build plan. No code yet.
+> **Status:** ✅ BUILT (P1) 2026-06-16 — Phases A–H complete. Awaiting (1) Sam to apply migrations **085 + 091** to Supabase, (2) Sam to confirm Part 4 long-lead/lead-time columns, (3) live UI walkthrough once the migrations are applied. Code is on branch `carpentry-material-invoice-capture` (not yet committed — awaiting "ship").
+>
+> **Build summary (what landed):**
+> - **Schema (085):** `suppliers`, `procurement_templates`, `procurement_items` (`order_by_date` GENERATED; idempotency key `job_id+source+source_ref`; backfill from `schedule_tasks.procurement_*`, now frozen; suppliers seeded from `supplier_trade_defaults`). **Template seed (091):** 62 master items (all matched to trade categories; 21 long-lead).
+> - **Server:** `procurementService.mjs` (generate UPSERT + edit-preservation, `recomputeItemRisk`, `refreshJobRisk`, `computeCommittedCost`) · `procurementRoutes.mjs` (generate, items CRUD, command-centre, selections/blockers, request-quote, draft-po 501 stub, suppliers CRUD) · lock hook in `financeCCRoutes.mjs` (auto-generate on `financial_locked`) · committed cost → FCC `committed_cost` KPI · schedule ripple → register `required_on_site_date` sync (`scheduleRoutes.mjs`).
+> - **Frontend:** `Procurement.jsx` (Command Centre / Register / Selections) at `/operations/procurement` + Operations nav link · constants enums.
+> - **SOPs:** `docs/sops/16_procurement/` 16-01…16-06 (Section 14 each); SOP_INDEX 106→112; changelog updated. (Folder is **16**, not 15 — 15 was taken by Carpentry.)
+> - **Verified:** migrations 085/091 applied to a scratch Postgres (generated col, 1:1 idempotent backfill, RLS, 62-row seed all green); risk math unit-tested 13/13; lint 0 + build clean; routes live (401 auth-gated). **Not yet run:** live generation/UI on the real DB (needs the migrations applied) — that is the Phase H live walkthrough.
+>
+> ---
+>
+> **Original status:** PLANNING — the airtight build plan. No code yet.
 > **Companion:** `PROCUREMENT_INTELLIGENCE_PLAN.md` (the A–T design / *what*). This doc is the *how* — the ordered, verifiable, miss-nothing build sequence.
 > **Decided 2026-06-10 (Sam):** ① generation = **auto-draft on job-lock + a Regenerate button**; ② master template = **I draft, Sam marks long-lead/specials** (Part 4); ③ this session delivers **all of it** — whiteboard + runbook + matrix + template draft.
 > **Migration number:** **085** (084 is workforce sync-mode; 083 the prior).

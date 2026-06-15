@@ -131,4 +131,13 @@
 
 ---
 
-*Last updated: 2026-05-30. Total SOPs: 106. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+| 16-01 | Procurement Module — Overview and Navigation | [16-01_procurement_overview.md](16_procurement/16-01_procurement_overview.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-02 | Generate a Procurement Plan | [16-02_generate_procurement_plan.md](16_procurement/16-02_generate_procurement_plan.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-03 | Manage the Procurement Register | [16-03_manage_register.md](16_procurement/16-03_manage_register.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-04 | Triage the Command Centre | [16-04_command_centre_triage.md](16_procurement/16-04_command_centre_triage.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-05 | Clear a Selection Blocker | [16-05_clear_selection_blocker.md](16_procurement/16-05_clear_selection_blocker.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+| 16-06 | Request a Quote and Track to Delivered | [16-06_request_quote_to_delivered.md](16_procurement/16-06_request_quote_to_delivered.md) | Procurement | Admin, Supervisor | Draft | untested | Yes | High |
+
+---
+
+*Last updated: 2026-06-16. Total SOPs: 112. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*

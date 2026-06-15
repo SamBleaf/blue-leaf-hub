@@ -614,7 +614,7 @@ function LabourRateCard() {
     <div className="rounded-card border border-hairline bg-surface p-6 space-y-4">
       <div>
         <h2 className="text-sm font-bold text-ink">Company labour rates</h2>
-        <p className="text-xs text-muted mt-0.5">Your team's real loaded rates — use these to price labour in a tender ({headcount} staff).</p>
+        <p className="text-xs text-muted mt-0.5">Your team&apos;s real loaded rates — use these to price labour in a tender ({headcount} staff).</p>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[

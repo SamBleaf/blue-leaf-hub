@@ -12,6 +12,7 @@ import {
   attachTaskDependenciesUuids
 } from "./scheduleGenerate.mjs";
 import { resolveScheduleCategoryBlocks } from "./scheduleCategories.mjs";
+import { refreshJobRisk } from "./procurementService.mjs";
 import { generateSchedulePlanWithClaude } from "./scheduleClaudePlan.mjs";
 import { attachCriticalPathFlags } from "./scheduleCriticalPath.mjs";
 import {
@@ -380,6 +381,35 @@ async function cascadeScheduleForward(sb, projectId, rootTaskId) {
       .eq("id", id);
     if (uerr) throw uerr;
   }
+
+  // Procurement (BQ-10) Phase E: the register is the source of truth for order-by.
+  // When a linked schedule task moves, refresh the item's required_on_site_date so
+  // its GENERATED order_by_date auto-recomputes. We do NOT write the frozen
+  // schedule_tasks.procurement_* fields. Non-fatal (skips silently pre-migration).
+  try {
+    const affectedJobs = new Set();
+    for (const id of updated) {
+      const row = byId.get(id);
+      if (!row?.start_date) continue;
+      const { data: linked } = await sb
+        .from("procurement_items")
+        .select("id, job_id, required_on_site_date")
+        .eq("related_schedule_task_id", id)
+        .eq("required", true);
+      for (const it of linked || []) {
+        if (it.required_on_site_date !== row.start_date) {
+          await sb.from("procurement_items")
+            .update({ required_on_site_date: row.start_date, updated_at: nowIso })
+            .eq("id", it.id);
+        }
+        affectedJobs.add(it.job_id);
+      }
+    }
+    for (const jobId of affectedJobs) await refreshJobRisk(sb, jobId);
+  } catch (e) {
+    console.warn("[procurement] schedule ripple → register sync skipped:", e?.message || e);
+  }
+
   return [...updated];
 }
 

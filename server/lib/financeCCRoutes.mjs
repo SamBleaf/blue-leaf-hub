@@ -11,6 +11,7 @@ import { getJobInsights } from "./projectInsights.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { getBuildexactCategoryMapping } from "./buildexactParser.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
+import { generateProcurementPlan, computeCommittedCost } from "./procurementService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { buildProgressClaimTokens, STAGE_LABELS as STAGE_LABELS_FROM_TOKENS } from "./docTokens.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
@@ -562,6 +563,12 @@ export function registerFinanceCCRoutes(app) {
       ? Math.floor((Date.now() - new Date(lastReviewDate).getTime()) / 86400000)
       : null;
 
+    // Committed cost (BQ-10 Phase F): Σ approved_amount on items with a sent PO.
+    // Computed, never stored-editable. Non-fatal (0 pre-migration).
+    let committedCost = 0;
+    try { committedCost = (await computeCommittedCost(sb, jobId)).committed || 0; }
+    catch { committedCost = 0; }
+
     res.json({
       ok: true,
       job: {
@@ -581,6 +588,7 @@ export function registerFinanceCCRoutes(app) {
         forecast_data_quality_warning: forecastDataQualityWarning,
         working_margin_pct: workingMarginPct != null ? Math.round(workingMarginPct * 10) / 10 : null,
         forecast_margin_pct: (!forecastDataQualityWarning && forecastMarginPct != null) ? Math.round(forecastMarginPct * 10) / 10 : null,
+        committed_cost: Math.round(committedCost * 100) / 100,
       },
       budget_vs_actual: budgetVsActual,
       wipaa: {
@@ -623,6 +631,20 @@ export function registerFinanceCCRoutes(app) {
       .select("id, address, contract_value, original_contract_value, target_margin_pct, floor_margin_pct, forecast_total_cost, financial_locked")
       .single();
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    // Lock hook (BQ-10): locking a job auto-drafts the procurement register once.
+    // Idempotent (generation is an UPSERT) + non-fatal to the lock.
+    if (updates.financial_locked === true) {
+      try {
+        const result = await generateProcurementPlan(sb, req.params.jobId, {
+          mode: "auto", actorId: req.caller?.id || null,
+        });
+        console.log("[procurement] auto-generated on lock:", req.params.jobId, result?.total ?? "?", "items");
+      } catch (e) {
+        console.warn("[procurement] auto-generate on lock failed (non-fatal):", e?.message || e);
+      }
+    }
+
     res.json({ ok: true, job: data });
   });
 

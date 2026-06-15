@@ -1329,7 +1329,7 @@ function BudgetTab({ jobId }) {
           </div>
         </div>
       ) : (
-        <p className="text-xs text-muted">Sync the Company Cost Model (Settings → Company Cost Model) to see the labour burn‑rate — how many full‑team days this budget supports before it's unprofitable.</p>
+        <p className="text-xs text-muted">Sync the Company Cost Model (Settings → Company Cost Model) to see the labour burn‑rate — how many full‑team days this budget supports before it&apos;s unprofitable.</p>
       )}
 
       <div>
