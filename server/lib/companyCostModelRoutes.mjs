@@ -63,7 +63,7 @@ export function registerCompanyCostModelRoutes(app) {
   });
 
   // Pull the latest numbers from the Google Sheet
-  app.post("/api/cost-model/sync", requireAuth, requireRole("admin", "supervisor"), async (_req, res) => {
+  app.post("/api/cost-model/sync", requireAuth, requireRole("admin"), async (_req, res) => {
     const sb = getServiceSupabase();
     const id = sheetId();
     if (!googleSheetsConfigured() || !id) {

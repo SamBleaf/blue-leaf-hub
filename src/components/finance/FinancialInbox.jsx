@@ -437,7 +437,9 @@ export default function FinancialInbox({ onUploaded }) {
     setImapPolling(true);
     try {
       const r = await authFetch("/api/finance/imap/poll", { method: "POST" }).then(r => r.json());
-      setImapStatus(prev => ({ ...prev, last: r, busy: false }));
+      // The poll summary nests per-account results under `.accounts` (same shape as /status `.last`),
+      // so the failure banner keeps working after a manual "Check now".
+      setImapStatus(prev => ({ ...prev, last: r.accounts || [], busy: false }));
       if (r.processed > 0) load();
     } finally {
       setImapPolling(false);
