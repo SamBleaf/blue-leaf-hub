@@ -425,6 +425,20 @@ export default function FinancialInbox({ onUploaded }) {
         </div>
       )}
 
+      {/* Inbox login-failure banner — surface IMAP auth/poll failures instead of failing silently */}
+      {imapStatus && (() => {
+        const results = Array.isArray(imapStatus.last) ? imapStatus.last : (imapStatus.last ? [imapStatus.last] : []);
+        const failed = results.filter(r => r && r.ok === false);
+        if (!failed.length) return null;
+        return (
+          <div className="rounded-lg border border-danger bg-surface px-4 py-2.5 text-xs text-danger">
+            <span className="font-semibold">⚠ Inbox login failing — </span>
+            {failed.map(f => `${f.account}: ${f.error || "authentication failed"}`).join(" · ")}
+            <span className="opacity-80"> · check that mailbox's password (IMAP) in the server env, then “Check now”.</span>
+          </div>
+        );
+      })()}
+
       {/* Status filter */}
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map(s => (

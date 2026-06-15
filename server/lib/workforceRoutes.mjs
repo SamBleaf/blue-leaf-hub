@@ -208,6 +208,11 @@ export async function syncTimesheetToBuildexact(timesheet, sb) {
     const order = await createPurchaseOrder({
       jobId: buildexactJobId,
       orderType: "Work",
+      // Apply GST (10%) like Deputy's native sync. Tax is an ORDER-level flag in Buildexact
+      // (isTaxFree) — NOT a line-item field. New API-created orders default to isTaxFree:true
+      // (GST-free); Deputy stamps isTaxFree:false so the Actual Cost matches the historical
+      // labour orders. The ex-GST cost (what drives margin) is identical either way.
+      isTaxFree: false,
       ...(contactId ? { contactId } : {}),
       description: `Blue Leaf Hub labour — ${emp.name} — ${timesheet.date}`,
       items,

@@ -173,7 +173,7 @@ function normRef(s) {
 
 // ── 4-tier matching cascade ────────────────────────────────────────────────────
 
-async function matchDocument(extracted, { jobs, subcontractors }) {
+async function matchDocument(extracted, { jobs, subcontractors, subjectHint } = {}) {
   const { extracted_job_ref, extracted_po_number, extracted_address, supplier_name } = extracted;
 
   // Tier 1 — Exact deterministic matches (free, instant, auditable)
@@ -212,6 +212,24 @@ async function matchDocument(extracted, { jobs, subcontractors }) {
       if (bestScore >= 0.65) {
         return { job_id: best.id, match_method: "fuzzy_address", match_confidence: Math.round(bestScore * 100) };
       }
+    }
+  }
+
+  // Tier 1c — Email subject contains a job's address. When a PDF has no site address,
+  // the forwarder often types it into the subject ("Fwd: ... 5a Gibson st"). Reverse
+  // match: are (almost) all of a job's address tokens present in the subject?
+  if (subjectHint && jobs.length) {
+    const subjNorm = normAddr(subjectHint);
+    let best = null, bestScore = 0;
+    for (const job of jobs) {
+      const jt = normAddr(job.address).split(" ").filter(t => t.length > 1);
+      if (jt.length < 2) continue;
+      const matched = jt.filter(t => subjNorm.includes(t)).length;
+      const score = matched / jt.length;
+      if (score > bestScore) { bestScore = score; best = job; }
+    }
+    if (best && bestScore >= 0.8) {
+      return { job_id: best.id, match_method: "subject_address", match_confidence: Math.round(bestScore * 90) };
     }
   }
 
@@ -988,7 +1006,7 @@ export function registerFinanceRoutes(app) {
             const base64 = att.content.toString("base64");
             const extracted = await extractDocument(base64, mime);
             const [match, tradeInference] = await Promise.all([
-              matchDocument(extracted, { jobs, subcontractors }),
+              matchDocument(extracted, { jobs, subcontractors, subjectHint: subject }),
               tradeCategories.length
                 ? inferTradeCategory(sb, {
                     supplierAbn: extracted.supplier_abn,
