@@ -529,3 +529,320 @@ The Buildexact API was never reached. No labour entry was created in Buildexact.
 ---
 
 *Re-test section appended 2026-06-14*
+
+---
+
+## Part 8 — Full Lifecycle & Architecture Audit (2026-06-15, Session 3)
+
+**Scope:** Architect-requested end-to-end lifecycle walkthrough (Lead → Handover), Delta Scope code verification (migrations 077–083), Buildexact API live coverage, reconciliation, and complete bug register update.  
+**Method:** Live browser session (Chrome MCP), direct Supabase REST API, Express API at localhost:8787. Parallel 9-agent Delta Scope workflow (`wf_d14cc615-bda`, 450k tokens).  
+**Test subject:** Lead `ce080bb4` → Job `52977053` → Project `826a3194` — all deleted post-audit.
+
+---
+
+### 8.1 — Lifecycle Walkthrough: Lead → Handover
+
+#### Stage 1 — Sales: Lead Creation
+
+| Step | Result |
+|------|--------|
+| `POST /api/sales/leads` | ✅ 201 — lead created with `stage: won`, address: 55 Audit Test Road, Burnside SA 5066 |
+| Lead fields (snake_case required) | ⚠️ **BUG-A2 confirmed active** — API requires snake_case (`first_name`, `estimated_value`); no camelCase conversion applied |
+| Lead stage set to `won` | ✅ Accepts `stage: won` directly |
+| CRM contact dedup | ✅ `convert-to-job` updates `crm_contacts.linked_job_id` by email fallback |
+
+#### Stage 2 — Sales: Lead → Job Conversion
+
+| Step | Result |
+|------|--------|
+| `POST /api/sales/leads/:id/convert-to-job` | ✅ 200 — job created with 10 facts stamped |
+| Facts stamped | ✅ `address`, `address_normalised`, `address_suburb`, `address_postcode`, `address_state`, `client_name`, `client_email`, `client_phone`, `project_type`, `estimated_value` |
+| All facts: `source=system`, `reason=lead_conversion` | ✅ Verified in `job_fact_history` |
+| Address derivation hook (`onAddressWrite`) | ✅ Auto-derives suburb/postcode/state via `normaliseAddress()` |
+| `address_normalised` = `"55 audit test road burnside"` | ✅ Correct normalised form |
+| Job status = `won` (because lead.stage === 'won') | ✅ Contextual status logic confirmed |
+| BUG-010 guard (blocks conversion without site_address) | ✅ Fixed — server returns 400 if `site_address` missing |
+| `jobs.estimated_value` column | ✅ Present (migration 078 confirmed applied) |
+
+#### Stage 3 — Knowledge Core: Confirm Queue
+
+| Step | Result |
+|------|--------|
+| `GET /api/facts/pending` | ✅ 200 `{ok:true, pending:[]}` |
+| `/confirm-queue` page renders | ✅ "No suggestions awaiting confirmation" — correct for human-entered lead data |
+| Consequence-tier enforcement | ✅ Only `source='extraction'` triggers `extracted_flagged` hold; human-entered address auto-applies |
+
+#### Stage 4 — Finance: Command Centre
+
+| Step | Result |
+|------|--------|
+| `GET /api/finance/jobs/:id/command-centre` | ✅ 200 — returns KPIs, variations, claims, revenue breakdown |
+| `contract_value: 0` before any variation | ✅ Correct — no original contract set |
+| `contract_value_missing: true` flag | ✅ Present |
+
+#### Stage 5 — Finance: Variation & Contract Value (Phase 5 Canonical Test)
+
+| Step | Result |
+|------|--------|
+| `POST /api/finance/jobs/:id/variations` | ✅ 200 — variation created, $15,000 ex-GST |
+| `POST .../variations/:id/send` | ✅ 200 — status moved to `sent` |
+| `POST .../variations/:id/sign` | ✅ 200 — variation signed |
+| Finance CC after signing: `contract_value: 15000` | ✅ **Phase 5 CONFIRMED** — signing updates canonical contract value |
+| `contract_value_missing: false` | ✅ Flag correctly cleared |
+| `signed_variations: 15000` | ✅ Variation counted |
+| `jobs.contract_value` DB column | ❌ BUG-P5-1/P5-2: Stale column still read by fee schedule (financeCCRoutes.mjs:857) and Director Portfolio WIPAA (jobFinanceRoutes.mjs:863) — see §8.3 |
+
+#### Stage 6 — Operations: Project & Schedule
+
+| Step | Result |
+|------|--------|
+| Automated project creation on job win | ❌ **BUG-LIFECYCLE-1** — no auto-creation; project must be inserted manually or via Buildexact sync |
+| `POST /api/schedule/generate` (with `projectId` in body) | ✅ 200 — 39 tasks generated via AI, start date 2026-07-01 |
+| First task: "Contract execution", phase: `pre_construction` | ✅ Correct milestone |
+| Schedule tasks stored with `project_id`, `phase`, `trade`, `task_type` | ✅ Full schema verified |
+| Global Gantt at `/operations` | ✅ Renders 2 seed projects with trade conflict detection |
+| Trade conflict detection | ✅ 3 conflicts surfaced across 2 projects |
+
+#### Stage 7 — WHS
+
+| Step | Result |
+|------|--------|
+| `GET /api/whs/:projectId/compliance` | ✅ 200 `{ok:true, subcontractors:[]}` |
+| `GET /api/whs/:projectId/reports` | ✅ 200, count: 0 (correct for new project) |
+| `GET /api/whs/projects/:projectId/profile` | ✅ 200 — `profile: null`, `prefill` auto-populated from job facts: `project_name`, `project_address`, `client_name`, `project_type` |
+| WHS engine pre-fill from Knowledge Core | ✅ Client name and address correctly sourced from `job_fact_history` |
+
+#### Stage 8 — Client Portal
+
+| Step | Result |
+|------|--------|
+| `POST /api/portal/admin/enable-test/:projectId` | ✅ 200 — `portalEnabled: true`, token: `Fp9vH6...` |
+| `GET /api/portal/:token` (client view, no auth) | ✅ 200 — returns `projectId`, `address`, `completionDateEst`, `portalEnabled: true` |
+| `clientName: null` | ⚠️ Not populated — `portal_client_name` must be set separately |
+| Claims and variations via portal | ✅ Returns `claims: 0` — correct for test state |
+
+#### Stage 9 — Finance: Progress Claim
+
+| Step | Result |
+|------|--------|
+| `POST /api/finance/jobs/:id/claims` with `stage: 'contract_execution'` | ❌ 400 — invalid stage. Stage enum is: `deposit`, `slab`, `frame`, `lock_up`, `fixing`, `practical_completion`, `custom` |
+| `POST .../claims` with `stage: 'deposit'`, `amount_ex_gst: 750` | ✅ 200 — claim created, ID `51911d47` |
+| Stage validation in DB (migration 031) | ✅ CHECK constraint confirmed on `progress_claims.stage` |
+
+#### Stage 10 — Buildexact API (Live Coverage)
+
+| Endpoint | Result |
+|----------|--------|
+| `GET /api/buildexact/status` | ✅ `configured: true`, `tokenValid: true`, `webhookUrl: http://127.0.0.1:8787/...` (BUG-015 confirmed) |
+| `POST /api/buildexact/test-connection` | ✅ **LIVE** — authenticated against BX API, returned `jobs_sample` with J1025 (`dea764af`) |
+| `GET /api/buildexact/job/:bxJobId/estimate` | ✅ **LIVE** — returned estimate: $45,446.82 net, $49,991.53 total, 9 categories, fields: `quote_number`, `net_total`, `markup_amount`, `markup_percent`, `tax`, `estimate_total`, `categories` |
+| `POST /api/buildexact/sync/:bxJobId` | ✅ **LIVE** — synced J1025 (`Spacecraft Design + Build`), returned: `contract_ex: 45235.84`, `claims_ex: 40035.19`, `variations_ex: -5200.66` |
+| `GET /api/buildexact/catalogues` | ✅ 17 catalogues returned (Recipe type confirmed) |
+| `GET /api/buildexact/webhook-events` | ✅ Returns event log; existing events show `event_type: 'unknown'` (pre-fix data from BUG-004) |
+| Webhook URL (BUG-015) | ❌ Shows `http://127.0.0.1:8787/api/webhooks/buildexact` — will be wrong in Railway production |
+| BX reconcile via script | ⚠️ No `/api/buildexact/reconcile` route — reconcile is a script (`buildexactReconcile.mjs`), not an API endpoint |
+| BX PO create/delete cycle | ⚠️ Not tested — PO creation requires a live BX estimate; skipped to avoid test POs in production BX account |
+| Estimate with integer job ID | ❌ Correctly returns 502 with OData type error: `Edm.Guid vs Edm.Int32` — good error, wrong input |
+
+#### Stage 11 — CRM: Contact Roles & Smart Lists
+
+| Step | Result |
+|------|--------|
+| `GET /api/crm/jobs/:jobId/contact-roles` | ✅ 200 `{ok:true, roles:[]}` — route confirmed at correct path |
+| Prior tests at `/api/crm/jobs/:id/roles` | ❌ Wrong path — correct path is `/api/crm/jobs/:jobId/contact-roles` |
+| Prior tests at `/api/crm/contacts/:id/smart-lists` | ❌ Wrong path — smart lists returned inside `GET /api/crm/contacts/:id` as `contact.smartLists` |
+| `GET /api/crm/contacts/:id` smart lists field | ⚠️ Field structure unclear — `contact.smartLists` key not confirmed in response during test (may require admin role) |
+| All 5 `job_contact_roles` routes: double-gated `requireAuth + requireRole('admin')` | ✅ Confirmed by code audit |
+
+#### Lifecycle Gap Summary
+
+| Gap | Severity | Notes |
+|-----|----------|-------|
+| No project auto-creation on job win | 🟠 HIGH | Only way to create a project is via Buildexact sync (module4Routes.mjs:318) or direct DB insert |
+| No handover module | ℹ️ INFO | Handover workflow not yet built; lifecycle ends at practical completion in Operations |
+| Marketing module not tested in lifecycle | ℹ️ INFO | Standalone module; not part of the construction lifecycle flow |
+
+---
+
+### 8.2 — Delta Scope Verification (Migrations 077–083)
+
+Results from 9-agent parallel code audit workflow.
+
+#### Migration 077 — Knowledge Core foundation
+**Status: PASS (code) / UNVERIFIED (DB)**  
+`job_fact_history` table schema confirmed. `factsService.mjs`, `jobFactRegistry.mjs`, `getJobProfile()`, `setFact()` all implemented and wired. Live verification: 10 facts stamped at lead→job conversion with full provenance. Migration must be applied before backfill script.
+
+#### Migration 078 — Lead carry provenance  
+**Status: PASS**  
+`jobs.estimated_value` column added (numeric 12,2). `jobFactRegistry.mjs` registers it. `convert-to-job` carries `leads.estimated_value` via `setFact`. Idempotent.
+
+#### Migration 079 — Drop contract_value trigger  
+**Status: PASS (code) / UNVERIFIED (DB application)**  
+SQL drops `job_variation_contract_sync` trigger and `sync_job_contract_value` function with IF EXISTS guards. `financeCCRoutes.mjs` confirmed to use `contractValueOf()` wrapper (not raw `jobs.contract_value`) for all main KPI handlers. BUG-N1 and BUG-N2 confirmed fixed. **Caveat:** Two stale read paths remain post-cutover (BUG-P5-1, BUG-P5-2).
+
+#### Migration 080 — Facts service write path  
+**Status: PASS**  
+`resolveStatus()`, `setFact()`, consequence-tier matrix all correctly implemented. `source='extraction'` + `tier='consequential'` → `status='extracted_flagged'`. `source='system'` or `'manual'` → auto-applied. Backfill script exists at `scripts/backfill-address-facts.mjs` (idempotent, dry-run-safe).
+
+#### Migration 081 — Trade taxonomy FK  
+**Status: PARTIAL**  
+`trade_category_id` column added to `purchase_orders`, `cost_intelligence`, `rfqs` (all FK → `trade_categories`). Backfill uses exact `LOWER(TRIM())` match — conservative and correct. `resolveTradeCategoryId()` exists in `buildexactParser.mjs` with fuzzy-to-exact two-stage resolution. Called correctly in PO issue flow. **Gap: `rfqPackageRoutes.mjs` never stamps `trade_category_id`** (BUG-DELTA6-01).
+
+#### Migration 082 — Carpentry job_id FK  
+**Status: PASS**  
+`carpentry_jobs.job_id` FK added (ON DELETE SET NULL). `labourAttribution.mjs` implements correct double-count guard (`excludeDoubleCounted()`). Guard is not yet active at any call site — intentionally deferred per scope. No regression risk.
+
+#### Migration 083 — job_contact_roles  
+**Status: PASS**  
+Table created with full schema including `fee_amount` (ex-GST), `credits_referral`, `role` enum. All 5 endpoints double-gated `requireAuth + requireRole('admin')`. `valueBroughtIn` uses `getCanonicalContractValue()` (facts spine, not stale column). `consultingFees` sums across all role rows correctly. Rollup recomputes on insert/update/delete/convert. New Contact form includes: smart-list 'will appear in' hint, Notes textarea, Referred by searchable picker. **Gap: BUG-CRM-1** (wrong referrer ID on CRM contact→lead convert).
+
+#### Confirm Queue (Phase 3)
+**Status: PASS**  
+`GET /api/facts/pending` wired, returns extracted_flagged facts deduped by `(job_id, fact_key)`. `/confirm-queue` page exists, admin/supervisor gated, renders `FactField` components. **Gap: BUG-FACTS-001** — Dismiss is client-side only; dismissed facts reappear on reload.
+
+#### Scope Engine (Phase 4 — Pluggable)
+**Status: SEALED (intentional)**  
+`server/lib/scopeIntelligence/index.mjs` fully implemented (`HubScopeIntelligence` class). Zero imports from any route file — completely inert with no regression risk. Existing RFQ extraction pipeline continues independently.
+
+---
+
+### 8.3 — Updated Bug Register
+
+#### New Bugs Found This Session
+
+| ID | Severity | Module | Description |
+|----|----------|--------|-------------|
+| BUG-P5-1 | 🔴 HIGH | Finance | `GET /api/finance/jobs/:id/claims/schedule` (financeCCRoutes.mjs:857) reads `original_contract_value \|\| contract_value` directly — stale post-mig-079 for jobs with post-win signed variations. Fee schedule stage dollar amounts will be wrong. |
+| BUG-P5-2 | 🔴 HIGH | Finance | `computeWipaa()` in jobFinanceRoutes.mjs:863 uses `job.contract_value \|\| 0` — Director Portfolio WIPAA figures (earned_revenue, wipaa_value, margin %) will be wrong for jobs with post-win signed variations. |
+| BUG-LIFECYCLE-1 | 🟠 HIGH | Operations | No automated project creation when a job transitions to `won`. The `convert-to-job` endpoint creates the job record and stamps facts but does not create a `projects` row. Projects are only created via the Buildexact sync (module4Routes.mjs:318) or direct DB insert. This breaks the lifecycle for non-Buildexact jobs. |
+| BUG-FACTS-001 | 🟡 MED | Knowledge Core | `Dismiss` in `FactField.jsx` is client-side only — no server call. Dismissed facts reappear in the Confirm Queue on every page reload. No `POST /api/facts/job/:jobId/:key/dismiss` endpoint exists. |
+| BUG-DELTA6-01 | 🟡 MED | RFQ | `rfqPackageRoutes.mjs` never stamps `trade_category_id` on RFQ create/update despite migration 081 adding the column. All RFQs from this route have `NULL trade_category_id`. Fix: import `resolveTradeCategoryId` from `buildexactParser.mjs` and call after insert. |
+| BUG-CRM-1 | 🔵 LOW | CRM | `crmRoutes.mjs` POST `/api/crm/contacts/:id/convert` (line 555): sets `referred_by_contact_id` to the converting contact's own `id` instead of `contact.referred_by_contact_id`. This breaks the referral chain at lead→job convert time. |
+| BUG-P5-3 | 🔵 LOW | WHS | `whs/whsMergeFields.mjs:65` reads `job.contract_value` directly for WHS document merge fields — unmaintained column post-mig-079. Low risk (document display only). |
+| BUG-DELTA6-02 | 🔵 LOW | RFQ | PO issue flow stamps `trade_category_id` as a post-insert update (module4Routes.mjs:661–672). A crash between insert and update leaves `NULL trade_category_id` silently. |
+| BUG-DELTA7-01 | 🔵 LOW | Workforce | `PATCH /api/workforce/timesheets/:id/carpentry-job` (workforceRoutes.mjs:606) sets `carpentry_job_id` without clearing `job_id`, creating dual-attributed timesheet rows. No caller warning. |
+| BUG-FACTS-002 | 🔵 LOW | Knowledge Core | win-finalize building facts use `source='system'` which `resolveStatus()` maps to `'manual'`. Provenance chip displays "source: system · manual entry" rather than attributing the write to the win-finalize action. `reason='win_finalize'` is recorded but buried. |
+| BUG-RFQ-001 | 🔵 LOW | RFQ | Two handlers in `rfqPackageRoutes.mjs` (send-scope:460, follow-up:574) call `res.json()` directly, bypassing `apiResponse.mjs`. Raw Supabase/Postgres errors could reach the browser. |
+| BUG-ADDR-TIER | 🔵 LOW | Knowledge Core | `address` fact is registered `tier='consequential'` but `source='system'` from `convert-to-job` bypasses confirmation (intentional but undocumented). `source='system'` and `source='manual'` are indistinguishable in `job_fact_history`. |
+| BUG-CRM-2 | 🔵 LOW | CRM | RLS on `job_contact_roles` is intentionally permissive (`FOR ALL TO authenticated USING(true)`). Real gate is route-level `requireRole('admin')`. Direct Supabase client queries would expose `fee_amount` (cost-sensitive) to any authenticated user. |
+
+#### Previously Reported Bug Status Update
+
+| ID | Previous Status | Current Status | Notes |
+|----|-----------------|----------------|-------|
+| BUG-BX02 | OPEN | ✅ **FIXED** | `Workforce.jsx` now calls `/api/operations/projects` (line 340) — confirmed by code audit |
+| BUG-004 | OPEN | ✅ **FIXED** | `extractEventType()` now checks `body.eventName`, `extractJobPayload()` checks `body.eventData` — confirmed by code audit |
+| BUG-N1 | OPEN | ✅ **FIXED** | WIPAA snapshot (financeCCRoutes.mjs:706) now uses `contractValueOf()` — confirmed |
+| BUG-N2 | OPEN | ✅ **FIXED** | CRM referral rollup (crmRoutes.mjs:191, 604) both use `getCanonicalContractValue()` — confirmed |
+| BUG-N4 | OPEN | ⚠️ **PARTIAL** | Reconcile has legacy fallback to `projects.buildexact_job_id` (buildexactReconcile.mjs:69–73). Write/read split persists — webhook writes to `projects`, reconcile reads `jobs` first. Workaround functions but data model split unresolved. |
+| BUG-A1 | OPEN | ⚠️ **PARTIAL** | Raw `error.message` responses down from ~175 to ~110 across server. Heavy concentrations remain in `financeRoutes.mjs` (~14), `authRoutes.mjs`, `carpentryRoutes.mjs`. |
+| BUG-A2 | OPEN | ❌ **STILL OPEN** | `workforceRoutes.mjs` and `salesRoutes.mjs` have zero `rowsToCamel`/`toCamel` calls. Both are top offenders. Snake_case still leaks to API consumers. |
+| BUG-009 | OPEN | ✅ **RESOLVED** | Status logic is contextual: `convert-to-job` correctly sets `'won'` for won leads, `'tendering'` otherwise. Not a real bug. |
+| BUG-010 | OPEN | ✅ **RESOLVED** | Server hard-blocks conversion without `site_address`. Old fallback address removed. UI error is a plain `alert()` (minor UX, not functional). |
+| BUG-015 | OPEN | ❌ **STILL OPEN** | Webhook URL shows `http://127.0.0.1:8787/...` — confirmed live in `/api/buildexact/status` response. No `API_BASE_URL` env var set in Railway. |
+| FINANCE-SHADOW | OPEN | ⚠️ **PARTIAL** | `registerJobFinanceRoutes` commented out (dev-api.mjs:781). Two routes remain: `registerFinanceRoutes` + `registerFinanceCCRoutes`. Shadow risk reduced. |
+| BUG-BX01 | OPEN | ❌ **STILL OPEN** | `employees.buildexact_employee_id = NULL` for all employees. Blocks all timesheet→BX sync. |
+| BUG-BX03 | OPEN | ❌ **STILL OPEN** | Silent exit at syncTimesheetToBuildexact:91 (`if (!timesheet.job_id) return`) — no error written to DB |
+| BUG-BX04 | OPEN | ❌ **STILL OPEN** | `jobs.buildexact_job_id = NULL` for all 9 jobs. BUG-N4 workaround in reconcile only. |
+| BUG-BX05 | OPEN | ❌ **STILL OPEN** | `updateJobLabourBudget()` is a stub (console.log only) — never writes to `job_budgets` |
+
+---
+
+### 8.4 — Buildexact API Coverage Summary
+
+| Coverage Area | Status | Notes |
+|---------------|--------|-------|
+| Auth (token login + cache) | ✅ LIVE | `accessToken` cached in-memory, refreshed successfully. `credentialSource: env`. |
+| Jobs list (OData filter) | ✅ LIVE | `test-connection` returns `jobs_sample` — real jobs returned from BX API |
+| Job estimate retrieval | ✅ LIVE | `GET /api/buildexact/job/:bxJobId/estimate` → 12 fields including `categories` array |
+| Job sync (snapshot) | ✅ LIVE | `POST /api/buildexact/sync/:bxJobId` → full financial snapshot: contract, claims, variations, actuals |
+| Catalogues | ✅ LIVE | 17 catalogues returned via `GET /api/buildexact/catalogues` |
+| Catalogue search | ✅ Route exists (not live-tested) |
+| Catalogue items | ✅ Route exists (not live-tested) |
+| Purchase Order create | ⚠️ Not live-tested | Route exists in module4Routes.mjs. Skipped to avoid test POs in BX production |
+| Webhook events log | ✅ Working | 4 historic events, all `event_type: 'unknown'` (pre-BUG-004-fix data) |
+| Reconciliation | ⚠️ Script only | No REST endpoint — run via `node scripts/reconcile-buildxact.mjs all` |
+| Labour entry push | ❌ BLOCKED | All 4 preconditions fail: no `buildexact_employee_id`, no `job_id` on timesheets, no `buildexact_job_id` on jobs, no `job_id` linking timesheet to job |
+
+---
+
+### 8.5 — API Server Stability
+
+During Buildexact live coverage testing, the Express API server (PID 27256) crashed once with no logged error. `nodemon` did not auto-restart (no child process spawned). Root cause: suspected unhandled promise rejection in sync or reconcile code path. Server was manually restarted. 
+
+**Recommendation:** Add `process.on('unhandledRejection', ...)` and `process.on('uncaughtException', ...)` handlers in `server/dev-api.mjs` to log and prevent silent crashes.
+
+---
+
+### 8.6 — Workforce Launch Readiness (Updated)
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| TC-01 Admin login | ✅ PASS | |
+| TC-02 Timesheet creation | ✅ PASS | |
+| TC-03 Timesheet entry | ✅ PASS | 9 cost codes confirmed in workforce_settings |
+| TC-04 Timesheet approval | ✅ PASS | Approval route fires syncTimesheetToBuildexact |
+| TC-05 History tab | ✅ PASS | Sync error display working; "—" for silent-skip cases is misleading |
+| TC-06 Worker PWA | ❌ **CRITICAL BLOCKER** | Workers must have Supabase accounts; no on-site self-registration flow |
+| TC-07 Team Directory | ✅ PASS | Returns `buildexact_employee_id` field |
+| TC-08 Mass Fill | ✅ PASS (partially) | `/api/operations/projects` fix confirmed; `job_id` link to BX still broken |
+| TC-09 BX Sync | ❌ BLOCKED | 4 cascading preconditions all null (BUG-BX01, BUG-BX03, BUG-BX04, BUG-BX05) |
+| BX API connectivity | ✅ LIVE | Auth works, jobs/estimates/sync all confirmed live |
+| BX employee IDs | ❌ NOT SET | Sam Morris `buildexact_employee_id = NULL` |
+
+**Workforce is not launch-ready.** Two blockers must be resolved before go-live:
+1. **TC-06 (Worker PWA auth)** — critical, no workaround
+2. **BX employee ID** — must be set via Team Directory before any timesheet can sync to Buildexact
+
+---
+
+### 8.7 — Fix Priority Order (Architect Reference)
+
+#### Immediate / Pre-Launch (must fix before Workforce go-live)
+1. **BUG-TC06** — Worker PWA auth: implement on-site registration or relaxed auth for workers
+2. **BUG-BX01** — Set `buildexact_employee_id` for Sam Morris via Team Directory
+
+#### Critical / Post-Launch Sprint 1
+3. **BUG-P5-1** — Fee schedule stale reads in `financeCCRoutes.mjs:857` — wrong dollar amounts for post-win variation jobs
+4. **BUG-P5-2** — Director Portfolio WIPAA stale reads in `jobFinanceRoutes.mjs:863`
+5. **BUG-LIFECYCLE-1** — Auto-create project on job win (add to `convert-to-job` endpoint)
+6. **BUG-BX03** — Add `project_id → job_id` fallback in `syncTimesheetToBuildexact()` + write errors for silent exits
+7. **BUG-N4** — Unify `buildexact_job_id` write path to `jobs` table (not `projects`)
+
+#### High / Sprint 2
+8. **BUG-A2** — camelCase conversion missing in `workforceRoutes.mjs` and `salesRoutes.mjs`
+9. **BUG-FACTS-001** — Server-side fact dismiss endpoint (`POST /api/facts/job/:jobId/:key/dismiss`)
+10. **BUG-DELTA6-01** — `rfqPackageRoutes.mjs`: stamp `trade_category_id` on RFQ create/update
+11. **BUG-015** — Add `API_BASE_URL` env var to Railway; fix webhook URL display
+
+#### Medium / Sprint 3
+12. **BUG-CRM-1** — Wrong referrer ID in CRM contact→lead convert
+13. **BUG-A1** — Continue reducing raw `error.message` responses (110 remaining)
+14. **BUG-BX05** — Implement `updateJobLabourBudget()` to write actuals to `job_budgets`
+15. **BUG-P5-3** — WHS merge fields: use canonical contract value
+16. **BUG-DELTA6-02** — Include `trade_category_id` in PO insert payload (not post-insert)
+17. **BUG-DELTA7-01** — Warn caller on dual-attributed timesheet PATCH
+18. **BUG-RFQ-001** — Route two rfqPackageRoutes handlers through `apiResponse.mjs`
+
+---
+
+### 8.8 — Session 3 Test Data Cleanup
+
+All test records created during this session have been deleted:
+
+| Record | ID | Status |
+|--------|----|--------|
+| Lead (55 Audit Test Road) | `ce080bb4-526b-4ba1-a03a-f208f494d891` | ✅ Deleted |
+| Job | `52977053-435d-4c54-b48e-fe0cc4190256` | ✅ Deleted |
+| Project | `826a3194-225f-488d-9133-81500a365b5d` | ✅ Deleted |
+| Variation ($15,000) | `6964ce1f-1c8a-4467-b16b-51b6afcbfbf4` | ✅ Deleted |
+| Progress claim ($750 deposit) | `51911d47-87e2-4c39-ae40-9a2b13531781` | ✅ Deleted |
+| Schedule tasks (39) | all for project `826a3194` | ✅ Deleted |
+| Job fact history (10 facts) | all for job `52977053` | ✅ Deleted |
+| buildexact_job_sync | for job `52977053` | ✅ Deleted |
+
+Pre-existing seed data (6 timesheets, 2 projects, 9 jobs) untouched.
+
+---
+
+*Full lifecycle audit appended 2026-06-15. Parallel Delta Scope code audit: 9 agents, 450k tokens, wf_d14cc615-bda.*
