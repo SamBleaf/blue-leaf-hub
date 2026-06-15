@@ -505,6 +505,11 @@ async function moveDropboxFile(token, fromPath, toPath) {
   return j?.metadata?.path_display || toPath;
 }
 
+// Overhead / subscription suppliers — invoices that are business overhead, not a build's cost.
+// The poller auto-routes these to the internal "Blue Leaf Building" job (booked, but never hits a
+// job's margin). Extend as needed, e.g. /buildxact|buildexact|xero|google|microsoft|adobe/i.
+const OVERHEAD_SUPPLIER_RE = /buildxact|buildexact/i;
+
 // Match an invoice to a CARPENTRY job by address, then by the email subject. Carpentry jobs
 // aren't in the tender `jobs` table, so the poller runs this only when no tender match was found.
 function matchCarpentryJob(extracted, subjectHint, carpentryJobs) {
@@ -1080,6 +1085,9 @@ export function registerFinanceRoutes(app) {
   let lastInvoicePollResults = [];
 
   async function pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories = [], carpentryJobs = []) {
+    // Overhead routing targets (resolved from already-loaded data): the internal job + an overhead trade.
+    const overheadJob = jobs.find(j => (j.address || "").toLowerCase() === "blue leaf building");
+    const overheadTrade = tradeCategories.find(t => /prelim/i.test(t.name || ""));
     const client = new ImapFlow(cfg);
     let processed = 0, skipped = 0, failed = 0;
     try {
@@ -1172,7 +1180,10 @@ export function registerFinanceRoutes(app) {
 
             // No tender-job match → try the carpentry jobs (material invoices for carpentry sites).
             const cMatch = !match.job_id ? matchCarpentryJob(extracted, subject, carpentryJobs) : null;
-            const matched = match.job_id || cMatch;
+            // Still no match → if it's an overhead/subscription supplier, route to the internal bucket.
+            const isOverhead = !match.job_id && !cMatch && overheadJob && OVERHEAD_SUPPLIER_RE.test(extracted.supplier_name || "");
+            const resolvedJobId = match.job_id || (isOverhead ? overheadJob.id : null);
+            const matched = resolvedJobId || cMatch;
 
             const { error: insertErr } = await sb.from("financial_documents").insert({
               source: "email",
@@ -1182,11 +1193,11 @@ export function registerFinanceRoutes(app) {
               email_subject: subject,
               email_received_at: receivedAt,
               ...extracted,
-              job_id: match.job_id || null,
+              job_id: resolvedJobId,
               carpentry_job_id: cMatch?.carpentry_job_id || null,
-              match_method: match.match_method || cMatch?.match_method,
+              match_method: match.match_method || cMatch?.match_method || (isOverhead ? "overhead_supplier" : undefined),
               match_confidence: match.match_confidence ?? cMatch?.match_confidence,
-              trade_category_id: tradeInference.trade_category_id,
+              trade_category_id: tradeInference.trade_category_id || (isOverhead ? overheadTrade?.id : null),
               ai_trade_confidence: tradeInference.ai_trade_confidence,
               ai_job_match_confidence: match.match_confidence ?? cMatch?.match_confidence,
               is_duplicate,
