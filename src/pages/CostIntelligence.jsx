@@ -579,6 +579,83 @@ function TrendsTab() {
   );
 }
 
+// P6 — surface the company's loaded labour rates in pre-tender estimating
+function LabourRateCard() {
+  const [cm, setCm] = useState(null);
+  const [days, setDays] = useState("");
+  const [crew, setCrew] = useState("");
+
+  useEffect(() => {
+    authFetch("/api/cost-model").then(r => r.json()).then(j => { if (j.ok) setCm(j); }).catch(() => {});
+  }, []);
+
+  const rates = cm?.rates || [];
+  const model = cm?.model;
+  const f = (n) => `$${Number(n || 0).toLocaleString("en-AU", { maximumFractionDigits: 0 })}`;
+
+  if (!model || !rates.length) {
+    return (
+      <div className="rounded-card border border-hairline bg-surface p-6">
+        <h2 className="text-sm font-bold text-ink">Company labour rates</h2>
+        <p className="text-xs text-muted mt-1">Sync the Company Cost Model (Settings → Company Cost Model) to price labour at your real loaded rates here.</p>
+      </div>
+    );
+  }
+
+  const hpd = Number(model.hours_per_day) || 8;
+  const headcount = rates.length;
+  const teamBE = rates.reduce((s, r) => s + Number(r.break_even_hourly || 0), 0) * hpd;
+  const teamCU = rates.reduce((s, r) => s + Number(r.charge_up_hourly || 0), 0) * hpd;
+  const perBE = teamBE / headcount, perCU = teamCU / headcount;
+  const d = Number(days) || 0, c = Number(crew) || 0;
+  const cost = d * c * perBE, bill = d * c * perCU, margin = bill - cost;
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-6 space-y-4">
+      <div>
+        <h2 className="text-sm font-bold text-ink">Company labour rates</h2>
+        <p className="text-xs text-muted mt-0.5">Your team's real loaded rates — use these to price labour in a tender ({headcount} staff).</p>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          ["Full team — cost/day", f(teamBE)],
+          ["Full team — charge/day", f(teamCU)],
+          ["Per head — cost/day", f(perBE)],
+          ["Per head — charge/day", f(perCU)],
+        ].map(([l, v]) => (
+          <div key={l} className="rounded-lg border border-hairline bg-page px-3 py-2">
+            <p className="text-[11px] text-muted">{l}</p>
+            <p className="text-base font-bold text-ink">{v}</p>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-hairline pt-4">
+        <p className="text-xs font-semibold text-ink mb-2">Quick labour estimate</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-[11px] text-muted block mb-1">Days on site</label>
+            <input type="number" value={days} onChange={e => setDays(e.target.value)} placeholder="e.g. 10"
+              className="w-28 rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted block mb-1">Crew size</label>
+            <input type="number" value={crew} onChange={e => setCrew(e.target.value)} placeholder={String(headcount)}
+              className="w-28 rounded-lg border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          {d > 0 && c > 0 && (
+            <div className="flex gap-5 text-sm">
+              <div><p className="text-[11px] text-muted">Labour cost</p><p className="font-bold text-ink">{f(cost)}</p></div>
+              <div><p className="text-[11px] text-muted">Charge at margin</p><p className="font-bold text-accent">{f(bill)}</p></div>
+              <div><p className="text-[11px] text-muted">Margin</p><p className="font-bold text-emerald-700">{f(margin)}</p></div>
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-muted mt-2">Cost = break‑even (wages + overhead). Charge = cost + {Math.round((Number(model.margin_pct) || 0) * 100)}% margin.</p>
+      </div>
+    </div>
+  );
+}
+
 function PreTenderTab() {
   const SLOPES = ["flat", "gentle", "moderate", "steep", "very_steep"];
   const PROJECT_TYPES = ["new_build", "renovation", "extension", "knockdown_rebuild"];
@@ -634,6 +711,7 @@ function PreTenderTab() {
 
   return (
     <div className="space-y-6">
+      <LabourRateCard />
       <div className="rounded-card border border-hairline bg-surface p-6 space-y-4">
         <div>
           <h2 className="text-sm font-bold text-ink">Pre-Tender Estimator</h2>
