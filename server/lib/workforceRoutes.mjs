@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { buildexactConfigured, createPurchaseOrder, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
+import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 
@@ -58,8 +59,10 @@ function splitOvertimeHours(totalHours, settings) {
   };
 }
 
-function computeCost(bands, employee) {
-  const rate = Number(employee?.hourly_rate) || 0;
+function computeCost(bands, employee, rateOverride) {
+  // P4: prefer the synced loaded rate (break-even = wage + on-costs + overhead) when available,
+  // so Buildexact actuals reflect the real cost of labour, not the base pay rate.
+  const rate = Number(rateOverride) || Number(employee?.hourly_rate) || 0;
   const otMult = Number(employee?.overtime_multiplier) || 1;
   const dtMult = Number(employee?.double_time_multiplier) || 1;
   const cost =
@@ -284,11 +287,12 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
 
   const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheetId);
   const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
+  const cm = await getCostModel(sb); // P4: loaded break-even rate (null until mig 090 + sync)
 
   // Compute cost for each entry
   for (const entry of entries || []) {
     const bands = splitOvertimeHours(Number(entry.hours), settings || { overtime_threshold: 8, double_time_threshold: 10 });
-    const cost = computeCost(bands, ts.employees);
+    const cost = computeCost(bands, ts.employees, loadedRate(cm, ts.employee_id));
     // overtime_hours stores all premium hours (overtime + double-time) — preserves the
     // column's original meaning (hours paid above the base rate).
     await sb.from("timesheet_entries")

@@ -34,6 +34,7 @@ import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiRespons
 import { buildexactConfigured, getJobById } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
+import { getCostModel, burnForLine } from "./costModelService.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1021,22 +1022,26 @@ export function registerCarpentryRoutes(app) {
 
       const { data: entries } = await sb
         .from("timesheet_entries")
-        .select("task_category, cost_amount, timesheets!inner(carpentry_job_id, status)")
+        .select("task_category, cost_amount, hours, timesheets!inner(carpentry_job_id, status)")
         .eq("timesheets.carpentry_job_id", jobId)
         .eq("timesheets.status", "approved");
-      const labourByTask = {};
+      const labourByTask = {}, hoursByTask = {};
       for (const e of entries || []) {
         labourByTask[e.task_category] = (labourByTask[e.task_category] || 0) + Number(e.cost_amount || 0);
+        hoursByTask[e.task_category] = (hoursByTask[e.task_category] || 0) + Number(e.hours || 0);
       }
+      const cm = await getCostModel(sb); // company cost model (null until mig 090 + sync)
 
       const { data: costRows } = await sb.from("carpentry_job_costs").select("amount").eq("job_id", jobId);
       const materialActualTotal = round2((costRows || []).reduce((s, c) => s + Number(c.amount || 0), 0));
 
       const lines = (budgets || []).map((b) => {
         const budget = round2(b.budget_ex_gst);
-        const actual = b.cost_type === "labour"
+        const isLabour = b.cost_type === "labour";
+        const actual = isLabour
           ? round2(labourByTask[b.workforce_task_category] || 0)
           : 0; // material per-line actuals not tracked yet (see totals.materialActual)
+        const actualHours = isLabour ? (hoursByTask[b.workforce_task_category] || 0) : 0;
         return {
           id: b.id,
           categoryName: b.category_name,
@@ -1045,6 +1050,8 @@ export function registerCarpentryRoutes(app) {
           budget,
           actual,
           variance: round2(budget - actual),
+          // P3: profitable-days + live actuals per labour category (null until cost model synced)
+          burn: isLabour ? burnForLine(budget, actual, actualHours, cm) : null,
         };
       });
 
@@ -1058,7 +1065,19 @@ export function registerCarpentryRoutes(app) {
         totalBudget: round2(labourBudget + materialBudget),
         totalActual: round2(labourActual + materialActualTotal),
       };
-      return ok(res, { lines, totals });
+      // P3/P5: job-level burn-rate — how many full-team days the labour budget supports (the
+      // schedule guardrail) + live labour margin. Null-safe when the cost model isn't synced.
+      const burn = cm ? {
+        available: true,
+        headcount: cm.headcount,
+        hoursPerDay: cm.hoursPerDay,
+        teamChargeUpPerDay: round2(cm.teamChargeUpPerDay),
+        teamBreakEvenPerDay: round2(cm.teamBreakEvenPerDay),
+        atMarginDays: cm.teamChargeUpPerDay > 0 ? Math.round((labourBudget / cm.teamChargeUpPerDay) * 10) / 10 : null,
+        breakEvenDays: cm.teamBreakEvenPerDay > 0 ? Math.round((labourBudget / cm.teamBreakEvenPerDay) * 10) / 10 : null,
+        labourMarginRemaining: round2(labourBudget - labourActual),
+      } : { available: false };
+      return ok(res, { lines, totals, burn });
     } catch (e) {
       console.error("[carpentry/budget GET]", e);
       return err(res, 502, translateDbError(e));

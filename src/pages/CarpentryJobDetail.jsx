@@ -1312,6 +1312,26 @@ function BudgetTab({ jobId }) {
         ))}
       </div>
 
+      {data.burn?.available ? (
+        <div className="rounded-lg border border-hairline bg-page p-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-sm font-semibold text-ink">Labour burn‑rate</p>
+              <p className="text-xs text-muted">
+                Full team ({data.burn.headcount} staff) · {fmt$(data.burn.teamBreakEvenPerDay)}/day cost · {fmt$(data.burn.teamChargeUpPerDay)}/day charge‑up
+              </p>
+            </div>
+            <div className="flex gap-5 text-right">
+              <div><p className="text-xs text-muted">Budget supports</p><p className="text-lg font-bold text-ink">{data.burn.atMarginDays ?? "—"}<span className="text-xs font-normal text-muted"> days @ margin</span></p></div>
+              <div><p className="text-xs text-muted">Break‑even</p><p className="text-lg font-bold text-ink">{data.burn.breakEvenDays ?? "—"}<span className="text-xs font-normal text-muted"> days</span></p></div>
+              <div><p className="text-xs text-muted">Labour margin left</p><p className={`text-lg font-bold ${data.burn.labourMarginRemaining < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(data.burn.labourMarginRemaining)}</p></div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">Sync the Company Cost Model (Settings → Company Cost Model) to see the labour burn‑rate — how many full‑team days this budget supports before it's unprofitable.</p>
+      )}
+
       <div>
         <h3 className="text-sm font-semibold text-ink mb-2">Labour — actuals from workforce timesheets</h3>
         <table className="w-full text-sm">
@@ -1319,17 +1339,22 @@ function BudgetTab({ jobId }) {
             <th className="text-left py-2 pr-3 font-medium">Category</th>
             <th className="text-right py-2 px-3 font-medium">Budget</th>
             <th className="text-right py-2 px-3 font-medium">Actual</th>
-            <th className="text-right py-2 pl-3 font-medium">Variance</th>
+            <th className="text-right py-2 px-3 font-medium">Variance</th>
+            <th className="text-right py-2 pl-3 font-medium" title="Full-team days this category's budget supports at target margin">Days @ margin</th>
           </tr></thead>
           <tbody>
-            {labour.map((l) => (
+            {labour.map((l) => {
+              const dot = l.burn?.status === "over" ? "text-red-600" : l.burn?.status === "warn" ? "text-amber-600" : "text-emerald-700";
+              return (
               <tr key={l.id} className="border-b border-hairline last:border-0">
                 <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
                 <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
                 <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
-                <td className={`py-2 pl-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
+                <td className={`py-2 px-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
+                <td className={`py-2 pl-3 text-right font-semibold ${dot}`}>{l.burn?.atMarginDays != null ? `${l.burn.atMarginDays}d` : "—"}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {labour.some((l) => !l.workforceTaskCategory) && (
