@@ -38,6 +38,7 @@ import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
 import { registerFinanceCCRoutes } from "./lib/financeCCRoutes.mjs";
+import { registerCompanyCostModelRoutes } from "./lib/companyCostModelRoutes.mjs";
 // DEREGISTERED (Phase -1 cleanup): jobFinanceRoutes was fully shadowed by financeRoutes +
 // financeCCRoutes (Express ignores param names, so its :id routes duplicated existing paths).
 // Its only non-shadowed endpoint, PUT /wipaa/forecast, was unused by the app. See
@@ -778,6 +779,7 @@ registerJobsApiRoutes(app);
 registerSalesRoutes(app);
 registerFinanceRoutes(app);
 registerFinanceCCRoutes(app);
+registerCompanyCostModelRoutes(app);
 // registerJobFinanceRoutes(app);  // DEREGISTERED (Phase -1) — fully shadowed; see import note above
 registerPortalRoutes(app);
 registerAuthRoutes(app);
