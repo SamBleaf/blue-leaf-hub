@@ -505,14 +505,36 @@ async function moveDropboxFile(token, fromPath, toPath) {
   return j?.metadata?.path_display || toPath;
 }
 
+// Match an invoice to a CARPENTRY job by address, then by the email subject. Carpentry jobs
+// aren't in the tender `jobs` table, so the poller runs this only when no tender match was found.
+function matchCarpentryJob(extracted, subjectHint, carpentryJobs) {
+  if (!carpentryJobs?.length) return null;
+  const tokenScore = (text, jobAddr) => {
+    const jt = normAddr(jobAddr || "").split(" ").filter(t => t.length > 1);
+    if (jt.length < 2) return 0;
+    const t = normAddr(text || "");
+    return jt.filter(tok => t.includes(tok)).length / jt.length;
+  };
+  for (const [text, method, mult] of [
+    [extracted.extracted_address, "carpentry_address", 100],
+    [subjectHint, "carpentry_subject", 90],
+  ]) {
+    if (!text) continue;
+    let best = null, bestScore = 0;
+    for (const c of carpentryJobs) { const s = tokenScore(text, c.address); if (s > bestScore) { bestScore = s; best = c; } }
+    if (best && bestScore >= 0.8) return { carpentry_job_id: best.id, match_method: method, match_confidence: Math.round(bestScore * mult) };
+  }
+  return null;
+}
+
 // ── Carpentry material invoice → Buildexact Purchase Order ─────────────────────
 // The material twin of the labour Work Order push (workforceRoutes.syncTimesheetToBuildexact).
 // Fires when an APPROVED invoice is allocated to a carpentry job. Idempotent via
 // financial_documents.buildexact_purchase_order_id; same item-landed safety net.
 // Recipe proven live 2026-06-15: orderType 'Purchase', costItemType 'Material', isTaxFree:false.
-// v1 does not set a line category (parentTask) — the supply category is chosen when the order is
-// completed in Buildexact; a category picker is a follow-up. No supplier contact in v1 either
-// (supplier name is in the line description) — both are set at completion.
+// parentTask = the chosen carpentry supply category (carpentry_cost_category) so the line lands in
+// the right Buildexact Actuals Category; if none was picked it's left blank for completion-time.
+// No supplier contact in v1 (supplier name is in the line description) — set it at completion.
 async function pushInvoiceToBuildexactPO(doc, sb) {
   if (!buildexactConfigured()) return { pushed: false, skipped: "not_configured" };
   if (doc.buildexact_purchase_order_id) return { pushed: true, skipped: "already_pushed" };
@@ -543,6 +565,7 @@ async function pushInvoiceToBuildexactPO(doc, sb) {
         unitCost: amount,
         totalCost: amount,
         uom: "ea",
+        parentTask: doc.carpentry_cost_category || undefined,
         notes: "Imported from Blue Leaf Hub",
       }],
     });
@@ -600,11 +623,11 @@ export function registerFinanceRoutes(app) {
   // A document is either a tender-job cost or a carpentry-job cost — never both, so setting one
   // clears the other. Pass carpentry_job_id: null to un-allocate.
   app.put("/api/finance/documents/:id/carpentry-job", requireAuth, async (req, res) => {
-    const { carpentry_job_id } = req.body || {};
+    const { carpentry_job_id, carpentry_cost_category } = req.body || {};
     const sb = getServiceSupabase();
     const update = carpentry_job_id
-      ? { carpentry_job_id, job_id: null, status: "pending_approval", updated_at: new Date().toISOString() }
-      : { carpentry_job_id: null, updated_at: new Date().toISOString() };
+      ? { carpentry_job_id, carpentry_cost_category: carpentry_cost_category ?? null, job_id: null, status: "pending_approval", updated_at: new Date().toISOString() }
+      : { carpentry_job_id: null, carpentry_cost_category: null, updated_at: new Date().toISOString() };
     const { data, error } = await sb.from("financial_documents")
       .update(update).eq("id", req.params.id).select().single();
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
@@ -619,6 +642,16 @@ export function registerFinanceRoutes(app) {
       .order("created_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
     res.json({ ok: true, carpentryJobs: data || [] });
+  });
+
+  // Material supply categories for a carpentry job → the PO line's parentTask (Buildexact cost line)
+  app.get("/api/finance/carpentry-jobs/:id/material-categories", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("carpentry_job_budgets")
+      .select("category_name").eq("job_id", req.params.id).eq("cost_type", "material").order("sort_order");
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+    const categories = [...new Set((data || []).map(r => r.category_name).filter(Boolean))];
+    res.json({ ok: true, categories });
   });
 
   // ── Upload + extract + match ──────────────────────────────────────────────
@@ -1046,7 +1079,7 @@ export function registerFinanceRoutes(app) {
   let invoicePollBusy = false;
   let lastInvoicePollResults = [];
 
-  async function pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories = []) {
+  async function pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories = [], carpentryJobs = []) {
     const client = new ImapFlow(cfg);
     let processed = 0, skipped = 0, failed = 0;
     try {
@@ -1137,6 +1170,10 @@ export function registerFinanceRoutes(app) {
               if (dup) is_duplicate = true;
             }
 
+            // No tender-job match → try the carpentry jobs (material invoices for carpentry sites).
+            const cMatch = !match.job_id ? matchCarpentryJob(extracted, subject, carpentryJobs) : null;
+            const matched = match.job_id || cMatch;
+
             const { error: insertErr } = await sb.from("financial_documents").insert({
               source: "email",
               original_filename: filename,
@@ -1146,13 +1183,14 @@ export function registerFinanceRoutes(app) {
               email_received_at: receivedAt,
               ...extracted,
               job_id: match.job_id || null,
-              match_method: match.match_method,
-              match_confidence: match.match_confidence,
+              carpentry_job_id: cMatch?.carpentry_job_id || null,
+              match_method: match.match_method || cMatch?.match_method,
+              match_confidence: match.match_confidence ?? cMatch?.match_confidence,
               trade_category_id: tradeInference.trade_category_id,
               ai_trade_confidence: tradeInference.ai_trade_confidence,
-              ai_job_match_confidence: match.match_confidence,
+              ai_job_match_confidence: match.match_confidence ?? cMatch?.match_confidence,
               is_duplicate,
-              status: match.job_id ? "pending_approval" : "unmatched",
+              status: matched ? "pending_approval" : "unmatched",
             });
 
             if (insertErr) {
@@ -1196,18 +1234,20 @@ export function registerFinanceRoutes(app) {
 
     invoicePollBusy = true;
     try {
-      const [jobsRes, subsRes, tradeCatsRes] = await Promise.all([
+      const [jobsRes, subsRes, tradeCatsRes, carpentryRes] = await Promise.all([
         sb.from("jobs").select("id, address, arch_ref").not("address", "is", null),
         sb.from("subcontractors").select("id, business_name, email").not("business_name", "is", null),
-        sb.from("trade_categories").select("id, name, is_active").eq("is_active", true).order("sort_order")
+        sb.from("trade_categories").select("id, name, is_active").eq("is_active", true).order("sort_order"),
+        sb.from("carpentry_jobs").select("id, reference, address, buildexact_job_id").not("buildexact_job_id", "is", null)
       ]);
       const jobs = jobsRes.data || [];
       const subcontractors = subsRes.data || [];
       const tradeCategories = tradeCatsRes.data || [];
+      const carpentryJobs = carpentryRes.data || [];
 
       const results = [];
       for (const cfg of configs) {
-        const r = await pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories);
+        const r = await pollOneAccount(cfg, sb, jobs, subcontractors, tradeCategories, carpentryJobs);
         results.push(r);
       }
       lastInvoicePollResults = results;

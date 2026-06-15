@@ -61,6 +61,8 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
   const [rejecting, setRejecting] = useState(false);
   const [carpentryJobs, setCarpentryJobs] = useState([]);
   const [selCarpentry, setSelCarpentry] = useState(doc.carpentry_job_id || "");
+  const [materialCats, setMaterialCats] = useState([]);
+  const [selCat, setSelCat] = useState(doc.carpentry_cost_category || "");
   const [assigningCj, setAssigningCj] = useState(false);
 
   useEffect(() => {
@@ -69,12 +71,20 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
       .catch(() => {});
   }, []);
 
-  async function assignCarpentry(cjId) {
+  // Load the chosen carpentry job's material supply categories (for the PO line's cost category)
+  useEffect(() => {
+    if (!selCarpentry) { setMaterialCats([]); return; }
+    authFetch(`/api/finance/carpentry-jobs/${selCarpentry}/material-categories`).then(r => r.json())
+      .then(j => { if (j.ok) setMaterialCats(j.categories || []); })
+      .catch(() => {});
+  }, [selCarpentry]);
+
+  async function assignCarpentry(cjId, category) {
     setAssigningCj(true);
     try {
       const r = await authFetch(`/api/finance/documents/${doc.id}/carpentry-job`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ carpentry_job_id: cjId || null })
+        body: JSON.stringify({ carpentry_job_id: cjId || null, carpentry_cost_category: category || null })
       });
       const j = await r.json();
       if (j.ok) { onUpdate(j.document); if (cjId) setSelJob(""); }
@@ -192,7 +202,7 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
             <label className="mt-3 mb-1 block text-xs text-muted">…or a carpentry job (material cost → Buildexact PO)</label>
             <select
               value={selCarpentry}
-              onChange={e => { setSelCarpentry(e.target.value); assignCarpentry(e.target.value); }}
+              onChange={e => { setSelCarpentry(e.target.value); setSelCat(""); assignCarpentry(e.target.value, ""); }}
               disabled={assigningCj}
               className="w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
             >
@@ -201,6 +211,21 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
                 <option key={c.id} value={c.id}>{c.reference} — {c.address}{!c.buildexact_job_id ? " (no BX link)" : ""}</option>
               ))}
             </select>
+
+            {selCarpentry && (
+              <>
+                <label className="mt-2 mb-1 block text-xs text-muted">Supply category (Buildexact cost line)</label>
+                <select
+                  value={selCat}
+                  onChange={e => { setSelCat(e.target.value); assignCarpentry(selCarpentry, e.target.value); }}
+                  disabled={assigningCj}
+                  className="w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                >
+                  <option value="">— Set in Buildexact when completing —</option>
+                  {materialCats.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </>
+            )}
 
             {doc.carpentry_job_id && (doc.buildexact_purchase_order_id || doc.buildexact_push_error) && (
               <p className={`mt-2 text-xs ${doc.buildexact_push_error ? "text-danger" : "text-accent"}`}>
