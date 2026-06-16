@@ -396,6 +396,8 @@ export default function RfqEngine() {
   /** Draft job row created/updated when extraction completes (RFQs queued against it before send). */
   const [extractionJobId, setExtractionJobId] = useState("");
   const extractionJobIdRef = useRef("");
+  /** Guards the building-facts prefill so it runs at most once per job. */
+  const factsPrefillJobRef = useRef("");
   /** Merged trade plan (estimate baseline + AI enrichment). */
   const [tradePlan, setTradePlan] = useState([]);
   const [tradeIntelSummary, setTradeIntelSummary] = useState(null);
@@ -581,6 +583,47 @@ export default function RfqEngine() {
       })
       .catch(() => {});
   }, [searchParams]);
+
+  // Building-facts prefill — once a job is known, seed floor area / storeys /
+  // building specs from the canonical project_metrics so they aren't re-keyed.
+  // Fills EMPTY fields only (never clobbers what the user or PDF extraction set).
+  useEffect(() => {
+    const jid = extractionJobId;
+    if (!jid || factsPrefillJobRef.current === jid) return;
+    factsPrefillJobRef.current = jid;
+    authFetch(`/api/cost-intelligence/jobs/${jid}/metrics`)
+      .then((r) => r.json())
+      .then((j) => {
+        const m = j?.metrics;
+        if (!j?.ok || !m) return;
+        setExtraction((prev) => {
+          const next = { ...prev };
+          if ((next.storeys === "" || next.storeys == null) && m.storeys != null) {
+            next.storeys = String(m.storeys);
+          }
+          if (next.floor_area_m2 == null && m.floor_area_m2 != null) {
+            next.floor_area_m2 = Number(m.floor_area_m2);
+          }
+          // Merge a curated set of building specs, only for keys not already set.
+          const specCandidates = {
+            wall_type: m.wall_type,
+            roof_type: m.roof_type,
+            roof_complexity: m.roof_complexity,
+            site_slope: m.site_slope,
+            wet_areas: m.wet_areas,
+          };
+          const specs = { ...(next.building_specs || {}) };
+          let added = false;
+          for (const [k, v] of Object.entries(specCandidates)) {
+            if (v == null || v === "") continue;
+            if (specs[k] == null || specs[k] === "") { specs[k] = v; added = true; }
+          }
+          if (added) next.building_specs = specs;
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, [extractionJobId]);
 
   useEffect(() => {
     if (!pdfRestoreTask?.length) return;
@@ -2469,6 +2512,27 @@ export default function RfqEngine() {
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={() => setActiveStep(3)} className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold">
                   ← Recipients
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hasDrafts = outbound.some((r) => !r.blocked);
+                    if (
+                      hasDrafts &&
+                      !window.confirm(
+                        "Regenerate all drafts from the current scope and the latest email template? This discards any manual edits you've made to the drafts below."
+                      )
+                    ) {
+                      return;
+                    }
+                    skipNextAutoRebuildRef.current = false;
+                    rebuildOutbound();
+                  }}
+                  disabled={completionLog || sendBusy}
+                  className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Re-run the email composer on every draft using the current scope and template"
+                >
+                  ↻ Regenerate emails
                 </button>
                 <button
                   type="button"
