@@ -12,6 +12,7 @@ export default function WorkerLayout({ children, onBack }) {
   const navigate = useNavigate();
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
+  const [showIosHint, setShowIosHint] = useState(false);
   const dismissed = useRef(false);
 
   const isHome = HOME_PATHS.includes(location.pathname);
@@ -26,6 +27,17 @@ export default function WorkerLayout({ children, onBack }) {
       setShowInstall(true);
     }
     window.addEventListener("beforeinstallprompt", handler);
+
+    // iOS Safari never fires beforeinstallprompt, so the Android-style Install button
+    // can't appear. Detect iPhone/iPad (and that we're not already running installed)
+    // and show the manual "Share → Add to Home Screen" steps instead.
+    const ua = window.navigator.userAgent || "";
+    const isIOS = /iphone|ipad|ipod/i.test(ua);
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+    if (isIOS && !isStandalone) setShowIosHint(true);
+
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
@@ -42,6 +54,7 @@ export default function WorkerLayout({ children, onBack }) {
     dismissed.current = true;
     localStorage.setItem(PWA_DISMISS_KEY, "1");
     setShowInstall(false);
+    setShowIosHint(false);
   }
 
   return (
@@ -106,6 +119,23 @@ export default function WorkerLayout({ children, onBack }) {
               ✕
             </button>
           </div>
+        </div>
+      )}
+
+      {/* iOS install hint — Safari has no install prompt, so guide the manual step */}
+      {showIosHint && !showInstall && (
+        <div className="bg-white border-b border-hairline px-4 py-3 flex items-start gap-3">
+          <span className="text-xl leading-none">📲</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-ink leading-snug">
+              To install: tap the Share button
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="inline-block w-4 h-4 mx-0.5 -mt-0.5 align-middle text-primary">
+                <path d="M12 16V4" /><path d="m8 8 4-4 4 4" /><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+              </svg>
+              at the bottom of Safari, then <span className="font-semibold">Add to Home Screen</span>.
+            </p>
+          </div>
+          <button type="button" onClick={handleDismiss} className="text-sm text-muted shrink-0">✕</button>
         </div>
       )}
 

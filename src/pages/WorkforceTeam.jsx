@@ -30,6 +30,7 @@ export default function WorkforceTeam() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
   const [workerLink, setWorkerLink] = useState("");
+  const [inviteUrl, setInviteUrl] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -118,18 +119,31 @@ export default function WorkforceTeam() {
     load();
   }
 
-  async function sendInvite(empId) {
-    if (!inviteEmail.trim()) { alert("Enter an email address"); return; }
+  // App-login invite for supervisors/managers. Goes through the proven staff-invite
+  // system (/api/auth/invite) — emails the setup link via the Hub's Gmail AND returns
+  // the link so it can be copied and sent directly (like the worker link), rather than
+  // the old Supabase-email path that silently failed.
+  async function sendInvite(emp) {
+    const email = inviteEmail.trim();
+    if (!email) { alert("Enter an email address"); return; }
     setInviting(true);
+    setInviteUrl("");
     try {
-      const res = await authFetch(`/api/workforce/employees/${empId}/invite`, {
+      const res = await authFetch(`/api/auth/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail }),
+        body: JSON.stringify({ email, fullName: emp.name, role: "supervisor" }),
       });
       const j = await res.json();
-      if (j.ok) { showToast("Invite sent"); load(); }
-      else { alert(j.error || "Invite failed"); }
+      if (res.ok && j.ok) {
+        const url = j.inviteUrl || "";
+        setInviteUrl(url);
+        if (url) { try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked */ } }
+        showToast(j.warning ? "Link ready — copy it below" : "Invite emailed + link copied");
+        load();
+      } else {
+        alert(j.error || "Invite failed");
+      }
     } catch { alert("Network error"); } finally { setInviting(false); }
   }
 
@@ -312,19 +326,19 @@ export default function WorkforceTeam() {
                       <label className="text-xs text-muted">App login invite (email)</label>
                       {isManagement && <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">Recommended</span>}
                     </div>
-                    {panel.invite_sent_at ? (
-                      <p className="text-xs text-green-700">Invite sent {fmtDate(panel.invite_sent_at)}</p>
-                    ) : (
-                      <>
-                        <p className="text-[11px] text-muted mb-2">For supervisors/managers who need the full app with their own login.</p>
-                        <div className="flex gap-1">
-                          <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="flex-1 min-w-0 border border-hairline rounded-lg px-2 py-1.5 text-sm" />
-                          <button type="button" onClick={() => sendInvite(panel.id)} disabled={inviting} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
-                            {inviting ? "…" : "Send"}
-                          </button>
-                        </div>
-                      </>
+                    <p className="text-[11px] text-muted mb-2">For supervisors/managers who need the full app with their own login. We email the setup link and copy it here so you can send it directly too.</p>
+                    {panel.invite_sent_at && !inviteUrl && (
+                      <p className="text-[11px] text-muted mb-2">Last invited {fmtDate(panel.invite_sent_at)} — resend below if it didn&apos;t arrive.</p>
                     )}
+                    {inviteUrl && (
+                      <input readOnly value={inviteUrl} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
+                    )}
+                    <div className="flex gap-1">
+                      <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="flex-1 min-w-0 border border-hairline rounded-lg px-2 py-1.5 text-sm" />
+                      <button type="button" onClick={() => sendInvite(panel)} disabled={inviting} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
+                        {inviting ? "…" : (panel.invite_sent_at ? "Resend" : "Send")}
+                      </button>
+                    </div>
                   </div>
                 );
                 return isManagement ? [invite, link] : [link, invite];

@@ -148,20 +148,6 @@ export default function UserManagement() {
     setInviting(true);
     setInviteResult(null);
     try {
-      // #region agent log
-      fetch("http://127.0.0.1:7509/ingest/d371ba5f-b4f3-43d9-8864-df0c21883529", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c97c4c" },
-        body: JSON.stringify({
-          sessionId: "c97c4c",
-          hypothesisId: "C",
-          location: "UserManagement.jsx:handleInvite",
-          message: "invite submit",
-          data: { email: inviteEmail.trim(), role: inviteRole },
-          timestamp: Date.now()
-        })
-      }).catch(() => {});
-      // #endregion
       const res = await authedFetch("/api/auth/invite", {
         method: "POST",
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole })

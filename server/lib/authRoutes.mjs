@@ -81,20 +81,6 @@ export function registerAuthRoutes(app) {
   });
 
   app.post("/api/auth/invite", async (req, res) => {
-    // #region agent log
-    fetch("http://127.0.0.1:7509/ingest/d371ba5f-b4f3-43d9-8864-df0c21883529", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c97c4c" },
-      body: JSON.stringify({
-        sessionId: "c97c4c",
-        hypothesisId: "D",
-        location: "authRoutes.mjs:invite",
-        message: "invite route hit",
-        data: { hasBody: !!req.body, role: req.body?.role },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
     try {
       const caller = await getCallerProfile(req);
       if (!caller) return res.status(401).json({ error: "Unauthorised" });
@@ -261,13 +247,32 @@ If you weren't expecting this, you can ignore this email.
         return res.status(409).json({ error: "An account with this email already exists. Try logging in." });
       }
 
-      const { data: { user }, error: createErr } = await sb.auth.admin.createUser({
+      let user;
+      const created = await sb.auth.admin.createUser({
         email: inv.email,
         password,
         email_confirm: true,
         user_metadata: { full_name: String(fullName).trim() }
       });
-      if (createErr) return res.status(500).json({ error: createErr.message });
+      if (created.error) {
+        // The auth user may already exist from an earlier invite attempt whose email
+        // never arrived (e.g. the old Supabase-email path). Recover it: find by email
+        // and set the password they just chose, rather than dead-ending here.
+        const { data: list } = await sb.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const existing = (list?.users || []).find(
+          (u) => (u.email || "").toLowerCase() === inv.email.toLowerCase()
+        );
+        if (!existing) return res.status(500).json({ error: created.error.message });
+        const { data: upd, error: updErr } = await sb.auth.admin.updateUserById(existing.id, {
+          password,
+          email_confirm: true,
+          user_metadata: { full_name: String(fullName).trim() }
+        });
+        if (updErr) return res.status(500).json({ error: updErr.message });
+        user = upd.user;
+      } else {
+        user = created.data.user;
+      }
 
       const { error: profileErr } = await sb.from("user_profiles").insert({
         id: user.id,
