@@ -1684,6 +1684,14 @@ export default function LeadDetail() {
                     Create Fee Proposal →
                   </Link>
                 )}
+                {lead.stage === "tender" && lead.job_id && (
+                  <Link
+                    to={`/tender-manager/rfq-engine?leadId=${leadId}&jobId=${lead.job_id}`}
+                    className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors mb-3"
+                  >
+                    Proceed to RFQ Engine &amp; Estimate →
+                  </Link>
+                )}
                 {next === "tender" && !lead.job_id && (
                   <button
                     onClick={createJobFromLead}

@@ -1,7 +1,7 @@
 import { authFetch } from "../lib/authFetch.js";
 import { apiPost, apiPatch } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { composeRfqEmail } from "../lib/rfqComposer";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import {
@@ -356,6 +356,8 @@ function buildOutboundRows({
 
 export default function RfqEngine() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const prefillDoneRef = useRef(false);
   const { project } = useProject();
   const skipNextAutoRebuildRef = useRef(false);
   /** After restoring saved email drafts, skip one rebuild when the subcontractor list finishes loading so drafts are not overwritten. */
@@ -529,6 +531,55 @@ export default function RfqEngine() {
       setSessionStorageEpoch((n) => n + 1);
     }
   }, []);
+
+  // Tender prefill — entered from a lead at the tender stage (?leadId=&jobId=).
+  // Pulls the lead's knowledge and seeds the engine, filling EMPTY fields only so an
+  // in-progress session is never clobbered. Runs once.
+  useEffect(() => {
+    if (prefillDoneRef.current) return;
+    const leadId = searchParams.get("leadId");
+    const jobId = searchParams.get("jobId");
+    if (!leadId && !jobId) return;
+    prefillDoneRef.current = true;
+    const qs = new URLSearchParams();
+    if (leadId) qs.set("leadId", leadId);
+    if (jobId) qs.set("jobId", jobId);
+    authFetch(`/api/tender/prefill?${qs.toString()}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const p = j?.prefill;
+        if (!p) return;
+        setExtraction((prev) => ({
+          ...prev,
+          project_address: prev.project_address || p.projectAddress || "",
+          project_type: prev.project_type || p.projectType || "",
+          architect_name: prev.architect_name || p.architectClient || "",
+          client_name: prev.client_name || p.clientName || "",
+        }));
+        if (p.jobId) {
+          setExtractionJobId((cur) => cur || p.jobId);
+          if (!extractionJobIdRef.current) extractionJobIdRef.current = p.jobId;
+        }
+        if (p.tenderDeadline) setDeadline((cur) => cur || p.tenderDeadline);
+        if (p.dropboxUrl) setSharedJobDropboxUrl((cur) => cur || p.dropboxUrl);
+        if (Array.isArray(p.suggestedTrades) && p.suggestedTrades.length) {
+          const ids = p.suggestedTrades.filter((t) => RFQ_TRADE_ORDER.includes(t));
+          setSelectedTrades((cur) => (cur && cur.size ? cur : new Set(ids)));
+        }
+        const who = [p.clientName, p.projectAddress].filter(Boolean).join(" — ");
+        const extras = [
+          p.documents?.length ? `${p.documents.length} lead document(s)` : null,
+          p.buildexactLinked ? `Buildxact estimate linked (${p.estimateCategories.length} categories)` : null,
+          p.estimatedValue ? `est. $${Number(p.estimatedValue).toLocaleString()}` : null,
+        ].filter(Boolean).join(" · ");
+        setBanner({
+          variant: "success",
+          title: `Pre-filled from lead${who ? `: ${who}` : ""}`,
+          body: `${extras ? extras + ". " : ""}Address, type, client and suggested trades are filled in. Upload the tender PDF to extract detailed scope, then review and send your RFQs.`,
+        });
+      })
+      .catch(() => {});
+  }, [searchParams]);
 
   useEffect(() => {
     if (!pdfRestoreTask?.length) return;

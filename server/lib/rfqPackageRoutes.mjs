@@ -9,6 +9,21 @@ import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqT
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { buildexactConfigured } from "./buildexactClient.mjs";
+import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
+
+// Suggested trades to pre-select when tendering a job, by build type. A hint the
+// user refines in the engine; Buildxact estimate categories (if linked) refine further.
+const CORE_TRADES = ["footings_concrete_formwork", "carpentry_joinery", "plumbing", "electrical", "internal_linings", "plastering", "painting", "tiling", "flooring", "waterproofing", "metal_roofing"];
+const TYPE_EXTRA = {
+  new_build: ["excavation", "termite_protection", "stormwater", "insulation", "cabinetry", "glazing_windows", "landscaping", "hvac"],
+  knockdown_rebuild: ["demolition", "excavation", "termite_protection", "stormwater", "insulation", "cabinetry", "glazing_windows", "landscaping", "hvac"],
+  extension: ["excavation", "insulation", "cabinetry", "glazing_windows", "hvac"],
+  renovation: ["demolition", "insulation", "cabinetry", "glazing_windows"],
+};
+function suggestTradesForType(t) {
+  return [...new Set([...CORE_TRADES, ...(TYPE_EXTRA[t] || [])])];
+}
 
 const STANDARD_TRADES = [
   "excavation", "demolition", "termite_protection", "footings_concrete_formwork",
@@ -127,6 +142,66 @@ function buildFollowUpText({ name, address, deadline, trade, sigName, footer }) 
 
 export function registerRfqPackageRoutes(app) {
   const db = () => getServiceSupabase();
+
+  // ── Tender prefill — bundle a lead's knowledge for the RFQ engine ─────────
+  // Used when "Proceed to RFQ Engine & Estimate" is clicked at the tender stage.
+  app.get("/api/tender/prefill", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
+    const { leadId, jobId } = req.query;
+    try {
+      let lead = null, job = null;
+      if (leadId) { const { data } = await s.from("leads").select("*").eq("id", leadId).maybeSingle(); lead = data; }
+      const useJobId = jobId || lead?.job_id || null;
+      if (useJobId) { const { data } = await s.from("jobs").select("*").eq("id", useJobId).maybeSingle(); job = data; }
+      if (!lead && !job) return err(res, 404, "No lead or job found for tender prefill.");
+
+      const projectType = job?.project_type || lead?.project_type || null;
+
+      let documents = [];
+      if (leadId) {
+        const { data: docs } = await s.from("lead_documents").select("id, filename, document_type, mime_type, storage_path, created_at").eq("lead_id", leadId).order("created_at", { ascending: false });
+        documents = rowsToCamel(docs || []);
+      }
+
+      // Buildxact estimate (the "& estimate" hook) — categories, if the job is linked.
+      let buildexactLinked = false, estimateCategories = [];
+      const bxJobId = job?.buildexact_job_id || null;
+      if (bxJobId && buildexactConfigured()) {
+        try {
+          const est = await pullBuildexactEstimate(bxJobId);
+          estimateCategories = (est?.estimate?.categories || []).map((c) => ({ name: c.categoryName, amount: c.amount }));
+          buildexactLinked = estimateCategories.length > 0;
+        } catch (e) { console.warn("[tender/prefill] estimate:", e?.message || e); }
+      }
+
+      return ok(res, {
+        prefill: {
+          leadId: leadId || null,
+          jobId: useJobId,
+          projectAddress: job?.address || lead?.site_address || null,
+          projectType,
+          architectClient: job?.architect_name || null,
+          clientName: job?.client_name || [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || null,
+          clientEmail: job?.client_email || lead?.email || null,
+          clientPhone: job?.client_phone || lead?.phone || null,
+          estimatedValue: lead?.estimated_value ?? null,
+          floorAreaM2: lead?.floor_area_estimate ?? null,
+          designStage: lead?.design_stage || null,
+          scopeNotes: lead?.discovery_notes || lead?.project_description || null,
+          tenderDeadline: lead?.tender_deadline || null,
+          dropboxUrl: job?.dropbox_shared_link || null,
+          documents,
+          buildexactLinked,
+          estimateCategories,
+          suggestedTrades: suggestTradesForType(projectType),
+        },
+      });
+    } catch (e) {
+      console.error("[tender/prefill]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
 
   // ── List all packages ────────────────────────────────────────────────────
   app.get("/api/rfq-packages", requireAuth, async (_req, res) => {
