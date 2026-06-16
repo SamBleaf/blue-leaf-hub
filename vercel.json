@@ -9,6 +9,14 @@
       "destination": "https://YOUR-RAILWAY-HOST.up.railway.app/api/:path*"
     },
     {
+      "source": "/worker",
+      "destination": "/worker.html"
+    },
+    {
+      "source": "/worker/:path*",
+      "destination": "/worker.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

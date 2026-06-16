@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -12,34 +13,24 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: "autoUpdate",
-        includeAssets: ["icons/*.svg", "manifest.webmanifest"],
-        manifest: {
-          name: "Blue Leaf Hub",
-          short_name: "Blue Leaf",
-          description: "Operating system for Blue Leaf Building — RFQs, tenders, cost intelligence.",
-          theme_color: "#1B3A5C",
-          background_color: "#F8F9FA",
-          display: "standalone",
-          start_url: "/",
-          icons: [
-            {
-              src: "/icons/icon-192.svg",
-              sizes: "192x192",
-              type: "image/svg+xml",
-              purpose: "any maskable"
-            },
-            {
-              src: "/icons/icon-512.svg",
-              sizes: "512x512",
-              type: "image/svg+xml",
-              purpose: "any maskable"
-            }
-          ]
-        },
+        // Two distinct installable identities are served from one SPA:
+        //   index.html  → /manifest.webmanifest  (Hub,    start_url "/")
+        //   worker.html → /manifest.json          (Worker, start_url "/worker")
+        // Both manifests are STATIC files in public/, each linked by exactly one entry HTML.
+        // VitePWA must NOT generate/inject its own <link rel="manifest"> — doing so re-creates
+        // the dual-manifest collision this split exists to fix. The service worker is unaffected:
+        // it registers via `virtual:pwa-register` in src/main.jsx, independent of manifest generation.
+        includeAssets: ["icons/*.svg", "manifest.webmanifest", "manifest.json", "brand/icon-blue.png"],
+        manifest: false,
         workbox: {
           mode: "development",
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-          navigateFallbackDenylist: [/^\/api/],
+          // The SW's SPA fallback serves index.html (the Hub identity) for in-app navigations.
+          // /api is excluded so API calls hit the server. /worker* is ALSO excluded so the
+          // worker routes resolve to worker.html (the Worker manifest + apple icons) via the
+          // Vercel rewrite — otherwise an active SW would serve the Hub index.html for /worker
+          // and an install there would pick up the wrong icon/identity.
+          navigateFallbackDenylist: [/^\/api/, /^\/worker/],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024 // 4 MiB — main bundle grows with deps
         },
         devOptions: {
@@ -48,6 +39,16 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
+    build: {
+      rollupOptions: {
+        // Two entry HTML documents so each can carry its own manifest (Hub vs Worker).
+        // Both bootstrap the same /src/main.jsx SPA — React Router renders by path.
+        input: {
+          main: fileURLToPath(new URL("./index.html", import.meta.url)),
+          worker: fileURLToPath(new URL("./worker.html", import.meta.url))
+        }
+      }
+    },
     server: {
       // Pinned to 5174 so the Hub never collides with the blue-leaf-website (Laravel) Vite on 5173.
       // strictPort: true → fail loudly if 5174 is taken rather than silently moving to a surprise port.
