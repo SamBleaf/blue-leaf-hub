@@ -303,6 +303,7 @@ export function registerRfqPackageRoutes(app) {
             sent_at: r.sent_at || new Date().toISOString(),
             email_subject: r.email_subject || "",
             email_body: r.email_body || "",
+            subject_variant: r.subject_variant || "",
             rfq_id: r.rfq_id || null
           });
         }

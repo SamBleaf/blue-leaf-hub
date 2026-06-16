@@ -83,7 +83,10 @@ function NewJobModal({ onClose, onCreated }) {
     }
     const p = data?.prefill || {};
     setPrefill(p);
-    setEstimateCategories(Array.isArray(p.categories) ? p.categories : []);
+    // Only seed budgets from the API when it returned real trade categories. Some accounts
+    // return a flat line-item list (one "category" per line) — skip those and let the user
+    // load the breakdown from the estimate XLSX, which parses the categories reliably.
+    setEstimateCategories(Array.isArray(p.categories) && p.categories.length <= 40 ? p.categories : []);
     setForm((f) => ({
       ...f,
       buildexactJobId: p.buildexactJobId || bxJobId.trim(),
@@ -193,6 +196,11 @@ function NewJobModal({ onClose, onCreated }) {
           {bxError && <p className="text-xs text-red-600 mt-1">{bxError}</p>}
           {prefill && (
             <p className="text-xs text-emerald-700 mt-1">✓ Data imported — fields below pre-filled. Review and confirm.</p>
+          )}
+          {prefill && estimateCategories.length === 0 && (
+            <p className="text-xs text-amber-600 mt-1">
+              For the labour/material budget breakdown, use &ldquo;Choose estimate XLSX&rdquo; above — the API didn&apos;t return grouped categories for this job.
+            </p>
           )}
         </div>
 

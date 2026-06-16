@@ -334,6 +334,7 @@ function buildOutboundRows({
         blocked: false,
         to: sub.email.trim(),
         subject: composed.subject,
+        subjectVariant: composed.subjectVariant,
         body: composed.body,
         html: composed.html,
         subcontractor_id: sub.id
@@ -1562,6 +1563,7 @@ export default function RfqEngine() {
       const messages = readyFresh.map((row) => ({
         to: row.to,
         subject: row.subject,
+        subjectVariant: row.subjectVariant,
         body: row.body,
         html: row.html,
         tradeId: row.tradeId,
@@ -1699,6 +1701,7 @@ export default function RfqEngine() {
             sent_at: new Date().toISOString(),
             email_subject: String(msg.subject || ""),
             email_body: String(msg.body || ""),
+            subject_variant: msg.subjectVariant || "",
             rfq_id: persistence.rfqIds[i] || null
           });
         }

@@ -48,16 +48,18 @@ Sends one email per subcontractor per trade scope. Each email contains the scope
 
 ## 6. What the email contains
 
-Each RFQ email includes:
-- Project address and project type
-- Trade being quoted
+Each RFQ email is structured to make it easy for a subcontractor to act quickly (this lifts reply rates):
+- Subject line leads with the **trade**, then the project address, then the price-by date — e.g. `Carpentry quote — 12 Stirling St (price by Fri 27 Jun, 5pm)`. Trade first so subbies can filter their inbox at a glance.
+- Personal greeting using the subcontractor contact name where known
+- A warm one-line opener inviting them to look at the job
+- **The ask up front**: a single clear line stating exactly what's needed (lump sum price ex GST), the deadline, and how to respond (just reply to the email)
+- Tender documents link (Dropbox)
 - Scope of works bullet points
-- Explicit exclusions list
-- Questions to answer in the quote
-- Due date for quote submission
-- Blue Leaf contact details for clarifications
+- Optional sections only when present: items to confirm, assumptions/site conditions, general/standards requirements, tender and submission requirements, and a flagged "missing information" block
+- A **bid / no-bid line** near the end — invites a quick "not this time" reply if they can't quote, with a note that they'll be kept top of the list for the next fitting job. Giving an easy out measurably increases overall reply rates.
+- A low-effort closing CTA ("just reply here or give me a call") and the Blue Leaf signature
 
-The email is sent as plain text with a structured layout. It comes from the Blue Leaf Gmail account.
+The email is sent as plain text (HTML variant with logo when a signature logo is configured). It comes from the Blue Leaf Gmail account. Composition logic lives in `src/lib/rfqComposer.js` (`composeRfqEmail`).
 
 ## 7. After sending
 

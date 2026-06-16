@@ -31,7 +31,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
-import { buildexactConfigured, getJobById, resolveBuildexactJobId } from "./buildexactClient.mjs";
+import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
@@ -403,6 +403,37 @@ export function registerCarpentryRoutes(app) {
     } catch (e) {
       console.error("[carpentry/jobs/:id DELETE]", e);
       return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── GET /api/carpentry/buildexact/debug ─────────────────────────────────────
+  // TEMP diagnostic: returns the raw Buildxact estimate-items response for a job so
+  // the category/line-item field shapes can be mapped (this account nests them
+  // differently than the default). Read-only. Remove once Fetch grouping is fixed.
+  app.get("/api/carpentry/buildexact/debug", requireAuth, async (req, res) => {
+    if (!buildexactConfigured()) return err(res, 503, "Buildexact is not configured.");
+    try {
+      const ref = String(req.query.job || req.query.jobNumber || "").trim();
+      if (!ref) return err(res, 400, "Pass ?job=<job number or GUID>, e.g. ?job=J1120");
+      const { jobId } = await resolveBuildexactJobId(ref);
+      if (!jobId) return err(res, 404, `No Buildexact job matched "${ref}".`);
+      const estimates = beList(await getEstimatesByJob(jobId));
+      if (!estimates.length) return err(res, 404, `No estimate found for job "${ref}".`);
+      const chosen = estimates.find((e) => e?.isAccepted) || estimates[0];
+      const estimateId = chosen?.estimateId || chosen?.id;
+      const items = beList(await getEstimateItems(estimateId));
+      const allFieldNames = [...new Set(items.flatMap((it) => Object.keys(it || {})))].sort();
+      return ok(res, {
+        jobRef: ref,
+        jobId,
+        estimateId,
+        estimateNumber: chosen?.number ?? null,
+        totalItems: items.length,
+        allFieldNames,
+        sampleItems: items.slice(0, 25),
+      });
+    } catch (e) {
+      return err(res, 502, e?.message || "Buildexact debug failed.");
     }
   });
 
@@ -999,6 +1030,15 @@ export function registerCarpentryRoutes(app) {
     const pulled = await pullBuildexactEstimate(buildexactJobId);
     const cats = pulled?.estimate?.categories || [];
     if (!cats.length) return { seeded: 0 };
+    // Some Buildxact accounts return the estimate as a flat line-item list rather than the
+    // category → sub-item → line hierarchy, so the "categories" come back as one row per
+    // line item (hundreds of them) instead of the handful of real trade categories. Don't
+    // auto-seed that — it produces a meaningless per-item budget. The reliable path is the
+    // reviewed categories from the estimate XLSX import (POST .../budget/seed).
+    if (cats.length > 40) {
+      console.warn(`[carpentry] Buildxact estimate ${buildexactJobId} returned ${cats.length} ungrouped lines — skipping budget auto-seed; use the estimate XLSX import.`);
+      return { seeded: 0, skipped: true };
+    }
     await sb.from("carpentry_job_budgets").delete().eq("job_id", carpentryJobId);
     const rows = cats.map((c, i) => {
       const name = String(c.name || "").trim() || `Category ${i + 1}`;

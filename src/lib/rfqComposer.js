@@ -192,6 +192,38 @@ function sectionLines(title, lines, max = 8) {
   return [title, ...items.map((b) => `• ${b}`)];
 }
 
+/** Stable 32-bit hash → used to assign an A/B subject variant deterministically per recipient. */
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Two subject lines under test for subcontractor reply rates:
+ *   A — trade-led statement (good for inbox scanning by trade)
+ *   B — direct question ("Can you price …?") + first-name where known (higher open/reply intent)
+ * Returns { subject, variant }. Pass variant "A" | "B" to force; "auto" (default) picks a
+ * stable variant from a per-recipient seed so each subbie always gets the same one.
+ */
+function buildSubject({ variant, label, addr, deadline, contactName }) {
+  const v =
+    variant === "A" || variant === "B"
+      ? variant
+      : hashSeed(`${contactName || ""}|${addr}|${label}`) % 2 === 0
+        ? "A"
+        : "B";
+  if (v === "B") {
+    const first = contactName?.trim()?.split(/\s+/)[0];
+    const lead = first && first.toLowerCase() !== "there" ? `${first}, can` : "Can";
+    return { subject: `${lead} you price ${label} at ${addr}? (by ${deadline})`, variant: "B" };
+  }
+  return { subject: `${label} quote — ${addr} (price by ${deadline})`, variant: "A" };
+}
+
 export function composeRfqEmail({
   contactName,
   projectAddress,
@@ -200,7 +232,8 @@ export function composeRfqEmail({
   dropboxLink,
   deadlineLabel,
   signatureFooter,
-  logoDataUrl
+  logoDataUrl,
+  subjectVariant = "auto"
 }) {
   const label = resolveTradeLabel(tradeId);
   const note = tradeNote && typeof tradeNote === "object" ? tradeNote : emptyTradeNote();
@@ -232,7 +265,11 @@ export function composeRfqEmail({
     const parts = [];
     parts.push(greetingLine(contactName));
     parts.push("");
-    parts.push(`${opener} at ${addr}.`);
+    parts.push(`${opener} at ${addr}, and I'd genuinely appreciate you taking a look.`);
+    parts.push("");
+    parts.push(
+      `What I need: a lump sum price ex GST, back to me by ${deadline}. Just reply straight to this email — whatever format suits you is fine.`
+    );
     parts.push("");
     parts.push(`Tender documents: ${docs}`);
     parts.push("");
@@ -263,8 +300,10 @@ export function composeRfqEmail({
       note.missing_items.slice(0, 5).forEach((m) => parts.push(`• ${m}`));
     }
     parts.push("");
-    parts.push(`Please return your lump sum price ex GST by ${deadline}.`);
-    parts.push("Feel free to reach out with any questions.");
+    parts.push(
+      `Even if this one isn't for you, a quick "not this time" really helps — I'll keep you top of the list for the next job that fits.`
+    );
+    parts.push("Any questions at all, just reply here or give me a call.");
     parts.push("");
     parts.push(...sigLines);
     return parts.join("\n");
@@ -284,9 +323,15 @@ export function composeRfqEmail({
     break;
   }
 
-  const subject = `RFQ - ${addr} - ${label} - ${deadline}`;
+  const { subject, variant } = buildSubject({
+    variant: subjectVariant,
+    label,
+    addr,
+    deadline,
+    contactName
+  });
   const logo = String(logoDataUrl || "").trim();
   const html =
     logo && isSafeInlineImageDataUrl(logo) ? plainBodyToHtml(body, logo) : undefined;
-  return { subject, body, html };
+  return { subject, subjectVariant: variant, body, html };
 }
