@@ -316,19 +316,36 @@ export async function resolveBuildexactJobId(input) {
   if (!raw) return { jobId: null, jobsSearched: 0 };
   if (BX_GUID_RE.test(raw)) return { jobId: raw, jobsSearched: 0 };
 
-  const jobs = beList(await beFetch("/jobs", { query: { $top: 500 } }));
   const norm = (v) => String(v ?? "").trim().toLowerCase();
   const target = norm(raw);
   const targetDigits = target.replace(/\D/g, ""); // "j1120" -> "1120"
   const NUMBER_FIELDS = ["jobNumber", "jobNo", "job_no", "number", "reference", "code", "name", "displayName", "title"];
+  const isMatch = (j) =>
+    NUMBER_FIELDS.some((f) => norm(j?.[f]) === target) ||
+    (targetDigits && NUMBER_FIELDS.some((f) => norm(j?.[f]).replace(/\D/g, "") === targetDigits));
 
-  const exact = jobs.find((j) => NUMBER_FIELDS.some((f) => norm(j?.[f]) === target));
-  const byDigits = targetDigits
-    ? jobs.find((j) => NUMBER_FIELDS.some((f) => norm(j?.[f]).replace(/\D/g, "") === targetDigits))
-    : null;
-  const match = exact || byDigits || null;
-
-  return { jobId: match?.jobId || match?.JobId || null, jobsSearched: jobs.length };
+  // Buildxact caps $top at 100, so page through the job list (up to a sane limit) and
+  // match the number client-side. $skip is only added past the first page, so a
+  // subscription that rejects $skip still searches the first 100 jobs.
+  const PAGE = 100;
+  const MAX_PAGES = 20;
+  let jobsSearched = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const query = page === 0 ? { $top: PAGE } : { $top: PAGE, $skip: page * PAGE };
+    let batch;
+    try {
+      batch = beList(await beFetch("/jobs", { query }));
+    } catch (e) {
+      if (page === 0) throw e; // first page failing is a real connectivity/query error
+      break;                   // later page failing (e.g. no $skip support) — stop here
+    }
+    if (!batch.length) break;
+    jobsSearched += batch.length;
+    const m = batch.find(isMatch);
+    if (m) return { jobId: m.jobId || m.JobId || null, jobsSearched };
+    if (batch.length < PAGE) break; // last page reached
+  }
+  return { jobId: null, jobsSearched };
 }
 
 export async function getJobItems(jobId) {            // actuals/committed costs (JobItemDto)
