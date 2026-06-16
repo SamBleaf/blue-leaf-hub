@@ -31,7 +31,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
-import { buildexactConfigured, getJobById } from "./buildexactClient.mjs";
+import { buildexactConfigured, getJobById, resolveBuildexactJobId } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
@@ -391,8 +391,26 @@ export function registerCarpentryRoutes(app) {
       return err(res, 503, "Buildexact is not configured — set BUILDEXACT_USERNAME and BUILDEXACT_API_KEY.");
     }
     try {
-      const buildexactJobId = String(req.body?.buildexactJobId || "").trim();
-      if (!buildexactJobId) return err(res, 400, "buildexactJobId is required.");
+      const ref = String(req.body?.buildexactJobId || "").trim();
+      if (!ref) return err(res, 400, "Enter a Buildexact job number or ID.");
+
+      // Resolve the entered job number (e.g. "J1120") — or a pasted GUID — to Buildexact's
+      // internal jobId. Without this, a job number lands in an OData filter as a property
+      // name and Buildexact rejects the query.
+      let resolved;
+      try {
+        resolved = await resolveBuildexactJobId(ref);
+      } catch (e) {
+        return err(res, 502, `Couldn't reach Buildexact: ${e?.message || "lookup failed"}`);
+      }
+      const buildexactJobId = resolved.jobId;
+      if (!buildexactJobId) {
+        return err(
+          res,
+          404,
+          `No Buildexact job matched "${ref}"${resolved.jobsSearched ? ` (searched ${resolved.jobsSearched} job${resolved.jobsSearched === 1 ? "" : "s"})` : ""}. Check the job number, or use the estimate XLSX import instead.`
+        );
+      }
 
       // Fetch job metadata and estimate in parallel
       const [jobDataResult, estimateResult] = await Promise.allSettled([
@@ -404,7 +422,7 @@ export function registerCarpentryRoutes(app) {
       const estimateData = estimateResult.status === "fulfilled" ? estimateResult.value : null;
 
       if (!estimateData && !jobData) {
-        const msg = estimateResult.reason?.message || "Could not fetch Buildexact data for this job ID.";
+        const msg = estimateResult.reason?.message || "Could not fetch Buildexact data for this job.";
         return err(res, 502, msg);
       }
 

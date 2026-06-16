@@ -306,6 +306,31 @@ export async function getJobById(id) {
   return beFirst(await beFetch("/jobs", { query: { $filter: `jobId eq ${id}` } }));
 }
 
+const BX_GUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+// Buildxact keys jobs by a GUID `jobId`, but people know the human job number (e.g. "J1120").
+// Accept either: a GUID passes straight through; a job number is matched client-side against the
+// likely JobDto fields (the exact field isn't documented for our subscription, so we check the
+// plausible ones plus a digits-only fallback). Returns { jobId, jobsSearched }.
+export async function resolveBuildexactJobId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return { jobId: null, jobsSearched: 0 };
+  if (BX_GUID_RE.test(raw)) return { jobId: raw, jobsSearched: 0 };
+
+  const jobs = beList(await beFetch("/jobs", { query: { $top: 500 } }));
+  const norm = (v) => String(v ?? "").trim().toLowerCase();
+  const target = norm(raw);
+  const targetDigits = target.replace(/\D/g, ""); // "j1120" -> "1120"
+  const NUMBER_FIELDS = ["jobNumber", "jobNo", "job_no", "number", "reference", "code", "name", "displayName", "title"];
+
+  const exact = jobs.find((j) => NUMBER_FIELDS.some((f) => norm(j?.[f]) === target));
+  const byDigits = targetDigits
+    ? jobs.find((j) => NUMBER_FIELDS.some((f) => norm(j?.[f]).replace(/\D/g, "") === targetDigits))
+    : null;
+  const match = exact || byDigits || null;
+
+  return { jobId: match?.jobId || match?.JobId || null, jobsSearched: jobs.length };
+}
+
 export async function getJobItems(jobId) {            // actuals/committed costs (JobItemDto)
   return beFetch(`/jobs/${encodeURIComponent(jobId)}/items`);
 }
