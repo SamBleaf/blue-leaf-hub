@@ -45,6 +45,8 @@ function NewJobModal({ onClose, onCreated }) {
   const [bxError, setBxError]       = useState(null);
   const [prefill, setPrefill]       = useState(null);
   const [estimateCategories, setEstimateCategories] = useState([]);
+  const [debugJson, setDebugJson]   = useState("");
+  const [debugBusy, setDebugBusy]   = useState(false);
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState(null);
 
@@ -68,6 +70,18 @@ function NewJobModal({ onClose, onCreated }) {
   });
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // TEMP: dump the raw Buildxact estimate JSON so the category/line-item field shapes
+  // can be mapped and the Fetch grouping fixed. Remove once Fetch works directly.
+  async function handleDebugDump() {
+    const ref = bxJobId.trim();
+    if (!ref) { setDebugJson("Enter a job number above first."); return; }
+    setDebugBusy(true);
+    setDebugJson("");
+    const { ok, data, error } = await apiFetch(`/api/carpentry/buildexact/debug?job=${encodeURIComponent(ref)}`);
+    setDebugBusy(false);
+    setDebugJson(ok ? JSON.stringify(data, null, 2) : `Error: ${error || "debug failed"}`);
+  }
 
   async function handleBxFetch() {
     if (!bxJobId.trim()) return;
@@ -201,6 +215,23 @@ function NewJobModal({ onClose, onCreated }) {
             <p className="text-xs text-amber-600 mt-1">
               For the labour/material budget breakdown, use &ldquo;Choose estimate XLSX&rdquo; above — the API didn&apos;t return grouped categories for this job.
             </p>
+          )}
+          {/* TEMP diagnostic — dumps the raw Buildxact estimate JSON to map field shapes. Remove once Fetch grouping is fixed. */}
+          <button
+            type="button"
+            onClick={handleDebugDump}
+            disabled={debugBusy}
+            className="text-[11px] text-muted/70 underline mt-2 disabled:opacity-40"
+          >
+            {debugBusy ? "Loading raw estimate…" : "Debug: show raw estimate JSON"}
+          </button>
+          {debugJson && (
+            <textarea
+              readOnly
+              value={debugJson}
+              onFocus={(e) => e.target.select()}
+              className="w-full h-40 mt-1 border border-hairline rounded-lg px-2 py-1.5 text-[10px] font-mono bg-gray-50"
+            />
           )}
         </div>
 
