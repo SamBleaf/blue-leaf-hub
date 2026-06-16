@@ -5,6 +5,7 @@ import { useAuth } from "../lib/useAuth.js";
 import { getDefaultRoute } from "../lib/roles.js";
 import { supabaseConfigured } from "../lib/supabaseClient.js";
 import { useRole } from "../lib/useRole.js";
+import { getWorkerToken } from "../lib/workerFetch.js";
 
 function RolePicker({ onPick }) {
   return (
@@ -47,6 +48,11 @@ export default function RootRedirect() {
   if (loading) {
     return <BrandLoading message="Loading…" />;
   }
+
+  // Worker PWA boot: a field worker installs the app from their magic link (token
+  // saved in localStorage) and has no Supabase account — open straight into the
+  // worker view so the home-screen icon lands on their timesheet, not /login.
+  if (!session && getWorkerToken()) return <Navigate to="/worker" replace />;
 
   if (!session) return <Navigate to="/login" replace />;
 

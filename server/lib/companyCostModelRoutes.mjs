@@ -105,14 +105,21 @@ export function registerCompanyCostModelRoutes(app) {
       if (existing) await sb.from("company_cost_model").update(modelRow).eq("id", existing.id);
       else await sb.from("company_cost_model").insert(modelRow);
 
-      // Upsert each employee's rates (by name)
+      // Upsert each employee's rates (by name) + push the base hourly rate into
+      // Workforce (employees.hourly_rate) so the spreadsheet is the single source
+      // of truth for pay rates — they update in Workforce on each sync.
+      let ratesApplied = 0;
       for (const rr of rateRows) {
         await sb.from("employee_cost_rates").upsert({ ...rr, synced_at: new Date().toISOString() }, { onConflict: "employee_name" });
+        if (rr.employee_id && rr.base_hourly != null) {
+          await sb.from("employees").update({ hourly_rate: rr.base_hourly, updated_at: new Date().toISOString() }).eq("id", rr.employee_id);
+          ratesApplied++;
+        }
       }
 
       res.json({
         ok: true,
-        synced: { employees: rateRows.length, overheads: overheads.length },
+        synced: { employees: rateRows.length, overheads: overheads.length, ratesApplied },
         overhead_recovery_per_hour,
         overhead_total,
         unmatched, // sheet names with no matching employee record

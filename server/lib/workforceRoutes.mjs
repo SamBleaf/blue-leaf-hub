@@ -358,9 +358,9 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const isDirector = ["admin"].includes(req.caller.role);
     const includeInactive = req.query.include_inactive === "true";
-    let q = sb.from("employees").select("id, user_id, name, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : ""));
+    let q = sb.from("employees").select("id, user_id, name, employee_number, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : ""));
     if (!includeInactive) q = q.eq("is_active", true);
-    q = q.order("name");
+    q = q.order("employee_number", { ascending: true, nullsFirst: false });
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, employees: data });
@@ -370,8 +370,11 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const { name, trade, employment_type, hourly_rate, overtime_multiplier, double_time_multiplier, is_leading_hand, buildexact_employee_id, email, phone, staff_code } = req.body;
     if (!name) return res.status(400).json({ ok: false, error: "name is required" });
+    // Auto-assign the next sequential employee number (MAX+1).
+    const { data: maxRow } = await sb.from("employees").select("employee_number").order("employee_number", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    const nextNumber = (maxRow?.employee_number || 0) + 1;
     const { data, error } = await sb.from("employees").insert({
-      name, trade: trade || "carpenter",
+      name, employee_number: nextNumber, trade: trade || "carpenter",
       employment_type: employment_type || "full_time",
       hourly_rate: hourly_rate || 0,
       overtime_multiplier: overtime_multiplier || 1.5,

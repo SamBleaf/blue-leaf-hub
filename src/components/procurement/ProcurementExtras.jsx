@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../lib/apiFetch.js";
 import {
-  PROCUREMENT_STATUS_LABELS, PROCUREMENT_RISK_LABELS, SUPPLY_TYPE_LABELS,
+  PROCUREMENT_STATUS_LABELS, PROCUREMENT_RISK_LABELS,
 } from "../../lib/constants.js";
 
 // ── shared helpers ────────────────────────────────────────────────────────────
@@ -18,10 +18,7 @@ export function RiskPill({ risk }) {
   if (!risk) return null;
   return <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${RISK_PILL[risk] || "bg-slate-100 text-slate-600"}`}>{PROCUREMENT_RISK_LABELS[risk] || risk}</span>;
 }
-const money = (n) => (n == null || n === "" ? "—" : `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
 const fdate = (d) => (d ? new Date(d).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "2-digit" }) : "—");
-const today = () => new Date().toISOString().slice(0, 10);
-const daysTo = (d) => (d ? Math.round((new Date(d) - new Date(today())) / 86400000) : null);
 
 function JobPicker({ jobOptions, value, onChange }) {
   return (

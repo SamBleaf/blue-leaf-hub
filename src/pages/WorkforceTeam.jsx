@@ -13,7 +13,7 @@ function fmtDate(d) {
 const EMPTY_FORM = {
   name: "", email: "", phone: "", trade: "carpenter", employment_type: "full_time",
   hourly_rate: "", overtime_multiplier: "1.5", double_time_multiplier: "2.0",
-  is_leading_hand: false, staff_code: "", buildexact_employee_id: "",
+  is_leading_hand: false, staff_code: "",
 };
 
 export default function WorkforceTeam() {
@@ -31,6 +31,7 @@ export default function WorkforceTeam() {
   const [showInactive, setShowInactive] = useState(false);
   const [workerLink, setWorkerLink] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -45,6 +46,20 @@ export default function WorkforceTeam() {
   useEffect(() => { load(); }, [load]);
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
+
+  async function syncRates() {
+    setSyncing(true);
+    try {
+      const res = await authFetch("/api/cost-model/sync", { method: "POST" });
+      const j = await res.json();
+      if (j.ok) {
+        const applied = j.synced?.ratesApplied ?? 0;
+        const unmatched = j.unmatched?.length ? `, ${j.unmatched.length} not matched` : "";
+        showToast(`Rates synced from spreadsheet (${applied} updated${unmatched})`);
+        load();
+      } else { alert(j.error || "Sync failed — check the cost-model spreadsheet is connected in Settings."); }
+    } catch { alert("Network error"); } finally { setSyncing(false); }
+  }
 
   function openNew() {
     setForm(EMPTY_FORM);
@@ -64,7 +79,6 @@ export default function WorkforceTeam() {
       overtime_multiplier: emp.overtime_multiplier != null ? String(emp.overtime_multiplier) : "1.5",
       double_time_multiplier: emp.double_time_multiplier != null ? String(emp.double_time_multiplier) : "2.0",
       is_leading_hand: !!emp.is_leading_hand,
-      buildexact_employee_id: emp.buildexact_employee_id || "",
     });
     setInviteEmail("");
     setWorkerLink("");
@@ -79,11 +93,11 @@ export default function WorkforceTeam() {
     try {
       const body = {
         ...form,
-        hourly_rate: parseFloat(form.hourly_rate) || 0,
         overtime_multiplier: parseFloat(form.overtime_multiplier) || 1.5,
         double_time_multiplier: parseFloat(form.double_time_multiplier) || 2.0,
-        buildexact_employee_id: form.buildexact_employee_id || null,
       };
+      // hourly_rate is sheet-driven (cost-model sync) — never set it from this form.
+      delete body.hourly_rate;
       let res;
       if (panel === "new") {
         res = await authFetch("/api/workforce/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -148,6 +162,11 @@ export default function WorkforceTeam() {
             {showInactive ? "Hide inactive" : "Show inactive"}
           </button>
           {isDirector && (
+            <button type="button" onClick={syncRates} disabled={syncing} className="px-3 py-2 rounded-lg border border-hairline text-sm font-medium text-ink disabled:opacity-50" title="Pull hourly rates from the cost-model spreadsheet">
+              {syncing ? "Syncing…" : "Sync rates"}
+            </button>
+          )}
+          {isDirector && (
             <button type="button" onClick={openNew} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold">+ Add employee</button>
           )}
         </div>
@@ -164,11 +183,11 @@ export default function WorkforceTeam() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-hairline">
                 <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted w-12">#</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Name</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Trade</th>
                   {isDirector && <th className="px-3 py-2 text-right text-xs font-semibold text-muted">Rate</th>}
                   <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Status</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted">BX ID</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
@@ -178,6 +197,7 @@ export default function WorkforceTeam() {
                     className={`cursor-pointer hover:bg-gray-50 ${panel?.id === emp.id ? "bg-blue-50" : ""}`}
                     onClick={() => openEdit(emp)}
                   >
+                    <td className="px-3 py-3 text-muted tabular-nums">{emp.employee_number ?? "—"}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1">
                         {emp.is_leading_hand && <span title="Leading hand">⭐</span>}
@@ -213,7 +233,7 @@ export default function WorkforceTeam() {
         {panel && (
           <div className="w-full md:w-80 shrink-0 border border-hairline rounded-lg bg-white p-4 self-start">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-ink">{panel === "new" ? "New employee" : "Edit employee"}</h2>
+              <h2 className="text-sm font-semibold text-ink">{panel === "new" ? "New employee" : `Edit employee${panel.employee_number ? ` · #${panel.employee_number}` : ""}`}</h2>
               <button type="button" onClick={() => setPanel(null)} className="text-muted text-lg leading-none">×</button>
             </div>
 
@@ -245,8 +265,11 @@ export default function WorkforceTeam() {
               </div>
               {isDirector && (
                 <div>
-                  <label className="text-xs text-muted block mb-1">Hourly rate ($)</label>
-                  <input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={e => setField("hourly_rate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" />
+                  <label className="text-xs text-muted block mb-1">Hourly rate</label>
+                  <div className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-gray-50 text-ink">
+                    {form.hourly_rate && Number(form.hourly_rate) > 0 ? `$${Number(form.hourly_rate).toFixed(2)}/h` : "— not set"}
+                  </div>
+                  <p className="text-[11px] text-muted mt-1">Linked to the cost-model spreadsheet. Edit rates there, then use “Sync rates”.</p>
                 </div>
               )}
               <div className="flex items-center gap-2">
@@ -254,14 +277,9 @@ export default function WorkforceTeam() {
                 <label htmlFor="lh" className="text-sm text-ink">Leading hand (enables photo logging)</label>
               </div>
               <div>
-                <label className="text-xs text-muted block mb-1">Staff code</label>
-                <input type="text" value={form.staff_code} onChange={e => setField("staff_code", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. EMP-001" />
-                <p className="text-[11px] text-muted mt-1">Internal staff ID used across the Hub. Optional.</p>
-              </div>
-              <div>
-                <label className="text-xs text-muted block mb-1">Buildexact Employee ID <span className="text-muted">(optional)</span></label>
-                <input type="text" value={form.buildexact_employee_id} onChange={e => setField("buildexact_employee_id", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. 12345" />
-                <p className="text-[11px] text-muted mt-1">Not required — Buildexact labour is recorded by name + Work Order, not an employee-ID match.</p>
+                <label className="text-xs text-muted block mb-1">Staff code <span className="text-muted">(optional)</span></label>
+                <input type="text" value={form.staff_code} onChange={e => setField("staff_code", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm" placeholder="e.g. payroll code" />
+                <p className="text-[11px] text-muted mt-1">Optional external/payroll code — separate from the auto employee number (#).</p>
               </div>
 
               {/* Invite section */}
