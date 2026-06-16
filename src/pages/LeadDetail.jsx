@@ -1082,6 +1082,30 @@ export default function LeadDetail() {
     }
   }
 
+  // From the tender stage: open the RFQ Engine pre-filled from this lead's
+  // knowledge. The engine works against a job, so if the lead hasn't been
+  // converted yet, create the job first (non-lossy convert) then hand off
+  // with the new jobId. This means the tender button always works at tender
+  // stage — even for leads that reached tender without a job.
+  async function startTenderRfq() {
+    if (lead.job_id) {
+      nav(`/tender-manager/rfq-engine?leadId=${lead.id}&jobId=${lead.job_id}`);
+      return;
+    }
+    if (creatingJob) return;
+    setCreatingJob(true);
+    try {
+      const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/convert-to-job`, {});
+      if (ok && data?.job?.id) {
+        nav(`/tender-manager/rfq-engine?leadId=${lead.id}&jobId=${data.job.id}`);
+      } else {
+        alert("Couldn't start the tender: " + (error || "job not created"));
+      }
+    } finally {
+      setCreatingJob(false);
+    }
+  }
+
   async function generatePTSA() {
     setGeneratingPTSA(true);
     setPtsaError("");
@@ -1314,6 +1338,25 @@ export default function LeadDetail() {
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
                 <p className="text-xs font-bold text-primary uppercase tracking-wide">Architect Tender</p>
                 <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — qualifying and fee proposal skipped.</p>
+              </div>
+            )}
+            {lead.stage === "tender" && (
+              <div className="rounded-card border border-primary bg-primary/[0.06] p-4">
+                <h3 className="section-label mb-1 text-primary">Tendering</h3>
+                <p className="text-xs text-muted mb-3 leading-relaxed">
+                  Open the RFQ Engine for this lead — it pre-fills the project, trades and documents from this lead&apos;s details.
+                </p>
+                <button
+                  type="button"
+                  onClick={startTenderRfq}
+                  disabled={creatingJob}
+                  className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors disabled:opacity-50"
+                >
+                  {creatingJob ? "Setting up…" : "Proceed to RFQ Engine & Estimate →"}
+                </button>
+                {!lead.job_id && (
+                  <p className="text-[11px] text-muted text-center mt-2">A job will be created from this lead first.</p>
+                )}
               </div>
             )}
             {showDiscovery && (
@@ -1682,14 +1725,6 @@ export default function LeadDetail() {
                     className="block w-full text-center rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3"
                   >
                     Create Fee Proposal →
-                  </Link>
-                )}
-                {lead.stage === "tender" && lead.job_id && (
-                  <Link
-                    to={`/tender-manager/rfq-engine?leadId=${leadId}&jobId=${lead.job_id}`}
-                    className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors mb-3"
-                  >
-                    Proceed to RFQ Engine &amp; Estimate →
                   </Link>
                 )}
                 {next === "tender" && !lead.job_id && (
