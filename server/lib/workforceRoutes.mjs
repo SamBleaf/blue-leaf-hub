@@ -997,11 +997,13 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
-    const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-    const { data, error } = await sb.from("timesheets")
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 120);
+    const from = req.query.from || new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    let q = sb.from("timesheets")
       .select("id, date, status, project_id, projects(address), timesheet_entries(hours)")
-      .eq("employee_id", emp.id).gte("date", from).order("date", { ascending: false });
+      .eq("employee_id", emp.id).gte("date", from);
+    if (req.query.to) q = q.lte("date", req.query.to);
+    const { data, error } = await q.order("date", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
     const timesheets = (data || []).map((t) => ({
       id: t.id, date: t.date, status: t.status,

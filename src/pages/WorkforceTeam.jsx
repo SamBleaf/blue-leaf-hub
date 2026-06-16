@@ -282,47 +282,53 @@ export default function WorkforceTeam() {
                 <p className="text-[11px] text-muted mt-1">Optional external/payroll code — separate from the auto employee number (#).</p>
               </div>
 
-              {/* Invite section */}
-              {panel !== "new" && panel?.is_active && (
-                <div className="pt-2 border-t border-hairline">
-                  <label className="text-xs text-muted block mb-1">Worker app invite</label>
-                  {panel.invite_sent_at ? (
-                    <p className="text-xs text-green-700">Invite sent {fmtDate(panel.invite_sent_at)}</p>
-                  ) : (
-                    <div className="flex gap-1">
-                      <input
-                        type="email"
-                        placeholder="Email address"
-                        value={inviteEmail}
-                        onChange={e => setInviteEmail(e.target.value)}
-                        className="flex-1 min-w-0 border border-hairline rounded-lg px-2 py-1.5 text-sm"
-                      />
-                      <button type="button" onClick={() => sendInvite(panel.id)} disabled={inviting} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
-                        {inviting ? "…" : "Send"}
-                      </button>
+              {/* Worker access — recommended method first, by role (W01).
+                  Workers: a magic link, no login. Supervisors/managers: an app login. */}
+              {panel !== "new" && panel?.is_active && (() => {
+                const isManagement = panel?.trade === "supervisor";
+                const link = (
+                  <div key="link" className="pt-2 border-t border-hairline">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-muted">Worker link (no login)</label>
+                      {!isManagement && <span className="text-[10px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">Recommended</span>}
                     </div>
-                  )}
-                </div>
-              )}
-
-              {/* Worker magic link — no Supabase account needed (W01) */}
-              {panel !== "new" && panel?.is_active && (
-                <div className="pt-2 border-t border-hairline">
-                  <label className="text-xs text-muted block mb-1">Worker link (no login)</label>
-                  <p className="text-[11px] text-muted mb-2">A personal link the worker opens on their phone to log hours — no account needed. Keep it private; reset to revoke the old one.</p>
-                  {workerLink && (
-                    <input readOnly value={workerLink} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
-                  )}
-                  <div className="flex gap-1">
-                    <button type="button" onClick={() => genWorkerLink(panel.id, false)} disabled={linkBusy} className="flex-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
-                      {linkBusy ? "…" : workerLink ? "Copy again" : "Get worker link"}
-                    </button>
+                    <p className="text-[11px] text-muted mb-2">A personal link the worker opens on their phone to log hours — no account needed. Keep it private; reset to revoke.</p>
                     {workerLink && (
-                      <button type="button" onClick={() => genWorkerLink(panel.id, true)} disabled={linkBusy} className="px-3 py-1.5 rounded-lg border border-hairline text-xs font-medium">Reset</button>
+                      <input readOnly value={workerLink} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
+                    )}
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => genWorkerLink(panel.id, false)} disabled={linkBusy} className="flex-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
+                        {linkBusy ? "…" : workerLink ? "Copy again" : "Get worker link"}
+                      </button>
+                      {workerLink && (
+                        <button type="button" onClick={() => genWorkerLink(panel.id, true)} disabled={linkBusy} className="px-3 py-1.5 rounded-lg border border-hairline text-xs font-medium">Reset</button>
+                      )}
+                    </div>
+                  </div>
+                );
+                const invite = (
+                  <div key="invite" className="pt-2 border-t border-hairline">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-muted">App login invite (email)</label>
+                      {isManagement && <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">Recommended</span>}
+                    </div>
+                    {panel.invite_sent_at ? (
+                      <p className="text-xs text-green-700">Invite sent {fmtDate(panel.invite_sent_at)}</p>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-muted mb-2">For supervisors/managers who need the full app with their own login.</p>
+                        <div className="flex gap-1">
+                          <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="flex-1 min-w-0 border border-hairline rounded-lg px-2 py-1.5 text-sm" />
+                          <button type="button" onClick={() => sendInvite(panel.id)} disabled={inviting} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
+                            {inviting ? "…" : "Send"}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
-                </div>
-              )}
+                );
+                return isManagement ? [invite, link] : [link, invite];
+              })()}
 
               {/* Preview */}
               {panel !== "new" && (

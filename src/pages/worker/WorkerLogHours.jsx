@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
 
@@ -43,6 +43,9 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function WorkerLogHours() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [existingId, setExistingId] = useState(null);
+  const [approved, setApproved] = useState(false);
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [entries, setEntries] = useState([]);
@@ -50,7 +53,7 @@ export default function WorkerLogHours() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [me, setMe] = useState(null);
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState(() => params.get("date") || todayStr());
   const [photoBusy, setPhotoBusy] = useState(false);
   const photoInputRef = useRef(null);
   const photoTargetIdx = useRef(null);
@@ -72,6 +75,37 @@ export default function WorkerLogHours() {
     });
     return () => { stop = true; };
   }, []);
+
+  // Load any existing timesheet for the selected date → prefill it (so a logged day
+  // opens with its entries to edit), or flag it approved (locked).
+  useEffect(() => {
+    let stop = false;
+    workerFetch(`/api/worker/timesheets/${date}`)
+      .then(r => r.json())
+      .then(j => {
+        if (stop) return;
+        const ts = j?.timesheet;
+        if (ts) {
+          setExistingId(ts.id);
+          setApproved(ts.status === "approved");
+          setEntries((ts.timesheet_entries || []).map(e => ({
+            task_category: e.task_category,
+            label: TASK_OPTIONS.find(t => t.value === e.task_category)?.label || e.task_category,
+            hours: Number(e.hours) || 8,
+            notes: e.notes || "",
+            completion_photo_url: e.completion_photo_url || "",
+          })));
+          if (ts.project_id) setSelectedId(ts.project_id);
+          else if (ts.carpentry_job_id) setSelectedId(ts.carpentry_job_id);
+        } else {
+          setExistingId(null);
+          setApproved(false);
+          setEntries([]);
+        }
+      })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [date]);
 
   const standardHours = me?.settings?.standard_hours ?? 8;
   const isLeadingHand = me?.employee?.is_leading_hand ?? false;
@@ -124,7 +158,7 @@ export default function WorkerLogHours() {
   }
 
   async function submit() {
-    if (!entries.length || !selectedProject) return;
+    if (approved || !entries.length || !selectedProject) return;
     setSubmitting(true);
     try {
       const payload = entries.map(e => ({
@@ -167,6 +201,36 @@ export default function WorkerLogHours() {
           <button type="button" onClick={() => navigate("/worker")} className="px-6 py-3 rounded-lg bg-primary text-white text-sm font-semibold">
             Done
           </button>
+        </div>
+      </WorkerLayout>
+    );
+  }
+
+  // ── Approved → read-only (worker can't edit an approved timesheet) ──────────
+  if (approved) {
+    const dayLabel = new Date(date).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" });
+    return (
+      <WorkerLayout onBack={() => navigate(-1)}>
+        <div className="px-4 pt-5 pb-8">
+          <h1 className="text-base font-bold text-ink mb-1">{dayLabel}</h1>
+          <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm mb-4">
+            <span className="font-semibold text-green-800">✓ Approved</span>
+            <span className="text-green-700"> — this timesheet is locked. Contact the office if it needs changing.</span>
+          </div>
+          <div className="space-y-2">
+            {entries.map((e, i) => (
+              <div key={i} className="rounded-lg border border-hairline bg-white px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-ink">{e.label}</span>
+                  <span className="text-sm font-semibold text-ink">{e.hours}h</span>
+                </div>
+                {e.notes && <p className="text-xs text-muted mt-1">{e.notes}</p>}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between text-sm font-semibold px-1 mt-3">
+            <span className="text-muted">Total</span><span className="text-ink">{totalHours}h</span>
+          </div>
         </div>
       </WorkerLayout>
     );
@@ -315,7 +379,7 @@ export default function WorkerLogHours() {
               ? "Pick a site to submit"
               : !entries.length
                 ? "Add a task to submit"
-                : `Submit ${totalHours}h`}
+                : `${existingId ? "Update" : "Submit"} ${totalHours}h`}
         </button>
       </div>
     </WorkerLayout>
