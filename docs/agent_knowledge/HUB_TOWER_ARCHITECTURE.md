@@ -318,3 +318,69 @@ Each phase is independently valuable and ships behind the existing human-approva
 - **"Health is per-module."** → No module owns the *project*. That ownership gap is the strongest argument for HUB TOWER.
 - **"Scale is later."** → Scale-hardening and HUB TOWER are the same materialised-read-plane project; do them together.
 - **"More automation = better."** → The win is *visibility + recommendation*, not more autonomous action. The execute-vs-advise line is the moat; HUB TOWER must never cross it.
+
+---
+
+# PART II — Reconciliation + Stress-Test Revisions (2026-06-17)
+
+> This part **supersedes Part I wherever they conflict.** It folds in two things Part I didn't know: (a) a **Control Tower already exists in the codebase**, and (b) a 5-critic adversarial stress-test whose verdict reorders the whole build.
+
+## A. Reconciliation — Control Tower already exists (build on it, don't duplicate)
+
+A parallel effort has already shipped **Control Tower Phase 0** — and it is the same concept as HUB TOWER, with a **stronger** safety model than Part I proposed:
+
+| Already built | Where |
+|---|---|
+| `ct_findings` (observation log: domain, severity, title/symptom/root_cause/recommended_fix, approval_requirement, confidence, evidence jsonb, score_impact, dedup hash, lifecycle) | `095_control_tower.sql` |
+| `ct_action_queue` (recommendations awaiting human decision; impact/effort/risk_reduction; `target_endpoint` is **informational only**; full decision trail) | `095_control_tower.sql` |
+| **`control_tower_ro` Postgres role** — SELECT on all tables, INSERT/UPDATE on the two ct_* tables only, **NO DELETE anywhere, physically barred from writing business data** (enforced by RLS + GRANTs, not app code) | `095_control_tower.sql` |
+| `GET /api/control-tower/status` (director-only; reports wiring, returns no business data) | `controlTowerRoutes.mjs` |
+| Write-whitelist data layer + env gating | `ctData.mjs` |
+| Design doc + charter | `CONTROL_TOWER_DATA_LAYER_PROPOSAL.md` |
+
+**Implication:** Part I's proposed `tower_signals` / `tower_recommendations` / `tower_escalations` / `tower_patterns` tables are **dropped** — use the existing `ct_findings` + `ct_action_queue`. `project_health` / `business_health_snapshots` / `job_summaries` remain valid additions. The DB-role enforcement **answers the authority critic outright** ("is the boundary enforceable?" → yes, at the database). Going forward, HUB TOWER = the existing Control Tower; this document is its design spec, not a competing build.
+
+## B. The stress-test verdict — the build sequence in Part I §8 is BACKWARDS
+
+Four of five critics independently concluded: **do not build the health-scoring plane on the current data.** Part I named this risk ("Tower on fragmented data is a confident liar") but treated the fix as a *precondition*; the critics say it is **the actual first phase and the highest-value work.** Revised sequence:
+
+```
+PHASE 0  — Data-flow tightening (the real first move; cheap, high-value, no Tower risk)
+  • Auto-create the projects row when a job hits status='won'   [CRITICAL · ~2h · jobs can sit "won" with no project → Operations blind]
+  • RFQ form prefills floor area / storeys / scope from facts    [HIGH · stops re-keying facts that already exist]
+  • Schedule generator reads project_metrics building facts      [MEDIUM · single vs double storey etc.]
+  • Procurement plan refresh hook when the schedule changes       [HIGH · plans currently drift silently]
+  • Batch portfolio endpoint /api/finance/portfolio/kpi-summary   [fixes 80% of the 50× storm in 20% of the code]
+
+PHASE 1  — Consolidate the read spine (make facts the universal read path)
+  • Bind Finance + Estimating + Schedule reads to getJobProfile()  (today only WHS/convert/contract-value use it)
+  • job_summaries: MEASURE FIRST. Start with the batch endpoint + short-TTL cache; only build a materialised
+    view if a real 50-job benchmark proves it necessary. Snapshot = audit/trend, NOT operational decisions.
+  • Do NOT rely on event-driven refresh — job_events are emitted in 7 places and consumed in 0. Use a
+    nightly batch + an on-demand POST /api/control-tower/refresh-job/:id.
+
+PHASE 2  — Control Tower intelligence (the doc's health plane, on clean data)
+  • project_health + the 4 solid categories (below) → ct_findings with score_impact
+  • Director brief ("Today's Tower"), approval queue on ct_action_queue, continuous-improvement patterns
+```
+
+## C. Corrections to Part I (the stress-test caught these as stale/overstated)
+- **Facts service is *partially* wired, not "never read."** `getJobProfile()` is in production (WHS hydration; convert-to-job stamps; `getCanonicalContractValue` consumer). The job is to make it the *universal* read path, not to start from zero — **less work than Part I implied.**
+- **Two of the "5 broken hand-offs" are already fixed:** Buildexact labour sync now logs to `buildexact_sync_error` (no longer silent); the portal now reads variations. Remaining critical: **auto-create project on win** + **RFQ prefill** + **schedule-reads-facts** + **procurement-drift hook**.
+- **`projects.contract_value` is stale** (its sync trigger was dropped in mig 079 but the column remains, fed from an unmaintained source). Anything reading it directly (portal/billing) drifts. Deprecate the column; read `getCanonicalContractValue()`. Add a Tower finding: "contract_value drift detected."
+
+## D. Health-score model — v2 (the validity critic forced a redesign)
+- **Display the category breakdown FIRST; the composite is only a headline colour.** A weighted average hides red categories under an amber mean — "score theater."
+- **Any single red category forces the composite red** (drop the average's ability to mask a 35/100 Procurement behind a 72 composite).
+- **Remove the margin double-count:** Procurement scores **on-time delivery only**; cost-of-delay belongs to Financial. Otherwise one root cause (late steel → labour penalty) reds two categories and over-weights the risk.
+- **Start with the 4 categories whose data is unified TODAY:** Financial · Schedule · Compliance/WHS · Client. **Defer Procurement + Capacity** until their data is reliably computable (procurement items aren't reliably linked to tasks; trade-conflict detection is O(n²) and unbuilt). **Documentation/Data is not a health category** — fold "consequential fact unconfirmed" into Compliance and make integration gaps a separate blocker flag, not a weighted peer.
+- **Expand hard-fail overrides** beyond safety/margin/compliance to include: aging unapproved variation (client friction), and any *silent integration failure* (these hide losses).
+
+## E. Governance hardening (from the authority critic)
+- **Escalation has no SLA today.** `ct_action_queue` carries `approval_requirement` but nothing ages it. Add: director-approval items pending > 24h auto-escalate (email/SMS); findings auto-resolve when the underlying signal clears; a 30-min monitor re-notifies aging escalations.
+- **Agents have no DB-role guard — only Tower does.** The "just this once" erosion risk is real: a future `/api/x/auto-approve` route has no database boundary. Add agent-scoped Postgres roles (parity with `control_tower_ro`) and a `/check` audit that rejects cross-domain writes.
+- **Tower reads every column** (incl. payroll, client PII, WHS injury free-text). Add column/table read-exclusions and an audit log of Tower reads (the JWT is powerful).
+- **Tower's own outputs need accountability:** make `confidence` required, give `evidence` a fixed schema (metric/threshold/observed/data_points), require a reason on rejection, and have Tower check its recent rejected findings before re-raising the same one (no nagging).
+
+## F. Net recommendation
+**HUB TOWER is the right destination, the foundation is already laid (Phase 0 done, well), and the architecture validates — but the next move is NOT the health plane.** It is Phase 0 data-flow tightening, led by the one-line, two-month-overdue fix: **auto-create the project on job win.** Fix the flows, consolidate the read spine, *then* let Control Tower score clean data. Building the scorer first means shipping a confident liar.
