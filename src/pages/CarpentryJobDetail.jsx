@@ -133,7 +133,7 @@ function CloseoutModal({ job, onClose, onConfirm }) {
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 
-function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
+function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted }) {
   const [editing, setEditing]   = useState(false);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
@@ -193,6 +193,15 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
     setStatusSaving(false);
     if (!ok) { setError(e || "Status change failed."); return; }
     onStatusChange(newStatus);
+  }
+
+  async function deleteJob() {
+    if (!confirm(`Delete carpentry job "${job.reference || job.clientName}"?\n\nThis permanently removes the job and its budget, milestones, costs and diary. It cannot be undone.`)) return;
+    setStatusSaving(true);
+    const { ok, error: e } = await apiDelete(`/api/carpentry/jobs/${job.id}`);
+    setStatusSaving(false);
+    if (!ok) { setError(e || "Delete failed."); return; }
+    onDeleted?.();
   }
 
   if (editing && form) {
@@ -336,6 +345,13 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange }) {
               ))}
             </div>
           </div>
+          <button
+            onClick={deleteJob}
+            disabled={statusSaving}
+            className="px-3 py-1.5 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors"
+          >
+            Delete
+          </button>
           <button
             onClick={startEdit}
             className="px-4 py-1.5 text-xs rounded-lg border border-hairline text-muted hover:text-ink transition-colors"
@@ -1451,6 +1467,7 @@ export default function CarpentryJobDetail() {
             performance={performance}
             onUpdated={loadJob}
             onStatusChange={(status) => setJob((j) => ({ ...j, status }))}
+            onDeleted={() => navigate("/carpentry")}
           />
         )}
         {tab === "schedule" && <ScheduleTab jobId={job.id} />}

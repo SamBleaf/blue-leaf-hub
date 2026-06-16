@@ -384,6 +384,28 @@ export function registerCarpentryRoutes(app) {
     }
   });
 
+  // ── DELETE /api/carpentry/jobs/:id ──────────────────────────────────────────
+  // Remove a carpentry job. Child rows (budgets, milestones, costs, diary,
+  // performance, site_tasks) cascade; timesheets + marketing tags are set null.
+  app.delete("/api/carpentry/jobs/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data: job } = await sb
+        .from("carpentry_jobs")
+        .select("id, reference")
+        .eq("id", req.params.id)
+        .maybeSingle();
+      if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
+      const { error } = await sb.from("carpentry_jobs").delete().eq("id", req.params.id);
+      if (error) throw error;
+      return ok(res, { deleted: true, reference: job.reference || null });
+    } catch (e) {
+      console.error("[carpentry/jobs/:id DELETE]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
   // ── POST /api/carpentry/buildexact/fetch ────────────────────────────────────
 
   app.post("/api/carpentry/buildexact/fetch", requireAuth, async (req, res) => {
