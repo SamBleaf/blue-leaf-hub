@@ -71,7 +71,7 @@ export default function WorkerHome() {
             {ts.rejection_notes && <p className="text-sm text-amber-700 mt-1">{ts.rejection_notes}</p>}
             <button
               type="button"
-              onClick={() => navigate("/worker/timesheet/log")}
+              onClick={() => navigate(`/worker/timesheet/log?date=${ts.date}`)}
               className="mt-2 text-sm font-semibold text-amber-800 underline underline-offset-2"
             >
               Edit and resubmit →

@@ -39,7 +39,12 @@ const TASK_OPTIONS = [
   { value: "supervision",        label: "Supervision" },
 ];
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// LOCAL calendar date (NOT toISOString — that shifts a day in AU timezones, which
+// would reject same-day logging in the morning).
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 export default function WorkerLogHours() {
   const navigate = useNavigate();
@@ -305,7 +310,7 @@ export default function WorkerLogHours() {
                   <div key={e.task_category} className="rounded-lg border border-hairline bg-white">
                     <div className="flex items-center gap-1.5 px-3 py-2.5">
                       <span className="flex-1 min-w-0 truncate text-sm text-ink">{e.label}</span>
-                      <button type="button" onClick={() => bumpHours(idx, -0.5)} aria-label="Less hours" className="w-8 h-8 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">−</button>
+                      <button type="button" onClick={() => bumpHours(idx, -0.5)} aria-label="Less hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">−</button>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -316,8 +321,8 @@ export default function WorkerLogHours() {
                         onChange={ev => setEntryHours(idx, ev.target.value)}
                         className="w-12 shrink-0 text-center text-sm font-semibold text-ink border-b border-hairline bg-transparent outline-none"
                       />
-                      <button type="button" onClick={() => bumpHours(idx, 0.5)} aria-label="More hours" className="w-8 h-8 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">+</button>
-                      <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
+                      <button type="button" onClick={() => bumpHours(idx, 0.5)} aria-label="More hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">+</button>
+                      <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
                       <button type="button" onClick={() => removeEntry(idx)} aria-label="Remove" className="w-7 h-8 shrink-0 text-muted text-xl leading-none flex items-center justify-center">×</button>
                     </div>
                     {expandedIdx === idx && (

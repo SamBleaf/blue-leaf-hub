@@ -859,23 +859,23 @@ export function registerWorkforceRoutes(app) {
 
     const [todayTs, yesterdayTs, weekEntries, settings] = await Promise.all([
       sb.from("timesheets").select("*, timesheet_entries(*)").eq("employee_id", emp.id).eq("date", today).maybeSingle(),
-      sb.from("timesheets").select("project_id, projects(id, address)").eq("employee_id", emp.id).eq("date", yesterday).maybeSingle(),
+      sb.from("timesheets").select("project_id, carpentry_job_id, projects(id, address)").eq("employee_id", emp.id).eq("date", yesterday).maybeSingle(),
       sb.from("timesheet_entries").select("hours, timesheets!inner(employee_id, date, status)").eq("timesheets.employee_id", emp.id).gte("timesheets.date", monStr).in("timesheets.status", ["submitted", "approved"]),
       sb.from("workforce_settings").select("*").limit(1).single(),
     ]);
 
     const weeklyHours = (weekEntries.data || []).reduce((s, e) => s + Number(e.hours || 0), 0);
 
-    // Open tasks for current project
+    // Open tasks for the current project OR carpentry job.
     let openTaskCount = 0;
-    let currentProjectId = null;
-    if (todayTs.data?.project_id) {
-      currentProjectId = todayTs.data.project_id;
-    } else if (yesterdayTs.data?.project_id) {
-      currentProjectId = yesterdayTs.data.project_id;
-    }
-    if (currentProjectId) {
-      const { count } = await sb.from("site_tasks").select("id", { count: "exact", head: true }).eq("project_id", currentProjectId).in("status", ["open", "in_progress"]);
+    const currentProjectId = todayTs.data?.project_id || yesterdayTs.data?.project_id || null;
+    const currentCarpentryJobId = todayTs.data?.carpentry_job_id || yesterdayTs.data?.carpentry_job_id || null;
+    if (currentProjectId || currentCarpentryJobId) {
+      let q = sb.from("site_tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]);
+      if (currentProjectId && currentCarpentryJobId) q = q.or(`project_id.eq.${currentProjectId},carpentry_job_id.eq.${currentCarpentryJobId}`);
+      else if (currentProjectId) q = q.eq("project_id", currentProjectId);
+      else q = q.eq("carpentry_job_id", currentCarpentryJobId);
+      const { count } = await q;
       openTaskCount = count || 0;
     }
 
@@ -935,8 +935,13 @@ export function registerWorkforceRoutes(app) {
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] required" });
     }
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (date > todayStr) {
+    if (!project_id && !carpentry_job_id) {
+      return res.status(400).json({ ok: false, error: "Select a site or job before submitting." });
+    }
+    // Tolerate timezones ahead of UTC (e.g. AEST +10): the worker's local "today" can be
+    // a calendar day ahead of the server's UTC date, so allow up to UTC + 1 day.
+    const maxDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    if (date > maxDate) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
     if (entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {

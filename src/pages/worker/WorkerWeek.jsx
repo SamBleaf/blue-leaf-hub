@@ -45,8 +45,8 @@ export default function WorkerWeek() {
       const isFuture = key > todayStr;
       let dot = null;
       if (ts && (ts.status === "submitted" || ts.status === "approved")) dot = "green";
-      else if (ts && ts.status === "rejected") dot = "red";
-      else if (!ts && !isWeekend && !isFuture) dot = "red";
+      else if (ts && ts.status === "rejected") dot = "amber"; // returned — needs resubmit
+      else if (!ts && !isWeekend && !isFuture) dot = "red";   // a working day with nothing logged
       out.push({ key, day, dot, isFuture, isToday: key === todayStr, isWeekend });
     }
     return out;
@@ -59,9 +59,11 @@ export default function WorkerWeek() {
     <WorkerLayout>
       <div className="px-4 pb-8">
         <h1 className="text-lg font-bold text-ink pt-4 mb-1">My timesheets</h1>
-        <p className="text-sm text-muted mb-3">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500 align-middle mr-1" />Logged
-          <span className="inline-block w-2 h-2 rounded-full bg-red-500 align-middle ml-3 mr-1" />Working day not logged. Tap a day to add or edit it.
+        <p className="text-sm text-muted mb-3 leading-relaxed">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 align-middle mr-1" />Logged
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 align-middle ml-3 mr-1" />Not logged
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 align-middle ml-3 mr-1" />Returned
+          <span className="block text-xs mt-1">Tap a day to add or edit it.</span>
         </p>
 
         <div className="flex items-center justify-between mb-2">
@@ -89,7 +91,7 @@ export default function WorkerWeek() {
               className={`aspect-square rounded-lg flex flex-col items-center justify-center text-sm ${c.isToday ? "ring-2 ring-primary" : "border border-hairline"} ${c.isFuture ? "opacity-30" : "bg-white active:scale-95"}`}
             >
               <span className={`${c.isWeekend ? "text-muted" : "text-ink"} font-medium leading-none`}>{c.day}</span>
-              {c.dot && <span className={`w-1.5 h-1.5 rounded-full mt-1 ${c.dot === "green" ? "bg-green-500" : "bg-red-500"}`} />}
+              {c.dot && <span className={`w-2 h-2 rounded-full mt-1 ${c.dot === "green" ? "bg-green-500" : c.dot === "amber" ? "bg-amber-500" : "bg-red-500"}`} />}
             </button>
           ))}
         </div>
