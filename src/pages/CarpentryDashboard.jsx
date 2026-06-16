@@ -83,6 +83,7 @@ function NewJobModal({ onClose, onCreated }) {
     }
     const p = data?.prefill || {};
     setPrefill(p);
+    setEstimateCategories(Array.isArray(p.categories) ? p.categories : []);
     setForm((f) => ({
       ...f,
       buildexactJobId: p.buildexactJobId || bxJobId.trim(),
@@ -111,7 +112,7 @@ function NewJobModal({ onClose, onCreated }) {
       if (!ok_) { setBxError(error || "Could not read the estimate file."); return; }
       const p = data?.prefill || {};
       setPrefill(p);
-      setEstimateCategories(Array.isArray(data?.raw?.categories) ? data.raw.categories : []);
+      setEstimateCategories(Array.isArray(data?.prefill?.categories) ? data.prefill.categories : []);
       const storey = /triple/i.test(p.buildingType) ? "3" : /double/i.test(p.buildingType) ? "2" : null;
       setForm((f) => ({
         ...f,

@@ -42,15 +42,25 @@ export async function pullBuildexactEstimate(buildexactJobId, opts = {}) {
   // header via `parentId`. The DTO also has a `costCategory` field but it is empty on live accounts,
   // so derive the category from the parent header. Keep only leaf, non-deleted cost lines.
   const allItems = beList(raw);
-  const parentNameById = new Map();
-  for (const it of allItems) {
-    if (it?.isParent) parentNameById.set(it.estimateItemId ?? it.id, String(it.description || "").trim());
-  }
+  const byId = new Map();
+  for (const it of allItems) byId.set(it.estimateItemId ?? it.id, it);
+  // Buildxact estimates can nest deeper than category → line (e.g. category → sub-item →
+  // component lines), so a leaf's immediate parent may be a sub-item, not the category.
+  // Walk the parentId chain up to the TOP-LEVEL ancestor (the category header) so every
+  // leaf rolls up to its real category instead of falling into a "Buildexact" catch-all.
+  const topCategoryName = (it) => {
+    let cur = it;
+    let guard = 0;
+    while (cur && cur.parentId != null && byId.has(cur.parentId) && guard++ < 20) {
+      cur = byId.get(cur.parentId);
+    }
+    return String(cur?.description || "").trim();
+  };
   const items = allItems
     .filter((it) => !it?.isParent && !it?.isDeleted)
     .map((it) => ({
       ...it,
-      categoryName: parentNameById.get(it.parentId) || it.costCategory || it.category || "Buildexact"
+      categoryName: topCategoryName(it) || it.costCategory || it.category || "Buildexact"
     }));
 
   const estimate = normaliseBuildexactEstimatePayload(items, {

@@ -463,6 +463,11 @@ export function registerCarpentryRoutes(app) {
           description,
           quotedValue,
           estimateTotal,
+          categories: (estimate.categories || []).map((c) => ({
+            name: c.name,
+            subtotalExGst: c.subtotal_ex_gst,
+            costType: classifyCostType(c.name),
+          })),
         },
         raw: {
           jobName: description,
