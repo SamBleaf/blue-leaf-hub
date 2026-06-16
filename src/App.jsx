@@ -47,6 +47,7 @@ import WorkforceTeam from "./pages/WorkforceTeam.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
 import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
+import WorkerWeek from "./pages/worker/WorkerWeek.jsx";
 import CarpentryDashboard from "./pages/CarpentryDashboard.jsx";
 import CarpentryJobDetail from "./pages/CarpentryJobDetail.jsx";
 import ConfirmQueue from "./pages/ConfirmQueue.jsx";
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="/worker" element={<WorkerHome />} />
             <Route path="/worker/timesheet/log" element={<WorkerLogHours />} />
             <Route path="/worker/tasks" element={<WorkerTasks />} />
+            <Route path="/worker/week" element={<WorkerWeek />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/accept-invite/:token" element={<AcceptInvite />} />

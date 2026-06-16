@@ -177,6 +177,9 @@ export default function WorkerHome() {
         <p className="text-center text-sm text-muted mt-3">
           This week: <span className="font-semibold text-ink">{weekly_hours} hrs</span>
         </p>
+        <div className="text-center mt-2">
+          <Link to="/worker/week" className="text-sm text-primary font-semibold">My timesheets — check for missed days →</Link>
+        </div>
       </div>
     </WorkerLayout>
   );

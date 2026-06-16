@@ -358,10 +358,17 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const isDirector = ["admin"].includes(req.caller.role);
     const includeInactive = req.query.include_inactive === "true";
-    let q = sb.from("employees").select("id, user_id, name, employee_number, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : ""));
-    if (!includeInactive) q = q.eq("is_active", true);
-    q = q.order("employee_number", { ascending: true, nullsFirst: false });
-    const { data, error } = await q;
+    const baseCols = "id, user_id, name, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : "");
+    const run = (cols, orderCol) => {
+      let q = sb.from("employees").select(cols);
+      if (!includeInactive) q = q.eq("is_active", true);
+      return q.order(orderCol, { ascending: true, nullsFirst: false });
+    };
+    let { data, error } = await run(baseCols + ", employee_number", "employee_number");
+    // Degrade gracefully if migration 093 isn't applied yet (column missing).
+    if (error && /employee_number/i.test(error.message || "")) {
+      ({ data, error } = await run(baseCols, "name"));
+    }
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, employees: data });
   });
@@ -983,6 +990,25 @@ export function registerWorkforceRoutes(app) {
     if (entryErr) return res.status(500).json({ ok: false, error: entryErr.message });
 
     res.json({ ok: true, timesheet_id: timesheetId });
+  });
+
+  // Recent timesheets (for the worker's "My week" view — spot missing days).
+  app.get("/api/worker/timesheets", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
+    const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    const { data, error } = await sb.from("timesheets")
+      .select("id, date, status, project_id, projects(address), timesheet_entries(hours)")
+      .eq("employee_id", emp.id).gte("date", from).order("date", { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const timesheets = (data || []).map((t) => ({
+      id: t.id, date: t.date, status: t.status,
+      project: t.projects?.address || null,
+      hours: (t.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0),
+    }));
+    res.json({ ok: true, timesheets, from });
   });
 
   app.get("/api/worker/timesheets/:date", workerAuth, async (req, res) => {

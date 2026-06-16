@@ -105,14 +105,16 @@ export function registerCompanyCostModelRoutes(app) {
       if (existing) await sb.from("company_cost_model").update(modelRow).eq("id", existing.id);
       else await sb.from("company_cost_model").insert(modelRow);
 
-      // Upsert each employee's rates (by name) + push the base hourly rate into
-      // Workforce (employees.hourly_rate) so the spreadsheet is the single source
-      // of truth for pay rates — they update in Workforce on each sync.
+      // Upsert each employee's rates (by name) + push the BREAK-EVEN hourly rate into
+      // Workforce (employees.hourly_rate) so labour cost reflects the true loaded cost
+      // (wage + super + leave over 1,634 productive hrs/yr + overhead recovery), not the
+      // bare wage. The spreadsheet is the single source of truth; updates on each sync.
       let ratesApplied = 0;
       for (const rr of rateRows) {
         await sb.from("employee_cost_rates").upsert({ ...rr, synced_at: new Date().toISOString() }, { onConflict: "employee_name" });
-        if (rr.employee_id && rr.base_hourly != null) {
-          await sb.from("employees").update({ hourly_rate: rr.base_hourly, updated_at: new Date().toISOString() }).eq("id", rr.employee_id);
+        const loaded = rr.break_even_hourly ?? rr.true_hourly ?? rr.base_hourly;
+        if (rr.employee_id && loaded != null) {
+          await sb.from("employees").update({ hourly_rate: loaded, updated_at: new Date().toISOString() }).eq("id", rr.employee_id);
           ratesApplied++;
         }
       }
