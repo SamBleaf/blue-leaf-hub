@@ -470,7 +470,14 @@ export default function RfqEngine() {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object") return;
 
-      if (typeof parsed.activeStep === "number") {
+      // If the saved session already has composed drafts, ALWAYS land on the dispatch step (4).
+      // Restoring to an earlier step would force a needless re-compose (and the user reported
+      // being bounced 4→3 every time). Having non-blocked drafts means you belong on step 4.
+      const restoredHasDrafts =
+        Array.isArray(parsed.outbound) && parsed.outbound.some((r) => r && !r.blocked);
+      if (restoredHasDrafts) {
+        setActiveStep(4);
+      } else if (typeof parsed.activeStep === "number") {
         setActiveStep(Math.min(4, Math.max(1, parsed.activeStep)));
       }
 
@@ -1722,22 +1729,25 @@ export default function RfqEngine() {
           }
         }
 
-        // Log outbound correspondence from the client — server-side insert is skipped
-        // when SUPABASE_SERVICE_ROLE_KEY isn't set and getServiceSupabase() returns null.
-        try {
-          await sb.from("correspondence").insert({
-            job_id: persistence.job.id,
-            rfq_id: rfqId || null,
-            subcontractor_id: messages[i].subcontractor_id || null,
-            direction: "outbound",
-            subject: subj,
-            body: bodyText,
-            sent_at: new Date().toISOString(),
-            message_id: msgId,
-            logged_by: "rfq-send"
-          });
-        } catch (cErr) {
-          console.warn("[rfq-send] correspondence insert", cErr?.message || cErr);
+        // Log outbound correspondence — but ONLY if the server didn't already (it does when it
+        // has the service-role key). Prevents duplicate correspondence rows; this client insert
+        // is the fallback for when the server couldn't log.
+        if (!sentResult?.serverLogged) {
+          try {
+            await sb.from("correspondence").insert({
+              job_id: persistence.job.id,
+              rfq_id: rfqId || null,
+              subcontractor_id: messages[i].subcontractor_id || null,
+              direction: "outbound",
+              subject: subj,
+              body: bodyText,
+              sent_at: new Date().toISOString(),
+              message_id: msgId,
+              logged_by: "rfq-send"
+            });
+          } catch (cErr) {
+            console.warn("[rfq-send] correspondence insert", cErr?.message || cErr);
+          }
         }
 
         try {

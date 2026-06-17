@@ -1731,7 +1731,9 @@ app.post("/api/rfq/send", async (req, res) => {
           });
           if (cErr) console.warn("[rfq-send] correspondence", cErr.message);
         }
-        results.push({ ok: true, to, transport, messageId: msgId });
+        // serverLogged tells the client whether THIS server already wrote the correspondence
+        // row, so the client can skip its fallback insert and avoid duplicate rows.
+        results.push({ ok: true, to, transport, messageId: msgId, serverLogged: Boolean(sb && rfqId) });
       } catch (e) {
         console.error("[rfq-send]", e);
         results.push({
