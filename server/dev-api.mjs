@@ -2079,6 +2079,17 @@ if (existsSync(distPath)) {
   app.get("*", (req, res) => res.sendFile(join(distPath, "index.html")));
 }
 
+// ── Global crash guards ──────────────────────────────────────────────────────
+// A single unhandled async error (a background poll, a webhook, a stray promise)
+// must NEVER take the whole API down — that 502s every route, including unrelated
+// ones. Log loudly and keep serving. The failing operation is lost; the server lives.
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[crash-guard] Unhandled promise rejection — server kept alive:", reason, promise);
+});
+process.on("uncaughtException", (err, origin) => {
+  console.error(`[crash-guard] Uncaught exception (${origin}) — server kept alive:`, err);
+});
+
 app.listen(PORT, () => {
   console.log(`[blue-leaf-api] Listening on ${PORT}`);
 });
