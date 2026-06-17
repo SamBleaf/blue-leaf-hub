@@ -347,6 +347,28 @@ function mergeKeepingSent(prevRows, freshRows) {
   return merged;
 }
 
+/**
+ * Shrink an outbound row before it goes into the localStorage session snapshot.
+ * `html` is regenerated from `body` (plainBodyToHtml) at send time, and with a signature logo it
+ * embeds a base64 data-URL PER ROW — on a 20+ trade job that alone blows the ~5MB localStorage
+ * quota, which makes setItem throw and silently freezes the whole session at its last good save.
+ * Transient send flags aren't persisted either (they're recomputed/sanitized on restore).
+ */
+function stripRowForPersist(r) {
+  if (!r || typeof r !== "object") return r;
+  const { html, sending, sendError, ...rest } = r;
+  void html;
+  void sending;
+  void sendError;
+  return rest;
+}
+
+/** Minimal subcontractor projection for the slim (quota-pressed) snapshot tier. */
+function minimalSubForPersist(sub) {
+  if (!sub || typeof sub !== "object") return sub;
+  return { id: sub.id, business_name: sub.business_name, email: sub.email, contact: sub.contact };
+}
+
 function normalizeTradeIdForSession(id) {
   if (!id) return id;
   return LEGACY_TRADE_IDS[id] || id;
@@ -540,6 +562,9 @@ export default function RfqEngine() {
       const savedActive = typeof parsed.activeStep === "number" ? parsed.activeStep : 1;
       let landStep = Math.max(savedHighest, savedActive);
       if (restoredHasDrafts) landStep = Math.max(landStep, 4); // legacy v2 fallback
+      // Never land on the dispatch step (4) with no drafts — the edit-lock blocks an auto-recompose
+      // there, which would strand the user on an empty screen. Drop to recipients so Compose rebuilds.
+      if (landStep >= 4 && !restoredHasDrafts) landStep = 3;
       landStep = Math.min(4, Math.max(1, landStep));
       setActiveStep(landStep);
       highestStepRef.current = landStep;
@@ -925,7 +950,7 @@ export default function RfqEngine() {
           : pdfRestoreTask && pdfRestoreTask.length
             ? pdfRestoreTask
             : [];
-      const snapshot = {
+      const base = {
         version: 3,
         activeStep,
         highestStep: highestStepRef.current,
@@ -936,11 +961,46 @@ export default function RfqEngine() {
         sharedJobDropboxUrl,
         dropboxLink: sharedJobDropboxUrl,
         pdfItemMeta: pdfItemMetaSnapshot,
-        outbound,
         completionLog,
         extractionJobId
       };
-      localStorage.setItem(RFQ_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+      const slimOutbound = Array.isArray(outbound) ? outbound.map(stripRowForPersist) : [];
+
+      const trySave = (snap) => {
+        try {
+          localStorage.setItem(RFQ_SESSION_STORAGE_KEY, JSON.stringify(snap));
+          return true;
+        } catch (err) {
+          // QuotaExceededError (or any storage failure) — caller falls back to a slimmer payload.
+          console.warn("[rfq-session-save] tier failed:", err?.name || err);
+          return false;
+        }
+      };
+
+      // Tier 1: full state, html stripped from rows. Tier 2: also minimise the subcontractor object
+      // and drop pdf meta. Tier 3: keep the wizard state (step/trades/deadline) but drop the drafts —
+      // they recompose on return; the user's step/trade/deadline edits must persist no matter what.
+      if (trySave({ ...base, outbound: slimOutbound })) {
+        // saved
+      } else if (
+        trySave({
+          ...base,
+          pdfItemMeta: [],
+          outbound: slimOutbound.map((r) =>
+            r && typeof r === "object" ? { ...r, subcontractor: minimalSubForPersist(r.subcontractor) } : r
+          )
+        })
+      ) {
+        // saved slim
+      } else if (trySave({ ...base, pdfItemMeta: [], outbound: [] })) {
+        // saved wizard-state only (drafts will recompose)
+      } else {
+        setBanner({
+          variant: "warning",
+          title: "This RFQ session is too large to auto-save",
+          body: "Your latest changes might not be remembered if you leave this page. Send the RFQs from here without navigating away, or remove some attached PDFs."
+        });
+      }
     } catch (err) {
       console.warn("[rfq-session-save]", err);
     }
