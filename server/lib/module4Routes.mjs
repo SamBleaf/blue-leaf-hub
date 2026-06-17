@@ -301,22 +301,51 @@ export function registerModule4Routes(app) {
       const { error: jobUp } = await sb.from("jobs").update({ status: "won", won_at: now }).eq("id", jobId);
       if (jobUp) throw new Error(jobUp.message);
 
-      const projectRow = {
+      // The status='won' update above fires trg_ensure_project_for_won_job
+      // (migration 096), which guarantees a baseline projects row exists. Enrich
+      // it idempotently — update the existing row if present, else insert. This
+      // never creates a duplicate and is safe to re-run win-finalize.
+      // Note: buildexact_job_id is deliberately NOT set here so we never clobber
+      // an existing Buildexact link.
+      const projectPatch = {
         job_id: jobId,
         address: addr || "Unknown",
         status: "active",
         accepted_trades: acceptedTrades,
         dropbox_shared_link: job.dropbox_shared_link || job.dropbox_link || "",
         dropbox_internal_path: job.dropbox_internal_path || "",
-        buildexact_job_id: null,
         buildexact_link_source: "pending",
         tentative_start_date: req.body?.tentative_start_date || null,
         notes: req.body?.project_notes || null,
         updated_at: now
       };
 
-      const { data: proj, error: pIns } = await sb.from("projects").insert(projectRow).select("*").single();
-      if (pIns) throw new Error(pIns.message);
+      let proj;
+      const { data: existingProj } = await sb
+        .from("projects")
+        .select("id")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (existingProj?.id) {
+        const { data: updProj, error: pUpd } = await sb
+          .from("projects")
+          .update(projectPatch)
+          .eq("id", existingProj.id)
+          .select("*")
+          .single();
+        if (pUpd) throw new Error(pUpd.message);
+        proj = updProj;
+      } else {
+        const { data: insProj, error: pIns } = await sb
+          .from("projects")
+          .insert(projectPatch)
+          .select("*")
+          .single();
+        if (pIns) throw new Error(pIns.message);
+        proj = insProj;
+      }
 
       // ── Value-carry: ensure a won job has a contract value (ex-GST) ──────────────
       // The fee-proposal-accept path historically read a non-existent `data` column, so

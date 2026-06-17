@@ -91,6 +91,9 @@ Pre-handover QA passed | inspection | blocks: defects rectification
 /**
  * @param {object} opts
  * @param {{ phase: string, phaseLabel: string, lineItems: string[] }[]} opts.categoryBlocks
+ * @param {object} [opts.buildingFacts] canonical project_metrics facts (storeys, floor_area_m2,
+ *   frame_type, roof_structure_type, roof_complexity, wall_type, roof_type, site_slope, wet_areas,
+ *   has_suspended_slab, has_basement, has_structural_steel, has_demolition) — used to tailor the plan.
  */
 export async function generateSchedulePlanWithClaude(opts) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
@@ -103,6 +106,37 @@ export async function generateSchedulePlanWithClaude(opts) {
     category_key: b.phase,
     tasks: (b.lineItems || []).map((name) => ({ name, category: b.phaseLabel, category_key: b.phase }))
   }));
+
+  // Building facts → a short, factual block + sequencing guidance. Single- vs
+  // multi-storey, suspended slabs, steel, demolition etc. materially change the plan.
+  const bf = opts.buildingFacts && typeof opts.buildingFacts === "object" ? opts.buildingFacts : {};
+  const factLines = [];
+  if (bf.storeys != null) factLines.push(`- Storeys: ${bf.storeys}`);
+  if (bf.floor_area_m2 != null) factLines.push(`- Floor area: ${bf.floor_area_m2} m²`);
+  if (bf.frame_type) factLines.push(`- Frame type: ${bf.frame_type}`);
+  if (bf.roof_structure_type) factLines.push(`- Roof structure: ${bf.roof_structure_type}`);
+  if (bf.roof_complexity) factLines.push(`- Roof complexity: ${bf.roof_complexity}`);
+  if (bf.wall_type) factLines.push(`- Wall type: ${bf.wall_type}`);
+  if (bf.roof_type) factLines.push(`- Roof cladding: ${bf.roof_type}`);
+  if (bf.site_slope) factLines.push(`- Site slope: ${bf.site_slope}`);
+  if (bf.wet_areas != null) factLines.push(`- Wet areas: ${bf.wet_areas}`);
+  if (bf.has_suspended_slab) factLines.push(`- Has a suspended slab`);
+  if (bf.has_basement) factLines.push(`- Has a basement`);
+  if (bf.has_structural_steel) factLines.push(`- Includes structural steel`);
+  if (bf.has_demolition) factLines.push(`- Demolition required`);
+
+  const factsSection = factLines.length
+    ? `\n## Project building facts (tailor durations, sequencing and gates to these)
+${factLines.join("\n")}
+
+Guidance:
+- Multi-storey (storeys >= 2): add upper-floor framing and a structural/frame inspection gate before upper-level work; expect longer frame and scaffold phases.
+- Larger floor area: allow longer trade durations; trades may run in parallel zones.
+- Suspended slab / basement / structural steel: add the associated formwork, crane/steel-erection and inspection hold points, plus longer cure and lead times.
+- Demolition required: add a site-prep/demolition phase before excavation.
+- Steep site slope: add retaining/earthworks time and account for access constraints.
+`
+    : "";
 
   const prompt = `You are a construction scheduling expert for residential building projects in South Australia.
 Given these construction categories and line items, generate a complete, realistic schedule with properly typed task dependencies.
@@ -148,7 +182,7 @@ ${CANONICAL_REF}
 - Use SS+lag and FF relationships from the canonical reference — don't force everything to FS.
 - Trusses, steel, windows, joinery: these have long lead times and often control the critical path.
 - Building permit is a hard gate: no site work until permit issued.
-
+${factsSection}
 Categories and items:
 ${JSON.stringify(categoriesPayload, null, 2)}`;
 

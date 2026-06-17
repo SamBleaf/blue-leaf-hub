@@ -305,7 +305,7 @@ export function registerFinanceCCRoutes(app) {
       sb.from("jobs").select("id, address, contract_value, original_contract_value, estimated_total_cost, forecast_total_cost, target_margin_pct, floor_margin_pct, financial_locked").eq("id", jobId).single(),
       sb.from("financial_documents").select("amount_ex_gst, status, trade_category_id").eq("job_id", jobId).in("status", ["approved", "filed", "xero_synced"]),
       sb.from("job_variations").select("amount_ex_gst, status").eq("job_id", jobId),
-      sb.from("progress_claims").select("amount_ex_gst, status").eq("job_id", jobId).neq("status", "void"),
+      sb.from("progress_claims").select("id, amount_ex_gst, status").eq("job_id", jobId).neq("status", "void"),
       sb.from("progress_claim_payments").select("payment_amount, progress_claim_id")
     ]);
 
@@ -379,6 +379,120 @@ export function registerFinanceCCRoutes(app) {
         forecast_data_quality_warning: forecastDataQualityWarning
       }
     });
+  });
+
+  // ── Portfolio KPI batch (replaces the per-job summary N+1 storm) ───────────
+  // Returns the SAME KPI shape as /jobs/:jobId/summary, keyed by job_id, for every
+  // active job (non-archived project linked to a job) in a handful of batched
+  // queries instead of one round-trip per job. Director portfolio view uses this.
+  app.get("/api/finance/portfolio/kpi-summary", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    try {
+      // Active portfolio = non-archived projects linked to a job.
+      const { data: projects, error: pErr } = await sb
+        .from("projects")
+        .select("id, job_id, address, status")
+        .neq("status", "archived")
+        .not("job_id", "is", null);
+      if (pErr) return res.status(500).json({ ok: false, error: translateDbError(pErr) });
+
+      const jobIds = [...new Set((projects || []).map((p) => p.job_id).filter(Boolean))];
+      if (!jobIds.length) return res.json({ ok: true, summaries: {}, count: 0 });
+
+      const [jobsRes, docsRes, varsRes, claimsRes] = await Promise.all([
+        sb.from("jobs").select("id, address, contract_value, original_contract_value, estimated_total_cost, forecast_total_cost, target_margin_pct, floor_margin_pct, financial_locked").in("id", jobIds),
+        sb.from("financial_documents").select("job_id, amount_ex_gst, status").in("job_id", jobIds).in("status", ["approved", "filed", "xero_synced"]),
+        sb.from("job_variations").select("job_id, amount_ex_gst, status").in("job_id", jobIds),
+        sb.from("progress_claims").select("id, job_id, amount_ex_gst, status").in("job_id", jobIds).neq("status", "void"),
+      ]);
+      if (jobsRes.error) return res.status(500).json({ ok: false, error: translateDbError(jobsRes.error) });
+
+      const claims = claimsRes.data || [];
+      const claimIdToJob = {};
+      for (const c of claims) claimIdToJob[c.id] = c.job_id;
+      const claimIds = claims.map((c) => c.id);
+
+      // Payments only for these jobs' claims.
+      let payments = [];
+      if (claimIds.length) {
+        const { data: payRows } = await sb
+          .from("progress_claim_payments")
+          .select("payment_amount, progress_claim_id")
+          .in("progress_claim_id", claimIds);
+        payments = payRows || [];
+      }
+
+      // Aggregate per job_id in one pass.
+      const byJob = {};
+      const bucket = (id) =>
+        (byJob[id] ||= { docs: 0, signedVar: 0, unsignedVar: 0, claimsIssued: 0, claimsPaid: 0 });
+      for (const d of docsRes.data || []) bucket(d.job_id).docs += Number(d.amount_ex_gst || 0);
+      for (const v of varsRes.data || []) {
+        const b = bucket(v.job_id);
+        if (v.status === "signed") b.signedVar += Number(v.amount_ex_gst || 0);
+        else if (["draft", "sent_to_client"].includes(v.status)) b.unsignedVar += Number(v.amount_ex_gst || 0);
+      }
+      for (const c of claims) {
+        if (!["draft", "void"].includes(c.status)) bucket(c.job_id).claimsIssued += Number(c.amount_ex_gst || 0);
+      }
+      for (const p of payments) {
+        const jid = claimIdToJob[p.progress_claim_id];
+        if (jid) bucket(jid).claimsPaid += Number(p.payment_amount || 0);
+      }
+
+      const jobsById = {};
+      for (const j of jobsRes.data || []) jobsById[j.id] = j;
+
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const r1 = (n) => Math.round(n * 10) / 10;
+
+      const summaries = {};
+      await Promise.all(
+        jobIds.map(async (jid) => {
+          const job = jobsById[jid];
+          if (!job) return;
+          const b = bucket(jid);
+          // Canonical contract value (same helper as the per-job endpoint).
+          const contractValue = await contractValueOf(jid, job, b.signedVar);
+          const actualCosts = b.docs;
+          const workingMarginPct =
+            contractValue > 0 ? ((contractValue - actualCosts) / contractValue) * 100 : null;
+          const forecastTotalCost = Number(job.forecast_total_cost || job.estimated_total_cost || 0);
+          const forecastMarginPct =
+            contractValue > 0 && forecastTotalCost > 0
+              ? ((contractValue - forecastTotalCost) / contractValue) * 100
+              : null;
+          summaries[jid] = {
+            job: {
+              id: job.id,
+              address: job.address,
+              financial_locked: job.financial_locked,
+              target_margin_pct: Number(job.target_margin_pct || 40),
+              floor_margin_pct: Number(job.floor_margin_pct || 33),
+            },
+            kpis: {
+              contract_value: r2(contractValue),
+              original_contract_value: Number(job.original_contract_value || job.contract_value || 0),
+              signed_variations: r2(b.signedVar),
+              unsigned_variations: r2(b.unsignedVar),
+              claims_issued: r2(b.claimsIssued),
+              claims_paid: r2(b.claimsPaid),
+              actual_costs: r2(actualCosts),
+              forecast_total_cost: forecastTotalCost || null,
+              working_margin_pct: workingMarginPct != null ? r1(workingMarginPct) : null,
+              forecast_margin_pct: forecastMarginPct != null ? r1(forecastMarginPct) : null,
+              forecast_data_quality_warning: forecastMarginPct != null && Math.abs(forecastMarginPct) > 200,
+            },
+          };
+        })
+      );
+
+      return res.json({ ok: true, summaries, count: Object.keys(summaries).length });
+    } catch (e) {
+      console.error("[finance/portfolio/kpi-summary]", e);
+      return res.status(500).json({ ok: false, error: "Failed to build portfolio summary" });
+    }
   });
 
   // ── Command Centre aggregate (single round-trip for full page load) ────────

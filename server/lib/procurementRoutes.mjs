@@ -112,6 +112,10 @@ export function registerProcurementRoutes(app) {
         mode: "manual", actorId: req.caller?.id || null,
       });
       if (!result.ok) return err(res, 400, result.error || "Generation failed");
+      // Plan regenerated → clear the schedule-drift staleness flag (migration 097).
+      await sb.from("projects")
+        .update({ procurement_plan_stale: false, procurement_plan_stale_since: null })
+        .eq("job_id", req.params.jobId);
       return ok(res, { result });
     } catch (e) {
       console.error("[procurement/generate]", e);
@@ -274,7 +278,25 @@ export function registerProcurementRoutes(app) {
       const sortByOrderBy = (arr) => arr.sort((a, b) => (a.orderByDate || "9999").localeCompare(b.orderByDate || "9999"));
       buckets.overdue = sortByOrderBy(buckets.overdue);
       buckets.dueSoon = sortByOrderBy(buckets.dueSoon);
-      return ok(res, { buckets, totalActive: items.length });
+
+      // Procurement plans flagged stale by a schedule change (migration 097) —
+      // surfaces a "schedule changed, refresh plan" prompt without auto-running.
+      let staleProjects = [];
+      if (jobIds.length) {
+        const { data: stale } = await sb
+          .from("projects")
+          .select("id, job_id, procurement_plan_stale_since")
+          .in("job_id", jobIds)
+          .eq("procurement_plan_stale", true);
+        staleProjects = (stale || []).map((p) => ({
+          projectId: p.id,
+          jobId: p.job_id,
+          jobAddress: addr[p.job_id] || null,
+          staleSince: p.procurement_plan_stale_since || null,
+        }));
+      }
+
+      return ok(res, { buckets, totalActive: items.length, staleProjects });
     } catch (e) {
       console.error("[procurement/command-centre]", e);
       return err(res, 502, translateDbError(e));

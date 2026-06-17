@@ -461,6 +461,17 @@ export function registerScheduleRoutes(app) {
         .single();
       if (pe || !proj) return res.status(404).json({ ok: false, error: pe?.message || "Project not found." });
 
+      // Canonical building facts → tailor the generated schedule (single vs multi-storey, etc.).
+      let buildingFacts = {};
+      if (proj.job_id) {
+        const { data: pm } = await sb
+          .from("project_metrics")
+          .select("storeys, floor_area_m2, has_suspended_slab, has_basement, has_structural_steel, has_demolition, frame_type, roof_structure_type, roof_complexity, wall_type, roof_type, site_slope, wet_areas")
+          .eq("job_id", proj.job_id)
+          .maybeSingle();
+        if (pm) buildingFacts = pm;
+      }
+
       // Soft-delete: get current max version, then mark existing rows deleted
       const { data: vRows } = await sb.from("schedule_tasks").select("schedule_version").eq("project_id", projectId).is("deleted_at", null).order("schedule_version", { ascending: false }).limit(1);
       const nextVersion = ((vRows?.[0]?.schedule_version) || 0) + 1;
@@ -529,7 +540,7 @@ export function registerScheduleRoutes(app) {
 
         try {
           if (process.env.ANTHROPIC_API_KEY?.trim()) {
-            const { tasks: aiTasks } = await generateSchedulePlanWithClaude({ categoryBlocks: catCtx.categories });
+            const { tasks: aiTasks } = await generateSchedulePlanWithClaude({ categoryBlocks: catCtx.categories, buildingFacts });
             rows = buildRowsFromClaudePlan(projectId, startDate, aiTasks, catCtx.categories, { scheduleHints });
             plannedVia = "claude";
           } else {
