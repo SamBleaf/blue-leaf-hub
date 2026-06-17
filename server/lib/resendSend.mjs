@@ -20,8 +20,13 @@ async function getResend() {
   return _resend;
 }
 
+// Default to admin@ on the verified blueleafbuilding.com.au domain so Resend activates as soon as
+// RESEND_API_KEY is present — no separate RESEND_FROM env is required. Override with RESEND_FROM
+// (e.g. a different display name or address on the verified domain) if ever needed.
+const DEFAULT_RESEND_FROM = "Blue Leaf Building <admin@blueleafbuilding.com.au>";
+
 export function resendFromAddress() {
-  return process.env.RESEND_FROM?.trim() || "";
+  return process.env.RESEND_FROM?.trim() || DEFAULT_RESEND_FROM;
 }
 
 export function resendSendConfigured() {
