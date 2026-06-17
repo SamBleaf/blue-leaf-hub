@@ -1,10 +1,10 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-06-17
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
-test_status: static_pass
+test_status: untested
 ---
 
 # SOP 04-05: Send RFQ Emails to Subcontractors
@@ -98,6 +98,32 @@ Next review: 2026-11-29
 
 ---
 
+## 13. RFQ Engine wizard — Step 4 dispatch (edit-lock + per-email send)
+
+> This section covers the **RFQ Engine wizard** (`Tender Manager → RFQ Engine`, the 4-step PDF→trades→recipients→dispatch flow in `src/pages/RfqEngine.jsx`). It is distinct from the Package Detail send above. The wizard composes a draft per subcontractor per trade on **Step 4 · Review drafts & dispatch**, then dispatches via `POST /api/rfq/send` (SMTP/Gmail — same transport as above).
+
+### What changed (2026-06-17)
+- **Edit-lock.** Once you reach Step 4, drafts are **frozen against automatic regeneration**. Changing trades, recipients, contact details, applying settings, the subcontractor list finishing loading, or **leaving the page and coming back** will no longer wipe or revert an edited draft. Only the explicit **↻ Regenerate emails** button rewrites drafts — and even then any **already-sent** row is left untouched.
+- **Navigate-away is safe.** The wizard remembers the furthest step you reached. Leaving Step 4 and returning lands you **back on Step 4** with every edit (and every sent row) intact — it no longer bounces you to Step 3, and pressing Compose no longer reverts your edits.
+- **Per-email Send button.** Each draft now has its own **Send this RFQ** button. You can send one subcontractor at a time. A sent row shows a green **✓ Sent** badge and its Subject/Body lock (read-only) so it can't be edited or re-sent.
+- **Batch button counts unsent only.** The top button now reads **Send N RFQ emails** / **Send remaining N** (and **All RFQs sent** when none remain). It sends only rows that haven't been sent yet.
+- **Sends are serialized.** Only one send runs at a time (per-row or batch) — every other Send button greys out while one is in flight. This prevents a duplicate job/folder being created by two simultaneous first sends.
+- **The package is built once, when the last draft is sent** — whether you finished via the batch button or by sending the final row individually. At that point the session resets and you're taken to the new RFQ package.
+- **A failed send rolls itself back** (the queued RFQ row it created is deleted) and shows the error on that specific draft, so retrying never leaves orphan rows.
+
+### How to use it
+1. Reach Step 4. Edit any draft's subject/body as needed — edits auto-save (an **✏️ Edited — saved** chip appears).
+2. To send one: click **Send this RFQ** on that draft. Wait for **✓ Sent**.
+3. To send the rest: click **Send remaining N** at the top.
+4. When all non-blocked drafts are sent, the RFQ package is created and you're navigated to it.
+
+### Automation notes
+- Per-row send + batch both call `sendOneRow()` → `persistRfqs([message])` → `POST /api/rfq/send` (1-element array). Server idempotency (`job_id` + `subcontractor_id` + `status='sent'`) blocks any accidental re-send.
+- Edits/sent state persist in `localStorage` (`blhub_rfq_session`, `version: 3`, carries `highestStep` + per-row `sent`/`sentAt`/`rfqId`). On restore, transient `sending` flags are cleared so a row can never be stuck on "Sending…".
+- Each successful send marks `rfqs.status='sent'`, logs `correspondence` (outbound), and saves an email copy to Dropbox.
+
+---
+
 ## 12. Troubleshoot Agent Test Script
 
 ### Pre-test setup
@@ -130,6 +156,41 @@ Next review: 2026-11-29
 4. Expected: notanemail returns ok: false with an error message
 5. Expected: response `partial: true`
 6. Expected: the valid recipient's status updates to 'sent'; the invalid one shows an error
+- [ ] Pass  [ ] Fail
+
+### RFQ Engine wizard — Step 4 (edit-lock + per-email send)
+
+**TC-04 — Edit survives navigate-away**
+1. In the RFQ Engine wizard, reach Step 4 with at least 2 drafts.
+2. Edit a draft's body (change the recipient name or add a line). Confirm the ✏️ Edited — saved chip appears.
+3. Navigate to another page (e.g. Dashboard), then return to the RFQ Engine.
+4. Expected: lands on **Step 4** (not Step 3).
+5. Expected: the edited draft still shows your edit (NOT reverted to the generated default).
+- [ ] Pass  [ ] Fail
+
+**TC-05 — Send one row leaves the others untouched**
+1. On Step 4 with ≥2 drafts (one with a test address sam@blueleafbuilding.com.au), edit a SECOND draft's body.
+2. Click **Send this RFQ** on the first draft only.
+3. Expected: first draft → green **✓ Sent**, its subject/body locked.
+4. Expected: the second draft still shows your edit, still editable, still unsent.
+5. Expected DB: exactly one `rfqs` row `status='sent'`; one `correspondence` outbound row.
+- [ ] Pass  [ ] Fail
+
+**TC-06 — Regenerate keeps sent rows**
+1. After TC-05 (one row sent, one edited-unsent), click **↻ Regenerate emails** and confirm.
+2. Expected: the unsent edited draft is regenerated (edit discarded — that's intended).
+3. Expected: the **sent** row is still **✓ Sent** and still locked (NOT reverted to an editable unsent draft).
+- [ ] Pass  [ ] Fail
+
+**TC-07 — Batch sends only the remaining, then builds the package once**
+1. With one row already sent, the top button should read **Send remaining N**.
+2. Click it. Expected: only the unsent rows send (the already-sent one is not re-sent — check no duplicate `rfqs` rows for it).
+3. Expected: once every non-blocked row is sent, an RFQ package is created and you're navigated to it; the session resets.
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Reload mid-flow is safe**
+1. On Step 4, send one row, edit another, then reload the page (Cmd-R).
+2. Expected: lands on Step 4; the sent row is still ✓ Sent + locked; the edited row still shows its edit; no row is stuck on "Sending…".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

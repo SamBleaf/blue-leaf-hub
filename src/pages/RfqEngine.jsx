@@ -278,28 +278,71 @@ function updateRowBody(rows, key, field, value) {
 
 /**
  * Re-compose outbound rows (add/remove trades + recipients) WITHOUT clobbering any draft the
- * user has manually edited. Edited rows keep their subject/body/html by key. The single source
- * of truth for every rebuild path — only an explicit force (Regenerate button) bypasses it.
+ * user has manually EDITED or already SENT. Such rows win by key over the fresh row — even when
+ * the fresh row came back blocked (subs still loading) or the fresh set dropped the row entirely
+ * (a transient filter). A typed or sent draft must NEVER be silently lost. The single source of
+ * truth for every non-force rebuild path; only an explicit force (Regenerate) bypasses it.
  */
 function mergePreservingEdits(prevRows, freshRows) {
-  const editedByKey = new Map(
+  const keepByKey = new Map(
     (Array.isArray(prevRows) ? prevRows : [])
-      .filter((r) => r && r.edited && !r.blocked)
+      .filter((r) => r && r.blocked !== true && (r.edited || r.sent))
       .map((r) => [r.key, r])
   );
-  if (editedByKey.size === 0) return freshRows;
-  return freshRows.map((row) => {
-    const kept = editedByKey.get(row.key);
-    if (!kept || row.blocked) return row;
+  if (keepByKey.size === 0) return Array.isArray(freshRows) ? freshRows : [];
+
+  const seen = new Set();
+  const merged = (Array.isArray(freshRows) ? freshRows : []).map((row) => {
+    const kept = keepByKey.get(row.key);
+    if (!kept) return row;
+    seen.add(row.key);
+    if (kept.sent) return kept; // a sent row is immutable — return it verbatim
     return {
       ...row,
+      to: kept.to ?? row.to,
+      subcontractor: kept.subcontractor ?? row.subcontractor,
+      subcontractor_id: kept.subcontractor_id ?? row.subcontractor_id,
       subject: kept.subject,
       body: kept.body,
       html: kept.html,
       subjectVariant: kept.subjectVariant,
+      blocked: false,
       edited: true
     };
   });
+
+  // Re-append any kept row the fresh set dropped (transient subs-empty / filter) so a typed or
+  // sent draft is never lost on a rebuild.
+  for (const [key, kept] of keepByKey) {
+    if (!seen.has(key)) merged.push(kept.sent ? kept : { ...kept, blocked: false, edited: true });
+  }
+  return merged;
+}
+
+/**
+ * Force-regenerate path (the explicit "Regenerate emails" button): manual edits ARE discarded,
+ * but a row already SENT is immutable — its email has gone out, so it must never revert to an
+ * unsent, editable draft. Keep sent rows by key, take fresh for everything else.
+ */
+function mergeKeepingSent(prevRows, freshRows) {
+  const sentByKey = new Map(
+    (Array.isArray(prevRows) ? prevRows : [])
+      .filter((r) => r && r.sent)
+      .map((r) => [r.key, r])
+  );
+  const fresh = Array.isArray(freshRows) ? freshRows : [];
+  if (sentByKey.size === 0) return fresh;
+  const seen = new Set();
+  const merged = fresh.map((row) => {
+    const kept = sentByKey.get(row.key);
+    if (!kept) return row;
+    seen.add(row.key);
+    return kept; // sent row verbatim
+  });
+  for (const [key, kept] of sentByKey) {
+    if (!seen.has(key)) merged.push(kept);
+  }
+  return merged;
 }
 
 function normalizeTradeIdForSession(id) {
@@ -393,6 +436,22 @@ export default function RfqEngine() {
   /** Incremented once after localStorage restore so the save effect never runs before hydrated state. */
   const [sessionStorageEpoch, setSessionStorageEpoch] = useState(0);
   const subcontractorsRef = useRef([]);
+  /** Mirrors of state read inside rebuildOutbound / sendOneRow (which must not re-create on every change). */
+  const activeStepRef = useRef(1);
+  const outboundRef = useRef([]);
+  /** Highest wizard step reached — persisted so restore lands the user back there regardless of
+   *  whether the saved outbound snapshot was momentarily blocked/empty. */
+  const highestStepRef = useRef(1);
+  /** Cached job/Dropbox context so per-row sends create the folder + job row only once. */
+  const jobContextRef = useRef(null);
+  const jobContextPromiseRef = useRef(null);
+  /** Serializes sends — only one persist+dispatch in flight at a time, so two quick per-row
+   *  clicks can never each insert a job (duplicate-job race) before the first sets the job id. */
+  const sendInFlightRef = useRef(false);
+  /** True once at least one row has actually been sent this session — gates the all-sent package build. */
+  const sendHappenedRef = useRef(false);
+  /** Guards the all-sent package build so it fires exactly once. */
+  const packageFinalizingRef = useRef(false);
   const [activeStep, setActiveStep] = useState(1);
   /** @type {{ id: string, buffer: ArrayBuffer, name: string, size: number, type: string, docType: string, status: string, error: null|string }[]} */
   const [pdfItems, setPdfItems] = useState([]);
@@ -470,16 +529,18 @@ export default function RfqEngine() {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object") return;
 
-      // If the saved session already has composed drafts, ALWAYS land on the dispatch step (4).
-      // Restoring to an earlier step would force a needless re-compose (and the user reported
-      // being bounced 4→3 every time). Having non-blocked drafts means you belong on step 4.
+      // Land the user back on the furthest step they reached, from an EXPLICIT persisted flag —
+      // never inferred from outbound contents (a save that captured a momentarily blocked/empty
+      // outbound must not bounce a returning step-4 user back to step 3).
       const restoredHasDrafts =
         Array.isArray(parsed.outbound) && parsed.outbound.some((r) => r && !r.blocked);
-      if (restoredHasDrafts) {
-        setActiveStep(4);
-      } else if (typeof parsed.activeStep === "number") {
-        setActiveStep(Math.min(4, Math.max(1, parsed.activeStep)));
-      }
+      const savedHighest = typeof parsed.highestStep === "number" ? parsed.highestStep : 0;
+      const savedActive = typeof parsed.activeStep === "number" ? parsed.activeStep : 1;
+      let landStep = Math.max(savedHighest, savedActive);
+      if (restoredHasDrafts) landStep = Math.max(landStep, 4); // legacy v2 fallback
+      landStep = Math.min(4, Math.max(1, landStep));
+      setActiveStep(landStep);
+      highestStepRef.current = landStep;
 
       if (parsed.extraction) {
         setExtraction(coerceExtraction(parsed.extraction));
@@ -535,7 +596,14 @@ export default function RfqEngine() {
       setPdfItems([]);
 
       if (Array.isArray(parsed.outbound)) {
-        setOutbound(parsed.outbound);
+        // Sanitize transient per-send flags: a reload that happened mid-send must not restore a
+        // row stuck on "Sending…" (its in-flight promise died with the old page). `sent`/`sentAt`/
+        // `rfqId`/`edited` ARE kept — those are durable.
+        setOutbound(
+          parsed.outbound.map((r) =>
+            r && typeof r === "object" ? { ...r, sending: false, sendError: null } : r
+          )
+        );
       }
 
       if (parsed.completionLog && typeof parsed.completionLog === "object") {
@@ -786,6 +854,16 @@ export default function RfqEngine() {
   };
 
   const rebuildOutbound = useCallback((force = false) => {
+    // EDIT-LOCK: once composed drafts exist on the dispatch step (4), ONLY the explicit
+    // "Regenerate emails" button (force=true) may rewrite them. No dep change, async
+    // subcontractor load, settings-apply, or remount may revert/reload a draft being edited.
+    if (
+      !force &&
+      activeStepRef.current === 4 &&
+      outboundRef.current.some((r) => r && !r.blocked)
+    ) {
+      return;
+    }
     setOutbound((prev) => {
       const fresh = buildOutboundRows({
         selectedTrades,
@@ -795,13 +873,16 @@ export default function RfqEngine() {
         deadline,
         sharedDropboxUrl: sharedJobDropboxUrl
       });
-      // Auto-rebuilds (trade/recipient/deadline/contact changes) preserve edits; only the
-      // explicit "Regenerate emails" button (force=true) wipes them.
-      return force === true ? fresh : mergePreservingEdits(prev, fresh);
+      // Auto-rebuilds (trade/recipient/deadline/contact changes) preserve edits AND sent rows;
+      // the explicit "Regenerate emails" button (force=true) discards edits but still keeps any
+      // already-sent row immutable.
+      return force === true ? mergeKeepingSent(prev, fresh) : mergePreservingEdits(prev, fresh);
     });
   }, [selectedTrades, tradeRecipients, extraction, sharedJobDropboxUrl, deadline]);
 
   useEffect(() => {
+    // EDIT-LOCK: step 4 is the dispatch step. Nothing automatic may regenerate drafts here.
+    if (activeStep === 4) return;
     if (skipNextAutoRebuildRef.current) {
       skipNextAutoRebuildRef.current = false;
       return;
@@ -811,7 +892,17 @@ export default function RfqEngine() {
       return;
     }
     rebuildOutbound();
-  }, [rebuildOutbound]);
+  }, [rebuildOutbound, activeStep]);
+
+  // Keep the mirror refs in sync; highestStepRef only ever climbs (the persisted landing step).
+  useEffect(() => {
+    activeStepRef.current = activeStep;
+    if (activeStep > highestStepRef.current) highestStepRef.current = activeStep;
+  }, [activeStep]);
+
+  useEffect(() => {
+    outboundRef.current = outbound;
+  }, [outbound]);
 
   // IDB writes happen explicitly in each handler that mutates the file set
   // (handlePdfInput / removePdfItem / handleClearAllPdfs / resetRfqSession) so
@@ -827,8 +918,9 @@ export default function RfqEngine() {
             ? pdfRestoreTask
             : [];
       const snapshot = {
-        version: 2,
+        version: 3,
         activeStep,
+        highestStep: highestStepRef.current,
         extraction,
         selectedTrades: Array.from(selectedTrades),
         tradeRecipients,
@@ -888,6 +980,12 @@ export default function RfqEngine() {
     setTradeIntelSummary(null);
     skipNextAutoRebuildRef.current = false;
     suppressNextSubsRebuildRef.current = false;
+    highestStepRef.current = 1;
+    jobContextRef.current = null;
+    jobContextPromiseRef.current = null;
+    sendInFlightRef.current = false;
+    sendHappenedRef.current = false;
+    packageFinalizingRef.current = false;
     void deletePdfs(RFQ_ENGINE_PDF_SCOPE).catch((err) =>
       console.warn("[rfq] failed to clear stored PDFs", err)
     );
@@ -1321,6 +1419,9 @@ export default function RfqEngine() {
     selectedTrades.size > 0 && Boolean(deadline) && subsLoadState !== "loading";
 
   const sendPayload = outbound.filter((row) => !row.blocked);
+  const unsentPayload = outbound.filter((row) => !row.blocked && !row.sent);
+  /** True while any row is mid-send — disables every Send button so per-row sends stay serialized. */
+  const anySending = outbound.some((row) => row && row.sending);
 
   async function persistRfqs(messages, dropboxMeta) {
     const sb = getSupabase();
@@ -1565,49 +1666,27 @@ export default function RfqEngine() {
     });
   };
 
-  const handleSend = async () => {
-    setBanner(null);
-    setCompletionLog(null);
-
-    if (!deadline) {
-      setBanner({ variant: "warning", title: "Pick a quote deadline first", body: "" });
-      return;
-    }
-
-    const readyMessages = outbound.filter((row) => !row.blocked);
-    const invalid = outbound.filter((row) => row.blocked);
-    if (readyMessages.length === 0) {
-      setBanner({
-        variant: "error",
-        title: "Nothing to send yet",
-        body: invalid[0]?.blockReason || "Select trades with valid subcontractor contacts."
-      });
-      return;
-    }
-
-    if (!supabaseConfigured) {
-      setBanner({
-        variant: "error",
-        title: "Supabase not configured",
-        body: "Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY so RFQs can persist."
-      });
-      return;
-    }
-
-    setSendBusy(true);
-    let persistence = null;
-    const sb = getSupabase();
-    try {
+  // Create the Dropbox job folder + cache it so every per-row send (and the batch) reuses the
+  // same context. Single-flight via the promise ref so concurrent first sends share one ensure.
+  const ensureJobContext = useCallback(async () => {
+    if (jobContextRef.current && jobContextRef.current.finalDropboxUrl) return jobContextRef.current;
+    if (jobContextPromiseRef.current) return jobContextPromiseRef.current;
+    jobContextPromiseRef.current = (async () => {
       const addr = extraction.project_address?.trim();
       if (!addr) {
         throw new Error("Set the project address before sending — it names the Dropbox job folder.");
       }
-
       let finalDropboxUrl = sharedJobDropboxUrl.trim();
       let ensureJson = null;
       if (!finalDropboxUrl) {
         try {
-          const tradeLabels = [...new Set(readyMessages.map((row) => resolveTradeLabel(row.tradeId) || row.tradeId))];
+          const tradeLabels = [
+            ...new Set(
+              outboundRef.current
+                .filter((r) => r && !r.blocked)
+                .map((row) => resolveTradeLabel(row.tradeId) || row.tradeId)
+            )
+          ];
           const ensureRes = await authFetch("/api/dropbox/ensure-job-folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1624,79 +1703,148 @@ export default function RfqEngine() {
           console.error("[dropbox send]", e);
         }
       }
-
-      if (!finalDropboxUrl) {
-        setBanner({
-          variant: "warning",
-          title: "No Dropbox link in emails",
-          body: "Dropbox was unavailable or not configured. RFQs will still send; add the tender folder link in the draft body if needed."
-        });
-      }
-
-      // Send the user's EDITED drafts exactly as shown in the editor. Never re-compose from
-      // scratch here — that silently discarded every manual edit (subject + body) the user made.
-      // Regenerate the HTML part from the edited plain-text body so the HTML the server prefers
-      // matches the edits (editing the body via the textarea does not touch row.html).
-      const sigForSend = loadEmailSignature();
-      const messages = readyMessages.map((row) => {
-        const body = String(row.body || "");
-        return {
-          to: row.to,
-          subject: String(row.subject || ""),
-          subjectVariant: row.subjectVariant,
-          body,
-          html: body.trim() ? plainBodyToHtml(body, sigForSend.logoDataUrl) : row.html,
-          tradeId: row.tradeId,
-          subcontractor_id: row.subcontractor_id,
-          businessName: row.subcontractor?.business_name?.trim() || "",
-          tradeLabel: resolveTradeLabel(row.tradeId) || row.tradeId
-        };
-      });
-      if (messages.length === 0) {
-        throw new Error("No sendable messages — check recipients and project address.");
-      }
-      if (finalDropboxUrl && messages.some((m) => !m.body.includes(finalDropboxUrl))) {
-        // Dropbox folder was (re)created at send time and a draft predates it — surface it
-        // rather than silently sending a draft without the tender-documents link.
-        setBanner({
-          variant: "warning",
-          title: "Some drafts may not contain the latest Dropbox link",
-          body: "The tender folder link was created/updated after these drafts were composed. Re-check the drafts, or click Regenerate emails if you want them refreshed."
-        });
-      }
-
-      const privateRootGuess = jobProjectsInternalPath(addr);
-      persistence = await persistRfqs(messages, {
-        dropboxSharedLinkUrl: finalDropboxUrl,
-        privateRoot: ensureJson?.privateRoot?.trim() || privateRootGuess,
+      const ctx = {
+        finalDropboxUrl,
+        privateRoot: ensureJson?.privateRoot?.trim() || jobProjectsInternalPath(addr),
         sharedRoot: ensureJson?.sharedRoot?.trim() || ""
+      };
+      jobContextRef.current = ctx;
+      return ctx;
+    })();
+    try {
+      return await jobContextPromiseRef.current;
+    } finally {
+      jobContextPromiseRef.current = null;
+    }
+  }, [extraction, sharedJobDropboxUrl]);
+
+  // Build the RFQ package + reset the session. Called from the all-sent effect (which guarantees
+  // every non-blocked row is sent), so finishing the last row individually OR via the batch both
+  // produce the package exactly once. Reads current `outbound` state, never the lagging ref.
+  const finalizeAllSentPackage = useCallback(async () => {
+    const rows = outbound.filter((r) => r && !r.blocked);
+    if (rows.length === 0 || !rows.every((r) => r.sent)) {
+      packageFinalizingRef.current = false; // defensive: condition no longer holds
+      return;
+    }
+    try {
+      const tradeGroups = {};
+      for (const r of rows) {
+        if (!tradeGroups[r.tradeId]) {
+          const note = extraction.trade_notes?.[r.tradeId] || emptyTradeNote();
+          const planRow = tradePlanById.get(r.tradeId);
+          const scopeFromPlan = planRow?.scope_bullets?.length ? planRow.scope_bullets : bulletsFromTradeNote(note);
+          tradeGroups[r.tradeId] = {
+            trade_id: r.tradeId,
+            trade_label: labelForTrade(r.tradeId, tradePlan, getTradeRegistry().labels) || resolveTradeLabel(r.tradeId),
+            scope_bullets: scopeFromPlan,
+            source: planRow?.source || "manual",
+            ai_enrichment: planRow?.ai_enrichment || [],
+            estimate_line_refs: planRow?.estimate_line_refs || [],
+            due_date: deadline || "",
+            recipients: []
+          };
+        }
+        tradeGroups[r.tradeId].recipients.push({
+          subcontractor_id: r.subcontractor_id || null,
+          business_name: r.subcontractor?.business_name?.trim() || r.to,
+          email: r.to,
+          status: "sent",
+          sent_at: r.sentAt || new Date().toISOString(),
+          email_subject: String(r.subject || ""),
+          email_body: String(r.body || ""),
+          subject_variant: r.subjectVariant || "",
+          rfq_id: r.rfqId || null
+        });
+      }
+      const pkgRes = await authFetch("/api/rfq-packages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: extractionJobIdRef.current,
+          project_address: extraction.project_address || "",
+          project_type: extraction.project_type || "",
+          tender_deadline: deadline || "",
+          architect_client: extraction.architect_name || extraction.client_name || "",
+          dropbox_url: sharedJobDropboxUrl || "",
+          extraction_data: extraction,
+          pdf_meta: pdfItems.map((p) => ({ name: p.name, docType: p.docType })),
+          trade_scopes: Object.values(tradeGroups)
+        })
       });
+      const pkgJson = await pkgRes.json().catch(() => null);
+      resetRfqSession();
+      if (pkgJson?.packageId) {
+        navigate(`/tender-manager/rfq-packages/${pkgJson.packageId}`);
+        return;
+      }
+    } catch (pkgErr) {
+      console.warn("[rfq-package] create failed, continuing", pkgErr);
+      resetRfqSession();
+    }
+    setBanner({
+      variant: "success",
+      title: "RFQs dispatched",
+      body: "All RFQs sent and logged — starting a fresh RFQ session."
+    });
+  }, [outbound, extraction, deadline, sharedJobDropboxUrl, pdfItems, tradePlan, tradePlanById, resetRfqSession, navigate]);
 
-      const messagesWithIds = messages.map((m, i) => ({
-        ...m,
-        jobId: persistence.job.id,
-        rfqId: persistence.rfqIds[i]
-      }));
-
+  // Send ONE row. Reuses the exact persist + dispatch pipeline as the batch for a 1-element
+  // messages array, and mutates ONLY this row's status — siblings are never rebuilt or reloaded.
+  const sendOneRow = useCallback(async (rowKey) => {
+    const row = outboundRef.current.find((r) => r && r.key === rowKey);
+    if (!row || row.blocked || row.sent || row.sending) return { ok: false };
+    if (sendInFlightRef.current) return { ok: false }; // serialize — never two persists at once
+    if (!deadline) {
+      setBanner({ variant: "warning", title: "Pick a quote deadline first", body: "" });
+      return { ok: false };
+    }
+    if (!supabaseConfigured) {
+      setBanner({
+        variant: "error",
+        title: "Supabase not configured",
+        body: "Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY so RFQs can persist."
+      });
+      return { ok: false };
+    }
+    sendInFlightRef.current = true;
+    setOutbound((prev) => prev.map((r) => (r.key === rowKey ? { ...r, sending: true, sendError: null } : r)));
+    const sb = getSupabase();
+    let persistence = null;
+    try {
+      const ctx = await ensureJobContext();
+      const finalDropboxUrl = ctx.finalDropboxUrl;
+      const sigForSend = loadEmailSignature();
+      const body = String(row.body || "");
+      const message = {
+        to: row.to,
+        subject: String(row.subject || ""),
+        subjectVariant: row.subjectVariant,
+        body,
+        html: body.trim() ? plainBodyToHtml(body, sigForSend.logoDataUrl) : row.html,
+        tradeId: row.tradeId,
+        subcontractor_id: row.subcontractor_id,
+        businessName: row.subcontractor?.business_name?.trim() || "",
+        tradeLabel: resolveTradeLabel(row.tradeId) || row.tradeId
+      };
+      persistence = await persistRfqs([message], {
+        dropboxSharedLinkUrl: finalDropboxUrl,
+        privateRoot: ctx.privateRoot,
+        sharedRoot: ctx.sharedRoot
+      });
+      const rfqId = persistence.rfqIds[0];
       const res = await authFetch("/api/rfq/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messagesWithIds })
+        body: JSON.stringify({ messages: [{ ...message, jobId: persistence.job.id, rfqId }] })
       });
-
       const json = await res.json().catch(() => null);
       if (!res.ok || !json) {
-        const msg =
-          typeof json?.error === "string" ? json.error : `Dispatch failed (${res.status})`;
-        throw new Error(msg);
+        throw new Error(typeof json?.error === "string" ? json.error : `Dispatch failed (${res.status})`);
       }
-
       if (!json.mail_ready) {
-        throw new Error(
-          "Mail is not configured — add Gmail OAuth (GMAIL_*) or SMTP (SMTP_*) in `.env` and restart the API."
-        );
+        throw new Error("Mail is not configured — add Gmail OAuth (GMAIL_*) or SMTP (SMTP_*) in `.env` and restart the API.");
       }
-
       if (!json.ok || json.partial) {
         const detail =
           typeof json.error === "string"
@@ -1704,148 +1852,140 @@ export default function RfqEngine() {
             : json?.results?.filter((r) => !r.ok)?.[0]?.error || "Dispatch interrupted.";
         throw new Error(detail);
       }
-
-      for (let i = 0; i < messages.length; i++) {
-        const trade = resolveTradeLabel(messages[i].tradeId) || messages[i].tradeId;
-        const subj = String(messages[i].subject || "").trim();
-        const bodyText = typeof messages[i].body === "string" ? messages[i].body : "";
-        const email_body = `Subject: ${subj}\n\n${bodyText}`.trim();
-        const sentResult = json.results?.[i];
-        const msgId = sentResult?.messageId ? String(sentResult.messageId).replace(/^<|>$/g, "") : null;
-
-        // Update RFQ status + sent_message_id from the client — server-side update is
-        // skipped when SUPABASE_SERVICE_ROLE_KEY isn't set. Without status="sent" the
-        // IMAP reply matcher won't find the RFQ in its candidate query.
-        const rfqId = messagesWithIds[i].rfqId;
-        if (rfqId) {
-          try {
-            await sb.from("rfqs").update({
-              status: "sent",
-              sent_at: new Date().toISOString(),
-              ...(msgId ? { sent_message_id: msgId } : {})
-            }).eq("id", rfqId);
-          } catch (rfqErr) {
-            console.warn("[rfq-send] rfq status update", rfqErr?.message || rfqErr);
-          }
-        }
-
-        // Log outbound correspondence — but ONLY if the server didn't already (it does when it
-        // has the service-role key). Prevents duplicate correspondence rows; this client insert
-        // is the fallback for when the server couldn't log.
-        if (!sentResult?.serverLogged) {
-          try {
-            await sb.from("correspondence").insert({
-              job_id: persistence.job.id,
-              rfq_id: rfqId || null,
-              subcontractor_id: messages[i].subcontractor_id || null,
-              direction: "outbound",
-              subject: subj,
-              body: bodyText,
-              sent_at: new Date().toISOString(),
-              message_id: msgId,
-              logged_by: "rfq-send"
-            });
-          } catch (cErr) {
-            console.warn("[rfq-send] correspondence insert", cErr?.message || cErr);
-          }
-        }
-
+      const sentResult = json.results?.[0];
+      const msgId = sentResult?.messageId ? String(sentResult.messageId).replace(/^<|>$/g, "") : null;
+      const subj = String(message.subject || "").trim();
+      const bodyText = String(message.body || "");
+      if (rfqId) {
         try {
-          await authFetch("/api/dropbox/save-rfq-email-copy", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jobAddress: persistence.job.address,
-              trade,
-              businessName: messages[i].businessName || "UNKNOWN",
-              textBody: email_body
-            })
-          });
-        } catch {
-          /* optional */
-        }
-      }
-
-      const sentCount = messages.length;
-      const transport = json.transport || "mail";
-
-      // Build RFQ package and navigate to it
-      try {
-        const tradeGroups = {};
-        for (let i = 0; i < messages.length; i++) {
-          const msg = messages[i];
-          if (!tradeGroups[msg.tradeId]) {
-            const note = extraction.trade_notes?.[msg.tradeId] || emptyTradeNote();
-            const planRow = tradePlanById.get(msg.tradeId);
-            const scopeFromPlan = planRow?.scope_bullets?.length ? planRow.scope_bullets : bulletsFromTradeNote(note);
-            tradeGroups[msg.tradeId] = {
-              trade_id: msg.tradeId,
-              trade_label: tradeLabelUi(msg.tradeId),
-              scope_bullets: scopeFromPlan,
-              source: planRow?.source || "manual",
-              ai_enrichment: planRow?.ai_enrichment || [],
-              estimate_line_refs: planRow?.estimate_line_refs || [],
-              due_date: deadline || "",
-              recipients: []
-            };
-          }
-          tradeGroups[msg.tradeId].recipients.push({
-            subcontractor_id: msg.subcontractor_id || null,
-            business_name: msg.businessName || msg.to,
-            email: msg.to,
+          await sb.from("rfqs").update({
             status: "sent",
             sent_at: new Date().toISOString(),
-            email_subject: String(msg.subject || ""),
-            email_body: String(msg.body || ""),
-            subject_variant: msg.subjectVariant || "",
-            rfq_id: persistence.rfqIds[i] || null
-          });
+            ...(msgId ? { sent_message_id: msgId } : {})
+          }).eq("id", rfqId);
+        } catch (e) {
+          console.warn("[rfq-send-one] status", e?.message || e);
         }
-        const pkgRes = await authFetch("/api/rfq-packages", {
+      }
+      if (!sentResult?.serverLogged) {
+        try {
+          await sb.from("correspondence").insert({
+            job_id: persistence.job.id,
+            rfq_id: rfqId || null,
+            subcontractor_id: message.subcontractor_id || null,
+            direction: "outbound",
+            subject: subj,
+            body: bodyText,
+            sent_at: new Date().toISOString(),
+            message_id: msgId,
+            logged_by: "rfq-send"
+          });
+        } catch (e) {
+          console.warn("[rfq-send-one] correspondence", e?.message || e);
+        }
+      }
+      try {
+        await authFetch("/api/dropbox/save-rfq-email-copy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            job_id: persistence.job.id,
-            project_address: extraction.project_address || persistence.job.address || "",
-            project_type: extraction.project_type || "",
-            tender_deadline: deadline || "",
-            architect_client: extraction.architect_name || extraction.client_name || "",
-            dropbox_url: sharedJobDropboxUrl || "",
-            extraction_data: extraction,
-            pdf_meta: pdfItems.map((p) => ({ name: p.name, docType: p.docType })),
-            trade_scopes: Object.values(tradeGroups)
+            jobAddress: persistence.job.address,
+            trade: message.tradeLabel,
+            businessName: message.businessName || "UNKNOWN",
+            textBody: `Subject: ${subj}\n\n${bodyText}`.trim()
           })
         });
-        const pkgJson = await pkgRes.json().catch(() => null);
-        resetRfqSession();
-        if (pkgJson?.packageId) {
-          navigate(`/tender-manager/rfq-packages/${pkgJson.packageId}`);
-          return;
-        }
-      } catch (pkgErr) {
-        console.warn("[rfq-package] create failed, continuing", pkgErr);
+      } catch {
+        /* optional */
       }
-
-      resetRfqSession();
+      sendHappenedRef.current = true;
+      setOutbound((prev) =>
+        prev.map((r) =>
+          r.key === rowKey
+            ? { ...r, sent: true, sending: false, sendError: null, edited: true, sentAt: new Date().toISOString(), rfqId }
+            : r
+        )
+      );
       setBanner({
         variant: "success",
-        title: "RFQs dispatched",
-        body: `${sentCount} message(s) sent via ${transport} and logged in Supabase. Job ${persistence.job.id?.slice(0, 8) || ""}… — starting a fresh RFQ session.`
+        title: `Sent to ${row.subcontractor?.business_name || row.to}`,
+        body: ""
       });
+      return { ok: true };
     } catch (err) {
-      console.error("[send]", err);
+      console.error("[send-one]", err);
+      // Roll back the queued RFQ this attempt created so failed retries don't accumulate orphans.
       if (sb && persistence?.rfqIds?.length) {
         try {
           await sb.from("rfqs").delete().in("id", persistence.rfqIds).eq("status", "queued");
         } catch (delErr) {
-          console.warn("[send-cleanup]", delErr);
+          console.warn("[send-one-cleanup]", delErr);
         }
       }
+      setOutbound((prev) => prev.map((r) => (r.key === rowKey ? { ...r, sending: false, sendError: err?.message || String(err) } : r)));
       setBanner({
         variant: "error",
-        title: "Send failed",
+        title: `Send failed for ${row.subcontractor?.business_name || row.to}`,
         body: err?.message || String(err)
       });
+      return { ok: false };
+    } finally {
+      sendInFlightRef.current = false;
+    }
+  }, [deadline, supabaseConfigured, ensureJobContext]);
+
+  // When every non-blocked row is sent (after a real send), build the package + reset — exactly
+  // once. Reads `outbound` state so it is immune to the mirror-ref's render-lag.
+  useEffect(() => {
+    if (!sendHappenedRef.current) return;
+    if (packageFinalizingRef.current) return;
+    if (sendInFlightRef.current) return;
+    const rows = outbound.filter((r) => r && !r.blocked);
+    if (rows.length === 0 || !rows.every((r) => r.sent)) return;
+    packageFinalizingRef.current = true;
+    void finalizeAllSentPackage();
+  }, [outbound, finalizeAllSentPackage]);
+
+  const handleSend = async () => {
+    setBanner(null);
+    setCompletionLog(null);
+    if (!deadline) {
+      setBanner({ variant: "warning", title: "Pick a quote deadline first", body: "" });
+      return;
+    }
+    const rows = outbound.filter((row) => !row.blocked && !row.sent);
+    if (rows.length === 0) {
+      setBanner({
+        variant: "error",
+        title: "Nothing to send yet",
+        body: "Select trades with valid subcontractor contacts, or all drafts are already sent."
+      });
+      return;
+    }
+    if (!supabaseConfigured) {
+      setBanner({
+        variant: "error",
+        title: "Supabase not configured",
+        body: "Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY so RFQs can persist."
+      });
+      return;
+    }
+    setSendBusy(true);
+    try {
+      let okCount = 0;
+      // Sequential — matches the server transport and the project's no-Promise.all convention.
+      // The all-sent effect builds the package + resets once every row has gone.
+      for (const row of rows) {
+        const r = await sendOneRow(row.key);
+        if (r?.ok) okCount += 1;
+      }
+      if (okCount === 0) {
+        setBanner({
+          variant: "error",
+          title: "No RFQs were sent",
+          body: "Every attempt failed — check the error shown on each draft and try again."
+        });
+      }
     } finally {
       setSendBusy(false);
     }
@@ -2595,7 +2735,7 @@ export default function RfqEngine() {
                     skipNextAutoRebuildRef.current = false;
                     rebuildOutbound(true);
                   }}
-                  disabled={completionLog || sendBusy}
+                  disabled={completionLog || sendBusy || anySending}
                   className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
                   title="Re-run the email composer on every draft using the current scope and template"
                 >
@@ -2604,10 +2744,16 @@ export default function RfqEngine() {
                 <button
                   type="button"
                   onClick={() => handleSend()}
-                  disabled={completionLog || sendBusy || sendPayload.length === 0 || !deadline.trim()}
+                  disabled={completionLog || sendBusy || anySending || unsentPayload.length === 0 || !deadline.trim()}
                   className="rounded-lg bg-accent px-6 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {sendBusy ? "Sending…" : `Send ${sendPayload.length} RFQ emails`}
+                  {sendBusy
+                    ? "Sending…"
+                    : unsentPayload.length === 0
+                      ? "All RFQs sent"
+                      : unsentPayload.length < sendPayload.length
+                        ? `Send remaining ${unsentPayload.length}`
+                        : `Send ${unsentPayload.length} RFQ email${unsentPayload.length === 1 ? "" : "s"}`}
                 </button>
               </div>
             </div>
@@ -2641,7 +2787,8 @@ export default function RfqEngine() {
                       </div>
                       <label className="mt-4 block text-xs font-semibold uppercase text-muted">Subject</label>
                       <input
-                        className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm"
+                        disabled={row.sent}
+                        className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-page disabled:opacity-60"
                         value={row.subject}
                         onChange={(e) =>
                           setOutbound((prev) => updateRowBody(prev, row.key, "subject", e.target.value))
@@ -2650,7 +2797,8 @@ export default function RfqEngine() {
                       <label className="mt-3 block text-xs font-semibold uppercase text-muted">Body</label>
                       <textarea
                         rows={14}
-                        className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-mono leading-relaxed md:text-sm"
+                        disabled={row.sent}
+                        className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-mono leading-relaxed md:text-sm disabled:cursor-not-allowed disabled:bg-page disabled:opacity-60"
                         value={row.body}
                         onChange={(e) =>
                           setOutbound((prev) => updateRowBody(prev, row.key, "body", e.target.value))
@@ -2688,6 +2836,24 @@ export default function RfqEngine() {
                           />
                         </div>
                       )}
+
+                      <div className="mt-4 flex items-center justify-end gap-3 border-t border-hairline pt-3">
+                        {row.sendError ? <span className="text-xs text-danger">{row.sendError}</span> : null}
+                        {row.sent ? (
+                          <span className="text-xs font-semibold text-success" title={row.sentAt || ""}>
+                            ✓ Sent
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={row.sending || sendBusy || anySending || !deadline.trim()}
+                            onClick={() => void sendOneRow(row.key)}
+                            className="rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {row.sending ? "Sending…" : "Send this RFQ"}
+                          </button>
+                        )}
+                      </div>
                     </>
                   ) : row.blockReason?.includes("Subcontractors") ? (
                     <Link to="/tender-manager/subcontractors" className="mt-2 inline-block text-sm font-semibold text-primary underline">
