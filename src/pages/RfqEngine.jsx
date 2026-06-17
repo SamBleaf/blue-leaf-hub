@@ -311,10 +311,12 @@ function mergePreservingEdits(prevRows, freshRows) {
     };
   });
 
-  // Re-append any kept row the fresh set dropped (transient subs-empty / filter) so a typed or
-  // sent draft is never lost on a rebuild.
+  // Re-append a kept row the fresh set dropped ONLY if it was already SENT (a sent email is
+  // immutable). An edited-but-unsent row that the fresh set no longer contains means the user
+  // genuinely deselected that trade/recipient — honour the removal and drop it; otherwise a
+  // deselected trade's edited draft would be resurrected and emailed to that subcontractor.
   for (const [key, kept] of keepByKey) {
-    if (!seen.has(key)) merged.push(kept.sent ? kept : { ...kept, blocked: false, edited: true });
+    if (!seen.has(key) && kept.sent) merged.push(kept);
   }
   return merged;
 }
@@ -599,11 +601,17 @@ export default function RfqEngine() {
         // Sanitize transient per-send flags: a reload that happened mid-send must not restore a
         // row stuck on "Sending…" (its in-flight promise died with the old page). `sent`/`sentAt`/
         // `rfqId`/`edited` ARE kept — those are durable.
-        setOutbound(
-          parsed.outbound.map((r) =>
-            r && typeof r === "object" ? { ...r, sending: false, sendError: null } : r
-          )
+        const sanitizedOutbound = parsed.outbound.map((r) =>
+          r && typeof r === "object" ? { ...r, sending: false, sendError: null } : r
         );
+        setOutbound(sanitizedOutbound);
+        // If the page was reloaded AFTER every row was sent but BEFORE the package finished
+        // building, arm the all-sent effect so it completes the build + reset — otherwise the
+        // session is stuck on a fully-sent screen with no way to finalize.
+        const nonBlocked = sanitizedOutbound.filter((r) => r && !r.blocked);
+        if (nonBlocked.length > 0 && nonBlocked.every((r) => r.sent)) {
+          sendHappenedRef.current = true;
+        }
       }
 
       if (parsed.completionLog && typeof parsed.completionLog === "object") {
@@ -1651,6 +1659,7 @@ export default function RfqEngine() {
     setOutbound((prev) =>
       prev.map((row) => {
         if (row.key !== rowKey) return row;
+        if (row.sent) return row; // a sent row is immutable — never overwrite an emailed draft
         return {
           ...row,
           ...(subject ? { subject } : {}),
@@ -1669,7 +1678,10 @@ export default function RfqEngine() {
   // Create the Dropbox job folder + cache it so every per-row send (and the batch) reuses the
   // same context. Single-flight via the promise ref so concurrent first sends share one ensure.
   const ensureJobContext = useCallback(async () => {
-    if (jobContextRef.current && jobContextRef.current.finalDropboxUrl) return jobContextRef.current;
+    // Cache on the context's existence, not on a truthy URL — when Dropbox returns no link the
+    // first call still caches an empty-URL ctx so the remaining rows of a big batch don't each
+    // re-POST ensure-job-folders.
+    if (jobContextRef.current) return jobContextRef.current;
     if (jobContextPromiseRef.current) return jobContextPromiseRef.current;
     jobContextPromiseRef.current = (async () => {
       const addr = extraction.project_address?.trim();
@@ -1815,7 +1827,21 @@ export default function RfqEngine() {
       const ctx = await ensureJobContext();
       const finalDropboxUrl = ctx.finalDropboxUrl;
       const sigForSend = loadEmailSignature();
-      const body = String(row.body || "");
+      let body = String(row.body || "");
+      // The composer leaves a literal "[add Dropbox link]" placeholder when no folder URL existed
+      // at compose time. If a real URL is now available, inject it; otherwise warn rather than ship
+      // a broken documentation link silently (restores a guard the old batch handleSend had).
+      if (body.includes("[add Dropbox link]")) {
+        if (finalDropboxUrl) {
+          body = body.split("[add Dropbox link]").join(finalDropboxUrl);
+        } else {
+          setBanner({
+            variant: "warning",
+            title: "No Dropbox link in this RFQ",
+            body: "Dropbox was unavailable, so this draft still has a placeholder where the tender-documents link should be. Add the link to the body (or set up Dropbox) before sending if the subcontractor needs the documents."
+          });
+        }
+      }
       const message = {
         to: row.to,
         subject: String(row.subject || ""),
@@ -1853,9 +1879,35 @@ export default function RfqEngine() {
         throw new Error(detail);
       }
       const sentResult = json.results?.[0];
-      const msgId = sentResult?.messageId ? String(sentResult.messageId).replace(/^<|>$/g, "") : null;
       const subj = String(message.subject || "").trim();
       const bodyText = String(message.body || "");
+      if (sentResult?.skipped) {
+        // Server found this (job, subcontractor) was ALREADY sent — no email went out this attempt.
+        // The queued rfq we just inserted is a redundant duplicate: delete it and do NOT log
+        // correspondence again. Mark the row sent so the UI reflects reality (it WAS emailed before).
+        if (rfqId) {
+          try {
+            await sb.from("rfqs").delete().eq("id", rfqId).eq("status", "queued");
+          } catch (e) {
+            console.warn("[rfq-send-one] skip-cleanup", e?.message || e);
+          }
+        }
+        sendHappenedRef.current = true;
+        setOutbound((prev) =>
+          prev.map((r) =>
+            r.key === rowKey
+              ? { ...r, sent: true, sending: false, sendError: null, edited: true, sentAt: new Date().toISOString(), rfqId: null }
+              : r
+          )
+        );
+        setBanner({
+          variant: "success",
+          title: `Already sent to ${row.subcontractor?.business_name || row.to}`,
+          body: ""
+        });
+        return { ok: true };
+      }
+      const msgId = sentResult?.messageId ? String(sentResult.messageId).replace(/^<|>$/g, "") : null;
       if (rfqId) {
         try {
           await sb.from("rfqs").update({
@@ -2809,7 +2861,7 @@ export default function RfqEngine() {
                       <div className="mt-3 flex flex-wrap items-center gap-3">
                         <button
                           type="button"
-                          disabled={rfqQCBusy[row.key]}
+                          disabled={rfqQCBusy[row.key] || row.sent}
                           onClick={() => runRfqQC(row.key, row.subject, row.body)}
                           className="rounded-lg border border-hairline bg-page px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-[#2E6B4F] hover:text-[#2E6B4F] disabled:opacity-40"
                         >
