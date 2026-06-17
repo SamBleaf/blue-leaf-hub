@@ -1,7 +1,10 @@
 import { gmailSendConfigured, sendViaGmail } from "./gmailSend.mjs";
 import { getSmtpTransporter, smtpFromAddress, smtpReady } from "./smtpSend.mjs";
+import { resendSendConfigured, sendViaResend } from "./resendSend.mjs";
 
 export function mailTransportName() {
+  // Resend (HTTPS) is preferred when configured — not blocked by host egress, no OAuth token expiry.
+  if (resendSendConfigured()) return "resend";
   if (gmailSendConfigured()) return "gmail";
   if (smtpReady()) return "smtp";
   return null;
@@ -28,32 +31,43 @@ async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, head
 }
 
 export async function sendPlainMail(opts) {
-  const { to, cc, bcc, subject, text, html, attachments, headers } = opts;
-  if (gmailSendConfigured()) {
+  const errors = [];
+
+  // 1) Resend (HTTPS API) — preferred when configured. Survives host SMTP-port blocks and has no
+  //    OAuth token to expire. Only active once RESEND_API_KEY AND RESEND_FROM are both set.
+  if (resendSendConfigured()) {
     try {
-      await sendViaGmail({ to, cc, bcc, subject, text, html, attachments, headers });
-      return "gmail";
-    } catch (gmailErr) {
-      // Gmail OAuth can fail with invalid_grant (expired/revoked token). Rather than hard-fail
-      // the whole send, fall back to SMTP (the same connected account, via app password) when
-      // it's configured. Only re-throw if there's no working SMTP fallback.
-      console.warn("[mail] Gmail send failed, trying SMTP fallback:", gmailErr?.message || gmailErr);
-      try {
-        const viaSmtp = await sendViaSmtp(opts);
-        if (viaSmtp) return "smtp";
-      } catch (smtpErr) {
-        const e = new Error(
-          `Gmail send failed (${gmailErr?.message || gmailErr}) and the SMTP fallback also failed (${smtpErr?.message || smtpErr}).`
-        );
-        e.cause = gmailErr;
-        throw e;
-      }
-      throw gmailErr; // Gmail failed and no SMTP configured
+      const via = await sendViaResend(opts);
+      if (via) return "resend";
+    } catch (resendErr) {
+      console.warn("[mail] Resend send failed, trying Gmail/SMTP fallback:", resendErr?.message || resendErr);
+      errors.push(`Resend: ${resendErr?.message || resendErr}`);
     }
   }
-  const viaSmtp = await sendViaSmtp(opts);
-  if (viaSmtp) return "smtp";
+
+  // 2) Gmail OAuth. Can fail with invalid_grant (expired/revoked token) — fall through to SMTP.
+  if (gmailSendConfigured()) {
+    try {
+      await sendViaGmail(opts);
+      return "gmail";
+    } catch (gmailErr) {
+      console.warn("[mail] Gmail send failed, trying SMTP fallback:", gmailErr?.message || gmailErr);
+      errors.push(`Gmail: ${gmailErr?.message || gmailErr}`);
+    }
+  }
+
+  // 3) SMTP (same connected account, app password).
+  try {
+    const viaSmtp = await sendViaSmtp(opts);
+    if (viaSmtp) return "smtp";
+  } catch (smtpErr) {
+    errors.push(`SMTP: ${smtpErr?.message || smtpErr}`);
+  }
+
+  if (errors.length) {
+    throw new Error(`All configured mail transports failed — ${errors.join("; ")}.`);
+  }
   throw new Error(
-    "No mail transport configured. Add Gmail OAuth vars (GMAIL_*) or SMTP_* in `.env`."
+    "No mail transport configured. Add RESEND_API_KEY + RESEND_FROM (recommended), Gmail OAuth (GMAIL_*), or SMTP_* in `.env`."
   );
 }
