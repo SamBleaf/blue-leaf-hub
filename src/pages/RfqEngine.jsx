@@ -272,7 +272,34 @@ function formatDeadlineDisplay(isoDate) {
 }
 
 function updateRowBody(rows, key, field, value) {
-  return rows.map((row) => (row.key === key ? { ...row, [field]: value } : row));
+  // Mark the row as edited so no auto-rebuild ever re-composes over the user's changes.
+  return rows.map((row) => (row.key === key ? { ...row, [field]: value, edited: true } : row));
+}
+
+/**
+ * Re-compose outbound rows (add/remove trades + recipients) WITHOUT clobbering any draft the
+ * user has manually edited. Edited rows keep their subject/body/html by key. The single source
+ * of truth for every rebuild path — only an explicit force (Regenerate button) bypasses it.
+ */
+function mergePreservingEdits(prevRows, freshRows) {
+  const editedByKey = new Map(
+    (Array.isArray(prevRows) ? prevRows : [])
+      .filter((r) => r && r.edited && !r.blocked)
+      .map((r) => [r.key, r])
+  );
+  if (editedByKey.size === 0) return freshRows;
+  return freshRows.map((row) => {
+    const kept = editedByKey.get(row.key);
+    if (!kept || row.blocked) return row;
+    return {
+      ...row,
+      subject: kept.subject,
+      body: kept.body,
+      html: kept.html,
+      subjectVariant: kept.subjectVariant,
+      edited: true
+    };
+  });
 }
 
 function normalizeTradeIdForSession(id) {
@@ -751,17 +778,20 @@ export default function RfqEngine() {
     skipNextAutoRebuildRef.current = false;
   };
 
-  const rebuildOutbound = useCallback(() => {
-    setOutbound(
-      buildOutboundRows({
+  const rebuildOutbound = useCallback((force = false) => {
+    setOutbound((prev) => {
+      const fresh = buildOutboundRows({
         selectedTrades,
         tradeRecipients,
         subcontractors: subcontractorsRef.current,
         extraction,
         deadline,
         sharedDropboxUrl: sharedJobDropboxUrl
-      })
-    );
+      });
+      // Auto-rebuilds (trade/recipient/deadline/contact changes) preserve edits; only the
+      // explicit "Regenerate emails" button (force=true) wipes them.
+      return force === true ? fresh : mergePreservingEdits(prev, fresh);
+    });
   }, [selectedTrades, tradeRecipients, extraction, sharedJobDropboxUrl, deadline]);
 
   useEffect(() => {
@@ -1473,15 +1503,18 @@ export default function RfqEngine() {
       }
 
       const finalUrl = dropboxUrl.trim();
-      setOutbound(
-        buildOutboundRows({
-          selectedTrades,
-          tradeRecipients,
-          subcontractors: subcontractorsRef.current,
-          extraction,
-          deadline,
-          sharedDropboxUrl: finalUrl
-        })
+      setOutbound((prev) =>
+        mergePreservingEdits(
+          prev,
+          buildOutboundRows({
+            selectedTrades,
+            tradeRecipients,
+            subcontractors: subcontractorsRef.current,
+            extraction,
+            deadline,
+            sharedDropboxUrl: finalUrl
+          })
+        )
       );
       setActiveStep(4);
     } finally {
@@ -1511,7 +1544,8 @@ export default function RfqEngine() {
         return {
           ...row,
           ...(subject ? { subject } : {}),
-          body
+          body,
+          edited: true
         };
       })
     );
@@ -2533,7 +2567,7 @@ export default function RfqEngine() {
                       return;
                     }
                     skipNextAutoRebuildRef.current = false;
-                    rebuildOutbound();
+                    rebuildOutbound(true);
                   }}
                   disabled={completionLog || sendBusy}
                   className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
@@ -2560,8 +2594,16 @@ export default function RfqEngine() {
                     row.blocked ? "border-danger/60 bg-danger/5" : "border-hairline bg-page"
                   }`}
                 >
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                    {resolveTradeLabel(row.tradeId) || row.tradeId}
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    <span>{resolveTradeLabel(row.tradeId) || row.tradeId}</span>
+                    {row.edited ? (
+                      <span
+                        className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-accent"
+                        title="You've edited this draft. It auto-saves and will NOT be re-generated over when you change trades, recipients or contact details."
+                      >
+                        ✏️ Edited — saved
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mt-2 text-lg font-semibold text-primary">
                     {row.subcontractor?.business_name || row.blockReason || "—"}
