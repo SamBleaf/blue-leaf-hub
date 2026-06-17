@@ -59,6 +59,7 @@ import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
 import { registerProcurementRoutes } from "./lib/procurementRoutes.mjs";
 import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
+import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 
@@ -797,6 +798,7 @@ registerWhsEngineRoutes(app);
 registerCarpentryRoutes(app);
 registerProcurementRoutes(app);
 registerFactsRoutes(app);
+registerControlTowerRoutes(app);
 
 app.get("/api/health",(_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
@@ -1716,14 +1718,25 @@ app.post("/api/rfq/send", async (req, res) => {
           error: e?.message || "Send failed"
         });
         const detail = `${to}: ${results.at(-1)?.error}`;
+        const sentOk = results.filter((r) => r.ok).length;
+        const isAuth = /invalid_grant|invalid_token|unauthorized|invalid_client|token/i.test(
+          results.at(-1)?.error || ""
+        );
+        const summary =
+          sentOk > 0
+            ? `Stopped after a send failure (${detail}). ${sentOk} message(s) sent before it; the remaining were NOT sent.`
+            : isAuth
+              ? `No emails were sent — the mail account could not authenticate (${detail}). This is usually an expired Gmail token: re-run \`npm run auth:gmail\`, update GMAIL_REFRESH_TOKEN, then retry.`
+              : `No emails were sent — the first message failed (${detail}).`;
         return res.status(502).json({
           ok: false,
           mail_ready: true,
           smtp_ready: smtpReady(),
           gmail_ready: gmailSendConfigured(),
           transport,
-          error: `Stopped after send failure (${detail}). Earlier messages were sent.`,
-          partial: true,
+          error: summary,
+          sentCount: sentOk,
+          partial: sentOk > 0,
           results
         });
       }

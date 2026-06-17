@@ -2,7 +2,7 @@ import { authFetch } from "../lib/authFetch.js";
 import { apiPost, apiPatch } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { composeRfqEmail } from "../lib/rfqComposer";
+import { composeRfqEmail, plainBodyToHtml } from "../lib/rfqComposer";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import {
   normalizeTradeKey,
@@ -1590,30 +1590,37 @@ export default function RfqEngine() {
         });
       }
 
-      const freshRows = buildOutboundRows({
-        selectedTrades,
-        tradeRecipients,
-        subcontractors,
-        extraction,
-        deadline,
-        sharedDropboxUrl: finalDropboxUrl
+      // Send the user's EDITED drafts exactly as shown in the editor. Never re-compose from
+      // scratch here — that silently discarded every manual edit (subject + body) the user made.
+      // Regenerate the HTML part from the edited plain-text body so the HTML the server prefers
+      // matches the edits (editing the body via the textarea does not touch row.html).
+      const sigForSend = loadEmailSignature();
+      const messages = readyMessages.map((row) => {
+        const body = String(row.body || "");
+        return {
+          to: row.to,
+          subject: String(row.subject || ""),
+          subjectVariant: row.subjectVariant,
+          body,
+          html: body.trim() ? plainBodyToHtml(body, sigForSend.logoDataUrl) : row.html,
+          tradeId: row.tradeId,
+          subcontractor_id: row.subcontractor_id,
+          businessName: row.subcontractor?.business_name?.trim() || "",
+          tradeLabel: resolveTradeLabel(row.tradeId) || row.tradeId
+        };
       });
-      const readyFresh = freshRows.filter((row) => !row.blocked);
-      if (readyFresh.length === 0) {
+      if (messages.length === 0) {
         throw new Error("No sendable messages — check recipients and project address.");
       }
-
-      const messages = readyFresh.map((row) => ({
-        to: row.to,
-        subject: row.subject,
-        subjectVariant: row.subjectVariant,
-        body: row.body,
-        html: row.html,
-        tradeId: row.tradeId,
-        subcontractor_id: row.subcontractor_id,
-        businessName: row.subcontractor?.business_name?.trim() || "",
-        tradeLabel: resolveTradeLabel(row.tradeId) || row.tradeId
-      }));
+      if (finalDropboxUrl && messages.some((m) => !m.body.includes(finalDropboxUrl))) {
+        // Dropbox folder was (re)created at send time and a draft predates it — surface it
+        // rather than silently sending a draft without the tender-documents link.
+        setBanner({
+          variant: "warning",
+          title: "Some drafts may not contain the latest Dropbox link",
+          body: "The tender folder link was created/updated after these drafts were composed. Re-check the drafts, or click Regenerate emails if you want them refreshed."
+        });
+      }
 
       const privateRootGuess = jobProjectsInternalPath(addr);
       persistence = await persistRfqs(messages, {
