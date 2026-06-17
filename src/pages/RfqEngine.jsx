@@ -1040,7 +1040,9 @@ export default function RfqEngine() {
       const plan = json.merged_plan || [];
       setTradePlan(plan);
       setTradeIntelSummary(json.estimate_summary || null);
-      setSelectedTrades(defaultSelectedTradeIds(plan));
+      // Only auto-select on the FIRST extraction. A re-extract must NOT wipe a selection the
+      // user has already curated.
+      setSelectedTrades((prev) => (prev && prev.size > 0 ? prev : defaultSelectedTradeIds(plan)));
       for (const row of plan) {
         if (row.trade_id) registerAdHocTrade(row.trade_id, row.trade_label);
       }
@@ -2109,6 +2111,20 @@ export default function RfqEngine() {
             <button
               type="button"
               onClick={() => {
+                const hasWork =
+                  selectedTrades.size > 0 ||
+                  outbound.some((r) => r && r.edited) ||
+                  Object.values(extraction?.trade_notes || {}).some(
+                    (n) => n && ((n.scope_summary || "").trim() || (n.specific_items || []).length)
+                  );
+                if (
+                  hasWork &&
+                  !window.confirm(
+                    "Skip extraction and start manual entry?\n\nThis clears the current extracted scope, your trade selection and recipients — and any drafts you've edited will be lost. Continue?"
+                  )
+                ) {
+                  return;
+                }
                 setExtraction(coerceExtraction(null));
                 setSelectedTrades(new Set());
                 setTradeRecipients({});

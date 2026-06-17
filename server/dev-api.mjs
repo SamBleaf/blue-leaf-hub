@@ -1671,6 +1671,28 @@ app.post("/api/rfq/send", async (req, res) => {
         });
       }
 
+      // Idempotency guard — never re-email a subcontractor who already has a SENT rfq for this
+      // job. Prevents double-sends when the user retries a send after a partial failure.
+      const jobIdM = String(m?.jobId || "").trim();
+      const subIdM = String(m?.subcontractor_id || "").trim();
+      if (sb && jobIdM && subIdM) {
+        try {
+          const { data: prior } = await sb
+            .from("rfqs")
+            .select("id")
+            .eq("job_id", jobIdM)
+            .eq("subcontractor_id", subIdM)
+            .eq("status", "sent")
+            .limit(1);
+          if (prior && prior.length) {
+            results.push({ ok: true, to, skipped: true });
+            continue;
+          }
+        } catch (idemErr) {
+          console.warn("[rfq-send] idempotency check", idemErr?.message || idemErr);
+        }
+      }
+
       try {
         const msgId = generateOutboundMessageId();
         const headers = { "Message-ID": msgId };
