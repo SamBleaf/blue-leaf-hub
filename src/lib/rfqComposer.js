@@ -221,7 +221,7 @@ export function composeRfqEmail({
   parts.push("");
   parts.push(`We are seeking your quotation for the ${label} package at ${addr}.`);
   parts.push("");
-  parts.push("The package generally includes:");
+  parts.push("The package generally includes but not limited to:");
   scopeBullets.forEach((b) => parts.push(`• ${b}`));
   parts.push("");
   parts.push("Please refer to the project documentation for the full extent of works.");
