@@ -175,10 +175,24 @@ export function registerRfqPackageRoutes(app) {
         } catch (e) { console.warn("[tender/prefill] estimate:", e?.message || e); }
       }
 
+      // Resume support: the full extraction + any RFQs already on the job, so the RFQ Engine
+      // can rehydrate a session straight from the DB (not the browser's localStorage) and jump
+      // to dispatch. existingRfqs lets the engine lock already-sent trades so they're never re-sent.
+      let existingRfqs = [];
+      if (useJobId) {
+        const { data: rfqRows } = await s
+          .from("rfqs")
+          .select("trade, subcontractor_id, status, sent_at, deadline")
+          .eq("job_id", useJobId);
+        existingRfqs = rowsToCamel(rfqRows || []);
+      }
+
       return ok(res, {
         prefill: {
           leadId: leadId || null,
           jobId: useJobId,
+          extractedData: job?.extracted_data || null,
+          existingRfqs,
           projectAddress: job?.address || lead?.site_address || null,
           projectType,
           architectClient: job?.architect_name || null,

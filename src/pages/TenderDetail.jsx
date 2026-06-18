@@ -951,6 +951,16 @@ export default function TenderDetail() {
             {scanResult && (
               <span className="text-xs text-muted">{scanResult}</span>
             )}
+            {!readOnly && job.status === "tendering" && (
+              <button
+                type="button"
+                onClick={() => navigate(`/tender-manager/rfq-engine?jobId=${jobId}&resume=4`)}
+                title="Reopen the RFQ Engine for this job at the dispatch step, with scope and recipients loaded — already-sent RFQs stay locked"
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:opacity-95"
+              >
+                Resume RFQ Engine →
+              </button>
+            )}
             <button
               type="button"
               onClick={scanInbox}

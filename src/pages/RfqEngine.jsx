@@ -512,6 +512,10 @@ export default function RfqEngine() {
   const [tradePlan, setTradePlan] = useState([]);
   const [tradeIntelSummary, setTradeIntelSummary] = useState(null);
   const [tradeIntelBusy, setTradeIntelBusy] = useState(false);
+  /** Set when entered with ?jobId=&resume= — rehydrate the whole session from the job's saved
+   *  scope + RFQs once subcontractors have loaded, then jump to dispatch. */
+  const [pendingResume, setPendingResume] = useState(null);
+  const resumeAppliedRef = useRef(false);
 
   useEffect(() => {
     extractionJobIdRef.current = extractionJobId;
@@ -687,6 +691,21 @@ export default function RfqEngine() {
       .then((j) => {
         const p = j?.prefill;
         if (!p) return;
+        // Resume path (?resume=4 from the job's "Resume RFQ Engine" button): rehydrate the whole
+        // session from the job's saved scope + RFQs rather than doing a shallow empty-field prefill.
+        // Deferred to a dedicated effect so it can wait for the subcontractor list to load.
+        const wantResume = searchParams.get("resume");
+        if (wantResume && p.extractedData) {
+          setPendingResume({
+            extractedData: p.extractedData,
+            existingRfqs: Array.isArray(p.existingRfqs) ? p.existingRfqs : [],
+            jobId: p.jobId || jobId,
+            deadline: p.tenderDeadline || "",
+            dropboxUrl: p.dropboxUrl || "",
+            landStep: wantResume === "3" ? 3 : 4,
+          });
+          return;
+        }
         setExtraction((prev) => ({
           ...prev,
           project_address: prev.project_address || p.projectAddress || "",
@@ -718,6 +737,96 @@ export default function RfqEngine() {
       })
       .catch(() => {});
   }, [searchParams]);
+
+  // Apply a DB-sourced resume once subcontractors are loaded: seed extraction, trades, recipients
+  // and pre-built drafts, lock already-sent trades so they can never be re-emailed, then land on
+  // the dispatch step. Mirrors the localStorage restore path but sources state from the job row.
+  useEffect(() => {
+    if (!pendingResume || resumeAppliedRef.current) return;
+    if (subsLoadState !== "ready") return; // need the contact pool before building recipients/drafts
+    resumeAppliedRef.current = true;
+
+    const { extractedData, existingRfqs, jobId: rJobId, deadline: rDeadline, dropboxUrl, landStep } = pendingResume;
+    const ext = coerceExtraction(extractedData);
+    setExtraction(ext);
+    if (rJobId) {
+      setExtractionJobId(rJobId);
+      extractionJobIdRef.current = rJobId;
+    }
+
+    // Map persisted RFQ trade labels back to canonical slugs.
+    const labelToSlug = new Map(RFQ_TRADE_ORDER.map((slug) => [resolveTradeLabel(slug).toLowerCase(), slug]));
+    const rfqSlug = (label) => {
+      const s = String(label || "").toLowerCase().trim();
+      return labelToSlug.get(s) || (RFQ_TRADE_ORDER.includes(s) ? s : null);
+    };
+    const rfqByTrade = new Map(); // slug -> [{ subId, sent }]
+    for (const r of existingRfqs) {
+      const slug = rfqSlug(r.trade);
+      if (!slug) continue;
+      if (!rfqByTrade.has(slug)) rfqByTrade.set(slug, []);
+      rfqByTrade.get(slug).push({ subId: r.subcontractorId || null, sent: r.status === "sent" || !!r.sentAt });
+    }
+
+    // Trades to work: anything with scope in the saved extraction, plus anything already RFQ'd.
+    const scoped = RFQ_TRADE_ORDER.filter((id) => bulletsFromTradeNote(ext.trade_notes?.[id]).length > 0);
+    const trades = new Set([...scoped, ...rfqByTrade.keys()]);
+    setSelectedTrades(new Set(trades));
+
+    // Recipients: existing RFQ recipients first, then auto-suggested contacts with an email.
+    const recips = {};
+    for (const tid of trades) {
+      const existing = (rfqByTrade.get(tid) || []).map((x) => x.subId).filter(Boolean);
+      const pool = subcontractorsForTrade(tid, subcontractorsRef.current, 9999)
+        .filter((sub) => sub.email?.trim())
+        .map((sub) => sub.id);
+      recips[tid] = [...new Set([...existing, ...pool])];
+    }
+    setTradeRecipients(recips);
+
+    if (rDeadline) setDeadline((cur) => cur || rDeadline);
+    if (dropboxUrl) setSharedJobDropboxUrl((cur) => cur || dropboxUrl);
+
+    // Pre-build drafts now — the step-4 edit-lock blocks the auto-rebuild effect, so nothing else
+    // will compose them. Then lock rows whose (trade, subcontractor) already has a sent RFQ.
+    const fresh = buildOutboundRows({
+      selectedTrades: trades,
+      tradeRecipients: recips,
+      subcontractors: subcontractorsRef.current,
+      extraction: ext,
+      deadline: rDeadline || "",
+      sharedDropboxUrl: dropboxUrl || ""
+    });
+    const sentKeys = new Set();
+    for (const [slug, list] of rfqByTrade) {
+      for (const x of list) if (x.sent && x.subId) sentKeys.add(`${slug}:${x.subId}`);
+    }
+    const marked = fresh.map((row) =>
+      sentKeys.has(row.key)
+        ? { ...row, sent: true, sending: false, sendError: null, edited: true, sentAt: row.sentAt || new Date().toISOString() }
+        : row
+    );
+    setOutbound(marked);
+
+    // Land on the requested step, but never strand the user on an empty dispatch screen.
+    const hasDraftable = marked.some((r) => !r.blocked && !r.sent);
+    const land = landStep >= 4 && !hasDraftable ? 3 : landStep;
+    setActiveStep(land);
+    highestStepRef.current = Math.max(highestStepRef.current, land);
+    // Stop the auto-rebuild + subs-load effects from overwriting the drafts we just built.
+    skipNextAutoRebuildRef.current = true;
+    suppressNextSubsRebuildRef.current = true;
+    // Deliberately NOT setting sendHappenedRef — keeps the all-sent finalizer from firing on load.
+
+    setBanner({
+      variant: "success",
+      title: "Resumed from saved tender data",
+      body: hasDraftable
+        ? `Loaded scope for ${trades.size} trade(s). Already-sent RFQs are locked — review the remaining drafts and send.`
+        : "Every trade for this job has already been sent — nothing remaining to dispatch."
+    });
+    setPendingResume(null);
+  }, [pendingResume, subsLoadState]);
 
   // Building-facts prefill — once a job is known, seed floor area / storeys /
   // building specs from the canonical project_metrics so they aren't re-keyed.
