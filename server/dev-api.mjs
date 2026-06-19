@@ -1659,6 +1659,26 @@ app.post("/api/rfq/send", async (req, res) => {
       const subject = m?.subject?.trim();
       const body = m?.body;
       const html = m?.html;
+      // Optional PDF attachments (e.g. architectural plans, for subbies who don't use Dropbox).
+      // Client sends base64; decode to Buffers and cap total ~22MB to stay under provider limits.
+      let attachments;
+      if (Array.isArray(m?.attachments) && m.attachments.length) {
+        let totalBytes = 0;
+        attachments = m.attachments
+          .map((a) => {
+            const buf = Buffer.from(String(a?.contentBase64 || ""), "base64");
+            totalBytes += buf.length;
+            return { filename: a?.filename || "document.pdf", content: buf, mimeType: a?.mimeType || "application/pdf" };
+          })
+          .filter((a) => a.content.length > 0);
+        if (totalBytes > 22 * 1024 * 1024) {
+          return res.status(413).json({
+            ok: false, mail_ready: true, transport,
+            error: `Attachments too large (${(totalBytes / 1048576).toFixed(1)} MB) — keep under 22 MB or rely on the Dropbox link.`,
+            results
+          });
+        }
+      }
       if (!to || !subject || typeof body !== "string") {
         return res.status(400).json({
           ok: false,
@@ -1701,7 +1721,8 @@ app.post("/api/rfq/send", async (req, res) => {
           subject,
           text: body,
           html: typeof html === "string" && html.trim() ? html.trim() : undefined,
-          headers
+          headers,
+          attachments
         });
         let jobId = String(m.jobId || "").trim();
         const rfqId = String(m.rfqId || "").trim();

@@ -498,6 +498,10 @@ export default function RfqEngine() {
   const [subcontractors, setSubcontractors] = useState([]);
   const [subsLoadState, setSubsLoadState] = useState("idle");
   const [outbound, setOutbound] = useState([]);
+  /** Attach plan PDFs to each RFQ email (for subbies who don't use Dropbox). */
+  const [attachPlans, setAttachPlans] = useState(false);
+  const [attachDocIds, setAttachDocIds] = useState(() => new Set());
+  const planAttachmentsRef = useRef(null); // cached base64 attachments; cleared when the selection changes
   const [completionLog, setCompletionLog] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [rfqQC, setRfqQC] = useState({});
@@ -1970,6 +1974,43 @@ export default function RfqEngine() {
     });
   }, [outbound, extraction, deadline, sharedJobDropboxUrl, pdfItems, tradePlan, tradePlanById, resetRfqSession, navigate]);
 
+  // Build the base64-encoded PDF attachments (selected plan documents) once per send batch.
+  // Cached in planAttachmentsRef so a 20-recipient send doesn't re-read + re-encode the same
+  // files 20×; the cache is cleared whenever the toggle or selection changes. Returns undefined
+  // when nothing is selected so the dispatch payload simply omits `attachments`.
+  const getPlanAttachments = useCallback(async () => {
+    if (!attachPlans || attachDocIds.size === 0) return undefined;
+    if (planAttachmentsRef.current) return planAttachmentsRef.current;
+    const items = pdfItems.filter((it) => attachDocIds.has(it.id));
+    if (items.length === 0) return undefined;
+    const out = [];
+    try {
+      const stored = await getPdfs(RFQ_ENGINE_PDF_SCOPE);
+      // Sequential — IndexedDB + base64 of large PDFs is CPU-heavy; don't Promise.all.
+      for (const it of items) {
+        let file = null;
+        try {
+          file = await resolvePdfItemFile(it, RFQ_ENGINE_PDF_SCOPE, stored);
+        } catch (e) {
+          console.warn("[rfq attach] missing file", it?.name, e?.message || e);
+          continue;
+        }
+        if (!file) continue;
+        const contentBase64 = await fileToBase64(file);
+        if (!contentBase64) continue;
+        out.push({
+          filename: it.name || file.name || "document.pdf",
+          contentBase64,
+          mimeType: file.type || "application/pdf"
+        });
+      }
+    } catch (e) {
+      console.warn("[rfq attach]", e?.message || e);
+    }
+    planAttachmentsRef.current = out.length ? out : undefined;
+    return planAttachmentsRef.current;
+  }, [attachPlans, attachDocIds, pdfItems]);
+
   // Send ONE row. Reuses the exact persist + dispatch pipeline as the batch for a 1-element
   // messages array, and mutates ONLY this row's status — siblings are never rebuilt or reloaded.
   const sendOneRow = useCallback(async (rowKey) => {
@@ -2028,10 +2069,13 @@ export default function RfqEngine() {
         sharedRoot: ctx.sharedRoot
       });
       const rfqId = persistence.rfqIds[0];
+      const attachments = await getPlanAttachments();
       const res = await authFetch("/api/rfq/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ ...message, jobId: persistence.job.id, rfqId }] })
+        body: JSON.stringify({
+          messages: [{ ...message, jobId: persistence.job.id, rfqId, ...(attachments ? { attachments } : {}) }]
+        })
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json) {
@@ -2153,7 +2197,7 @@ export default function RfqEngine() {
     } finally {
       sendInFlightRef.current = false;
     }
-  }, [deadline, supabaseConfigured, ensureJobContext]);
+  }, [deadline, supabaseConfigured, ensureJobContext, getPlanAttachments]);
 
   // When every non-blocked row is sent (after a real send), build the package + reset — exactly
   // once. Reads `outbound` state so it is immune to the mirror-ref's render-lag.
@@ -2978,6 +3022,87 @@ export default function RfqEngine() {
                 </button>
               </div>
             </div>
+
+            {pdfItems.length > 0 ? (
+              <div className="mt-6 rounded-xl border border-hairline bg-page p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={attachPlans}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      planAttachmentsRef.current = null;
+                      setAttachPlans(on);
+                      // First time on, default to attaching every uploaded plan PDF.
+                      if (on && attachDocIds.size === 0) {
+                        setAttachDocIds(new Set(pdfItems.map((it) => it.id)));
+                      }
+                    }}
+                    className="mt-0.5 rounded border-hairline text-accent focus:ring-accent"
+                  />
+                  <span>
+                    <span className="text-sm font-bold text-primary">Attach plans to each email</span>
+                    <span className="mt-1 block text-xs text-muted">
+                      Sends the selected PDFs as attachments so subbies who don&apos;t use Dropbox can open the plans
+                      directly. The Dropbox link is still included. Keep the total under ~22&nbsp;MB.
+                    </span>
+                  </span>
+                </label>
+
+                {attachPlans ? (
+                  <>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      {pdfItems.map((it) => {
+                        const on = attachDocIds.has(it.id);
+                        const mb = (it.size || 0) / (1024 * 1024);
+                        return (
+                          <label
+                            key={it.id}
+                            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                              on ? "border-accent bg-accent/10" : "border-hairline bg-surface"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => {
+                                planAttachmentsRef.current = null;
+                                setAttachDocIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(it.id)) next.delete(it.id);
+                                  else next.add(it.id);
+                                  return next;
+                                });
+                              }}
+                              className="rounded border-hairline text-accent focus:ring-accent"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-semibold text-ink">{it.name}</span>
+                              <span className="text-[10px] uppercase tracking-wide text-muted">
+                                {(it.docType || "other").replace(/_/g, " ")} · {mb < 0.1 ? "<0.1" : mb.toFixed(1)} MB
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {(() => {
+                      const bytes = pdfItems
+                        .filter((it) => attachDocIds.has(it.id))
+                        .reduce((s, it) => s + (it.size || 0), 0);
+                      const mb = bytes / (1024 * 1024);
+                      const over = mb > 22;
+                      return (
+                        <p className={`mt-3 text-xs font-semibold ${over ? "text-danger" : "text-muted"}`}>
+                          {attachDocIds.size} file{attachDocIds.size === 1 ? "" : "s"} selected · {mb.toFixed(1)} MB
+                          {over ? " — over the 22 MB limit; deselect some files or rely on the Dropbox link." : ""}
+                        </p>
+                      );
+                    })()}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="mt-6 space-y-4">
               {outbound.map((row) => (
