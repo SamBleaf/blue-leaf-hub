@@ -238,7 +238,7 @@ function ApprovalsTab({ role }) {
                       <p className="font-medium text-ink">{ts.employees?.name}</p>
                       <p className="text-xs text-muted">{ts.employees?.trade}</p>
                     </td>
-                    <td className="px-3 py-3 text-muted">{ts.projects?.address || "—"}</td>
+                    <td className="px-3 py-3 text-muted">{ts.carpentry_jobs ? <span>{ts.carpentry_jobs.address || ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.reference})</span></span> : (ts.projects?.address || "—")}</td>
                     <td className="px-3 py-3 text-muted">{fmtDate(ts.date)}</td>
                     <td className="px-3 py-3 text-right">{totalHrs}h</td>
                     {isDirector && (

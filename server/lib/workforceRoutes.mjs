@@ -562,7 +562,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade, hourly_rate, overtime_multiplier), projects(id, address), carpentry_jobs(id, reference, client_name), timesheet_entries(*)")
+      .select("*, employees(id, name, trade, hourly_rate, overtime_multiplier), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
       .eq("status", "submitted")
       .order("submitted_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -574,7 +574,7 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { status, employee_id, project_id, date_from, date_to } = req.query;
     let q = sb.from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name), timesheet_entries(*)")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
       .order("date", { ascending: false });
     if (status) q = q.eq("status", status);
     if (employee_id) q = q.eq("employee_id", employee_id);

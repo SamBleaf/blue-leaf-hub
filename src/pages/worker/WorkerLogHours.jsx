@@ -99,6 +99,7 @@ export default function WorkerLogHours() {
             hours: Number(e.hours) || 8,
             notes: e.notes || "",
             completion_photo_url: e.completion_photo_url || "",
+            manuallyEdited: true,
           })));
           if (ts.project_id) setSelectedId(ts.project_id);
           else if (ts.carpentry_job_id) setSelectedId(ts.carpentry_job_id);
@@ -119,6 +120,26 @@ export default function WorkerLogHours() {
   const overHrs = totalHours - standardHours;
   const hoursWarning = overHrs > 2 ? "red" : overHrs > 0.5 ? "amber" : null;
 
+  // Even-split standard hours across selected tasks (nearest 0.5h, remainder on the last task).
+  function fairSplit(total, count) {
+    if (count <= 0) return [];
+    const per = Math.max(0.5, Math.round((total / count) * 2) / 2);
+    const arr = Array(count).fill(per);
+    const last = Math.round((total - per * (count - 1)) * 2) / 2;
+    arr[count - 1] = last >= 0.5 ? last : per;
+    return arr;
+  }
+  // Re-split the standard day across tasks the worker has NOT hand-edited; edited tasks keep theirs.
+  function redistribute(list) {
+    const manualSum = list.filter(e => e.manuallyEdited).reduce((s, e) => s + Number(e.hours || 0), 0);
+    const autoIdx = list.map((e, i) => (e.manuallyEdited ? -1 : i)).filter(i => i >= 0);
+    const split = fairSplit(Math.max(0, standardHours - manualSum), autoIdx.length);
+    return list.map((e, i) => {
+      const k = autoIdx.indexOf(i);
+      return k === -1 ? e : { ...e, hours: split[k] };
+    });
+  }
+
   function addTask(task) {
     const existing = entries.findIndex(e => e.task_category === task.value);
     if (existing !== -1) {
@@ -126,7 +147,7 @@ export default function WorkerLogHours() {
       removeEntry(existing);
       return;
     }
-    setEntries(prev => [...prev, { task_category: task.value, label: task.label, hours: standardHours, notes: "", completion_photo_url: "" }]);
+    setEntries(prev => redistribute([...prev, { task_category: task.value, label: task.label, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
   }
   function patchEntry(idx, patch) {
     setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
@@ -134,13 +155,13 @@ export default function WorkerLogHours() {
   function setEntryHours(idx, val) {
     const n = Number(val);
     if (!n || n <= 0) return; // ignore empty/zero — keeps the previous value
-    patchEntry(idx, { hours: Math.min(24, n) });
+    patchEntry(idx, { hours: Math.min(24, n), manuallyEdited: true });
   }
   function bumpHours(idx, delta) {
-    setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, hours: Math.max(0.5, Math.min(24, Number(e.hours || 0) + delta)) } : e)));
+    setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, hours: Math.max(0.5, Math.min(24, Number(e.hours || 0) + delta)), manuallyEdited: true } : e)));
   }
   function removeEntry(idx) {
-    setEntries(prev => prev.filter((_, i) => i !== idx));
+    setEntries(prev => redistribute(prev.filter((_, i) => i !== idx)));
     setExpandedIdx(null);
   }
   function openPhotoFor(idx) {
