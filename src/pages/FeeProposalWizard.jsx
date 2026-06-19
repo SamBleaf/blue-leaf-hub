@@ -337,7 +337,7 @@ export default function FeeProposalWizard() {
     try {
       const b64 = await fileToBase64(file);
       const url = ext.endsWith(".pdf") ? "/api/fee-proposal/parse-pdf" : "/api/fee-proposal/parse-xlsx";
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataBase64: b64, filename: file.name })
