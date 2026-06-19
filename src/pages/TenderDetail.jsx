@@ -102,6 +102,42 @@ function CorrespondenceBlock({ rfq, rows, readOnly, onLog }) {
               </button>
             </div>
           ) : null}
+          {(() => {
+            // Roll-up: every attachment received across this trade's correspondence,
+            // newest-first, deduped — so the latest quote PDF is one click away without
+            // expanding each message.
+            const all = [];
+            const seen = new Set();
+            for (const c of rows) {
+              const atts = Array.isArray(c.attachments) ? c.attachments : [];
+              for (const a of atts) {
+                const key = `${a?.url || a?.filename || ""}|${a?.size || ""}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                all.push(a);
+              }
+            }
+            if (all.length === 0) return null;
+            return (
+              <div className="rounded border border-accent/40 bg-accent/5 p-2">
+                <div className="font-semibold text-ink">All attachments ({all.length})</div>
+                <ul className="mt-1 list-inside list-disc space-y-1 text-[11px]">
+                  {all.map((a, i) => (
+                    <li key={`roll-${i}`}>
+                      {a?.url && String(a.url).startsWith("http") ? (
+                        <a href={a.url} target="_blank" rel="noreferrer" className="font-semibold text-accent underline">
+                          {a.filename || "PDF"}
+                        </a>
+                      ) : (
+                        <span>{a?.filename || "file"}</span>
+                      )}
+                      {typeof a?.size === "number" ? ` · ${(a.size / 1024).toFixed(1)} KB` : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
         </div>
       ) : null}
     </div>

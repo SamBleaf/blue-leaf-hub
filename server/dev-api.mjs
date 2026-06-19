@@ -265,13 +265,51 @@ function extractAmountFromEmailText(text) {
   return null;
 }
 
+// Strip quoted reply history from an inbound plain-text email so the correspondence
+// log shows only what the sender typed THIS time. Cuts at the first common "quoted
+// original" marker (Gmail/Apple "On … wrote:", Outlook "-----Original Message-----" /
+// "From:"-header block / "____" divider, forwarded-message banner) and any trailing
+// run of ">"-quoted lines. Falls back to the original if the whole message was quotes.
+export function stripQuotedReply(text) {
+  const src = String(text || "");
+  if (!src.trim()) return src;
+  const lines = src.split(/\r?\n/);
+  const markers = [
+    /^On .+ wrote:\s*$/i, // Gmail / Apple Mail attribution line
+    /^-{2,}\s*Original Message\s*-{2,}/i, // Outlook classic
+    /^_{5,}\s*$/, // Outlook horizontal divider
+    /^Begin forwarded message:/i,
+    /^>{1,}\s?/ // a quoted ">" line
+  ];
+  let cut = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i].trim();
+    if (!ln) continue;
+    // "From:" alone is too eager mid-body — only treat it as the start of a quoted
+    // Outlook header block when a Sent:/To:/Date:/Subject: line follows within 3 lines.
+    if (/^From:\s*.+/i.test(ln)) {
+      const look = lines.slice(i + 1, i + 4).join("\n");
+      if (/^\s*(Sent|To|Date|Subject):/im.test(look)) { cut = i; break; }
+      continue;
+    }
+    if (markers.some((re) => re.test(ln))) { cut = i; break; }
+  }
+  let kept = cut >= 0 ? lines.slice(0, cut) : lines;
+  while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+  const out = kept.join("\n").trim();
+  return out || src.trim();
+}
+
 async function processIncomingQuoteMessage(sb, msg, rfqRows) {
   const sourceBuf = await readSourceToBuffer(msg.source);
   const parsed = await simpleParser(sourceBuf);
   const fromEmail = maybeFirstAddress(parsed);
   const subject = String(parsed?.subject || msg?.envelope?.subject || "").trim();
   const textBody = String(parsed?.text || "").trim();
-  const bodyForLog = textBody || String(parsed?.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  // Store only the freshly-typed reply in correspondence — drop the quoted thread history.
+  const bodyForLog = stripQuotedReply(
+    textBody || String(parsed?.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+  );
   const externalId = String(parsed?.messageId || `imap-uid-${msg.uid}`).trim();
 
   // Deduplicate — if this message_id is already in correspondence, skip entirely

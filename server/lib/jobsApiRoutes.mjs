@@ -5,6 +5,7 @@ import { ok, err, translateDbError } from "./apiResponse.mjs";
 const JOB_STATUSES_VALID = ["tendering", "won", "lost", "archived"];
 import {
   dropboxConfigured,
+  ensureJobFolderStructure,
   mergeJobDataJsonFile,
   uploadFeeProposalPdfToPresaleDocs
 } from "./dropboxClient.mjs";
@@ -82,7 +83,29 @@ export function registerJobsApiRoutes(app) {
         status: JOB_STATUSES_VALID.includes(statusInput) ? statusInput : "tendering",
       }).select().single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json({ ok: true, job: data });
+
+      // Provision the Dropbox job folders (PLANS + INTERNAL trees) at tender entry so they
+      // exist well before RFQ time, and stamp the public PLANS link onto the job. Idempotent
+      // and non-fatal: a Dropbox hiccup never blocks job creation — the same structure is
+      // re-ensured at RFQ compose as a fallback. Skipped for the "Address pending" draft.
+      let job = data;
+      if (!isPlaceholder && dropboxConfigured()) {
+        try {
+          const fld = await ensureJobFolderStructure({ jobAddress: data.address });
+          if (fld?.dropboxSharedLinkUrl) {
+            const { data: updated } = await sb
+              .from("jobs")
+              .update({ dropbox_shared_link: fld.dropboxSharedLinkUrl, dropbox_link: fld.dropboxSharedLinkUrl })
+              .eq("id", data.id)
+              .select()
+              .maybeSingle();
+            if (updated) job = updated;
+          }
+        } catch (e) {
+          console.warn("[jobs POST] Dropbox folder provisioning skipped:", e?.message || e);
+        }
+      }
+      return res.json({ ok: true, job });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message });
     }
