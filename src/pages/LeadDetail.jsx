@@ -57,6 +57,10 @@ const PTSA_STATUS_COLORS = {
 const PTSA_STATUS_LABELS = {
   draft: "Draft", sent: "Sent to Client", signed: "Signed", declined: "Declined",
 };
+// 'signed' is NOT a selectable status — it is set only via "Mark PTSA as signed"
+// (POST /api/sales/leads/:id/ptsa/mark-signed), which stores the signed PDF and
+// provisions the job folder. The dropdown offers draft / sent / declined only.
+const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 
 const GATE_REQUIREMENTS = {
   qualify:       [],
@@ -969,6 +973,10 @@ export default function LeadDetail() {
   const [generatingPTSA, setGeneratingPTSA] = useState(false);
   const [ptsaError, setPtsaError] = useState("");
   const [refProjects, setRefProjects] = useState([]);
+  const [markingSigned, setMarkingSigned] = useState(false);
+  const [signedFile, setSignedFile] = useState(null);
+  const [signedDateInput, setSignedDateInput] = useState("");
+  const [signedDownloadUrl, setSignedDownloadUrl] = useState(null);
 
   const bpFetchedFor = useRef(null);
 
@@ -1005,6 +1013,26 @@ export default function LeadDetail() {
       .then((j) => { if (j.ok) setRefProjects(j.projects || []); })
       .catch(() => setRefProjects([]));
   }, [lead?.id, lead?.stage, lead?.lead_type]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resolve a short-lived signed-download URL for the stored signed PTSA PDF.
+  useEffect(() => {
+    if (lead?.ptsa_status !== "signed" || !lead?.ptsa_signed_document_path) {
+      setSignedDownloadUrl(null);
+      return;
+    }
+    let cancelled = false;
+    authFetch(`/api/sales/leads/${leadId}/documents`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j.ok) return;
+        const match = (j.documents || []).find(
+          (d) => d.document_type === "ptsa_signed" || d.storage_path === lead.ptsa_signed_document_path
+        );
+        setSignedDownloadUrl(match?.download_url || null);
+      })
+      .catch(() => { if (!cancelled) setSignedDownloadUrl(null); });
+    return () => { cancelled = true; };
+  }, [leadId, lead?.ptsa_status, lead?.ptsa_signed_document_path]);
 
   async function patch(updates) {
     const r = await authFetch(`/api/sales/leads/${leadId}`, {
@@ -1128,6 +1156,33 @@ export default function LeadDetail() {
       setPtsaError(e.message);
     } finally {
       setGeneratingPTSA(false);
+    }
+  }
+
+  async function markPtsaSigned() {
+    if (!signedFile) { setPtsaError("Choose the signed PDF first."); return; }
+    setMarkingSigned(true);
+    setPtsaError("");
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = ev => resolve(String(ev.target.result).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(signedFile);
+      });
+      const { ok, error } = await apiPost(`/api/sales/leads/${leadId}/ptsa/mark-signed`, {
+        signedPdfBase64: b64,
+        filename: signedFile.name,
+        signedDate: signedDateInput || undefined,
+      });
+      if (!ok) throw new Error(error || "Failed to mark PTSA as signed.");
+      setSignedFile(null);
+      setSignedDateInput("");
+      await load();
+    } catch (e) {
+      setPtsaError(e.message);
+    } finally {
+      setMarkingSigned(false);
     }
   }
 
@@ -1561,19 +1616,26 @@ export default function LeadDetail() {
                 {/* Header + status */}
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="section-label">Pre-Tender Service Agreement</h3>
-                  <select
-                    value={lead.ptsa_status || "draft"}
-                    onChange={e => {
-                      const updates = { ptsa_status: e.target.value };
-                      if (e.target.value === "sent" && !lead.ptsa_sent_date) {
-                        updates.ptsa_sent_date = new Date().toISOString().slice(0, 10);
-                      }
-                      patch(updates);
-                    }}
-                    className={`text-xs font-semibold rounded-full px-2.5 py-0.5 border-0 cursor-pointer focus:outline-none ${PTSA_STATUS_COLORS[lead.ptsa_status || "draft"]}`}
-                  >
-                    {Object.entries(PTSA_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
+                  {lead.ptsa_status === "signed" ? (
+                    // Signed is terminal + set only via "Mark PTSA as signed" below — show a static badge.
+                    <span className={`text-xs font-semibold rounded-full px-2.5 py-0.5 ${PTSA_STATUS_COLORS.signed}`}>
+                      {PTSA_STATUS_LABELS.signed}
+                    </span>
+                  ) : (
+                    <select
+                      value={lead.ptsa_status || "draft"}
+                      onChange={e => {
+                        const updates = { ptsa_status: e.target.value };
+                        if (e.target.value === "sent" && !lead.ptsa_sent_date) {
+                          updates.ptsa_sent_date = new Date().toISOString().slice(0, 10);
+                        }
+                        patch(updates);
+                      }}
+                      className={`text-xs font-semibold rounded-full px-2.5 py-0.5 border-0 cursor-pointer focus:outline-none ${PTSA_STATUS_COLORS[lead.ptsa_status || "draft"]}`}
+                    >
+                      {PTSA_SELECTABLE_STATUSES.map(v => <option key={v} value={v}>{PTSA_STATUS_LABELS[v]}</option>)}
+                    </select>
+                  )}
                 </div>
 
                 {/* PTSA fee (read-only — set in Winning Offer section above) */}
@@ -1706,6 +1768,60 @@ export default function LeadDetail() {
                   {generatingPTSA ? "Generating…" : "⬇ Generate PTSA Document"}
                 </button>
                 <p className="text-xs text-muted text-center mt-1.5">Downloads a branded DOCX ready to send to the client</p>
+
+                {/* Mark PTSA as signed — stores the signed PDF, stamps the lead, and
+                    provisions the job + Dropbox folder tree (server-side, one event). */}
+                <div className="mt-4 pt-4 border-t border-amber-100">
+                  {lead.ptsa_status === "signed" ? (
+                    <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-2.5">
+                      <div className="flex items-center gap-1.5 text-sm font-semibold text-green-800">
+                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                        PTSA signed{lead.pretender_signed_date ? ` on ${lead.pretender_signed_date}` : ""}
+                      </div>
+                      {signedDownloadUrl ? (
+                        <a
+                          href={signedDownloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1.5 inline-block text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
+                        >
+                          View signed PTSA PDF ↗
+                        </a>
+                      ) : (
+                        <p className="mt-1.5 text-xs text-muted">Signed PDF stored.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs font-medium text-ink mb-2">Mark PTSA as signed</p>
+                      <p className="text-xs text-muted mb-2">Upload the client-signed PDF. This stores the document, marks the lead signed, and creates the job folder.</p>
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={e => { setSignedFile(e.target.files?.[0] || null); setPtsaError(""); }}
+                        className="block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-page file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-hairline/40 mb-2"
+                      />
+                      <div className="flex items-center justify-between py-1.5 mb-2">
+                        <span className="text-xs text-muted">Date signed <span className="font-normal">(optional)</span></span>
+                        <input
+                          type="date"
+                          value={signedDateInput}
+                          onChange={e => setSignedDateInput(e.target.value)}
+                          className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                      </div>
+                      <button
+                        onClick={markPtsaSigned}
+                        disabled={markingSigned || !signedFile}
+                        className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                      >
+                        {markingSigned ? "Marking signed…" : "✓ Mark PTSA as signed"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
   );
 

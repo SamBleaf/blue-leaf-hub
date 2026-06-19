@@ -457,7 +457,7 @@ export function buildStandardQuotePdfFileName(trade, businessName) {
   return `${t}-${b}-QUOTE.PDF`;
 }
 
-async function pathExists(accessToken, dropboxPath) {
+export async function pathExists(accessToken, dropboxPath) {
   try {
     await rpc("files/get_metadata", { path: dropboxPath }, accessToken);
     return true;
@@ -720,6 +720,15 @@ export async function ensureJobFolderStructure(opts) {
 
   const privateRoot = `${sharedRoot}/INTERNAL`;
 
+  // Expand the template's folder tree with the extra operational branches (LEAD DOCS,
+  // SITE DIARY, SCHEDULE, WHS/INDUCTIONS, MARKETING, …). Log-only + never throws so a
+  // hiccup here never blocks job-folder provisioning (Dropbox is a non-fatal mirror).
+  try {
+    await ensureExtendedJobFolders(opts.jobAddress);
+  } catch (e) {
+    console.warn("[ensureJobFolderStructure] extended folders skipped:", e?.message || e);
+  }
+
   return {
     sharedRoot,
     plansRoot,
@@ -728,6 +737,162 @@ export async function ensureJobFolderStructure(opts) {
     createdPaths: [sharedRoot, plansRoot],
     internalShare: null
   };
+}
+
+/**
+ * Ensure the expanded operational branches exist under the shared job root.
+ * Sequential (no Promise.all), idempotent (createFolderIfNotExists swallows path/conflict),
+ * and never throws — Dropbox is a non-fatal mirror. Parents are created before children
+ * (e.g. INTERNAL before INTERNAL/LEAD DOCS, WHS before WHS/INDUCTIONS).
+ */
+export async function ensureExtendedJobFolders(jobAddress) {
+  try {
+    const token = await getDropboxAccessToken();
+    const root = sharedJobRootPath(jobAddress);
+    // Order matters: each parent must precede its children.
+    const branches = [
+      "INTERNAL",
+      "INTERNAL/P.O",
+      "INTERNAL/INVOICES",
+      "INTERNAL/PORTAL",
+      "INTERNAL/PRESALE DOCS",
+      "INTERNAL/QUOTES",
+      "INTERNAL/RFQ",
+      "INTERNAL/LEAD DOCS",
+      "SITE DIARY",
+      "SCHEDULE",
+      "WHS",
+      "WHS/INDUCTIONS",
+      "MARKETING",
+    ];
+    for (const seg of branches) {
+      try {
+        await createFolderIfNotExists(token, `${root}/${seg}`);
+      } catch (e) {
+        // Swallow path/conflict and any per-folder error — keep going, never throw.
+        console.warn(`[ensureExtendedJobFolders] ${seg} skipped:`, e?.message || e);
+      }
+    }
+  } catch (e) {
+    console.warn("[ensureExtendedJobFolders] skipped:", e?.message || e);
+  }
+}
+
+/**
+ * Backfill a lead's documents, notes, and conversations into the job's
+ * `INTERNAL/LEAD DOCS/` Dropbox folder. Idempotent (skips files that already exist),
+ * non-fatal (Dropbox is a mirror), and SEQUENTIAL (no Promise.all — concurrent reads
+ * fail for online-only Smart Sync files; see CLAUDE.md).
+ *
+ * Each lead_documents row is downloaded from the 'lead-documents' Supabase bucket and
+ * uploaded to INTERNAL/LEAD DOCS/<original-filename>. lead_notes and lead_conversations
+ * are dumped to LEAD-NOTES.txt / LEAD-CONVERSATIONS.txt. Every file is wrapped in its
+ * own try/catch so one failure never aborts the rest.
+ *
+ * @param {{ sb: object, leadId: string, jobAddress: string }} args
+ * @returns {Promise<{ copied: number, failed: number }>}
+ */
+export async function backfillLeadDataToJobFolder({ sb, leadId, jobAddress }) {
+  let copied = 0;
+  let failed = 0;
+  if (!sb || !leadId || !jobAddress) return { copied, failed };
+
+  let token;
+  let leadDocsRoot;
+  try {
+    token = await getDropboxAccessToken();
+    const root = sharedJobRootPath(jobAddress);
+    leadDocsRoot = `${root}/INTERNAL/LEAD DOCS`;
+    // files/upload auto-creates parents, but ensure the folder exists for the text dumps too.
+    await createFolderIfNotExists(token, `${root}/INTERNAL`);
+    await createFolderIfNotExists(token, leadDocsRoot);
+  } catch (e) {
+    console.warn("[backfillLeadDataToJobFolder] setup skipped:", e?.message || e);
+    return { copied, failed };
+  }
+
+  // 1. Lead documents from the 'lead-documents' Supabase bucket → INTERNAL/LEAD DOCS/<filename>.
+  try {
+    const { data: docs } = await sb
+      .from("lead_documents")
+      .select("filename, storage_path")
+      .eq("lead_id", leadId);
+    for (const doc of docs || []) {
+      const fileName = String(doc.filename || "").trim() || "document";
+      const destPath = `${leadDocsRoot}/${fileName}`;
+      try {
+        if (await pathExists(token, destPath)) continue; // idempotent — already backfilled
+        const { data: blob, error: dlErr } = await sb.storage
+          .from("lead-documents")
+          .download(doc.storage_path);
+        if (dlErr || !blob) {
+          failed += 1;
+          console.warn(`[backfillLeadDataToJobFolder] download failed for ${doc.storage_path}:`, dlErr?.message || dlErr);
+          continue;
+        }
+        const buffer = Buffer.from(await blob.arrayBuffer());
+        await dropboxUploadBuffer(token, destPath, buffer, { autorename: false });
+        copied += 1;
+      } catch (e) {
+        failed += 1;
+        console.warn(`[backfillLeadDataToJobFolder] doc ${fileName} skipped:`, e?.message || e);
+      }
+    }
+  } catch (e) {
+    console.warn("[backfillLeadDataToJobFolder] documents skipped:", e?.message || e);
+  }
+
+  // 2. Lead notes → INTERNAL/LEAD DOCS/LEAD-NOTES.txt
+  try {
+    const notesPath = `${leadDocsRoot}/LEAD-NOTES.txt`;
+    if (!(await pathExists(token, notesPath))) {
+      const { data: notes } = await sb
+        .from("lead_notes")
+        .select("body, note_type, author_name, created_at")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: true });
+      if ((notes || []).length > 0) {
+        const text = (notes || [])
+          .map(
+            (n) =>
+              `[${n.created_at || ""}] ${n.author_name || "Unknown"} (${n.note_type || "internal"}):\n${n.body || ""}`
+          )
+          .join("\n\n---\n\n");
+        await dropboxUploadUtf8Text(token, notesPath, `${text}\n`, { autorename: false });
+        copied += 1;
+      }
+    }
+  } catch (e) {
+    failed += 1;
+    console.warn("[backfillLeadDataToJobFolder] notes skipped:", e?.message || e);
+  }
+
+  // 3. Lead conversations → INTERNAL/LEAD DOCS/LEAD-CONVERSATIONS.txt
+  try {
+    const convPath = `${leadDocsRoot}/LEAD-CONVERSATIONS.txt`;
+    if (!(await pathExists(token, convPath))) {
+      const { data: convos } = await sb
+        .from("lead_conversations")
+        .select("title, transcript_text, created_at")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: true });
+      if ((convos || []).length > 0) {
+        const text = (convos || [])
+          .map(
+            (c) =>
+              `=== ${c.title || "Conversation"} — ${c.created_at || ""} ===\n${c.transcript_text || ""}`
+          )
+          .join("\n\n");
+        await dropboxUploadUtf8Text(token, convPath, `${text}\n`, { autorename: false });
+        copied += 1;
+      }
+    }
+  } catch (e) {
+    failed += 1;
+    console.warn("[backfillLeadDataToJobFolder] conversations skipped:", e?.message || e);
+  }
+
+  return { copied, failed };
 }
 
 export async function uploadTenderDocumentToJob(opts) {

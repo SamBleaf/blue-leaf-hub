@@ -88,8 +88,17 @@ export function registerJobsApiRoutes(app) {
       // exist well before RFQ time, and stamp the public PLANS link onto the job. Idempotent
       // and non-fatal: a Dropbox hiccup never blocks job creation — the same structure is
       // re-ensured at RFQ compose as a fallback. Skipped for the "Address pending" draft.
+      //
+      // Dropbox folder OWNERSHIP across the lead→job lifecycle:
+      //   • convert-to-job (salesRoutes.convertLeadToJob) — creates the job, NO Dropbox today.
+      //   • RFQ compose (rfqPackageRoutes) — self-ensures the folder tree as a fallback.
+      //   • PTSA-signed (salesRoutes /ptsa/mark-signed) — OWNS folder provisioning + lead
+      //     data backfill for LEAD-SOURCED jobs (gated by jobs.dropbox_provisioned_at).
+      // So for lead-sourced jobs we DEFER folder creation to PTSA-signed and skip the inline
+      // create here (files/upload auto-creates parents, so deferring breaks no upload site).
+      // Direct / no-lead jobs still get folders immediately below.
       let job = data;
-      if (!isPlaceholder && dropboxConfigured()) {
+      if (!isPlaceholder && !lead_id && dropboxConfigured()) {
         try {
           const fld = await ensureJobFolderStructure({ jobAddress: data.address });
           if (fld?.dropboxSharedLinkUrl) {

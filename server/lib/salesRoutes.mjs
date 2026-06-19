@@ -13,6 +13,11 @@ import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { setFact } from "./factsService.mjs";
 import { recomputeReferralRollup } from "./crmRoutes.mjs";
+import {
+  dropboxConfigured,
+  ensureJobFolderStructure,
+  backfillLeadDataToJobFolder,
+} from "./dropboxClient.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -207,6 +212,162 @@ const PROJECT_TYPE_LABELS = {
 // Generated from /tmp/ptsa-template.docx via gen_ptsa_template.mjs
 const PTSA_TEMPLATE_B64 = "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";
 
+/**
+ * Convert a lead into a job (server-side, non-lossy, provenance-stamped).
+ *
+ * Extracted verbatim from POST /api/sales/leads/:id/convert-to-job so the same
+ * side-effects can run from the PTSA mark-signed orchestration. PRESERVES EVERY
+ * side-effect: dedup by address_normalised then raw ilike, the setFact provenance
+ * loop, the CRM contact link, the referrer role + recomputeReferralRollup, and
+ * linking job_id back onto the lead. NO Dropbox side-effects here (the original
+ * route had none — folder provisioning is owned by PTSA-signed / job creation).
+ *
+ * @param {object} sb — service-role Supabase client
+ * @param {object} lead — the full lead row (snake_case)
+ * @param {string|null} actorId — caller id for provenance, or null
+ * @returns {Promise<{ job: object, alreadyConverted?: boolean, stampedFacts?: string[] }>}
+ * @throws {Error} with `.httpStatus`/`.publicMessage` for caller-mappable failures.
+ */
+export async function convertLeadToJob(sb, lead, actorId = null) {
+  // 1. Already converted — return the existing job (idempotent).
+  if (lead.job_id) {
+    const { data: existingJob } = await sb.from("jobs").select("*").eq("id", lead.job_id).maybeSingle();
+    if (existingJob) return { job: existingJob, alreadyConverted: true };
+  }
+
+  // 2. Require a real site address — the "Name — Suburb" fallback produces an unmatchable
+  //    address that orphans the job from Operations and Finance selectors. (BUG-010)
+  if (!lead.site_address?.trim()) {
+    const e = new Error("A site address is required before creating a project. Please add the site address to the lead first.");
+    e.httpStatus = 400;
+    e.publicMessage = e.message;
+    throw e;
+  }
+
+  // Resolve the canonical address + client name.
+  const clientName = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+  const rawAddress = lead.site_address.trim();
+  const addr = normaliseAddress(rawAddress);
+
+  // 3. Dedup exactly like POST /api/jobs: prefer the normalised key, then raw ilike.
+  let job = null;
+  if (addr.normalised) {
+    const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
+    job = data?.[0] || null;
+  }
+  if (!job) {
+    const { data } = await sb.from("jobs").select("*").ilike("address", rawAddress).limit(1);
+    job = data?.[0] || null;
+  }
+
+  // 4. Create the job if no match (same column shape + inline normalisation as POST /api/jobs).
+  if (!job) {
+    const { data: created, error: insErr } = await sb.from("jobs").insert({
+      address: rawAddress,
+      address_normalised: addr.normalised,
+      address_suburb: addr.suburb,
+      address_state: addr.state,
+      address_postcode: addr.postcode,
+      client_name: clientName || null,
+      client_email: lead.email?.trim() || null,
+      client_phone: lead.phone?.trim() || null,
+      project_type: lead.project_type || null,
+      lead_id: lead.id,
+      // Derive status from lead stage: a won lead → won job; everything else → tendering.
+      // Valid job statuses (migration 001 CHECK): tendering | won | lost | archived.
+      status: lead.stage === "won" ? "won" : "tendering",
+    }).select().single();
+    if (insErr) {
+      const e = new Error(translateDbError(insErr));
+      e.httpStatus = 400;
+      e.publicMessage = e.message;
+      throw e;
+    }
+    job = created;
+  }
+
+  // 5. Stamp each carried lead fact via the facts service (provenance = the lead).
+  //    The address fact's Phase-1 hook derives suburb/postcode/state — we never
+  //    write those ourselves. Skipped if the value is empty. setFact failures are
+  //    non-fatal (the job already exists) — logged so the conversion still returns.
+  const carry = [
+    ["address", rawAddress],
+    ["client_name", clientName || null],
+    ["client_email", lead.email?.trim() || null],
+    ["client_phone", lead.phone?.trim() || null],
+    ["project_type", lead.project_type || null],
+    ["architect_name", lead.architect_name?.trim() || null],
+    // Lead's deal-value estimate → job estimate fact. NOT original_contract_value
+    // (Phase 5 sets that at WIN from the accepted proposal).
+    ["estimated_value", lead.estimated_value != null ? Number(lead.estimated_value) : null],
+  ];
+  const stamped = [];
+  for (const [key, value] of carry) {
+    if (value === null || value === undefined || value === "") continue;
+    const r = await setFact(job.id, key, value, {
+      source: "system",
+      reason: "lead_conversion",
+      actorId,
+    });
+    if (r?.ok) stamped.push(key);
+    else console.warn(`[convert-to-job] setFact ${key}:`, r?.error);
+  }
+
+  // 6. Link the lead to the new job (so the UI/CRM read the job).
+  await sb.from("leads").update({ job_id: job.id, updated_at: new Date().toISOString() }).eq("id", lead.id);
+
+  // 7. Link the matching CRM contact to the job (by lead linkage, else by email).
+  try {
+    let contact = null;
+    const { data: byLead } = await sb.from("crm_contacts").select("id").eq("converted_lead_id", lead.id).limit(1);
+    contact = byLead?.[0] || null;
+    if (!contact && lead.email?.trim()) {
+      const { data: byEmail } = await sb.from("crm_contacts").select("id").ilike("email", lead.email.trim()).limit(1);
+      contact = byEmail?.[0] || null;
+    }
+    if (contact) {
+      await sb.from("crm_contacts")
+        .update({ linked_job_id: job.id, updated_at: new Date().toISOString() })
+        .eq("id", contact.id);
+    }
+  } catch (e) {
+    console.warn("[convert-to-job] crm link:", e?.message || e);
+  }
+
+  // 7b. Close the referral loop: if this lead was referred by a CRM contact,
+  //     materialise a 'referrer' role on the Party spine (credits_referral=true,
+  //     so it credits the new job's contract value as "value brought in"), then
+  //     recompute that referrer's rollup. Idempotent via the UNIQUE(job_id,
+  //     contact_id, role) constraint. Additive + NON-FATAL — a failure here must
+  //     never break the conversion (the job already exists).
+  if (lead.referred_by_contact_id) {
+    try {
+      // upsert-style: the UNIQUE(job_id, contact_id, role) constraint makes a
+      // re-convert a no-op rather than a duplicate. We swallow the duplicate-key
+      // error and still recompute below so the rollup stays correct.
+      const { error: roleErr } = await sb.from("job_contact_roles").insert({
+        job_id: job.id,
+        lead_id: lead.id,
+        contact_id: lead.referred_by_contact_id,
+        role: "referrer",
+        status: "active",
+        credits_referral: true,
+        created_by: actorId,
+      });
+      if (roleErr && !/duplicate key|unique constraint/i.test(String(roleErr.message || roleErr))) {
+        console.warn("[convert-to-job] referrer role insert:", roleErr.message || roleErr);
+      }
+      await recomputeReferralRollup(sb, lead.referred_by_contact_id);
+    } catch (e) {
+      console.warn("[convert-to-job] referrer role:", e?.message || e);
+    }
+  }
+
+  // 8. Re-read the job so the response reflects any applied fact writes.
+  const { data: fresh } = await sb.from("jobs").select("*").eq("id", job.id).maybeSingle();
+  return { job: fresh || job, stampedFacts: stamped };
+}
+
 export function registerSalesRoutes(app) {
 
   // ── Sales Scorecard ─────────────────────────────────────────────────────────
@@ -380,6 +541,12 @@ export function registerSalesRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const body = req.body;
+    // The signed PTSA state is owned solely by POST /api/sales/leads/:id/ptsa/mark-signed,
+    // which stores the signed PDF + provisions the job folder. Block the blanket PATCH from
+    // setting it directly so those side-effects can never be bypassed.
+    if (body.ptsa_status === "signed") {
+      return err(res, 400, "Use POST /api/sales/leads/:id/ptsa/mark-signed to mark a PTSA signed (it stores the signed PDF and provisions the job folder).");
+    }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     const updates = { ...body, updated_at: new Date().toISOString() };
@@ -414,142 +581,182 @@ export function registerSalesRoutes(app) {
     const actorId = req.caller?.id || null;
 
     try {
-      // 1. Load the lead.
+      // Thin wrapper: load the lead, then delegate every side-effect to convertLeadToJob().
       const { data: lead, error: leadErr } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
       if (leadErr) return err(res, 400, translateDbError(leadErr));
       if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
-      if (lead.job_id) {
-        // Already converted — return the existing job (idempotent).
-        const { data: existingJob } = await sb.from("jobs").select("*").eq("id", lead.job_id).maybeSingle();
-        if (existingJob) return ok(res, { job: rowToCamel(existingJob), alreadyConverted: true });
-      }
 
-      // 2. Require a real site address — the "Name — Suburb" fallback produces an unmatchable
-      //    address that orphans the job from Operations and Finance selectors. (BUG-010)
-      if (!lead.site_address?.trim()) {
-        return err(res, 400, "A site address is required before creating a project. Please add the site address to the lead first.");
-      }
-
-      // Resolve the canonical address + client name.
-      const clientName = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
-      const rawAddress = lead.site_address.trim();
-      const addr = normaliseAddress(rawAddress);
-
-      // 3. Dedup exactly like POST /api/jobs: prefer the normalised key, then raw ilike.
-      let job = null;
-      if (addr.normalised) {
-        const { data } = await sb.from("jobs").select("*").eq("address_normalised", addr.normalised).limit(1);
-        job = data?.[0] || null;
-      }
-      if (!job) {
-        const { data } = await sb.from("jobs").select("*").ilike("address", rawAddress).limit(1);
-        job = data?.[0] || null;
-      }
-
-      // 4. Create the job if no match (same column shape + inline normalisation as POST /api/jobs).
-      if (!job) {
-        const { data: created, error: insErr } = await sb.from("jobs").insert({
-          address: rawAddress,
-          address_normalised: addr.normalised,
-          address_suburb: addr.suburb,
-          address_state: addr.state,
-          address_postcode: addr.postcode,
-          client_name: clientName || null,
-          client_email: lead.email?.trim() || null,
-          client_phone: lead.phone?.trim() || null,
-          project_type: lead.project_type || null,
-          lead_id: lead.id,
-          // Derive status from lead stage: a won lead → won job; everything else → tendering.
-          // Valid job statuses (migration 001 CHECK): tendering | won | lost | archived.
-          status: lead.stage === "won" ? "won" : "tendering",
-        }).select().single();
-        if (insErr) return err(res, 400, translateDbError(insErr));
-        job = created;
-      }
-
-      // 5. Stamp each carried lead fact via the facts service (provenance = the lead).
-      //    The address fact's Phase-1 hook derives suburb/postcode/state — we never
-      //    write those ourselves. Skipped if the value is empty. setFact failures are
-      //    non-fatal (the job already exists) — logged so the conversion still returns.
-      const carry = [
-        ["address", rawAddress],
-        ["client_name", clientName || null],
-        ["client_email", lead.email?.trim() || null],
-        ["client_phone", lead.phone?.trim() || null],
-        ["project_type", lead.project_type || null],
-        ["architect_name", lead.architect_name?.trim() || null],
-        // Lead's deal-value estimate → job estimate fact. NOT original_contract_value
-        // (Phase 5 sets that at WIN from the accepted proposal).
-        ["estimated_value", lead.estimated_value != null ? Number(lead.estimated_value) : null],
-      ];
-      const stamped = [];
-      for (const [key, value] of carry) {
-        if (value === null || value === undefined || value === "") continue;
-        const r = await setFact(job.id, key, value, {
-          source: "system",
-          reason: "lead_conversion",
-          actorId,
-        });
-        if (r?.ok) stamped.push(key);
-        else console.warn(`[convert-to-job] setFact ${key}:`, r?.error);
-      }
-
-      // 6. Link the lead to the new job (so the UI/CRM read the job).
-      await sb.from("leads").update({ job_id: job.id, updated_at: new Date().toISOString() }).eq("id", lead.id);
-
-      // 7. Link the matching CRM contact to the job (by lead linkage, else by email).
-      try {
-        let contact = null;
-        const { data: byLead } = await sb.from("crm_contacts").select("id").eq("converted_lead_id", lead.id).limit(1);
-        contact = byLead?.[0] || null;
-        if (!contact && lead.email?.trim()) {
-          const { data: byEmail } = await sb.from("crm_contacts").select("id").ilike("email", lead.email.trim()).limit(1);
-          contact = byEmail?.[0] || null;
-        }
-        if (contact) {
-          await sb.from("crm_contacts")
-            .update({ linked_job_id: job.id, updated_at: new Date().toISOString() })
-            .eq("id", contact.id);
-        }
-      } catch (e) {
-        console.warn("[convert-to-job] crm link:", e?.message || e);
-      }
-
-      // 7b. Close the referral loop: if this lead was referred by a CRM contact,
-      //     materialise a 'referrer' role on the Party spine (credits_referral=true,
-      //     so it credits the new job's contract value as "value brought in"), then
-      //     recompute that referrer's rollup. Idempotent via the UNIQUE(job_id,
-      //     contact_id, role) constraint. Additive + NON-FATAL — a failure here must
-      //     never break the conversion (the job already exists).
-      if (lead.referred_by_contact_id) {
-        try {
-          // upsert-style: the UNIQUE(job_id, contact_id, role) constraint makes a
-          // re-convert a no-op rather than a duplicate. We swallow the duplicate-key
-          // error and still recompute below so the rollup stays correct.
-          const { error: roleErr } = await sb.from("job_contact_roles").insert({
-            job_id: job.id,
-            lead_id: lead.id,
-            contact_id: lead.referred_by_contact_id,
-            role: "referrer",
-            status: "active",
-            credits_referral: true,
-            created_by: actorId,
-          });
-          if (roleErr && !/duplicate key|unique constraint/i.test(String(roleErr.message || roleErr))) {
-            console.warn("[convert-to-job] referrer role insert:", roleErr.message || roleErr);
-          }
-          await recomputeReferralRollup(sb, lead.referred_by_contact_id);
-        } catch (e) {
-          console.warn("[convert-to-job] referrer role:", e?.message || e);
-        }
-      }
-
-      // 8. Re-read the job so the response reflects any applied fact writes.
-      const { data: fresh } = await sb.from("jobs").select("*").eq("id", job.id).maybeSingle();
-      return ok(res, { job: rowToCamel(fresh || job), stampedFacts: stamped });
+      const { job, alreadyConverted, stampedFacts } = await convertLeadToJob(sb, lead, actorId);
+      if (alreadyConverted) return ok(res, { job: rowToCamel(job), alreadyConverted: true });
+      return ok(res, { job: rowToCamel(job), stampedFacts });
     } catch (e) {
+      if (e?.httpStatus && e?.publicMessage) return err(res, e.httpStatus, e.publicMessage);
       console.error("[convert-to-job]", e);
       return err(res, 500, "Failed to convert lead to job.");
+    }
+  });
+
+  // ── Mark a PTSA as SIGNED (sole writer of the signed state) ───────────────────
+  // One event: (a) store the signed PDF in the 'lead-documents' bucket (source of
+  // truth), (b) stamp the lead signed, (c) [non-fatal mirror] create the job (if
+  // lead-sourced) + Dropbox folder tree, and (d) backfill the lead's docs/notes/
+  // conversations into the job folder. Supabase is the source of truth; Dropbox is a
+  // NON-FATAL mirror — a Dropbox outage or missing folder must never 500 this request.
+  // The blanket PATCH /api/sales/leads/:id rejects ptsa_status='signed' so this is the
+  // ONLY path that can mark a PTSA signed.
+  app.post("/api/sales/leads/:id/ptsa/mark-signed", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const leadId = String(req.params.id || "").trim();
+    if (!leadId) return err(res, 400, "Lead id required.");
+    const actorId = req.caller?.id || null;
+
+    const { signedPdfBase64, filename, signedDate } = req.body || {};
+    if (!filename?.trim()) return err(res, 400, "filename is required.");
+    if (!signedPdfBase64 || typeof signedPdfBase64 !== "string") {
+      return err(res, 400, "signedPdfBase64 is required.");
+    }
+    // Strip a possible data-URL prefix, then validate it is real base64.
+    const b64 = signedPdfBase64.includes(",") ? signedPdfBase64.split(",").pop() : signedPdfBase64;
+    let buffer;
+    try {
+      buffer = Buffer.from(b64, "base64");
+    } catch {
+      return err(res, 400, "signedPdfBase64 is not valid base64.");
+    }
+    if (!buffer || buffer.length === 0) return err(res, 400, "signedPdfBase64 is empty or not valid base64.");
+
+    try {
+      // Load the lead.
+      const { data: lead, error: leadErr } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (leadErr) return err(res, 400, translateDbError(leadErr));
+      if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+
+      // ── Supabase-primary order (critical) ────────────────────────────────────
+      const today = new Date().toISOString().slice(0, 10);
+      const signedDateStr = (typeof signedDate === "string" && signedDate.trim()) ? signedDate.trim().slice(0, 10) : today;
+
+      // (1) Upload the signed PDF to the 'lead-documents' bucket at the LAW path:
+      //     [bucket]/leads/<id>/<YYYY-MM-DD>-<sanitised-filename> (lowercase, spaces→hyphens,
+      //     strip specials except - and .).
+      const sanitised = filename
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9.\-]/g, "")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "") || "signed-ptsa.pdf";
+      const storagePath = `leads/${leadId}/${signedDateStr}-${sanitised}`;
+      const { error: uploadErr } = await sb.storage
+        .from("lead-documents")
+        .upload(storagePath, buffer, { contentType: "application/pdf", upsert: true });
+      if (uploadErr) return err(res, 502, `Storage upload failed: ${uploadErr.message}`);
+
+      // (2) Stamp the lead signed. This MUST persist even if later steps fail.
+      const { error: stampErr } = await sb.from("leads").update({
+        ptsa_status: "signed",
+        pretender_signed_date: signedDateStr,
+        ptsa_signed_document_path: storagePath,
+        ptsa_signed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", leadId);
+      if (stampErr) {
+        // Best-effort cleanup of the uploaded file if the stamp itself fails.
+        await sb.storage.from("lead-documents").remove([storagePath]).catch(() => {});
+        return err(res, 400, translateDbError(stampErr));
+      }
+
+      // (3) Record the lead_documents row (document_type:'ptsa_signed') — BEST-EFFORT.
+      //     A failure here does not fail the request (the signed stamp already persisted).
+      try {
+        await sb.from("lead_documents").insert({
+          lead_id: leadId,
+          filename: filename.trim(),
+          file_size: buffer.length,
+          mime_type: "application/pdf",
+          storage_path: storagePath,
+          document_type: "ptsa_signed",
+          uploaded_by: req.caller?.email || "Unknown",
+          created_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn("[ptsa/mark-signed] lead_documents insert (best-effort):", e?.message || e);
+      }
+
+      // ── Dropbox NON-FATAL orchestration (mirror only) ────────────────────────
+      // Re-read the lead so job_id reflects any in-flight conversion. Markers make
+      // re-marking a no-op. Nothing below may 500 the request.
+      const provisioning = { jobId: null, jobCreated: false, dropboxProvisioned: false, leadDataBackfilled: false, dropboxConfigured: dropboxConfigured() };
+      try {
+        if (dropboxConfigured()) {
+          let { data: freshLead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+          freshLead = freshLead || lead;
+
+          // (a) Create the job if lead-sourced and not yet converted.
+          let job = null;
+          if (freshLead.job_id) {
+            const { data: existing } = await sb.from("jobs").select("*").eq("id", freshLead.job_id).maybeSingle();
+            job = existing || null;
+          }
+          if (!job) {
+            try {
+              const result = await convertLeadToJob(sb, freshLead, actorId);
+              job = result.job;
+              provisioning.jobCreated = !result.alreadyConverted;
+            } catch (e) {
+              // A missing site address (or other convert error) is non-fatal here —
+              // the signed PDF + stamp already persisted. Log and skip the mirror.
+              console.warn("[ptsa/mark-signed] convertLeadToJob skipped:", e?.publicMessage || e?.message || e);
+            }
+          }
+
+          if (job) {
+            provisioning.jobId = job.id;
+            const jobAddress = job.address;
+
+            // (b) Provision the Dropbox folder tree + stamp links/markers. Idempotent.
+            if (!job.dropbox_provisioned_at && jobAddress) {
+              try {
+                const fld = await ensureJobFolderStructure({ jobAddress });
+                const jobUpdate = { dropbox_provisioned_at: new Date().toISOString() };
+                if (fld?.dropboxSharedLinkUrl) {
+                  jobUpdate.dropbox_shared_link = fld.dropboxSharedLinkUrl;
+                  jobUpdate.dropbox_link = fld.dropboxSharedLinkUrl;
+                }
+                await sb.from("jobs").update(jobUpdate).eq("id", job.id);
+                provisioning.dropboxProvisioned = true;
+              } catch (e) {
+                console.warn("[ptsa/mark-signed] ensureJobFolderStructure skipped:", e?.message || e);
+              }
+            } else if (job.dropbox_provisioned_at) {
+              provisioning.dropboxProvisioned = true; // already done — no-op
+            }
+
+            // (c) Backfill the lead's docs/notes/conversations into INTERNAL/LEAD DOCS.
+            if (!job.lead_data_backfilled_at && jobAddress) {
+              try {
+                const bf = await backfillLeadDataToJobFolder({ sb, leadId, jobAddress });
+                await sb.from("jobs").update({ lead_data_backfilled_at: new Date().toISOString() }).eq("id", job.id);
+                provisioning.leadDataBackfilled = true;
+                provisioning.backfill = bf;
+              } catch (e) {
+                console.warn("[ptsa/mark-signed] backfillLeadDataToJobFolder skipped:", e?.message || e);
+              }
+            } else if (job.lead_data_backfilled_at) {
+              provisioning.leadDataBackfilled = true; // already done — no-op
+            }
+          }
+        }
+      } catch (e) {
+        // Belt-and-braces: never let the mirror 500 the request.
+        console.warn("[ptsa/mark-signed] Dropbox orchestration skipped:", e?.message || e);
+      }
+
+      // Return the freshly-stamped lead + a soft provisioning summary.
+      const { data: finalLead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      return ok(res, { lead: rowToCamel(finalLead || lead), provisioning });
+    } catch (e) {
+      console.error("[ptsa/mark-signed]", e);
+      return err(res, 500, "Failed to mark the PTSA as signed.");
     }
   });
 
