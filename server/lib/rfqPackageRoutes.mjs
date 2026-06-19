@@ -281,11 +281,25 @@ export function registerRfqPackageRoutes(app) {
         subMap = Object.fromEntries((subs || []).map((x) => [x.id, x]));
       }
       const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
-      const results = [];
-      for (const r of rfqs || []) {
+
+      // Hard per-send timeout so a single slow/hung transport (e.g. a Gmail or SMTP
+      // fallback that stalls) can't block the whole batch and blow past the proxy's
+      // ~30s response limit — that's what made a 19-recipient send appear "stuck".
+      const SEND_TIMEOUT_MS = 15000;
+      const CONCURRENCY = 6;
+      const withTimeout = (promise, ms, label) => {
+        let t;
+        const timer = new Promise((_, reject) => {
+          t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+        });
+        return Promise.race([Promise.resolve(promise).finally(() => clearTimeout(t)), timer]);
+      };
+
+      const rows = rfqs || [];
+      const sendOne = async (r) => {
         const sub = subMap[r.subcontractor_id] || {};
         const to = String(sub.email || "").trim();
-        if (!to) { results.push({ rfqId: r.id, ok: false, error: "no email" }); continue; }
+        if (!to) return { rfqId: r.id, ok: false, error: "no email" };
         const baseSubj = subjectOf(r.email_body) || `RFQ — ${tradeLabel(r.trade) || r.trade} — ${job.address}`;
         const subject = /^re:/i.test(baseSubj) ? baseSubj : `Re: ${baseSubj}`;
         const headers = {};
@@ -295,19 +309,36 @@ export function registerRfqPackageRoutes(app) {
           headers["References"] = mid;
         }
         try {
-          const transport = await sendPlainMail({ to, subject, text: body, html: wrapPlainTextEmailHtml(body), headers });
+          const transport = await withTimeout(
+            sendPlainMail({ to, subject, text: body, html: wrapPlainTextEmailHtml(body), headers }),
+            SEND_TIMEOUT_MS,
+            `Send to ${to}`
+          );
           try {
             await s.from("correspondence").insert({
               job_id: job.id, rfq_id: r.id, subcontractor_id: r.subcontractor_id || null,
               direction: "outbound", subject, body, sent_at: new Date().toISOString(), logged_by: "rfq-notify"
             });
           } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
-          results.push({ rfqId: r.id, ok: true, to, transport });
+          return { rfqId: r.id, ok: true, to, transport };
         } catch (sendErr) {
-          results.push({ rfqId: r.id, ok: false, to, error: sendErr?.message || String(sendErr) });
+          return { rfqId: r.id, ok: false, to, error: sendErr?.message || String(sendErr) };
         }
-      }
-      const sent = results.filter((x) => x.ok).length;
+      };
+
+      // Bounded-concurrency pool: workers pull from a shared cursor so at most
+      // CONCURRENCY sends are in flight at once (fast, but gentle on Resend rate limits).
+      const results = new Array(rows.length);
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < rows.length) {
+          const i = cursor++;
+          results[i] = await sendOne(rows[i]);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) || 1 }, worker));
+
+      const sent = results.filter((x) => x && x.ok).length;
       return ok(res, { sent, total: results.length, results });
     } catch (e) {
       console.error("[rfq/notify-recipients]", e);
