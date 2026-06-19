@@ -408,22 +408,22 @@ export function classifyTenderUploadSegments(fileName, hints = "") {
   const n = `${fileName} ${hints}`.toLowerCase();
   // Only match on explicit keywords — no broad guesses
   if (/\benergy\b|\bnathers\b|\bnat\s*hers\b|\bbess\b|\bthermal\b/.test(n)) {
-    return ["ENERGY REPORT"];
+    return ["PLANS", "ENERGY REPORT"];
   }
   if (/\bstructural\b|\bengineering\b|\bgeotech\b|\bfooting\b|\bfooting\s*plan\b/.test(n)) {
-    return ["ENGINEERING"];
+    return ["PLANS", "ENGINEERING"];
   }
   if (/\bselections\b|\bjoinery\b|\bcabinet\b|\binteriors\b/.test(n)) {
-    return ["INTERIORS, SELECTIONS, CABINTRY"];
+    return ["PLANS", "INTERIORS, SELECTIONS, CABINTRY"];
   }
   if (/\bsurvey\b|\bcontour\b|\bfeature\s*survey\b/.test(n)) {
-    return ["SURVEY"];
+    return ["PLANS", "SURVEY"];
   }
   if (/\btimber\s*frame\b|\bwall\s*frame\b|\broof\s*truss\b|\btruss\b/.test(n)) {
-    return ["TIMBER FRAMING"];
+    return ["PLANS", "TIMBER FRAMING"];
   }
   if (/\barchitectural\b|\barchitect\b|\bfloor\s*plan\b|\belevation\b|\bworking\s*drawing\b/.test(n)) {
-    return ["ARCHITECTURAL"];
+    return ["PLANS", "ARCHITECTURAL"];
   }
   // No confident match — leave for user to assign via doc type dropdown
   return ["INTERNAL", "PRESALE DOCS"];
@@ -516,6 +516,93 @@ export async function getOrCreateSharedLinkForPath(accessToken, path) {
   throw new Error("Could not create or resolve a Dropbox shared link for the shared job folder.");
 }
 
+/** Plan folders (client/subcontractor-shareable) that live under PLANS/. INTERNAL is never here. */
+export const PLAN_FOLDER_NAMES = [
+  "ARCHITECTURAL",
+  "ENGINEERING",
+  "SURVEY",
+  "ENERGY REPORT",
+  "TIMBER FRAMING",
+  "INTERIORS, SELECTIONS, CABINTRY"
+];
+
+/**
+ * Create (or upgrade an existing link to) a PUBLIC "anyone with the link" shared link on `path`.
+ * Team policy must permit public links (verified). Used ONLY for the PLANS folder — never INTERNAL.
+ */
+export async function ensurePublicSharedLink(accessToken, path) {
+  const publicSettings = { audience: { ".tag": "public" }, access: { ".tag": "viewer" }, allow_download: true };
+  const created = await sharingPost(
+    "sharing/create_shared_link_with_settings",
+    { path, settings: publicSettings },
+    accessToken
+  );
+  if (created.ok && created.json.url) return created.json.url;
+
+  // A link already exists — resolve it, then force its audience to public.
+  let url = null;
+  if (created.json?.error?.[".tag"] === "shared_link_already_exists") {
+    url =
+      created.json.error.shared_link_already_exists?.metadata?.url ||
+      created.json.error.shared_link_already_exists?.url ||
+      null;
+  }
+  if (!url) {
+    const listed = await sharingPost("sharing/list_shared_links", { path, direct_only: true }, accessToken);
+    url = listed.json?.links?.[0]?.url || null;
+  }
+  if (!url) throw new Error(`Could not create or resolve a public Dropbox link for ${path}.`);
+  await sharingPost(
+    "sharing/modify_shared_link_settings",
+    { url, settings: publicSettings, remove_expiration: false },
+    accessToken
+  ).catch(() => null);
+  return url;
+}
+
+/**
+ * Nest plan folders under `${sharedRoot}/PLANS` and return a PUBLIC link on PLANS. INTERNAL/* stays a
+ * sibling the PLANS link cannot reach (a folder link only grants its own subtree). Idempotent — safe to
+ * re-run; the root job folder is NOT publicly linked. Returns { plansRoot, plansLinkUrl, moved }.
+ */
+export async function ensurePlansSubfolderAndPublicLink(accessToken, sharedRoot) {
+  const plansRoot = `${sharedRoot}/PLANS`;
+  await createFolderIfNotExists(accessToken, plansRoot);
+
+  let entries = [];
+  try {
+    entries = await listFolderAllEntries(accessToken, sharedRoot, { recursive: false });
+  } catch {
+    entries = [];
+  }
+  const moved = [];
+  for (const e of entries) {
+    if (e[".tag"] !== "folder") continue;
+    const name = e.name;
+    if (name === "PLANS" || name === "INTERNAL") continue;
+    if (!PLAN_FOLDER_NAMES.includes(name)) continue; // only relocate known plan folders
+    try {
+      await rpc(
+        "files/move_v2",
+        { from_path: `${sharedRoot}/${name}`, to_path: `${plansRoot}/${name}`, autorename: false, allow_ownership_transfer: false },
+        accessToken
+      );
+      moved.push(name);
+    } catch (err) {
+      if (!/conflict|already|duplicate/i.test(err?.message || "")) throw err;
+    }
+  }
+
+  const plansLinkUrl = await ensurePublicSharedLink(accessToken, plansRoot);
+  return { plansRoot, plansLinkUrl, moved };
+}
+
+/** Migrate an EXISTING job's folder to the PLANS-nesting layout + public link. */
+export async function migrateJobToPlans(jobAddress) {
+  const token = await getDropboxAccessToken();
+  return ensurePlansSubfolderAndPublicLink(token, sharedJobRootPath(jobAddress));
+}
+
 export async function dropboxUploadBuffer(accessToken, dropboxPath, buffer, { autorename = true } = {}) {
   const arg = JSON.stringify({
     path: dropboxPath,
@@ -567,12 +654,12 @@ function tenderSegmentsFromDocumentCategory(category) {
     .trim()
     .toLowerCase();
   const map = {
-    architectural: ["ARCHITECTURAL"],
-    engineering: ["ENGINEERING"],
-    energy_report: ["ENERGY REPORT"],
-    interiors_selections: ["INTERIORS, SELECTIONS, CABINTRY"],
-    survey: ["SURVEY"],
-    timber_framing: ["TIMBER FRAMING"],
+    architectural: ["PLANS", "ARCHITECTURAL"],
+    engineering: ["PLANS", "ENGINEERING"],
+    energy_report: ["PLANS", "ENERGY REPORT"],
+    interiors_selections: ["PLANS", "INTERIORS, SELECTIONS, CABINTRY"],
+    survey: ["PLANS", "SURVEY"],
+    timber_framing: ["PLANS", "TIMBER FRAMING"],
     internal: ["INTERNAL", "PRESALE DOCS"],
     other: ["INTERNAL", "PRESALE DOCS"]
   };
@@ -627,15 +714,18 @@ export async function ensureJobFolderStructure(opts) {
     }
   }
 
-  const dropboxSharedLinkUrl = await getOrCreateSharedLinkForPath(token, sharedRoot);
+  // Public "anyone with link" share on PLANS only — never the job root (which contains INTERNAL).
+  const { plansRoot, plansLinkUrl } = await ensurePlansSubfolderAndPublicLink(token, sharedRoot);
+  const dropboxSharedLinkUrl = plansLinkUrl;
 
   const privateRoot = `${sharedRoot}/INTERNAL`;
 
   return {
     sharedRoot,
+    plansRoot,
     privateRoot,
     dropboxSharedLinkUrl,
-    createdPaths: [sharedRoot],
+    createdPaths: [sharedRoot, plansRoot],
     internalShare: null
   };
 }

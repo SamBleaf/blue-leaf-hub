@@ -152,6 +152,14 @@ export default function TenderDetail() {
   const [batchPoProgress, setBatchPoProgress] = useState({}); // rfq_id → 'pending'|'ok'|'error'
   const [batchPoBusy, setBatchPoBusy] = useState(false);
   const [batchPoDismissed, setBatchPoDismissed] = useState(false);
+  // "Email all trade recipients" — resend the (corrected) plans link as a reply to existing RFQs.
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailRecips, setEmailRecips] = useState([]);
+  const [emailSel, setEmailSel] = useState(() => new Set());
+  const [emailMsg, setEmailMsg] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailResult, setEmailResult] = useState(null);
 
   const readOnly = job?.status === "archived";
 
@@ -210,6 +218,66 @@ export default function TenderDetail() {
       setScanBusy(false);
     }
   }, [load]);
+
+  const openEmailRecipients = useCallback(async () => {
+    setEmailOpen(true);
+    setEmailResult(null);
+    setEmailLoading(true);
+    try {
+      const res = await authFetch(`/api/rfq/recipients/${jobId}`);
+      const json = await res.json();
+      const recips = json?.recipients || [];
+      setEmailRecips(recips);
+      setEmailSel(new Set(recips.map((r) => r.rfqId)));
+      const link = json?.job?.dropboxLink || "";
+      setEmailMsg(
+        `Hi,\n\nA quick update on the ${json?.job?.address || "project"} tender — please use the updated project documentation link below. ` +
+          `It now opens for anyone, no Dropbox account needed:\n\n${link}\n\n` +
+          `If you've already started your quote, the scope is unchanged — this just refreshes the plans link. ` +
+          `Any questions, let me know.\n\nKind regards,\nSam Morris\nBlue Leaf Building`
+      );
+    } catch {
+      setEmailResult({ error: "Could not load recipients." });
+    } finally {
+      setEmailLoading(false);
+    }
+  }, [jobId]);
+
+  const toggleRfqSel = (rfqId) =>
+    setEmailSel((prev) => {
+      const n = new Set(prev);
+      if (n.has(rfqId)) n.delete(rfqId);
+      else n.add(rfqId);
+      return n;
+    });
+  const toggleTradeSel = (trade, on) =>
+    setEmailSel((prev) => {
+      const n = new Set(prev);
+      for (const r of emailRecips) if (r.trade === trade) on ? n.add(r.rfqId) : n.delete(r.rfqId);
+      return n;
+    });
+
+  const sendEmailRecipients = useCallback(async () => {
+    const rfqIds = [...emailSel];
+    if (rfqIds.length === 0) { setEmailResult({ error: "Select at least one recipient." }); return; }
+    if (!emailMsg.trim()) { setEmailResult({ error: "Message can't be empty." }); return; }
+    setEmailBusy(true);
+    setEmailResult(null);
+    try {
+      const res = await authFetch("/api/rfq/notify-recipients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, rfqIds, message: emailMsg })
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) setEmailResult({ error: json?.error || "Send failed." });
+      else { setEmailResult({ sent: json.sent, total: json.total }); load(); }
+    } catch (e) {
+      setEmailResult({ error: e?.message || "Send failed." });
+    } finally {
+      setEmailBusy(false);
+    }
+  }, [emailSel, emailMsg, jobId, load]);
 
   useEffect(() => {
     if (!job?.id || jobTab !== "fee-proposal") return;
@@ -961,6 +1029,16 @@ export default function TenderDetail() {
                 Resume RFQ Engine →
               </button>
             )}
+            {!readOnly && job.status === "tendering" && (
+              <button
+                type="button"
+                onClick={openEmailRecipients}
+                title="Email the current RFQ recipients an update (e.g. the corrected plans link), threaded as a reply to their RFQ"
+                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition hover:border-primary/40"
+              >
+                ✉ Email recipients
+              </button>
+            )}
             <button
               type="button"
               onClick={scanInbox}
@@ -986,6 +1064,82 @@ export default function TenderDetail() {
             </button>
           </div>
         </div>
+
+        {emailOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => !emailBusy && setEmailOpen(false)}
+          >
+            <div
+              className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-card border border-hairline bg-surface p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-primary">Email RFQ recipients</h3>
+                <button type="button" onClick={() => setEmailOpen(false)} className="text-muted hover:text-ink">✕</button>
+              </div>
+              {emailLoading ? (
+                <p className="mt-4 text-sm text-muted">Loading recipients…</p>
+              ) : emailRecips.length === 0 ? (
+                <p className="mt-4 text-sm text-muted">No sent RFQ recipients found for this job.</p>
+              ) : (
+                <>
+                  <p className="mt-2 text-xs text-muted">
+                    Toggle trades/recipients, then send. Each email goes as a reply to that subcontractor's original RFQ thread.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {[...new Set(emailRecips.map((r) => r.trade))].map((trade) => {
+                      const rows = emailRecips.filter((r) => r.trade === trade);
+                      const allOn = rows.every((r) => emailSel.has(r.rfqId));
+                      return (
+                        <div key={trade} className="rounded-lg border border-hairline bg-page p-2">
+                          <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+                            <input type="checkbox" checked={allOn} onChange={(e) => toggleTradeSel(trade, e.target.checked)} />
+                            {trade}
+                          </label>
+                          <div className="mt-1 space-y-1 pl-5">
+                            {rows.map((r) => (
+                              <label key={r.rfqId} className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                                <input type="checkbox" checked={emailSel.has(r.rfqId)} onChange={() => toggleRfqSel(r.rfqId)} />
+                                <span className="text-ink">{r.businessName || r.email}</span>
+                                <span className="text-[10px]">{r.email}</span>
+                                {!r.hasThread ? <span className="text-[10px] text-warning">(no thread — sends fresh)</span> : null}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <label className="mt-3 block text-xs font-semibold uppercase text-muted">Message</label>
+                  <textarea
+                    rows={10}
+                    value={emailMsg}
+                    onChange={(e) => setEmailMsg(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs font-mono leading-relaxed"
+                  />
+                  {emailResult?.error ? <p className="mt-2 text-xs text-danger">{emailResult.error}</p> : null}
+                  {emailResult?.sent != null ? (
+                    <p className="mt-2 text-xs text-success">Sent {emailResult.sent} of {emailResult.total}.</p>
+                  ) : null}
+                  <div className="mt-4 flex items-center justify-end gap-3">
+                    <button type="button" onClick={() => setEmailOpen(false)} className="rounded-lg border border-hairline bg-page px-4 py-2 text-xs font-semibold">
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      disabled={emailBusy || emailSel.size === 0}
+                      onClick={sendEmailRecipients}
+                      className="rounded-lg bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm disabled:opacity-40"
+                    >
+                      {emailBusy ? "Sending…" : `Send to ${emailSel.size} recipient${emailSel.size === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {rfqs.map((r) => {
           const sub = r.subcontractors;
           const vis = isOverdue(r.deadline, r.status)

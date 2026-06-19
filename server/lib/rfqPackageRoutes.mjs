@@ -217,6 +217,104 @@ export function registerRfqPackageRoutes(app) {
     }
   });
 
+  // ── Tender Board: resend the (corrected) plans link to a job's RFQ recipients, threaded as a reply ──
+  // List recipients grouped by trade for the "Email all trade recipients" panel.
+  app.get("/api/rfq/recipients/:jobId", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
+    try {
+      const { jobId } = req.params;
+      const { data: job } = await s
+        .from("jobs").select("id, address, dropbox_shared_link, dropbox_link").eq("id", jobId).maybeSingle();
+      if (!job) return err(res, 404, "Job not found.");
+      const { data: rfqs, error } = await s
+        .from("rfqs")
+        .select("id, trade, subcontractor_id, status, sent_at, sent_message_id, email_body")
+        .eq("job_id", jobId)
+        .in("status", ["sent", "received", "reminded", "followed_up"]);
+      if (error) return err(res, 500, translateDbError(error));
+      const subIds = [...new Set((rfqs || []).map((r) => r.subcontractor_id).filter(Boolean))];
+      let subMap = {};
+      if (subIds.length) {
+        const { data: subs } = await s.from("subcontractors").select("id, business_name, email").in("id", subIds);
+        subMap = Object.fromEntries((subs || []).map((x) => [x.id, x]));
+      }
+      const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
+      const recipients = (rfqs || [])
+        .map((r) => {
+          const sub = subMap[r.subcontractor_id] || {};
+          return {
+            rfqId: r.id, trade: r.trade, status: r.status,
+            businessName: sub.business_name || "", email: sub.email || "",
+            hasThread: Boolean(r.sent_message_id), subject: subjectOf(r.email_body)
+          };
+        })
+        .filter((r) => r.email);
+      return ok(res, {
+        job: { id: job.id, address: job.address, dropboxLink: job.dropbox_shared_link || job.dropbox_link || "" },
+        recipients
+      });
+    } catch (e) {
+      console.error("[rfq/recipients]", e);
+      return err(res, 500, "Failed to load recipients.");
+    }
+  });
+
+  // Send an update (e.g. the corrected plans link) to selected recipients, threaded as a reply.
+  app.post("/api/rfq/notify-recipients", requireAuth, async (req, res) => {
+    const s = db();
+    if (!s) return err(res, 503, "Database not configured.");
+    try {
+      const { jobId, rfqIds, message } = req.body || {};
+      if (!jobId || !Array.isArray(rfqIds) || rfqIds.length === 0) return err(res, 400, "jobId and rfqIds[] required.");
+      const body = String(message || "").trim();
+      if (!body) return err(res, 400, "message required.");
+      const { data: job } = await s.from("jobs").select("id, address").eq("id", jobId).maybeSingle();
+      if (!job) return err(res, 404, "Job not found.");
+      const { data: rfqs } = await s
+        .from("rfqs").select("id, trade, subcontractor_id, sent_message_id, email_body")
+        .eq("job_id", jobId).in("id", rfqIds);
+      const subIds = [...new Set((rfqs || []).map((r) => r.subcontractor_id).filter(Boolean))];
+      let subMap = {};
+      if (subIds.length) {
+        const { data: subs } = await s.from("subcontractors").select("id, business_name, email").in("id", subIds);
+        subMap = Object.fromEntries((subs || []).map((x) => [x.id, x]));
+      }
+      const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
+      const results = [];
+      for (const r of rfqs || []) {
+        const sub = subMap[r.subcontractor_id] || {};
+        const to = String(sub.email || "").trim();
+        if (!to) { results.push({ rfqId: r.id, ok: false, error: "no email" }); continue; }
+        const baseSubj = subjectOf(r.email_body) || `RFQ — ${tradeLabel(r.trade) || r.trade} — ${job.address}`;
+        const subject = /^re:/i.test(baseSubj) ? baseSubj : `Re: ${baseSubj}`;
+        const headers = {};
+        if (r.sent_message_id) {
+          const mid = `<${String(r.sent_message_id).replace(/^<|>$/g, "")}>`;
+          headers["In-Reply-To"] = mid;
+          headers["References"] = mid;
+        }
+        try {
+          const transport = await sendPlainMail({ to, subject, text: body, html: wrapPlainTextEmailHtml(body), headers });
+          try {
+            await s.from("correspondence").insert({
+              job_id: job.id, rfq_id: r.id, subcontractor_id: r.subcontractor_id || null,
+              direction: "outbound", subject, body, sent_at: new Date().toISOString(), logged_by: "rfq-notify"
+            });
+          } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
+          results.push({ rfqId: r.id, ok: true, to, transport });
+        } catch (sendErr) {
+          results.push({ rfqId: r.id, ok: false, to, error: sendErr?.message || String(sendErr) });
+        }
+      }
+      const sent = results.filter((x) => x.ok).length;
+      return ok(res, { sent, total: results.length, results });
+    } catch (e) {
+      console.error("[rfq/notify-recipients]", e);
+      return err(res, 500, "Failed to send notifications.");
+    }
+  });
+
   // ── List all packages ────────────────────────────────────────────────────
   app.get("/api/rfq-packages", requireAuth, async (_req, res) => {
     const s = db();
