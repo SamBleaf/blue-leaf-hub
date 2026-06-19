@@ -1156,35 +1156,38 @@ export default function LeadDetail() {
   const showWinningOffer = !isArchTender && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
   const showPreTender = ["winning_offer","accepted","tender","won"].includes(lead.stage);
 
-  return (
-    <div>
-      {/* Breadcrumb */}
-      <div className="flex items-center justify-between pb-4 mb-2 border-b border-hairline">
-        <div className="flex items-center gap-2 text-sm min-w-0">
-          <Link to="/sales" className="text-primary hover:underline flex-shrink-0">Sales Pipeline</Link>
-          <span className="text-muted">/</span>
-          <span className="text-ink font-medium truncate">{lead.first_name} {lead.last_name || ""}</span>
-          <span className={`ml-1 flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageMeta?.color}`}>{stageMeta?.label}</span>
-        </div>
-        <div className="flex gap-2 flex-shrink-0">
-          <button onClick={() => patch({ stage: "nurture" }).then(() => load())} className="text-xs text-muted hover:text-ink px-3 py-1.5 rounded border border-hairline">→ Nurture</button>
-          <button onClick={() => patch({ stage: "lost" }).then(() => nav("/sales"))} className="text-xs text-red-500 hover:text-red-700 px-3 py-1.5 rounded border border-red-200 hover:border-red-400">Mark Lost</button>
-        </div>
-      </div>
+  // ── Option A refactor ──────────────────────────────────────────────
+  // Each block below is the EXISTING JSX, copied verbatim (same handlers,
+  // same classes). The new return composes these into a stage-focused
+  // layout: sticky header → "Do this now" focus panel → "Lead file" drawer.
 
-      {/* 3-column body */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-hairline">
+  const breadcrumbBlock = (
+    <div className="flex items-center gap-2 text-sm min-w-0">
+      <Link to="/sales" className="text-primary hover:underline flex-shrink-0">Sales Pipeline</Link>
+      <span className="text-muted">/</span>
+      <span className="text-ink font-medium truncate">{lead.first_name} {lead.last_name || ""}</span>
+      <span className={`ml-1 flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageMeta?.color}`}>{stageMeta?.label}</span>
+    </div>
+  );
 
-          {/* LEFT */}
-          <div className="p-5 space-y-5">
-            <div className="rounded-card border border-hairline bg-surface p-4">
-              <h3 className="section-label mb-3">Contact</h3>
-              <InlineField label="First name" value={lead.first_name} onSave={v => patch({ first_name: v || "Unnamed" })} />
-              <InlineField label="Last name" value={lead.last_name} onSave={v => patch({ last_name: v })} />
-              <InlineField label="Email" value={lead.email} type="email" onSave={v => patch({ email: v })} />
-              <InlineField label="Phone" value={lead.phone} type="tel" onSave={v => patch({ phone: v })} />
-            </div>
+  const headerActionsBlock = (
+    <div className="flex gap-2 flex-shrink-0">
+      <button onClick={() => patch({ stage: "nurture" }).then(() => load())} className="text-xs text-muted hover:text-ink px-3 py-1.5 rounded border border-hairline">→ Nurture</button>
+      <button onClick={() => patch({ stage: "lost" }).then(() => nav("/sales"))} className="text-xs text-red-500 hover:text-red-700 px-3 py-1.5 rounded border border-red-200 hover:border-red-400">Mark Lost</button>
+    </div>
+  );
 
+  const contactBlock = (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Contact</h3>
+      <InlineField label="First name" value={lead.first_name} onSave={v => patch({ first_name: v || "Unnamed" })} />
+      <InlineField label="Last name" value={lead.last_name} onSave={v => patch({ last_name: v })} />
+      <InlineField label="Email" value={lead.email} type="email" onSave={v => patch({ email: v })} />
+      <InlineField label="Phone" value={lead.phone} type="tel" onSave={v => patch({ phone: v })} />
+    </div>
+  );
+
+  const projectBlock = (
             <div className="rounded-card border border-hairline bg-surface p-4">
               <h3 className="section-label mb-3">Project</h3>
               <InlineField label="Project type" value={lead.project_type} options={PROJECT_TYPES} onSave={v => patch({ project_type: v })} />
@@ -1195,10 +1198,14 @@ export default function LeadDetail() {
               <InlineField label="Design stage" value={lead.design_stage} options={DESIGN_STAGES} onSave={v => patch({ design_stage: v })} />
               <InlineField label="Desired start" value={lead.desired_start_date || ""} type="date" onSave={v => patch({ desired_start_date: v })} />
             </div>
+  );
 
+  const marginBlock = (
             <MarginPanel lead={lead} onSave={v => patch({ target_gp_pct: v })} />
+  );
 
-            {!isArchTender && <div className="rounded-card border border-hairline bg-surface p-4">
+  const qualifyingBlock = !isArchTender && (
+            <div className="rounded-card border border-hairline bg-surface p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="section-label">Qualifying Scorecard</h3>
                 <span className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
@@ -1216,8 +1223,10 @@ export default function LeadDetail() {
                   Score under 5 — APB recommends nurturing this lead rather than investing discovery time.
                 </p>
               )}
-            </div>}
+            </div>
+  );
 
+  const blueprintBlock = (
             <div className="rounded-card border border-primary/20 bg-primary/5 p-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-primary">Blueprint Insight</h3>
@@ -1235,12 +1244,9 @@ export default function LeadDetail() {
                 <p className="text-xs text-muted italic">Loading APB advice…</p>
               )}
             </div>
-          </div>
+  );
 
-          {/* CENTRE — Conversations + Activities */}
-          <div className="p-5 flex flex-col gap-4">
-
-            {/* Conversations */}
+  const conversationsBlock = (
             <div className="rounded-card border border-primary/20 bg-primary/[0.03] p-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -1284,7 +1290,9 @@ export default function LeadDetail() {
                 </div>
               )}
             </div>
+  );
 
+  const logActivityBlock = (
             <div className="rounded-card border border-hairline bg-surface p-4">
               <h3 className="section-label mb-3">Log Activity</h3>
               <form onSubmit={logActivity} className="space-y-2">
@@ -1304,7 +1312,9 @@ export default function LeadDetail() {
                 </button>
               </form>
             </div>
+  );
 
+  const timelineBlock = (
             <div className="space-y-3">
               <h3 className="section-label">Activity Timeline</h3>
               {activities.length === 0 ? (
@@ -1330,17 +1340,16 @@ export default function LeadDetail() {
                 </div>
               ))}
             </div>
-          </div>
+  );
 
-          {/* RIGHT — Stage checklist + advance */}
-          <div className="p-5 space-y-5">
-            {isArchTender && (
+  const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
                 <p className="text-xs font-bold text-primary uppercase tracking-wide">Architect Tender</p>
                 <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — qualifying and fee proposal skipped.</p>
               </div>
-            )}
-            {lead.stage === "tender" && (
+  );
+
+  const tenderBlock = lead.stage === "tender" && (
               <div className="rounded-card border border-primary bg-primary/[0.06] p-4">
                 <h3 className="section-label mb-1 text-primary">Tendering</h3>
                 <p className="text-xs text-muted mb-3 leading-relaxed">
@@ -1358,8 +1367,9 @@ export default function LeadDetail() {
                   <p className="text-[11px] text-muted text-center mt-2">A job will be created from this lead first.</p>
                 )}
               </div>
-            )}
-            {showDiscovery && (
+  );
+
+  const discoveryBlock = showDiscovery && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">Discovery</h3>
                 <div className="space-y-3">
@@ -1385,9 +1395,9 @@ export default function LeadDetail() {
                   </div>
                 </div>
               </div>
-            )}
+  );
 
-            {showWinningOffer && (
+  const winningOfferBlock = showWinningOffer && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">Winning Offer</h3>
 
@@ -1544,9 +1554,9 @@ export default function LeadDetail() {
                   </div>
                 </div>
               </div>
-            )}
+  );
 
-            {showPreTender && (
+  const ptsaBlock = showPreTender && (
               <div className="rounded-card border border-amber-200 bg-amber-50/20 p-4">
                 {/* Header + status */}
                 <div className="flex items-center justify-between mb-3">
@@ -1697,9 +1707,9 @@ export default function LeadDetail() {
                 </button>
                 <p className="text-xs text-muted text-center mt-1.5">Downloads a branded DOCX ready to send to the client</p>
               </div>
-            )}
+  );
 
-            {next && (
+  const advanceBlock = next && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">
                   Advance to {nextLabel}
@@ -1750,13 +1760,13 @@ export default function LeadDetail() {
                   <p className="mt-2 text-xs text-muted text-center">Complete the requirements above to advance.</p>
                 )}
               </div>
-            )}
+  );
 
-            <LeadNotesPanel leadId={leadId} />
+  const notesBlock = <LeadNotesPanel leadId={leadId} />;
 
-            <LeadDocumentsPanel leadId={leadId} />
+  const documentsBlock = <LeadDocumentsPanel leadId={leadId} />;
 
-            {!["won","lost"].includes(lead.stage) && (
+  const nurtureBlock = !["won","lost"].includes(lead.stage) && (
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">Nurture</h3>
                 <InlineField label="Follow-up date" value={lead.nurture_follow_up_date || ""} type="date" onSave={v => patch({ nurture_follow_up_date: v })} />
@@ -1771,9 +1781,179 @@ export default function LeadDetail() {
                   />
                 </div>
               </div>
-            )}
+  );
+
+  // ── Stage stepper (header) ──────────────────────────────────────────
+  const currentStageIdx = STAGE_ORDER.indexOf(lead.stage);
+  const stageStepper = isArchTender ? (
+    <div className="rounded-lg border border-primary/30 bg-primary/[0.04] px-3 py-1.5 text-xs text-primary font-semibold whitespace-nowrap">
+      Architect Tender — fast-tracked
+    </div>
+  ) : (
+    <div className="flex items-center gap-1 overflow-x-auto -mx-1 px-1 py-0.5">
+      {STAGE_ORDER.map((sid, i) => {
+        const meta = STAGES.find(s => s.id === sid);
+        const isCurrent = sid === lead.stage;
+        const isPast = currentStageIdx >= 0 && i < currentStageIdx;
+        return (
+          <div key={sid} className="flex items-center flex-shrink-0">
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${
+                isCurrent ? meta?.color + " ring-1 ring-primary" : isPast ? "bg-page text-muted" : "bg-page text-muted/60"
+              }`}
+            >
+              {meta?.label}
+            </span>
+            {i < STAGE_ORDER.length - 1 && <span className="mx-0.5 text-muted/40 text-[10px]">›</span>}
           </div>
+        );
+      })}
+    </div>
+  );
+
+  // ── Key facts (header) ──────────────────────────────────────────────
+  const keyFactsBlock = (
+    <div className="flex items-center gap-4 flex-shrink-0">
+      <div className="text-right">
+        <p className="text-[10px] uppercase tracking-wide text-muted">Est. value</p>
+        <p className="text-sm font-semibold text-ink">{lead.estimated_value ? `$${Number(lead.estimated_value).toLocaleString("en-AU")}` : "—"}</p>
+      </div>
+      {!isArchTender && (
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-wide text-muted">Qualifying</p>
+          <p className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
+            {lead.qualify_score ?? 0}/8
+          </p>
         </div>
+      )}
+    </div>
+  );
+
+  // ── "Do this now" focus — pick block(s) by stage ────────────────────
+  let focusContent = null;
+  let focusShown = true;
+  if (lead.stage === "enquiry" || lead.stage === "qualify") {
+    focusContent = qualifyingBlock;
+  } else if (lead.stage === "discovery") {
+    focusContent = <>{discoveryBlock}{conversationsBlock}</>;
+  } else if (lead.stage === "winning_offer") {
+    focusContent = winningOfferBlock;
+  } else if (lead.stage === "fee_proposal") {
+    focusContent = <>{ptsaBlock}{advanceBlock}</>;
+  } else if (lead.stage === "tender") {
+    focusContent = tenderBlock;
+  } else if (lead.stage === "accepted") {
+    focusContent = (
+      <div className="rounded-card border border-emerald-200 bg-emerald-50/40 p-4">
+        <p className="text-sm font-medium text-ink mb-3">Offer accepted — proceed to tender.</p>
+        {advanceBlock}
+      </div>
+    );
+  } else {
+    // won / nurture / lost — no focus panel
+    focusShown = false;
+  }
+
+  return (
+    <div>
+      {/* 1) STICKY HEADER */}
+      <div className="sticky top-0 z-10 bg-page border-b border-hairline -mx-4 px-4 sm:-mx-5 sm:px-5 pt-2 pb-3 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          {breadcrumbBlock}
+          {headerActionsBlock}
+        </div>
+        {stageStepper}
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          {keyFactsBlock}
+          {/* Primary "Next →" control */}
+          {next && !["fee_proposal", "accepted"].includes(lead.stage) && (
+            <details className="ml-auto rounded-lg border border-hairline bg-surface">
+              <summary className="cursor-pointer select-none list-none px-4 py-2 text-sm font-semibold text-white bg-primary rounded-lg hover:opacity-90 flex items-center gap-2">
+                Next: {nextLabel} →
+                {!gatePass && <span className="text-[10px] font-normal bg-white/20 rounded px-1.5 py-0.5">checklist</span>}
+              </summary>
+              <div className="p-3 w-72 max-w-[80vw]">
+                {advanceBlock}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
+      {/* 2) "DO THIS NOW" FOCUS PANEL */}
+      {focusShown && (
+        <div className="mt-4 rounded-card border border-primary/30 bg-primary/[0.03] p-4 sm:p-5 space-y-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-primary">Do this now · {stageMeta?.label}</p>
+          {archTenderBlock}
+          {focusContent}
+        </div>
+      )}
+
+      {/* 3) "LEAD FILE" DRAWER */}
+      <details open className="mt-4 rounded-card border border-hairline bg-surface">
+        <summary className="cursor-pointer select-none list-none px-4 py-3 text-sm font-semibold text-ink flex items-center gap-2 hover:bg-page rounded-t-card">
+          <span className="text-muted">▸</span> Lead file
+          <span className="text-xs font-normal text-muted ml-1">all details, editable at any stage</span>
+        </summary>
+        <div className="border-t border-hairline p-4 sm:p-5 space-y-6">
+          {/* Lead details */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {contactBlock}
+            {projectBlock}
+            {marginBlock}
+            {blueprintBlock}
+          </div>
+
+          {/* Qualifying */}
+          {qualifyingBlock && (
+            <div>
+              <p className="section-label mb-2">Qualifying</p>
+              {qualifyingBlock}
+            </div>
+          )}
+
+          {/* Stage work — kept accessible at any stage */}
+          {(discoveryBlock || winningOfferBlock || ptsaBlock) && (
+            <div>
+              <p className="section-label mb-2">Stage work</p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {discoveryBlock}
+                {winningOfferBlock}
+                {ptsaBlock}
+              </div>
+            </div>
+          )}
+
+          {/* Conversations & activity */}
+          <div>
+            <p className="section-label mb-2">Conversations &amp; activity</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {conversationsBlock}
+              {logActivityBlock}
+            </div>
+            <div className="mt-4">
+              {timelineBlock}
+            </div>
+          </div>
+
+          {/* Notes & documents */}
+          <div>
+            <p className="section-label mb-2">Notes &amp; documents</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {notesBlock}
+              {documentsBlock}
+            </div>
+          </div>
+
+          {/* Nurture */}
+          {nurtureBlock && (
+            <div>
+              <p className="section-label mb-2">Nurture</p>
+              {nurtureBlock}
+            </div>
+          )}
+        </div>
+      </details>
 
       <ConversationPanel
         leadId={leadId}
