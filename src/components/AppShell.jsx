@@ -544,8 +544,8 @@ export default function AppShell() {
 
   return (
     <div
-      className="min-h-screen bg-page"
-      style={{ paddingLeft: `${sidebarW}px` }}
+      className="min-h-screen bg-page md:pl-[var(--blh-sidebar-w)]"
+      style={{ "--blh-sidebar-w": `${sidebarW}px` }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -578,9 +578,8 @@ export default function AppShell() {
       {/* ── Mobile header ─────────────────────────────────────────────── */}
       <header
         className="sticky top-0 z-20 border-b border-hairline bg-surface/95 backdrop-blur md:hidden"
-        style={{ marginLeft: `-${sidebarW}px`, paddingLeft: `${sidebarW}px` }}
       >
-        <div className="flex items-center gap-3 px-3 py-3" style={{ marginLeft: `-${sidebarW}px` }}>
+        <div className="flex items-center gap-3 px-3 py-3">
           <button
             type="button"
             onClick={() => setMobileOpen((o) => !o)}
