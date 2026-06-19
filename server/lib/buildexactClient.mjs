@@ -374,6 +374,38 @@ export async function deletePurchaseOrder(id) {
   return beFetch(`/jobs/purchaseorders/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// POST /jobs/purchaseorders/complete — Buildexact dev-recommended single call (2026-06-19) that
+// replaces the old PATCH/PUT/{id}/complete dance. It sets the order status to "Received" (Purchase
+// order) or "Completed" (Work order) AND creates all the job's actual-costing items from the order's
+// line items — i.e. this is what makes Hub costs land in Buildexact actuals. Body: { purchaseOrderId }.
+export async function completePurchaseOrder(purchaseOrderId) {
+  return beFetch("/jobs/purchaseorders/complete", { method: "POST", body: { purchaseOrderId } });
+}
+
+// Kill-switch for the completion step above. Default ON when Buildexact is configured; set
+// BUILDEXACT_COMPLETE_ORDERS=false in Railway to create orders WITHOUT completing them (no actuals)
+// — a fast rollback that needs no redeploy if completion ever misbehaves against live data.
+export function buildexactCompleteOrdersEnabled() {
+  return process.env.BUILDEXACT_COMPLETE_ORDERS !== "false";
+}
+
+// Best-effort completion check: returns true/false if Buildexact clearly reports the order's status,
+// or null if it can't be determined. Used to avoid re-completing an order whose completion call's
+// HTTP response was lost (which would otherwise risk double-booking actuals on retry).
+export async function isPurchaseOrderComplete(jobId, orderId) {
+  if (!jobId || !orderId) return null;
+  let list;
+  try { list = await getPurchaseOrders(jobId); } catch { return null; }
+  const want = String(orderId);
+  const po = beList(list).find((o) => String(o?.purchaseOrderId ?? o?.id ?? o?.orderId ?? "") === want);
+  if (!po) return null;
+  if (typeof po.isCompleted === "boolean") return po.isCompleted;
+  if (typeof po.isReceived === "boolean") return po.isReceived;
+  const st = String(po.orderStatus ?? po.status ?? "").toLowerCase();
+  if (!st) return null;
+  return /complete|received/.test(st);
+}
+
 // POST /jobs/create — JobCreateOptionsDto.
 export async function createJob(options) {
   return beFetch("/jobs/create", { method: "POST", body: options });

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
-import { buildexactConfigured, createPurchaseOrder, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
+import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, buildexactCompleteOrdersEnabled, isPurchaseOrderComplete, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
 import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
@@ -170,81 +170,204 @@ export async function resolveCostCategory(timesheet, entry, sb) {
   return TASK_LABELS[entry.task_category] || entry.task_category;
 }
 
+// Complete a Buildexact Work Order created from a timesheet. POST /jobs/purchaseorders/complete flips
+// it to "Completed" and creates the actual-costing items from the lines. The order id is kept on the
+// row in EVERY outcome so a retry completes (never re-creates) the same order.
+async function completeWorkOrder(woId, timesheet, sb, opts = {}) {
+  try {
+    if (opts.precheck) {
+      // Retry path: if Buildexact already shows this order completed, a prior completion succeeded
+      // but its HTTP response was lost — mark done instead of re-completing (avoids double-booking).
+      let jobId = null;
+      try { ({ buildexactJobId: jobId } = await resolveBuildexactJobIdForTimesheet(timesheet, sb)); } catch { /* unknown */ }
+      const already = await isPurchaseOrderComplete(jobId, woId);
+      if (already === true) {
+        await sb.from("timesheets").update({
+          buildexact_work_order_id: woId,
+          buildexact_completed_at: new Date().toISOString(),
+          buildexact_sync_error: null,
+        }).eq("id", timesheet.id);
+        console.log("[workforce/buildexact-sync] WORK ORDER already completed in Buildexact — marked done", JSON.stringify({ id: woId, ts: timesheet.id }));
+        return { synced: true, workOrderId: woId, completed: true, skipped: "already_completed" };
+      }
+      if (already === null) {
+        // Can't confirm the order's status on a retry — re-completing could double-book. Stop and
+        // flag for manual review rather than guess.
+        await sb.from("timesheets").update({
+          buildexact_work_order_id: woId,
+          buildexact_completed_at: null,
+          buildexact_needs_review: true,
+          buildexact_sync_error: `Couldn't confirm Buildexact order ${woId} status on retry — verify it in Buildexact, then Force re-sync`,
+        }).eq("id", timesheet.id);
+        console.warn("[workforce/buildexact-sync] completion status indeterminate on retry — flagged for review", JSON.stringify({ id: woId, ts: timesheet.id }));
+        return { synced: false, workOrderId: woId, completed: false, needsReview: true, error: "completion status indeterminate" };
+      }
+    }
+    await completePurchaseOrder(woId);
+    await sb.from("timesheets").update({
+      buildexact_work_order_id: woId,
+      buildexact_completed_at: new Date().toISOString(),
+      buildexact_sync_error: null,
+    }).eq("id", timesheet.id);
+    console.log("[workforce/buildexact-sync] WORK ORDER completed", JSON.stringify({ id: woId, ts: timesheet.id }));
+    return { synced: true, workOrderId: woId, completed: true };
+  } catch (e) {
+    await sb.from("timesheets").update({
+      buildexact_work_order_id: woId,
+      buildexact_completed_at: null,
+      buildexact_sync_error: `Work Order created (id ${woId}) but completion failed: ${e?.message || "unknown"}`,
+    }).eq("id", timesheet.id);
+    console.warn("[workforce/buildexact-sync] WORK ORDER completion failed", JSON.stringify({ woId, error: e?.message }));
+    return { synced: false, workOrderId: woId, completed: false, error: e?.message };
+  }
+}
+
 // Push an approved timesheet to Buildexact as a WORK ORDER (orderType 'Work') — the mechanism
 // Deputy used (proven live 2026-06-14): one Work Order per timesheet, a Labour line per entry,
 // each line's `parentTask` set to the job's cost category (the "Actuals Category"), description
 // "[Name] (HUB)". Returns { synced, error?, skipped?, workOrderId? } so callers can count.
-export async function syncTimesheetToBuildexact(timesheet, sb) {
+export async function syncTimesheetToBuildexact(timesheet, sb, opts = {}) {
   if (!buildexactConfigured()) return { synced: false, skipped: true };
-  if (timesheet.buildexact_work_order_id) return { synced: true, skipped: "already_pushed" }; // idempotent — never duplicate
-  const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
-  if (!emp) {
-    await sb.from("timesheets").update({ buildexact_sync_error: "Employee record not found" }).eq("id", timesheet.id);
-    return { synced: false, error: "Employee record not found" };
+  // Terminal: needs manual intervention (orphaned/empty order, or edited after an order existed).
+  if (timesheet.buildexact_needs_review && !opts.force) {
+    return { synced: false, skipped: "needs_review", error: timesheet.buildexact_sync_error };
   }
-  const { buildexactJobId, error: resolveErr } = await resolveBuildexactJobIdForTimesheet(timesheet, sb);
-  if (!buildexactJobId) {
-    await sb.from("timesheets").update({ buildexact_sync_error: resolveErr }).eq("id", timesheet.id);
-    return { synced: false, error: resolveErr };
+  // Fully done: actuals booked. completed_at is authoritative ON ITS OWN — legacy rows backfilled by
+  // migration 098 can have completed_at without a work_order_id, and must never be re-created.
+  if (timesheet.buildexact_completed_at && !timesheet.buildexact_sync_error) {
+    return { synced: true, skipped: "already_pushed" };
   }
-  const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheet.id);
-  if (!entries?.length) return { synced: false, skipped: "no_entries" };
 
-  const contactId = await ensureBuildexactContact(emp, sb);
-
-  const items = [];
-  for (const entry of entries) {
-    const parentTask = await resolveCostCategory(timesheet, entry, sb);
-    items.push({
-      costItemType: "Labour",
-      description: `${emp.name} (HUB)`,
-      quantity: Number(entry.hours),
-      unitCost: Number(emp.hourly_rate),
-      totalCost: Number(entry.cost_amount ?? 0),
-      uom: "hr",
-      parentTask: parentTask || undefined,
-      notes: "Imported from Blue Leaf Hub",
-    });
-  }
+  // Atomically claim the row so concurrent pushers (approval auto-feed, manual /sync, bulk
+  // sync-pending) can never double-create or double-complete. A stale claim (>10 min) is reclaimable.
+  // claimStamp is our unique lease token: on release we clear ONLY our own claim, so a slow worker
+  // whose lease was reclaimed can't wipe the new holder's claim.
+  const claimCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const claimStamp = new Date().toISOString();
+  const { data: claimed } = await sb.from("timesheets")
+    .update({ buildexact_sync_claimed_at: claimStamp })
+    .eq("id", timesheet.id)
+    .or(`buildexact_sync_claimed_at.is.null,buildexact_sync_claimed_at.lt.${claimCutoff}`)
+    .select("id, status, buildexact_work_order_id, buildexact_completed_at, buildexact_sync_error, buildexact_needs_review");
+  if (!claimed || claimed.length === 0) return { synced: false, skipped: "sync_in_progress" };
+  let row = claimed[0];
 
   try {
-    const order = await createPurchaseOrder({
-      jobId: buildexactJobId,
-      orderType: "Work",
-      // Apply GST (10%) like Deputy's native sync. Tax is an ORDER-level flag in Buildexact
-      // (isTaxFree) — NOT a line-item field. New API-created orders default to isTaxFree:true
-      // (GST-free); Deputy stamps isTaxFree:false so the Actual Cost matches the historical
-      // labour orders. The ex-GST cost (what drives margin) is identical either way.
-      isTaxFree: false,
-      ...(contactId ? { contactId } : {}),
-      description: `Blue Leaf Hub labour — ${emp.name} — ${timesheet.date}`,
-      items,
-    });
-    const woId = order?.purchaseOrderId || order?.id || null;
-    // Verify the line items actually landed. Buildexact has been seen to create the order
-    // header but drop the lines — and a Work Order with 0 items can't be marked Completed.
-    // Catch it loudly instead of silently reporting success.
-    let landed = items.length;
-    if (woId) {
+    // Forced redo of a needs-review row (operator has cleaned up the order in Buildexact): drop the
+    // stale order id so a fresh, correct one is created.
+    if (opts.force && row.buildexact_needs_review) {
+      await sb.from("timesheets").update({
+        buildexact_needs_review: false,
+        buildexact_work_order_id: null,
+        buildexact_completed_at: null,
+        buildexact_synced_at: null,
+        buildexact_sync_error: null,
+      }).eq("id", timesheet.id);
+      row = { ...row, buildexact_needs_review: false, buildexact_work_order_id: null, buildexact_completed_at: null };
+    }
+    // Re-check authoritative state now that we hold the claim (closes the read->claim window).
+    if (row.buildexact_needs_review) return { synced: false, skipped: "needs_review", error: row.buildexact_sync_error };
+    if (row.buildexact_completed_at && !row.buildexact_sync_error) {
+      return { synced: true, skipped: "already_pushed" };
+    }
+    // Only push APPROVED timesheets — a forced re-sync of an unapproved row would book $0 actuals
+    // (unapprove nulls each entry's cost_amount). Use the fresh DB status, not the possibly-stale
+    // in-memory one the approval auto-feed passes.
+    if (row.status !== "approved") return { synced: false, skipped: "not_approved" };
+    // Order already created but not completed -> retry completion only (never re-create), with a
+    // pre-check so a lost completion response doesn't double-book.
+    if (row.buildexact_work_order_id) {
+      if (!buildexactCompleteOrdersEnabled()) return { synced: true, skipped: "complete_disabled", workOrderId: row.buildexact_work_order_id };
+      return await completeWorkOrder(row.buildexact_work_order_id, timesheet, sb, { precheck: true });
+    }
+
+    // ── Create a new Work Order ──────────────────────────────────────────────
+    const { data: emp } = await sb.from("employees").select("*").eq("id", timesheet.employee_id).single();
+    if (!emp) {
+      await sb.from("timesheets").update({ buildexact_sync_error: "Employee record not found" }).eq("id", timesheet.id);
+      return { synced: false, error: "Employee record not found" };
+    }
+    const { buildexactJobId, error: resolveErr } = await resolveBuildexactJobIdForTimesheet(timesheet, sb);
+    if (!buildexactJobId) {
+      await sb.from("timesheets").update({ buildexact_sync_error: resolveErr }).eq("id", timesheet.id);
+      return { synced: false, error: resolveErr };
+    }
+    const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheet.id);
+    if (!entries?.length) return { synced: false, skipped: "no_entries" };
+
+    const contactId = await ensureBuildexactContact(emp, sb);
+
+    const items = [];
+    for (const entry of entries) {
+      const parentTask = await resolveCostCategory(timesheet, entry, sb);
+      items.push({
+        costItemType: "Labour",
+        description: `${emp.name} (HUB)`,
+        quantity: Number(entry.hours),
+        unitCost: Number(emp.hourly_rate),
+        totalCost: Number(entry.cost_amount ?? 0),
+        uom: "hr",
+        parentTask: parentTask || undefined,
+        notes: "Imported from Blue Leaf Hub",
+      });
+    }
+
+    try {
+      const order = await createPurchaseOrder({
+        jobId: buildexactJobId,
+        orderType: "Work",
+        // Apply GST (10%) like Deputy's native sync. Tax is an ORDER-level flag in Buildexact
+        // (isTaxFree) — NOT a line-item field. New API-created orders default to isTaxFree:true
+        // (GST-free); Deputy stamps isTaxFree:false so the Actual Cost matches the historical
+        // labour orders. The ex-GST cost (what drives margin) is identical either way.
+        isTaxFree: false,
+        ...(contactId ? { contactId } : {}),
+        description: `Blue Leaf Hub labour — ${emp.name} — ${timesheet.date}`,
+        items,
+      });
+      const woId = order?.purchaseOrderId || order?.id || null;
+      // A successful create with no resolvable id means an order exists in Buildexact we can't
+      // reference — STOP (don't complete; don't let a retry re-create a duplicate). Manual review.
+      if (!woId) {
+        await sb.from("timesheets").update({
+          buildexact_needs_review: true,
+          buildexact_sync_error: "Buildexact created the Work Order but returned no id — reconcile manually in Buildexact, then Force re-sync",
+        }).eq("id", timesheet.id);
+        console.warn("[workforce/buildexact-sync] WORK ORDER created with NO id", JSON.stringify({ job: buildexactJobId }));
+        return { synced: false, error: "Work Order created but Buildexact returned no id", needsReview: true };
+      }
+      // Persist the id immediately so a retry never re-creates it, even if a later step fails.
+      await sb.from("timesheets").update({ buildexact_work_order_id: woId, buildexact_synced_at: new Date().toISOString() }).eq("id", timesheet.id);
+      // Verify the line items actually landed. Buildexact has been seen to create the order header
+      // but drop the lines — and a Work Order with 0 items can't be marked Completed. Flag for
+      // manual cleanup (delete the empty order, then Force re-sync) rather than looping on it.
+      let landed = items.length;
       try { const back = await beFetch(`/jobs/purchaseorders/${woId}/items`); landed = (Array.isArray(back) ? back : (back.items || [])).length; }
       catch { /* keep the sent count */ }
+      if (items.length > 0 && landed === 0) {
+        await sb.from("timesheets").update({
+          buildexact_needs_review: true,
+          buildexact_sync_error: "Work Order created but its line items didn't land in Buildexact — delete the empty order in Buildexact, then Force re-sync",
+        }).eq("id", timesheet.id);
+        console.warn("[workforce/buildexact-sync] WORK ORDER has NO line items", JSON.stringify({ id: woId, sentLines: items.length }));
+        return { synced: false, error: "Work Order line items didn't land in Buildexact", workOrderId: woId, needsReview: true };
+      }
+      console.log("[workforce/buildexact-sync] WORK ORDER created", JSON.stringify({ orderNumber: order?.orderNumber, id: woId, job: buildexactJobId, lines: landed }));
+      if (!buildexactCompleteOrdersEnabled()) {
+        return { synced: true, workOrderId: woId, completed: false, skipped: "complete_disabled" };
+      }
+      // Complete -> status "Completed" + actual-costing items created from the line items.
+      return await completeWorkOrder(woId, timesheet, sb);
+    } catch (e) {
+      console.warn("[workforce/buildexact-sync] WORK ORDER failed", JSON.stringify({ job: buildexactJobId, error: e?.message }));
+      await sb.from("timesheets").update({ buildexact_sync_error: e?.message || "Work Order create failed" }).eq("id", timesheet.id);
+      return { synced: false, error: e?.message };
     }
-    if (woId && items.length > 0 && landed === 0) {
-      await sb.from("timesheets").update({ buildexact_sync_error: "Work Order created but its line items didn't land in Buildexact", buildexact_work_order_id: woId }).eq("id", timesheet.id);
-      console.warn("[workforce/buildexact-sync] WORK ORDER has NO line items", JSON.stringify({ id: woId, sentLines: items.length }));
-      return { synced: false, error: "Work Order line items didn't land in Buildexact", workOrderId: woId };
-    }
-    await sb.from("timesheets").update({
-      buildexact_synced_at: new Date().toISOString(),
-      buildexact_sync_error: null,
-      buildexact_work_order_id: woId,
-    }).eq("id", timesheet.id);
-    console.log("[workforce/buildexact-sync] WORK ORDER created", JSON.stringify({ orderNumber: order?.orderNumber, id: woId, job: buildexactJobId, lines: landed }));
-    return { synced: true, workOrderId: woId };
-  } catch (e) {
-    console.warn("[workforce/buildexact-sync] WORK ORDER failed", JSON.stringify({ job: buildexactJobId, error: e?.message }));
-    await sb.from("timesheets").update({ buildexact_sync_error: e?.message || "Work Order create failed" }).eq("id", timesheet.id);
-    return { synced: false, error: e?.message };
+  } finally {
+    // Release ONLY our own lease (match claimStamp) so we never clear a claim another worker
+    // acquired after ours went stale.
+    await sb.from("timesheets").update({ buildexact_sync_claimed_at: null })
+      .eq("id", timesheet.id).eq("buildexact_sync_claimed_at", claimStamp);
   }
 }
 
@@ -553,8 +676,14 @@ export function registerWorkforceRoutes(app) {
       .select("*, timesheet_entries(*)").eq("id", req.params.id).single();
     if (!ts) return res.status(404).json({ ok: false, error: "Timesheet not found" });
     try {
-      await syncTimesheetToBuildexact(ts, sb);
-      res.json({ ok: true });
+      // force=true redoes a needs-review timesheet: clears the stale order id and creates a fresh one
+      // (use only after the old order has been deleted/adjusted in Buildexact).
+      const force = req.body?.force === true || req.query?.force === "true";
+      const r = await syncTimesheetToBuildexact(ts, sb, { force });
+      if (r?.synced || r?.skipped === "already_pushed" || r?.skipped === "complete_disabled") {
+        return res.json({ ok: true, ...r });
+      }
+      return res.status(502).json({ ok: false, error: r?.error || `Sync did not complete (${r?.skipped || "unknown"})`, result: r });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
@@ -567,7 +696,8 @@ export function registerWorkforceRoutes(app) {
     const { data: rows, error } = await sb.from("timesheets")
       .select("*, timesheet_entries(*)")
       .eq("status", "approved")
-      .is("buildexact_synced_at", null);
+      .is("buildexact_completed_at", null)
+      .eq("buildexact_needs_review", false);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     let synced = 0, failed = 0;
     for (const ts of rows || []) {
@@ -606,19 +736,32 @@ export function registerWorkforceRoutes(app) {
   // Director can un-approve a timesheet → resets to submitted so it can be re-reviewed/edited
   app.post("/api/workforce/timesheets/:id/unapprove", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
+    // If a Buildexact order already exists for this timesheet, edits can't auto-sync (the API creates/
+    // completes orders, it can't rewrite an existing order's lines). Flag it for manual review so
+    // re-approval won't silently re-complete a stale/already-completed order; the operator deletes or
+    // adjusts it in Buildexact and uses Force re-sync to create a fresh one.
+    const { data: cur } = await sb.from("timesheets")
+      .select("buildexact_work_order_id, buildexact_completed_at")
+      .eq("id", req.params.id).eq("status", "approved").maybeSingle();
+    const hasOrder = !!(cur && cur.buildexact_work_order_id);
     const { error } = await sb.from("timesheets").update({
       status: "submitted",
       approved_by: null,
       approved_at: null,
       buildexact_synced_at: null,
-      buildexact_sync_error: null,
+      buildexact_completed_at: null,
+      buildexact_sync_claimed_at: null,
+      buildexact_needs_review: hasOrder,
+      buildexact_sync_error: hasOrder
+        ? `A Buildexact order (${cur.buildexact_work_order_id})${cur.buildexact_completed_at ? " is already completed" : " already exists"} for this timesheet — edits won't auto-sync. Delete/adjust it in Buildexact, then use Force re-sync.`
+        : null,
       updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).eq("status", "approved");
     if (error) return res.status(500).json({ ok: false, error: error.message });
     // Reset cost_amount on entries so it gets re-computed on next approval
     await sb.from("timesheet_entries").update({ cost_amount: null, overtime_hours: 0 })
       .eq("timesheet_id", req.params.id);
-    res.json({ ok: true });
+    res.json({ ok: true, buildexactNeedsReview: hasOrder, workOrderId: cur?.buildexact_work_order_id || null });
   });
 
   // Attribute (or clear) a carpentry job on a pending/submitted timesheet
