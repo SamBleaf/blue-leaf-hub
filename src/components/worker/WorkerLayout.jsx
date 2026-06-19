@@ -60,7 +60,7 @@ export default function WorkerLayout({ children, onBack }) {
   return (
     <div className="flex min-h-screen flex-col bg-page">
       {/* Blue header */}
-      <header className="h-14 bg-primary flex items-center px-4 shrink-0 relative">
+      <header className="min-h-[3.5rem] bg-primary flex items-center px-4 shrink-0 relative" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         {/* Back button — all pages except home */}
         {!isHome ? (
           <button
@@ -140,7 +140,7 @@ export default function WorkerLayout({ children, onBack }) {
       )}
 
       {/* Page content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {children}
       </main>
     </div>

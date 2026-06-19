@@ -20,10 +20,10 @@ export default defineConfig(({ mode }) => {
         // VitePWA must NOT generate/inject its own <link rel="manifest"> — doing so re-creates
         // the dual-manifest collision this split exists to fix. The service worker is unaffected:
         // it registers via `virtual:pwa-register` in src/main.jsx, independent of manifest generation.
-        includeAssets: ["icons/*.svg", "manifest.webmanifest", "manifest.json", "brand/icon-blue.png"],
+        includeAssets: ["icons/*.svg", "icons/*.png", "manifest.webmanifest", "manifest.json", "brand/icon-blue.png"],
         manifest: false,
         workbox: {
-          mode: "development",
+          mode: "production",
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
           // The SW's SPA fallback serves index.html (the Hub identity) for in-app navigations.
           // /api is excluded so API calls hit the server. /worker* is ALSO excluded so the
