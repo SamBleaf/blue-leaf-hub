@@ -4,6 +4,7 @@
  */
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
+import { resendSendConfigured, sendBatchViaResend } from "./resendSend.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqTradeIntelligence.mjs";
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
@@ -282,24 +283,17 @@ export function registerRfqPackageRoutes(app) {
       }
       const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
 
-      // Hard per-send timeout so a single slow/hung transport (e.g. a Gmail or SMTP
-      // fallback that stalls) can't block the whole batch and blow past the proxy's
-      // ~30s response limit — that's what made a 19-recipient send appear "stuck".
-      const SEND_TIMEOUT_MS = 15000;
-      const CONCURRENCY = 6;
-      const withTimeout = (promise, ms, label) => {
-        let t;
-        const timer = new Promise((_, reject) => {
-          t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
-        });
-        return Promise.race([Promise.resolve(promise).finally(() => clearTimeout(t)), timer]);
-      };
-
       const rows = rfqs || [];
-      const sendOne = async (r) => {
+      const htmlBody = wrapPlainTextEmailHtml(body);
+      const nowIso = new Date().toISOString();
+
+      // Build one send spec per recipient that has an email; the rest are recorded as failures.
+      const results = [];
+      const specs = [];
+      for (const r of rows) {
         const sub = subMap[r.subcontractor_id] || {};
         const to = String(sub.email || "").trim();
-        if (!to) return { rfqId: r.id, ok: false, error: "no email" };
+        if (!to) { results.push({ rfqId: r.id, ok: false, error: "no email" }); continue; }
         const baseSubj = subjectOf(r.email_body) || `RFQ — ${tradeLabel(r.trade) || r.trade} — ${job.address}`;
         const subject = /^re:/i.test(baseSubj) ? baseSubj : `Re: ${baseSubj}`;
         const headers = {};
@@ -308,35 +302,76 @@ export function registerRfqPackageRoutes(app) {
           headers["In-Reply-To"] = mid;
           headers["References"] = mid;
         }
+        specs.push({ r, to, subject, headers });
+      }
+
+      // Log everyone who actually went out, in ONE batched insert (best-effort).
+      const logCorrespondence = async (out) => {
+        if (!out.length) return;
         try {
-          const transport = await withTimeout(
-            sendPlainMail({ to, subject, text: body, html: wrapPlainTextEmailHtml(body), headers }),
-            SEND_TIMEOUT_MS,
-            `Send to ${to}`
-          );
-          try {
-            await s.from("correspondence").insert({
-              job_id: job.id, rfq_id: r.id, subcontractor_id: r.subcontractor_id || null,
-              direction: "outbound", subject, body, sent_at: new Date().toISOString(), logged_by: "rfq-notify"
-            });
-          } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
-          return { rfqId: r.id, ok: true, to, transport };
-        } catch (sendErr) {
-          return { rfqId: r.id, ok: false, to, error: sendErr?.message || String(sendErr) };
-        }
+          await s.from("correspondence").insert(out.map(({ r, subject }) => ({
+            job_id: job.id, rfq_id: r.id, subcontractor_id: r.subcontractor_id || null,
+            direction: "outbound", subject, body, sent_at: nowIso, logged_by: "rfq-notify"
+          })));
+        } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
       };
 
-      // Bounded-concurrency pool: workers pull from a shared cursor so at most
-      // CONCURRENCY sends are in flight at once (fast, but gentle on Resend rate limits).
-      const results = new Array(rows.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < rows.length) {
-          const i = cursor++;
-          results[i] = await sendOne(rows[i]);
+      // Preferred path: ONE Resend Batch API call for every recipient. Sending them as separate
+      // concurrent requests trips Resend's per-second rate limit and the rejected ones fall back
+      // to slow SMTP (~2 min each) — which is what made a 19-recipient send hang. One call ≈ 1–2s.
+      let batched = false;
+      if (specs.length && resendSendConfigured()) {
+        try {
+          const ids = await sendBatchViaResend(specs.map((sp) => ({
+            to: sp.to, subject: sp.subject, text: body, html: htmlBody, headers: sp.headers
+          })));
+          for (let i = 0; i < specs.length; i++) {
+            results.push({ rfqId: specs[i].r.id, ok: true, to: specs[i].to, transport: "resend-batch", messageId: ids[i]?.id || null });
+          }
+          await logCorrespondence(specs.map((sp) => ({ r: sp.r, subject: sp.subject })));
+          batched = true;
+        } catch (batchErr) {
+          console.warn("[rfq/notify] Resend batch failed, falling back to per-send:", batchErr?.message || batchErr);
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) || 1 }, worker));
+      }
+
+      // Fallback (Resend not configured, or the batch call failed): per-send with a hard timeout
+      // so one slow/hung transport can't block the batch past the proxy's ~30s response limit.
+      if (!batched && specs.length) {
+        const SEND_TIMEOUT_MS = 20000;
+        const CONCURRENCY = 3;
+        const withTimeout = (promise, ms, label) => {
+          let t;
+          const timer = new Promise((_, reject) => {
+            t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+          });
+          return Promise.race([Promise.resolve(promise).finally(() => clearTimeout(t)), timer]);
+        };
+        const outcome = new Array(specs.length);
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < specs.length) {
+            const i = cursor++;
+            const sp = specs[i];
+            try {
+              const transport = await withTimeout(
+                sendPlainMail({ to: sp.to, subject: sp.subject, text: body, html: htmlBody, headers: sp.headers }),
+                SEND_TIMEOUT_MS, `Send to ${sp.to}`
+              );
+              outcome[i] = { ok: true, sp, transport };
+            } catch (sendErr) {
+              outcome[i] = { ok: false, sp, error: sendErr?.message || String(sendErr) };
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, specs.length) || 1 }, worker));
+        const okOnes = [];
+        for (const o of outcome) {
+          if (o.ok) { results.push({ rfqId: o.sp.r.id, ok: true, to: o.sp.to, transport: o.transport }); okOnes.push({ r: o.sp.r, subject: o.sp.subject }); }
+          else { results.push({ rfqId: o.sp.r.id, ok: false, to: o.sp.to, error: o.error }); }
+        }
+        await logCorrespondence(okOnes);
+      }
 
       const sent = results.filter((x) => x && x.ok).length;
       return ok(res, { sent, total: results.length, results });
