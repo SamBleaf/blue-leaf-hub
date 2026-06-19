@@ -89,11 +89,21 @@ export function registerAuthRoutes(app) {
       const sb = getServiceSupabase();
       if (!sb) return res.status(503).json({ error: "DB not configured" });
 
-      const { email, fullName, role, projectId } = req.body || {};
+      const { email, fullName, role, projectId, employeeId } = req.body || {};
       if (!isValidEmail(email)) return res.status(400).json({ error: "Valid email required." });
       if (!ROLES.includes(role)) return res.status(400).json({ error: "Invalid role." });
 
       const emailNorm = String(email).trim().toLowerCase();
+
+      // Optional: link this login to an in-house employee (canonical employee<->login link).
+      if (employeeId) {
+        const { data: emp } = await sb.from("employees").select("id, user_id, is_active").eq("id", employeeId).maybeSingle();
+        if (!emp) return res.status(404).json({ error: "Employee not found." });
+        if (emp.is_active === false) return res.status(400).json({ error: "This employee is inactive." });
+        if (emp.user_id) return res.status(409).json({ error: "This employee already has a login." });
+        const { data: linkedProfile } = await sb.from("user_profiles").select("id").eq("employee_id", employeeId).maybeSingle();
+        if (linkedProfile) return res.status(409).json({ error: "This employee already has a login." });
+      }
 
       const { data: existingUser } = await sb
         .from("user_profiles")
@@ -117,6 +127,15 @@ export function registerAuthRoutes(app) {
         await sb.from("invitations").update({ revoked_at: now }).eq("id", inv.id);
       }
 
+      // Supersede any prior pending invite for the SAME employee (possibly a different email).
+      if (employeeId) {
+        const { data: empPending } = await sb.from("invitations").select("id")
+          .eq("employee_id", employeeId).is("accepted_at", null).is("revoked_at", null).gt("expires_at", now);
+        for (const inv of empPending || []) {
+          await sb.from("invitations").update({ revoked_at: now }).eq("id", inv.id);
+        }
+      }
+
       const token = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -127,9 +146,15 @@ export function registerAuthRoutes(app) {
         token,
         invited_by: caller.id,
         project_id: projectId || null,
+        employee_id: employeeId || null,
         expires_at: expiresAt
       });
       if (insertErr) return res.status(500).json({ error: insertErr.message });
+
+      // Stamp the employee as invited so the Team Directory shows "Last invited / Resend".
+      if (employeeId) {
+        await sb.from("employees").update({ invite_sent_at: now, updated_at: now }).eq("id", employeeId);
+      }
 
       const inviteUrl = `${appBaseUrl()}/accept-invite/${token}`;
       const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
@@ -274,15 +299,38 @@ If you weren't expecting this, you can ignore this email.
         user = created.data.user;
       }
 
-      const { error: profileErr } = await sb.from("user_profiles").insert({
+      const profileRow = {
         id: user.id,
         email: inv.email,
         full_name: String(fullName).trim(),
         role: inv.role,
         is_active: true,
         invited_by: inv.invited_by
-      });
-      if (profileErr) return res.status(500).json({ error: profileErr.message });
+      };
+      if (inv.employee_id) profileRow.employee_id = inv.employee_id;
+      const { error: profileErr } = await sb.from("user_profiles").insert(profileRow);
+      if (profileErr) {
+        // One login per employee (partial-unique index) — plain message, never raw SQL.
+        if (profileErr.code === "23505" || /employee_id/i.test(profileErr.message || "")) {
+          return res.status(409).json({ error: "This employee already has a login." });
+        }
+        return res.status(500).json({ error: profileErr.message });
+      }
+
+      // Establish the canonical employee->login link eagerly so resolveWorkerEmployee matches on
+      // employees.user_id. Guard against the employee already being linked to a DIFFERENT login.
+      if (inv.employee_id) {
+        const { data: linked } = await sb.from("employees")
+          .update({ user_id: user.id, updated_at: new Date().toISOString() })
+          .eq("id", inv.employee_id).is("user_id", null).select("id");
+        if (!linked || linked.length === 0) {
+          const { data: emp2 } = await sb.from("employees").select("user_id").eq("id", inv.employee_id).maybeSingle();
+          if (emp2?.user_id !== user.id) {
+            await sb.from("user_profiles").update({ employee_id: null }).eq("id", user.id);
+            return res.status(409).json({ error: "This employee is already linked to another login." });
+          }
+        }
+      }
 
       await sb
         .from("invitations")

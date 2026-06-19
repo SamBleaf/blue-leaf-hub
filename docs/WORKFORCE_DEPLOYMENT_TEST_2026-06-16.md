@@ -322,6 +322,8 @@ SOP file: `docs/sops/10_workforce/workforce_overview.md` (Section 10, Automation
 ### L-01 — Work Orders land `Unsent`; admin must manually click Complete
 The Buildexact public API has no endpoint to set order status (PATCH/PUT/complete all 404). Orders land `Unsent` and must be manually opened in the Buildexact portal and clicked Complete to flow into Actual Costs. This matches Deputy's workflow and **does not block the launch** — it's an accepted manual step that takes ~30 seconds per order. Admin's daily routine: approve timesheets → auto-sync fires → open BX → Complete the new Work Orders.
 
+> **Update (login-cleanup workstream, 2026-06-19):** the `POST /api/workforce/employees/:id/invite` endpoint below was REMOVED. App-login invites now go through `POST /api/auth/invite` (`{ employeeId }`), which creates a real `user_profiles` row and the canonical employee↔login link. The orphan-auth-user concern below applied only to the old Supabase-invite path.
+
 ### L-02 — No Supabase auth user cleanup route for invited workers
 `POST /api/workforce/employees/:id/invite` calls `sb.auth.admin.inviteUserByEmail()` which creates an `auth.users` row. If the employee is deactivated without having accepted the invite, their auth row remains. No cleanup route exists. **Low risk** — the invite expires after 24h and the auth user gains no access without an active `employees` record. Recommend: Admin should manually delete the auth user from the Supabase dashboard if an employee is removed before accepting.
 

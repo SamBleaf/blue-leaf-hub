@@ -540,21 +540,10 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true });
   });
 
-  app.post("/api/workforce/employees/:id/invite", requireAuth, requireRole("admin"), async (req, res) => {
-    const sb = getServiceSupabase();
-    const { data: emp } = await sb.from("employees").select("*").eq("id", req.params.id).single();
-    if (!emp) return res.status(404).json({ ok: false, error: "Employee not found" });
-    if (!req.body.email) return res.status(400).json({ ok: false, error: "email is required" });
-    try {
-      await sb.auth.admin.inviteUserByEmail(req.body.email, {
-        data: { employee_id: emp.id, role: "worker" },
-      });
-      await sb.from("employees").update({ invite_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", emp.id);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: e?.message || "Invite failed" });
-    }
-  });
+  // (removed) POST /api/workforce/employees/:id/invite — dead endpoint: it used a non-existent
+  // 'worker' role and never inserted a user_profiles row, so the invitee could never pass auth.
+  // App-login invites now go through POST /api/auth/invite with { employeeId } (authRoutes.mjs +
+  // WorkforceTeam.jsx), which creates the profile AND the canonical employee<->login link (mig 100).
 
   app.get("/api/workforce/employees/:id/preview", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();

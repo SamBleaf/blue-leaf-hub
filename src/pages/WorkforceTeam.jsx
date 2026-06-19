@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { authFetch } from "../lib/authFetch.js";
 import { useAuth } from "../lib/useAuth.js";
+import { ROLES, ROLE_LABELS } from "../lib/roles.js";
 
 const TRADE_OPTIONS = ["carpenter", "labourer", "leading_hand", "supervisor", "other"];
 const EMPLOYMENT_OPTIONS = ["full_time", "part_time", "casual"];
@@ -31,6 +32,7 @@ export default function WorkforceTeam() {
   const [showInactive, setShowInactive] = useState(false);
   const [workerLink, setWorkerLink] = useState("");
   const [inviteUrl, setInviteUrl] = useState("");
+  const [inviteRole, setInviteRole] = useState("employee");
   const [linkBusy, setLinkBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -132,7 +134,7 @@ export default function WorkforceTeam() {
       const res = await authFetch(`/api/auth/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, fullName: emp.name, role: "supervisor" }),
+        body: JSON.stringify({ email, fullName: emp.name, role: inviteRole, employeeId: emp.id }),
       });
       const j = await res.json();
       if (res.ok && j.ok) {
@@ -333,6 +335,9 @@ export default function WorkforceTeam() {
                     {inviteUrl && (
                       <input readOnly value={inviteUrl} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
                     )}
+                    <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-sm mb-1">
+                      {ROLES.filter(r => r !== "client").map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                    </select>
                     <div className="flex gap-1">
                       <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="flex-1 min-w-0 border border-hairline rounded-lg px-2 py-1.5 text-sm" />
                       <button type="button" onClick={() => sendInvite(panel)} disabled={inviting} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
