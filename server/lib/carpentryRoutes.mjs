@@ -31,6 +31,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+import { signSiteTaskPhotos } from "./siteMedia.mjs";
 import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
@@ -822,6 +823,7 @@ export function registerCarpentryRoutes(app) {
         .order("sort_order")
         .order("created_at");
       if (error) throw error;
+      await signSiteTaskPhotos(sb, data || []);
       return ok(res, { tasks: data || [] });
     } catch (e) {
       console.error("[carpentry/tasks GET]", e);

@@ -5,6 +5,8 @@ import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, build
 import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
+import { ok, err } from "./apiResponse.mjs";
+import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey } from "./siteMedia.mjs";
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
 
@@ -872,6 +874,7 @@ export function registerWorkforceRoutes(app) {
       .order("created_at");
     if (error) return res.status(500).json({ ok: false, error: error.message });
     const sorted = (data || []).sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
+    await signSiteTaskPhotos(sb, sorted);
     res.json({ ok: true, tasks: sorted });
   });
 
@@ -1250,7 +1253,40 @@ export function registerWorkforceRoutes(app) {
       t.assigned_to === emp.id
     );
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
+    await signSiteTaskPhotos(sb, sorted);
     res.json({ ok: true, tasks: sorted, project_id: latestTs.project_id, carpentry_job_id: latestTs.carpentry_job_id });
+  });
+
+  // Upload a worker completion photo to the private site-media bucket; returns the storage PATH.
+  // Any active worker may attach photos. Body: { dataUrl, entityType, entityId, filename }.
+  app.post("/api/worker/photos", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    const { dataUrl, data, entityType, entityId, filename } = req.body || {};
+    const raw = dataUrl || data;
+    if (!raw || !entityType || !entityId) return err(res, 400, "dataUrl, entityType and entityId are required.");
+    if (!PHOTO_ENTITY_DIR[entityType]) return err(res, 400, "Invalid entityType.");
+    if (!isUuid(entityId)) return err(res, 400, "Invalid entityId.");
+    if (entityType === "site_task") {
+      const { data: task } = await sb.from("site_tasks").select("id, assigned_to").eq("id", entityId).maybeSingle();
+      if (!task) return err(res, 404, "Task not found.");
+      if (task.assigned_to && task.assigned_to !== emp.id) return err(res, 403, "You can only add photos to your own or unassigned tasks.");
+    }
+    const m = /^data:(image\/(?:jpe?g|png|webp));base64,(.+)$/i.exec(String(raw));
+    if (!m) return err(res, 400, "Photo must be a base64 image.");
+    const buf = Buffer.from(m[2], "base64");
+    if (buf.length > 6 * 1024 * 1024) return err(res, 413, "Photo too large (max 6MB).");
+    const path = buildPhotoPath(entityType, entityId, filename);
+    if (!path) return err(res, 400, "Could not build a storage path.");
+    try {
+      const { error } = await sb.storage.from(SITE_MEDIA_BUCKET).upload(path, buf, { contentType: m[1], upsert: false });
+      if (error) throw error;
+      return ok(res, { path });
+    } catch (e) {
+      console.error("[worker/photos]", e?.message || e);
+      return err(res, 502, "Could not save the photo. Please try again.");
+    }
   });
 
   app.post("/api/worker/tasks/:id/complete", workerAuth, async (req, res) => {
@@ -1265,10 +1301,22 @@ export function registerWorkforceRoutes(app) {
       updated_at: new Date().toISOString(),
     };
     if (req.body.notes) update.completion_notes = req.body.notes;
-    if (req.body.photo_url && emp.is_leading_hand) update.completion_photo_url = req.body.photo_url;
+    // Completion photo: any worker may attach one. Value MUST be a storage key from /api/worker/photos.
+    const rawPhoto = req.body.photoPath || req.body.photo_url;
+    if (rawPhoto != null && String(rawPhoto).trim() !== "") {
+      const p = String(rawPhoto).trim();
+      if (!isValidPhotoKey(p)) return err(res, 400, "Upload the photo before completing the task.");
+      update.completion_photo_url = p;
+    }
 
-    const { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id).select().single();
+    // Scope the update so a worker can only complete tasks assigned to them or unassigned (mirrors
+    // GET /api/worker/tasks visibility). 0 rows updated -> the task isn't theirs.
+    const { data, error } = await sb.from("site_tasks").update(update)
+      .eq("id", req.params.id)
+      .or(`assigned_to.is.null,assigned_to.eq.${emp.id}`)
+      .select().maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return err(res, 403, "You can only complete tasks assigned to you or unassigned tasks.");
     res.json({ ok: true, task: data });
   });
 

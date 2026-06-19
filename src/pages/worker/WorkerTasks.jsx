@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
+import { uploadWorkerPhoto } from "../../lib/workerPhoto.js";
 
 const FILTER_TABS = ["All", "My tasks", "Urgent", "Done"];
 
@@ -25,6 +26,9 @@ export default function WorkerTasks() {
   const [notes, setNotes] = useState("");
   const [me, setMe] = useState(null);
   const [showDone, setShowDone] = useState(false);
+  const [photoPath, setPhotoPath] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -40,7 +44,6 @@ export default function WorkerTasks() {
   }, []);
 
   const myId = me?.employee?.id;
-  const isLeadingHand = me?.employee?.is_leading_hand ?? false;
 
   function filteredTasks() {
     let list = tasks;
@@ -63,7 +66,7 @@ export default function WorkerTasks() {
   async function completeTask(taskId) {
     setCompleting(true);
     try {
-      const body = { notes: notes || undefined };
+      const body = { notes: notes || undefined, photoPath: photoPath || undefined };
       const res = await workerFetch(`/api/worker/tasks/${taskId}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,9 +77,27 @@ export default function WorkerTasks() {
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: "done", completed_at: new Date().toISOString() } : t));
         setSelected(null);
         setNotes("");
+        setPhotoPath(null);
+        setPhotoPreview(null);
       }
     } catch { /* ignore */ } finally {
       setCompleting(false);
+    }
+  }
+
+  async function handleTaskPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !selected) return;
+    setPhotoBusy(true);
+    try {
+      const path = await uploadWorkerPhoto(file, { entityType: "site_task", entityId: selected.id });
+      setPhotoPath(path);
+      setPhotoPreview(URL.createObjectURL(file));
+    } catch (err) {
+      alert(err?.message || "Could not upload the photo");
+    } finally {
+      setPhotoBusy(false);
     }
   }
 
@@ -88,7 +109,7 @@ export default function WorkerTasks() {
     return (
       <button
         type="button"
-        onClick={() => { setSelected(task); setNotes(""); }}
+        onClick={() => { setSelected(task); setNotes(""); setPhotoPath(null); setPhotoPreview(null); }}
         className="w-full flex items-start gap-3 py-3 text-left hover:bg-gray-50 transition"
       >
         <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
@@ -212,6 +233,10 @@ export default function WorkerTasks() {
               className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 mb-3"
             />
 
+            {photoPreview && (
+              <img src={photoPreview} alt="Completion photo" className="w-full max-h-48 object-cover rounded-lg border border-hairline mb-3" />
+            )}
+
             <div className="flex gap-2">
               <button
                 type="button"
@@ -221,26 +246,23 @@ export default function WorkerTasks() {
               >
                 {completing ? "Marking done…" : "Mark as done"}
               </button>
-              {isLeadingHand && (
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("task-photo-input")?.click()}
-                  className="px-4 py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
-                >
-                  Add photo
-                </button>
-              )}
               <button
                 type="button"
-                onClick={() => { setSelected(null); setNotes(""); }}
+                onClick={() => document.getElementById("task-photo-input")?.click()}
+                disabled={photoBusy}
+                className="px-4 py-3 rounded-lg border border-hairline text-ink text-sm font-medium disabled:opacity-50"
+              >
+                {photoBusy ? "Uploading…" : photoPath ? "Photo ✓" : "Add photo"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSelected(null); setNotes(""); setPhotoPath(null); setPhotoPreview(null); }}
                 className="px-4 py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
               >
                 Cancel
               </button>
             </div>
-            {isLeadingHand && (
-              <input id="task-photo-input" type="file" accept="image/*" capture="environment" className="hidden" />
-            )}
+            <input id="task-photo-input" type="file" accept="image/*" capture="environment" className="hidden" onChange={handleTaskPhoto} />
           </div>
         </div>
       )}

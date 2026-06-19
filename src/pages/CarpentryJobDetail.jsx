@@ -816,6 +816,14 @@ function TasksPanel({ jobId }) {
                             Done {new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
                           </p>
                         )}
+                        {task.completion_notes && (
+                          <p className="text-xs text-muted mt-0.5">{task.completion_notes}</p>
+                        )}
+                        {task.completion_photo_signed_url && (
+                          <a href={task.completion_photo_signed_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
+                            <img src={task.completion_photo_signed_url} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-emerald-200" />
+                          </a>
+                        )}
                       </div>
                     </div>
                   ))}

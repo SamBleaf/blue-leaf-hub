@@ -1159,6 +1159,14 @@ export default function OperationsProjectDetail() {
                                 {(task.created_via === "voice_note" || task.created_via === "ai_extraction") && (
                                   <p className="text-xs text-muted">via voice note</p>
                                 )}
+                                {task.completion_notes && (
+                                  <p className="text-xs text-muted mt-0.5">{task.completion_notes}</p>
+                                )}
+                                {task.completion_photo_signed_url && (
+                                  <a href={task.completion_photo_signed_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
+                                    <img src={task.completion_photo_signed_url} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-hairline" />
+                                  </a>
+                                )}
                               </div>
                               {task.status !== "done" && (
                                 <button
