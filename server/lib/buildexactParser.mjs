@@ -102,6 +102,9 @@ const CATEGORY_MAPPING = [
   ["Rendering",                     "fix_out",     "plastering",  true],
   ["Plaster & Render",              "fix_out",     "plastering",  true],
   ["Cleaning",                      "fix_out",     "cleaning",    true],
+  ["Masonary",                      "lock_up",     "masonry",     true],   // common Buildxact typo of Masonry
+  ["Outdoor Works",                 "external",    "landscaping", true],
+  ["Outdoor Works Supply",          "external",    "landscaping", true],
 ];
 
 function normCategoryName(s) {

@@ -26,7 +26,8 @@ untouched. The "Open APB version" / "Download APB version" buttons render *this*
 | `{TOTAL_INC_GST}` / `{TOTAL_COST_GST}` | Total inc GST (formatted) |
 | `{WHY_BUILD_WITH_US}` | Why-build section (3 USPs, multi-line) |
 | `{ONLINE_PM_BODY}` | Online project-management / staying-involved section |
-| `{CONSTRUCTION_SCHEDULE_INTRO}` | Schedule narrative — contains `[ADD WEEKS]` (must fill) |
+| `{CONSTRUCTION_SCHEDULE_INTRO}` | Schedule narrative — auto-fills the week count from the SCHED items |
+| `{TOTAL_WEEKS}` | Total relative weeks (e.g. 24), derived from the estimate's SCHED durations |
 | `{VARIATIONS_CLAUSE}` | "Variations … cost + 25% margin." |
 | `{APB_SUMMARY_BODY}` | Warm closing letter |
 | `{NEXT_STEPS}` | The Next Step CTA |
@@ -47,7 +48,16 @@ Testimonials:       {#TESTIMONIALS}"{TESTIMONIAL_TEXT}" — {TESTIMONIAL_AUTHOR}
 Licences:           {#LICENCES}{LICENCE_TEXT}{/LICENCES}
 Responsibilities:   {#RESPONSIBILITIES_OURS}{RESP_TEXT}{/RESPONSIBILITIES_OURS}
                     {#RESPONSIBILITIES_YOURS}{RESP_TEXT}{/RESPONSIBILITIES_YOURS}
+Construction
+  Schedule (relative): {#CONSTRUCTION_SCHEDULE}{PHASE_LABEL}  {PHASE_WEEKS}
+                         {#TASKS}{TASK_NAME} — {TASK_WEEKS} (starts week {START_WEEK}){/TASKS}{/CONSTRUCTION_SCHEDULE}
 ```
+
+The construction schedule is **auto-derived** from the estimate's `[task] SCHED` line items —
+sequenced finish-to-start through the canonical phases (Site prep → Foundations → Frame → Lock-up →
+Fit-out → External), no commencement date. `{TOTAL_WEEKS}` and the `{CONSTRUCTION_SCHEDULE_INTRO}`
+week count fill automatically; if the estimate has no SCHED items, `[ADD WEEKS]` remains and blocks
+generation.
 
 ## Recommended 13-section order (APB)
 1. **Cover** — `{NICHE_STATEMENT}`, `{QUOTE_NUMBER}`, `{PROJECT_ADDRESS}`, `{DATE}`
@@ -72,8 +82,8 @@ Responsibilities:   {#RESPONSIBILITIES_OURS}{RESP_TEXT}{/RESPONSIBILITIES_OURS}
 - Warm-timber lifestyle imagery on the cover + section dividers (APB QC wants 20+ pages w/ imagery).
 - Footer on every page: boxed Blue Leaf logo · `www.blueleafbuilding.com.au` · `| 0X` page number.
 
-## Two fields that still need a fill mechanism
-- **`[ADD WEEKS]`** (schedule) is per-project → needs a wizard input (a "construction weeks" field
-  that overrides `CONSTRUCTION_SCHEDULE_INTRO`). Not built yet — flag if you want it.
+## Remaining fill mechanism
+- **Construction weeks** — now AUTO-DERIVED from the estimate's SCHED items (`buildRelativeSchedule`);
+  `[ADD WEEKS]` only remains (and blocks) if an estimate has no SCHED items.
 - **Testimonials** are constant across proposals → bake 3–5 named ones into `APB_CONTENT.TESTIMONIALS`
-  (server). Send them through and they're a one-line change.
+  (server). Send them through and they're a one-line change — then the APB version generates clean.

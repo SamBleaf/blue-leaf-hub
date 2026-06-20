@@ -1,4 +1,4 @@
-import { getBuildexactCategoryMapping, parseCostMetrics } from "./buildexactParser.mjs";
+import { getBuildexactCategoryMapping, parseCostMetrics, parseSchedItems } from "./buildexactParser.mjs";
 
 // Common Buildxact-estimator misspellings → corrected (word-boundary, case-insensitive).
 const SCOPE_SPELLING = [
@@ -373,12 +373,18 @@ export const APB_CONTENT = {
 // Used by /api/fee-proposal/generate-docx when style==='apb'. Content falls back to APB_CONTENT.
 export function proposalToApbDocxData(p) {
   const a = p && p.apb && typeof p.apb === "object" ? p.apb : {};
+  // Derive a relative week-by-week schedule from the estimate's SCHED items; auto-fills [ADD WEEKS].
+  const sched = buildRelativeSchedule(p && p.categories);
+  let scheduleIntro = a.construction_schedule || APB_CONTENT.CONSTRUCTION_SCHEDULE_INTRO;
+  if (sched) scheduleIntro = scheduleIntro.replace(/\[ADD WEEKS\]/gi, String(sched.totalWeeks));
   return {
     ...proposalToDocxData(p),
     NICHE_STATEMENT: a.niche_statement || APB_CONTENT.NICHE_STATEMENT,
     WHY_BUILD_WITH_US: a.why_build_with_us || APB_CONTENT.WHY_BUILD_WITH_US,
     ONLINE_PM_BODY: a.online_pm || APB_CONTENT.ONLINE_PM_BODY,
-    CONSTRUCTION_SCHEDULE_INTRO: a.construction_schedule || APB_CONTENT.CONSTRUCTION_SCHEDULE_INTRO,
+    CONSTRUCTION_SCHEDULE_INTRO: scheduleIntro,
+    CONSTRUCTION_SCHEDULE: sched ? sched.phases : [],
+    TOTAL_WEEKS: sched ? sched.totalWeeks : "",
     VARIATIONS_CLAUSE: a.variations || APB_CONTENT.VARIATIONS_CLAUSE,
     APB_SUMMARY_BODY: a.summary || APB_CONTENT.SUMMARY_BODY,
     GUARANTEES: Array.isArray(a.guarantees) ? a.guarantees : APB_CONTENT.GUARANTEES,
@@ -387,6 +393,63 @@ export function proposalToApbDocxData(p) {
     RESPONSIBILITIES_OURS: (Array.isArray(a.responsibilities_ours) ? a.responsibilities_ours : APB_CONTENT.RESPONSIBILITIES_OURS).map((t) => ({ RESP_TEXT: t })),
     RESPONSIBILITIES_YOURS: (Array.isArray(a.responsibilities_yours) ? a.responsibilities_yours : APB_CONTENT.RESPONSIBILITIES_YOURS).map((t) => ({ RESP_TEXT: t }))
   };
+}
+
+// Phase order + client labels for the relative schedule. Maps the Buildxact category phases
+// (site_prep/foundations/frame/lock_up/fix_out/external) to the canonical construction sequence the
+// Schedule module uses, collapsed to the client-facing groupings shown on a proposal.
+const SCHEDULE_PHASES = [
+  { keys: ["site_prep", "pre_construction", "site_slab"], label: "Site preparation" },
+  { keys: ["foundations", "substructure"], label: "Foundations & slab" },
+  { keys: ["frame"], label: "Frame" },
+  { keys: ["lock_up", "masonary", "masonry", "roof", "roofing"], label: "Lock-up — roof, windows, cladding & masonry" },
+  { keys: ["rough_in"], label: "Rough-in / first fix" },
+  { keys: ["fix_out", "fitout"], label: "Fit-out / second fix" },
+  { keys: ["external", "completion", "landscaping"], label: "External works & completion" }
+];
+
+// Build a RELATIVE week-by-week construction schedule from the estimate's SCHED items — copying the
+// Schedule module's method (durations from parseSchedItems, sequenced finish-to-start in canonical
+// phase order) but WITHOUT a commencement date, so it reads as "Week 1..N". Returns
+// { totalWeeks, phases:[{PHASE_LABEL, PHASE_WEEKS, TASKS:[{TASK_NAME, TASK_WEEKS, START_WEEK}]}] }
+// or null when the estimate carries no SCHED items.
+export function buildRelativeSchedule(categories) {
+  const items = parseSchedItems(categories || []).filter((it) => Number(it.duration_days) > 0);
+  if (!items.length) return null;
+  const phaseIndex = (p) => {
+    const k = String(p || "").toLowerCase();
+    const i = SCHEDULE_PHASES.findIndex((ph) => ph.keys.includes(k));
+    return i === -1 ? SCHEDULE_PHASES.length - 1 : i;
+  };
+  const buckets = SCHEDULE_PHASES.map(() => []);
+  for (const it of items) buckets[phaseIndex(it.phase)].push(it);
+
+  const weekOf = (day) => Math.floor(day / 7) + 1;
+  let dayCursor = 0; // 0-based day offset from a notional project start
+  const phases = [];
+  for (let i = 0; i < SCHEDULE_PHASES.length; i++) {
+    const tasks = buckets[i];
+    if (!tasks.length) continue;
+    const phaseStartDay = dayCursor;
+    const TASKS = [];
+    for (const t of tasks) {
+      const weeks = Math.max(1, Math.ceil(t.duration_days / 7));
+      TASKS.push({
+        TASK_NAME: titleCaseSentence(t.task_name),
+        TASK_WEEKS: weeks === 1 ? "1 week" : `${weeks} weeks`,
+        START_WEEK: weekOf(dayCursor)
+      });
+      dayCursor += t.duration_days; // finish-to-start, sequential (conservative — no commencement date)
+    }
+    const startWk = weekOf(phaseStartDay);
+    const endWk = Math.max(startWk, Math.ceil(dayCursor / 7));
+    phases.push({
+      PHASE_LABEL: SCHEDULE_PHASES[i].label,
+      PHASE_WEEKS: startWk === endWk ? `Week ${startWk}` : `Weeks ${startWk}–${endWk}`,
+      TASKS
+    });
+  }
+  return { totalWeeks: Math.max(1, Math.ceil(dayCursor / 7)), phases };
 }
 
 // Scan an APB render object for unfilled [ADD …] / [INSERT …] tokens so generation can be BLOCKED
