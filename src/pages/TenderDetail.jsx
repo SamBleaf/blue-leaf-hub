@@ -825,16 +825,24 @@ export default function TenderDetail() {
       });
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || "Send failed");
-      const sb = getSupabase();
-      await sb.from("correspondence").insert({
-        job_id: jobId,
-        rfq_id: queryRfq.id,
-        subcontractor_id: queryRfq.subcontractor_id,
-        direction: "outbound",
-        subject,
-        body: fullText,
-        logged_by: "sam"
-      });
+      // /api/rfq/send already logs correspondence WITH the real message_id AND captures
+      // resend_email_id (engagement tracking) whenever it has the rfqId — which the query always
+      // passes. Only fall back to a client-side log if the server didn't, so we never write a
+      // duplicate, message-id-less "sent" row (that orphaned row is what made past query sends look
+      // like they never went through Resend).
+      const serverLogged = Boolean(j?.results?.some((r) => r?.serverLogged));
+      if (!serverLogged) {
+        const sb = getSupabase();
+        await sb.from("correspondence").insert({
+          job_id: jobId,
+          rfq_id: queryRfq.id,
+          subcontractor_id: queryRfq.subcontractor_id,
+          direction: "outbound",
+          subject,
+          body: fullText,
+          logged_by: "sam"
+        });
+      }
       setQueryRfq(null);
       setQueryBody("");
       await load();
