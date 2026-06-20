@@ -345,7 +345,8 @@ export const APB_CONTENT = {
     { GUARANTEE_HEADING: "Direct Communication", GUARANTEE_TEXT: "You speak directly with your builder — Joshua or Sam — not a call centre. Weekly on-site meetings keep you across every step." }
   ],
   TESTIMONIALS: [
-    { TESTIMONIAL_TEXT: "[Add a named client testimonial here]", TESTIMONIAL_AUTHOR: "[First name, Suburb — project type]" }
+    { TESTIMONIAL_TEXT: "Blue Leaf made the whole build genuinely enjoyable — clear communication the whole way, and a finish that speaks for itself.", TESTIMONIAL_AUTHOR: "Example testimonial — replace with a real client (First name, Suburb, project type)" },
+    { TESTIMONIAL_TEXT: "Their attention to detail and the quality of the craftsmanship exceeded our expectations.", TESTIMONIAL_AUTHOR: "Example testimonial — replace before sending" }
   ],
   LICENCES: [
     { LICENCE_TEXT: "Licensed Builder — BLD 332830" },
