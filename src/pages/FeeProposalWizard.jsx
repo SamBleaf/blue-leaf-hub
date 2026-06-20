@@ -378,15 +378,11 @@ export default function FeeProposalWizard() {
       setParseSummary(j.parsed);
       if (j.estimate_id) setEstimateId(j.estimate_id);
 
-      // Resolve job: prefer server match, then fuzzy-match against loaded jobs list
-      let resolvedJobId = j.job_id || null;
-      if (!resolvedJobId && j.parsed?.address) {
-        resolvedJobId = fuzzyMatchJobId(j.parsed.address, jobs);
-      }
-      if (resolvedJobId) {
-        setJobId(resolvedJobId);
-        void hydrateFromJob(resolvedJobId);
-      }
+      // Resolve job: server match → fuzzy on the parsed address → the job already linked (e.g. from
+      // the URL / dropdown). The estimateitems export has no address, so the already-linked jobId is
+      // the fallback that keeps the client/address/architect/refs.
+      const resolvedJobId =
+        j.job_id || (j.parsed?.address ? fuzzyMatchJobId(j.parsed.address, jobs) : null) || jobId || null;
       setScreenContext?.({
         page: "fee-proposal",
         jobId: resolvedJobId || null,
@@ -396,8 +392,15 @@ export default function FeeProposalWizard() {
       const sb = getSupabase();
       const { data: seq, error: sErr } = await sb.rpc("alloc_proposal_sequence");
       if (sErr) throw new Error(sErr.message);
+      // Merge the estimate data first (cost/PC-PS/floor/quote), THEN re-hydrate from the linked job so
+      // its client/address/architect/building-type/refs backfill the fields the estimateitems file
+      // can't provide (hydrateFromJob keeps any non-empty value and only fills the blanks).
       setProposal(mergeParsedToProposal(j.parsed, seq));
-      if (resolvedJobId) void applyBlendedInclusions(resolvedJobId, j.parsed?.categories || []);
+      if (resolvedJobId) {
+        setJobId(resolvedJobId);
+        void hydrateFromJob(resolvedJobId);
+        void applyBlendedInclusions(resolvedJobId, j.parsed?.categories || []);
+      }
     } catch (e) {
       alert(e?.message || String(e));
     } finally {
