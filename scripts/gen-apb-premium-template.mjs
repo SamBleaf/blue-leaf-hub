@@ -32,6 +32,37 @@ let ct = z.file("[Content_Types].xml").asText();
 if (!/Extension="jpeg"/.test(ct)) ct = ct.replace("</Types>", `<Default Extension="jpeg" ContentType="image/jpeg"/></Types>`);
 z.file("[Content_Types].xml", ct);
 
+// --- Cleanup pass (review feedback 2026-06-21: 37pp too long, dusty-blue spacers too big) ---
+let doc = z.file("word/document.xml").asText();
+
+// (a) Drop EMPTY dusty-blue (#B9CEDB) single-cell banner tables. The one in the source sits INSIDE the
+//     {#INCLUSION_SECTIONS} loop, so it rendered as a big empty block before EVERY inclusion category
+//     (~10×) — the main "spacing blocks too big" + page bloat. Text/image banners are kept.
+doc = doc.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (t) => {
+  if (!t.includes("B9CEDB")) return t;
+  const hasText = (t.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || []).some((s) => s.replace(/<[^>]+>/g, "").trim());
+  const hasImg = /<w:drawing/.test(t);
+  return hasText || hasImg ? t : "";
+});
+
+// (b) Trim forced page breaks before SHORT secondary sections so they flow onto the prior page
+//     (premium ≠ one page per minor section). Indices are 1-based in document order; see the section
+//     map in the build notes. Major chapters (cover, overview, intro, scope, why-build, online-pm,
+//     inclusions, prime-cost, schedule, quote-summary, fee-schedule, back-cover) keep their breaks.
+//     #2 Document guide, #6 Guarantees, #10 Optional upgrades, #12 Testimonials, #13 Licences,
+//     #14 Responsibilities, #15 Exclusions, #18 Next step, #19 Closing summary.
+const DROP_BREAKS = new Set([2, 6, 10, 12, 13, 14, 15, 18, 19]);
+const segs = doc.split('<w:br w:type="page"/>');
+doc = segs.reduce((acc, seg, i) => (i === 0 ? seg : acc + (DROP_BREAKS.has(i) ? "" : '<w:br w:type="page"/>') + seg), "");
+z.file("word/document.xml", doc);
+
+// (c) Footer: recolor the "Building" word to brand blue (was grey #6B6B6B).
+for (const fn of Object.keys(z.files).filter((n) => /word\/footer\d+\.xml/.test(n))) {
+  let fx = z.file(fn).asText();
+  fx = fx.replace(/<w:r\b[\s\S]*?<\/w:r>/g, (run) => (/<w:t[^>]*>Building<\/w:t>/.test(run) ? run.replace(/6B6B6B/g, "006C9B") : run));
+  z.file(fn, fx);
+}
+
 const buf = z.generate({ type: "nodebuffer", compression: "DEFLATE" });
 for (const out of OUTS) writeFileSync(out, buf);
 console.log(`Wrote premium APB template (${(buf.length / 1024).toFixed(0)}KB) → ${OUTS.map((o) => o.split("/").slice(-2).join("/")).join(", ")}`);
