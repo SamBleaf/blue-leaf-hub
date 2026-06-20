@@ -82,13 +82,21 @@ const rowLoop = (d, openTag, closeTag, firstCellTag, lastCellTag) => {
 };
 doc = rowLoop(doc, "{#SUMMARY_ROWS}", "{/SUMMARY_ROWS}", "{CATEGORY_NAME}", "{CATEGORY_COST_GST}");
 doc = rowLoop(doc, "{#FEE_SCHEDULE}", "{/FEE_SCHEDULE}", "{STAGE_CLAIM}", "{PERCENTAGE}");
+
+// (f) Density pass (layout spacing only — no content/merge changes):
+//   - Blue divider bars: the empty 006C9B cells render a ~14pt block. Replace their empty paragraph
+//     with a ~4.5pt exact-height line so each becomes a thin brand rule, not a dead-space block.
+doc = doc.replace(
+  /(<w:tc><w:tcPr>(?:(?!<\/w:tc>)[\s\S])*?006C9B(?:(?!<\/w:tc>)[\s\S])*?<\/w:tcPr>)<w:p\/>(<\/w:tc>)/g,
+  '$1<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="90" w:lineRule="exact"/><w:rPr><w:sz w:val="6"/></w:rPr></w:pPr></w:p>$2'
+);
+//   - Cell padding: tcMar 220tw (11pt) is too loose on banners + data tables → 100tw (5pt) compact.
+doc = doc.replace(/<w:(top|bottom|start|end) w:w="220" w:type="dxa"\/>/g, '<w:$1 w:w="100" w:type="dxa"/>');
 z.file("word/document.xml", doc);
 
-// (c) Footer: recolor the "Building" word to brand blue (was grey #6B6B6B).
+// (c) Footer: make ALL footer elements brand blue #006C9B (was mixed with grey #6B6B6B).
 for (const fn of Object.keys(z.files).filter((n) => /word\/footer\d+\.xml/.test(n))) {
-  let fx = z.file(fn).asText();
-  fx = fx.replace(/<w:r\b[\s\S]*?<\/w:r>/g, (run) => (/<w:t[^>]*>Building<\/w:t>/.test(run) ? run.replace(/6B6B6B/g, "006C9B") : run));
-  z.file(fn, fx);
+  z.file(fn, z.file(fn).asText().replace(/6B6B6B/g, "006C9B"));
 }
 
 const buf = z.generate({ type: "nodebuffer", compression: "DEFLATE" });
