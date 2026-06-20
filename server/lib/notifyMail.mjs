@@ -30,6 +30,18 @@ async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, head
   return "smtp";
 }
 
+/**
+ * Send one email via the first available transport (Resend → Gmail → SMTP).
+ *
+ * Returns `{ transport, resendId }`:
+ *   - `transport` is "resend" | "gmail" | "smtp" (the winning transport).
+ *   - `resendId` is the Resend message id when sent via Resend, else `null`. Persist it on the
+ *     rfqs row (rfqs.resend_email_id) so the Resend webhook can attribute delivery/open/click/
+ *     bounce events to that RFQ. Gmail/SMTP have no such id, hence null.
+ *
+ * Backward-compatible: every existing caller `await`s this and ignores the return value (audited),
+ * so widening the bare "resend"/"gmail"/"smtp" string to an object breaks nothing.
+ */
 export async function sendPlainMail(opts) {
   const errors = [];
 
@@ -37,8 +49,10 @@ export async function sendPlainMail(opts) {
   //    OAuth token to expire. Only active once RESEND_API_KEY AND RESEND_FROM are both set.
   if (resendSendConfigured()) {
     try {
-      const via = await sendViaResend(opts);
-      if (via) return "resend";
+      const resendId = await sendViaResend(opts);
+      // sendViaResend returns the Resend message id (truthy string) on success, or null if not
+      // actually configured at call time.
+      if (resendId) return { transport: "resend", resendId };
     } catch (resendErr) {
       console.warn("[mail] Resend send failed, trying Gmail/SMTP fallback:", resendErr?.message || resendErr);
       errors.push(`Resend: ${resendErr?.message || resendErr}`);
@@ -49,7 +63,7 @@ export async function sendPlainMail(opts) {
   if (gmailSendConfigured()) {
     try {
       await sendViaGmail(opts);
-      return "gmail";
+      return { transport: "gmail", resendId: null };
     } catch (gmailErr) {
       console.warn("[mail] Gmail send failed, trying SMTP fallback:", gmailErr?.message || gmailErr);
       errors.push(`Gmail: ${gmailErr?.message || gmailErr}`);
@@ -59,7 +73,7 @@ export async function sendPlainMail(opts) {
   // 3) SMTP (same connected account, app password).
   try {
     const viaSmtp = await sendViaSmtp(opts);
-    if (viaSmtp) return "smtp";
+    if (viaSmtp) return { transport: "smtp", resendId: null };
   } catch (smtpErr) {
     errors.push(`SMTP: ${smtpErr?.message || smtpErr}`);
   }

@@ -72,7 +72,9 @@ export async function sendViaResend({ to, cc, bcc, subject, text, html, attachme
   if (!data?.id) {
     throw new Error("Resend: send not accepted (no id returned).");
   }
-  return "resend";
+  // Return the Resend message id (not the bare "resend" string) so callers can persist it for
+  // webhook matching (rfqs.resend_email_id). A non-empty string here still means "sent via Resend".
+  return data.id;
 }
 
 /**

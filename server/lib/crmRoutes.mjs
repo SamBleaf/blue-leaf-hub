@@ -32,9 +32,49 @@ import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { getCanonicalContractValue } from "./factsService.mjs";
+import { recordRfqEvent } from "./rfqEngagement.mjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
 const UNSUBSCRIBE_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || "blhub-unsubscribe-secret";
+
+// Verify a Resend (Svix) webhook signature over the RAW request body. Mirrors the buildexact
+// webhook's fail-open pattern (buildexactWebhook.mjs): when RESEND_WEBHOOK_SECRET is unset,
+// verification is SKIPPED so the live webhook keeps working exactly as today — only once the secret
+// is configured does a bad/missing signature get rejected (401) before any DB write. This protects
+// BOTH the CRM mailing-list stats and the RFQ engagement state from forged events.
+// Raw bytes are captured by the express.json({ verify }) hook in dev-api.mjs as req.rawBody.
+function verifyResendSvixSignature(req) {
+  const secret = process.env.RESEND_WEBHOOK_SECRET?.trim();
+  if (!secret) return { ok: true, skipped: true }; // fail-open until configured
+
+  const svixId = req.get("svix-id");
+  const svixTimestamp = req.get("svix-timestamp");
+  const svixSignature = req.get("svix-signature");
+  if (!svixId || !svixTimestamp || !svixSignature) return { ok: false, reason: "missing_svix_headers" };
+
+  const raw = req.rawBody;
+  if (!raw || !raw.length) return { ok: false, reason: "missing_raw_body" };
+
+  // Svix secrets are "whsec_<base64key>"; the HMAC key is the base64-decoded portion.
+  const keyB64 = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  let key;
+  try { key = Buffer.from(keyB64, "base64"); } catch { return { ok: false, reason: "bad_secret" }; }
+
+  const signedContent = `${svixId}.${svixTimestamp}.${raw.toString("utf8")}`;
+  const expected = crypto.createHmac("sha256", key).update(signedContent).digest("base64");
+
+  // svix-signature is a space-delimited list of "<version>,<sig>" (e.g. "v1,abc v1,def").
+  const provided = svixSignature.split(" ").map((p) => (p.includes(",") ? p.split(",")[1] : p));
+  const expBuf = Buffer.from(expected, "base64");
+  for (const sig of provided) {
+    try {
+      const b = Buffer.from(String(sig).trim(), "base64");
+      if (expBuf.length === b.length && expBuf.length > 0 && crypto.timingSafeEqual(expBuf, b)) return { ok: true };
+    } catch { /* try next candidate */ }
+  }
+  return { ok: false, reason: "signature_mismatch" };
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1199,7 +1239,14 @@ export function registerCrmRoutes(app) {
   // ─── Resend webhook ───────────────────────────────────────────────────────
 
   app.post("/api/webhooks/resend", async (req, res) => {
-    // In production: verify Resend-Signature header
+    // Verify the Svix signature over the raw body BEFORE any processing. Fail-open when
+    // RESEND_WEBHOOK_SECRET is unset (current behaviour preserved); once set, forged/unsigned
+    // events are rejected with 401 before any DB write — guarding both CRM stats and RFQ engagement.
+    const sigCheck = verifyResendSvixSignature(req);
+    if (!sigCheck.ok) {
+      console.warn("[resend webhook] signature rejected:", sigCheck.reason);
+      return res.sendStatus(401);
+    }
     const { type, data } = req.body || {};
     if (!type || !data) return res.sendStatus(200);
 
@@ -1280,6 +1327,52 @@ export function registerCrmRoutes(app) {
     } catch (e) {
       // Log but don't fail — Resend will retry
       console.error("Resend webhook error:", e.message);
+    }
+
+    // ── RFQ engagement tracking (Feature 1, additive) ──────────────────────────
+    // SAME Resend webhook, SAME email_id. The CRM block above matches email_send_recipients for
+    // mailing-list stats; this block ALSO matches rfqs.resend_email_id so per-trade RFQ engagement
+    // (delivered → opened → clicked-docs → bounced/suppressed) is driven by the same events.
+    // Fully isolated in its own try/catch so it can NEVER affect CRM behaviour or the 200 response.
+    try {
+      const RFQ_EVENT_MAP = {
+        "email.delivered": "delivered",
+        "email.opened": "opened",
+        "email.clicked": "clicked",
+        "email.bounced": "bounced",
+        "email.complained": "complained",
+      };
+      const rfqEventType = RFQ_EVENT_MAP[type];
+      if (rfqEventType && emailId) {
+        const sb = getServiceSupabase();
+        if (sb) {
+          const { data: rfqRows } = await sb
+            .from("rfqs")
+            .select("id")
+            .eq("resend_email_id", emailId);
+          for (const row of rfqRows || []) {
+            // Stable per-event id so Resend retries de-dupe. Resend payloads don't carry a single
+            // canonical event id, so compose one from event type + the event timestamp.
+            const sourceEventId =
+              data.event_id || data.id || `${type}:${data.created_at || data.timestamp || ""}`;
+            const clickedLink =
+              data.click?.link || data.link?.url || data.link || data.url || null;
+            await recordRfqEvent(sb, {
+              rfqId: row.id,
+              eventType: rfqEventType,
+              sourceEventId,
+              occurredAt: data.created_at || data.timestamp || null,
+              meta: {
+                ...(clickedLink ? { link: clickedLink } : {}),
+                ...(data.bounce?.message ? { bounce: data.bounce.message } : {}),
+              },
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // Never fail the webhook on RFQ tracking — Resend will retry, CRM side already handled.
+      console.error("RFQ engagement webhook error:", e.message);
     }
 
     res.sendStatus(200);

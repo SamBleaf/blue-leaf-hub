@@ -62,6 +62,9 @@ import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
+import { requireAuth, requireRole } from "./lib/requireAuth.mjs";
+import { captureResendId } from "./lib/rfqEngagement.mjs";
+import dns from "node:dns";
 
 console.log("[blue-leaf-api] booting…");
 
@@ -799,7 +802,13 @@ app.post(
 );
 
 const JSON_BODY_LIMIT = process.env.BLUEPRINT_BODY_LIMIT || "100mb";
-app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.json({
+  limit: JSON_BODY_LIMIT,
+  // Capture the raw request bytes so signed-webhook handlers (e.g. /api/webhooks/resend) can verify
+  // an HMAC/Svix signature over the EXACT payload. Cheap (one Buffer ref per request) and only read
+  // by those handlers; everything else uses the parsed req.body as before.
+  verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.use((err, _req, res, next) => {
   if (err?.type === "entity.too.large") {
     return res.status(413).json({
@@ -876,6 +885,147 @@ app.post("/api/subcontractors/csv-template-sheet", async (req, res) => {
   } catch (err) {
     console.error("[subcontractors/csv-template-sheet]", err);
     return res.status(502).json({ ok: false, error: err?.message || "Could not create Google Sheet template." });
+  }
+});
+
+// ── Subcontractor email MX-validation guard (Feature 2) ───────────────────────
+// MX-check the email's domain so staff get a WARNING (never a block) when a domain can't receive
+// mail. Result is persisted on subcontractors.email_mx_valid so a red badge can show in the list +
+// RFQ recipient picker. (5 of 26 trades on a live RFQ had dead/suppressed addresses.)
+//
+// Semantics of the returned value:
+//   true  — domain has MX (or A/AAAA fallback) records → mailable.
+//   false — domain resolves but has NO mail records, OR the domain plainly doesn't exist (ENOTFOUND
+//           / ENODATA) → almost certainly undeliverable. WARN, do not block.
+//   null  — "not checked": a transient DNS error / timeout, or unparseable input. Treated as unknown
+//           so a DNS hiccup never marks a good address bad and never blocks a save.
+
+function emailDomainOf(email) {
+  const e = String(email || "").trim().toLowerCase();
+  // Require exactly one '@' and a plausible domain (a dotted label, no spaces).
+  const parts = e.split("@");
+  if (parts.length !== 2) return null;
+  const [local, domain] = parts;
+  if (!local || !domain) return null;
+  if (/\s/.test(domain)) return null;
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return null;
+  return domain;
+}
+
+/**
+ * MX-check a single email's domain with a hard 3s timeout. Returns true | false | null (see above).
+ * Never throws — a DNS error or timeout resolves to null ("not checked"), never to a block.
+ */
+async function checkEmailMx(email) {
+  const domain = emailDomainOf(email);
+  if (!domain) return null; // unparseable → unknown, not "invalid"
+
+  const TIMEOUT_MS = 3000;
+  const resolveMx = () =>
+    new Promise((resolve) => {
+      let settled = false;
+      const t = setTimeout(() => {
+        if (!settled) { settled = true; resolve({ valid: null }); } // timeout → unknown
+      }, TIMEOUT_MS);
+      dns.resolveMx(domain, (errMx, addresses) => {
+        if (settled) return;
+        if (!errMx && Array.isArray(addresses) && addresses.length > 0) {
+          settled = true; clearTimeout(t); resolve({ valid: true });
+          return;
+        }
+        // No MX: some valid domains accept mail on their A record (implicit MX). ENOTFOUND/ENODATA
+        // mean the domain has no DNS at all → undeliverable. Other errors → unknown.
+        const noSuchDomain = errMx && (errMx.code === "ENOTFOUND" || errMx.code === "ENODATA");
+        dns.resolve(domain, (errA, aRecs) => {
+          if (settled) return;
+          settled = true; clearTimeout(t);
+          if (!errA && Array.isArray(aRecs) && aRecs.length > 0) { resolve({ valid: true }); return; }
+          if (noSuchDomain || (errA && (errA.code === "ENOTFOUND" || errA.code === "ENODATA"))) {
+            resolve({ valid: false }); // domain has no mail/A records → undeliverable
+            return;
+          }
+          resolve({ valid: null }); // transient → unknown
+        });
+      });
+    });
+
+  try {
+    const { valid } = await resolveMx();
+    return valid;
+  } catch {
+    return null; // never block on a DNS error
+  }
+}
+
+// Validate + persist MX result for ONE subcontractor. Called by the frontend after a create/edit
+// save (the save itself stays client-side via Supabase RLS). requireAuth-gated.
+// Only re-checks when the email actually changed (the client passes the saved email).
+app.post("/api/subcontractors/:id/mx-check", requireAuth, async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Database not configured." });
+    const id = String(req.params.id || "").trim();
+    const email = String(req.body?.email || "").trim();
+    if (!id) return res.status(400).json({ ok: false, error: "Subcontractor id required." });
+    if (!email) return res.status(400).json({ ok: false, error: "email required." });
+
+    // Skip the DNS round-trip if the stored email already matches and was checked — unless forced.
+    const force = req.body?.force === true;
+    const { data: existing } = await sb
+      .from("subcontractors")
+      .select("email, email_mx_valid, email_mx_checked_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ ok: false, error: "Subcontractor not found." });
+
+    if (!force && existing.email === email && existing.email_mx_checked_at) {
+      return res.json({ ok: true, emailMxValid: existing.email_mx_valid, checkedAt: existing.email_mx_checked_at, skipped: true });
+    }
+
+    const valid = await checkEmailMx(email);
+    const checkedAt = new Date().toISOString();
+    const { error: upErr } = await sb
+      .from("subcontractors")
+      .update({ email_mx_valid: valid, email_mx_checked_at: checkedAt })
+      .eq("id", id);
+    if (upErr) return res.status(500).json({ ok: false, error: "Could not save MX result." });
+
+    return res.json({ ok: true, emailMxValid: valid, checkedAt });
+  } catch (e) {
+    console.error("[subcontractors/mx-check]", e);
+    return res.status(500).json({ ok: false, error: e?.message || "MX check failed." });
+  }
+});
+
+// Admin backfill: re-MX-check every subcontractor sequentially (each with its own 3s timeout).
+// requireAuth + admin role. Sequential so a large directory never opens hundreds of DNS sockets.
+app.post("/api/subcontractors/mx-recheck-all", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Database not configured." });
+    const { data: subs, error } = await sb
+      .from("subcontractors")
+      .select("id, email")
+      .not("email", "is", null);
+    if (error) return res.status(500).json({ ok: false, error: "Could not load subcontractors." });
+
+    let checked = 0, invalid = 0, unknown = 0;
+    for (const sub of subs || []) {
+      const email = String(sub.email || "").trim();
+      if (!email) continue;
+      const valid = await checkEmailMx(email); // sequential, per-row 3s timeout
+      await sb
+        .from("subcontractors")
+        .update({ email_mx_valid: valid, email_mx_checked_at: new Date().toISOString() })
+        .eq("id", sub.id);
+      checked += 1;
+      if (valid === false) invalid += 1;
+      else if (valid === null) unknown += 1;
+    }
+    return res.json({ ok: true, checked, invalid, unknown });
+  } catch (e) {
+    console.error("[subcontractors/mx-recheck-all]", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Recheck failed." });
   }
 });
 
@@ -1754,7 +1904,9 @@ app.post("/api/rfq/send", async (req, res) => {
       try {
         const msgId = generateOutboundMessageId();
         const headers = { "Message-ID": msgId };
-        await sendPlainMail({
+        // Capture the Resend message id (null for gmail/smtp) so the Resend webhook can attribute
+        // delivery/open/click/bounce events to this RFQ (rfqs.resend_email_id).
+        const { resendId } = await sendPlainMail({
           to,
           subject,
           text: body,
@@ -1769,7 +1921,11 @@ app.post("/api/rfq/send", async (req, res) => {
           const { data: rRow } = await sb.from("rfqs").select("job_id, subcontractor_id").eq("id", rfqId).maybeSingle();
           if (rRow?.job_id && !jobId) jobId = rRow.job_id;
           const scId = subId || (rRow?.subcontractor_id ? String(rRow.subcontractor_id) : "");
-          await sb
+          // Status update uses ONLY pre-102 columns so it ALWAYS persists, even before migration
+          // 102 is applied by hand. The idempotency guard keys on status==='sent'; if this update
+          // were lost (because resend_email_id rode along on an unknown column and PostgREST 400'd
+          // the whole statement), a re-send could DOUBLE-EMAIL a live subbie. So keep it decoupled.
+          const { error: upErr } = await sb
             .from("rfqs")
             .update({
               sent_message_id: msgId,
@@ -1777,6 +1933,10 @@ app.post("/api/rfq/send", async (req, res) => {
               sent_at: new Date().toISOString()
             })
             .eq("id", rfqId);
+          if (upErr) console.warn("[rfq-send] rfqs status update:", upErr.message);
+          // Resend id captured SEPARATELY (best-effort, try/catch'd) so a not-yet-applied migration
+          // 102 can never take down the status update above.
+          if (resendId) await captureResendId(sb, rfqId, resendId);
           const { error: cErr } = await sb.from("correspondence").insert({
             job_id: jobId || null,
             rfq_id: rfqId,

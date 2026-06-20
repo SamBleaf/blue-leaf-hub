@@ -5,6 +5,26 @@ import { authFetch } from "../lib/authFetch.js";
 // Use the app-wide singleton to avoid multiple GoTrueClient instances
 const supabase = getSupabase();
 
+const MX_WARNING =
+  "This email domain can't receive mail — double-check the address before sending RFQs to it.";
+
+// Ask the server to MX-check + persist the result for a subcontractor's email. Returns true only
+// when the domain is confirmed undeliverable (email_mx_valid === false) so the caller can warn.
+// Never throws and never blocks the save — a network/DNS hiccup returns false (no warning).
+async function checkSubMx(id, email) {
+  try {
+    const res = await authFetch(`/api/subcontractors/${id}/mx-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return data?.ok === true && data?.emailMxValid === false;
+  } catch {
+    return false;
+  }
+}
+
 const BASE_TRADES = [
   "excavation",
   "demolition",
@@ -385,9 +405,10 @@ function EditModal({ sub, onClose, onSaved, tradesList }) {
       return;
     }
     setSaving(true);
+    const newEmail = form.email.trim();
     const { error: err } = await supabase.from("subcontractors").update({
       business_name: form.business_name.trim(),
-      email: form.email.trim(),
+      email: newEmail,
       trade: form.trade,
       contact: form.contact.trim() || null,
       mobile: form.mobile.trim() || null,
@@ -397,8 +418,14 @@ function EditModal({ sub, onClose, onSaved, tradesList }) {
       state: form.state || "SA",
       postcode: form.postcode.trim() || null,
     }).eq("id", sub.id);
+    if (err) { setSaving(false); setError(err.message); return; }
+    // MX-check the (possibly changed) email — only re-checks server-side when it actually changed.
+    // Never blocks the save; warns the user if the domain can't receive mail.
+    const warn = await checkSubMx(sub.id, newEmail);
     setSaving(false);
-    if (err) { setError(err.message); return; }
+    if (warn) {
+      window.alert(`Saved. ${MX_WARNING}`);
+    }
     onSaved();
     onClose();
   };
@@ -537,11 +564,17 @@ function AddModal({ onClose, onSaved, tradesList, colourMap }) {
       state: form.state || ai.state || "SA",
       postcode: form.postcode || ai.postcode || null
     };
-    const { error: err } = await supabase.from("subcontractors").insert(payload);
+    const { data: inserted, error: err } = await supabase
+      .from("subcontractors").insert(payload).select("id").single();
     if (err) {
       setError(err.message);
       setStep("confirm");
       return;
+    }
+    // MX-check the new email; warn (never block) if the domain can't receive mail.
+    const warn = inserted?.id ? await checkSubMx(inserted.id, payload.email) : false;
+    if (warn) {
+      window.alert(`Saved. ${MX_WARNING}`);
     }
     onSaved();
     onClose();
@@ -1098,6 +1131,11 @@ function SubCard({ sub, colourMap, onEdit }) {
           <a href={`mailto:${sub.email}`} style={{ fontSize: 12, color: "#006c9b", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             ✉ {sub.email}
           </a>
+        )}
+        {sub.email_mx_valid === false && (
+          <span title={MX_WARNING} style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", borderRadius: 6, padding: "1px 6px" }}>
+            ⚠ Undeliverable email
+          </span>
         )}
         {sub.suburb && (
           <div style={{ fontSize: 12, color: "#64748b" }}>
@@ -1720,7 +1758,12 @@ export default function Subcontractors() {
                       </td>
                       <td style={tableCell}><TradeBadge trade={sub.trade || "unknown"} colourMap={colourMap} /></td>
                       <td style={tableCell}>{sub.contact || "-"}</td>
-                      <td style={tableCell}>{sub.email || "-"}</td>
+                      <td style={tableCell}>
+                        {sub.email || "-"}
+                        {sub.email_mx_valid === false && (
+                          <span title={MX_WARNING} style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", borderRadius: 6, padding: "1px 5px" }}>⚠</span>
+                        )}
+                      </td>
                       <td style={tableCell}>{sub.mobile || "-"}</td>
                       <td style={tableCell}>{[sub.suburb, sub.state].filter(Boolean).join(", ") || "-"}</td>
                       <td style={tableCell}>{stats.rfqCount}</td>

@@ -5,6 +5,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { resendSendConfigured, sendBatchViaResend } from "./resendSend.mjs";
+import { captureResendId } from "./rfqEngagement.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqTradeIntelligence.mjs";
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
@@ -327,6 +328,9 @@ export function registerRfqPackageRoutes(app) {
           })));
           for (let i = 0; i < specs.length; i++) {
             results.push({ rfqId: specs[i].r.id, ok: true, to: specs[i].to, transport: "resend-batch", messageId: ids[i]?.id || null });
+            // Capture the per-recipient Resend id (ids[] maps 1:1 to specs[]) so the Resend webhook
+            // can attribute delivery/open/click/bounce events to this RFQ. Best-effort, sequential.
+            if (ids[i]?.id) await captureResendId(s, specs[i].r.id, ids[i].id);
           }
           await logCorrespondence(specs.map((sp) => ({ r: sp.r, subject: sp.subject })));
           batched = true;
@@ -655,7 +659,9 @@ export function registerRfqPackageRoutes(app) {
         if (!to) { results.push({ email: to, ok: false, error: "No email" }); continue; }
 
         try {
-          await sendPlainMail({ to, subject: email_subject, text: email_body });
+          // Capture the Resend message id (null for gmail/smtp) so the webhook can attribute
+          // delivery/open/click/bounce events to the rfqs row created below.
+          const { resendId } = await sendPlainMail({ to, subject: email_subject, text: email_body });
 
           // Insert recipient row
           const { data: rec } = await s.from("rfq_recipients").insert({
@@ -675,6 +681,10 @@ export function registerRfqPackageRoutes(app) {
           // recipients are tracked via rfq_recipients alone (H1). Previously the insert was
           // attempted with a null id and failed silently, dropping the recipient from tracking.
           if (pkg?.job_id && r.subcontractor_id) {
+            // INSERT uses ONLY pre-102 columns so the rfqs row (which the Tender Board + quote
+            // tracker depend on) ALWAYS gets created — even before migration 102 is applied by hand.
+            // resend_email_id is captured SEPARATELY below (best-effort) so an unknown column can
+            // never PostgREST-400 the whole INSERT and silently drop the send from tracking.
             const { data: rfqRow, error: rfqErr } = await s.from("rfqs").insert({
               job_id: pkg.job_id,
               subcontractor_id: r.subcontractor_id,
@@ -686,8 +696,10 @@ export function registerRfqPackageRoutes(app) {
             }).select("id").single();
             if (rfqErr) {
               console.warn("[rfq-package/send] rfqs insert failed:", rfqErr.message);
-            } else if (rfqRow && rec) {
-              await s.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
+            } else if (rfqRow) {
+              if (rec) await s.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
+              // Resend id is best-effort (try/catch'd) — harmless no-op pre-102, auto-populates after.
+              if (resendId) await captureResendId(s, rfqRow.id, resendId);
             }
           }
 

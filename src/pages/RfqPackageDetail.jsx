@@ -187,7 +187,15 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
     async function loadSubs() {
       const sb = getSupabase();
       if (!sb) return;
-      const { data } = await sb.from("subcontractors").select("id, business_name, email, contact, trades").order("business_name");
+      // email_mx_valid is added by migration 102. If 102 isn't applied yet, PostgREST 400s the WHOLE
+      // select and the recipient picker would be empty — so fall back to the base columns and just
+      // skip the undeliverable badge until 102 lands. The picker must always populate.
+      const baseCols = "id, business_name, email, contact, trade";
+      let { data, error } = await sb.from("subcontractors").select(`${baseCols}, email_mx_valid`).order("business_name");
+      if (error) {
+        const fb = await sb.from("subcontractors").select(baseCols).order("business_name");
+        data = fb.data;
+      }
       setSubcontractors(data || []);
     }
     loadSubs();
@@ -296,7 +304,12 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
                     onClick={() => toggleSub(sub)}
                     className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${isSelected ? "bg-primary/10 border border-primary/30" : "hover:bg-page"}`}
                   >
-                    <div className="font-medium text-ink leading-tight">{sub.business_name}</div>
+                    <div className="font-medium text-ink leading-tight">
+                      {sub.business_name}
+                      {sub.email_mx_valid === false && (
+                        <span title="This email domain can't receive mail — double-check the address" className="ml-1.5 rounded bg-red-100 px-1 py-0.5 text-[9px] font-bold text-red-700 align-middle">⚠ undeliverable</span>
+                      )}
+                    </div>
                     <div className="text-[11px] text-muted truncate">{sub.email}</div>
                   </button>
                 );

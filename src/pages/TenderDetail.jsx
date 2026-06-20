@@ -26,6 +26,69 @@ const RFQ_STATUS_VIS = {
   not_required: { label: "Not required", cls: "bg-slate-200 text-slate-700" }
 };
 
+// Per-trade email engagement strip, driven entirely by the denormalised rfqs.* columns the recipient
+// query already SELECTs (rfqs ( * )). No extra query. Events arrive via the Resend webhook:
+//   delivered → email_delivered_at, opened → email_opened_at, clicked → email_clicked_at,
+//   docs link clicked → docs_viewed_at, bounced/complained → bounced_at / suppressed.
+// NOTE: Resend open + click tracking is opt-in per domain — opened/clicked only populate once it's
+// enabled for blueleafbuilding.com.au in the Resend dashboard. Delivered/bounced work regardless.
+function fmtTs(ts) {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function EngagementStrip({ rfq }) {
+  const chips = [];
+  if (rfq.bounced_at || rfq.suppressed) {
+    const label = rfq.bounced_at ? "Bounced" : "Suppressed";
+    chips.push(
+      <span
+        key="bad"
+        title={rfq.bounced_at ? `Bounced ${fmtTs(rfq.bounced_at)}` : "Address suppressed (bounce/complaint) — won't receive mail"}
+        className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700"
+      >
+        {label}
+      </span>
+    );
+  } else {
+    if (rfq.email_delivered_at) {
+      chips.push(
+        <span key="del" title={`Delivered ${fmtTs(rfq.email_delivered_at)}`} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+          Delivered
+        </span>
+      );
+    }
+    if (rfq.email_opened_at) {
+      // "Opened (soft)" — Resend opens rely on a tracking pixel and are easily under-reported
+      // (image blocking, plain-text clients), so they are a soft signal, not proof of non-open.
+      chips.push(
+        <span key="open" title={`Opened ${fmtTs(rfq.email_opened_at)} — soft signal (tracking pixel, may under-report)`} className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+          Opened (soft)
+        </span>
+      );
+    }
+    if (rfq.docs_viewed_at) {
+      chips.push(
+        <span key="docs" title={`Docs link clicked ${fmtTs(rfq.docs_viewed_at)}`} className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+          👁 Viewed docs
+        </span>
+      );
+    } else if (rfq.email_clicked_at) {
+      chips.push(
+        <span key="click" title={`Clicked a link ${fmtTs(rfq.email_clicked_at)}`} className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+          Clicked
+        </span>
+      );
+    }
+  }
+  if (!chips.length) return null;
+  return <div className="flex flex-wrap items-center gap-1.5">{chips}</div>;
+}
+
 function isOverdue(deadline, status) {
   if (!deadline || ["received", "accepted", "declined", "not_required"].includes(status)) return false;
   const d = new Date(`${deadline}T00:00:00`);
@@ -1121,7 +1184,7 @@ export default function TenderDetail() {
               ) : (
                 <>
                   <p className="mt-2 text-xs text-muted">
-                    Toggle trades/recipients, then send. Each email goes as a reply to that subcontractor's original RFQ thread.
+                    Toggle trades/recipients, then send. Each email goes as a reply to that subcontractor&apos;s original RFQ thread.
                   </p>
                   <div className="mt-3 space-y-2">
                     {[...new Set(emailRecips.map((r) => r.trade))].map((trade) => {
@@ -1192,6 +1255,7 @@ export default function TenderDetail() {
                     <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">{r.trade}</span>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${vis.cls}`}>{vis.label}</span>
                   </div>
+                  <EngagementStrip rfq={r} />
                   <div className="text-sm font-semibold text-ink">{sub?.business_name || "—"}</div>
                   <div className="text-xs text-muted">{(sub?.contact || "—") + (sub?.email ? ` · ${sub.email}` : "")}</div>
                   <div className="grid gap-1 text-xs text-muted sm:grid-cols-2">
