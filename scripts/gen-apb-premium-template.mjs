@@ -56,6 +56,20 @@ const segs = doc.split('<w:br w:type="page"/>');
 doc = segs.reduce((acc, seg, i) => (i === 0 ? seg : acc + (DROP_BREAKS.has(i) ? "" : '<w:br w:type="page"/>') + seg), "");
 z.file("word/document.xml", doc);
 
+// (d) Drop the "Description"/"Amount" header paragraphs that sit INSIDE the {#PC_SUMS} loop — they
+//     reprinted before every PC/PS line. Scoped to the loop so other tables keep their headers.
+{
+  let inPcLoop = false;
+  doc = doc.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const txt = (para.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || []).map((s) => s.replace(/<[^>]+>/g, "")).join("").trim();
+    if (txt.includes("{#PC_SUMS}")) { inPcLoop = true; return para; }
+    if (txt.includes("{/PC_SUMS}")) { inPcLoop = false; return para; }
+    if (inPcLoop && (txt === "Description" || txt === "Amount")) return "";
+    return para;
+  });
+}
+z.file("word/document.xml", doc);
+
 // (c) Footer: recolor the "Building" word to brand blue (was grey #6B6B6B).
 for (const fn of Object.keys(z.files).filter((n) => /word\/footer\d+\.xml/.test(n))) {
   let fx = z.file(fn).asText();
