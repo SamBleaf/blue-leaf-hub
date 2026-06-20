@@ -51,7 +51,8 @@ doc = doc.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (t) => {
 //     inclusions, prime-cost, schedule, quote-summary, fee-schedule, back-cover) keep their breaks.
 //     #2 Document guide, #6 Guarantees, #10 Optional upgrades, #12 Testimonials, #13 Licences,
 //     #14 Responsibilities, #15 Exclusions, #18 Next step, #19 Closing summary.
-const DROP_BREAKS = new Set([2, 6, 10, 12, 13, 14, 15, 18, 19]);
+//     #3 Introduction letter is KEPT (APB rapport beat) but de-blanked — drop its break so it flows.
+const DROP_BREAKS = new Set([2, 3, 6, 10, 12, 13, 14, 15, 18, 19]);
 const segs = doc.split('<w:br w:type="page"/>');
 doc = segs.reduce((acc, seg, i) => (i === 0 ? seg : acc + (DROP_BREAKS.has(i) ? "" : '<w:br w:type="page"/>') + seg), "");
 z.file("word/document.xml", doc);
@@ -68,6 +69,19 @@ z.file("word/document.xml", doc);
     return para;
   });
 }
+
+// (e) Collapse Quote Summary + Fee Schedule from one-table-per-row (header reprinted every row) to a
+//     SINGLE table — header once, the data ROW repeating — by moving the loop tags into the data-row
+//     cells (open in the first cell, close in the last). Cuts the 5-page summary (30 categories) to ~1pg.
+const rowLoop = (d, openTag, closeTag, firstCellTag, lastCellTag) => {
+  const esc = (s) => s.replace(/[{}#/]/g, "\\$&");
+  const rmPara = (x, tag) => x.replace(new RegExp("<w:p\\b(?:(?!</w:p>)[\\s\\S])*?" + esc(tag) + "(?:(?!</w:p>)[\\s\\S])*?</w:p>"), "");
+  d = rmPara(d, openTag); // remove the standalone {#…} paragraph (loop currently wraps the whole table)
+  d = rmPara(d, closeTag);
+  return d.replace(firstCellTag, openTag + firstCellTag).replace(lastCellTag, lastCellTag + closeTag);
+};
+doc = rowLoop(doc, "{#SUMMARY_ROWS}", "{/SUMMARY_ROWS}", "{CATEGORY_NAME}", "{CATEGORY_COST_GST}");
+doc = rowLoop(doc, "{#FEE_SCHEDULE}", "{/FEE_SCHEDULE}", "{STAGE_CLAIM}", "{PERCENTAGE}");
 z.file("word/document.xml", doc);
 
 // (c) Footer: recolor the "Building" word to brand blue (was grey #6B6B6B).
