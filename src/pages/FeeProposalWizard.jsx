@@ -9,6 +9,7 @@ import {
   DEFAULT_FEE_SCHEDULE,
   emptyProposal,
   mergeParsedToProposal,
+  salutationFromClientName,
   TEMPLATE_STORAGE_KEY
 } from "../lib/feeProposalDefaults.js";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
@@ -284,11 +285,12 @@ export default function FeeProposalWizard() {
       try {
         const { data: lead } = await sb
           .from("leads")
-          .select("first_name,last_name,architect_name")
+          .select("name,first_name,last_name,architect_name")
           .eq("id", job.lead_id)
           .maybeSingle();
         if (lead) {
-          leadClient = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+          // Prefer the full-name field so compound clients survive ("Jess Parken & Rick Lockwood").
+          leadClient = (lead.name || "").trim() || `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
           leadArchitect = String(lead.architect_name || "").trim();
         }
       } catch {
@@ -301,7 +303,9 @@ export default function FeeProposalWizard() {
         ...p,
         address: (p.address || "").trim() || job.address || "",
         client_name,
-        client_salutation: (p.client_salutation || "").trim() || client_name,
+        // Shared salutation derivation so every data-entry path greets the client identically
+        // ("Jess Parken & Rick Lockwood" → "Jess Parken and Rick Lockwood").
+        client_salutation: (p.client_salutation || "").trim() || salutationFromClientName(client_name),
         architect_name: (p.architect_name || "").trim() || job.architect_name || exArchitect || leadArchitect || "",
         arch_ref: (p.arch_ref || "").trim() || job.arch_ref || "",
         eng_ref: (p.eng_ref || "").trim() || job.eng_ref || "",

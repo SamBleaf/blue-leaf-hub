@@ -57,7 +57,7 @@ export function emptyProposal() {
 
 export const TEMPLATE_STORAGE_KEY = "blhub_fee_proposal_docx_template_b64";
 
-function salutationFromClientName(name) {
+export function salutationFromClientName(name) {
   const n = String(name || "").trim();
   if (!n) return "";
   return n.replace(/\s+&\s+/g, " and ").replace(/\s+/g, " ");

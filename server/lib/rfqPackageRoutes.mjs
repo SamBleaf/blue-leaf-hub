@@ -198,7 +198,9 @@ export function registerRfqPackageRoutes(app) {
           projectAddress: job?.address || lead?.site_address || null,
           projectType,
           architectClient: job?.architect_name || null,
-          clientName: job?.client_name || [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || null,
+          // Prefer the full-name field (leads.name) so compound clients ("Jess Parken & Rick Lockwood")
+          // survive — first_name+last_name can only represent one person.
+          clientName: job?.client_name || lead?.name?.trim() || [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || null,
           clientEmail: job?.client_email || lead?.email || null,
           clientPhone: job?.client_phone || lead?.phone || null,
           estimatedValue: lead?.estimated_value ?? null,

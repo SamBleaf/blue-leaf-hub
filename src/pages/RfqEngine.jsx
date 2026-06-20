@@ -453,6 +453,9 @@ export default function RfqEngine() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefillDoneRef = useRef(false);
+  // Lead identity (name/email/phone/leadId) from /api/tender/prefill — stamped onto the job at
+  // create/update time in persistRfqs so the RFQ-created 'tendering' job carries the client.
+  const prefillLeadRef = useRef(null);
   const { project } = useProject();
   const skipNextAutoRebuildRef = useRef(false);
   /** After restoring saved email drafts, skip one rebuild when the subcontractor list finishes loading so drafts are not overwritten. */
@@ -717,6 +720,14 @@ export default function RfqEngine() {
           architect_name: prev.architect_name || p.architectClient || "",
           client_name: prev.client_name || p.clientName || "",
         }));
+        // Keep the lead's contact identity OUT of extraction (that's PDF scope) but available to
+        // persistRfqs so the job carries client name/email/phone + lead_id. Otherwise it's discarded.
+        prefillLeadRef.current = {
+          leadId: leadId || p.leadId || null,
+          clientName: p.clientName || "",
+          clientEmail: p.clientEmail || "",
+          clientPhone: p.clientPhone || "",
+        };
         if (p.jobId) {
           setExtractionJobId((cur) => cur || p.jobId);
           if (!extractionJobIdRef.current) extractionJobIdRef.current = p.jobId;
@@ -1157,6 +1168,7 @@ export default function RfqEngine() {
     setCompletionLog(null);
     setExtractionJobId("");
     extractionJobIdRef.current = "";
+    prefillLeadRef.current = null; // don't let a prior lead's identity contaminate the next job
     setTradePlan([]);
     setTradeIntelSummary(null);
     skipNextAutoRebuildRef.current = false;
@@ -1365,6 +1377,12 @@ export default function RfqEngine() {
       if (!supabaseConfigured) return;
       const ext = coerceExtraction(extRaw);
       const fields = buildJobFieldsFromExtraction(ext);
+      // Fill-when-blank: a tender PDF rarely carries the client/architect, and the builder returns ""
+      // for those. Don't PATCH a blank over a name already on the job — it's stamped/healed from the
+      // source lead in persistRfqs. (Mirrors the persistRfqs heal so neither path can wipe identity.)
+      for (const k of ["client_name", "architect_name"]) {
+        if (!String(fields[k] || "").trim()) delete fields[k];
+      }
       const addr = String(fields.address || "").trim();
       try {
         const jid = extractionJobIdRef.current;
@@ -1617,6 +1635,7 @@ export default function RfqEngine() {
       (extraction.project_address ? jobProjectsInternalPath(extraction.project_address) : "");
 
     const jid = extractionJobIdRef.current;
+    const lead = prefillLeadRef.current || {};
     let job;
     if (jid) {
       const patch = { ...exFields };
@@ -1625,12 +1644,32 @@ export default function RfqEngine() {
         patch.dropbox_link = sharedUrl;
       }
       if (internalPath) patch.dropbox_internal_path = internalPath;
+      // Identity heal, fill-when-blank: read the current row so a blank extraction never WIPES a
+      // client_name (exFields.client_name is "" when unknown) and an admin-set name is never clobbered.
+      const { data: existing } = await sb
+        .from("jobs")
+        .select("client_name,client_email,client_phone,lead_id")
+        .eq("id", jid)
+        .maybeSingle();
+      if (!(patch.client_name || "").trim()) {
+        delete patch.client_name; // don't overwrite with a blank extraction
+        if (!(existing?.client_name || "").trim() && lead.clientName) patch.client_name = lead.clientName;
+      }
+      if (!(existing?.client_email || "").trim() && lead.clientEmail) patch.client_email = lead.clientEmail;
+      if (!(existing?.client_phone || "").trim() && lead.clientPhone) patch.client_phone = lead.clientPhone;
+      if (!existing?.lead_id && lead.leadId) patch.lead_id = lead.leadId;
       const { data, error: jobErr } = await sb.from("jobs").update(patch).eq("id", jid).select("*").single();
       if (jobErr) throw jobErr;
       job = data;
     } else {
       const jobInsert = {
         ...exFields,
+        // Stamp the client identity from the source lead (fill-when-blank vs the tender-doc extraction)
+        // so the new 'tendering' job isn't orphaned without a client.
+        client_name: (exFields.client_name || "").trim() || lead.clientName || null,
+        client_email: lead.clientEmail || null,
+        client_phone: lead.clientPhone || null,
+        lead_id: lead.leadId || null,
         dropbox_shared_link: sharedUrl,
         dropbox_internal_path: internalPath,
         dropbox_link: sharedUrl,

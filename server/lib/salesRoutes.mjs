@@ -244,8 +244,10 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
     throw e;
   }
 
-  // Resolve the canonical address + client name.
-  const clientName = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+  // Resolve the canonical address + client name. Prefer the full-name field (leads.name) so a
+  // compound client ("Jess Parken & Rick Lockwood") survives — first+last is only one person.
+  // Keeps both creation paths (RFQ vs conversion) deriving the identical client_name.
+  const clientName = (lead.name && lead.name.trim()) || `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
   const rawAddress = lead.site_address.trim();
   const addr = normaliseAddress(rawAddress);
 
