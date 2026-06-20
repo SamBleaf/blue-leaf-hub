@@ -810,6 +810,9 @@ export default function TenderDetail() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // A query is an intentional follow-up — bypass the "already sent" idempotency guard, which
+          // would otherwise silently skip it (the rfq is already status='sent' by the time you query).
+          force: true,
           messages: [
             {
               to,
@@ -825,6 +828,11 @@ export default function TenderDetail() {
       });
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || "Send failed");
+      // Never swallow a skip as success — if the send was skipped, tell the user instead of logging
+      // a phantom "sent" row.
+      if (j?.results?.some((r) => r?.skipped)) {
+        throw new Error("Send was skipped (this subcontractor already has a sent RFQ for this job). Reload and try again.");
+      }
       // /api/rfq/send already logs correspondence WITH the real message_id AND captures
       // resend_email_id (engagement tracking) whenever it has the rfqId — which the query always
       // passes. Only fall back to a client-side log if the server didn't, so we never write a

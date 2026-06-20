@@ -1812,6 +1812,10 @@ app.get("/api/quote-tracker/unmatched", async (_req, res) => {
 app.post("/api/rfq/send", async (req, res) => {
   try {
     const msgs = req.body?.messages;
+    // force:true lets an INTENTIONAL re-send/follow-up (a Query, or re-sending after fixing a bounced
+    // address) bypass the "already sent" idempotency guard below. Initial sends omit it, so accidental
+    // double-sends are still prevented.
+    const forceResend = req.body?.force === true;
     const transport = mailTransportName();
 
     if (!transport) {
@@ -1883,7 +1887,7 @@ app.post("/api/rfq/send", async (req, res) => {
       // job. Prevents double-sends when the user retries a send after a partial failure.
       const jobIdM = String(m?.jobId || "").trim();
       const subIdM = String(m?.subcontractor_id || "").trim();
-      if (sb && jobIdM && subIdM) {
+      if (!forceResend && sb && jobIdM && subIdM) {
         try {
           const { data: prior } = await sb
             .from("rfqs")
