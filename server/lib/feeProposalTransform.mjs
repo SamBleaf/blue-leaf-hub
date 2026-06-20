@@ -331,7 +331,7 @@ export const APB_CONTENT = {
   ONLINE_PM_BODY:
     "Every Blue Leaf client receives a login to the Blue Leaf client portal. From any device, anywhere, you can watch progress photos as your home takes shape, follow your live construction schedule and see exactly what's happening next, make and confirm your selections with prices locked in, read every communication and approval in one place, and track your budget and any variations. With 24/7 access you'll always feel up to speed — and you can share the journey with family and friends.",
   CONSTRUCTION_SCHEDULE_INTRO:
-    "Your project is scheduled for completion within approximately [ADD WEEKS] weeks from the commencement of construction. We guarantee adherence to this timeframe by closely monitoring your personalised construction schedule, which you follow live in your portal from slab through to practical completion.",
+    "Your project is scheduled for completion within approximately [ADD WEEKS] weeks from the commencement of construction. This program is realistic and includes a sensible allowance for weather and the unforeseen — we'd always rather under-promise and over-deliver than quote a timeframe we can't comfortably meet. You'll follow your personalised schedule live in your portal, from slab through to practical completion, and we monitor it closely with the aim of meeting or bettering it.",
   VARIATIONS_CLAUSE:
     "Variations are charged at cost price, plus a 25% builder's margin. Every variation is approved by you in writing before any additional work is carried out — so there are no surprises at the end.",
   SUMMARY_BODY:
@@ -375,7 +375,10 @@ export const APB_CONTENT = {
 export function proposalToApbDocxData(p) {
   const a = p && p.apb && typeof p.apb === "object" ? p.apb : {};
   // Derive a relative week-by-week schedule from the estimate's SCHED items; auto-fills [ADD WEEKS].
-  const sched = buildRelativeSchedule(p && p.categories);
+  const sched = buildRelativeSchedule(
+    p && p.categories,
+    p && p.schedule_buffer_pct != null ? Number(p.schedule_buffer_pct) : undefined
+  );
   let scheduleIntro = a.construction_schedule || APB_CONTENT.CONSTRUCTION_SCHEDULE_INTRO;
   if (sched) scheduleIntro = scheduleIntro.replace(/\[ADD WEEKS\]/gi, String(sched.totalWeeks));
   return {
@@ -399,6 +402,11 @@ export function proposalToApbDocxData(p) {
 // Phase order + client labels for the relative schedule. Maps the Buildxact category phases
 // (site_prep/foundations/frame/lock_up/fix_out/external) to the canonical construction sequence the
 // Schedule module uses, collapsed to the client-facing groupings shown on a proposal.
+// Contingency buffer baked into the CLIENT-FACING proposal schedule (under-promise / over-deliver).
+// Operations still runs the tighter real program from the same SCHED data and aims to beat this.
+// Tune here, or per-proposal via p.schedule_buffer_pct (e.g. 0.15 = +15%, 0.25 = +25%).
+export const SCHEDULE_BUFFER_PCT = 0.2;
+
 const SCHEDULE_PHASES = [
   { keys: ["site_prep", "pre_construction", "site_slab"], label: "Site preparation" },
   { keys: ["foundations", "substructure"], label: "Foundations & slab" },
@@ -414,9 +422,10 @@ const SCHEDULE_PHASES = [
 // phase order) but WITHOUT a commencement date, so it reads as "Week 1..N". Returns
 // { totalWeeks, phases:[{PHASE_LABEL, PHASE_WEEKS, TASKS:[{TASK_NAME, TASK_WEEKS, START_WEEK}]}] }
 // or null when the estimate carries no SCHED items.
-export function buildRelativeSchedule(categories) {
+export function buildRelativeSchedule(categories, bufferPct = SCHEDULE_BUFFER_PCT) {
   const items = parseSchedItems(categories || []).filter((it) => Number(it.duration_days) > 0);
   if (!items.length) return null;
+  const bufferMul = 1 + (Number.isFinite(bufferPct) ? Math.max(0, bufferPct) : 0);
   const phaseIndex = (p) => {
     const k = String(p || "").toLowerCase();
     const i = SCHEDULE_PHASES.findIndex((ph) => ph.keys.includes(k));
@@ -434,13 +443,14 @@ export function buildRelativeSchedule(categories) {
     const phaseStartDay = dayCursor;
     const TASKS = [];
     for (const t of tasks) {
-      const weeks = Math.max(1, Math.ceil(t.duration_days / 7));
+      const effDays = t.duration_days * bufferMul; // working duration + contingency buffer
+      const weeks = Math.max(1, Math.ceil(effDays / 7));
       TASKS.push({
         TASK_NAME: titleCaseSentence(t.task_name),
         TASK_WEEKS: weeks === 1 ? "1 week" : `${weeks} weeks`,
         START_WEEK: weekOf(dayCursor)
       });
-      dayCursor += t.duration_days; // finish-to-start, sequential (conservative — no commencement date)
+      dayCursor += effDays; // finish-to-start, sequential (conservative — no commencement date)
     }
     const startWk = weekOf(phaseStartDay);
     const endWk = Math.max(startWk, Math.ceil(dayCursor / 7));
