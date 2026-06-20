@@ -1,5 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -300,6 +300,32 @@ export default function FeeProposalWizard() {
     }));
   }, []);
 
+  // Phase 5b — blend the job's RFQ scope into the import-derived inclusions (server merges
+  // rfq_trade_scopes.scope_bullets per category). Keeps import-only inclusions if the job has no RFQ.
+  const inclusionsEditedRef = useRef(false);
+  const applyBlendedInclusions = useCallback(async (jid, categories) => {
+    if (!jid || !Array.isArray(categories) || !categories.length) return;
+    // Don't silently clobber manual inclusion edits when a job is re-linked — confirm first.
+    if (inclusionsEditedRef.current &&
+        !window.confirm("Re-build inclusions from this job's RFQ scope? This replaces your manual inclusion edits.")) {
+      return;
+    }
+    try {
+      const r = await authFetch("/api/fee-proposal/inclusions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: jid, categories })
+      });
+      const j = await r.json();
+      if (r.ok && j?.ok && Array.isArray(j.inclusion_sections) && j.inclusion_sections.length) {
+        setProposal((p) => ({ ...p, inclusion_sections: j.inclusion_sections }));
+        inclusionsEditedRef.current = false; // fresh blend supersedes prior edits
+      }
+    } catch {
+      /* keep import-only inclusions */
+    }
+  }, []);
+
   useEffect(() => {
     if (!isNew) return;
     const qJobId = searchParams.get("jobId");
@@ -315,19 +341,24 @@ export default function FeeProposalWizard() {
     const fmt = (n) =>
       new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(Number(n) || 0);
     if (proposal.SUMMARY_ROWS?.length) return proposal.SUMMARY_ROWS;
-    return (proposal.categories || []).map((c) => {
-      const ex = Number(c.subtotal_ex_gst ?? c.subtotal ?? 0);
-      const inc = Number(c.subtotal_inc_gst ?? Math.round(ex * 1.1 * 100) / 100);
-      const name = c.name || String(c.number ?? "");
-      return {
-        name,
-        subtotal_ex_gst: ex,
-        subtotal_inc_gst: inc,
-        CATEGORY_NAME: name,
-        CATEGORY_SUBTOTAL_EX_GST: fmt(ex),
-        CATEGORY_COST_GST: fmt(inc)
-      };
-    });
+    return (proposal.categories || [])
+      .map((c) => {
+        const ex = Number(c.subtotal_ex_gst ?? c.subtotal ?? 0);
+        const inc = Number(c.subtotal_inc_gst ?? Math.round(ex * 1.1 * 100) / 100);
+        return { c, ex, inc };
+      })
+      .filter(({ inc }) => inc > 0) // drop $0 categories (matches the server summary; avoids re-adding them on reopen)
+      .map(({ c, ex, inc }) => {
+        const name = c.name || String(c.number ?? "");
+        return {
+          name,
+          subtotal_ex_gst: ex,
+          subtotal_inc_gst: inc,
+          CATEGORY_NAME: name,
+          CATEGORY_SUBTOTAL_EX_GST: fmt(ex),
+          CATEGORY_COST_GST: fmt(inc)
+        };
+      });
   }, [proposal]);
 
   async function handleParseFile(file) {
@@ -366,6 +397,7 @@ export default function FeeProposalWizard() {
       const { data: seq, error: sErr } = await sb.rpc("alloc_proposal_sequence");
       if (sErr) throw new Error(sErr.message);
       setProposal(mergeParsedToProposal(j.parsed, seq));
+      if (resolvedJobId) void applyBlendedInclusions(resolvedJobId, j.parsed?.categories || []);
     } catch (e) {
       alert(e?.message || String(e));
     } finally {
@@ -427,12 +459,23 @@ export default function FeeProposalWizard() {
         setProposal((p) => ({ ...p, quote_number: `Quote ${n}` }));
       }
       if (isNew) {
-        const { data, error } = await sb.from("fee_proposals").insert({ ...row, status: "draft" }).select("id").single();
-        if (error) throw new Error(error.message);
+        let insertRow = { ...row, status: "draft" };
+        let { data, error } = await sb.from("fee_proposals").insert(insertRow).select("id").single();
+        if (error && error.code === "23505") {
+          // The mirrored Buildxact number is already in use (e.g. a revision of the same estimate, or
+          // the sequence has reached it) — fall back to the internal sequence so the save still
+          // succeeds, instead of surfacing a raw duplicate-key error to the user.
+          const { data: seq, error: sq } = await sb.rpc("alloc_proposal_sequence");
+          if (sq) throw new Error("Could not allocate a quote number — please try again.");
+          insertRow = { ...insertRow, quote_number: String(seq) };
+          ({ data, error } = await sb.from("fee_proposals").insert(insertRow).select("id").single());
+          if (!error) setProposal((p) => ({ ...p, quote_number: `Quote ${seq}` }));
+        }
+        if (error) throw new Error("Could not save the proposal — the quote number may already be in use.");
         navigate(`/tender-manager/fee-proposal/${data.id}`, { replace: true });
       } else {
         const { error } = await sb.from("fee_proposals").update(row).eq("id", id);
-        if (error) throw new Error(error.message);
+        if (error) throw new Error("Could not save your changes — please try again.");
         alert("Saved.");
       }
     } catch (e) {
@@ -442,9 +485,10 @@ export default function FeeProposalWizard() {
     }
   }
 
-  async function generateDocx() {
-    const tpl = localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
-    if (!tpl) {
+  async function generateDocx(style = "original") {
+    // APB style sends no local template — the server auto-fetches the stored APB template.
+    const tpl = style === "apb" ? "" : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
+    if (style !== "apb" && !tpl) {
       alert("Upload a Word template in Step 3 first (or on Template setup).");
       return;
     }
@@ -456,7 +500,8 @@ export default function FeeProposalWizard() {
         body: JSON.stringify({
           templateBase64: tpl,
           proposalData: { ...proposal, SUMMARY_ROWS: summaryRows },
-          filename: `Fee-${String(proposal.quote_number).replace(/\s+/g, "-")}.docx`
+          style,
+          filename: `Fee-${String(proposal.quote_number).replace(/\s+/g, "-")}${style === "apb" ? "-APB" : ""}.docx`
         })
       });
       const ct = res.headers.get("content-type") || "";
@@ -471,7 +516,7 @@ export default function FeeProposalWizard() {
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `Fee-${String(proposal.quote_number).replace(/\s+/g, "-")}.docx`;
+      a.download = `Fee-${String(proposal.quote_number).replace(/\s+/g, "-")}${style === "apb" ? "-APB" : ""}.docx`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
@@ -481,9 +526,9 @@ export default function FeeProposalWizard() {
     }
   }
 
-  async function openInGoogleDocs() {
-    const tpl = localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
-    if (!tpl) {
+  async function openInGoogleDocs(style = "original") {
+    const tpl = style === "apb" ? "" : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
+    if (style !== "apb" && !tpl) {
       alert("Upload a Word template first.");
       return;
     }
@@ -495,7 +540,8 @@ export default function FeeProposalWizard() {
         body: JSON.stringify({
           templateBase64: tpl,
           proposalData: { ...proposal, SUMMARY_ROWS: summaryRows },
-          quoteNumber: proposal.quote_number
+          quoteNumber: proposal.quote_number,
+          style
         })
       });
       const j = await res.json();
@@ -737,7 +783,7 @@ info@blueleafbuilding.com.au`;
                   onBlur={(e) => {
                     if (!jobId) {
                       const matched = fuzzyMatchJobId(e.target.value, jobs);
-                      if (matched) { setJobId(matched); void hydrateFromJob(matched); }
+                      if (matched) { setJobId(matched); void hydrateFromJob(matched); void applyBlendedInclusions(matched, proposal.categories); }
                     }
                   }}
                 />
@@ -809,6 +855,7 @@ info@blueleafbuilding.com.au`;
                     const v = e.target.value;
                     setJobId(v);
                     if (isNew && v) void hydrateFromJob(v);
+                    if (v) void applyBlendedInclusions(v, proposal.categories);
                   }}
                 >
                   <option value="">—</option>
@@ -845,12 +892,13 @@ info@blueleafbuilding.com.au`;
                   <input
                     className="w-full font-semibold text-ink"
                     value={sec.SECTION_HEADING}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      inclusionsEditedRef.current = true;
                       setProposal((p) => ({
                         ...p,
                         inclusion_sections: p.inclusion_sections.map((s, i) => (i === si ? { ...s, SECTION_HEADING: e.target.value } : s))
-                      }))
-                    }
+                      }));
+                    }}
                   />
                   {(sec.SECTION_ITEMS || []).map((it, ii) => (
                     <div key={ii} className="mt-2 flex gap-2">
@@ -858,7 +906,8 @@ info@blueleafbuilding.com.au`;
                       <input
                         className="flex-1 rounded border px-2 py-1 text-sm"
                         value={it.ITEM_TEXT}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          inclusionsEditedRef.current = true;
                           setProposal((p) => ({
                             ...p,
                             inclusion_sections: p.inclusion_sections.map((s, i) =>
@@ -869,22 +918,23 @@ info@blueleafbuilding.com.au`;
                                   }
                                 : s
                             )
-                          }))
-                        }
+                          }));
+                        }}
                       />
                     </div>
                   ))}
                   <button
                     type="button"
                     className="mt-2 text-xs font-semibold text-accent underline"
-                    onClick={() =>
+                    onClick={() => {
+                      inclusionsEditedRef.current = true;
                       setProposal((p) => ({
                         ...p,
                         inclusion_sections: p.inclusion_sections.map((s, i) =>
                           i === si ? { ...s, SECTION_ITEMS: [...(s.SECTION_ITEMS || []), { ITEM_TEXT: "" }] } : s
                         )
-                      }))
-                    }
+                      }));
+                    }}
                   >
                     + Bullet
                   </button>
@@ -893,12 +943,13 @@ info@blueleafbuilding.com.au`;
               <button
                 type="button"
                 className="text-sm font-semibold text-accent underline"
-                onClick={() =>
+                onClick={() => {
+                  inclusionsEditedRef.current = true;
                   setProposal((p) => ({
                     ...p,
                     inclusion_sections: [...(p.inclusion_sections || []), { SECTION_HEADING: "New section", SECTION_ITEMS: [{ ITEM_TEXT: "" }] }]
-                  }))
-                }
+                  }));
+                }}
               >
                 + Section
               </button>
@@ -1066,6 +1117,32 @@ info@blueleafbuilding.com.au`;
                 alert("Template updated and saved to server.");
               }}
             />
+            <p className="mt-3 text-xs font-semibold text-primary">APB version template (dual-output)</p>
+            <p className="mt-0.5 text-xs text-muted">
+              Upload the APB-Balanced .docx (with the extra sales-section merge fields). Stored
+              separately and used by the APB buttons below — the original stays untouched.
+            </p>
+            <input
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="mt-1 block text-xs text-muted"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                const b64 = await fileToBase64(f);
+                try {
+                  await authFetch("/api/settings/fee-proposal-template", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dataBase64: b64, style: "apb" })
+                  });
+                  alert("APB template saved to server.");
+                } catch {
+                  alert("APB template upload failed.");
+                }
+              }}
+            />
           </div>
 
           <div className="rounded-lg border border-hairline bg-page p-4">
@@ -1078,10 +1155,18 @@ info@blueleafbuilding.com.au`;
               <button
                 type="button"
                 disabled={busy || !templateLoaded}
-                onClick={openInGoogleDocs}
+                onClick={() => openInGoogleDocs("original")}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
               >
                 {busy ? "Uploading…" : driveFileId ? "Re-open in Google Docs" : "Open in Google Docs"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => openInGoogleDocs("apb")}
+                className="rounded-lg border border-accent/50 px-4 py-2 text-sm font-semibold text-accent disabled:opacity-40"
+              >
+                Open APB version
               </button>
               {driveEditUrl ? (
                 <a
@@ -1100,10 +1185,18 @@ info@blueleafbuilding.com.au`;
             <button
               type="button"
               disabled={busy || !templateLoaded}
-              onClick={generateDocx}
+              onClick={() => generateDocx("original")}
               className="rounded-lg border border-hairline px-4 py-2 text-sm font-semibold disabled:opacity-40"
             >
               Download DOCX
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => generateDocx("apb")}
+              className="rounded-lg border border-accent/50 px-4 py-2 text-sm font-semibold text-accent disabled:opacity-40"
+            >
+              Download APB version
             </button>
             <button type="button" className="rounded-lg border border-hairline px-4 py-2 text-sm" onClick={() => setStep(2)}>
               Back to editor

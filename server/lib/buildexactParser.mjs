@@ -393,12 +393,116 @@ function isLineItemRow(row) {
   return true;
 }
 
+// Detect the Buildxact "Estimate Items" export — a flat sheet (usually "Data") with NAMED columns
+// incl. CategoryDescription / Allowance (the explicit PC/PS flag) / TotalIncMarkupAndTax (per-line
+// inc markup+tax). This export is preferred: PC/PS detection and category inc-GST subtotals are
+// exact (summed per line, no ratio hack). Returns {sheetName, headerRow, header} or null.
+function findEstimateItemsSheet(wb) {
+  for (const sn of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false });
+    for (let i = 0; i < Math.min(6, rows.length); i++) {
+      const h = (rows[i] || []).map((c) => String(c).trim());
+      if (h.includes("CategoryDescription") && h.includes("TotalIncMarkupAndTax")) {
+        return { sheetName: sn, headerRow: i, header: h };
+      }
+    }
+  }
+  return null;
+}
+
+// Parse the Estimate Items "Data" sheet into the SAME shape parseXLSX returns for the report export,
+// PLUS per-item `allowance` ("PC"|"PS"|"") and `total_inc_gst`. Category subtotals are summed from
+// per-line values (exact), never derived via a ratio. The Data sheet carries no address/client, so
+// those resolve from the linked job downstream; the quote number comes from the filename.
+function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[found.sheetName], { header: 1, defval: "", raw: false });
+  const H = found.header;
+  const col = (n) => H.indexOf(n);
+  const cCat = col("CategoryDescription");
+  const cDisp = col("DisplayedOrder");
+  const cCode = col("Code");
+  const cDesc = col("Description");
+  const cType = col("Type");
+  const cAllow = col("Allowance");
+  const cUnits = col("Units");
+  const cUom = col("UOM");
+  const cUnitCost = col("UnitCost");
+  const cTotal = col("Total");
+  const cTotalInc = col("TotalIncMarkupAndTax");
+
+  const catMap = new Map();
+  let order = 0;
+  for (let i = found.headerRow + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!Array.isArray(row) || row.length === 0) continue;
+    const catName = cellStr(row[cCat]).trim();
+    if (!catName) continue;
+    if (!catMap.has(catName)) {
+      catMap.set(catName, { number: ++order, name: catName, subtotal: 0, subtotal_ex_gst: 0, subtotal_inc_gst: 0, active_items: [] });
+    }
+    const cat = catMap.get(catName);
+    const desc = cellStr(row[cDesc]).trim();
+    if (!desc) continue; // category-header / blank row — subtotals come from the item lines below
+    const total = parseMoney(row[cTotal]);
+    const totalInc = parseMoney(row[cTotalInc]);
+    const isMeta = /\bSCHED\b/i.test(desc) || /COST\s+METRIC/i.test(desc);
+    // Skip only TRUE zero lines — keep a line if EITHER the ex-markup cost OR the client-facing
+    // inc-markup+tax figure carries value (supplier-direct / client-supplied lines have cost 0 but a
+    // real sell price; dropping them would understate the total and lose PC/PS sums).
+    if (!isMeta && (total == null || total <= 0) && (totalInc == null || totalInc <= 0)) continue;
+    const allowRaw = cellStr(row[cAllow]).trim().toUpperCase();
+    cat.active_items.push({
+      code: cellStr(row[cDisp]) || cellStr(row[cCode]),
+      description: desc,
+      type: cellStr(row[cType]),
+      allowance: allowRaw === "PC" || allowRaw === "PS" ? allowRaw : "",
+      units: parseFloat(String(row[cUnits] || "").replace(/,/g, "")) || null,
+      uom: cellStr(row[cUom]),
+      unit_cost: parseMoney(row[cUnitCost]) ?? null,
+      total: total ?? 0,
+      total_inc_gst: totalInc ?? null
+    });
+    if (!isMeta) {
+      if (total != null) cat.subtotal_ex_gst += total;
+      if (totalInc != null) cat.subtotal_inc_gst += totalInc;
+    }
+  }
+
+  const categories = [...catMap.values()].map((c) => ({
+    ...c,
+    subtotal: Math.round(c.subtotal_ex_gst * 100) / 100,
+    subtotal_ex_gst: Math.round(c.subtotal_ex_gst * 100) / 100,
+    subtotal_inc_gst: Math.round(c.subtotal_inc_gst * 100) / 100
+  }));
+  const net_total = Math.round(categories.reduce((s, c) => s + (c.subtotal_ex_gst || 0), 0) * 100) / 100;
+  const estimate_total = Math.round(categories.reduce((s, c) => s + (c.subtotal_inc_gst || 0), 0) * 100) / 100;
+  const qnFromFile = filenameHint ? (filenameHint.match(/(Q\d+)/i)?.[1]?.toUpperCase() || "") : "";
+  return {
+    quote_number: qnFromFile,
+    address: "",
+    client_name: "",
+    arch_ref: "",
+    eng_ref: "",
+    building_type: "",
+    date_prepared: "",
+    net_total,
+    markup_amount: 0,
+    markup_percent: 0,
+    tax: Math.max(0, Math.round((estimate_total - net_total) * 100) / 100),
+    estimate_total,
+    source_format: "estimateitems",
+    categories
+  };
+}
+
 /**
  * @param {Buffer} buffer
  * @param {string} [filenameHint] - original filename, e.g. "Q1191-CategoriesAndItems-20260512.xlsx"
  */
 export function parseXLSX(buffer, filenameHint = "") {
   const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const ei = findEstimateItemsSheet(wb);
+  if (ei) return parseEstimateItemsWorkbook(wb, ei, filenameHint);
   const name = wb.SheetNames[0];
   const sheet = wb.Sheets[name];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
@@ -485,10 +589,12 @@ export function parseXLSX(buffer, filenameHint = "") {
         code,
         description,
         type,
+        allowance: "",       // PC/PS flag is absent from the report export — only the estimateitems export carries it
         units,
         uom,
         unit_cost,
-        total
+        total,
+        total_inc_gst: null  // report export has no per-line inc-GST; category inc-GST is ratio-derived below
       });
     }
   }
@@ -518,6 +624,7 @@ export function parseXLSX(buffer, filenameHint = "") {
     markup_percent: markup_percent ?? 0,
     tax: tax ?? 0,
     estimate_total: estimate_total ?? 0,
+    source_format: "report",
     categories
   };
 }

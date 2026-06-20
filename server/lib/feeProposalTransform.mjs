@@ -1,59 +1,182 @@
-const PC_RE = /\b(pc\s*sum|provisional\s*sum|allowance)\b/i;
+import { getBuildexactCategoryMapping, parseCostMetrics } from "./buildexactParser.mjs";
+
+// Common Buildxact-estimator misspellings → corrected (word-boundary, case-insensitive).
+const SCOPE_SPELLING = [
+  [/\bmasonary\b/gi, "masonry"],
+  [/\bsanity\s+ware\b/gi, "sanitaryware"],
+  [/\bwidows\b/gi, "windows"],
+  [/\bpendent\b/gi, "pendant"],
+  [/\bscorpian\b/gi, "scorpion"],
+  [/\bdissemble\b/gi, "disassemble"]
+];
+// Estimator pricing/unit shorthand to strip from client-facing bullets.
+const SCOPE_STRIP = [
+  /\s*\bpc\s+per\s+[a-z/0-9 ]+/gi,   // "pc per point/fixture", "pc per m2"
+  /\s*\bpc\s*pm2\b/gi,
+  /\s*\bper\s+lm\b/gi,
+  /\s*\bday\s*rate\b/gi,
+  /\s*\(\s*lm[^)]*\)/gi,             // "(lm per level)", "( lm)"
+  /\s*\(\s*\d+%\s*\)/g,              // "(2%)"
+  /\s*\bat\s+\d+\s*centres\b/gi      // "at 300 centres"
+];
+// Proper nouns / standards to re-capitalise AFTER sentence-casing.
+const SCOPE_PROPER = [
+  [/\bnathers\b/gi, "NatHERS"],
+  [/\bcolorbond\b/gi, "COLORBOND"],
+  [/\bc\/bond\b/gi, "COLORBOND"],
+  [/\blosp\b/gi, "LOSP"],
+  [/\blvl\b/gi, "LVL"],
+  [/\bpvc\b/gi, "PVC"],
+  [/\bwhs\b/gi, "WHS"],
+  [/\bled\b/gi, "LED"],
+  [/\bmpa\b/gi, "MPa"],
+  [/\br(\d(?:\.\d)?)\b/gi, (_m, n) => "R" + n]   // r2.5 → R2.5
+];
 
 function titleCaseSentence(s) {
   const t = String(s || "").trim();
   if (!t) return "";
-  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);   // first char up, preserve the rest
 }
 
+// Turn a raw Buildxact line into a client-ready scope bullet: fix typos, strip PC/PS markers + inline
+// $ amounts + estimator pricing shorthand, collapse a trailing "labour"/"supply" tag (so the pair
+// de-dupes to one bullet), sentence-case to tame ALL-CAPS, then re-capitalise known proper nouns.
+// The wizard stays editable for final polish.
+function cleanScopeText(desc) {
+  let d = String(desc || "").trim();
+  for (const [re, to] of SCOPE_SPELLING) d = d.replace(re, to);
+  d = d.replace(/\s*\$\s?[\d,]+(?:\.\d+)?\b/g, "");          // inline "$2000"
+  d = d.replace(/\s*\(?\bps\b\)?\s*\(?\s*pm2\s*\)?/i, " ");  // "PS (pm2)"
+  for (const re of SCOPE_STRIP) d = d.replace(re, "");
+  // Strip a trailing run of estimator tags (labour / supply / PC / PS / (PC)) — looped so combined
+  // tails like "… supply (PC)" or "… labour PC" fully collapse; the labour/supply pair then de-dupes.
+  let prev;
+  do { prev = d; d = d.replace(/\s*[-–(]?\s*\b(labour|supply|pc|ps)\b\)?\s*$/i, "").trim(); } while (d !== prev);
+  d = d.replace(/\s{2,}/g, " ").trim();
+  d = d ? d.charAt(0).toUpperCase() + d.slice(1).toLowerCase() : d; // sentence case
+  for (const [re, to] of SCOPE_PROPER) d = d.replace(re, to);
+  return d.trim();
+}
+
+// Client-facing relabels for internal Buildxact trade-role category names.
+const CLIENT_CATEGORY_LABEL = {
+  "Roof Plumber": "Roofing",
+  Tiler: "Tiling",
+  "Site Cleaner": "Site Cleaning",
+  "Outdoor works supply": "Outdoor Works"
+};
+// Canonical display name for a category, with client-friendly relabels + typo correction.
+function displayCategoryName(name) {
+  let raw = String(name || "").trim();
+  if (!raw) return "";
+  for (const [re, to] of SCOPE_SPELLING) raw = raw.replace(re, to); // fix typos in headings too (Masonary → masonry)
+  const canon = getBuildexactCategoryMapping(raw)?.name || raw;
+  return CLIENT_CATEGORY_LABEL[canon] || CLIENT_CATEGORY_LABEL[raw] || canon;
+}
+
+// Fixed block pinned to the top of every proposal's Inclusions (per Sam — builders warranty is constant).
+export const BUILDERS_WARRANTY_SECTION = {
+  SECTION_HEADING: "Builders Warranty",
+  SECTION_ITEMS: [
+    { ITEM_TEXT: "5 Year builders warranty" },
+    { ITEM_TEXT: "10 Year structural warranty" },
+    { ITEM_TEXT: "6 month maintenance/defect period" }
+  ]
+};
+
 /**
- * Build inclusion sections for docxtemplater from parsed categories.
+ * Build inclusion sections for docxtemplater from the IMPORT categories — Builders Warranty pinned
+ * first, then one section per category with cleaned bullets (markers/amounts stripped, meta rows
+ * dropped). Phase 5b will blend RFQ scope bullets into each category.
  * @param {{ categories?: { name?: string, number?: number, active_items?: { description?: string }[] }[] }} parsed
  */
 export function buildInclusionSectionsFromParse(parsed) {
-  const sections = [];
+  const sections = [{
+    SECTION_HEADING: BUILDERS_WARRANTY_SECTION.SECTION_HEADING,
+    SECTION_ITEMS: BUILDERS_WARRANTY_SECTION.SECTION_ITEMS.map((i) => ({ ...i }))
+  }];
   for (const cat of parsed.categories || []) {
+    const heading = displayCategoryName(cat.name) || `Category ${cat.number}`;
+    if (heading === BUILDERS_WARRANTY_SECTION.SECTION_HEADING) continue; // don't duplicate the pinned warranty
     const items = [];
+    const seen = new Set();
     for (const it of cat.active_items || []) {
-      const d = titleCaseSentence(it.description);
-      if (!d) continue;
+      const raw = String(it.description || "");
+      if (/COST\s+METRIC/i.test(raw) || /\bSCHED\b/i.test(raw)) continue; // skip meta rows (cost metrics, schedule)
+      const d = cleanScopeText(raw);                                      // client-ready bullet
+      const k = d.toLowerCase();
+      if (!d || seen.has(k)) continue;                                    // de-dupe (collapses labour/supply pairs)
+      seen.add(k);
       items.push({ ITEM_TEXT: d });
     }
-    if (items.length) {
-      sections.push({
-        SECTION_HEADING: cat.name || `Category ${cat.number}`,
-        SECTION_ITEMS: items
-      });
-    }
+    if (items.length) sections.push({ SECTION_HEADING: heading, SECTION_ITEMS: items });
   }
   return sections;
 }
 
+const normaliseBullet = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// Phase 5b — blend the polished RFQ scope into the import-derived inclusion sections.
+// `scopeByCategory` is a Map(canonicalCategoryName → bullet[]). For each section we put the RFQ
+// scope bullets first (they're the considered, client-ready scope), then append any import line
+// items not already covered. De-dupes on normalised text so scope + estimate don't repeat.
+export function mergeRfqScopeIntoInclusions(sections, scopeByCategory) {
+  if (!scopeByCategory || !scopeByCategory.size) return sections;
+  return (sections || []).map((sec) => {
+    const canon = displayCategoryName(sec.SECTION_HEADING);
+    const bullets = scopeByCategory.get(canon) || scopeByCategory.get(sec.SECTION_HEADING);
+    if (!bullets || !bullets.length) return sec;
+    const seen = new Set();
+    const merged = [];
+    for (const b of bullets) {
+      const t = cleanScopeText(b);
+      const k = normaliseBullet(t);
+      if (!t || seen.has(k)) continue;
+      seen.add(k);
+      merged.push({ ITEM_TEXT: t });
+    }
+    for (const it of sec.SECTION_ITEMS || []) {
+      const k = normaliseBullet(it.ITEM_TEXT);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      merged.push(it);
+    }
+    return { SECTION_HEADING: sec.SECTION_HEADING, SECTION_ITEMS: merged };
+  });
+}
+
+// PC/PS come ONLY from Buildxact's explicit Allowance flag (per Sam's decision — Buildxact is the
+// single source of truth). The report export has no Allowance column, so PC/PS auto-fill requires the
+// estimateitems export; a report-format upload yields an empty PC/PS section to be filled manually.
 export function extractPcSumsFromParse(parsed) {
   const out = [];
   for (const cat of parsed.categories || []) {
     for (const it of cat.active_items || []) {
-      const desc = String(it.description || "");
-      if (PC_RE.test(desc) || /\ballowance\b/i.test(desc)) {
-        out.push({
-          PC_DESCRIPTION: desc.trim(),
-          PC_AMOUNT: formatCurrencyAud(it.total || 0)
-        });
-      }
+      const allow = String(it.allowance || "").toUpperCase();
+      if (allow !== "PC" && allow !== "PS") continue;
+      const amount = Number(it.total_inc_gst ?? it.total ?? 0);
+      out.push({
+        PC_DESCRIPTION: cleanScopeText(it.description),
+        PC_AMOUNT: `${allow} sum of ${formatCurrencyAud(amount)}`
+      });
     }
   }
   return out;
 }
 
 export function buildSummaryRowsFromParse(parsed) {
-  return (parsed.categories || []).map((c) => {
+  const rows = [];
+  for (const c of parsed.categories || []) {
     const ex = Number(c.subtotal_ex_gst ?? c.subtotal ?? 0);
     const inc = Number(c.subtotal_inc_gst ?? Math.round(ex * 1.1 * 100) / 100);
-    return {
-      CATEGORY_NAME: c.name || String(c.number),
+    if (!(inc > 0)) continue; // drop $0 categories (Garage Door, Appliances, Glazing… padded Q1209)
+    rows.push({
+      CATEGORY_NAME: displayCategoryName(c.name) || String(c.number),
       CATEGORY_COST_GST: formatCurrencyAud(inc)
-    };
-  });
+    });
+  }
+  return rows;
 }
 
 export function formatCurrencyAud(n) {
@@ -101,9 +224,13 @@ export const DEFAULT_OPENING = `Thank you for the opportunity to provide this fe
  * Map parsed Buildexact → proposal JSON for UI + docxtemplater.
  */
 export function parsedToProposalDraft(parsed, opts = {}) {
+  // Mirror the Buildxact quote number (Q1196 → "Quote 1196") per Sam's decision; fall back to the
+  // internal sequence only when the estimate carries no number of its own.
+  const bxNum = String(parsed.quote_number || "").replace(/^Q/i, "").trim();
   const seq = opts.quoteSeq != null ? String(opts.quoteSeq) : "";
-  const quote_number = seq ? `Quote ${seq}` : parsed.quote_number || "";
+  const quote_number = bxNum ? `Quote ${bxNum}` : seq ? `Quote ${seq}` : "";
   const total_inc_gst = parsed.estimate_total || 0;
+  const metrics = parseCostMetrics(parsed.categories || []);
   return {
     quote_number,
     address: parsed.address || "",
@@ -114,6 +241,7 @@ export function parsedToProposalDraft(parsed, opts = {}) {
     arch_ref: "",
     eng_ref: "",
     spec_ref: "TENDER",
+    floor_area_m2: metrics.floor_area_m2 != null ? metrics.floor_area_m2 : "",
     date: parsed.date_prepared || new Date().toLocaleDateString("en-AU"),
     net_total: parsed.net_total,
     markup_percent: parsed.markup_percent,
@@ -145,12 +273,9 @@ export function proposalToDocxData(p) {
     OPTION_PRICE: o.OPTION_PRICE || o.price || ""
   }));
   const summary =
-    (p.SUMMARY_ROWS && p.SUMMARY_ROWS.length
+    p.SUMMARY_ROWS && p.SUMMARY_ROWS.length
       ? p.SUMMARY_ROWS
-      : (p.categories || []).map((c) => ({
-          CATEGORY_NAME: c.name || String(c.number),
-          CATEGORY_COST_GST: formatCurrencyAud((c.subtotal || 0) * 1.1)
-        }))) || [];
+      : buildSummaryRowsFromParse({ categories: p.categories || [] }); // $0-dropped, exact inc-GST (no *1.1)
   const inc =
     p.inclusion_sections && p.inclusion_sections.length
       ? p.inclusion_sections
@@ -192,4 +317,91 @@ export function proposalToDocxData(p) {
     })),
     EXCLUSIONS: exclusions
   };
+}
+
+// ─── APB-Balanced version (dual-output) ───────────────────────────────────────
+// Static, write-once sales content for the APB-styled proposal, drawn from the APB "Creating
+// Professional Contract Proposals" methodology and BLB's own assets (the client portal, APB
+// membership, licence BLD 332830). Every block is overridable per-proposal via p.apb.* — these are
+// the defaults the APB template renders until Sam customises them.
+export const APB_CONTENT = {
+  NICHE_STATEMENT: "Adelaide's boutique builder for considered, high-craft homes",
+  WHY_BUILD_WITH_US:
+    "At Blue Leaf Building we partner with a small number of Adelaide families each year, so every home receives the attention to detail it deserves. We are boutique by design — fewer projects, greater focus on yours.\n\nAs members of the Association of Professional Builders, we follow proven systems for pricing, communication and delivery — which means a fixed price you can rely on and no surprises along the way. Every cost, selection and update lives in your online project portal, accessible 24/7.\n\nWe don't simply want to build you a house — we want to create your home while removing the stress and uncertainty from one of the most important investments of your life. We measure our success by how you feel walking through your finished home.",
+  ONLINE_PM_BODY:
+    "Every Blue Leaf client receives a login to the Blue Leaf client portal. From any device, anywhere, you can watch progress photos as your home takes shape, follow your live construction schedule and see exactly what's happening next, make and confirm your selections with prices locked in, read every communication and approval in one place, and track your budget and any variations. With 24/7 access you'll always feel up to speed — and you can share the journey with family and friends.",
+  CONSTRUCTION_SCHEDULE_INTRO:
+    "Your project is scheduled for completion within approximately [ADD WEEKS] weeks from the commencement of construction. We guarantee adherence to this timeframe by closely monitoring your personalised construction schedule, which you follow live in your portal from slab through to practical completion.",
+  VARIATIONS_CLAUSE:
+    "Variations are charged at cost price, plus a 25% builder's margin. Every variation is approved by you in writing before any additional work is carried out — so there are no surprises at the end.",
+  SUMMARY_BODY:
+    "Thank you for the opportunity to provide this proposal. We've valued the time spent together on your project and believe the rapport we've built will make for a rewarding experience and a result you'll love.\n\nShould you choose Blue Leaf Building, we'll take every step to exceed your expectations and guide you smoothly through the entire process. We look forward to bringing your new home to life.",
+  GUARANTEES: [
+    { GUARANTEE_HEADING: "Structural Guarantee", GUARANTEE_TEXT: "Your new home carries a 10-year structural warranty, a 5-year builders warranty and a 6-month maintenance and defect period." },
+    { GUARANTEE_HEADING: "Fixed Price", GUARANTEE_TEXT: "Outside your nominated PC and provisional-sum allowances, the contract price is fixed — the price you sign is the price you pay. Variations occur only with your written approval, charged at cost plus a 25% builder's margin." },
+    { GUARANTEE_HEADING: "A Handover Date You Can Plan Around", GUARANTEE_TEXT: "We agree a firm handover date and hold ourselves to it — communicating early and clearly if anything genuinely beyond our control affects the program." },
+    { GUARANTEE_HEADING: "Defect-Free Handover", GUARANTEE_TEXT: "We hand over a high-quality finish, free of defects, and check in over the following weeks to make sure it stays that way." },
+    { GUARANTEE_HEADING: "Direct Communication", GUARANTEE_TEXT: "You speak directly with your builder — Joshua or Sam — not a call centre. Regular on-site meetings keep you across every step." },
+    { GUARANTEE_HEADING: "Satisfaction", GUARANTEE_TEXT: "This is your home, and we want you to love it — the process and the finished result." }
+  ],
+  TESTIMONIALS: [
+    { TESTIMONIAL_TEXT: "[Add a named client testimonial here]", TESTIMONIAL_AUTHOR: "[First name, Suburb — project type]" }
+  ],
+  LICENCES: [
+    { LICENCE_TEXT: "Licensed Builder — BLD 332830" },
+    { LICENCE_TEXT: "ABN [ADD ABN]" },
+    { LICENCE_TEXT: "Member, Association of Professional Builders (APB)" }
+  ],
+  RESPONSIBILITIES_OURS: [
+    "All construction works in accordance with the plans, specifications and the Building Code of Australia",
+    "All local government fees and permits",
+    "All insurances and Workplace Health & Safety requirements",
+    "All hire fees and site establishment",
+    "Prompt notification of any changes required to the design or material specifications"
+  ],
+  RESPONSIBILITIES_YOURS: [
+    "Water and electricity connection and supply during construction",
+    "Reasonable site access during the construction period",
+    "Timely selection of all items in your selection schedule when prompted",
+    "Prompt response to any questions or approvals required",
+    "Timely payment of progress claims and approved variations"
+  ]
+};
+
+// Render data for the APB-Balanced template: everything the original has, PLUS the new sales sections.
+// Used by /api/fee-proposal/generate-docx when style==='apb'. Content falls back to APB_CONTENT.
+export function proposalToApbDocxData(p) {
+  const a = p && p.apb && typeof p.apb === "object" ? p.apb : {};
+  return {
+    ...proposalToDocxData(p),
+    NICHE_STATEMENT: a.niche_statement || APB_CONTENT.NICHE_STATEMENT,
+    WHY_BUILD_WITH_US: a.why_build_with_us || APB_CONTENT.WHY_BUILD_WITH_US,
+    ONLINE_PM_BODY: a.online_pm || APB_CONTENT.ONLINE_PM_BODY,
+    CONSTRUCTION_SCHEDULE_INTRO: a.construction_schedule || APB_CONTENT.CONSTRUCTION_SCHEDULE_INTRO,
+    VARIATIONS_CLAUSE: a.variations || APB_CONTENT.VARIATIONS_CLAUSE,
+    APB_SUMMARY_BODY: a.summary || APB_CONTENT.SUMMARY_BODY,
+    GUARANTEES: Array.isArray(a.guarantees) ? a.guarantees : APB_CONTENT.GUARANTEES,
+    TESTIMONIALS: Array.isArray(a.testimonials) ? a.testimonials : APB_CONTENT.TESTIMONIALS,
+    LICENCES: Array.isArray(a.licences) ? a.licences : APB_CONTENT.LICENCES,
+    RESPONSIBILITIES_OURS: (Array.isArray(a.responsibilities_ours) ? a.responsibilities_ours : APB_CONTENT.RESPONSIBILITIES_OURS).map((t) => ({ RESP_TEXT: t })),
+    RESPONSIBILITIES_YOURS: (Array.isArray(a.responsibilities_yours) ? a.responsibilities_yours : APB_CONTENT.RESPONSIBILITIES_YOURS).map((t) => ({ RESP_TEXT: t }))
+  };
+}
+
+// Scan an APB render object for unfilled [ADD …] / [INSERT …] tokens so generation can be BLOCKED
+// before a templated bracket ever reaches a client (APB QC: never present a placeholder).
+export function findApbPlaceholders(apbData) {
+  const found = new Set();
+  const walk = (v) => {
+    if (typeof v === "string") {
+      const m = v.match(/\[(?:add|insert)[^\]]*\]/gi);
+      if (m) m.forEach((x) => found.add(x));
+    } else if (Array.isArray(v)) {
+      v.forEach(walk);
+    } else if (v && typeof v === "object") {
+      Object.values(v).forEach(walk);
+    }
+  };
+  walk(apbData);
+  return [...found];
 }

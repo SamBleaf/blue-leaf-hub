@@ -63,33 +63,37 @@ function salutationFromClientName(name) {
   return n.replace(/\s+&\s+/g, " and ").replace(/\s+/g, " ");
 }
 
-/** Summary tab + docxtemplater rows from parsed categories. */
+/** Summary tab + docxtemplater rows from parsed categories — local fallback; drops $0 categories. */
 function buildSummaryFromParsed(parsed) {
-  return (parsed.categories || []).map((c) => {
+  const rows = [];
+  for (const c of parsed.categories || []) {
     const ex = Number(c.subtotal_ex_gst ?? c.subtotal ?? 0);
     const inc = Number(c.subtotal_inc_gst ?? Math.round(ex * 1.1 * 100) / 100);
+    if (!(inc > 0)) continue;
     const name = c.name || String(c.number ?? "");
-    return {
+    rows.push({
       name,
       subtotal_ex_gst: ex,
       subtotal_inc_gst: inc,
       CATEGORY_NAME: name,
       CATEGORY_SUBTOTAL_EX_GST: fmtAud(ex),
       CATEGORY_COST_GST: fmtAud(inc)
-    };
-  });
+    });
+  }
+  return rows;
 }
 
+// Local fallback — PC/PS from the explicit Allowance flag only (Buildxact is the source of truth).
 function buildPcFromParsed(parsed) {
-  const re = /\b(pc\s*sum|provisional\s*sum|allowance)\b/i;
   const out = [];
   for (const cat of parsed.categories || []) {
     for (const it of cat.active_items || []) {
-      const desc = String(it.description || "");
-      if (!re.test(desc) && !/\ballowance\b/i.test(desc)) continue;
+      const allow = String(it.allowance || "").toUpperCase();
+      if (allow !== "PC" && allow !== "PS") continue;
+      const amount = Number(it.total_inc_gst ?? it.total ?? 0);
       out.push({
-        PC_DESCRIPTION: desc.trim(),
-        PC_AMOUNT: new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(it.total || 0)
+        PC_DESCRIPTION: String(it.description || "").trim(),
+        PC_AMOUNT: `${allow} sum of ${fmtAud(amount)}`
       });
     }
   }
@@ -99,7 +103,10 @@ function buildPcFromParsed(parsed) {
 /** Merge Buildexact parse payload into editable proposal shape. */
 export function mergeParsedToProposal(parsed, quoteSeq) {
   const base = emptyProposal();
-  const qn = quoteSeq != null ? `Quote ${quoteSeq}` : parsed.quote_number || "";
+  // Mirror the Buildxact quote number (Q1196 → "Quote 1196"); fall back to the internal sequence.
+  const bxNum = String(parsed.quote_number || "").replace(/^Q/i, "").trim();
+  const qn = bxNum ? `Quote ${bxNum}` : quoteSeq != null ? `Quote ${quoteSeq}` : "";
+  const floor = parsed.cost_metrics?.floor_area_m2;
   return {
     ...base,
     quote_number: qn,
@@ -109,6 +116,7 @@ export function mergeParsedToProposal(parsed, quoteSeq) {
     building_type: parsed.building_type || "",
     arch_ref: parsed.arch_ref != null ? String(parsed.arch_ref) : "",
     eng_ref: parsed.eng_ref != null ? String(parsed.eng_ref) : "",
+    floor_area_m2: floor != null ? String(floor) : base.floor_area_m2,
     date: parsed.date_prepared || base.date,
     net_total: parsed.net_total || 0,
     markup_percent: parsed.markup_percent || 0,
@@ -116,9 +124,11 @@ export function mergeParsedToProposal(parsed, quoteSeq) {
     tax_amount: parsed.tax || 0,
     total_inc_gst: parsed.estimate_total || 0,
     categories: parsed.categories || [],
-    SUMMARY_ROWS: buildSummaryFromParsed(parsed),
-    inclusion_sections: cloneDefaultInclusionSections(),
-    pc_sums: buildPcFromParsed(parsed),
+    // Prefer the server-enriched transform (PC/PS from Allowance, $0-dropped summary, import-driven
+    // inclusions with Builders Warranty pinned); fall back to local builders only if absent.
+    SUMMARY_ROWS: parsed.summary_rows?.length ? parsed.summary_rows : buildSummaryFromParsed(parsed),
+    inclusion_sections: parsed.inclusion_sections?.length ? parsed.inclusion_sections : cloneDefaultInclusionSections(),
+    pc_sums: parsed.pc_sums?.length ? parsed.pc_sums : buildPcFromParsed(parsed),
     exclusions: cloneDefaultExclusions()
   };
 }

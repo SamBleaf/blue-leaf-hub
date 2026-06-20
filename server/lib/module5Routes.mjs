@@ -8,8 +8,8 @@ import { exec } from "child_process";
 import { mkdtemp, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseCostMetrics, parsePDF, parseSchedItems, parseXLSX } from "./buildexactParser.mjs";
-import { proposalToDocxData } from "./feeProposalTransform.mjs";
+import { parseCostMetrics, parsePDF, parseSchedItems, parseXLSX, getBuildexactCategoryMapping } from "./buildexactParser.mjs";
+import { proposalToDocxData, proposalToApbDocxData, findApbPlaceholders, extractPcSumsFromParse, buildSummaryRowsFromParse, buildInclusionSectionsFromParse, mergeRfqScopeIntoInclusions } from "./feeProposalTransform.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { resolveJobIdByAddress, upsertJobKnowledge } from "./jobResolver.mjs";
 import { mailTransportName, sendPlainMail } from "./notifyMail.mjs";
@@ -136,7 +136,24 @@ export function registerModule5Routes(app) {
           .eq("source_hash", incomingHashXlsx)
           .maybeSingle();
         if (existingParse && !req.query.force) {
-          return res.json({ ok: true, result: existingParse, cached: true });
+          const cachedParsed = {
+            quote_number: existingParse.quote_number || "",
+            address: existingParse.address || "",
+            client_name: existingParse.client_name || "",
+            building_type: existingParse.building_type || "",
+            date_prepared: existingParse.date_prepared || "",
+            net_total: existingParse.net_total || 0,
+            markup_amount: existingParse.markup_amount || 0,
+            markup_percent: existingParse.markup_percent || 0,
+            tax: existingParse.tax || 0,
+            estimate_total: existingParse.estimate_total || 0,
+            categories: existingParse.categories || []
+          };
+          cachedParsed.cost_metrics = parseCostMetrics(cachedParsed.categories);
+          cachedParsed.pc_sums = extractPcSumsFromParse(cachedParsed);
+          cachedParsed.summary_rows = buildSummaryRowsFromParse(cachedParsed);
+          cachedParsed.inclusion_sections = buildInclusionSectionsFromParse(cachedParsed);
+          return res.json({ ok: true, parsed: cachedParsed, result: existingParse, job_id: existingParse.job_id || null, estimate_id: existingParse.id || null, cached: true });
         }
       }
 
@@ -144,6 +161,12 @@ export function registerModule5Routes(app) {
       const parsed = parseXLSX(buf, filenameHint);
       const scheduleHints = parseSchedItems(parsed.categories);
       const costMetrics = parseCostMetrics(parsed.categories);
+      // Enrich with the transformed proposal fields the wizard consumes directly (PC/PS from the
+      // Allowance flag, $0-dropped summary, import-driven inclusions with Builders Warranty pinned).
+      parsed.cost_metrics = costMetrics;
+      parsed.pc_sums = extractPcSumsFromParse(parsed);
+      parsed.summary_rows = buildSummaryRowsFromParse(parsed);
+      parsed.inclusion_sections = buildInclusionSectionsFromParse(parsed);
       // Resolve job and persist estimate
       const resolved = await resolveJobIdByAddress(parsed.address);
       const job_id = resolved?.job_id || null;
@@ -195,6 +218,43 @@ export function registerModule5Routes(app) {
     } catch (e) {
       console.error("[fee-proposal/parse-xlsx]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Phase 5b — build a job's inclusions: import categories (Builders Warranty pinned) blended with the
+  // polished RFQ scope (rfq_trade_scopes.scope_bullets), matched per canonical category. Called by the
+  // wizard once a job is linked (the estimateitems export carries no address, so scope can't resolve at
+  // parse time). Degrades to import-only inclusions when the job has no RFQ package.
+  app.post("/api/fee-proposal/inclusions", requireAuth, async (req, res) => {
+    try {
+      const jobId = String(req.body?.jobId || "").trim();
+      const categories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+      let sections = buildInclusionSectionsFromParse({ categories });
+      const sb = getServiceSupabase();
+      let scopeCats = 0;
+      if (sb && jobId) {
+        const { data: pkgs } = await sb
+          .from("rfq_packages")
+          .select("id, rfq_trade_scopes ( trade_label, scope_bullets, trade_category_id, trade_categories ( name ) )")
+          .eq("job_id", jobId);
+        const scopeByCategory = new Map();
+        for (const pkg of pkgs || []) {
+          for (const ts of pkg.rfq_trade_scopes || []) {
+            const catName = ts.trade_categories?.name || ts.trade_label || "";
+            if (!catName) continue;
+            const canon = getBuildexactCategoryMapping(catName)?.name || catName;
+            const bullets = Array.isArray(ts.scope_bullets) ? ts.scope_bullets.map((b) => String(b)) : [];
+            if (!bullets.length) continue;
+            scopeByCategory.set(canon, (scopeByCategory.get(canon) || []).concat(bullets));
+          }
+        }
+        scopeCats = scopeByCategory.size;
+        sections = mergeRfqScopeIntoInclusions(sections, scopeByCategory);
+      }
+      return res.json({ ok: true, inclusion_sections: sections, scope_categories: scopeCats });
+    } catch (e) {
+      console.error("[fee-proposal/inclusions]", e);
+      return res.status(500).json({ ok: false, error: e?.message || "Failed to build inclusions" });
     }
   });
 
@@ -306,6 +366,13 @@ export function registerModule5Routes(app) {
   // ── Template upload / fetch ───────────────────────────────────────────────
   const TEMPLATE_BUCKET = "templates";
   const TEMPLATE_PATH   = "fee-proposal-template.docx";
+  const TEMPLATE_PATH_APB = "fee-proposal-template-apb.docx";
+  // Dual-version: pick the stored template + render transform by style ('original' | 'apb'). The
+  // original keeps Sam's perfected design; the APB version is refined in parallel, then the original
+  // is retired.
+  const templatePathForStyle = (style) => (style === "apb" ? TEMPLATE_PATH_APB : TEMPLATE_PATH);
+  const renderDataForStyle = (style, proposalData) =>
+    style === "apb" ? proposalToApbDocxData(proposalData) : proposalToDocxData(proposalData);
 
   /** Upload DOCX template to Supabase Storage (+ optionally Dropbox). */
   app.post("/api/settings/fee-proposal-template", requireAuth, async (req, res) => {
@@ -316,11 +383,13 @@ export function registerModule5Routes(app) {
     let buf;
     try { buf = Buffer.from(b64, "base64"); } catch { return res.status(400).json({ ok: false, error: "Invalid base64" }); }
     if (!buf.length) return res.status(400).json({ ok: false, error: "Empty file" });
+    const style = req.body?.style === "apb" ? "apb" : "original";
+    const tplPath = templatePathForStyle(style);
 
     // Supabase Storage upload
     const { error: uploadErr } = await sb.storage
       .from(TEMPLATE_BUCKET)
-      .upload(TEMPLATE_PATH, buf, {
+      .upload(tplPath, buf, {
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         upsert: true
       });
@@ -331,7 +400,7 @@ export function registerModule5Routes(app) {
       try {
         const { getDropboxAccessToken, dropboxUploadBuffer } = await import("./dropboxClient.mjs");
         const token = await getDropboxAccessToken();
-        await dropboxUploadBuffer(token, "/BLUE LEAF BUILDING/INTERNAL/TEMPLATES/fee-proposal-template.docx", buf, { autorename: false });
+        await dropboxUploadBuffer(token, `/BLUE LEAF BUILDING/INTERNAL/TEMPLATES/${tplPath}`, buf, { autorename: false });
       } catch (e) {
         console.warn("[fee-proposal-template] Dropbox backup failed:", e?.message || e);
       }
@@ -346,7 +415,8 @@ export function registerModule5Routes(app) {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
 
-    const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+    const style = req.query?.style === "apb" ? "apb" : "original";
+    const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(templatePathForStyle(style));
     if (error) {
       if (error.message?.includes("not found") || error.message?.includes("Object not found")) {
         return res.status(404).json({ ok: false, error: "No template uploaded yet" });
@@ -410,12 +480,13 @@ export function registerModule5Routes(app) {
     try {
       let templateBase64 = String(req.body?.templateBase64 || "").trim();
       const proposalData = req.body?.proposalData;
+      const style = req.body?.style === "apb" ? "apb" : "original";
 
       // Auto-fetch template from Supabase Storage if not provided by client
       if (!templateBase64) {
         const sb = getServiceSupabase();
         if (sb) {
-          const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+          const { data, error } = await sb.storage.from(TEMPLATE_BUCKET).download(templatePathForStyle(style));
           if (!error && data) {
             const buf = Buffer.from(await data.arrayBuffer());
             templateBase64 = buf.toString("base64");
@@ -423,7 +494,9 @@ export function registerModule5Routes(app) {
         }
       }
 
-      if (!templateBase64) return res.status(400).json({ ok: false, error: "No template available — upload a DOCX template in Settings first." });
+      if (!templateBase64) {
+        return res.status(400).json({ ok: false, error: style === "apb" ? "No APB template uploaded yet — upload the APB DOCX template in Settings." : "No template available — upload a DOCX template in Settings first." });
+      }
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData object required." });
       }
@@ -434,7 +507,12 @@ export function registerModule5Routes(app) {
         parser: makeAngularParser,
         nullGetter: () => ""
       });
-      doc.render(proposalToDocxData(proposalData));
+      const renderData = renderDataForStyle(style, proposalData);
+      if (style === "apb") {
+        const ph = findApbPlaceholders(renderData);
+        if (ph.length) return res.status(400).json({ ok: false, error: `APB version has unfilled placeholders — fill these first: ${ph.join(", ")}` });
+      }
+      doc.render(renderData);
       const out = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
       const fn = String(req.body?.filename || "Fee-Proposal.docx").replace(/[^\w.\- ]+/g, "") || "Fee-Proposal.docx";
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -455,15 +533,18 @@ export function registerModule5Routes(app) {
       let templateBase64 = String(req.body?.templateBase64 || "").trim();
       const proposalData = req.body?.proposalData;
       const quoteNumber = String(req.body?.quoteNumber || "Draft").trim();
+      const style = req.body?.style === "apb" ? "apb" : "original";
       // Auto-fetch template from Supabase Storage if not provided by client
       if (!templateBase64) {
         const sbStorage = getServiceSupabase();
         if (sbStorage) {
-          const { data: tplData, error: tplErr } = await sbStorage.storage.from(TEMPLATE_BUCKET).download(TEMPLATE_PATH);
+          const { data: tplData, error: tplErr } = await sbStorage.storage.from(TEMPLATE_BUCKET).download(templatePathForStyle(style));
           if (!tplErr && tplData) templateBase64 = Buffer.from(await tplData.arrayBuffer()).toString("base64");
         }
       }
-      if (!templateBase64) return res.status(400).json({ ok: false, error: "No template available — upload a DOCX template in Settings first." });
+      if (!templateBase64) {
+        return res.status(400).json({ ok: false, error: style === "apb" ? "No APB template uploaded yet — upload the APB DOCX template in Settings." : "No template available — upload a DOCX template in Settings first." });
+      }
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData required." });
       }
@@ -475,7 +556,12 @@ export function registerModule5Routes(app) {
         parser: makeAngularParser,
         nullGetter: () => ""
       });
-      doc.render(proposalToDocxData(proposalData));
+      const renderData = renderDataForStyle(style, proposalData);
+      if (style === "apb") {
+        const ph = findApbPlaceholders(renderData);
+        if (ph.length) return res.status(400).json({ ok: false, error: `APB version has unfilled placeholders — fill these first: ${ph.join(", ")}` });
+      }
+      doc.render(renderData);
       const docxBuffer = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
       // Upload to Google Drive as a Google Doc (editable)
       const filename = `${safeFilePart(quoteNumber)}-Fee-Proposal.docx`;
