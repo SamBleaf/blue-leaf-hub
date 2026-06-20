@@ -485,11 +485,28 @@ export default function FeeProposalWizard() {
     }
   }
 
+  const APB_TEMPLATE_KEY = "blhub_fee_proposal_apb_template_b64";
+  // APB template: an uploaded override (localStorage) if present, else the bundled styled default
+  // (public/BLB_APB_TEMPLATE.docx — cloned from the original design + APB sections).
+  async function apbTemplateBase64() {
+    const cached = localStorage.getItem(APB_TEMPLATE_KEY)?.trim();
+    if (cached) return cached;
+    try {
+      const res = await fetch("/BLB_APB_TEMPLATE.docx");
+      if (!res.ok) return "";
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(binary);
+    } catch {
+      return "";
+    }
+  }
+
   async function generateDocx(style = "original") {
-    // APB style sends no local template — the server auto-fetches the stored APB template.
-    const tpl = style === "apb" ? "" : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
-    if (style !== "apb" && !tpl) {
-      alert("Upload a Word template in Step 3 first (or on Template setup).");
+    const tpl = style === "apb" ? await apbTemplateBase64() : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
+    if (!tpl) {
+      alert(style === "apb" ? "APB template not available — try again, or upload one in Step 3." : "Upload a Word template in Step 3 first (or on Template setup).");
       return;
     }
     setBusy(true);
@@ -527,9 +544,9 @@ export default function FeeProposalWizard() {
   }
 
   async function openInGoogleDocs(style = "original") {
-    const tpl = style === "apb" ? "" : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
-    if (style !== "apb" && !tpl) {
-      alert("Upload a Word template first.");
+    const tpl = style === "apb" ? await apbTemplateBase64() : localStorage.getItem(TEMPLATE_STORAGE_KEY)?.trim();
+    if (!tpl) {
+      alert(style === "apb" ? "APB template not available — try again, or upload one in Step 3." : "Upload a Word template first.");
       return;
     }
     setBusy(true);
@@ -1131,15 +1148,16 @@ info@blueleafbuilding.com.au`;
                 e.target.value = "";
                 if (!f) return;
                 const b64 = await fileToBase64(f);
+                localStorage.setItem(APB_TEMPLATE_KEY, b64); // override the bundled default
                 try {
                   await authFetch("/api/settings/fee-proposal-template", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ dataBase64: b64, style: "apb" })
                   });
-                  alert("APB template saved to server.");
+                  alert("APB template saved.");
                 } catch {
-                  alert("APB template upload failed.");
+                  alert("APB template saved locally (server save failed).");
                 }
               }}
             />
