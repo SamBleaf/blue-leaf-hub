@@ -275,29 +275,53 @@ export default function FeeProposalWizard() {
         /* ignore */
       }
     }
-    setProposal((p) => ({
-      ...p,
-      address: (p.address || "").trim() || job.address || "",
-      client_name: (p.client_name || "").trim() || buildexactClient || job.client_name || exClient || "",
-      architect_name: (p.architect_name || "").trim() || job.architect_name || exArchitect || "",
-      arch_ref: (p.arch_ref || "").trim() || job.arch_ref || "",
-      eng_ref: (p.eng_ref || "").trim() || job.eng_ref || "",
-      spec_ref: (() => {
-        const cur = (p.spec_ref || "").trim();
-        if (cur && cur !== "TENDER") return cur;
-        const jv = (job.spec_ref || "").trim();
-        return jv || "TENDER";
-      })(),
-      building_type: (p.building_type || "").trim() || job.building_type || exBuildingType || "",
-      floor_area_m2:
-        p.floor_area_m2 !== "" && p.floor_area_m2 != null
-          ? p.floor_area_m2
-          : job.floor_area_m2 != null
-            ? Number(job.floor_area_m2)
-            : exFloorArea != null && Number.isFinite(exFloorArea)
-              ? exFloorArea
-              : ""
-    }));
+    // Lead fallback: RFQ-auto-created jobs may not have the client/architect stamped onto the job
+    // (the name lives on the source lead as first_name/last_name). Pull it from the lead so the
+    // proposal still gets the client from the data trail.
+    let leadClient = "";
+    let leadArchitect = "";
+    if (job.lead_id) {
+      try {
+        const { data: lead } = await sb
+          .from("leads")
+          .select("first_name,last_name,architect_name")
+          .eq("id", job.lead_id)
+          .maybeSingle();
+        if (lead) {
+          leadClient = `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+          leadArchitect = String(lead.architect_name || "").trim();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    setProposal((p) => {
+      const client_name = (p.client_name || "").trim() || buildexactClient || job.client_name || exClient || leadClient || "";
+      return {
+        ...p,
+        address: (p.address || "").trim() || job.address || "",
+        client_name,
+        client_salutation: (p.client_salutation || "").trim() || client_name,
+        architect_name: (p.architect_name || "").trim() || job.architect_name || exArchitect || leadArchitect || "",
+        arch_ref: (p.arch_ref || "").trim() || job.arch_ref || "",
+        eng_ref: (p.eng_ref || "").trim() || job.eng_ref || "",
+        spec_ref: (() => {
+          const cur = (p.spec_ref || "").trim();
+          if (cur && cur !== "TENDER") return cur;
+          const jv = (job.spec_ref || "").trim();
+          return jv || "TENDER";
+        })(),
+        building_type: (p.building_type || "").trim() || job.building_type || exBuildingType || "",
+        floor_area_m2:
+          p.floor_area_m2 !== "" && p.floor_area_m2 != null
+            ? p.floor_area_m2
+            : job.floor_area_m2 != null
+              ? Number(job.floor_area_m2)
+              : exFloorArea != null && Number.isFinite(exFloorArea)
+                ? exFloorArea
+                : ""
+      };
+    });
   }, []);
 
   // Phase 5b — blend the job's RFQ scope into the import-derived inclusions (server merges
