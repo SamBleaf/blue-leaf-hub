@@ -405,7 +405,7 @@ export function proposalToApbDocxData(p) {
 // Contingency buffer baked into the CLIENT-FACING proposal schedule (under-promise / over-deliver).
 // Operations still runs the tighter real program from the same SCHED data and aims to beat this.
 // Tune here, or per-proposal via p.schedule_buffer_pct (e.g. 0.15 = +15%, 0.25 = +25%).
-export const SCHEDULE_BUFFER_PCT = 0.2;
+export const SCHEDULE_BUFFER_PCT = 0.25;
 
 const SCHEDULE_PHASES = [
   { keys: ["site_prep", "pre_construction", "site_slab"], label: "Site preparation" },
