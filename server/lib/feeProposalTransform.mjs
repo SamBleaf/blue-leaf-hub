@@ -325,9 +325,9 @@ export function proposalToDocxData(p) {
 // membership, licence BLD 332830). Every block is overridable per-proposal via p.apb.* — these are
 // the defaults the APB template renders until Sam customises them.
 export const APB_CONTENT = {
-  NICHE_STATEMENT: "Adelaide's boutique builder for considered, high-craft homes",
+  NICHE_STATEMENT: "Adelaide's boutique builder — custom new builds & bespoke renovations",
   WHY_BUILD_WITH_US:
-    "At Blue Leaf Building we partner with a small number of Adelaide families each year, so every home receives the attention to detail it deserves. We are boutique by design — fewer projects, greater focus on yours.\n\nAs members of the Association of Professional Builders, we follow proven systems for pricing, communication and delivery — which means a fixed price you can rely on and no surprises along the way. Every cost, selection and update lives in your online project portal, accessible 24/7.\n\nWe don't simply want to build you a house — we want to create your home while removing the stress and uncertainty from one of the most important investments of your life. We measure our success by how you feel walking through your finished home.",
+    "Blue Leaf Building is a boutique Adelaide construction company delivering high-quality custom new builds and bespoke renovations. Founded by directors Joshua Manning and Sam Morris — who began as a high-end carpentry company and grew into a full-scale builder — we're recognised for craftsmanship, collaboration and innovation, and recommended by highly regarded architects for making the building journey seamless and rewarding.\n\nWhat sets us apart is what comes standard:\n\n• LVL stud frames as standard — laminated veneer lumber for perfectly straight, true walls, H2 termite-resistant and engineered from sustainably harvested timber. Stronger, more durable and more stable than conventional pine framing, at no additional cost.\n\n• Energy efficiency & comfort as standard — world-leading sealing membranes, vented cavity systems and double glazing included on every home (the same technology used in the world's most energy-efficient homes). The result: healthier indoor air, lower power bills, a quieter home, and a longer building life — at no extra cost.\n\n• Personalised service & involvement — we take on only a limited number of projects each year, with weekly site meetings to keep you involved and informed throughout. The result isn't just a house; it's a home that truly reflects you.",
   ONLINE_PM_BODY:
     "Every Blue Leaf client receives a login to the Blue Leaf client portal. From any device, anywhere, you can watch progress photos as your home takes shape, follow your live construction schedule and see exactly what's happening next, make and confirm your selections with prices locked in, read every communication and approval in one place, and track your budget and any variations. With 24/7 access you'll always feel up to speed — and you can share the journey with family and friends.",
   CONSTRUCTION_SCHEDULE_INTRO:
@@ -337,19 +337,20 @@ export const APB_CONTENT = {
   SUMMARY_BODY:
     "Thank you for the opportunity to provide this proposal. We've valued the time spent together on your project and believe the rapport we've built will make for a rewarding experience and a result you'll love.\n\nShould you choose Blue Leaf Building, we'll take every step to exceed your expectations and guide you smoothly through the entire process. We look forward to bringing your new home to life.",
   GUARANTEES: [
-    { GUARANTEE_HEADING: "Structural Guarantee", GUARANTEE_TEXT: "Your new home carries a 10-year structural warranty, a 5-year builders warranty and a 6-month maintenance and defect period." },
+    { GUARANTEE_HEADING: "10-Year Structural Warranty", GUARANTEE_TEXT: "We back the bones of your home for a full decade — well beyond the industry's 5-year standard — so you have long-term peace of mind that the core structure is protected." },
+    { GUARANTEE_HEADING: "5-Year Non-Structural Warranty", GUARANTEE_TEXT: "We extend coverage on non-structural elements to 5 years, instead of the standard 2 — confidence in both form and function." },
+    { GUARANTEE_HEADING: "Transferable Warranty", GUARANTEE_TEXT: "If you sell your home within the warranty period, the coverage transfers to the new owner — boosting resale value and protecting your investment." },
+    { GUARANTEE_HEADING: "6-Month Defect Liability Period", GUARANTEE_TEXT: "Twice the standard — more time after moving in to live with your home and flag any issues, which we fix at no extra cost." },
     { GUARANTEE_HEADING: "Fixed Price", GUARANTEE_TEXT: "Outside your nominated PC and provisional-sum allowances, the contract price is fixed — the price you sign is the price you pay. Variations occur only with your written approval, charged at cost plus a 25% builder's margin." },
-    { GUARANTEE_HEADING: "A Handover Date You Can Plan Around", GUARANTEE_TEXT: "We agree a firm handover date and hold ourselves to it — communicating early and clearly if anything genuinely beyond our control affects the program." },
-    { GUARANTEE_HEADING: "Defect-Free Handover", GUARANTEE_TEXT: "We hand over a high-quality finish, free of defects, and check in over the following weeks to make sure it stays that way." },
-    { GUARANTEE_HEADING: "Direct Communication", GUARANTEE_TEXT: "You speak directly with your builder — Joshua or Sam — not a call centre. Regular on-site meetings keep you across every step." },
-    { GUARANTEE_HEADING: "Satisfaction", GUARANTEE_TEXT: "This is your home, and we want you to love it — the process and the finished result." }
+    { GUARANTEE_HEADING: "Direct Communication", GUARANTEE_TEXT: "You speak directly with your builder — Joshua or Sam — not a call centre. Weekly on-site meetings keep you across every step." }
   ],
   TESTIMONIALS: [
     { TESTIMONIAL_TEXT: "[Add a named client testimonial here]", TESTIMONIAL_AUTHOR: "[First name, Suburb — project type]" }
   ],
   LICENCES: [
     { LICENCE_TEXT: "Licensed Builder — BLD 332830" },
-    { LICENCE_TEXT: "ABN [ADD ABN]" },
+    { LICENCE_TEXT: "ABN 88 656 051 188" },
+    { LICENCE_TEXT: "Member, Master Builders Association (MBA)" },
     { LICENCE_TEXT: "Member, Association of Professional Builders (APB)" }
   ],
   RESPONSIBILITIES_OURS: [
