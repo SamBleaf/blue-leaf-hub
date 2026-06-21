@@ -18,6 +18,9 @@ import {
   aiConfigured, draftSupplierEmail, summariseSupplierReply,
   draftSelectionReminder, weeklyProcurementDigest, explainScheduleImpact,
 } from "./procurementAiService.mjs";
+import { buildPurchaseOrderPdfBuffer, defaultStandardConditions } from "./poPdfKit.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const daysBetween = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
@@ -366,6 +369,9 @@ export function registerProcurementRoutes(app) {
         sb.from("projects").select("id, address").eq("job_id", item.job_id).limit(1).maybeSingle(),
       ]);
       const amount = Number(item.approved_amount ?? item.quoted_amount ?? item.cost_allowance ?? 0) || 0;
+      // Guard: a PO with no supplier or $0 can never be issued — block it at draft.
+      if (!supplierId) return err(res, 400, "Assign a supplier before drafting a PO.");
+      if (amount <= 0) return err(res, 400, "Set an approved or quoted amount before drafting a PO.");
       const gst = Math.round(amount * GST_RATE * 100) / 100;
       const poRow = {
         project_id: project?.id || null, job_id: item.job_id, subcontractor_id: null,
@@ -384,9 +390,85 @@ export function registerProcurementRoutes(app) {
         user_modified: true, updated_at: new Date().toISOString(),
       }).eq("id", item.id);
       const row = await reRiskItem(sb, item.id);
-      return ok(res, { purchaseOrder: rowToCamel(po), item: row ? rowToCamel(row) : null, note: "Draft PO created and linked. Review and issue it in the Purchase Orders flow — nothing has been sent." });
+      return ok(res, { purchaseOrder: rowToCamel(po), item: row ? rowToCamel(row) : null, note: "Draft PO created. Use 'Issue PO' to send it to the supplier — nothing has been sent yet." });
     } catch (e) {
       console.error("[procurement/draft-po]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/procurement/items/:id/issue-po ────────────────────────────────
+  // The missing end-to-end step: issue an item's DRAFT po — render the PO PDF,
+  // email it to the assigned supplier, mark PO issued + item po_sent (so committed
+  // cost advances). Procurement-specific; does NOT touch the tender /api/po/issue.
+  app.post("/api/procurement/items/:id/issue-po", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data: item } = await sb.from("procurement_items").select("*").eq("id", req.params.id).maybeSingle();
+      if (!item) return err(res, 404, "Item not found.");
+      if (!item.purchase_order_id) return err(res, 400, "Draft a PO for this item first.");
+
+      const [{ data: po }, { data: supplier }, { data: trade }, { data: project }] = await Promise.all([
+        sb.from("purchase_orders").select("*").eq("id", item.purchase_order_id).maybeSingle(),
+        item.supplier_id ? sb.from("suppliers").select("name, email, phone, address").eq("id", item.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
+        item.trade_category_id ? sb.from("trade_categories").select("name").eq("id", item.trade_category_id).maybeSingle() : Promise.resolve({ data: null }),
+        sb.from("projects").select("id, address").eq("job_id", item.job_id).limit(1).maybeSingle(),
+      ]);
+      if (!po) return err(res, 404, "Linked PO not found — draft it again.");
+      if (po.status === "issued") return err(res, 409, "This PO has already been issued.");
+      if (!supplier) return err(res, 400, "Assign a supplier before issuing.");
+      if (!supplier.email) return err(res, 400, `${supplier.name || "The supplier"} has no email on file — add one before issuing.`);
+
+      const amount = Number(po.total_amount ?? 0) || 0;
+      if (amount <= 0) return err(res, 400, "PO amount is zero — set an approved amount and re-draft.");
+      const gst = Number(po.gst_amount ?? Math.round(amount * GST_RATE * 100) / 100);
+      const incGst = Number(po.total_inc_gst ?? Math.round((amount + gst) * 100) / 100);
+
+      const { data: company } = await sb.from("company_profile").select("name, abn, address, phone, email").limit(1).maybeSingle();
+      const logoDataUrl = await getBrandingEmailLogo(sb).catch(() => "");
+
+      const lineItems = (Array.isArray(po.line_items) && po.line_items.length)
+        ? po.line_items.map((li) => ({ description: li.description || item.item_name, qty: String(li.quantity ?? item.quantity ?? 1), unit: li.uom || item.uom || "", unitCost: Number(li.unit_cost ?? amount), lineTotal: Number(li.total ?? amount) }))
+        : [{ description: item.item_name, qty: String(item.quantity || 1), unit: item.uom || "", unitCost: amount, lineTotal: amount }];
+
+      const pdfBuf = await buildPurchaseOrderPdfBuffer({
+        poNumber: po.po_number,
+        dateCreatedIso: todayStr(),
+        company: {
+          companyName: company?.name || "Blue Leaf Building",
+          abn: company?.abn || "", address: company?.address || "",
+          phone: company?.phone || "", email: company?.email || "", website: "",
+        },
+        vendor: { name: supplier.name || "Supplier", lines: [supplier.address, supplier.phone, supplier.email].filter(Boolean) },
+        jobAddress: project?.address || "",
+        tradeTitle: trade?.name || item.category || "Materials",
+        scheduledCompletionIso: item.required_on_site_date || "",
+        tentativeStartLabel: "",
+        lineItems,
+        subtotalExGst: amount, gstAmount: gst, totalIncGst: incGst,
+        standardConditions: defaultStandardConditions(),
+        logoDataUrl,
+      });
+
+      const safeAddr = (project?.address || "job").replace(/[^a-zA-Z0-9]/g, "-");
+      const fmtAud = (n) => Number(n || 0).toLocaleString("en-AU", { style: "currency", currency: "AUD" });
+      await sendPlainMail({
+        to: supplier.email,
+        subject: `Purchase Order ${po.po_number} — ${project?.address || "Blue Leaf Building"}`,
+        text: `Hi ${supplier.name || ""},\n\nPlease find attached Purchase Order ${po.po_number} for ${project?.address || "our project"}.\n\nItem: ${item.item_name}\nTotal (inc GST): ${fmtAud(incGst)}\n\nPlease confirm receipt and expected delivery.\n\nBlue Leaf Building`,
+        attachments: [{ filename: `PO-${po.po_number}-${safeAddr}.pdf`, content: pdfBuf, contentType: "application/pdf" }],
+      });
+
+      await sb.from("purchase_orders").update({ status: "issued", issued_at: new Date().toISOString() }).eq("id", po.id);
+      await sb.from("procurement_items").update({
+        status: (RANK[item.status] ?? 0) < RANK.po_sent ? "po_sent" : item.status,
+        user_modified: true, updated_at: new Date().toISOString(),
+      }).eq("id", item.id);
+      const row = await reRiskItem(sb, item.id);
+      return ok(res, { purchaseOrder: { ...rowToCamel(po), status: "issued" }, item: row ? rowToCamel(row) : null, emailedTo: supplier.email });
+    } catch (e) {
+      console.error("[procurement/issue-po]", e);
       return err(res, 502, translateDbError(e));
     }
   });

@@ -136,8 +136,9 @@ export function BoardTab({ jobOptions, selectedJobId, setSelectedJobId, canEdit 
   useEffect(() => { load(); }, [load]);
 
   const move = async (id, status) => {
-    const { ok, data } = await apiPatch(`/api/procurement/items/${id}`, { status });
+    const { ok, data, error } = await apiPatch(`/api/procurement/items/${id}`, { status });
     if (ok && data.item) setItems((arr) => arr.map((r) => (r.id === id ? data.item : r)));
+    else window.alert(error || "Couldn't update the status — please retry.");
   };
   const byLane = useMemo(() => {
     const m = Object.fromEntries(LANES.map((l) => [l.key, []]));
@@ -225,7 +226,10 @@ export function SuppliersTab({ canEdit }) {
     setSaving(false);
     if (res.ok) { setForm(null); load(); } else window.alert(res.error || "Save failed");
   };
-  const refreshPerf = async (id) => { await apiPost(`/api/procurement/suppliers/${id}/refresh-performance`, {}); load(); };
+  const refreshPerf = async (id) => {
+    const { ok, error } = await apiPost(`/api/procurement/suppliers/${id}/refresh-performance`, {});
+    if (ok) load(); else window.alert(error || "Couldn't refresh performance.");
+  };
 
   return (
     <div>

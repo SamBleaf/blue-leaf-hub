@@ -216,8 +216,9 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
   const [confirmRegen, setConfirmRegen] = useState(false);
 
   const load = useCallback(async (jobId) => {
-    if (!jobId) { setItems([]); setMissing([]); return; }
+    if (!jobId) { setItems([]); setMissing([]); setCommitted(0); return; }
     setLoading(true); setErr(null);
+    setItems([]); setCommitted(0); setMissing([]); // clear stale rows on job switch / reload
     const { ok, data, error } = await apiFetch(`/api/procurement/jobs/${jobId}/items`);
     if (ok) { setItems(data.items || []); setCommitted(data.committed || 0); }
     else setErr(error || "Failed to load register");
@@ -240,15 +241,23 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
     const { ok, data, error } = await apiPost(`/api/procurement/items/${id}/draft-po`, {});
     if (ok) { load(selectedJobId); window.alert(data.note || "Draft PO created."); } else window.alert(error || "Draft PO failed");
   };
+  const issuePo = async (it) => {
+    if (!window.confirm(`Issue this PO and email it to the supplier?\n\n${it.itemName}`)) return;
+    const { ok, data, error } = await apiPost(`/api/procurement/items/${it.id}/issue-po`, {});
+    if (ok) { load(selectedJobId); window.alert(`PO issued — emailed to ${data.emailedTo}.`); }
+    else window.alert(error || "Couldn't issue the PO.");
+  };
   const aiOrderEmail = async (it) => {
-    if (!it.supplierId) { window.alert("Set a supplier on this item first."); return; }
-    const { ok, data } = await apiPost("/api/procurement/ai/supplier-email", { supplierId: it.supplierId, itemIds: [it.id], kind: "order" });
+    if (!it.supplierId) { setRowErr("Set a supplier on this item first."); return; }
+    const { ok, data, error } = await apiPost("/api/procurement/ai/supplier-email", { supplierId: it.supplierId, itemIds: [it.id], kind: "order" });
     if (ok && data.draft) setAiDraft({ title: `Order email — ${it.itemName}`, draft: data.draft });
+    else setRowErr(error || "Couldn't draft the order email.");
   };
   const removeItem = async (id) => {
     if (!window.confirm("Remove this item from the register? (Regenerate won't bring it back.)")) return;
-    const { ok } = await apiDelete(`/api/procurement/items/${id}`);
+    const { ok, error } = await apiDelete(`/api/procurement/items/${id}`);
     if (ok) setItems((arr) => arr.filter((r) => r.id !== id));
+    else setRowErr(error || "Couldn't remove that item — please retry.");
   };
   const regenerate = async () => {
     setBusy(true);
@@ -402,7 +411,9 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
                   {canEdit && (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {it.supplyType === "builder_supplied" && <button type="button" onClick={() => aiOrderEmail(it)} className="text-xs text-muted hover:text-primary mr-2" title="Draft an order/RFQ email (review before sending)">✉</button>}
-                      {isAdmin && it.supplyType === "builder_supplied" && <button type="button" onClick={() => draftPo(it.id)} className="text-xs text-muted hover:text-primary mr-2" title="Create a draft PO and link it">PO</button>}
+                      {isAdmin && it.supplyType === "builder_supplied" && it.status !== "po_drafted" && it.status !== "po_sent" && <button type="button" onClick={() => draftPo(it.id)} className="text-xs text-muted hover:text-primary mr-2" title="Create a draft PO and link it">PO</button>}
+                      {isAdmin && it.supplyType === "builder_supplied" && it.status === "po_drafted" && <button type="button" onClick={() => issuePo(it)} className="text-xs text-primary font-semibold hover:underline mr-2" title="Issue the draft PO + email the supplier">Issue</button>}
+                      {it.status === "po_sent" && <span className="text-xs text-green-600 mr-2" title="PO issued and emailed">PO&nbsp;✓</span>}
                       <button type="button" onClick={() => removeItem(it.id)} className="text-xs text-muted hover:text-red-600" title="Remove from register">✕</button>
                     </td>
                   )}
@@ -434,15 +445,16 @@ function Selections({ jobOptions, onOpenItem }) {
   const [aiDraft, setAiDraft] = useState(null);
   const [drafting, setDrafting] = useState(null);
   const confirmSelection = async (id) => {
-    await apiPatch(`/api/procurement/items/${id}`, { selection_status: "confirmed" });
-    load();
+    const { ok, error } = await apiPatch(`/api/procurement/items/${id}`, { selection_status: "confirmed" });
+    if (ok) load(); else window.alert(error || "Couldn't mark that selection confirmed — please retry.");
   };
   const draftReminder = async (it) => {
     // AI-drafted, client-safe — sending stays manual (the Hub never auto-sends).
     setDrafting(it.id);
-    const { ok, data } = await apiPost(`/api/procurement/items/${it.id}/ai/selection-reminder`, {});
+    const { ok, data, error } = await apiPost(`/api/procurement/items/${it.id}/ai/selection-reminder`, {});
     setDrafting(null);
     if (ok && data.draft) setAiDraft({ title: `Selection reminder — ${it.itemName}`, draft: data.draft });
+    else window.alert(error || "Couldn't draft the reminder.");
   };
 
   return (
