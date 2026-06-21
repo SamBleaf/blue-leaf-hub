@@ -1,0 +1,173 @@
+================================================================================
+BLUE LEAF HUB — PLANNED SCOPE (for external review)
+Extracted: 2026-06-21
+Sources: MASTER_PLAN.md (BUILD QUEUE + Document Templates workstream)
+         + approved 9-issue fix plan (UX + cross-module integration priorities)
+================================================================================
+
+HOW TO READ THIS
+- "Hub" = Blue Leaf Building's internal operations platform (React + Vite front
+  end, Node/Express API in server/lib/*.mjs, Supabase Postgres, deployed on
+  Railway at https://blueleafhub.com.au). A separate field "Worker PWA" (magic-
+  link, no login) is used by on-site staff.
+- Status legend:  [DONE] shipped this round (code complete, unit-tested, builds)
+                  [PENDING] planned, not yet built
+                  [BLOCKED] needs an external action (migration apply, API key,
+                            device test) before it is live
+- Migrations are applied MANUALLY by the owner in Supabase. Commits to main auto-
+  deploy production.
+
+================================================================================
+PART 1 — NINE ISSUES (daily-use fixes), grouped into delivery phases
+================================================================================
+
+PHASE 0 — fastest value (the two reported bugs + two client-facing emails)
+--------------------------------------------------------------------------------
+[DONE]    B0  Invite link broken for new users (e.g. a director couldn't load it)
+              Cause: invite URLs were built from APP_URL with a localhost
+              fallback; 4 different domains hard-coded across the code.
+              Fix: one shared appBaseUrl() helper -> https://blueleafhub.com.au.
+[BLOCKED] B0  Owner to: confirm APP_URL is set in Railway prod; run the zero-code
+              probe (generate a fresh invite, read the emitted URL); resolve the
+              deploy-topology question (single-origin Railway vs Vercel+Railway)
+              before deleting the dead vercel.json; re-invite the affected user.
+[DONE]    W1  Worker-view task bug: a carpentry task added to a job didn't show
+              in the worker app. Cause: the worker task list was inferred from
+              the worker's latest timesheet. Fix: explicit, persisted job picker
+              in the Worker PWA; inference removed; service-role endpoints now
+              validate every client param (uuid + category whitelist + job scope).
+[DONE]    BQ-13 Progress-claim email: replaced plain-text <pre> with a branded
+              HTML template (+ optional bank/payment block).
+[DONE]    BQ-14 Variation email: same upgrade.
+[BLOCKED] BQ-13/14 bank block needs migration 106 (company_profile bank columns)
+              applied + the real BSB/account number backfilled by the owner.
+
+PHASE 1 — foundational fixes + first cross-module pieces
+--------------------------------------------------------------------------------
+[DONE]    DATE Cross-cutting AU-local date fix: weekStart()/"today" used UTC, which
+              is the previous day during AEST mornings — corrupts week boundaries
+              and (downstream) payroll. New noon-anchored helpers + regression test.
+[DONE]    CARP Carpentry tasks made first-class: the create endpoint + UI now set
+              category + assignee (previously every task was general/unassigned),
+              so the worker job-picker's category filter is meaningful.
+[BLOCKED] CARP Migration 107 (site_tasks "exactly one of project/carpentry job"
+              constraint, added NOT VALID) to be applied; run the documented
+              pre-apply audit + VALIDATE after.
+[DONE]    FAB  Quick-add "+" relabelled "Task" -> "Site Task", gated to schedule
+              editors, deep-links to the Operations Site-Tasks panel (auto-opens).
+[DONE]    DOCS Document Templates workstream (BQ-12..51) added to MASTER_PLAN.md.
+[DONE]    FIN  Finance invoice viewer: "View PDF" while approving/matching, in
+              both the Approval queue and the Inbox; IDOR-safe stream endpoint;
+              email-ingested invoices now persist their file at ingest (was the
+              gap that left the viewer empty for them); PDF/image/HEIC handling.
+
+PHASE 2 — workforce build-up + remaining UX
+--------------------------------------------------------------------------------
+[DONE]    VOICE Shared Whisper transcription service (the app had NO speech-to-text
+              before — every "transcript" feature consumed externally-made text);
+              a from-transcript endpoint that splits a pasted site walk-through
+              into a DRAFT task list via a cheap model (reviewed before anything
+              is created); a generic /api/transcribe (audio -> text); paste-and-
+              review UI on the carpentry job.
+[BLOCKED] VOICE Whisper needs OPENAI_API_KEY set; live transcription untested
+              until then. In-app audio RECORDING with an offline queue (for poor
+              site signal) is the remaining piece — needs device testing.
+[PENDING] VOICE Consolidate the other transcript features (sales meeting analysis,
+              site-diary memos, marketing subtitles) onto the one Whisper service.
+[DONE]    SNAP  Weekly timesheet completion snapshot (Workforce > Snapshot):
+              active employees x working days, flags who still owes hours.
+[DONE]    BP    Blueprint AI widget on mobile: full-width bottom sheet, ignores
+              stale saved position, FAB moved off the app's "+" FAB.
+[PENDING] SCHED Mobile Operations schedule can't scroll horizontally. Decision
+              pending: dedicated mobile read-only schedule view (recommended) vs
+              touch-pan the Gantt. REQUIRES a real-device reproduction first (the
+              originally-cited root cause was wrong).
+
+PHASE 3 — optional / larger (scoped down per owner)
+--------------------------------------------------------------------------------
+[PENDING] QC    Carpentry QC checklists per phase (frame/roof/lock-up/fit-off/
+              final). Owner chose ADVISORY + reminders (non-blocking) + a loud
+              office "QC outstanding" flag, with a soft-gate built but off by
+              default. New tables keyed to a STABLE phase set (never to Buildexact-
+              reseeded budget rows); per-job leading-hand assignment; photos +
+              signature as storage objects.
+[PENDING] RDO   RDO + public-holiday calendar, DISPLAY-ONLY now (accrual stays in
+              Xero). Fix WorkerWeek so an RDO/holiday isn't flagged as a missing
+              timesheet; QLD/national holiday seed; both flags strictly NON-cost-
+              bearing. 9-day-fortnight roster generator + calendar tab = fast-follow.
+[PENDING] TPL   Document template batches 2-4 (client experience, operational,
+              marketing) — see Part 2.
+
+PHASE 4 — own program (may not happen this horizon)
+--------------------------------------------------------------------------------
+[PENDING] DEP   Deputy-replacement core: clock-in/out + geolocation, leave mgmt,
+              AWARD INTERPRETATION (penalty rates/loadings — highest legal risk,
+              needs a real sprint + payroll sign-off), Xero payroll export. Run
+              parallel to Deputy one pay cycle, reconcile, then cancel. Do NOT
+              market as a Deputy replacement until all four are live.
+
+================================================================================
+PART 2 — DOCUMENT TEMPLATES WORKSTREAM (BQ-12 .. BQ-51)
+Full audit: docs/templates/TEMPLATE_MASTER_AUDIT.md (32 exist, 47 missing)
+HTML emails -> server/lib/emailTemplates/ ; client DOCX -> docs/templates/*.docx ;
+server PDFs -> server/lib/pdfKit.mjs. Each ships with an SOP.
+================================================================================
+
+BATCH 1 — critical (blocks real workflows)
+  BQ-12 Portal invite email (HTML)                                   [PENDING]
+  BQ-13 Progress-claim HTML email                                    [DONE]
+  BQ-14 Variation HTML email                                         [DONE]
+  BQ-15 WHS generation UI (engine + templates exist; build the page) [PENDING]
+  BQ-16 Proposal acceptance letter (DOCX) — signed record           [PENDING]
+  BQ-17 Practical completion notice — legal DLP/final-payment trigger[PENDING]
+  BQ-18 Handover checklist                                           [PENDING]
+  BQ-19 Client onboarding welcome email                              [PENDING]
+  BQ-20 SOPA overdue-payment notice (statutory)                      [PENDING]
+  BQ-21 Selections schedule — #1 variation source, no process today [PENDING]
+
+BATCH 2 — client experience
+  BQ-22 Enquiry confirmation   BQ-23 Weekly client update
+  BQ-24 Payment reminder       BQ-25 Payment receipt
+  BQ-26 Warranty pack          BQ-27 Certificates index
+  BQ-28 Completion thank-you + testimonial   BQ-29 Portal action-required
+  BQ-30 Meeting minutes        BQ-31 PTSA covering email             [ALL PENDING]
+
+BATCH 3 — operational
+  BQ-32 Quote comparison       BQ-33 Quality inspection checklist
+  BQ-34 Defect list            BQ-35 Pre-start checklist
+  BQ-36 Subcontractor onboarding   BQ-37 Sub compliance reminder
+  BQ-38 Long-lead register     BQ-39 Budget-vs-actual
+  BQ-40 Margin-risk report     BQ-41 6-month defect reminder         [ALL PENDING]
+
+BATCH 4 — polish / marketing
+  BQ-42 Appliance/finishes register   BQ-43 Maintenance guide
+  BQ-44 Neighbour letter       BQ-45 Onboarding pack
+  BQ-46 Photo-usage approval   BQ-47 Case-study brief
+  BQ-48 Discovery questionnaire   BQ-49 Meeting agenda
+  BQ-50 Defect-liability form  BQ-51 Construction commencement notice [ALL PENDING]
+
+================================================================================
+PART 3 — DATABASE MIGRATIONS INTRODUCED THIS ROUND (apply manually, in order)
+================================================================================
+  106_company_bank_details.sql   company_profile += bank_account_name, bank_bsb,
+                                  bank_account_number. Then backfill real values.
+  107_site_tasks_xor_check.sql    site_tasks CHECK exactly-one-of project/carpentry
+                                  (added NOT VALID; audit + VALIDATE after).
+  Each migration file documents its own pre-apply audit + DOWN (rollback).
+
+================================================================================
+PART 4 — OPEN DECISIONS (owner to confirm; do not block built work)
+================================================================================
+  1. Mobile schedule: read-only mobile view vs pan-the-Gantt (needs device repro).
+  2. QC: stay pure advisory, or advisory + office "QC outstanding" flag + dormant
+     soft-gate? Confirm the fixed QC phase set before the QC migration.
+  3. Deputy/award interpretation: fund a real sprint, or state Deputy is not
+     retired this horizon.
+  4. In-app voice recording + offline queue: build now or after paste-path proves
+     adoption.
+  5. crm/portal email domains: confirm whether their different fallback domains
+     are intentional before unifying them.
+
+================================================================================
+END OF SCOPE
+================================================================================

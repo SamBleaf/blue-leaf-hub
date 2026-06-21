@@ -1,0 +1,84 @@
+# Client Portal v2 — Operational Review (Internal / Red-Team)
+
+**Author stance:** Hostile red-teamer, not the developer. Perspective: Sam (director), site supervisor, accounts, contracts admin — the people who have to *run* this thing on a live $2m job and answer to a difficult client.
+
+**Date:** 2026-06-21
+**Verdict up front:** The data model is genuinely good and the security boundary is solid. But as an *operational* tool, the portal is roughly half-built. It surfaces information beautifully and captures almost no work. **Every authoring workflow still lives in email / spreadsheets / Dropbox / the phone**, because the admin UI can't upload a file, can't author payment instructions, never sends a client a notification, and never chases a client who goes quiet. On day one of a real job, staff will use the portal as a read-only brochure and keep doing the actual work the old way. It does NOT yet meaningfully reduce admin time. It *will* reduce variation/claim confusion **if and only if** the upstream Finance module is being driven correctly — and it introduces a new, sharp **contract risk** around what "Approve" legally means.
+
+---
+
+## 1. Does it reduce the six operational pains? Honest scoring
+
+| Operational goal | Delivers? | Why / where it breaks |
+|---|---|---|
+| **Fewer phone calls** | Partial | Home/Journey/Financial snapshot genuinely answer "what's happening / what do I owe." BUT the only client→builder channel is `portal_messages` (free-text), which emails `admin@` and has **no SLA, no threading per topic, no "Sam is typing", no read receipt back to the client**. A client who messages and hears nothing for a day will phone. And there is **no client phone number / "call us" affordance** in the portal — ironically it can't even deflect a call to a scheduled callback. |
+| **Fewer emails** | No (net neutral, maybe worse) | The portal *generates* emails to staff (every message, every meeting decline, every payment-notify → `admin@blueleafbuilding.com.au`) but sends the **client nothing in-app**. All client-facing notification is still external email you author by hand outside the portal. You've added an inbox firehose to `admin@` without removing the outbound email work. |
+| **Fewer variation disputes** | Conditional / risky | If Finance issues the variation, the portal mirrors it, shows inc-GST + EOT + builder reasoning + PDF, and writes an immutable audit row on approve/decline. That's a real improvement. **But the approval is not a signature** (see §3 Legal). A litigious client can later say "I clicked a button, I never signed the variation." You've created a *record* of intent, not an *executed* variation. |
+| **Fewer missed selections** | Partial | The board is good and the nightly sync flips overdue selections red. **But nothing tells the client a selection is due** — no email, no in-app notification, no reminder. "Overdue" only turns red *inside* the portal, which the client has no reason to open if they aren't nagged. Missed selections will still be caught by the supervisor noticing and phoning. |
+| **Fewer progress-claim disputes** | Partial | Inc-GST figures from canonical generated columns, audit on payment-notify — good. **But `payment_instructions` (the bank details / how-to-pay text the client needs) is never set by any code path** (see §2), so the one thing the client actually needs to pay is blank, and they'll email/phone accounts asking "where do I send the money?" |
+| **Less admin time** | No | This is the big failure. The admin UI (`PortalV2Admin.jsx`) makes staff **hand-author milestones, hand-author every weekly update, hand-type each selection and its two options, and hand-schedule meetings** — with no file upload, no document publishing UI, no bulk import, no templates. It is faster to keep the spreadsheet. (Details in §4.) |
+
+---
+
+## 2. Where staff STILL leave the portal — the operational gap table
+
+| Operational goal | Portal delivers? | Gap forcing staff back to old tools (cite) | Fix |
+|---|---|---|---|
+| **Publish a document to the client** (contract, plans, certificate) | **No** | `portalV2AdminRoutes.mjs` `POST /documents` only inserts a metadata row and takes `storagePath`/`publicUrl` as **strings the caller must already know** (lines 301-325). There is **no multipart upload, no Dropbox picker, no Supabase upload**. And `PortalV2Admin.jsx` has **no Documents section at all** (grep: zero matches for "document"). So a staff member literally cannot get a PDF into the portal from the admin UI — they must upload to Dropbox manually, find the path, and... there's no UI to paste it into anyway. Documents only ever appear via the auto-archive of *signed variations* in `portalIntegration.mjs`. | Add a Documents panel to `PortalV2Admin.jsx` with real file upload → Supabase Storage (or Dropbox), writing `storage_path`. Until then, the "Documents" tab is empty on every job and clients email you asking for their contract. |
+| **Tell the client to pay** | **No** | `payment_instructions` is in the client allowlist (`portalV2Routes.mjs:52`) and rendered in `ClientActions.jsx` (`claim.paymentInstructions`), but **no server code ever writes it** (grep: only the SELECT exists). `syncClaimIssued` never sets it. So "how do I pay" is permanently blank. | Either store BSB/acct on the project and inject into the claim, or add a field to the (non-existent) claim admin UI. Right now accounts fields the "where do I send money" call every claim. |
+| **Notify the client of anything in-app** | **No** | `portal_notifications` is **only ever SELECTed** (`portalV2Routes.mjs:940`) — **never inserted anywhere in the server**. The bell/notifications feed is dead on arrival; it returns `[]` forever. The dedup index in migration 103 (lines 321-322) guards inserts that never happen. | Generate `portal_notifications` rows in `portalIntegration.mjs` and `portalSync.mjs` whenever an action is created or goes overdue. Otherwise the client never knows to log in. |
+| **Chase a client who ignores an action** | **No** | There is **no reminder mechanism**. `portalSync.mjs` flips selections to `overdue` but sends nobody anything. No "you have an unactioned variation" nudge. `client_actions.notification_sent_at` exists in schema but is never written. A difficult client can sit on a variation forever and the only escalation is the supervisor noticing and phoning. | Nightly: for open actions past due, send the client an email + create an in-app notification, stamp `notification_sent_at`, and surface an internal "stale actions" list to staff. |
+| **Author the weekly update / "why we built it this way"** | Manual only | `UpdateSection` in `PortalV2Admin.jsx` is a blank textarea every week. No draft list, no last-week prefill, no photo attach, no schedule auto-pull into the headline. Sam writes prose from scratch weekly or it doesn't happen — and if it doesn't happen, Home/Journey look abandoned. | Pre-draft from the schedule delta + this week's site-diary entries; let Sam edit. Attach photos. |
+| **Build the milestone timeline** | Manual *or* auto, and they fight | `portalSync.mjs` auto-creates milestones from `schedule_tasks.phase`, but admin can *also* hand-author them. The merge logic (lines 112-123) only protects a manual row's label, and **`is_current`/`achieved_at`/`confidence` are overwritten by the sync every night** even on manual rows. A supervisor who manually sets "current stage" will find the cron has moved it back by morning. Confusing dual ownership. | Make a milestone either fully manual or fully auto (a flag), and never let sync touch a manual row's `is_current`. |
+| **Get a real photo to the client** | **No upload path** | Home + Journey render `project_photos`, but there is **no admin endpoint or UI to add a photo to `project_photos` for the portal**. Photos must already exist via some other module. So the headline feature ("site photos appear as work begins", `ClientHome.jsx:89`) has no way for the supervisor to actually post a photo from the portal admin. | Add photo upload to the admin UI writing `project_photos` with `milestone_key`. |
+| **Confirm a client's variation approval is binding** | **No e-sign** | See §3. Approve sets `job_variations.status = 'signed'` (`portalV2Routes.mjs:427`) with **no signature artefact**. Contracts admin must still issue/collect a signed variation *outside* the portal — the UI even says so (`ClientActions.jsx:165`). So the contractual step still happens in email/DocuSign/paper. | Integrate real e-signature, or stop calling the status "signed." |
+| **Selection that costs more than allowance → variation** | **Broken loop** | When a client picks an over-allowance option, the portal computes `cost_impact` and sets status `in_review` (`portalV2Routes.mjs:617-633`) but **does not create a variation**. `client_selections.linked_variation_id` exists in schema but nothing populates it. Staff must notice the over-allowance pick, go to Finance, raise the variation by hand, and it won't link back. | On an over-allowance selection, auto-raise a draft variation in Finance and link it. |
+| **See cross-project portal health** | **No** | Every admin screen is `:projectId`-scoped. There is no "which clients have stale actions / unread messages / overdue selections across all jobs" dashboard. With 8 live jobs, staff have no triage view and will miss things. | Build a portfolio portal-ops dashboard. |
+| **Bulk anything** | **No** | No bulk selection import (a $2m fitout has 50+ selections — typed one-by-one with two options each), no bulk document publish, no template milestone set per build type. This alone makes the spreadsheet faster for setup. | CSV/template import for selections + a default milestone set per project type. |
+
+---
+
+## 3. Legal / contract risk (the part that bites on a $2m job)
+
+1. **"Approve" ≠ signed variation, but the code pretends it does.** `POST /variations/:id/respond` with `approve` sets canonical `job_variations.status = 'signed'` and `signed_date` (`portalV2Routes.mjs:427-428`) and archives a "signed" PDF — yet **there is no signature**. The known context confirms "approvals are timestamped account-recorded." If a client disputes a $40k variation, your evidence is an audit row saying their *account* clicked a button. Under HBA/HIA contract terms a variation typically must be **signed in writing before work proceeds**. Calling it `signed` in the canonical finance record is actively dangerous — it may misrepresent contractual status to your own accounts team and to any export/report built on `job_variations.status`. **Recommendation:** introduce a distinct status (`client_approved_portal`) and keep `signed` reserved for an actual executed document.
+
+2. **Anonymous legacy token coexists with the JWT portal.** `requirePortalAuth` Path B still resolves a project by `portal_token` for read access (lines 84-107). Writes are correctly blocked (`requirePortalWrite` fail-safe is solid). But a leaked share-link still exposes **the financial snapshot, every client_visible document, meeting minutes, and selections** to anyone with the URL — no login, no expiry. For a $2m client this is a privacy/data-leak exposure. **Recommendation:** gate the financial snapshot and documents behind JWT only; make tokens expirable/revocable.
+
+3. **Audit captures the client, not identity assurance.** The audit row stores `user_name` from `project.portal_client_name` (`portalV2Routes.mjs:99`) — i.e. a *project field*, not a verified identity. If the client shares their login with a spouse/architect (the schema even has `secondary`/`architect` roles), the audit says the primary client approved when they may not have. No re-auth / no per-approval identity step.
+
+4. **Decline reason is optional but consequences aren't.** A client can decline a variation with no note (`note` optional), which flips the canonical `job_variations.status = 'rejected'` (`portalV2Routes.mjs:451`). One mis-tap rejects a variation in your finance system of record, and the only "undo" is re-issuing from Finance. There is **no confirmation step** on a contractual decline.
+
+---
+
+## 4. Admin UX failures (why staff abandon it)
+
+- **No Documents UI and no upload anywhere** — already covered; it's the single biggest reason the portal stays read-only.
+- **Team directory is a raw JSON textarea** (`PortalV2Admin.jsx:108-109`). Sam edits `[{"name":...,"role":...}]` by hand and a JSON typo silently fails to a generic error. No client supervisor will touch this.
+- **Selections entry is hostile**: category, item, allowance, due, plus exactly two hard-coded options A/B with price (`SelectionsSection`). Real fitouts have 3-5 options, images, suppliers, lead times — none editable here. So the rich `selection_options` schema (image_url, supplier, lead_time) is unreachable from the UI; staff will enter the bare minimum and email the real options.
+- **No edit/delete** for milestones, selections, meetings, updates once created — only add and (for milestones) toggle confidence/current. A typo in a published update is permanent from this UI.
+- **No claim admin at all** — claims only arrive via Finance sync, so there's no way to set `payment_instructions`, fix a stage label, or re-issue. Accounts stays in Finance + email.
+- **Build phase is set in two places that disagree**: `projects.build_phase` (admin settings: `pre_construction/on_site/practical_completion`) drives the Home greeting, while `portal_milestones.is_current` drives the stage card — and the nightly sync owns the latter. Staff toggling "build phase" won't see the stage card change, and vice versa. Confusing dual source of truth.
+
+---
+
+## 5. Things that are genuinely good (briefly)
+
+- **Security boundary is correct.** `requirePortalAuth` per-project membership check (`pcu.is_active !== true` fail-safe), `requirePortalWrite` blocking token writes by default, service-role + middleware as the real boundary with RLS as net — this is well-reasoned and the comments show it.
+- **Cost/margin leakage is genuinely prevented.** Field allowlists are real column lists, inc-GST sourced from canonical generated columns, `cost_to_builder`/`amount_ex_gst`/`internal_notes` never selected. Note one subtlety: `portal_decisions.cost_delta` is populated from `variation.amount_ex_gst` in `portalIntegration.mjs:92` — but the client UI never reads `cost_delta`; it reads `variation.amountIncGst` from the join. So no leak in practice, but `cost_delta` holding an ex-GST number that's labelled neither way is a latent trap if a future dev surfaces it.
+- **Audit-before-respond with rollback** on variation approval (`portalV2Routes.mjs:407-420`) is the right instinct — it refuses to record an un-audited approval.
+- **Idempotent, defensive sync** in `portalIntegration.mjs` (best-effort, `.catch()` at call sites in `financeCCRoutes.mjs`) means a portal failure never breaks a finance request. Good blast-radius control.
+
+---
+
+## 6. Go-live blockers (given ONE prod DB, migration 103 not yet applied)
+
+1. **Migration 103 is unapplied and depends on 099-102 also being unapplied.** The whole feature is dark until five migrations are hand-pasted into the *production* SQL editor with no staging. Any error mid-paste (e.g. a CHECK conflict on an existing `portal_*` table from migration 027) leaves the DB half-migrated. `accept-invite` already defensively tolerates `project_client_users` not existing (`authRoutes.mjs:351-367`) — proof the team expects partial-apply states. **Do a dry run against a DB copy before pasting to prod.**
+2. **Cron is boot-time + 24h `setInterval`, not a real scheduler** (`dev-api.mjs:2254-2259`). On Railway, every redeploy resets the timer; if the dyno restarts daily the nightly sync may run at random times or twice. Overdue flagging and (future) reminders are therefore unreliable. Move to an external cron hitting `POST /api/cron/portal-sync`.
+3. **In-app notifications + reminders don't exist** — so even with everything applied, a client gets zero proactive nudges. The portal is opt-in-by-memory. This guts the "fewer missed selections / fewer calls" thesis.
+4. **No document upload + blank payment instructions** = the two tabs a $2m client cares most about (their contract, how to pay) are empty on launch.
+
+---
+
+## Bottom line for Sam
+
+Ship it as a **read-only client window** (Home, Journey, Financial snapshot, variation/claim *visibility*) — that part is real and will impress a client. But do **not** retire any current workflow yet: keep authoring documents in Dropbox, payment instructions in email, reminders by phone, and signed variations on paper/DocuSign, because the portal cannot yet do those. The single highest-leverage fix is **admin-side document upload + a notifications/reminder engine**; without them the portal reduces almost no admin time and the client still has to be chased by phone.

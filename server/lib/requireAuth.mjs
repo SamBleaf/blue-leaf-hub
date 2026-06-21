@@ -16,6 +16,14 @@ export async function requireAuth(req, res, next) {
     .eq("id", user.id)
     .maybeSingle();
   if (!profile?.is_active) return res.status(403).json({ ok: false, error: "Account inactive" });
+  // SECURITY: requireAuth gates STAFF endpoints. Portal clients are issued real
+  // Supabase auth accounts but must NEVER reach staff APIs through this middleware
+  // (they have a dedicated portal middleware, requirePortalAuth). Without this a
+  // logged-in client's token would pass every bare requireAuth route (CRM, costs,
+  // jobs, …). Clients authenticate to the portal via requirePortalAuth only.
+  if (profile.role === "client") {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
   req.caller = { ...profile, email: user.email };
   next();
 }

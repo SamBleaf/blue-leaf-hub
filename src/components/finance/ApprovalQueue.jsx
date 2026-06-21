@@ -1,5 +1,6 @@
 import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
+import InvoiceFileViewer from "./InvoiceFileViewer.jsx";
 
 function fmtAmount(n) {
   if (n == null) return "—";
@@ -117,7 +118,10 @@ function ApprovalCard({ doc, jobs, tradeCategories, onApprove, onReject, onRemat
       <div className="grid md:grid-cols-2 gap-0">
         {/* Left: extracted data */}
         <div className="p-4 border-b md:border-b-0 md:border-r border-hairline">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-muted mb-2">Invoice details</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted">Invoice details</p>
+            <InvoiceFileViewer docId={doc.id} label="📄 View PDF" />
+          </div>
           <p className="text-base font-bold text-ink">{doc.supplier_name || "Unknown supplier"}</p>
           {doc.supplier_abn && <p className="text-xs text-muted mt-0.5">ABN {doc.supplier_abn}</p>}
 

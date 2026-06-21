@@ -39,6 +39,7 @@ import JobCommandCentre from "./pages/JobCommandCentre.jsx";
 import JobDashboardSelector from "./pages/JobDashboardSelector.jsx";
 import SupervisorHome from "./pages/SupervisorHome.jsx";
 import PortalAdmin from "./pages/PortalAdmin.jsx";
+const PortalV2Admin = React.lazy(() => import("./pages/PortalV2Admin.jsx"));
 import RfqPackageList from "./pages/RfqPackageList.jsx";
 import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
 import Marketing from "./pages/Marketing.jsx";
@@ -53,6 +54,16 @@ import CarpentryJobDetail from "./pages/CarpentryJobDetail.jsx";
 import ConfirmQueue from "./pages/ConfirmQueue.jsx";
 
 const PortalApp = React.lazy(() => import("./pages/portal/PortalApp.jsx"));
+
+// ── Client Portal v2.0 (logged-in clients; role === "client") ────────────────
+const ClientPortalLayout = React.lazy(() => import("./pages/clientportal/ClientPortalLayout.jsx"));
+const ClientHome = React.lazy(() => import("./pages/clientportal/ClientHome.jsx"));
+const ClientActions = React.lazy(() => import("./pages/clientportal/ClientActions.jsx"));
+const ClientJourney = React.lazy(() => import("./pages/clientportal/ClientJourney.jsx"));
+const ClientSelections = React.lazy(() => import("./pages/clientportal/ClientSelections.jsx"));
+const ClientDocuments = React.lazy(() => import("./pages/clientportal/ClientDocuments.jsx"));
+const ClientMessages = React.lazy(() => import("./pages/clientportal/ClientMessages.jsx"));
+const ClientMyHome = React.lazy(() => import("./pages/clientportal/ClientMyHome.jsx"));
 
 export default function App() {
   return (
@@ -85,6 +96,74 @@ export default function App() {
                 element={<RoleRoute element={<MyPortal />} allowed={["client"]} redirectTo="/login" />}
               />
               <Route path="/supervisor" element={<SupervisorHome />} />
+
+              {/* ── Client Portal v2.0 — own layout (not AppShell); layout enforces role === "client" ── */}
+              <Route
+                path="/client-portal"
+                element={
+                  <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                    <ClientPortalLayout />
+                  </Suspense>
+                }
+              >
+                <Route
+                  index
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientHome />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="actions"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientActions />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="journey"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientJourney />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="selections"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientSelections />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="documents"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientDocuments />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="messages"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientMessages />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="my-home"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientMyHome />
+                    </Suspense>
+                  }
+                />
+              </Route>
+
               <Route element={<AppShell />}>
                 <Route
                   path="/settings/users"
@@ -190,6 +269,10 @@ export default function App() {
                 <Route
                   path="/portal-admin/:projectId"
                   element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/portal-admin/:projectId/v2"
+                  element={<RoleRoute element={<PortalV2Admin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route

@@ -640,11 +640,21 @@ function TasksPanel({ jobId }) {
   const [showAddTask, setShowAddTask] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskPriority, setTaskPriority] = useState("normal");
+  const [taskCategory, setTaskCategory] = useState("general");
+  const [taskAssignee, setTaskAssignee] = useState("");
   const [taskDesc, setTaskDesc]   = useState("");
   const [addingTask, setAddingTask] = useState(false);
   const [togglingId, setTogglingId] = useState(null);
   const [taskError, setTaskError] = useState(null);
   const [showDone, setShowDone]   = useState(false);
+  const [employees, setEmployees] = useState([]);
+  // Voice → tasks (paste a Plaud transcript → draft tasks for review)
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [drafts, setDrafts] = useState([]); // { title, priority, category, description, _keep }
+  const [addingDrafts, setAddingDrafts] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
 
   const loadTasks = useCallback(async () => {
     setLoadingT(true);
@@ -654,6 +664,11 @@ function TasksPanel({ jobId }) {
   }, [jobId]);
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
+  useEffect(() => {
+    apiFetch("/api/workforce/employees")
+      .then(({ ok, data }) => { if (ok) setEmployees((data?.employees || []).filter(e => e.is_active !== false)); })
+      .catch(() => {});
+  }, []);
 
   async function addTask() {
     if (!taskTitle.trim()) return;
@@ -663,6 +678,8 @@ function TasksPanel({ jobId }) {
       title: taskTitle.trim(),
       description: taskDesc.trim() || undefined,
       priority: taskPriority,
+      category: taskCategory,
+      assignedTo: taskAssignee || undefined,
     });
     setAddingTask(false);
     if (!ok) { setTaskError(e || "Failed to add task."); return; }
@@ -670,7 +687,55 @@ function TasksPanel({ jobId }) {
     setTaskTitle("");
     setTaskDesc("");
     setTaskPriority("normal");
+    setTaskCategory("general");
+    setTaskAssignee("");
     setShowAddTask(false);
+  }
+
+  async function extractFromTranscript() {
+    if (!transcript.trim()) return;
+    setExtracting(true);
+    setVoiceError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/tasks/from-transcript`, {
+      transcript: transcript.trim(),
+    });
+    setExtracting(false);
+    if (!ok) { setVoiceError(e || "Could not extract tasks."); return; }
+    const list = (data?.tasks || []).map((t) => ({ ...t, _keep: true }));
+    if (!list.length) { setVoiceError("No tasks found in that transcript."); return; }
+    setDrafts(list);
+  }
+
+  async function addSelectedDrafts() {
+    const keep = drafts.filter((d) => d._keep && d.title.trim());
+    if (!keep.length) return;
+    setAddingDrafts(true);
+    setVoiceError(null);
+    const created = [];
+    const failed = [];
+    for (const d of keep) {
+      // Sequential, not Promise.all — keeps order and avoids hammering the API.
+      const { ok, data } = await apiPost(`/api/carpentry/jobs/${jobId}/tasks`, {
+        title: d.title.trim(),
+        description: d.description?.trim() || undefined,
+        priority: d.priority,
+        category: d.category,
+        createdVia: "ai_extraction",
+      });
+      if (ok && data?.task) created.push(data.task);
+      else failed.push(d);
+    }
+    setAddingDrafts(false);
+    if (created.length) setTasks((prev) => [...created, ...prev]);
+    if (failed.length > 0) {
+      // Don't silently drop failures — keep only the failed drafts on screen for retry.
+      setVoiceError(`Added ${created.length} of ${keep.length}. ${failed.length} could not be added — still listed below, try again.`);
+      setDrafts(failed.map((d) => ({ ...d, _keep: true })));
+      return;
+    }
+    setDrafts([]);
+    setTranscript("");
+    setShowTranscript(false);
   }
 
   async function toggleDone(task) {
@@ -694,13 +759,97 @@ function TasksPanel({ jobId }) {
     <div className="mb-8">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-ink">Tasks for workers</h3>
-        <button
-          onClick={() => setShowAddTask((v) => !v)}
-          className="px-3 py-1.5 text-xs rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
-        >
-          {showAddTask ? "Cancel" : "+ Add Task"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setShowTranscript((v) => !v); setDrafts([]); setVoiceError(null); }}
+            className="px-3 py-1.5 text-xs rounded-lg border border-hairline text-ink font-medium hover:bg-slate-50 transition-colors"
+            title="Paste a site walk-through transcript and turn it into tasks"
+          >
+            🎤 From transcript
+          </button>
+          <button
+            onClick={() => setShowAddTask((v) => !v)}
+            className="px-3 py-1.5 text-xs rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+          >
+            {showAddTask ? "Cancel" : "+ Add Task"}
+          </button>
+        </div>
       </div>
+
+      {showTranscript && (
+        <div className="mb-4 p-4 bg-slate-50 rounded-card border border-hairline space-y-3">
+          {voiceError && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{voiceError}</div>}
+          {drafts.length === 0 ? (
+            <>
+              <label className="block text-xs font-medium text-ink mb-1">Paste your walk-through transcript</label>
+              <textarea
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                rows={5}
+                placeholder="Paste the transcript from your Plaud recorder (or any notes). We'll turn it into a draft task list you can review before adding."
+                className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
+              />
+              <button
+                onClick={extractFromTranscript}
+                disabled={extracting || !transcript.trim()}
+                className="px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-40 transition-colors"
+              >
+                {extracting ? "Extracting…" : "Extract tasks"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-medium text-ink">Review {drafts.length} draft task{drafts.length !== 1 ? "s" : ""} — untick any you do not want, then add.</p>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {drafts.map((d, i) => (
+                  <div key={i} className="flex items-start gap-2 bg-white border border-hairline rounded-lg px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={d._keep}
+                      onChange={(e) => setDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, _keep: e.target.checked } : x))}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <input
+                        value={d.title}
+                        onChange={(e) => setDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, title: e.target.value } : x))}
+                        className="w-full border border-hairline rounded px-2 py-1 text-sm focus-ring"
+                      />
+                      {(d.description || "").trim() && (
+                        <textarea
+                          value={d.description}
+                          onChange={(e) => setDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, description: e.target.value } : x))}
+                          rows={2}
+                          className="w-full border border-hairline rounded px-2 py-1 text-xs text-muted focus-ring mt-1 resize-none"
+                        />
+                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.category}</span>
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.priority.replace(/_/g, " ")}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={addSelectedDrafts}
+                  disabled={addingDrafts || !drafts.some((d) => d._keep)}
+                  className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                >
+                  {addingDrafts ? "Adding…" : `Add ${drafts.filter((d) => d._keep).length} task(s)`}
+                </button>
+                <button
+                  onClick={() => setDrafts([])}
+                  className="px-3 py-2 rounded-lg border border-hairline text-ink text-sm font-medium"
+                >
+                  Back
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {taskError && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-3">{taskError}</div>}
 
@@ -727,8 +876,8 @@ function TasksPanel({ jobId }) {
               className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
             />
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <label className="block text-xs font-medium text-ink mb-1">Priority</label>
               <select
                 value={taskPriority}
@@ -738,6 +887,33 @@ function TasksPanel({ jobId }) {
                 <option value="urgent">Urgent</option>
                 <option value="normal">Normal</option>
                 <option value="when_time_permits">When time permits</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Category</label>
+              <select
+                value={taskCategory}
+                onChange={(e) => setTaskCategory(e.target.value)}
+                className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
+              >
+                <option value="general">General</option>
+                <option value="defect">Defect</option>
+                <option value="safety">Safety</option>
+                <option value="materials">Materials</option>
+                <option value="inspection">Inspection</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Assign to (optional)</label>
+              <select
+                value={taskAssignee}
+                onChange={(e) => setTaskAssignee(e.target.value)}
+                className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
+              >
+                <option value="">Anyone on site</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
               </select>
             </div>
             <div className="flex items-end">

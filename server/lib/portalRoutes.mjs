@@ -9,7 +9,7 @@ import {
 } from "./dropboxClient.mjs";
 
 const PROJECT_SELECT =
-  "id, job_id, address, portal_client_name, portal_client_email, contract_value, completion_date_est, portal_enabled, portal_token";
+  "id, job_id, address, portal_client_name, portal_client_email, contract_value, completion_date_est, portal_enabled, portal_v2_enabled, portal_token";
 
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
@@ -41,6 +41,10 @@ async function resolveProject(token) {
     .eq("portal_token", token)
     .eq("portal_enabled", true)
     .maybeSingle();
+  // SECURITY (#15): once a project is on Portal v2 (login-based), the legacy
+  // anonymous token surface is disabled entirely — it must not leak v2 data or
+  // accept actions. v2 clients use /api/portal/app/:projectId/* with a real login.
+  if (data?.portal_v2_enabled) return null;
   return data || null;
 }
 
@@ -1207,6 +1211,18 @@ export function registerPortalRoutes(app) {
 
   app.post("/api/portal/:token/decisions/:decisionId/respond", async (req, res) => {
     try {
+      // SECURITY (#7): a contractual approval/decline must NOT be possible from an
+      // anonymous share token. A leaked URL must never sign off a six-figure
+      // variation. All approvals now go through the authenticated v2 portal
+      // (POST /api/portal/app/:projectId/variations/:id/respond, login-gated +
+      // audited). This legacy write is disabled.
+      return res.status(403).json({
+        ok: false,
+        error: "Approvals now require logging in to your client portal.",
+        requiresLogin: true,
+        loginUrl: "/client-portal"
+      });
+      // eslint-disable-next-line no-unreachable
       const project = await resolveProject(req.params.token);
       if (!project) return res.status(404).json({ ok: false, error: "Portal not found" });
       const sb = getServiceSupabase();

@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-05-30  
-> Total SOPs: 106  
+> Last updated: 2026-06-21  
+> Total SOPs: 120  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -91,6 +91,10 @@
 | 11-07 | Send a message to the client | [portal_send_message.md](11_client_portal/portal_send_message.md) | Client Portal | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 11-08 | Update portal milestones | [portal_update_milestones.md](11_client_portal/portal_update_milestones.md) | Client Portal | Admin, Supervisor | Draft | untested | Yes | High |
 | 11-09 | Client guide — using your portal | [portal_client_guide.md](11_client_portal/portal_client_guide.md) | Client Portal | Client | Draft | untested | Yes | High |
+| 11-10 | Client login & invite (Portal v2.0) | [11-10_v2_client_login_and_invite.md](11_client_portal/11-10_v2_client_login_and_invite.md) | Client Portal v2.0 | Admin, Client | Draft | untested | Yes | High |
+| 11-11 | My Actions & approvals (Portal v2.0) | [11-11_v2_my_actions_approvals.md](11_client_portal/11-11_v2_my_actions_approvals.md) | Client Portal v2.0 | Client, Admin | Draft | untested | Yes | High |
+| 11-12 | Admin console (Portal v2.0) | [11-12_v2_admin_console.md](11_client_portal/11-12_v2_admin_console.md) | Client Portal v2.0 | Admin, Supervisor | Draft | untested | Yes | High |
+| 11-13 | Project journey & documents (Portal v2.0) | [11-13_v2_project_journey_and_documents.md](11_client_portal/11-13_v2_project_journey_and_documents.md) | Client Portal v2.0 | Client, Admin | Draft | untested | Yes | High |
 | 12-01 | Update company details and logo | [settings_company_details.md](12_admin_settings/settings_company_details.md) | Settings | Admin | Draft | untested | Yes | Medium |
 | 12-02 | Invite a new staff member | [settings_invite_user.md](12_admin_settings/settings_invite_user.md) | Settings | Admin | Draft | untested | Yes | High |
 | 12-03 | Manage user roles and access | [settings_manage_users.md](12_admin_settings/settings_manage_users.md) | Settings | Admin | Draft | untested | Yes | High |
@@ -146,4 +150,4 @@
 
 ---
 
-*Last updated: 2026-06-16. Total SOPs: 116. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+*Last updated: 2026-06-21. Total SOPs: 120. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*

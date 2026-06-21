@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
+import { selectedJobQuery } from "../../lib/workerJob.js";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -25,7 +26,8 @@ export default function WorkerHome() {
 
   useEffect(() => {
     let stop = false;
-    workerFetch("/api/worker/me")
+    const q = selectedJobQuery();
+    workerFetch(`/api/worker/me${q ? `?${q}` : ""}`)
       .then(r => r.json())
       .then(j => {
         if (stop) return;

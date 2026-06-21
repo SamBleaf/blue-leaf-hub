@@ -138,7 +138,7 @@ const SIDEBAR_EXPANDED_W = 256;
 const SIDEBAR_COLLAPSED_W = 64;
 
 const QUICK_ADD_ITEMS = [
-  { label: "Task",       icon: "✅", path: (pid) => pid ? `/operations/${pid}/schedule` : "/operations" },
+  { label: "Site Task",  icon: "✅", path: (pid) => pid ? `/operations/${pid}?panel=site-tasks` : "/operations" },
   { label: "Site note",  icon: "📋", path: (pid) => pid ? `/operations/${pid}/diary` : "/operations" },
   { label: "RFQ",        icon: "📄", path: () => "/tender-manager/rfq-engine" },
   { label: "PO",         icon: "📦", path: (pid) => pid ? `/operations/${pid}` : "/operations" },
@@ -213,6 +213,7 @@ export default function AppShell() {
     () =>
       QUICK_ADD_ITEMS.filter((item) => {
         if (item.label === "RFQ" || item.label === "PO") return can.accessTender(role);
+        if (item.label === "Site Task") return can.editSchedule(role); // creating site tasks is admin/supervisor
         return true;
       }),
     [role]

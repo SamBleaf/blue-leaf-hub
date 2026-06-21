@@ -23,3 +23,30 @@ export function addDaysYmd(ymd, days) {
   if (Number.isNaN(d.getTime())) throw new Error("Invalid date");
   return d.toISOString().slice(0, 10);
 }
+
+// The business operates in Australia (QLD). Computing "today" via
+// new Date().toISOString().slice(0,10) returns the UTC date, which is the
+// PREVIOUS day for the first ~10 hours of every AEST day — an off-by-one that
+// corrupts week boundaries, "missing timesheet" flags and (downstream) payroll.
+// Always derive calendar dates in the business timezone.
+export const BUSINESS_TZ = "Australia/Brisbane"; // UTC+10, no DST
+
+// Current calendar date (YYYY-MM-DD) in the business timezone.
+export function todayYmd(tz = BUSINESS_TZ) {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+// Monday (week start) of the week containing the given YYYY-MM-DD.
+// Noon-anchored so getDay()/setDate() never cross a UTC or DST boundary.
+export function mondayOf(ymd) {
+  const base = toYmd(ymd) || todayYmd();
+  const d = new Date(`${base}T12:00:00`);
+  const day = d.getDay(); // 0=Sun … 6=Sat (local, but noon-anchored so stable)
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}

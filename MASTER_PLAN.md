@@ -69,6 +69,25 @@ Audit trail: `AUDIT_REPORT_2026-06-02.md`, `AUDIT_REPORT_2026-06-03.md` (+ a ful
 - [ ] **BQ-10** Procurement Intelligence — one-stop procurement hub in Operations, triggered at job-lock (see ESTIMATING OS section) — PLANNING
 - [ ] **BQ-11** Trade Intelligence (subbie market) — collect in Hub, feed to Bestimator (see ESTIMATING OS section)
 
+### DOCUMENT TEMPLATES WORKSTREAM (full audit → `docs/templates/TEMPLATE_MASTER_AUDIT.md`)
+> 32 templates exist, 47 missing. HTML emails → `server/lib/emailTemplates/`; client DOCX → `docs/templates/*.docx`; server PDFs → `server/lib/pdfKit.mjs`. Each ships with an SOP (Section 14). DB columns still needed (mig): `jobs.practical_completion_date`, `jobs.contract_signed_at`, `projects.supervisor_phone` (bank fields done in mig 106).
+
+**Batch 1 — critical (blocks real workflows)**
+- [ ] **BQ-12** Portal invite email (HTML) — trigger: job created + portal enabled
+- [x] **BQ-13** Progress-claim HTML email — replaces the `<pre>` block (financeCCRoutes) — DONE (Phase 0); bank block needs mig 106 + backfill
+- [x] **BQ-14** Variation HTML email — replaces the `<pre>` block — DONE (Phase 0)
+- [ ] **BQ-15** WHS generation UI — engine + markdown templates exist; build the builder-facing page
+- [ ] **BQ-16** Proposal acceptance letter (DOCX) — signed acceptance record
+- [ ] **BQ-17** Practical completion notice (DOCX/PDF) — legal trigger for DLP + final payment
+- [ ] **BQ-18** Handover checklist (DOCX/PDF)
+- [ ] **BQ-19** Client onboarding welcome email (HTML)
+- [ ] **BQ-20** SOPA overdue-payment notice (PDF)
+- [ ] **BQ-21** Selections schedule (DOCX) — #1 variation source has no formal process
+
+**Batch 2 — client experience:** BQ-22 enquiry confirmation · BQ-23 weekly client update · BQ-24 payment reminder · BQ-25 payment receipt · BQ-26 warranty pack · BQ-27 certificates index · BQ-28 completion thank-you + testimonial · BQ-29 portal action-required · BQ-30 meeting minutes · BQ-31 PTSA covering email
+**Batch 3 — operational:** BQ-32 quote comparison · BQ-33 quality inspection checklist · BQ-34 defect list · BQ-35 pre-start checklist · BQ-36 sub onboarding · BQ-37 sub compliance reminder · BQ-38 long-lead register · BQ-39 budget-vs-actual · BQ-40 margin-risk report · BQ-41 6-month defect reminder
+**Batch 4 — polish/marketing:** BQ-42 appliance/finishes register · BQ-43 maintenance guide · BQ-44 neighbour letter · BQ-45 onboarding pack · BQ-46 photo-usage approval · BQ-47 case-study brief · BQ-48 discovery questionnaire · BQ-49 meeting agenda · BQ-50 defect-liability form · BQ-51 construction commencement notice
+
 ---
 
 ## ESTIMATING OPERATING SYSTEM — division of labour + data flows

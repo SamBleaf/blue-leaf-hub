@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
 import { uploadWorkerPhoto } from "../../lib/workerPhoto.js";
+import { getSelectedJob, setSelectedJob } from "../../lib/workerJob.js";
 
 const FILTER_TABS = ["All", "My tasks", "Urgent", "Done"];
 
@@ -20,6 +21,7 @@ const PRIORITY_BADGE = {
 export default function WorkerTasks() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(false);
   const [filter, setFilter] = useState("All");
   const [selected, setSelected] = useState(null);
   const [completing, setCompleting] = useState(false);
@@ -29,19 +31,43 @@ export default function WorkerTasks() {
   const [photoPath, setPhotoPath] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [job, setJob] = useState(getSelectedJob());
+  const [showJobPicker, setShowJobPicker] = useState(false);
 
+  // Mount: load the job list + me. The selected job is restored from localStorage.
   useEffect(() => {
     let stop = false;
     Promise.all([
-      workerFetch("/api/worker/tasks").then(r => r.json()),
+      workerFetch("/api/worker/jobs").then(r => r.json()),
       workerFetch("/api/worker/me").then(r => r.json()),
-    ]).then(([tasksJ, meJ]) => {
+    ]).then(([jobsJ, meJ]) => {
       if (stop) return;
-      if (tasksJ.ok) setTasks(tasksJ.tasks || []);
+      if (jobsJ.ok) setJobs(jobsJ.jobs || []);
       if (meJ.ok) setMe(meJ);
     }).catch(() => {}).finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
   }, []);
+
+  // Load tasks whenever the selected job changes. No job selected → no tasks.
+  useEffect(() => {
+    if (!job?.id) { setTasks([]); return; }
+    let stop = false;
+    setTasksLoading(true);
+    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type)}`)
+      .then(r => r.json())
+      .then(j => { if (!stop && j.ok) setTasks(j.tasks || []); })
+      .catch(() => {})
+      .finally(() => { if (!stop) setTasksLoading(false); });
+    return () => { stop = true; };
+  }, [job?.id, job?.type]);
+
+  function pickJob(j) {
+    const next = { id: j.id, type: j.type, address: j.address };
+    setJob(next);
+    setSelectedJob(next);
+    setShowJobPicker(false);
+  }
 
   const myId = me?.employee?.id;
 
@@ -141,8 +167,38 @@ export default function WorkerTasks() {
   return (
     <WorkerLayout>
       <div className="px-4 pt-5 pb-8">
-        <h1 className="text-base font-bold text-ink mb-4">Site tasks</h1>
+        <h1 className="text-base font-bold text-ink mb-3">Site tasks</h1>
 
+        {/* Job selector — the worker picks which site they're on */}
+        <button
+          type="button"
+          onClick={() => setShowJobPicker(true)}
+          className="w-full flex items-center justify-between gap-2 mb-4 px-3 py-2.5 rounded-lg bg-white border border-hairline text-left"
+        >
+          <span className="min-w-0">
+            <span className="block text-[10px] font-semibold text-muted uppercase tracking-wide">Job</span>
+            <span className={`block text-sm font-medium truncate ${job ? "text-ink" : "text-muted"}`}>
+              {job ? job.address : "Select a job"}
+            </span>
+          </span>
+          <span className="text-primary text-sm font-semibold shrink-0">Change ▾</span>
+        </button>
+
+        {!job ? (
+          <div className="text-center mt-10">
+            <p className="text-sm text-muted">Select a job to see its site tasks.</p>
+            <button
+              type="button"
+              onClick={() => setShowJobPicker(true)}
+              className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold"
+            >
+              Choose a job
+            </button>
+          </div>
+        ) : tasksLoading ? (
+          <p className="text-sm text-muted text-center mt-10">Loading tasks…</p>
+        ) : (
+        <>
         {/* Filter tabs */}
         <div className="flex gap-1 mb-4 overflow-x-auto">
           {FILTER_TABS.map(f => (
@@ -208,7 +264,39 @@ export default function WorkerTasks() {
             )}
           </>
         )}
+        </>
+        )}
       </div>
+
+      {/* Job picker bottom sheet */}
+      {showJobPicker && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowJobPicker(false)} />
+          <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[80vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-ink mb-3">Choose a job</h3>
+            {jobs.length === 0 ? (
+              <p className="text-sm text-muted">No active jobs found.</p>
+            ) : (
+              <div className="divide-y divide-hairline">
+                {jobs.map(j => (
+                  <button
+                    key={`${j.type}-${j.id}`}
+                    type="button"
+                    onClick={() => pickJob(j)}
+                    className="w-full flex items-center gap-3 py-3 text-left"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className={`block text-sm truncate ${job?.id === j.id ? "font-semibold text-primary" : "text-ink"}`}>{j.address}</span>
+                      <span className="block text-xs text-muted">{j.type === "carpentry" ? "Carpentry" : "Construction"}{j.recent ? " · recent" : ""}</span>
+                    </span>
+                    {job?.id === j.id && <span className="text-primary shrink-0">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Task detail bottom sheet */}
       {selected && (

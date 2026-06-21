@@ -13,12 +13,43 @@ import { getBuildexactCategoryMapping } from "./buildexactParser.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { generateProcurementPlan, computeCommittedCost } from "./procurementService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
+import { appBaseUrl } from "./appUrl.mjs";
+import { progressClaimEmail, variationEmail } from "./emailTemplates/financeEmails.mjs";
 import { buildProgressClaimTokens, STAGE_LABELS as STAGE_LABELS_FROM_TOKENS } from "./docTokens.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { translateDbError } from "./apiResponse.mjs";
 import { getCanonicalContractValue } from "./factsService.mjs";
+import {
+  syncVariationSent,
+  syncVariationSigned,
+  syncVariationRejected,
+  syncClaimIssued,
+  syncClaimPaid
+} from "./portalIntegration.mjs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+// Company bank details for the payment block in claim/variation emails.
+// Columns added in migration 106; returns null gracefully if not yet applied or
+// not yet populated, so emails still send (just without the payment block).
+async function getCompanyBank(sb) {
+  try {
+    const { data, error } = await sb
+      .from("company_profile")
+      .select("bank_account_name, bank_bsb, bank_account_number")
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    if (!data.bank_bsb && !data.bank_account_number) return null;
+    return {
+      accountName: data.bank_account_name || "Blue Leaf Building",
+      bsb: data.bank_bsb || null,
+      accountNumber: data.bank_account_number || null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function norm(s) {
   return String(s || "")
@@ -1231,38 +1262,27 @@ export function registerFinanceCCRoutes(app) {
       .eq("id", claimId).select().single();
     if (updErr) return res.status(500).json({ ok: false, error: translateDbError(updErr) });
 
+    // Portal v2: surface this claim in the client's portal + My Actions feed.
+    await syncClaimIssued({ jobId, claim: updated, stageLabel: STAGE_LABELS[updated.stage] || updated.stage }).catch(() => {});
+
     // Email client PDF if address provided
     let emailSent = false;
     let trackingId = null;
     if (email_to) {
       const stageLabel = STAGE_LABELS[claim.stage] || claim.stage;
-      const fmtAud = n => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n || 0);
-      const amountEx = Number(claim.amount_ex_gst || 0);
       const safeAddr = (job.address || "").replace(/[^a-zA-Z0-9]/g, "-");
       const { randomUUID } = await import("crypto");
       trackingId = randomUUID();
-      const baseUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
-      const pixelUrl = `${baseUrl}/api/track/email/${trackingId}`;
+      const pixelUrl = `${appBaseUrl()}/api/track/email/${trackingId}`;
       try {
-        const bodyText = [
-          `Please find attached Progress Claim ${claim.claim_number} for ${job.address}.`,
-          ``,
-          `Stage: ${stageLabel}`,
-          `Amount (ex GST): ${fmtAud(amountEx)}`,
-          `GST: ${fmtAud(amountEx * 0.1)}`,
-          `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
-          `Payment due: ${dueDate}`,
-          ``,
-          `Please direct all payment enquiries to accounts@blueleafbuilding.com.au.`,
-          ``,
-          `Blue Leaf Building`,
-        ].join("\n");
+        const bank = await getCompanyBank(sb);
+        const { subject, text, html } = progressClaimEmail({ claim, job, stageLabel, dueDate, bank, pixelUrl });
         await sendPlainMail({
           to: email_to,
           cc: email_cc || undefined,
-          subject: `Progress Claim ${claim.claim_number} — ${job.address}`,
-          text: bodyText,
-          html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${bodyText}</pre><img src="${pixelUrl}" width="1" height="1" style="display:none" alt="">`,
+          subject,
+          text,
+          html,
           attachments: [{
             filename: `Progress-Claim-${claim.claim_number}-${safeAddr}.pdf`,
             content: clientPdf,
@@ -1323,6 +1343,9 @@ export function registerFinanceCCRoutes(app) {
       : claim.status;
 
     await sb.from("progress_claims").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id", claimId);
+
+    // Portal v2: mirror paid status to the client portal claim + clear its action.
+    await syncClaimPaid({ claimId, newStatus }).catch(() => {});
 
     const { data: refreshed } = await sb.from("progress_claims")
       .select("*, progress_claim_payments(payment_amount, payment_date, payment_method, payment_reference)")
@@ -1883,36 +1906,24 @@ export function registerFinanceCCRoutes(app) {
       .eq("id", vid).select().single();
     if (updErr) return res.status(500).json({ ok: false, error: translateDbError(updErr) });
 
+    // Portal v2: surface this variation in the client's My Actions feed for approval.
+    await syncVariationSent({ jobId, variation: updated }).catch(() => {});
+
     let emailSent = false;
     let trackingId = null;
     if (email_to) {
-      const fmtAud = n => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n || 0);
-      const amountEx = Number(variation.amount_ex_gst || 0);
       const safeAddr = (job.address || "").replace(/[^a-zA-Z0-9]/g, "-");
       const { randomUUID } = await import("crypto");
       trackingId = randomUUID();
-      const baseUrl = (process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "");
-      const pixelUrl = `${baseUrl}/api/track/email/${trackingId}`;
+      const pixelUrl = `${appBaseUrl()}/api/track/email/${trackingId}`;
       try {
-        const bodyText = [
-          `Please find attached Variation ${variation.variation_number} for ${job.address}.`,
-          ``,
-          `Title: ${variation.title}`,
-          ...(variation.description ? [`Description: ${variation.description}`, ``] : [``]),
-          `Amount (ex GST): ${fmtAud(amountEx)}`,
-          `GST: ${fmtAud(amountEx * 0.1)}`,
-          `Total (inc GST): ${fmtAud(amountEx * 1.1)}`,
-          ...(variation.eot_days ? [`Extension of time: ${variation.eot_days} days`, ``] : [``]),
-          `To approve this variation, please reply to this email or contact us at accounts@blueleafbuilding.com.au.`,
-          ``,
-          `Blue Leaf Building`,
-        ].join("\n");
+        const { subject, text, html } = variationEmail({ variation, job, pixelUrl });
         await sendPlainMail({
           to: email_to,
           cc: email_cc || undefined,
-          subject: `Variation ${variation.variation_number} — ${job.address}`,
-          text: bodyText,
-          html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${bodyText}</pre><img src="${pixelUrl}" width="1" height="1" style="display:none" alt="">`,
+          subject,
+          text,
+          html,
           attachments: [{
             filename: `Variation-${variation.variation_number}-${safeAddr}.pdf`,
             content: pdfBuffer,
@@ -1966,6 +1977,9 @@ export function registerFinanceCCRoutes(app) {
       }).catch(e => console.warn("[sign] normalized_costs:", e.message));
     }
 
+    // Portal v2: approve the client's portal decision + archive signed PDF to Documents.
+    await syncVariationSigned({ variationId: vid }).catch(() => {});
+
     res.json({ ok: true, variation });
   });
 
@@ -1978,6 +1992,10 @@ export function registerFinanceCCRoutes(app) {
       .update({ status: "rejected", rejection_reason: reason || null, updated_at: new Date().toISOString() })
       .eq("id", vid).select().single();
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    // Portal v2: decline the client's portal decision to keep both in sync.
+    await syncVariationRejected({ variationId: vid, reason }).catch(() => {});
+
     res.json({ ok: true, variation: data });
   });
 
@@ -2359,7 +2377,7 @@ export function registerFinanceCCRoutes(app) {
       await sendPlainMail({
         to: (admins || []).map(u => u.email).filter(Boolean).join(", ") || "accounts@blueleafbuilding.com.au",
         subject: `WIPAA Review Due — ${jobs.length} job${jobs.length > 1 ? "s" : ""} (${today})`,
-        text: `Monthly WIPAA review is due for the following jobs:\n\n${jobList}\n\nLogin to Blue Leaf Hub to complete each review.\n${(process.env.APP_URL || "https://blueleafhub.com.au").replace(/\/$/, "")}/finance/jobs`,
+        text: `Monthly WIPAA review is due for the following jobs:\n\n${jobList}\n\nLogin to Blue Leaf Hub to complete each review.\n${appBaseUrl()}/finance/jobs`,
       });
     } catch (e) {
       console.error("[WIPAA reminder] email failed:", e.message);

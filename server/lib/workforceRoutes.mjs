@@ -7,6 +7,7 @@ import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err } from "./apiResponse.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey } from "./siteMedia.mjs";
+import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
 
@@ -76,12 +77,11 @@ function computeCost(bands, employee, rateOverride) {
 
 // ── Monday of the current ISO week ───────────────────────────────────────────
 
+// Monday of the week containing dateStr, in the business timezone (AU-local).
+// Delegates to the shared, noon-anchored mondayOf() so the week boundary is not
+// thrown off by the UTC date being a day behind during AEST mornings.
 function weekStart(dateStr) {
-  const d = new Date(dateStr || Date.now());
-  const day = d.getUTCDay(); // 0=Sun
-  const diff = (day === 0 ? -6 : 1 - day);
-  d.setUTCDate(d.getUTCDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return mondayOf(dateStr || todayYmd());
 }
 
 // ── Buildexact sync ───────────────────────────────────────────────────────────
@@ -498,6 +498,59 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, employees: data });
   });
 
+  // Weekly timesheet completion snapshot (admin/supervisor): for each active
+  // employee × each working day of the week, did they submit/approve a timesheet?
+  // Lets the office see at a glance who still owes hours. AU-local week math.
+  app.get("/api/workforce/completion-snapshot", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const week_start = mondayOf(req.query.weekStart || todayYmd());
+    const week_end = addDaysYmd(week_start, 6);
+
+    const { data: settings } = await sb.from("workforce_settings").select("working_days").limit(1).maybeSingle();
+    const workingDayNames = (settings?.working_days?.length ? settings.working_days : ["Mon", "Tue", "Wed", "Thu", "Fri"]);
+    const DOW_NAME = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    // Working-day dates within this week (noon-anchored to avoid TZ drift).
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDaysYmd(week_start, i);
+      const dow = new Date(`${d}T12:00:00`).getDay();
+      if (workingDayNames.includes(DOW_NAME[dow])) dates.push(d);
+    }
+
+    const { data: emps, error: empErr } = await sb.from("employees")
+      .select("id, name, employment_type, is_active")
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+    if (empErr) return res.status(500).json({ ok: false, error: empErr.message });
+
+    const { data: ts } = await sb.from("timesheets")
+      .select("employee_id, date, status")
+      .gte("date", week_start).lte("date", week_end);
+    const byKey = {};
+    for (const t of ts || []) byKey[`${t.employee_id}|${t.date}`] = t.status;
+
+    const DONE = ["submitted", "approved"];
+    const employees = (emps || []).map((e) => {
+      // Only full-time staff are expected to log every working day. Casual/part-time
+      // would otherwise show as "missing" on days they never work → false positives
+      // that drown the real signal. They still appear (informational), missing = 0.
+      const expectsAllDays = e.employment_type === "full_time";
+      const days = {};
+      let done = 0, missing = 0;
+      for (const d of dates) {
+        const st = byKey[`${e.id}|${d}`] || null;
+        if (st && DONE.includes(st)) { days[d] = "done"; done++; }
+        else if (st === "rejected") { days[d] = "returned"; if (expectsAllDays) missing++; }
+        else if (st) { days[d] = st; if (expectsAllDays) missing++; }
+        else { days[d] = expectsAllDays ? "missing" : "na"; if (expectsAllDays) missing++; }
+      }
+      return { id: e.id, name: e.name, employment_type: e.employment_type, expects_all_days: expectsAllDays, days, done, missing };
+    });
+
+    res.json({ ok: true, week_start, week_end, dates, employees });
+  });
+
   app.post("/api/workforce/employees", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     const { name, trade, employment_type, hourly_rate, overtime_multiplier, double_time_multiplier, is_leading_hand, buildexact_employee_id, email, phone, staff_code } = req.body;
@@ -547,7 +600,7 @@ export function registerWorkforceRoutes(app) {
 
   app.get("/api/workforce/employees/:id/preview", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayYmd();
     const [empRes, tsRes] = await Promise.all([
       sb.from("employees").select("id, name, trade, employment_type, is_leading_hand, is_active").eq("id", req.params.id).single(),
       sb.from("timesheets").select("*, timesheet_entries(*)").eq("employee_id", req.params.id).eq("date", today).maybeSingle(),
@@ -809,7 +862,7 @@ export function registerWorkforceRoutes(app) {
     }
 
     // Workers active this week
-    const monStr = weekStart(new Date().toISOString().slice(0, 10));
+    const monStr = weekStart(todayYmd());
     const { data: weekEntries } = await sb
       .from("timesheet_entries")
       .select("hours, cost_amount, timesheets!inner(project_id, status, date, employees(id, name))")
@@ -851,6 +904,11 @@ export function registerWorkforceRoutes(app) {
   // ── Site tasks ────────────────────────────────────────────────────────────
 
   const PRIORITY_ORDER = { urgent: 0, normal: 1, when_time_permits: 2 };
+  // Whitelists for worker-supplied query params. These endpoints run with the
+  // service role (RLS bypassed), so every client-supplied value that reaches a
+  // PostgREST filter MUST be validated against a fixed set / isUuid() first.
+  const SITE_TASK_CATEGORIES = ["general", "defect", "safety", "materials", "inspection"];
+  const WORKER_JOB_TYPES = ["project", "carpentry"];
 
   app.get("/api/projects/:id/site-tasks", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
@@ -988,8 +1046,8 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const today = todayYmd();
+    const yesterday = addDaysYmd(today, -1);
     const monStr = weekStart(today);
 
     const [todayTs, yesterdayTs, weekEntries, settings] = await Promise.all([
@@ -1001,11 +1059,32 @@ export function registerWorkforceRoutes(app) {
 
     const weeklyHours = (weekEntries.data || []).reduce((s, e) => s + Number(e.hours || 0), 0);
 
-    // Open tasks for the current project OR carpentry job.
+    // Open-task badge count. If the PWA passes the worker's currently-selected job
+    // (?jobId&jobType) the badge follows that job so it always matches the Site-tasks
+    // list. With no selection (first home load) fall back to the latest-timesheet
+    // context purely for the badge — never for the task list itself.
     let openTaskCount = 0;
+    const selJobId = (req.query.jobId || "").trim();
+    const selJobType = (req.query.jobType || "").trim();
     const currentProjectId = todayTs.data?.project_id || yesterdayTs.data?.project_id || null;
     const currentCarpentryJobId = todayTs.data?.carpentry_job_id || yesterdayTs.data?.carpentry_job_id || null;
-    if (currentProjectId || currentCarpentryJobId) {
+
+    const selJobTypeOk = !selJobType || WORKER_JOB_TYPES.includes(selJobType);
+    let selJobAllowed = false;
+    if (selJobId && isUuid(selJobId) && selJobTypeOk) {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      selJobAllowed = workerMaySeeJob(vis, selJobId, selJobType);
+    }
+    if (selJobAllowed) {
+      let q = sb.from("site_tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]);
+      if (selJobType === "carpentry") q = q.eq("carpentry_job_id", selJobId);
+      else if (selJobType === "project") q = q.eq("project_id", selJobId);
+      else q = q.or(`project_id.eq.${selJobId},carpentry_job_id.eq.${selJobId}`);
+      // match the list's visibility: unassigned OR mine
+      q = q.or(`assigned_to.is.null,assigned_to.eq.${emp.id}`);
+      const { count } = await q;
+      openTaskCount = count || 0;
+    } else if (currentProjectId || currentCarpentryJobId) {
       let q = sb.from("site_tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]);
       if (currentProjectId && currentCarpentryJobId) q = q.or(`project_id.eq.${currentProjectId},carpentry_job_id.eq.${currentCarpentryJobId}`);
       else if (currentProjectId) q = q.eq("project_id", currentProjectId);
@@ -1061,6 +1140,71 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, projects: list });
   });
 
+  // Job picker for the Worker PWA Site-tasks screen (W-fix). Returns the jobs a
+  // worker would pick from — every ACTIVE project/carpentry job, PLUS any job the
+  // worker has logged hours on in the last 90 days (so a recently-finished site
+  // they still owe tasks on stays available). "recent" jobs sort first so the
+  // common case (the site I'm on now) is one tap. This replaces the old implicit
+  // "infer the job from the latest timesheet" behaviour that hid freshly-added tasks.
+  // Jobs a worker may access: active projects + active carpentry jobs, PLUS any
+  // job they logged a timesheet against in the last 90 days. This is the single
+  // source of truth for BOTH the job picker AND authorising task reads — the
+  // worker endpoints run with the service role (RLS bypassed), so a UUID-valid
+  // jobId must still be checked against this set or any worker could enumerate
+  // every job's tasks/photos by guessing ids.
+  async function workerVisibleJobs(sb, empId) {
+    const since = addDaysYmd(todayYmd(), -90);
+    const [projRes, carpRes, tsRes] = await Promise.all([
+      sb.from("projects").select("id, address, status").order("address", { ascending: true }),
+      sb.from("carpentry_jobs").select("id, address, client_name, status").order("address", { ascending: true }),
+      sb.from("timesheets").select("project_id, carpentry_job_id").eq("employee_id", empId).gte("date", since),
+    ]);
+    const recentProj = new Set();
+    const recentCarp = new Set();
+    for (const t of tsRes.data || []) {
+      if (t.project_id) recentProj.add(t.project_id);
+      if (t.carpentry_job_id) recentCarp.add(t.carpentry_job_id);
+    }
+    const projects = (projRes.data || [])
+      .map(p => ({ id: p.id, address: p.address, status: p.status, type: "project", recent: recentProj.has(p.id) }))
+      .filter(p => p.status === "active" || p.recent);
+    const carpJobs = (carpRes.data || [])
+      .map(j => ({ id: j.id, address: j.client_name ? `${j.address} (${j.client_name})` : j.address, status: j.status, type: "carpentry", recent: recentCarp.has(j.id) }))
+      .filter(j => j.status === "active" || j.recent);
+    return {
+      error: projRes.error,
+      projects,
+      carpJobs,
+      projectIds: new Set(projects.map(p => p.id)),
+      carpentryIds: new Set(carpJobs.map(j => j.id)),
+    };
+  }
+
+  function workerMaySeeJob(vis, jobId, jobType) {
+    if (jobType === "carpentry") return vis.carpentryIds.has(jobId);
+    if (jobType === "project") return vis.projectIds.has(jobId);
+    return vis.projectIds.has(jobId) || vis.carpentryIds.has(jobId);
+  }
+
+  app.get("/api/worker/jobs", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
+
+    const vis = await workerVisibleJobs(sb, emp.id);
+    if (vis.error) return res.status(500).json({ ok: false, error: vis.error.message });
+
+    const list = [...vis.projects, ...vis.carpJobs].sort((a, b) => {
+      if (a.recent !== b.recent) return a.recent ? -1 : 1;
+      const aActive = a.status === "active" ? 0 : 1;
+      const bActive = b.status === "active" ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return a.address.localeCompare(b.address);
+    });
+
+    res.json({ ok: true, jobs: list });
+  });
+
   app.post("/api/worker/timesheets", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
@@ -1075,7 +1219,7 @@ export function registerWorkforceRoutes(app) {
     }
     // Tolerate timezones ahead of UTC (e.g. AEST +10): the worker's local "today" can be
     // a calendar day ahead of the server's UTC date, so allow up to UTC + 1 day.
-    const maxDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const maxDate = addDaysYmd(todayYmd(), 1);
     if (date > maxDate) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
@@ -1172,7 +1316,7 @@ export function registerWorkforceRoutes(app) {
     if (ts.status === "approved") return res.status(409).json({ ok: false, error: "Cannot edit approved timesheet" });
 
     const { entries, ...rest } = req.body;
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = todayYmd();
     if (rest.date && rest.date > todayStr) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
@@ -1200,40 +1344,35 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    // Find current context from latest timesheet (may be regular project or carpentry job)
-    const { data: latestTs } = await sb
-      .from("timesheets")
-      .select("project_id, carpentry_job_id")
-      .eq("employee_id", emp.id)
-      .in("status", ["submitted", "approved"])
-      .order("date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // The worker EXPLICITLY selects a job (sent as ?jobId&jobType) — we no longer
+    // infer it from the latest timesheet. Inference was the bug: a freshly-added
+    // task on a job the worker hadn't yet logged hours against was invisible.
+    const jobId = (req.query.jobId || "").trim();
+    const jobType = (req.query.jobType || "").trim();
+    const category = (req.query.category || "").trim();
 
-    if (!latestTs) return res.json({ ok: true, tasks: [], project_id: null });
+    if (!jobId) return res.json({ ok: true, tasks: [], needsJobSelection: true });
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.", "BAD_JOB_ID");
+    if (jobType && !WORKER_JOB_TYPES.includes(jobType)) return err(res, 400, "Invalid job type.", "BAD_JOB_TYPE");
+    if (category && !SITE_TASK_CATEGORIES.includes(category)) return err(res, 400, "Invalid category.", "BAD_CATEGORY");
 
-    let tasksQuery;
-    if (latestTs.carpentry_job_id) {
-      tasksQuery = sb
-        .from("site_tasks")
-        .select("*, employees!assigned_to(id, name)")
-        .eq("carpentry_job_id", latestTs.carpentry_job_id)
-        .neq("status", "wont_do")
-        .order("sort_order")
-        .order("created_at");
-    } else if (latestTs.project_id) {
-      tasksQuery = sb
-        .from("site_tasks")
-        .select("*, employees!assigned_to(id, name)")
-        .eq("project_id", latestTs.project_id)
-        .neq("status", "wont_do")
-        .order("sort_order")
-        .order("created_at");
-    } else {
-      return res.json({ ok: true, tasks: [], project_id: null });
-    }
+    // Authorise: the worker may only read tasks for a job in their visible set.
+    const vis = await workerVisibleJobs(sb, emp.id);
+    if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "You don't have access to this job.", "JOB_FORBIDDEN");
 
-    const { data: tasks } = await tasksQuery;
+    let q = sb
+      .from("site_tasks")
+      .select("*, employees!assigned_to(id, name)")
+      .neq("status", "wont_do");
+    // jobId is validated as a UUID above, so the .or() interpolation is injection-safe.
+    if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
+    else if (jobType === "project") q = q.eq("project_id", jobId);
+    else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
+    if (category) q = q.eq("category", category);
+    q = q.order("sort_order").order("created_at");
+
+    const { data: tasks, error } = await q;
+    if (error) return err(res, 500, error.message);
 
     // Filter: open+in_progress tasks (unassigned OR assigned to this employee) + done tasks
     const visible = (tasks || []).filter(t =>
@@ -1243,7 +1382,7 @@ export function registerWorkforceRoutes(app) {
     );
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
-    res.json({ ok: true, tasks: sorted, project_id: latestTs.project_id, carpentry_job_id: latestTs.carpentry_job_id });
+    res.json({ ok: true, tasks: sorted, jobId, jobType: jobType || null });
   });
 
   // Upload a worker completion photo to the private site-media bucket; returns the storage PATH.

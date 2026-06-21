@@ -399,6 +399,42 @@ if (jwt) {
   skip("IMAP status", "No JWT");
 }
 
+// ── 12. Client Portal v2 ────────────────────────────────────────────────────
+// These assertions are migration-INDEPENDENT: they exercise the requirePortalAuth
+// boundary + route registration, which reject before any portal_v2 table is read.
+// Deeper data-flow assertions (invite→login→approve variation→archive→audit) need
+// migrations 099–103 applied to the live DB and a seeded v2 project; see
+// scripts/seed_portal_v2_demo.sql and run them once the dashboard paste is done.
+section("Client Portal v2");
+
+const FAKE_PID = "00000000-0000-0000-0000-000000000000";
+
+{
+  const { status } = await get(`/api/portal/app/${FAKE_PID}/home`);
+  if (status === 401) pass("v2 client route rejects no-auth (401)");
+  else fail("v2 client route no-auth", `Expected 401, got ${status}`);
+}
+{
+  const { status } = await get(`/api/portal/app/${FAKE_PID}/home`, "not-a-real-token");
+  if (status === 401) pass("v2 client route rejects forged token (401)");
+  else fail("v2 client route forged token", `Expected 401, got ${status}`);
+}
+{
+  const { status } = await post(`/api/portal/app/${FAKE_PID}/variations/x/respond`, { action: "approve" });
+  if (status === 401) pass("v2 contractual write rejects no-auth (401)");
+  else fail("v2 contractual write no-auth", `Expected 401, got ${status}`);
+}
+{
+  const { status } = await get(`/api/portal/admin/v2/${FAKE_PID}/overview`);
+  if (status === 401) pass("admin v2 route requires auth (401)");
+  else fail("admin v2 route no-auth", `Expected 401, got ${status}`);
+}
+{
+  const { status, body } = await post("/api/cron/portal-sync", {});
+  if (status === 200 && body?.ok) pass(`POST /api/cron/portal-sync (projects: ${body.projects ?? "?"})`);
+  else fail("POST /api/cron/portal-sync", `Status ${status}`);
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 const total = passed + failed + skipped;
 console.log("\n╔══════════════════════════════════════════════════════════════╗");

@@ -1,5 +1,6 @@
 import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
+import InvoiceFileViewer from "./InvoiceFileViewer.jsx";
 
 const STATUS_LABELS = {
   unmatched: { label: "Unmatched", chip: "border-warning/40 bg-warning/10 text-warning" },
@@ -136,8 +137,11 @@ function DocumentDetail({ doc, jobs, onUpdate, onClose }) {
         onClick={e => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-hairline bg-surface px-4 py-3">
-          <h3 className="text-sm font-bold text-ink truncate max-w-[280px]">{doc.original_filename}</h3>
-          <button type="button" onClick={onClose} className="text-muted hover:text-ink text-lg leading-none">✕</button>
+          <h3 className="text-sm font-bold text-ink truncate max-w-[200px]">{doc.original_filename}</h3>
+          <div className="flex items-center gap-3">
+            <InvoiceFileViewer docId={doc.id} label="📄 View PDF" />
+            <button type="button" onClick={onClose} className="text-muted hover:text-ink text-lg leading-none">✕</button>
+          </div>
         </div>
 
         <div className="space-y-5 p-4">

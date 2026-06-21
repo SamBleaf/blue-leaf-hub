@@ -1121,6 +1121,17 @@ export default function BlueprintAgent({
   });
   const dragRef = useRef(null);
   const posRef = useRef(panelPos);
+  // Below 768px the panel becomes a full-width bottom sheet and ignores any saved
+  // drag position (which could otherwise pin it over the app's "+" FAB / bottom nav,
+  // with no way to drag it back — there's no touch-drag). Desktop keeps drag.
+  const [isMobile, setIsMobile] = useState(() => {
+    try { return window.innerWidth < 768; } catch { return false; }
+  });
+  useEffect(() => {
+    const onResize = () => { try { setIsMobile(window.innerWidth < 768); } catch { /* ignore */ } };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const handleSetOpen = (val) => {
     setOpen(val);
@@ -1225,9 +1236,28 @@ export default function BlueprintAgent({
         }
       `}</style>
 
-      {/* Floating panel — always mounted; visibility via CSS only */}
+      {/* Mobile backdrop — makes the bottom-sheet dismissible by tapping outside */}
+      {isMobile && open && !minimized && (
+        <div
+          onClick={() => handleSetOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9997 }}
+        />
+      )}
+
+      {/* Floating panel — always mounted; visibility via CSS only.
+          Mobile: full-width bottom sheet (saved drag pos ignored). Desktop: draggable. */}
       <div
-        style={{
+        style={isMobile ? {
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100%',
+          height: '75vh',
+          zIndex: 9998,
+          display: open && !minimized ? 'block' : 'none',
+          animation: open && !minimized ? 'panelIn 0.25s ease' : 'none',
+        } : {
           position: 'fixed',
           bottom: `${panelPos.bottom}px`,
           right: `${panelPos.right}px`,
@@ -1262,8 +1292,11 @@ export default function BlueprintAgent({
         className="blueprint-fab"
         style={{
           position: 'fixed',
-          bottom: '20px',
-          right: '20px',
+          // Mobile: sit on the LEFT so it never covers the app's "+" quick-add FAB
+          // (bottom-20 right-4) or the bottom nav. Desktop: bottom-right as before.
+          bottom: isMobile ? '84px' : '20px',
+          left: isMobile ? '16px' : 'auto',
+          right: isMobile ? 'auto' : '20px',
           width: '52px',
           height: '52px',
           borderRadius: '14px',

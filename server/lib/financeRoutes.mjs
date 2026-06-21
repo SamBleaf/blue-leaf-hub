@@ -11,7 +11,7 @@ import { checkProjectInsights } from "./projectInsights.mjs";
 // (removed) unused top-level `import PDFDocument from "pdfkit"` — it forced pdfkit's ~13s cold
 // import at server boot for nothing (no PDFDocument usage in this file).
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
-import { buildexactConfigured, createPurchaseOrder, beFetch } from "./buildexactClient.mjs";
+import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, buildexactCompleteOrdersEnabled, beFetch } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 
 const { parsed: _dotenv = {} } = dotenvConfig();
@@ -22,6 +22,7 @@ import {
   dropboxConfigured,
   getDropboxAccessToken,
   dropboxUploadBuffer,
+  dropboxDownloadBuffer,
   sharedJobRootPath,
   DROPBOX_PRIVATE_INTERNAL_BASE
 } from "./dropboxClient.mjs";
@@ -537,12 +538,44 @@ function matchCarpentryJob(extracted, subjectHint, carpentryJobs) {
 // Fires when an APPROVED invoice is allocated to a carpentry job. Idempotent via
 // financial_documents.buildexact_purchase_order_id; same item-landed safety net.
 // Recipe proven live 2026-06-15: orderType 'Purchase', costItemType 'Material', isTaxFree:false.
+// Complete a Buildexact Purchase Order created from an invoice. POST /jobs/purchaseorders/complete
+// flips it to "Received" and creates the actual-costing items from the order's lines. The order id is
+// kept on the row in EVERY outcome so a retry completes (never re-creates) the same order.
+async function completeInvoicePO(poId, doc, sb) {
+  try {
+    await completePurchaseOrder(poId);
+    await sb.from("financial_documents").update({
+      buildexact_purchase_order_id: poId,
+      buildexact_pushed_at: new Date().toISOString(),
+      buildexact_push_error: null,
+    }).eq("id", doc.id);
+    console.log("[finance/buildexact-po] completed", JSON.stringify({ id: poId, doc: doc.id }));
+    return { pushed: true, purchaseOrderId: poId, completed: true };
+  } catch (e) {
+    await sb.from("financial_documents").update({
+      buildexact_purchase_order_id: poId,
+      buildexact_pushed_at: null,
+      buildexact_push_error: `Order created (id ${poId}) but completion failed: ${e?.message || "unknown"}`,
+    }).eq("id", doc.id);
+    console.warn("[finance/buildexact-po] completion failed", JSON.stringify({ poId, error: e?.message }));
+    return { pushed: false, purchaseOrderId: poId, completed: false, error: e?.message };
+  }
+}
+
 // parentTask = the chosen carpentry supply category (carpentry_cost_category) so the line lands in
 // the right Buildexact Actuals Category; if none was picked it's left blank for completion-time.
 // No supplier contact in v1 (supplier name is in the line description) — set it at completion.
 async function pushInvoiceToBuildexactPO(doc, sb) {
   if (!buildexactConfigured()) return { pushed: false, skipped: "not_configured" };
-  if (doc.buildexact_purchase_order_id) return { pushed: true, skipped: "already_pushed" };
+  // Already fully pushed (order created AND completed) — nothing to do.
+  if (doc.buildexact_purchase_order_id && doc.buildexact_pushed_at && !doc.buildexact_push_error) {
+    return { pushed: true, skipped: "already_pushed" };
+  }
+  // Order created on a prior run but completion didn't finish — retry completion only (never re-create).
+  if (doc.buildexact_purchase_order_id) {
+    if (!buildexactCompleteOrdersEnabled()) return { pushed: true, skipped: "already_pushed" };
+    return await completeInvoicePO(doc.buildexact_purchase_order_id, doc, sb);
+  }
   if (!doc.carpentry_job_id) return { pushed: false, skipped: "not_carpentry" };
 
   const { data: cj } = await sb.from("carpentry_jobs")
@@ -584,13 +617,15 @@ async function pushInvoiceToBuildexactPO(doc, sb) {
       await sb.from("financial_documents").update({ buildexact_purchase_order_id: poId, buildexact_push_error: "Purchase Order created but its line item didn't land in Buildexact" }).eq("id", doc.id);
       return { pushed: false, error: "PO line item didn't land in Buildexact", purchaseOrderId: poId };
     }
-    await sb.from("financial_documents").update({
-      buildexact_purchase_order_id: poId,
-      buildexact_pushed_at: new Date().toISOString(),
-      buildexact_push_error: null,
-    }).eq("id", doc.id);
+    // Persist the order id immediately so a retry never re-creates it, even if completion fails.
+    await sb.from("financial_documents").update({ buildexact_purchase_order_id: poId }).eq("id", doc.id);
     console.log("[finance/buildexact-po] created", JSON.stringify({ orderNumber: order?.orderNumber, id: poId, job: cj.reference, amount }));
-    return { pushed: true, purchaseOrderId: poId };
+    if (!buildexactCompleteOrdersEnabled()) {
+      await sb.from("financial_documents").update({ buildexact_pushed_at: new Date().toISOString(), buildexact_push_error: null }).eq("id", doc.id);
+      return { pushed: true, purchaseOrderId: poId, completed: false, skipped: "complete_disabled" };
+    }
+    // Complete -> status "Received" + actual-costing items created from the line items.
+    return await completeInvoicePO(poId, doc, sb);
   } catch (e) {
     console.warn("[finance/buildexact-po] failed", JSON.stringify({ doc: doc.id, error: e?.message }));
     await sb.from("financial_documents").update({ buildexact_push_error: e?.message || "Purchase Order create failed" }).eq("id", doc.id);
@@ -778,6 +813,44 @@ export function registerFinanceRoutes(app) {
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, documents: data || [] });
+  });
+
+  // ── Stream the original invoice file (in-app viewing during approval/matching) ──
+  // IDOR-safe: the dropbox_path is read from the document row (looked up by id),
+  // never accepted from the client. requireAuth restricts this to authenticated
+  // staff. The frontend fetches this as a blob (Bearer auth) and renders inline.
+  app.get("/api/finance/documents/:id/file", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data: doc, error } = await sb.from("financial_documents")
+      .select("id, dropbox_path, original_filename")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!doc) return res.status(404).json({ ok: false, error: "Document not found." });
+    if (!doc.dropbox_path) {
+      return res.status(404).json({ ok: false, error: "No file on record for this invoice (it may have arrived before file capture was enabled)." });
+    }
+    if (!dropboxConfigured()) return res.status(503).json({ ok: false, error: "Document storage is not configured." });
+    try {
+      const token = await getDropboxAccessToken();
+      const buf = await dropboxDownloadBuffer(token, doc.dropbox_path);
+      const name = (doc.original_filename || "invoice").toLowerCase();
+      const ext = name.includes(".") ? name.split(".").pop() : "";
+      const ct = ext === "pdf" ? "application/pdf"
+        : ext === "png" ? "image/png"
+        : (ext === "jpg" || ext === "jpeg") ? "image/jpeg"
+        : ext === "webp" ? "image/webp"
+        : (ext === "heic" || ext === "heif") ? "image/heic"
+        : "application/octet-stream";
+      const safeName = (doc.original_filename || "invoice").replace(/[^a-zA-Z0-9._-]/g, "_");
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
+      res.setHeader("Cache-Control", "private, max-age=60");
+      return res.end(buf);
+    } catch (e) {
+      console.error("[finance] document file stream:", e?.message);
+      return res.status(502).json({ ok: false, error: "Could not load the file from storage." });
+    }
   });
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -1185,9 +1258,22 @@ export function registerFinanceRoutes(app) {
             const resolvedJobId = match.job_id || (isOverhead ? overheadJob.id : null);
             const matched = resolvedJobId || cMatch;
 
+            // Persist the original attachment so it can be viewed during approval
+            // (email invoices previously stored no file → "View PDF" was empty).
+            let dropbox_path = null;
+            if (dropboxConfigured()) {
+              try {
+                const dbToken = await getDropboxAccessToken();
+                dropbox_path = await uploadToInbox(dbToken, att.content, filename);
+              } catch (e) {
+                console.error("[invoice-imap] Dropbox upload error:", e?.message);
+              }
+            }
+
             const { error: insertErr } = await sb.from("financial_documents").insert({
               source: "email",
               original_filename: filename,
+              dropbox_path,
               email_message_id: messageId,
               email_from: from,
               email_subject: subject,

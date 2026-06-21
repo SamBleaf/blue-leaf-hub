@@ -1,6 +1,6 @@
 import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { useProject } from "../lib/ProjectContext.jsx";
 import { loadCompanySettings } from "../lib/companySettings.js";
@@ -78,7 +78,9 @@ function ModuleCard({ to, title, description, stat, statLabel, icon }) {
 
 export default function OperationsProjectDetail() {
   const { projectId } = useParams();
+  const [searchParams] = useSearchParams();
   const { selectProject } = useProject();
+  const siteTasksRef = useRef(null);
 
   const [project, setProject] = useState(null);
   const [pos, setPos] = useState([]);
@@ -105,7 +107,7 @@ export default function OperationsProjectDetail() {
   const [showLabourTab, setShowLabourTab] = useState(false);
   const [labourData, setLabourData] = useState(null);
   const [labourLoading, setLabourLoading] = useState(false);
-  const [showSiteTasksTab, setShowSiteTasksTab] = useState(false);
+  const [showSiteTasksTab, setShowSiteTasksTab] = useState(searchParams.get("panel") === "site-tasks");
   const [siteTasks, setSiteTasks] = useState([]);
   const [siteTasksLoading, setSiteTasksLoading] = useState(false);
   const [siteTaskFilter, setSiteTaskFilter] = useState("All");
@@ -213,14 +215,36 @@ export default function OperationsProjectDetail() {
     }
   }, [showSiteTasksTab, loadSiteTasks]);
 
+  // Deep-link from the "+ Site Task" quick-add. Open the panel whenever the param
+  // is present — covers the case where we're already on the page and only the query
+  // string changed (the useState initializer doesn't re-run then).
+  useEffect(() => {
+    if (searchParams.get("panel") === "site-tasks") setShowSiteTasksTab(true);
+  }, [searchParams]);
+
+  // Scroll to the panel once it's actually mounted (gated on load + open, not a
+  // guessed delay — the section's ref is null until the project finishes loading).
+  useEffect(() => {
+    if (!loading && showSiteTasksTab && searchParams.get("panel") === "site-tasks" && siteTasksRef.current) {
+      const t = setTimeout(() => siteTasksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      return () => clearTimeout(t);
+    }
+  }, [loading, showSiteTasksTab, searchParams]);
+
   async function createSiteTask(form) {
     setNewTaskBusy(true);
     try {
-      await authFetch(`/api/projects/${projectId}/site-tasks`, {
+      const res = await authFetch(`/api/projects/${projectId}/site-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.ok === false) {
+        // Surface the real reason (e.g. 403 — only admins/supervisors can add site tasks)
+        // instead of silently clearing the form and showing nothing.
+        throw new Error(j.error || (res.status === 403 ? "You don't have permission to add site tasks." : `Failed to add task (${res.status}).`));
+      }
       setNewTaskForm(null);
       loadSiteTasks();
     } catch (e) { setError(e?.message || String(e)); } finally { setNewTaskBusy(false); }
@@ -1031,7 +1055,7 @@ export default function OperationsProjectDetail() {
       </section>
 
       {/* ── Site Tasks (collapsible) ── */}
-      <section>
+      <section ref={siteTasksRef}>
         <button
           type="button"
           onClick={() => setShowSiteTasksTab(v => !v)}

@@ -45,6 +45,9 @@ import { registerCompanyCostModelRoutes } from "./lib/companyCostModelRoutes.mjs
 // docs/agent_knowledge/IMPLEMENTATION_PLAN.md (Phase -1). File retained for reference.
 // import { registerJobFinanceRoutes } from "./lib/jobFinanceRoutes.mjs";
 import { registerPortalRoutes } from "./lib/portalRoutes.mjs";
+import { registerPortalV2Routes } from "./lib/portalV2Routes.mjs";
+import { registerPortalV2AdminRoutes } from "./lib/portalV2AdminRoutes.mjs";
+import { runPortalNightlySync } from "./lib/portalSync.mjs";
 import { registerAuthRoutes } from "./lib/authRoutes.mjs";
 import { registerSupervisorRoutes } from "./lib/supervisorRoutes.mjs";
 import { registerRfqPackageRoutes } from "./lib/rfqPackageRoutes.mjs";
@@ -830,7 +833,11 @@ registerFinanceRoutes(app);
 registerFinanceCCRoutes(app);
 registerCompanyCostModelRoutes(app);
 // registerJobFinanceRoutes(app);  // DEREGISTERED (Phase -1) — fully shadowed; see import note above
+// v2 BEFORE legacy: /api/portal/my-projects and /api/portal/app/* must win over
+// the legacy /api/portal/:token catch-all (which would treat "my-projects" as a token).
+registerPortalV2Routes(app);
 registerPortalRoutes(app);
+registerPortalV2AdminRoutes(app);
 registerAuthRoutes(app);
 registerSupervisorRoutes(app);
 registerRfqPackageRoutes(app);
@@ -1559,6 +1566,24 @@ app.post("/api/cron/lead-time-notifications", async (req, res) => {
 });
 
 // ── CI-3.2: Nightly AI insights batch ────────────────────────────────────────
+// Client Portal v2 nightly sync: schedule→milestones + selections overdue.
+// Secured by an optional shared secret: when CRON_SECRET is set, callers must
+// present it (x-cron-secret header or ?secret=). Mutates every project, so this
+// must not be open once a secret is configured at cron-job.org.
+app.post("/api/cron/portal-sync", async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const provided = req.headers["x-cron-secret"] || req.query?.secret;
+    if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+  try {
+    const result = await runPortalNightlySync();
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || "portal-sync failed" });
+  }
+});
+
 app.post("/api/cron/cost-insights", async (_req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
@@ -2236,6 +2261,9 @@ if (envBool(process.env.REMINDER_CRON_ENABLED, false)) {
     runLeadTimeNotifications(sb)
       .then(r => console.log("[lead-time-notifications]", r))
       .catch(e => console.error("[lead-time-notifications]", e));
+    runPortalNightlySync()
+      .then(r => console.log("[portal-sync]", r))
+      .catch(e => console.error("[portal-sync]", e));
   };
   setInterval(tick, dayMs);
   setTimeout(tick, 45_000);

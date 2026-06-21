@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
+import { appBaseUrl } from "./appUrl.mjs";
 
 const ROLES = ["admin", "supervisor", "employee", "client"];
 
@@ -19,10 +20,6 @@ async function getCallerProfile(req) {
     .maybeSingle();
   if (!profile || !profile.is_active) return null;
   return { ...profile, authId: user.id };
-}
-
-function appBaseUrl() {
-  return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
 }
 
 function isValidEmail(email) {
@@ -342,6 +339,29 @@ If you weren't expecting this, you can ignore this email.
           .from("projects")
           .update({ portal_client_email: inv.email, portal_client_name: String(fullName).trim() })
           .eq("id", inv.project_id);
+
+        // Portal v2: link this client account to the project. requirePortalAuth's
+        // JWT path checks project_client_users(user_id, project_id) — without this
+        // row the client would log in but get 403 on every portal route.
+        // Tolerate the table not existing yet (migration 103 not applied) so the
+        // existing token portal keeps working.
+        try {
+          await sb
+            .from("project_client_users")
+            .upsert(
+              {
+                project_id: inv.project_id,
+                user_id: user.id,
+                role: "primary",
+                is_active: true,
+                invited_at: inv.created_at || null,
+                invite_accepted_at: new Date().toISOString()
+              },
+              { onConflict: "project_id,user_id" }
+            );
+        } catch (linkErr) {
+          console.warn("[accept-invite] project_client_users link skipped:", linkErr?.message || linkErr);
+        }
       }
 
       return res.json({ ok: true, email: inv.email });

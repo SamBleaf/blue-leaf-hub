@@ -31,7 +31,9 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
-import { signSiteTaskPhotos } from "./siteMedia.mjs";
+import { signSiteTaskPhotos, isUuid } from "./siteMedia.mjs";
+import { transcribeAudio, transcriptionConfigured } from "./transcribe.mjs";
+import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
@@ -837,10 +839,16 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { title, description, priority = "normal", dueDate } = req.body || {};
+      if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+      const { title, description, priority = "normal", dueDate, category = "general", assignedTo, createdVia = "manual" } = req.body || {};
       if (!title?.trim()) return err(res, 400, "title is required.");
       const VALID_PRIORITY = ["urgent", "normal", "when_time_permits"];
       if (!VALID_PRIORITY.includes(priority)) return err(res, 400, "Invalid priority.");
+      const VALID_CATEGORY = ["general", "defect", "safety", "materials", "inspection"];
+      if (!VALID_CATEGORY.includes(category)) return err(res, 400, "Invalid category.");
+      const VALID_CREATED_VIA = ["manual", "voice_note", "ai_extraction"];
+      if (!VALID_CREATED_VIA.includes(createdVia)) return err(res, 400, "Invalid createdVia.");
+      if (assignedTo && !isUuid(assignedTo)) return err(res, 400, "Invalid assignee.");
 
       const row = {
         carpentry_job_id: req.params.id,
@@ -848,9 +856,11 @@ export function registerCarpentryRoutes(app) {
         title: title.trim(),
         description: description?.trim() || null,
         priority,
+        category,
+        assigned_to: assignedTo || null,
         due_date: dueDate || null,
         created_by: req.caller.id,
-        created_via: "manual",
+        created_via: createdVia,
         status: "open",
         sort_order: 0,
       };
@@ -864,6 +874,49 @@ export function registerCarpentryRoutes(app) {
     } catch (e) {
       console.error("[carpentry/tasks POST]", e);
       return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/tasks/from-transcript ──────────────────────
+  // Voice-to-tasks: paste a site walk-through transcript (Plaud, or in-app
+  // recording → /api/transcribe) and get back a DRAFT task list for review.
+  // Creates NOTHING — the UI shows the drafts, the user edits/dedupes, then
+  // posts the keepers to POST /tasks (createdVia:'ai_extraction').
+  app.post("/api/carpentry/jobs/:id/tasks/from-transcript", requireAuth, async (req, res) => {
+    try {
+      const transcript = String(req.body?.transcript || "").trim();
+      if (!transcript) return err(res, 400, "transcript is required.");
+      if (transcript.length > 20000) return err(res, 413, "Transcript too long — split it into shorter sessions.");
+      const jobLabel = String(req.body?.jobLabel || "").trim();
+      const tasks = await splitTranscriptToTasks(transcript, { jobLabel });
+      return ok(res, { tasks, draft: true });
+    } catch (e) {
+      console.error("[carpentry/tasks from-transcript]", e);
+      return err(res, 502, e.message || "Could not extract tasks from the transcript.");
+    }
+  });
+
+  // ── POST /api/transcribe ────────────────────────────────────────────────────
+  // Generic speech-to-text (Whisper). Body: { audioBase64, mimeType?, filename? }.
+  // Returns { transcript }. Used by in-app voice capture; safe to adopt elsewhere
+  // (sales meeting analysis, site diary memos) instead of paste-only.
+  app.post("/api/transcribe", requireAuth, async (req, res) => {
+    try {
+      if (!transcriptionConfigured()) return err(res, 503, "Transcription is not configured (OPENAI_API_KEY missing).");
+      const { audioBase64, mimeType, filename } = req.body || {};
+      if (!audioBase64) return err(res, 400, "audioBase64 is required.");
+      const b64 = String(audioBase64).replace(/^data:[^;]+;base64,/, "");
+      const buffer = Buffer.from(b64, "base64");
+      if (!buffer.length) return err(res, 400, "Empty audio.");
+      if (buffer.length > 25 * 1024 * 1024) return err(res, 413, "Audio too large (max 25MB).");
+      const transcript = await transcribeAudio(buffer, {
+        filename: filename || "audio.webm",
+        mimeType: mimeType || "audio/webm",
+      });
+      return ok(res, { transcript });
+    } catch (e) {
+      console.error("[transcribe]", e);
+      return err(res, 502, e.message || "Transcription failed.");
     }
   });
 

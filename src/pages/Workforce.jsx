@@ -687,7 +687,78 @@ function BuildexactSyncControl() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-const TABS = ["Approvals", "Mass Fill", "History"];
+// ── Completion Snapshot tab ───────────────────────────────────────────────────
+function SnapshotTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [weekStart, setWeekStart] = useState(""); // "" = current week
+
+  useEffect(() => {
+    setLoading(true);
+    const q = weekStart ? `?weekStart=${encodeURIComponent(weekStart)}` : "";
+    authFetch(`/api/workforce/completion-snapshot${q}`)
+      .then(r => r.json())
+      .then(j => { if (j.ok) setData(j); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [weekStart]);
+
+  if (loading) return <p className="text-sm text-muted">Loading snapshot…</p>;
+  if (!data) return <p className="text-sm text-muted">Could not load the snapshot.</p>;
+
+  const dayLabel = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric" });
+  const cell = (state) => {
+    if (state === "done") return <span className="inline-block w-5 h-5 rounded-full bg-green-100 text-green-700 text-xs leading-5 text-center">✓</span>;
+    if (state === "returned") return <span className="inline-block w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs leading-5 text-center" title="rejected — returned">↩</span>;
+    if (state === "missing") return <span className="inline-block w-5 h-5 rounded-full bg-red-50 text-red-400 text-xs leading-5 text-center">·</span>;
+    if (state === "na") return <span className="inline-block w-5 h-5 text-slate-300 text-xs leading-5 text-center" title="not a working day for this employee">–</span>;
+    return <span className="inline-block w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[10px] leading-5 text-center">{state[0]}</span>;
+  };
+
+  const shiftWeek = (deltaDays) => {
+    const base = data.week_start;
+    const d = new Date(`${base}T12:00:00`);
+    d.setDate(d.getDate() + deltaDays);
+    setWeekStart(d.toISOString().slice(0, 10));
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => shiftWeek(-7)} className="px-2.5 py-1 rounded border border-hairline text-sm">←</button>
+          <span className="text-sm font-medium text-ink">Week of {data.week_start}</span>
+          <button type="button" onClick={() => shiftWeek(7)} className="px-2.5 py-1 rounded border border-hairline text-sm">→</button>
+          {weekStart && <button type="button" onClick={() => setWeekStart("")} className="text-xs text-primary underline ml-1">This week</button>}
+        </div>
+        <span className="text-xs text-muted">{data.employees.filter(e => e.missing > 0).length} of {data.employees.length} have missing days</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="py-2 pr-3 font-medium">Employee</th>
+              {data.dates.map(d => <th key={d} className="py-2 px-2 font-medium text-center whitespace-nowrap">{dayLabel(d)}</th>)}
+              <th className="py-2 pl-3 font-medium text-center">Missing</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.employees.map(e => (
+              <tr key={e.id} className="border-t border-hairline">
+                <td className="py-2 pr-3 text-ink">{e.name}{e.employment_type === "casual" && <span className="ml-1 text-[10px] text-muted">(casual)</span>}</td>
+                {data.dates.map(d => <td key={d} className="py-2 px-2 text-center">{cell(e.days[d])}</td>)}
+                <td className="py-2 pl-3 text-center">{e.missing > 0 ? <span className="font-semibold text-red-600">{e.missing}</span> : <span className="text-green-600">0</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {data.employees.length === 0 && <p className="text-sm text-muted mt-4">No active employees.</p>}
+    </div>
+  );
+}
+
+const TABS = ["Approvals", "Snapshot", "Mass Fill", "History"];
 
 export default function Workforce() {
   const { role } = useAuth();
@@ -714,6 +785,7 @@ export default function Workforce() {
       </div>
 
       {tab === "Approvals" && <ApprovalsTab role={role} />}
+      {tab === "Snapshot" && <SnapshotTab />}
       {tab === "Mass Fill" && <MassFillTab />}
       {tab === "History" && <HistoryTab role={role} />}
     </div>
