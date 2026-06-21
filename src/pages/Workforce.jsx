@@ -349,6 +349,7 @@ function MassFillTab() {
   }
   function removeRow(i) { setRows(prev => prev.filter((_, idx) => idx !== i)); }
   function updateRow(i, field, val) { setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r)); }
+  function duplicateRow(i) { setRows(prev => { const copy = [...prev]; copy.splice(i + 1, 0, { ...prev[i] }); return copy; }); }
 
   async function submit() {
     if (!date) return;
@@ -407,7 +408,7 @@ function MassFillTab() {
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Task</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted w-20">Hours</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Notes</th>
-              <th className="w-8" />
+              <th className="w-16" />
             </tr>
           </thead>
           <tbody className="divide-y divide-hairline">
@@ -432,7 +433,10 @@ function MassFillTab() {
                   <input type="text" placeholder="Notes" value={r.notes} onChange={e => updateRow(i, "notes", e.target.value)} className="w-full border border-hairline rounded px-2 py-1.5 text-sm" />
                 </td>
                 <td className="px-2 py-2">
-                  <button type="button" onClick={() => removeRow(i)} className="text-muted hover:text-red-600 text-sm">×</button>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => duplicateRow(i)} title="Duplicate this row" className="text-muted hover:text-primary text-sm">⧉</button>
+                    <button type="button" onClick={() => removeRow(i)} title="Remove this row" className="text-muted hover:text-red-600 text-sm">×</button>
+                  </div>
                 </td>
               </tr>
             ))}
