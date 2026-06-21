@@ -692,6 +692,14 @@ function TasksPanel({ jobId }) {
     setShowAddTask(false);
   }
 
+  async function applyTemplate() {
+    setTaskError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/tasks/apply-template`, {});
+    if (!ok) { setTaskError(e || "Could not add the base checklist."); return; }
+    if (data?.added > 0) await loadTasks();
+    else setTaskError("Base checklist already added — nothing new to add.");
+  }
+
   async function extractFromTranscript() {
     if (!transcript.trim()) return;
     setExtracting(true);
@@ -760,6 +768,13 @@ function TasksPanel({ jobId }) {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-ink">Tasks for workers</h3>
         <div className="flex items-center gap-2">
+          <button
+            onClick={applyTemplate}
+            className="px-3 py-1.5 text-xs rounded-lg border border-hairline text-ink font-medium hover:bg-slate-50 transition-colors"
+            title="Add the standard per-stage carpentry checklist to this job"
+          >
+            📋 Base checklist
+          </button>
           <button
             onClick={() => { setShowTranscript((v) => !v); setDrafts([]); setVoiceError(null); }}
             className="px-3 py-1.5 text-xs rounded-lg border border-hairline text-ink font-medium hover:bg-slate-50 transition-colors"

@@ -121,6 +121,75 @@ function defaultMilestones(projectType) {
   }
 }
 
+// Default per-stage site-task checklist seeded onto a new carpentry job (and
+// applyable to an existing job). A practical starting point the leading hand ticks
+// off / edits — not exhaustive. category 'inspection' marks the QC-style checks.
+const SITE_TASK_STAGES = {
+  prestart: [
+    { title: "Pre-start: confirm site access, amenities & power", category: "general" },
+    { title: "Pre-start: check plans, levels & set-out", category: "inspection" },
+  ],
+  frame: [
+    { title: "Frame: set out & check square", category: "general" },
+    { title: "Frame: install wall frames (LVL)", category: "general" },
+    { title: "Frame: brace & plumb walls", category: "general" },
+    { title: "Frame: QC check before sheeting/lining", category: "inspection" },
+  ],
+  roof: [
+    { title: "Roof: install trusses / rafters", category: "general" },
+    { title: "Roof: check tie-downs & batten spacing", category: "inspection" },
+  ],
+  lockup: [
+    { title: "Lock-up: install windows & external doors", category: "general" },
+    { title: "Lock-up: wrap & external cladding", category: "general" },
+  ],
+  fitoff: [
+    { title: "Fit-off: hang internal doors", category: "general" },
+    { title: "Fit-off: skirting & architraves", category: "general" },
+    { title: "Fit-off: install hardware & fixtures", category: "general" },
+  ],
+  final: [
+    { title: "Final: clean down site", category: "general" },
+    { title: "Final: defect walk & sign-off", category: "inspection" },
+  ],
+};
+
+function defaultSiteTasks(projectType) {
+  let stages;
+  switch (projectType) {
+    case "frame":        stages = ["prestart", "frame", "roof", "final"]; break;
+    case "fitoff":       stages = ["prestart", "fitoff", "final"]; break;
+    case "lockup":       stages = ["prestart", "lockup", "final"]; break;
+    case "full_package": stages = ["prestart", "frame", "roof", "lockup", "fitoff", "final"]; break;
+    default:             stages = ["prestart", "final"];
+  }
+  const out = [];
+  let order = 10;
+  for (const s of stages) {
+    for (const t of (SITE_TASK_STAGES[s] || [])) {
+      out.push({ ...t, sort_order: order });
+      order += 10;
+    }
+  }
+  return out;
+}
+
+// Build site_tasks insert rows for a carpentry job from the default checklist.
+function buildDefaultTaskRows(job, callerId, now) {
+  return defaultSiteTasks(job.project_type).map((t) => ({
+    carpentry_job_id: job.id,
+    project_id: null,
+    title: t.title,
+    category: t.category,
+    priority: "normal",
+    status: "open",
+    created_by: callerId,
+    created_via: "manual",
+    sort_order: t.sort_order,
+    created_at: now,
+  }));
+}
+
 // ── Route registration ────────────────────────────────────────────────────────
 
 /**
@@ -246,6 +315,14 @@ export function registerCarpentryRoutes(app) {
       if (milestoneRows.length) {
         const { error: me } = await sb.from("carpentry_job_milestones").insert(milestoneRows);
         if (me) console.warn("[carpentry/jobs POST] milestone seed error:", me.message);
+      }
+
+      // Seed the default per-stage site-task checklist so a new job opens with a
+      // base set the leading hand can tick off. Non-fatal.
+      const seedTaskRows = buildDefaultTaskRows(job, req.caller.id, now);
+      if (seedTaskRows.length) {
+        const { error: ste } = await sb.from("site_tasks").insert(seedTaskRows);
+        if (ste) console.warn("[carpentry/jobs POST] site-task seed error:", ste.message);
       }
 
       // Auto-seed budget categories from the Buildexact estimate (labour categories drive the
@@ -873,6 +950,35 @@ export function registerCarpentryRoutes(app) {
       return ok(res, { task });
     } catch (e) {
       console.error("[carpentry/tasks POST]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/tasks/apply-template ───────────────────────
+  // Apply the default per-stage site-task checklist to an EXISTING job. Idempotent:
+  // skips any default whose title is already present, so it can be re-run safely.
+  app.post("/api/carpentry/jobs/:id/tasks/apply-template", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+      const { data: job, error: je } = await sb
+        .from("carpentry_jobs").select("id, project_type").eq("id", req.params.id).maybeSingle();
+      if (je) throw je;
+      if (!job) return err(res, 404, "Job not found.", "NOT_FOUND");
+
+      const { data: existing } = await sb.from("site_tasks").select("title").eq("carpentry_job_id", job.id);
+      const have = new Set((existing || []).map((t) => (t.title || "").trim().toLowerCase()));
+      const now = new Date().toISOString();
+      const rows = buildDefaultTaskRows(job, req.caller.id, now)
+        .filter((r) => !have.has(r.title.trim().toLowerCase()));
+      if (!rows.length) return ok(res, { added: 0, tasks: [] });
+
+      const { data, error } = await sb.from("site_tasks").insert(rows).select("*, employees!assigned_to(id, name)");
+      if (error) throw error;
+      return ok(res, { added: data.length, tasks: data });
+    } catch (e) {
+      console.error("[carpentry/tasks apply-template]", e);
       return err(res, 502, translateDbError(e));
     }
   });
