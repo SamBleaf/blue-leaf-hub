@@ -497,6 +497,10 @@ function ScheduleTab({ jobId }) {
   const [adding, setAdding]         = useState(false);
   const [savingId, setSavingId]     = useState(null);
   const [error, setError]           = useState(null);
+  // D2: auto-layout
+  const [autoDates, setAutoDates]   = useState({ commencement: "", frameDelivery: "" });
+  const [autoBusy, setAutoBusy]     = useState(false);
+  const [autoPreview, setAutoPreview] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -504,6 +508,20 @@ function ScheduleTab({ jobId }) {
     setLoading(false);
     if (ok) setMilestones(data?.milestones || []);
   }, [jobId]);
+
+  async function runAutoLayout(apply) {
+    if (!autoDates.commencement) { setError("Set a commencement date first."); return; }
+    setAutoBusy(true); setError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/milestones/auto-layout`, {
+      commencementDate: autoDates.commencement,
+      frameDeliveryDate: autoDates.frameDelivery || undefined,
+      apply,
+    });
+    setAutoBusy(false);
+    if (!ok) { setError(e || "Auto-layout failed."); return; }
+    if (apply) { setAutoPreview(null); load(); }
+    else setAutoPreview(data?.affected || []);
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -551,6 +569,42 @@ function ScheduleTab({ jobId }) {
       <h3 className="text-sm font-semibold text-ink mb-4">Schedule Milestones</h3>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
+
+      {/* D2: auto-lay out milestone target dates from a commencement + frame-delivery date */}
+      <div className="mb-6 p-4 rounded-card border border-hairline bg-slate-50">
+        <p className="text-sm font-medium text-ink mb-2">Auto-lay out dates</p>
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Commencement</label>
+            <input type="date" value={autoDates.commencement} onChange={(e) => setAutoDates((d) => ({ ...d, commencement: e.target.value }))} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Frame delivery (optional)</label>
+            <input type="date" value={autoDates.frameDelivery} onChange={(e) => setAutoDates((d) => ({ ...d, frameDelivery: e.target.value }))} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+        </div>
+        {!autoPreview ? (
+          <button onClick={() => runAutoLayout(false)} disabled={autoBusy || !autoDates.commencement} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-40">
+            {autoBusy ? "Calculating…" : "Preview dates"}
+          </button>
+        ) : (
+          <div>
+            <div className="rounded-lg border border-hairline bg-white divide-y divide-hairline mb-2">
+              {autoPreview.map((a) => (
+                <div key={a.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <span className="text-ink">{a.name}</span>
+                  <span className="text-muted">{a.oldTargetDate ? `${fmtDate(a.oldTargetDate)} → ` : ""}<span className="font-medium text-ink">{fmtDate(a.newTargetDate)}</span></span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => runAutoLayout(true)} disabled={autoBusy} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-40">{autoBusy ? "Applying…" : "Apply dates"}</button>
+              <button onClick={() => setAutoPreview(null)} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium">Cancel</button>
+            </div>
+          </div>
+        )}
+        <p className="text-[11px] text-muted mt-2">Build durations scale with crew size; frame delivery + certifier waits use standard lead-times. Review before applying.</p>
+      </div>
 
       {loading ? (
         <p className="text-sm text-muted">Loading…</p>
