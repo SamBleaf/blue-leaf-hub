@@ -78,7 +78,7 @@ export default function DocumentsTemplates() {
   async function setupFolders() {
     setNotice("Setting up Dropbox folders…");
     const { ok, data, error: e } = await apiPost("/api/templates/setup-folders", {});
-    setNotice(ok ? `Created ${data?.created?.length || 0} module folders + INDEX in Dropbox.` : (e || "Folder setup failed."));
+    setNotice(ok ? `Set up ${data?.created?.length || 0} module folders + ${data?.files || 0} template masters in Dropbox.` : (e || "Folder setup failed."));
   }
 
   if (loading) return <div className="p-10 text-center text-muted text-sm">Loading templates…</div>;
