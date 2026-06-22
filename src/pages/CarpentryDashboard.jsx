@@ -43,7 +43,6 @@ function NewJobModal({ onClose, onCreated }) {
   const [bxLoading, setBxLoading]   = useState(false);
   const [xlsxBusy, setXlsxBusy]     = useState(false);
   const [bxError, setBxError]       = useState(null);
-  const [prefill, setPrefill]       = useState(null);
   const [estimateCategories, setEstimateCategories] = useState([]);
   const [debugJson, setDebugJson]   = useState("");
   const [debugBusy, setDebugBusy]   = useState(false);
@@ -96,11 +95,8 @@ function NewJobModal({ onClose, onCreated }) {
       return;
     }
     const p = data?.prefill || {};
-    setPrefill(p);
-    // Only seed budgets from the API when it returned real trade categories. Some accounts
-    // return a flat line-item list (one "category" per line) — skip those and let the user
-    // load the breakdown from the estimate XLSX, which parses the categories reliably.
-    setEstimateCategories(Array.isArray(p.categories) && p.categories.length <= 40 ? p.categories : []);
+    // Financials always come from the Estimate Items XLSX (Step 2) — the API estimate
+    // is cost-only / often ungrouped, so we do NOT seed the budget from the fetch.
     setForm((f) => ({
       ...f,
       buildexactJobId: p.buildexactJobId || bxJobId.trim(),
@@ -131,7 +127,6 @@ function NewJobModal({ onClose, onCreated }) {
       const { ok: ok_, data, error } = await apiPost("/api/carpentry/estimate/parse-xlsx", { dataBase64, filename: file.name });
       if (!ok_) { setBxError(error || "Could not read the estimate file."); return; }
       const p = data?.prefill || {};
-      setPrefill(p);
       setEstimateCategories(Array.isArray(data?.prefill?.categories) ? data.prefill.categories : []);
       const storey = /triple/i.test(p.buildingType) ? "3" : /double/i.test(p.buildingType) ? "2" : null;
       setForm((f) => ({
@@ -182,16 +177,17 @@ function NewJobModal({ onClose, onCreated }) {
           <button onClick={onClose} className="text-muted hover:text-ink transition-colors text-xl leading-none">&times;</button>
         </div>
 
-        {/* Buildexact lookup bar */}
+        {/* Buildexact import — use BOTH: Fetch fills the details, the Estimate Items XLSX gives the budget */}
         <div className="px-5 pt-4 pb-3 bg-slate-50 border-b border-hairline">
-          <p className="text-xs text-muted mb-2 font-medium">IMPORT FROM BUILDEXACT (optional)</p>
+          {/* Step 1 — details from the Buildexact API */}
+          <p className="text-xs text-muted mb-2 font-medium">STEP 1 — FETCH DETAILS FROM BUILDEXACT (job no. → client, contact, address)</p>
           <div className="flex gap-2">
             <input
               type="text"
               value={bxJobId}
               onChange={(e) => setBxJobId(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleBxFetch()}
-              placeholder="Enter Buildexact Job ID…"
+              placeholder="Enter Buildexact Job ID / number…"
               className="flex-1 border border-hairline rounded-lg px-3 py-2 text-sm focus-ring"
             />
             <button
@@ -202,23 +198,25 @@ function NewJobModal({ onClose, onCreated }) {
               {bxLoading ? "Fetching…" : "Fetch"}
             </button>
           </div>
+          {form.buildexactJobId && (
+            <p className="text-xs text-emerald-700 mt-1">✓ Details imported — client &amp; site fields pre-filled below.</p>
+          )}
 
+          {/* Step 2 — financials from the Estimate Items XLSX (always the source of truth for $) */}
           <div className="mt-3 pt-3 border-t border-hairline/60">
-            <p className="text-xs text-muted mb-2 font-medium">OR IMPORT THE ESTIMATE XLSX (no API needed)</p>
+            <p className="text-xs text-muted mb-2 font-medium">STEP 2 — UPLOAD THE ESTIMATE ITEMS XLSX (budget &amp; financials)</p>
             <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-primary text-primary text-sm font-medium cursor-pointer hover:bg-primary/5 transition-colors ${xlsxBusy ? "opacity-40 pointer-events-none" : ""}`}>
-              {xlsxBusy ? "Reading…" : "Choose estimate XLSX"}
+              {xlsxBusy ? "Reading…" : estimateCategories.length ? "Replace estimate XLSX" : "Choose estimate items XLSX"}
               <input type="file" accept=".xlsx,.xls" onChange={handleXlsxFile} className="hidden" />
             </label>
+            {estimateCategories.length > 0 && (
+              <p className="text-xs text-emerald-700 mt-1">
+                ✓ Budget loaded — {estimateCategories.length} categories, sell {fmt$(estimateCategories.reduce((s, c) => s + Number(c.sellExGst ?? c.subtotalExGst ?? 0), 0))} ex-GST
+              </p>
+            )}
+            <p className="text-[11px] text-muted mt-1">Use the <strong>Estimate Items</strong> export (not Categories &amp; Items) — it carries the marked-up sell price per category.</p>
           </div>
           {bxError && <p className="text-xs text-red-600 mt-1">{bxError}</p>}
-          {prefill && (
-            <p className="text-xs text-emerald-700 mt-1">✓ Data imported — fields below pre-filled. Review and confirm.</p>
-          )}
-          {prefill && estimateCategories.length === 0 && (
-            <p className="text-xs text-amber-600 mt-1">
-              For the labour/material budget breakdown, use &ldquo;Choose estimate XLSX&rdquo; above — the API didn&apos;t return grouped categories for this job.
-            </p>
-          )}
           {/* TEMP diagnostic — dumps the raw Buildxact estimate JSON to map field shapes. Remove once Fetch grouping is fixed. */}
           <button
             type="button"
