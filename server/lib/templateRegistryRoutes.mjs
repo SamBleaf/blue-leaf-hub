@@ -1,0 +1,193 @@
+// templateRegistryRoutes.mjs — Documents & Templates registry API (Workstream B).
+// All routes are Director-only (the /api/templates prefix is gated admin in dev-api.mjs).
+// The code catalogue (templateCatalog.mjs) is the canonical list; document_templates rows
+// store editable metadata + Dropbox sync/health, merged over the catalogue by catalog_key.
+import { ok, err, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+import { getServiceSupabase } from "./supabaseService.mjs";
+import {
+  dropboxConfigured,
+  getDropboxAccessToken,
+  createFolderIfNotExists,
+  dropboxUploadUtf8Text,
+  dropboxDownloadBuffer,
+  getOrCreateSharedLinkForPath,
+  DROPBOX_TEMPLATES_BASE,
+} from "./dropboxClient.mjs";
+import { TEMPLATE_CATALOG, TEMPLATE_MODULES, mergeCatalogWithRows } from "./templateCatalog.mjs";
+
+// Text kinds can be edited inline in the Hub (write-back to a Dropbox .md master).
+const EDITABLE_TEXT_KINDS = new Set(["email_md", "whs_markdown"]);
+
+function catalogEntry(key) {
+  return TEMPLATE_CATALOG.find((t) => t.key === key) || null;
+}
+
+// The Dropbox path of a template's editable master: <BASE>/<module folder>/<key>.md
+function masterPath(entry) {
+  const folder = TEMPLATE_MODULES[entry.module]?.folder || "Admin & Shared";
+  return `${DROPBOX_TEMPLATES_BASE}/${folder}/${entry.key}.md`;
+}
+
+export function registerTemplateRegistryRoutes(app) {
+  // ── GET /api/templates — full registry (catalogue merged with DB rows) ───────
+  app.get("/api/templates", async (req, res) => {
+    const sb = getServiceSupabase();
+    let rows = [];
+    if (sb) {
+      const { data, error } = await sb.from("document_templates").select("*");
+      if (error && error.code !== "42P01") return err(res, 500, translateDbError(error)); // 42P01 = table not yet migrated
+      rows = rowsToCamel(data || []); // camelCase so DB keys align with the catalogue on merge
+    }
+    let templates = mergeCatalogWithRows(rows);
+    const { module, kind, status } = req.query || {};
+    if (module) templates = templates.filter((t) => t.module === module);
+    if (kind) templates = templates.filter((t) => t.kind === kind);
+    if (status) templates = templates.filter((t) => t.status === status);
+    templates.sort((a, b) => (a.module || "").localeCompare(b.module || "") || (a.title || "").localeCompare(b.title || ""));
+    return ok(res, { templates, modules: TEMPLATE_MODULES });
+  });
+
+  // ── GET /api/templates/:key — one template (catalogue + DB override) ─────────
+  app.get("/api/templates/:key", async (req, res) => {
+    const entry = catalogEntry(req.params.key);
+    const sb = getServiceSupabase();
+    let row = null;
+    if (sb) {
+      const { data } = await sb.from("document_templates").select("*").eq("catalog_key", req.params.key).maybeSingle();
+      row = data ? rowsToCamel([data])[0] : null;
+    }
+    if (!entry && !row) return err(res, 404, "Template not found.", "NOT_FOUND");
+    const [merged] = mergeCatalogWithRows(row ? [row] : []);
+    return ok(res, { template: merged || { ...entry, key: req.params.key } });
+  });
+
+  // ── GET /api/templates/:key/content — editable text master (for the Hub editor) ──
+  app.get("/api/templates/:key/content", async (req, res) => {
+    const entry = catalogEntry(req.params.key);
+    if (!entry) return err(res, 404, "Template not found.", "NOT_FOUND");
+    if (!EDITABLE_TEXT_KINDS.has(entry.kind)) {
+      return err(res, 400, `${entry.title} is a ${entry.kind} — edit it in Dropbox/Word, not in the Hub.`, "NOT_EDITABLE");
+    }
+    if (!dropboxConfigured()) return err(res, 503, "Dropbox is not configured.");
+    try {
+      const token = await getDropboxAccessToken();
+      const buf = await dropboxDownloadBuffer(token, masterPath(entry));
+      return ok(res, { content: buf.toString("utf8"), exists: true, path: masterPath(entry) });
+    } catch (e) {
+      // Master not created yet — start the editor from an empty/seed body.
+      if (/not_found|409|path\/not_found/i.test(String(e?.message || ""))) {
+        return ok(res, { content: "", exists: false, path: masterPath(entry) });
+      }
+      console.error("[templates/content GET]", e?.message || e);
+      return err(res, 502, "Could not read the template from Dropbox.");
+    }
+  });
+
+  // ── PUT /api/templates/:key/content — in-Hub edit → write master back to Dropbox ──
+  app.put("/api/templates/:key/content", async (req, res) => {
+    const entry = catalogEntry(req.params.key);
+    if (!entry) return err(res, 404, "Template not found.", "NOT_FOUND");
+    if (!EDITABLE_TEXT_KINDS.has(entry.kind)) {
+      return err(res, 400, `${entry.title} can't be edited in the Hub (it's a ${entry.kind}).`, "NOT_EDITABLE");
+    }
+    const content = String(req.body?.content ?? "");
+    if (!dropboxConfigured()) return err(res, 503, "Dropbox is not configured.");
+    try {
+      const token = await getDropboxAccessToken();
+      const path = masterPath(entry);
+      await dropboxUploadUtf8Text(token, path, content, { autorename: false });
+      // Record the edit + bump version on the DB row (upsert).
+      const sb = getServiceSupabase();
+      if (sb) {
+        const { data: existing } = await sb.from("document_templates").select("id, version").eq("catalog_key", entry.key).maybeSingle();
+        const payload = {
+          catalog_key: entry.key, module: entry.module, category: entry.category || null,
+          title: entry.title, kind: entry.kind, storage: "dropbox", storage_path: path,
+          edit_method: "Edit in Hub (writes the .md master to Dropbox)", status: entry.status || "active",
+          purpose: entry.purpose || null, version: (existing?.version || 1) + (existing ? 1 : 0),
+          updated_at: new Date().toISOString(),
+        };
+        if (existing) await sb.from("document_templates").update(payload).eq("id", existing.id);
+        else await sb.from("document_templates").insert(payload);
+      }
+      return ok(res, { saved: true, path });
+    } catch (e) {
+      console.error("[templates/content PUT]", e?.message || e);
+      return err(res, 502, "Could not save the template to Dropbox.");
+    }
+  });
+
+  // ── GET /api/templates/:key/dropbox-link — shared link (open/edit in Dropbox) ──
+  app.get("/api/templates/:key/dropbox-link", async (req, res) => {
+    const entry = catalogEntry(req.params.key);
+    if (!entry) return err(res, 404, "Template not found.", "NOT_FOUND");
+    if (!dropboxConfigured()) return err(res, 503, "Dropbox is not configured.");
+    try {
+      const token = await getDropboxAccessToken();
+      const folder = TEMPLATE_MODULES[entry.module]?.folder || "Admin & Shared";
+      // Link the module folder (the file may be a .md / .docx we don't name exactly here).
+      const link = await getOrCreateSharedLinkForPath(token, `${DROPBOX_TEMPLATES_BASE}/${folder}`);
+      return ok(res, { url: link });
+    } catch (e) {
+      console.error("[templates/dropbox-link GET]", e?.message || e);
+      return err(res, 502, "Could not get a Dropbox link.");
+    }
+  });
+
+  // ── PATCH /api/templates/:key — update editable metadata (purpose/status/path) ──
+  app.patch("/api/templates/:key", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const entry = catalogEntry(req.params.key);
+    const allowed = ["module", "category", "title", "description", "kind", "storage", "storage_path", "edit_method", "status", "purpose"];
+    const patch = {};
+    for (const k of allowed) if (req.body?.[k] !== undefined) patch[k] = req.body[k];
+    patch.updated_at = new Date().toISOString();
+    try {
+      const { data: existing } = await sb.from("document_templates").select("id").eq("catalog_key", req.params.key).maybeSingle();
+      if (existing) {
+        const { error } = await sb.from("document_templates").update(patch).eq("id", existing.id);
+        if (error) return err(res, 500, translateDbError(error));
+      } else {
+        const base = entry ? { module: entry.module, title: entry.title, kind: entry.kind } : {};
+        const { error } = await sb.from("document_templates").insert({ catalog_key: req.params.key, ...base, ...patch });
+        if (error) return err(res, 500, translateDbError(error));
+      }
+      return ok(res);
+    } catch (e) {
+      console.error("[templates PATCH]", e?.message || e);
+      return err(res, 500, "Could not update the template.");
+    }
+  });
+
+  // ── POST /api/templates/setup-folders — create the per-module Dropbox structure ──
+  app.post("/api/templates/setup-folders", async (_req, res) => {
+    if (!dropboxConfigured()) return err(res, 503, "Dropbox is not configured.");
+    try {
+      const token = await getDropboxAccessToken();
+      await createFolderIfNotExists(token, DROPBOX_TEMPLATES_BASE);
+      await createFolderIfNotExists(token, `${DROPBOX_TEMPLATES_BASE}/00 — START HERE`);
+      const created = [];
+      // Sequential (no Promise.all) — Dropbox folder creation must be serialised.
+      for (const m of Object.values(TEMPLATE_MODULES)) {
+        await createFolderIfNotExists(token, `${DROPBOX_TEMPLATES_BASE}/${m.folder}`);
+        created.push(m.folder);
+      }
+      const index = [
+        "# Blue Leaf — Templates",
+        "",
+        "Edit the masters here; the Hub reads them live. Folders mirror the software modules.",
+        "",
+        "- 📝 **editable master** — change it here (Word/markdown) and the Hub picks it up.",
+        "- ⚙️ **app-generated** — the layout lives in code; any file here is a reference sample only.",
+        "",
+        "See the **Documents & Templates** page in the Hub for the full index, status and purpose of each.",
+      ].join("\n");
+      await dropboxUploadUtf8Text(token, `${DROPBOX_TEMPLATES_BASE}/00 — START HERE/INDEX.md`, index, { autorename: false });
+      return ok(res, { created, base: DROPBOX_TEMPLATES_BASE });
+    } catch (e) {
+      console.error("[templates/setup-folders POST]", e?.message || e);
+      return err(res, 502, "Could not create the Dropbox template folders.");
+    }
+  });
+}

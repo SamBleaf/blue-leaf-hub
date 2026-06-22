@@ -8,6 +8,9 @@ export const DROPBOX_SHARED_PROJECTS_BASE = "/BLUE LEAF BUILDING/PROJECTS/BLUE L
 /** Private INTERNAL tree (team folder → INTERNAL; see restrictInternalFolder…). */
 export const DROPBOX_PRIVATE_INTERNAL_BASE = "/BLUE LEAF BUILDING/INTERNAL";
 
+/** Documents & Templates registry tree — editable masters, organised per software module. */
+export const DROPBOX_TEMPLATES_BASE = "/BLUE LEAF BUILDING/ADMINISTRATION/TEMPLATES";
+
 const QUOTES = "QUOTES";
 
 function dropboxEnv() {
@@ -751,14 +754,34 @@ export async function ensureExtendedJobFolders(jobAddress) {
     const root = sharedJobRootPath(jobAddress);
     // Order matters: each parent must precede its children.
     const branches = [
+      // Canonical INTERNAL records taxonomy — mirrors RECORD_FOLDERS in
+      // jobRecordsFiler.mjs. Every job record (every module, end to end) is filed
+      // under one of these so the job folder is a complete record-keeping archive.
       "INTERNAL",
-      "INTERNAL/P.O",
-      "INTERNAL/INVOICES",
-      "INTERNAL/PORTAL",
-      "INTERNAL/PRESALE DOCS",
-      "INTERNAL/QUOTES",
+      "INTERNAL/CONTRACT",
+      "INTERNAL/APPROVED PLANS",
+      "INTERNAL/PERMITS & APPROVALS",
+      "INTERNAL/ENGINEERING & REPORTS",
+      "INTERNAL/SELECTIONS",
       "INTERNAL/RFQ",
+      "INTERNAL/QUOTES",
+      "INTERNAL/P.O",
+      "INTERNAL/VARIATIONS",
+      "INTERNAL/PROGRESS CLAIMS",
+      "INTERNAL/INVOICES",
+      "INTERNAL/SITE DIARY",
+      "INTERNAL/SITE PHOTOS",
+      "INTERNAL/SCHEDULE",
+      "INTERNAL/WHS",
+      "INTERNAL/WHS/INDUCTIONS",
+      "INTERNAL/CORRESPONDENCE",
+      "INTERNAL/CERTIFICATES & HANDOVER",
+      "INTERNAL/PRESALE DOCS",
       "INTERNAL/LEAD DOCS",
+      "INTERNAL/PORTAL",
+      // Legacy top-level branches kept for back-compat with not-yet-rewired modules
+      // and existing jobs (records migrate under INTERNAL as each module adopts
+      // jobRecordsFiler). MARKETING stays top-level (shareable assets, not records).
       "SITE DIARY",
       "SCHEDULE",
       "WHS",

@@ -60,6 +60,7 @@ import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligence
 import { registerCrmRoutes } from "./lib/crmRoutes.mjs";
 import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
+import { registerTemplateRegistryRoutes } from "./lib/templateRegistryRoutes.mjs";
 import { registerProcurementRoutes } from "./lib/procurementRoutes.mjs";
 import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
@@ -840,6 +841,7 @@ for (const prefix of [
   "/api/cost-model",        // company cost model — pay rates / charge-up (Director-only)
   "/api/fee-proposal",      // tender fee proposals
   "/api/tender",            // tender win/lose/PO-check flows
+  "/api/templates",         // Documents & Templates registry (admin library)
 ]) {
   app.use(prefix, requireAuth, requireRole("admin"));
 }
@@ -873,6 +875,7 @@ registerMarketingIntelligenceRoutes(app);
 registerCrmRoutes(app);
 registerWhsEngineRoutes(app);
 registerCarpentryRoutes(app);
+registerTemplateRegistryRoutes(app);
 registerProcurementRoutes(app);
 registerFactsRoutes(app);
 registerControlTowerRoutes(app);
