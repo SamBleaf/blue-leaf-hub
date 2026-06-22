@@ -13,6 +13,7 @@ import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
 import UserManagement from "./pages/UserManagement.jsx";
+import DocumentsTemplates from "./pages/DocumentsTemplates.jsx";
 import MyPortal from "./pages/MyPortal.jsx";
 import Settings from "./pages/Settings.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
@@ -168,6 +169,10 @@ export default function App() {
                 <Route
                   path="/settings/users"
                   element={<RoleRoute element={<UserManagement />} allowed={["admin"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/documents-templates"
+                  element={<RoleRoute element={<DocumentsTemplates />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/home"
