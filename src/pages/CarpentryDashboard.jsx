@@ -104,10 +104,13 @@ function NewJobModal({ onClose, onCreated }) {
     setForm((f) => ({
       ...f,
       buildexactJobId: p.buildexactJobId || bxJobId.trim(),
-      clientName:  p.clientName  || f.clientName,
-      address:     p.address     || f.address,
-      description: p.description || f.description,
-      quotedValue: p.quotedValue != null ? String(p.quotedValue) : f.quotedValue,
+      clientName:    p.clientName    || f.clientName,
+      clientContact: p.clientContact || f.clientContact,
+      clientPhone:   p.clientPhone   || f.clientPhone,
+      clientEmail:   p.clientEmail   || f.clientEmail,
+      address:       p.address       || f.address,
+      description:   p.description   || f.description,
+      quotedValue:   p.quotedValue != null ? String(p.quotedValue) : f.quotedValue,
     }));
     setStep("form");
   }

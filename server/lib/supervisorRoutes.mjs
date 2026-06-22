@@ -1,11 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 
 const { parsed: _env = {} } = (await import("dotenv")).config();
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
 export function registerSupervisorRoutes(app) {
-  app.post("/api/supervisor/parse-voice", async (req, res) => {
+  // Staff-only: this calls a paid LLM and parses site data — was previously
+  // unauthenticated (anyone could POST a transcript and burn tokens).
+  app.post("/api/supervisor/parse-voice", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const { transcript, projectAddress, tasks = [] } = req.body || {};
     if (!transcript?.trim()) return res.json({ ok: false, error: "No transcript" });
     if (!apiKey) return res.json({ ok: false, error: "ANTHROPIC_API_KEY not set" });

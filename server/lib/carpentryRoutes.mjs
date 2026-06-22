@@ -34,7 +34,7 @@ import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiRespons
 import { signSiteTaskPhotos, isUuid } from "./siteMedia.mjs";
 import { transcribeAudio, transcriptionConfigured } from "./transcribe.mjs";
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
-import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList } from "./buildexactClient.mjs";
+import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList, getCustomerContacts } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
@@ -582,8 +582,35 @@ export function registerCarpentryRoutes(app) {
         jobData?.name ||
         "";
 
-      // net_total = sell price ex GST (what they charge the builder)
-      const quotedValue = estimate.net_total ? Math.round(Number(estimate.net_total) * 100) / 100 : null;
+      // Client contact — JobDto doesn't reliably carry email/phone (the cause of the
+      // "contact doesn't come across" bug). Best-effort + non-fatal: read any direct
+      // fields on the job, then resolve the client's primary contact via /clients/:id/contacts.
+      let clientContact = "", clientEmail = "", clientPhone = "";
+      try {
+        clientEmail = jobData?.CustomerEmail || jobData?.customerEmail || jobData?.clientEmail || jobData?.email || "";
+        clientPhone = jobData?.CustomerPhone || jobData?.customerPhone || jobData?.clientPhone || jobData?.phone || jobData?.mobile || "";
+        const customerId = jobData?.clientId || jobData?.customerId || jobData?.ClientId || jobData?.CustomerId || jobData?.client_id || jobData?.customer_id || null;
+        if (customerId) {
+          const contactsRaw = await getCustomerContacts(customerId).catch(() => null);
+          const list = Array.isArray(contactsRaw) ? contactsRaw : (contactsRaw?.value || contactsRaw?.data || []);
+          const primary = list.find((c) => c?.email || c?.Email) || list[0];
+          if (primary) {
+            clientContact = [primary.firstName || primary.FirstName, primary.lastName || primary.LastName].filter(Boolean).join(" ").trim()
+              || primary.name || primary.Name || primary.fullName || "";
+            clientEmail = clientEmail || primary.email || primary.Email || "";
+            clientPhone = clientPhone || primary.phone || primary.Phone || primary.mobile || primary.Mobile || "";
+          }
+        }
+        if (!clientEmail && !clientPhone) {
+          console.warn("[carpentry/buildexact/fetch] no client contact resolved — jobData keys:", Object.keys(jobData || {}).join(","));
+        }
+      } catch (e) {
+        console.warn("[carpentry/buildexact/fetch] contact resolve failed:", e?.message);
+      }
+
+      // Prefer the marked-up SELL ex-GST when the estimate carries markup; net_total is the cost.
+      const quotedValue = (estimate.sell_total_ex_gst ?? estimate.net_total)
+        ? Math.round(Number(estimate.sell_total_ex_gst ?? estimate.net_total) * 100) / 100 : null;
 
       // Estimate total inc GST for reference
       const estimateTotal = estimate.estimate_total ? Math.round(Number(estimate.estimate_total) * 100) / 100 : null;
@@ -592,6 +619,9 @@ export function registerCarpentryRoutes(app) {
         prefill: {
           buildexactJobId,
           clientName,
+          clientContact,
+          clientEmail,
+          clientPhone,
           address,
           description,
           quotedValue,
@@ -599,14 +629,19 @@ export function registerCarpentryRoutes(app) {
           categories: (estimate.categories || []).map((c) => ({
             name: c.name,
             subtotalExGst: c.subtotal_ex_gst,
+            sellExGst: c.subtotal_sell_ex_gst ?? c.subtotal_ex_gst,
+            costExGst: c.subtotal_ex_gst,
             costType: classifyCostType(c.name),
           })),
         },
         raw: {
           jobName: description,
+          sourceFormat: estimate.source_format || "api",
           categories: (estimate.categories || []).map((c) => ({
             name: c.name,
             subtotalExGst: c.subtotal_ex_gst,
+            sellExGst: c.subtotal_sell_ex_gst ?? c.subtotal_ex_gst,
+            costExGst: c.subtotal_ex_gst,
           })),
         },
       });
@@ -627,12 +662,16 @@ export function registerCarpentryRoutes(app) {
       const p = parseXLSX(buf, String(req.body?.filename || ""));
       const round2 = (v) => (v != null && v !== "" ? Math.round(Number(v) * 100) / 100 : null);
       const desc = [p.quote_number, p.building_type].filter(Boolean).join(" — ");
+      // sell ex-GST (cost + markup) = what we charge the builder; the marked-up
+      // figure the budget should show. Falls back to net_total (cost) for the
+      // legacy report export which carries no per-category markup.
+      const sellTotal = round2(p.sell_total_ex_gst ?? p.net_total);
       return ok(res, {
         prefill: {
           clientName: p.client_name || "",
           address: p.address || "",
           description: desc,
-          quotedValue: round2(p.net_total),     // ex-GST sell price (what we charge the builder)
+          quotedValue: sellTotal,               // ex-GST SELL price (markup-inclusive)
           estimateTotal: round2(p.estimate_total),
           quoteNumber: p.quote_number || "",
           buildingType: p.building_type || "",
@@ -640,12 +679,20 @@ export function registerCarpentryRoutes(app) {
         raw: {
           quoteNumber: p.quote_number || "",
           buildingType: p.building_type || "",
+          sourceFormat: p.source_format || "",   // 'estimateitems' (good) | 'report' (legacy — warn)
+          costTotalExGst: round2(p.net_total),
+          sellTotalExGst: sellTotal,
+          markupAmount: round2(p.markup_amount),
           // Classify each estimate category: names without "supply" are labour
-          // budget lines (actuals come from workforce timesheets); names with
-          // "supply" are material budget lines (actuals from carpentry_job_costs).
+          // budget lines (actuals from workforce timesheets); names with "supply"
+          // are material budget lines (actuals from carpentry_job_costs). Budget =
+          // markup-inclusive sell ex-GST; cost = ex-markup (for margin).
           categories: (p.categories || []).map((c) => ({
             name: c.name,
-            subtotalExGst: c.subtotal_ex_gst,
+            subtotalExGst: c.subtotal_ex_gst,                              // cost ex-markup
+            sellExGst: round2(c.subtotal_sell_ex_gst ?? c.subtotal_ex_gst), // markup-inclusive ex-GST
+            costExGst: round2(c.subtotal_ex_gst),
+            allowance: c.active_items?.some((it) => it.allowance) ? "PC/PS" : "",
             costType: classifyCostType(c.name),
           })),
         },
@@ -1204,11 +1251,17 @@ export function registerCarpentryRoutes(app) {
     const rows = cats.map((c, i) => {
       const name = String(c.name || "").trim() || `Category ${i + 1}`;
       const costType = classifyCostType(name);
+      // budget = marked-up sell ex-GST when the estimate carries markup (XLSX path);
+      // for the API estimate (cost-only today) sell falls back to cost. cost_ex_gst
+      // keeps the ex-markup cost for margin.
+      const cost = round2(c.subtotal_ex_gst ?? 0);
+      const sell = round2(c.subtotal_sell_ex_gst ?? c.subtotal_ex_gst ?? 0);
       return {
         job_id: carpentryJobId,
         category_name: name,
         cost_type: costType,
-        budget_ex_gst: round2(c.subtotal_ex_gst ?? 0),
+        budget_ex_gst: sell,
+        cost_ex_gst: cost,
         workforce_task_category: costType === "labour" ? matchTaskCategory(name) : null,
         sort_order: i,
       };
@@ -1237,11 +1290,17 @@ export function registerCarpentryRoutes(app) {
         const costType = c.costType === "labour" || c.costType === "material"
           ? c.costType
           : classifyCostType(name);
+        // budget_ex_gst = the marked-up SELL price ex-GST (what Sam wants shown);
+        // cost_ex_gst = ex-markup cost (for margin). sellExGst falls back to
+        // subtotalExGst for the legacy report export (no per-category markup).
+        const cost = round2(c.costExGst ?? c.subtotalExGst ?? 0);
+        const sell = round2(c.sellExGst ?? c.subtotalExGst ?? c.budgetExGst ?? 0);
         return {
           job_id: jobId,
           category_name: name,
           cost_type: costType,
-          budget_ex_gst: round2(c.subtotalExGst ?? c.budgetExGst ?? 0),
+          budget_ex_gst: sell,
+          cost_ex_gst: cost,
           workforce_task_category: costType === "labour" ? matchTaskCategory(name) : null,
           sort_order: i,
         };

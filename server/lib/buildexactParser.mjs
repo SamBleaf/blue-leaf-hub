@@ -431,6 +431,8 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
   const cUom = col("UOM");
   const cUnitCost = col("UnitCost");
   const cTotal = col("Total");
+  const cMarkup = col("Markup");
+  const cTax = col("Tax");
   const cTotalInc = col("TotalIncMarkupAndTax");
 
   const catMap = new Map();
@@ -441,7 +443,7 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
     const catName = cellStr(row[cCat]).trim();
     if (!catName) continue;
     if (!catMap.has(catName)) {
-      catMap.set(catName, { number: ++order, name: catName, subtotal: 0, subtotal_ex_gst: 0, subtotal_inc_gst: 0, active_items: [] });
+      catMap.set(catName, { number: ++order, name: catName, subtotal: 0, subtotal_ex_gst: 0, subtotal_markup: 0, subtotal_tax: 0, subtotal_inc_gst: 0, active_items: [] });
     }
     const cat = catMap.get(catName);
     const desc = cellStr(row[cDesc]).trim();
@@ -468,16 +470,32 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
     if (!isMeta) {
       if (total != null) cat.subtotal_ex_gst += total;
       if (totalInc != null) cat.subtotal_inc_gst += totalInc;
+      const mk = parseMoney(row[cMarkup]);
+      const tx = parseMoney(row[cTax]);
+      if (mk != null) cat.subtotal_markup += mk;
+      if (tx != null) cat.subtotal_tax += tx;
     }
   }
 
-  const categories = [...catMap.values()].map((c) => ({
-    ...c,
-    subtotal: Math.round(c.subtotal_ex_gst * 100) / 100,
-    subtotal_ex_gst: Math.round(c.subtotal_ex_gst * 100) / 100,
-    subtotal_inc_gst: Math.round(c.subtotal_inc_gst * 100) / 100
-  }));
+  // subtotal_ex_gst = COST ex-markup (sum of Total). subtotal_sell_ex_gst = the
+  // marked-up sell price ex-GST (cost + markup) = inc-markup+tax − tax. This is the
+  // number the carpentry budget should display; the cost is kept for margin.
+  const categories = [...catMap.values()].map((c) => {
+    const cost = Math.round(c.subtotal_ex_gst * 100) / 100;
+    const markup = Math.round(c.subtotal_markup * 100) / 100;
+    const sell = Math.round((c.subtotal_ex_gst + c.subtotal_markup) * 100) / 100;
+    return {
+      ...c,
+      subtotal: cost,
+      subtotal_ex_gst: cost,
+      subtotal_markup: markup,
+      subtotal_sell_ex_gst: sell,
+      subtotal_tax: Math.round(c.subtotal_tax * 100) / 100,
+      subtotal_inc_gst: Math.round(c.subtotal_inc_gst * 100) / 100,
+    };
+  });
   const net_total = Math.round(categories.reduce((s, c) => s + (c.subtotal_ex_gst || 0), 0) * 100) / 100;
+  const sell_total_ex_gst = Math.round(categories.reduce((s, c) => s + (c.subtotal_sell_ex_gst || 0), 0) * 100) / 100;
   const estimate_total = Math.round(categories.reduce((s, c) => s + (c.subtotal_inc_gst || 0), 0) * 100) / 100;
   const qnFromFile = filenameHint ? (filenameHint.match(/(Q\d+)/i)?.[1]?.toUpperCase() || "") : "";
   return {
@@ -489,9 +507,10 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
     building_type: "",
     date_prepared: "",
     net_total,
-    markup_amount: 0,
-    markup_percent: 0,
-    tax: Math.max(0, Math.round((estimate_total - net_total) * 100) / 100),
+    sell_total_ex_gst,
+    markup_amount: Math.round((sell_total_ex_gst - net_total) * 100) / 100,
+    markup_percent: net_total > 0 ? Math.round(((sell_total_ex_gst - net_total) / net_total) * 1000) / 10 : 0,
+    tax: Math.max(0, Math.round((estimate_total - sell_total_ex_gst) * 100) / 100),
     estimate_total,
     source_format: "estimateitems",
     categories
