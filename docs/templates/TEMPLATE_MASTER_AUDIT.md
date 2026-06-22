@@ -3,7 +3,23 @@
 **Audit date:** 2026-06-21  
 **Scope:** Full codebase, all modules, all document types  
 **Auditor:** Claude Code (automated + code inspection)  
-**Status:** Draft — awaiting Sam review before any build begins
+**Status:** Superseded by the live registry — see §0.
+
+---
+
+## 0. Status update (2026-06-23) — refined reality
+
+The original audit below over-counted (the "47 missing" was nearer **12 net-new** worth building; ~20 cut, ~9 merged, 6 already shipped). The refined plan is now **live in the Hub**, so this static audit is a historical reference — the **single source of truth is now the Documents & Templates registry**:
+
+- **In the app:** `/documents-templates` (admin) lists every template across all modules with kind · status (`active` / `planned`) · purpose · edit-method, grouped per module, with in-Hub editing for email/markdown masters and "Open in Dropbox" for the rest.
+- **In code:** `server/lib/templateCatalog.mjs` is the canonical catalogue (merged with the `document_templates` table). Edit there to add/change a template's metadata.
+- **In Dropbox:** editable masters live under `BLUE LEAF BUILDING/ADMINISTRATION/TEMPLATES/<module>/` (seeded by "Set up Dropbox folders").
+
+**Shipped since this audit:** progress-claim + variation HTML emails (replaced the `<pre>` plain text); the registry itself (Workstream B); carpentry budget/schedule/tasks work (Workstream D); supervisor cost-strip + field app (Workstream A5).
+
+**Still `planned` (need your input before build, not code):** Small-works Contract + SOPA overdue notice (legal sign-off); Client Onboarding Pack + Handover Pack + Warranty (your words/photos); WHS generate UI (#11 — engine exists, the render/approve/download UI is the build); Insurance register + Mandatory-inspections register (in-app modules); the remaining email `.md` masters. These are tracked as `status:'planned'` rows in the registry — filter "Required (not built)" to see them.
+
+**Reclassified as portal flows (not standalone templates):** selections, weekly updates, meeting notes — handled by the client portal + the single `portalNotify` engine.
 
 ---
 
