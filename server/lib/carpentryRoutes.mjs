@@ -362,7 +362,21 @@ export function registerCarpentryRoutes(app) {
           .maybeSingle();
         if (perf) performance = rowToCamel(perf);
       }
-      return ok(res, { job: rowToCamel(job), performance });
+      // D6: Actual Start = the FIRST APPROVED timesheet on this job (proof of work on site),
+      // unless it's been set manually. (Actual End stays manual.) Derived on read so it's always
+      // accurate; the stored column wins if a human set it.
+      const jobOut = rowToCamel(job);
+      if (!job.actual_start) {
+        const { data: firstTs } = await sb
+          .from("timesheets")
+          .select("date")
+          .eq("carpentry_job_id", job.id)
+          .eq("status", "approved")
+          .order("date", { ascending: true })
+          .limit(1);
+        if (firstTs?.[0]?.date) { jobOut.actualStart = firstTs[0].date; jobOut.actualStartDerived = true; }
+      }
+      return ok(res, { job: jobOut, performance });
     } catch (e) {
       console.error("[carpentry/jobs/:id GET]", e);
       return err(res, 502, translateDbError(e));
@@ -876,12 +890,8 @@ export function registerCarpentryRoutes(app) {
         .single();
       if (error) throw error;
 
-      // Record actual_start on first diary entry
-      if (!job.actual_start) {
-        await sb.from("carpentry_jobs")
-          .update({ actual_start: date, updated_at: new Date().toISOString() })
-          .eq("id", req.params.id);
-      }
+      // D6: actual_start is no longer stamped from the first diary entry — it's derived from the
+      // first APPROVED timesheet (see the job GET), which is the real proof of work on site.
 
       return ok(res, { entry: rowToCamel(entry) });
     } catch (e) {
