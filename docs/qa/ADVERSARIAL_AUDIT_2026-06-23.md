@@ -14,13 +14,31 @@ The frontend gating (nav + `RoleRoute`) and the **admin prefix-gate loop** (`dev
 
 My independent live checks confirm the *floor* is OK (an authenticated **client** is correctly denied all internal tables by RLS — see §5), but the **staff-role** boundary and the **unauthenticated** surface are not.
 
+**Complete `app.use` gate map (built this session).** The only prefix gates are: the admin loop (`dev-api.mjs:835-846`), `/api/carpentry` → admin+supervisor (`851`), `/api/cost-intelligence` → requireAuth (`costIntelligenceRoutes.mjs:46`, on top of the admin loop), and **`/api/portal/admin` → requireAuth only** (`portalRoutes.mjs:182`). Everything else (`/api/cron|dropbox|mail|quote-tracker|po|schedule|workforce|rfq|crm|operations|whs|worker|blueprint|subcontractor`) has **no prefix gate** — only whatever inline middleware each route carries.
+
+### §1a — Live-proven via curl against the running API (this session)
+| Endpoint | Test | Result |
+|---|---|---|
+| `GET /api/mail/inbox` | no token | **200 — returned 79 real inbox messages** (unauth company-email read) |
+| `GET /api/quote-tracker/unmatched` | no token | **200 — real quote PII** (unauth) |
+| `POST /api/dropbox/ensure-job-folders` | no token | 400 "jobAddress required" — **reached handler unauth** |
+| `POST /api/rfq/:id/reextract-amount` | no token | 404 "RFQ not found" — **reached handler unauth** (mutates + burns paid API) |
+| `POST /api/po/issue` | **employee** token | 400 "…required" — **employee passed the gate** (can issue POs) |
+| `POST /api/schedule/:id/task` | **employee** token | 400 "name required" — **employee can edit any schedule** |
+| `POST /api/crm/sends/:id/send` | **employee** token | 404 "Send not found" — **employee can fire bulk email** |
+| `POST /api/portal/admin/generate-token` | **employee** token | **200 — minted a working portal token** (employee can expose any project's portal) |
+| `GET /api/workforce/timesheets` | **employee** token | **200 — whole workforce's timesheets** |
+| `GET /api/carpentry/jobs/:id/budget` | **supervisor** token | response **contains `margin`** — cost-strip is UI-only, server leaks $ |
+| `POST /api/portal/admin/generate-token` | no token | 401 "Unauthorised" — **gated** (this corrects C1 below) |
+| `GET /api/finance/jobs` | no token | 401 — control, gate works ✅ |
+
 ---
 
 ## 1. CRITICAL — unauthenticated/abusable endpoints (close before deploy)
 
 | # | Finding | Location | Status |
 |---|---------|----------|--------|
-| C1 | **`POST /api/portal/admin/generate-token` is unauthenticated.** Takes any `projectId`, mints `portal_token`, sets `portal_enabled=true`. Anyone can mint a working client-portal token for any project → full portal data exposure. The whole v1 `/api/portal/admin/*` surface (photos upload, claims, milestones, decisions, builder-messages) is `async(req,res)` with no auth. Both v1 and v2 portal routers are registered. | `portalRoutes.mjs:184` (+205,237,333,386,448,479,509,538,621,639,665,720) | ✅ VERIFIED |
+| ~~C1~~ | **CORRECTED → not unauthenticated; it's role-bypass.** `/api/portal/admin/*` IS gated by `app.use("/api/portal/admin", requireAuth)` (`portalRoutes.mjs:182`) — returns 401 without a token. But it's `requireAuth` **only** (no `requireRole`): **live-proven, an `employee` token minted a working portal token** (`POST …/generate-token` → 200 `{token,portalUrl}`). Reclassified as a HIGH role-bypass in §2. The v2 admin surface adds `requireRole(admin,supervisor,employee)` on `/api/portal/admin/v2`. | `portalRoutes.mjs:182,184` | ⚠ corrected (was false-positive) |
 | C2 | **`POST /api/cron/rfq-reminders` is unauthenticated and sends reminder emails to subcontractors.** No middleware, no `CRON_SECRET` check inside (unlike the *next* cron block which is secret-guarded). Anyone can trigger subbie email blasts → spam/reputation abuse. `/api/cron/lead-time-notifications` (1585) is the same. | `dev-api.mjs:1574, 1585` | ✅ VERIFIED |
 | C3 | **`GET /api/mail/inbox` reads the company IMAP inbox unauthenticated.** No auth; returns recent INBOX messages to anyone. (Distinct from `/api/imap/quote-poll`, which was already secured.) | `dev-api.mjs:2071` | ✅ VERIFIED |
 | C4 | **`/api/dropbox/*` write routes are unauthenticated** — `ensure-job-folders`, `upload-tender-document`, `save-rfq-email-copy`, `save-quote-pdf`. Anyone can write into the company file store / exhaust storage. | `dev-api.mjs:1430,1455,1499,1531` | ✅ VERIFIED |
