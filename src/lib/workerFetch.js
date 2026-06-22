@@ -18,8 +18,18 @@ const TOKEN_KEY = "blhub_worker_token";
     const t = url.searchParams.get("token");
     if (t) {
       localStorage.setItem(TOKEN_KEY, t);
-      url.searchParams.delete("token");
-      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+      // Strip the token from the URL ONLY when running as the INSTALLED app (standalone). In the
+      // browser we MUST keep it in the URL so an iOS "Add to Home Screen" bookmarks the tokenised
+      // URL — Safari and the installed PWA use SEPARATE storage, so the launch URL is the only way
+      // the token reaches the installed app. (API calls always use the x-worker-token header, so the
+      // token never rides request URLs / access logs regardless.)
+      const standalone =
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+        window.navigator.standalone === true;
+      if (standalone) {
+        url.searchParams.delete("token");
+        window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+      }
     }
   } catch { /* ignore */ }
 })();

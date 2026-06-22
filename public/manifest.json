@@ -2,7 +2,6 @@
   "name": "Blue Leaf Building",
   "short_name": "BLB",
   "description": "Blue Leaf Building — workforce app",
-  "start_url": "/worker",
   "scope": "/worker",
   "display": "standalone",
   "orientation": "portrait",
