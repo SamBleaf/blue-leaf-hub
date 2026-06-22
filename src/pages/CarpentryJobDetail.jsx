@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch, apiPatch, apiPost, apiDelete } from "../lib/apiFetch.js";
+import { useAuth } from "../lib/useAuth.js";
+import { can } from "../lib/roles.js";
 import {
   CARPENTRY_JOB_STATUS_LABELS,
   CARPENTRY_PROJECT_TYPES,
@@ -133,7 +135,7 @@ function CloseoutModal({ job, onClose, onConfirm }) {
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 
-function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted }) {
+function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted, showCost = true }) {
   const [editing, setEditing]   = useState(false);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
@@ -261,6 +263,7 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted })
           </div>
         </div>
         <div className="grid grid-cols-3 gap-4">
+          {showCost && (
           <div>
             <label className="block text-xs font-medium text-ink mb-1">Quoted value (ex GST)</label>
             <div className="relative">
@@ -268,6 +271,8 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted })
               <input type="number" min={0} step={0.01} value={form.quotedValue} onChange={(e) => set("quotedValue", e.target.value)} className="w-full border border-hairline rounded-lg pl-7 pr-3 py-2 text-sm focus-ring" />
             </div>
           </div>
+          )}
+          {showCost && (
           <div>
             <label className="block text-xs font-medium text-ink mb-1">Budgeted cost (ex GST)</label>
             <div className="relative">
@@ -275,6 +280,7 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted })
               <input type="number" min={0} step={0.01} value={form.quotedCost} onChange={(e) => set("quotedCost", e.target.value)} className="w-full border border-hairline rounded-lg pl-7 pr-3 py-2 text-sm focus-ring" />
             </div>
           </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-ink mb-1">Floor area (m²)</label>
             <input type="number" min={0} step={0.01} value={form.floorAreaM2} onChange={(e) => set("floorAreaM2", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
@@ -1295,7 +1301,7 @@ function CostsTab({ jobId }) {
 
   return (
     <div className="p-6">
-      {/* Budget vs Actual card */}
+      {/* Budget vs Actual card (CostsTab is already Director-only via the tab gate) */}
       {summary && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-slate-50 rounded-card border border-hairline">
           <div>
@@ -1610,6 +1616,11 @@ const TABS = [
 export default function CarpentryJobDetail() {
   const { jobId } = useParams();
   const navigate  = useNavigate();
+  const { role } = useAuth();
+  // Cost-stripped view for supervisors: they manage the build (schedule, tasks,
+  // diary) but don't see Costs/Budget $ figures. Directors/admin see everything.
+  const showCost = can.viewCostData(role);
+  const visibleTabs = TABS.filter((t) => showCost || (t.id !== "budget" && t.id !== "costs"));
   const [tab, setTab]         = useState("overview");
   const [job, setJob]         = useState(null);
   const [performance, setPerformance] = useState(null);
@@ -1643,7 +1654,7 @@ export default function CarpentryJobDetail() {
 
       {/* Tabs */}
       <div className="flex border-b border-hairline mb-0 -mb-px">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -1667,12 +1678,13 @@ export default function CarpentryJobDetail() {
             onUpdated={loadJob}
             onStatusChange={(status) => setJob((j) => ({ ...j, status }))}
             onDeleted={() => navigate("/carpentry")}
+            showCost={showCost}
           />
         )}
         {tab === "schedule" && <ScheduleTab jobId={job.id} />}
         {tab === "diary"    && <DiaryTab job={job} />}
-        {tab === "costs"    && <CostsTab jobId={job.id} />}
-        {tab === "budget"   && <BudgetTab jobId={job.id} />}
+        {tab === "costs"    && showCost && <CostsTab jobId={job.id} />}
+        {tab === "budget"   && showCost && <BudgetTab jobId={job.id} />}
       </div>
     </div>
   );
