@@ -161,16 +161,18 @@ export default function SupervisorHome() {
     if (!diaryProjectId || !diaryNotes.trim()) return;
     setDiaryBusy(true);
     try {
-      const res = await authFetch(`/api/diary/${diaryProjectId}`, {
+      const res = await authFetch(`/api/diary/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          entry_date: today,
-          weather: diaryWeather.replace(/^[^\s]+\s/, ""),
-          trades_onsite: [],
-          work_completed: diaryNotes.trim(),
-          issues: "",
-          next_steps: ""
+          projectId: diaryProjectId,
+          entry: {
+            entry_date: today,
+            weather: diaryWeather.replace(/^[^\s]+\s/, ""),
+            trades_onsite: [],
+            work_completed: diaryNotes.trim(),
+            issues: ""
+          }
         })
       });
       const j = await res.json();
@@ -208,16 +210,19 @@ export default function SupervisorHome() {
 
       if (voiceParsed.type === "diary" || voiceParsed.type === "both") {
         const d = voiceParsed.type === "both" ? voiceParsed.data.diary : voiceParsed.data;
-        const res = await authFetch(`/api/diary/${voiceProject}`, {
+        const res = await authFetch(`/api/diary/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            entry_date: today,
-            weather: d.weather || "",
-            trades_onsite: d.tradesOnSite || [],
-            work_completed: d.workCompleted || "",
-            issues: d.issues || "",
-            next_steps: d.nextSteps || ""
+            projectId: voiceProject,
+            entry: {
+              entry_date: today,
+              weather: d.weather || "",
+              trades_onsite: d.tradesOnSite || [],
+              work_completed: d.workCompleted || "",
+              issues: d.issues || "",
+              structured_by_ai: true
+            }
           })
         });
         const j = await res.json();
