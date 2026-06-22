@@ -14,6 +14,9 @@ import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
 import UserManagement from "./pages/UserManagement.jsx";
 import DocumentsTemplates from "./pages/DocumentsTemplates.jsx";
+import FieldLayout from "./pages/field/FieldLayout.jsx";
+import FieldHome from "./pages/field/FieldHome.jsx";
+import FieldStub from "./pages/field/FieldStub.jsx";
 import MyPortal from "./pages/MyPortal.jsx";
 import Settings from "./pages/Settings.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
@@ -163,6 +166,18 @@ export default function App() {
                     </Suspense>
                   }
                 />
+              </Route>
+
+              {/* A5 — mobile field app (own shell, not AppShell). Admin allowed for preview. */}
+              <Route
+                path="/field"
+                element={<RoleRoute element={<FieldLayout />} allowed={["admin", "supervisor", "employee"]} redirectTo="/home" />}
+              >
+                <Route index element={<FieldHome />} />
+                <Route path="jobs" element={<FieldStub title="Jobs" hint="Cost-stripped carpentry job list is coming to the field app. For now, open the Carpentry module." linkTo="/carpentry" linkLabel="Open Carpentry" />} />
+                <Route path="tasks" element={<FieldStub title="Tasks" hint="Worker + supervisor/QC task lists are coming to the field app. For now, manage tasks in Operations." linkTo="/operations" linkLabel="Open Operations" />} />
+                <Route path="whs" element={<FieldStub title="WHS / Safety" hint="Quick WHS actions are coming to the field app. For now, use the WHS tools in Operations." linkTo="/operations" linkLabel="Open Operations" />} />
+                <Route path="diary" element={<FieldStub title="Site Diary" hint="The quick diary + voice memo are coming to the field app. For now, use the current supervisor diary." linkTo="/supervisor" linkLabel="Open quick diary" />} />
               </Route>
 
               <Route element={<AppShell />}>
