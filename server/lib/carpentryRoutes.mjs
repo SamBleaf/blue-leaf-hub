@@ -1155,7 +1155,7 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { costType, description, amount, costDate, source = "manual", sourceReference } = req.body || {};
+      const { costType, description, amount, costDate, source = "manual", sourceReference, carpentryJobBudgetId } = req.body || {};
 
       if (!costType) return err(res, 400, "costType is required.");
       if (!COST_TYPES.includes(costType)) {
@@ -1180,6 +1180,9 @@ export function registerCarpentryRoutes(app) {
           source:           ["manual", "xero"].includes(source) ? source : "manual",
           source_reference: sourceReference ? String(sourceReference).trim() : null,
           cost_date:        costDate || new Date().toISOString().slice(0, 10),
+          // D5: tag to a material budget line for per-category actuals (only when provided, so
+          // this is safe before migration 113 adds the column).
+          ...(carpentryJobBudgetId ? { carpentry_job_budget_id: carpentryJobBudgetId } : {}),
           created_at:       now,
           updated_at:       now,
         })
@@ -1303,15 +1306,20 @@ export function registerCarpentryRoutes(app) {
       }
       const cm = await getCostModel(sb); // company cost model (null until mig 090 + sync)
 
-      const { data: costRows } = await sb.from("carpentry_job_costs").select("amount").eq("job_id", jobId);
+      const { data: costRows } = await sb.from("carpentry_job_costs").select("*").eq("job_id", jobId);
       const materialActualTotal = round2((costRows || []).reduce((s, c) => s + Number(c.amount || 0), 0));
+      // D5: per-line material actuals — costs tagged to a budget line via carpentry_job_budget_id.
+      const materialActualByLine = {};
+      for (const c of costRows || []) {
+        if (c.carpentry_job_budget_id) materialActualByLine[c.carpentry_job_budget_id] = (materialActualByLine[c.carpentry_job_budget_id] || 0) + Number(c.amount || 0);
+      }
 
       const lines = (budgets || []).map((b) => {
         const budget = round2(b.budget_ex_gst);
         const isLabour = b.cost_type === "labour";
         const actual = isLabour
           ? round2(labourByTask[b.workforce_task_category] || 0)
-          : 0; // material per-line actuals not tracked yet (see totals.materialActual)
+          : round2(materialActualByLine[b.id] || 0); // D5: per-line material actuals from tagged costs
         const actualHours = isLabour ? (hoursByTask[b.workforce_task_category] || 0) : 0;
         return {
           id: b.id,

@@ -1259,23 +1259,27 @@ function CostsTab({ jobId }) {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
+  const [materialLines, setMaterialLines] = useState([]); // D5: material budget lines to tag costs against
   const [form, setForm]         = useState({
     costType: CARPENTRY_COST_TYPES.MATERIAL,
     description: "",
     amount: "",
     costDate: new Date().toISOString().slice(0, 10),
+    budgetLineId: "",
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [costsRes, summaryRes] = await Promise.all([
+    const [costsRes, summaryRes, budgetRes] = await Promise.all([
       apiFetch(`/api/carpentry/jobs/${jobId}/costs`),
       apiFetch(`/api/carpentry/jobs/${jobId}/summary`),
+      apiFetch(`/api/carpentry/jobs/${jobId}/budget`),
     ]);
     setLoading(false);
     if (costsRes.ok) setCosts(costsRes.data?.costs || []);
     if (summaryRes.ok) setSummary(summaryRes.data?.summary || null);
+    if (budgetRes.ok) setMaterialLines((budgetRes.data?.lines || []).filter((l) => l.costType === "material"));
   }, [jobId]);
 
   useEffect(() => { load(); }, [load]);
@@ -1290,11 +1294,12 @@ function CostsTab({ jobId }) {
       description: form.description.trim(),
       amount: Number(form.amount),
       costDate: form.costDate,
+      carpentryJobBudgetId: form.budgetLineId || undefined,
     });
     setSaving(false);
     if (!ok) { setError(e || "Failed to add cost."); return; }
     setCosts((cs) => [data.cost, ...cs]);
-    setForm({ costType: CARPENTRY_COST_TYPES.MATERIAL, description: "", amount: "", costDate: new Date().toISOString().slice(0, 10) });
+    setForm({ costType: CARPENTRY_COST_TYPES.MATERIAL, description: "", amount: "", costDate: new Date().toISOString().slice(0, 10), budgetLineId: "" });
     setShowForm(false);
     // Reload summary
     const { ok: sOk, data: sData } = await apiFetch(`/api/carpentry/jobs/${jobId}/summary`);
@@ -1408,6 +1413,15 @@ function CostsTab({ jobId }) {
               <input type="date" value={form.costDate} onChange={(e) => set("costDate", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
             </div>
           </div>
+          {materialLines.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Budget line (for per-category actuals)</label>
+              <select value={form.budgetLineId} onChange={(e) => set("budgetLineId", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
+                <option value="">Unassigned (counts in material total only)</option>
+                {materialLines.map((l) => <option key={l.id} value={l.id}>{l.categoryName}</option>)}
+              </select>
+            </div>
+          )}
           <div className="flex justify-end">
             <button
               onClick={saveCost}
@@ -1601,22 +1615,26 @@ function BudgetTab({ jobId }) {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-ink mb-2">Material / supply — budget</h3>
+        <h3 className="text-sm font-semibold text-ink mb-2">Material / supply — budget vs actual</h3>
         <table className="w-full text-sm">
           <thead><tr className="text-xs text-muted border-b border-hairline">
             <th className="text-left py-2 pr-3 font-medium">Category</th>
             <th className="text-right py-2 px-3 font-medium">Budget</th>
+            <th className="text-right py-2 px-3 font-medium">Actual</th>
+            <th className="text-right py-2 pl-3 font-medium">Variance</th>
           </tr></thead>
           <tbody>
             {material.map((l) => (
               <tr key={l.id} className="border-b border-hairline last:border-0">
                 <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
                 <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
+                <td className="py-2 px-3 text-right text-ink">{l.actual ? fmt$(l.actual) : "—"}</td>
+                <td className={`py-2 pl-3 text-right ${l.variance < 0 ? "text-red-600" : "text-muted"}`}>{fmt$(l.variance)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="text-xs text-muted mt-1">Material actuals are tracked in total ({fmt$(t.materialActual)}) under the Costs tab until cost entries are tagged per category.</p>
+        <p className="text-xs text-muted mt-1">Per-category actuals come from cost entries tagged to a budget line (Costs tab → Budget line). Untagged costs still count in the material total ({fmt$(t.materialActual)}).</p>
       </div>
     </div>
   );
