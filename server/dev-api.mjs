@@ -845,6 +845,10 @@ for (const prefix of [
 ]) {
   app.use(prefix, requireAuth, requireRole("admin"));
 }
+// Carpentry is admin + supervisor only — READ endpoints were requireAuth-only, letting any
+// authenticated employee/client curl job + cost data. The field app already hides carpentry from
+// employees (can.accessCarpentry); this enforces it server-side. (Workers use /api/worker, not this.)
+app.use("/api/carpentry", requireAuth, requireRole("admin", "supervisor"));
 
 registerModule4Routes(app);
 registerModule5Routes(app);
@@ -1062,7 +1066,7 @@ app.post("/api/subcontractors/mx-recheck-all", requireAuth, requireRole("admin")
   }
 });
 
-app.post("/api/subcontractor/lookup", async (req, res) => {
+app.post("/api/subcontractor/lookup", requireAuth, async (req, res) => {
   try {
     const key = process.env.ANTHROPIC_API_KEY?.trim();
     if (!key) {
@@ -1192,7 +1196,7 @@ const RFQ_EXTRACT_MAX_FILES = 1;
 /** Warn when decoded PDF exceeds this size (bytes); model may still truncate or fail. */
 const RFQ_EXTRACT_LARGE_FILE_BYTES = 8 * 1024 * 1024;
 
-app.post("/api/rfq/extract", async (req, res) => {
+app.post("/api/rfq/extract", requireAuth, async (req, res) => {
   try {
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key) {
@@ -1610,7 +1614,13 @@ app.post("/api/cron/portal-sync", async (req, res) => {
   }
 });
 
-app.post("/api/cron/cost-insights", async (_req, res) => {
+app.post("/api/cron/cost-insights", async (req, res) => {
+  // Same CRON_SECRET guard as /api/cron/portal-sync — this triggers paid Claude batches.
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const provided = req.headers["x-cron-secret"] || req.query?.secret;
+    if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -1818,7 +1828,7 @@ app.post("/api/cron/wipaa-review-tasks", async (_req, res) => {
 });
 
 /** Unmatched quote emails (requires service role + migration 003). */
-app.post("/api/rfq/remind-one", async (req, res) => {
+app.post("/api/rfq/remind-one", requireAuth, async (req, res) => {
   const rfqId = req.body?.rfqId?.trim?.();
   if (!rfqId) {
     return res.status(400).json({ ok: false, error: "rfqId required." });
@@ -1860,7 +1870,7 @@ app.get("/api/quote-tracker/unmatched", async (_req, res) => {
   return res.json({ ok: true, serviceConfigured: true, items: data || [] });
 });
 
-app.post("/api/rfq/send", async (req, res) => {
+app.post("/api/rfq/send", requireAuth, async (req, res) => {
   try {
     const msgs = req.body?.messages;
     // force:true lets an INTENTIONAL re-send/follow-up (a Query, or re-sending after fixing a bounced
@@ -2194,7 +2204,7 @@ async function pollImapForQuoteReplies() {
   }
 }
 
-app.post("/api/imap/quote-poll", async (_req, res) => {
+app.post("/api/imap/quote-poll", requireAuth, requireRole("admin"), async (_req, res) => {
   try {
     const out = await pollImapForQuoteReplies();
     return res.json(out);
