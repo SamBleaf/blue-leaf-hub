@@ -606,8 +606,15 @@ export async function migrateJobToPlans(jobAddress) {
   return ensurePlansSubfolderAndPublicLink(token, sharedJobRootPath(jobAddress));
 }
 
+// Dropbox-API-Arg is an HTTP header → must be an ASCII ByteString. Escape any non-Latin1 char
+// (em-dash "—", accented client names, etc.) as a \uXXXX JSON escape; Dropbox decodes it back.
+// Without this, fetch throws "Cannot convert argument to a ByteString…" on Unicode paths.
+function dropboxApiArg(obj) {
+  return JSON.stringify(obj).replace(/[-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+}
+
 export async function dropboxUploadBuffer(accessToken, dropboxPath, buffer, { autorename = true } = {}) {
-  const arg = JSON.stringify({
+  const arg = dropboxApiArg({
     path: dropboxPath,
     mode: "add",
     autorename,
@@ -1060,7 +1067,7 @@ export async function uploadReceivedQuotePdfToJob(opts) {
 /** Download file bytes from Dropbox (shared namespace path). */
 export async function dropboxDownloadBuffer(accessToken, dropboxPath) {
   const namespaceId = await getTeamNamespaceId(accessToken);
-  const arg = JSON.stringify({ path: dropboxPath });
+  const arg = dropboxApiArg({ path: dropboxPath });
   const res = await fetch(`${DROPBOX_CONTENT}/files/download`, {
     method: "POST",
     headers: {

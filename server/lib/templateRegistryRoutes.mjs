@@ -125,8 +125,13 @@ export function registerTemplateRegistryRoutes(app) {
     try {
       const token = await getDropboxAccessToken();
       const folder = TEMPLATE_MODULES[entry.module]?.folder || "Admin & Shared";
+      const path = `${DROPBOX_TEMPLATES_BASE}/${folder}`;
+      // Ensure the folder exists before linking — so "Open in Dropbox" works even if the
+      // one-time "Set up Dropbox folders" hasn't been run yet. Sequential, idempotent.
+      await createFolderIfNotExists(token, DROPBOX_TEMPLATES_BASE);
+      await createFolderIfNotExists(token, path);
       // Link the module folder (the file may be a .md / .docx we don't name exactly here).
-      const link = await getOrCreateSharedLinkForPath(token, `${DROPBOX_TEMPLATES_BASE}/${folder}`);
+      const link = await getOrCreateSharedLinkForPath(token, path);
       return ok(res, { url: link });
     } catch (e) {
       console.error("[templates/dropbox-link GET]", e?.message || e);
