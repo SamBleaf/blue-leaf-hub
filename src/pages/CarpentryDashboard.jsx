@@ -177,6 +177,9 @@ function NewJobModal({ onClose, onCreated }) {
           <button onClick={onClose} className="text-muted hover:text-ink transition-colors text-xl leading-none">&times;</button>
         </div>
 
+        {/* Scrollable body — import bar + form scroll TOGETHER so Step 2 (XLSX) is always reachable
+            even on short screens (previously the import bar was outside the scroll area and got clipped). */}
+        <div className="flex-1 overflow-y-auto">
         {/* Buildexact import — use BOTH: Fetch fills the details, the Estimate Items XLSX gives the budget */}
         <div className="px-5 pt-4 pb-3 bg-slate-50 border-b border-hairline">
           {/* Step 1 — details from the Buildexact API */}
@@ -236,8 +239,8 @@ function NewJobModal({ onClose, onCreated }) {
           )}
         </div>
 
-        {/* Form body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* Form body (scrolls with the import bar via the shared container above) */}
+        <div className="p-5 space-y-4">
           {/* Row: Client name + contact */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -423,6 +426,7 @@ function NewJobModal({ onClose, onCreated }) {
             </div>
           )}
         </div>
+        </div>{/* /scrollable body */}
 
         {/* Footer */}
         <div className="flex justify-end gap-3 px-5 py-4 border-t border-hairline">
