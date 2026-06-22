@@ -2261,13 +2261,26 @@ if (envBool(process.env.REMINDER_CRON_ENABLED, false)) {
     runLeadTimeNotifications(sb)
       .then(r => console.log("[lead-time-notifications]", r))
       .catch(e => console.error("[lead-time-notifications]", e));
-    runPortalNightlySync()
-      .then(r => console.log("[portal-sync]", r))
-      .catch(e => console.error("[portal-sync]", e));
   };
   setInterval(tick, dayMs);
   setTimeout(tick, 45_000);
   console.log("[blue-leaf-api] REMINDER_CRON_ENABLED: daily deadline reminders (~2 days before).");
+}
+
+// Portal nightly sync on its OWN daily timer, DECOUPLED from REMINDER_CRON — so the
+// client Journey advances and the finance reconciliation / client-identity backfill
+// self-heal in prod BY DEFAULT (no extra env flag, doesn't enable the reminder jobs).
+// Idempotent + best-effort. Disable with PORTAL_SYNC_ENABLED=false.
+if (envBool(process.env.PORTAL_SYNC_ENABLED, true)) {
+  const portalDayMs = 24 * 60 * 60 * 1000;
+  const portalTick = () => {
+    runPortalNightlySync()
+      .then((r) => console.log("[portal-sync]", r))
+      .catch((e) => console.error("[portal-sync]", e));
+  };
+  setInterval(portalTick, portalDayMs);
+  setTimeout(portalTick, 60_000);
+  console.log("[blue-leaf-api] PORTAL_SYNC_ENABLED: daily portal sync (milestones, selections, finance reconcile).");
 }
 
 if (envBool(process.env.IMAP_POLL_ENABLED, true)) {
@@ -2327,6 +2340,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, "../dist");
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
+  // The Worker PWA has its own entry document (worker.html → /manifest.json, start_url "/worker")
+  // so an iPhone "Add to Home Screen" from /worker installs the Blue Leaf Building identity, not
+  // the Hub. The vercel.json rewrite that did this is inert on Railway, so the Express server must
+  // do it. Must come BEFORE the SPA catch-all, which would otherwise return Hub index.html.
+  const workerHtml = join(distPath, "worker.html");
+  if (existsSync(workerHtml)) {
+    app.get(["/worker", "/worker/*"], (_req, res) => res.sendFile(workerHtml));
+  }
   app.get("*", (req, res) => res.sendFile(join(distPath, "index.html")));
 }
 
