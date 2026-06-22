@@ -206,7 +206,7 @@ export function registerTemplateRegistryRoutes(app) {
     try {
       const token = await getDropboxAccessToken();
       await createFolderIfNotExists(token, DROPBOX_TEMPLATES_BASE);
-      await createFolderIfNotExists(token, `${DROPBOX_TEMPLATES_BASE}/00 — START HERE`);
+      await createFolderIfNotExists(token, `${DROPBOX_TEMPLATES_BASE}/00 START HERE`);
       const created = [];
       // Sequential (no Promise.all) — Dropbox folder creation must be serialised.
       for (const m of Object.values(TEMPLATE_MODULES)) {
@@ -228,7 +228,7 @@ export function registerTemplateRegistryRoutes(app) {
         try { await dropboxUploadUtf8Text(token, path, text, { autorename: false }); return true; }
         catch (e) { if (/conflict|already exists/i.test(String(e?.message || ""))) return false; throw e; }
       };
-      await skipConflict(`${DROPBOX_TEMPLATES_BASE}/00 — START HERE/INDEX.md`, index);
+      await skipConflict(`${DROPBOX_TEMPLATES_BASE}/00 START HERE/INDEX.md`, index);
       let files = 0;
       // Sequential (no Promise.all) — Dropbox writes must be serialised.
       for (const t of TEMPLATE_CATALOG) {

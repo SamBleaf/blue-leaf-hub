@@ -610,7 +610,7 @@ export async function migrateJobToPlans(jobAddress) {
 // (em-dash "—", accented client names, etc.) as a \uXXXX JSON escape; Dropbox decodes it back.
 // Without this, fetch throws "Cannot convert argument to a ByteString…" on Unicode paths.
 function dropboxApiArg(obj) {
-  return JSON.stringify(obj).replace(/[-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  return JSON.stringify(obj).replace(/[^\x00-\x7F]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
 export async function dropboxUploadBuffer(accessToken, dropboxPath, buffer, { autorename = true } = {}) {

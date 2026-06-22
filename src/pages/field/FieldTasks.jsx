@@ -13,6 +13,7 @@ export default function FieldTasks() {
   const [names, setNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
+  const [err, setErr] = useState(null);
 
   async function load() {
     if (!supabaseConfigured()) { setLoading(false); return; }
@@ -32,9 +33,11 @@ export default function FieldTasks() {
   async function markDone(t) {
     if (!canEdit) return;
     setSaving(t.id);
+    setErr(null);
     const sb = getSupabase();
-    await sb.from("schedule_tasks").update({ percent_complete: 100, status: "complete" }).eq("id", t.id);
+    const { error } = await sb.from("schedule_tasks").update({ percent_complete: 100, status: "complete" }).eq("id", t.id);
     setSaving(null);
+    if (error) { setErr("Couldn't mark that task done — try again."); return; } // don't drop it from the list on failure
     setByProject((prev) => {
       const next = { ...prev };
       next[t.project_id] = (next[t.project_id] || []).filter((x) => x.id !== t.id);
@@ -50,6 +53,7 @@ export default function FieldTasks() {
   return (
     <div className="space-y-4">
       <PageTitle sub={canEdit ? "Tap the circle to mark a task done" : "View only"}>Tasks</PageTitle>
+      {err && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{err}</div>}
       {projectIds.length === 0 ? (
         <Empty title="No open tasks" hint="Open schedule tasks across active projects show here." />
       ) : (
