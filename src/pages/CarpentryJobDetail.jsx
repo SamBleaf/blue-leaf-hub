@@ -647,6 +647,7 @@ function TasksPanel({ jobId }) {
   const [taskTitle, setTaskTitle] = useState("");
   const [taskPriority, setTaskPriority] = useState("normal");
   const [taskCategory, setTaskCategory] = useState("general");
+  const [taskAudience, setTaskAudience] = useState("worker"); // D3: 'worker' | 'supervisor' (QC/order-ahead)
   const [taskAssignee, setTaskAssignee] = useState("");
   const [taskDesc, setTaskDesc]   = useState("");
   const [addingTask, setAddingTask] = useState(false);
@@ -694,6 +695,7 @@ function TasksPanel({ jobId }) {
       priority: taskPriority,
       category: taskCategory,
       assignedTo: taskAssignee || undefined,
+      taskAudience,
     });
     setAddingTask(false);
     if (!ok) { setTaskError(e || "Failed to add task."); return; }
@@ -702,6 +704,7 @@ function TasksPanel({ jobId }) {
     setTaskDesc("");
     setTaskPriority("normal");
     setTaskCategory("general");
+    setTaskAudience("worker");
     setTaskAssignee("");
     setShowAddTask(false);
   }
@@ -776,6 +779,27 @@ function TasksPanel({ jobId }) {
 
   const openTasks = tasks.filter((t) => t.status !== "done");
   const doneTasks = tasks.filter((t) => t.status === "done");
+  // D3: split worker tasks from supervisor/QC tasks (e.g. "order flashings", "book frame inspection").
+  const openWorker = openTasks.filter((t) => t.task_audience !== "supervisor");
+  const openSup = openTasks.filter((t) => t.task_audience === "supervisor");
+  const renderOpenRow = (task) => (
+    <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-hairline bg-white">
+      <button
+        onClick={() => toggleDone(task)}
+        disabled={togglingId === task.id}
+        className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-primary flex items-center justify-center transition-colors disabled:opacity-40"
+        aria-label="Mark done"
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-ink leading-snug">{task.title}</p>
+        {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
+      </div>
+      <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
+        {TASK_PRIORITY_LABEL[task.priority] || task.priority}
+      </span>
+      <button onClick={() => deleteTask(task)} className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1" title="Remove task">✕</button>
+    </div>
+  );
 
   return (
     <div className="mb-8">
@@ -905,6 +929,23 @@ function TasksPanel({ jobId }) {
               className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring resize-none"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">For</label>
+            <div className="flex gap-2">
+              {[["worker", "Workers"], ["supervisor", "Supervisor (QC / order-ahead)"]].map(([v, l]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setTaskAudience(v)}
+                  className={`flex-1 min-h-[38px] rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    taskAudience === v ? "bg-primary text-white" : "border border-hairline bg-white text-ink hover:bg-slate-50"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-ink mb-1">Priority</label>
@@ -973,32 +1014,14 @@ function TasksPanel({ jobId }) {
         <p className="text-sm text-muted">No tasks yet. Add tasks for your workers to tick off on-site.</p>
       ) : (
         <>
-          {openTasks.length > 0 && (
-            <div className="space-y-2 mb-3">
-              {openTasks.map((task) => (
-                <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-hairline bg-white">
-                  <button
-                    onClick={() => toggleDone(task)}
-                    disabled={togglingId === task.id}
-                    className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-primary flex items-center justify-center transition-colors disabled:opacity-40"
-                    aria-label="Mark done"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-ink leading-snug">{task.title}</p>
-                    {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
-                  </div>
-                  <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
-                    {TASK_PRIORITY_LABEL[task.priority] || task.priority}
-                  </span>
-                  <button
-                    onClick={() => deleteTask(task)}
-                    className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1"
-                    title="Remove task"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+          {openWorker.length > 0 && (
+            <div className="space-y-2 mb-3">{openWorker.map(renderOpenRow)}</div>
+          )}
+
+          {openSup.length > 0 && (
+            <div className="mb-3">
+              <h4 className="text-xs font-semibold text-muted mb-2">Tasks for supervisors (QC / order-ahead)</h4>
+              <div className="space-y-2">{openSup.map(renderOpenRow)}</div>
             </div>
           )}
 

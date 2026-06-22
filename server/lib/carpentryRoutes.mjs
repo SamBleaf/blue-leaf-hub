@@ -971,8 +971,9 @@ export function registerCarpentryRoutes(app) {
     if (!sb) return err(res, 503, "Database not configured.");
     try {
       if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
-      const { title, description, priority = "normal", dueDate, category = "general", assignedTo, createdVia = "manual" } = req.body || {};
+      const { title, description, priority = "normal", dueDate, category = "general", assignedTo, createdVia = "manual", taskAudience = "worker" } = req.body || {};
       if (!title?.trim()) return err(res, 400, "title is required.");
+      if (!["worker", "supervisor"].includes(taskAudience)) return err(res, 400, "Invalid taskAudience.");
       const VALID_PRIORITY = ["urgent", "normal", "when_time_permits"];
       if (!VALID_PRIORITY.includes(priority)) return err(res, 400, "Invalid priority.");
       // Generic task types + the canonical labour streams (D4: a task's category can be the job's
@@ -1001,6 +1002,9 @@ export function registerCarpentryRoutes(app) {
         created_via: createdVia,
         status: "open",
         sort_order: 0,
+        // D3: 'worker' (default) or 'supervisor' (QC / order-ahead tasks). Only set when provided
+        // so it's safe before migration 115 adds the column.
+        ...(taskAudience && taskAudience !== "worker" ? { task_audience: taskAudience } : {}),
       };
       const { data: task, error } = await sb
         .from("site_tasks")
