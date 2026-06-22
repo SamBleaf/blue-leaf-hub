@@ -13,7 +13,18 @@ export default function WorkerLayout({ children, onBack }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
   const [showIosHint, setShowIosHint] = useState(false);
+  const [offline, setOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   const dismissed = useRef(false);
+
+  // Field crews work in poor signal — show a clear offline banner so a worker knows why a save
+  // might not be going through, rather than tapping into silent failures.
+  useEffect(() => {
+    const goOnline = () => setOffline(false);
+    const goOffline = () => setOffline(true);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
+  }, []);
 
   const isHome = HOME_PATHS.includes(location.pathname);
   const handleBack = onBack ?? (() => navigate(-1));
@@ -95,6 +106,13 @@ export default function WorkerLayout({ children, onBack }) {
         {/* Right spacer to keep logo centred */}
         <div className="w-9 shrink-0" />
       </header>
+
+      {/* Offline banner — field connectivity is unreliable */}
+      {offline && (
+        <div className="bg-amber-500 text-white text-xs font-medium px-4 py-1.5 text-center shrink-0">
+          You&apos;re offline — changes can&apos;t be saved until you reconnect.
+        </div>
+      )}
 
       {/* PWA install banner */}
       {showInstall && (

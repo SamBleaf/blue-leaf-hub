@@ -309,6 +309,11 @@ export default function WorkforceTeam() {
                       {!isManagement && <span className="text-[10px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">Recommended</span>}
                     </div>
                     <p className="text-[11px] text-muted mb-2">A personal link the worker opens on their phone to log hours — no account needed. Keep it private; reset to revoke.</p>
+                    {!workerLink && (
+                      <p className={`text-[11px] mb-2 font-medium ${panel.has_worker_link ? "text-green-600" : "text-amber-600"}`}>
+                        {panel.has_worker_link ? "✓ A worker link has been issued." : "⚠ No worker link issued yet."}
+                      </p>
+                    )}
                     {workerLink && (
                       <input readOnly value={workerLink} onFocus={e => e.target.select()} className="w-full border border-hairline rounded-lg px-2 py-1.5 text-xs mb-2 bg-gray-50" />
                     )}

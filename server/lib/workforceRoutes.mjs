@@ -490,7 +490,9 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const isDirector = ["admin"].includes(req.caller.role);
     const includeInactive = req.query.include_inactive === "true";
-    const baseCols = "id, user_id, name, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : "");
+    // worker_token is selected only to derive a has_worker_link flag — it is stripped before the
+    // response so the secret is never exposed (lets the Team Directory show who still needs a link).
+    const baseCols = "id, user_id, name, trade, employment_type, is_leading_hand, is_active, email, phone, staff_code, buildexact_employee_id, buildexact_contact_id, invite_sent_at, created_at, worker_token" + (isDirector ? ", hourly_rate, overtime_multiplier, double_time_multiplier" : "");
     const run = (cols, orderCol) => {
       let q = sb.from("employees").select(cols);
       if (!includeInactive) q = q.eq("is_active", true);
@@ -502,7 +504,8 @@ export function registerWorkforceRoutes(app) {
       ({ data, error } = await run(baseCols, "name"));
     }
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    res.json({ ok: true, employees: data });
+    const employees = (data || []).map(({ worker_token, ...e }) => ({ ...e, has_worker_link: !!worker_token }));
+    res.json({ ok: true, employees });
   });
 
   // Weekly timesheet completion snapshot (admin/supervisor): for each active

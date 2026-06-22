@@ -242,9 +242,12 @@ function ApprovalsTab({ role }) {
                     <td className="px-3 py-3 text-muted">{fmtDate(ts.date)}</td>
                     <td className="px-3 py-3 text-right">{totalHrs}h</td>
                     {isDirector && (
-                      <td className="px-3 py-3 text-right text-muted">
+                      <td
+                        className="px-3 py-3 text-right text-muted"
+                        title="Base-rate estimate — excludes overtime/double-time premiums. The exact cost is calculated at approval."
+                      >
                         {ts.employees?.hourly_rate
-                          ? `~$${(totalHrs * Number(ts.employees.hourly_rate)).toFixed(2)}`
+                          ? `~$${(totalHrs * Number(ts.employees.hourly_rate)).toFixed(2)}${otHrs > 0 ? "+" : ""}`
                           : "—"}
                       </td>
                     )}
