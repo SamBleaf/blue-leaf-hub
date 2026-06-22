@@ -34,18 +34,24 @@ export default function WorkerTasks() {
   const [jobs, setJobs] = useState([]);
   const [job, setJob] = useState(getSelectedJob());
   const [showJobPicker, setShowJobPicker] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   // Mount: load the job list + me. The selected job is restored from localStorage.
+  // A 401 means the magic link is expired/reset — surface it instead of showing a normal-looking
+  // but empty screen (which made a dead link look like "no work").
   useEffect(() => {
     let stop = false;
     Promise.all([
-      workerFetch("/api/worker/jobs").then(r => r.json()),
-      workerFetch("/api/worker/me").then(r => r.json()),
-    ]).then(([jobsJ, meJ]) => {
+      workerFetch("/api/worker/jobs").then(async r => ({ status: r.status, body: await r.json().catch(() => ({})) })),
+      workerFetch("/api/worker/me").then(async r => ({ status: r.status, body: await r.json().catch(() => ({})) })),
+    ]).then(([jobsR, meR]) => {
       if (stop) return;
-      if (jobsJ.ok) setJobs(jobsJ.jobs || []);
-      if (meJ.ok) setMe(meJ);
-    }).catch(() => {}).finally(() => { if (!stop) setLoading(false); });
+      if (jobsR.status === 401 || meR.status === 401) { setAuthError(true); return; }
+      if (jobsR.body.ok) setJobs(jobsR.body.jobs || []);
+      if (meR.body.ok) setMe(meR.body);
+      if (!jobsR.body.ok && !meR.body.ok) setLoadError(true);
+    }).catch(() => { if (!stop) setLoadError(true); }).finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
   }, []);
 
@@ -72,11 +78,10 @@ export default function WorkerTasks() {
   const myId = me?.employee?.id;
 
   function filteredTasks() {
-    let list = tasks;
+    // Active tabs never show done tasks (the Done tab + collapsed section handle those separately).
+    let list = tasks.filter(t => t.status !== "done");
     if (filter === "My tasks") list = list.filter(t => t.assigned_to === myId || t.assigned_to === null);
     if (filter === "Urgent") list = list.filter(t => t.priority === "urgent");
-    if (filter === "Done") list = list.filter(t => t.status === "done");
-    else list = list.filter(t => t.status !== "done");
     return list;
   }
 
@@ -105,8 +110,16 @@ export default function WorkerTasks() {
         setNotes("");
         setPhotoPath(null);
         setPhotoPreview(null);
+      } else {
+        // Surface the failure instead of silently swallowing it — keep the sheet open so the
+        // worker can retry. 401 = expired/reset link; otherwise show the server's message.
+        alert(res.status === 401
+          ? "Your worker link has expired or been reset — ask the office for a new link."
+          : (j.error || "Couldn't save this task. Please try again."));
       }
-    } catch { /* ignore */ } finally {
+    } catch {
+      alert("Couldn't save this task — check your connection and try again.");
+    } finally {
       setCompleting(false);
     }
   }
@@ -129,6 +142,29 @@ export default function WorkerTasks() {
 
   if (loading) {
     return <WorkerLayout><div className="flex items-center justify-center pt-24 text-muted text-sm">Loading…</div></WorkerLayout>;
+  }
+
+  if (authError) {
+    return (
+      <WorkerLayout>
+        <div className="px-6 pt-20 text-center">
+          <p className="text-3xl mb-3">🔑</p>
+          <h1 className="text-base font-bold text-ink mb-2">Your link has expired</h1>
+          <p className="text-sm text-muted">This worker link is no longer valid or has been reset.<br />Please ask your site supervisor for a new link.</p>
+        </div>
+      </WorkerLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <WorkerLayout>
+        <div className="px-6 pt-20 text-center">
+          <p className="text-sm text-muted mb-3">Couldn&apos;t load your tasks.</p>
+          <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold">Try again</button>
+        </div>
+      </WorkerLayout>
+    );
   }
 
   function TaskRow({ task }) {

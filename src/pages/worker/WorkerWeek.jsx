@@ -16,6 +16,7 @@ export default function WorkerWeek() {
   const [view, setView] = useState(() => firstOfMonth(new Date()));
   const [byDate, setByDate] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null); // null | "auth" | "load"
 
   const monthStart = ymd(view);
   const monthEnd = ymd(new Date(view.getFullYear(), view.getMonth() + 1, 0));
@@ -23,10 +24,17 @@ export default function WorkerWeek() {
   useEffect(() => {
     let stop = false;
     setLoading(true);
+    setLoadError(null);
     workerFetch(`/api/worker/timesheets?from=${monthStart}&to=${monthEnd}`)
-      .then((r) => r.json())
-      .then((j) => { if (stop) return; const m = {}; for (const t of (j.timesheets || [])) m[t.date] = t; setByDate(m); })
-      .catch(() => {})
+      .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
+      .then(({ status, body }) => {
+        if (stop) return;
+        // Don't paint a failed load as "every day missing" — surface the error instead.
+        if (status === 401) { setLoadError("auth"); return; }
+        if (!body.ok) { setLoadError("load"); return; }
+        const m = {}; for (const t of (body.timesheets || [])) m[t.date] = t; setByDate(m);
+      })
+      .catch(() => { if (!stop) setLoadError("load"); })
       .finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
   }, [monthStart, monthEnd]);
@@ -46,11 +54,11 @@ export default function WorkerWeek() {
       let dot = null;
       if (ts && (ts.status === "submitted" || ts.status === "approved")) dot = "green";
       else if (ts && ts.status === "rejected") dot = "amber"; // returned — needs resubmit
-      else if (!ts && !isWeekend && !isFuture) dot = "red";   // a working day with nothing logged
+      else if (!ts && !isWeekend && !isFuture && !loadError) dot = "red"; // working day, nothing logged (suppressed if the load failed)
       out.push({ key, day, dot, isFuture, isToday: key === todayStr, isWeekend });
     }
     return out;
-  }, [view, byDate]);
+  }, [view, byDate, loadError]);
 
   const canForward = view < firstOfMonth(new Date());
   const missing = cells.filter((c) => c && c.dot === "red").length;
@@ -72,7 +80,15 @@ export default function WorkerWeek() {
           <button type="button" disabled={!canForward} onClick={() => canForward && setView((v) => new Date(v.getFullYear(), v.getMonth() + 1, 1))} aria-label="Next month" className="w-9 h-9 rounded-full border border-hairline text-ink text-lg flex items-center justify-center disabled:opacity-30">›</button>
         </div>
 
-        {missing > 0 && (
+        {loadError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-sm mb-2 text-red-700">
+            {loadError === "auth"
+              ? "Your worker link has expired or been reset — ask the office for a new link."
+              : <>Couldn&apos;t load your timesheets. <button type="button" onClick={() => window.location.reload()} className="font-semibold underline">Retry</button></>}
+          </div>
+        )}
+
+        {!loadError && missing > 0 && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm mb-2 text-amber-800">
             <span className="font-semibold">{missing}</span> day{missing > 1 ? "s" : ""} this month not logged — the red ones.
           </div>

@@ -512,6 +512,27 @@ function HistoryTab({ role }) {
     }
   }
 
+  // Retry a Buildexact push and SURFACE the result (a re-failed sync used to be silent). `force`
+  // recovers a needs_review row (orphaned/empty order) — guarded because it re-creates actuals.
+  async function retrySync(ts, force) {
+    if (force && !window.confirm(
+      "Force re-sync re-creates the Buildexact actuals for this timesheet. Only do this AFTER you've deleted or fixed the order in Buildexact, or the labour cost may be double-booked. Continue?"
+    )) return;
+    try {
+      const res = await authFetch(`/api/workforce/timesheets/${ts.id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: !!force }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!j.ok) alert(j.error || "Sync failed — check Buildexact and try again.");
+    } catch {
+      alert("Sync failed — check your connection and try again.");
+    } finally {
+      load();
+    }
+  }
+
   return (
     <div>
       <div className="flex gap-3 mb-4 flex-wrap items-end">
@@ -574,16 +595,19 @@ function HistoryTab({ role }) {
                           className="inline-flex items-center gap-1 text-xs text-red-600 font-medium cursor-help"
                         >
                           ⚠ Sync failed
-                          <button
-                            type="button"
-                            className="underline ml-1"
-                            onClick={async () => {
-                              await authFetch(`/api/workforce/timesheets/${ts.id}/sync`, { method: "POST" });
-                              load();
-                            }}
-                          >
+                          <button type="button" className="underline ml-1" onClick={() => retrySync(ts, false)}>
                             Retry
                           </button>
+                          {ts.buildexact_needs_review && (
+                            <button
+                              type="button"
+                              className="underline ml-1 text-amber-700"
+                              title="Use only after deleting/fixing the order in Buildexact"
+                              onClick={() => retrySync(ts, true)}
+                            >
+                              Force
+                            </button>
+                          )}
                         </span>
                       ) : ts.buildexact_synced_at ? (
                         <span className="text-xs text-green-600">✓ Synced</span>

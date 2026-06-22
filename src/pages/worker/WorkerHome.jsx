@@ -47,9 +47,23 @@ export default function WorkerHome() {
     );
   }
   if (error) {
+    const isAuth = /link is invalid|reset|unauthor/i.test(error);
     return (
       <WorkerLayout>
-        <div className="p-4 text-red-600 text-sm">{error}</div>
+        <div className="px-6 pt-20 text-center">
+          {isAuth ? (
+            <>
+              <p className="text-3xl mb-3">🔑</p>
+              <h1 className="text-base font-bold text-ink mb-2">Your link has expired</h1>
+              <p className="text-sm text-muted">This worker link is no longer valid or has been reset.<br />Please ask your site supervisor for a new link.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted mb-3">{error}</p>
+              <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold">Try again</button>
+            </>
+          )}
+        </div>
       </WorkerLayout>
     );
   }
