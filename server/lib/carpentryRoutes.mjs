@@ -325,16 +325,13 @@ export function registerCarpentryRoutes(app) {
         if (ste) console.warn("[carpentry/jobs POST] site-task seed error:", ste.message);
       }
 
-      // Auto-seed budget categories from the Buildexact estimate (labour categories drive the
-      // workforce labour push). Non-fatal — job creation still succeeds if Buildexact is unreachable.
-      if (buildexactJobId) {
-        try {
-          const r = await seedBudgetsFromBuildexact(sb, job.id, buildexactJobId);
-          console.log(`[carpentry/jobs POST] auto-seeded ${r.seeded} budget categories for ${job.reference}`);
-        } catch (e) {
-          console.warn("[carpentry/jobs POST] budget auto-seed failed:", e?.message);
-        }
-      }
+      // NOTE: the budget is NOT auto-seeded from the Buildexact API. The v3 estimate API
+      // returns a flat, cost-only line-item list (no per-category markup), so it cannot
+      // produce the marked-up sell-ex-GST per category that the budget needs — and on some
+      // accounts each leaf line came through as its own "category" (the ~100-row budget bug).
+      // The authoritative source is the reviewed Estimate-Items XLSX import, which seeds the
+      // budget via POST /budget/seed (mapping workforce_task_category for the labour push).
+      // The API fetch still supplies the job code + client contact at /buildexact/fetch.
 
       return ok(res, { job: rowToCamel(job) });
     } catch (e) {
@@ -1228,47 +1225,6 @@ export function registerCarpentryRoutes(app) {
       }
     }
     return best ? best.key : null;
-  }
-
-  // Pull the Buildexact estimate categories and (re)seed a carpentry job's labour/material budget
-  // lines. Labour categories get a workforce_task_category — the labour→Buildexact push reads
-  // category_name from here to set each Work Order line's cost category. Used by job creation
-  // (auto-seed) and the manual seed endpoint / one-off backfills.
-  async function seedBudgetsFromBuildexact(sb, carpentryJobId, buildexactJobId) {
-    const pulled = await pullBuildexactEstimate(buildexactJobId);
-    const cats = pulled?.estimate?.categories || [];
-    if (!cats.length) return { seeded: 0 };
-    // Some Buildxact accounts return the estimate as a flat line-item list rather than the
-    // category → sub-item → line hierarchy, so the "categories" come back as one row per
-    // line item (hundreds of them) instead of the handful of real trade categories. Don't
-    // auto-seed that — it produces a meaningless per-item budget. The reliable path is the
-    // reviewed categories from the estimate XLSX import (POST .../budget/seed).
-    if (cats.length > 40) {
-      console.warn(`[carpentry] Buildxact estimate ${buildexactJobId} returned ${cats.length} ungrouped lines — skipping budget auto-seed; use the estimate XLSX import.`);
-      return { seeded: 0, skipped: true };
-    }
-    await sb.from("carpentry_job_budgets").delete().eq("job_id", carpentryJobId);
-    const rows = cats.map((c, i) => {
-      const name = String(c.name || "").trim() || `Category ${i + 1}`;
-      const costType = classifyCostType(name);
-      // budget = marked-up sell ex-GST when the estimate carries markup (XLSX path);
-      // for the API estimate (cost-only today) sell falls back to cost. cost_ex_gst
-      // keeps the ex-markup cost for margin.
-      const cost = round2(c.subtotal_ex_gst ?? 0);
-      const sell = round2(c.subtotal_sell_ex_gst ?? c.subtotal_ex_gst ?? 0);
-      return {
-        job_id: carpentryJobId,
-        category_name: name,
-        cost_type: costType,
-        budget_ex_gst: sell,
-        cost_ex_gst: cost,
-        workforce_task_category: costType === "labour" ? matchTaskCategory(name) : null,
-        sort_order: i,
-      };
-    });
-    const { error } = await sb.from("carpentry_job_budgets").insert(rows);
-    if (error) throw error;
-    return { seeded: rows.length };
   }
 
   // ── POST /api/carpentry/jobs/:id/budget/seed ────────────────────────────────
