@@ -16,7 +16,10 @@ import UserManagement from "./pages/UserManagement.jsx";
 import DocumentsTemplates from "./pages/DocumentsTemplates.jsx";
 import FieldLayout from "./pages/field/FieldLayout.jsx";
 import FieldHome from "./pages/field/FieldHome.jsx";
-import FieldStub from "./pages/field/FieldStub.jsx";
+import FieldJobs from "./pages/field/FieldJobs.jsx";
+import FieldTasks from "./pages/field/FieldTasks.jsx";
+import FieldWHS from "./pages/field/FieldWHS.jsx";
+import FieldDiary from "./pages/field/FieldDiary.jsx";
 import MyPortal from "./pages/MyPortal.jsx";
 import Settings from "./pages/Settings.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
@@ -174,10 +177,10 @@ export default function App() {
                 element={<RoleRoute element={<FieldLayout />} allowed={["admin", "supervisor", "employee"]} redirectTo="/home" />}
               >
                 <Route index element={<FieldHome />} />
-                <Route path="jobs" element={<FieldStub title="Jobs" hint="Cost-stripped carpentry job list is coming to the field app. For now, open the Carpentry module." linkTo="/carpentry" linkLabel="Open Carpentry" />} />
-                <Route path="tasks" element={<FieldStub title="Tasks" hint="Worker + supervisor/QC task lists are coming to the field app. For now, manage tasks in Operations." linkTo="/operations" linkLabel="Open Operations" />} />
-                <Route path="whs" element={<FieldStub title="WHS / Safety" hint="Quick WHS actions are coming to the field app. For now, use the WHS tools in Operations." linkTo="/operations" linkLabel="Open Operations" />} />
-                <Route path="diary" element={<FieldStub title="Site Diary" hint="The quick diary + voice memo are coming to the field app. For now, use the current supervisor diary." linkTo="/supervisor" linkLabel="Open quick diary" />} />
+                <Route path="jobs" element={<FieldJobs />} />
+                <Route path="tasks" element={<FieldTasks />} />
+                <Route path="whs" element={<FieldWHS />} />
+                <Route path="diary" element={<FieldDiary />} />
               </Route>
 
               <Route element={<AppShell />}>
