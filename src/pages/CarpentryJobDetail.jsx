@@ -654,6 +654,9 @@ function TasksPanel({ jobId }) {
   const [taskError, setTaskError] = useState(null);
   const [showDone, setShowDone]   = useState(false);
   const [employees, setEmployees] = useState([]);
+  // D4: the job's labour budget categories drive the task-category dropdown, so a worker task's
+  // category == the budget category == the timesheet task_category (the spine that accrues actuals).
+  const [labourCats, setLabourCats] = useState([]);
   // Voice → tasks (paste a Plaud transcript → draft tasks for review)
   const [showTranscript, setShowTranscript] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -675,6 +678,11 @@ function TasksPanel({ jobId }) {
       .then(({ ok, data }) => { if (ok) setEmployees((data?.employees || []).filter(e => e.is_active !== false)); })
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    apiFetch(`/api/carpentry/jobs/${jobId}/budget`)
+      .then(({ ok, data }) => { if (ok) setLabourCats((data?.lines || []).filter((l) => l.costType === "labour")); })
+      .catch(() => {});
+  }, [jobId]);
 
   async function addTask() {
     if (!taskTitle.trim()) return;
@@ -917,11 +925,20 @@ function TasksPanel({ jobId }) {
                 onChange={(e) => setTaskCategory(e.target.value)}
                 className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
               >
-                <option value="general">General</option>
-                <option value="defect">Defect</option>
-                <option value="safety">Safety</option>
-                <option value="materials">Materials</option>
-                <option value="inspection">Inspection</option>
+                {labourCats.length > 0 && (
+                  <optgroup label="Work stream (labour)">
+                    {labourCats.map((c) => (
+                      <option key={c.id} value={c.workforceTaskCategory || c.categoryName}>{c.categoryName}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Other">
+                  <option value="general">General</option>
+                  <option value="defect">Defect</option>
+                  <option value="safety">Safety</option>
+                  <option value="materials">Materials</option>
+                  <option value="inspection">Inspection</option>
+                </optgroup>
               </select>
             </div>
             <div>
