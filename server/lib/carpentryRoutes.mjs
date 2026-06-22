@@ -975,7 +975,14 @@ export function registerCarpentryRoutes(app) {
       if (!title?.trim()) return err(res, 400, "title is required.");
       const VALID_PRIORITY = ["urgent", "normal", "when_time_permits"];
       if (!VALID_PRIORITY.includes(priority)) return err(res, 400, "Invalid priority.");
-      const VALID_CATEGORY = ["general", "defect", "safety", "materials", "inspection"];
+      // Generic task types + the canonical labour streams (D4: a task's category can be the job's
+      // labour budget stream so it ties to the budget + timesheet task_category). Must match the
+      // site_tasks.category CHECK (migration 114).
+      const VALID_CATEGORY = [
+        "general", "defect", "safety", "materials", "inspection",
+        "first_fix_framing", "cladding", "second_fix", "outdoor_works",
+        "formwork_slab_prep", "site_labouring", "site_cleanup", "supervision",
+      ];
       if (!VALID_CATEGORY.includes(category)) return err(res, 400, "Invalid category.");
       const VALID_CREATED_VIA = ["manual", "voice_note", "ai_extraction"];
       if (!VALID_CREATED_VIA.includes(createdVia)) return err(res, 400, "Invalid createdVia.");

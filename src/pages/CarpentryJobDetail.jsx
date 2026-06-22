@@ -680,7 +680,7 @@ function TasksPanel({ jobId }) {
   }, []);
   useEffect(() => {
     apiFetch(`/api/carpentry/jobs/${jobId}/budget`)
-      .then(({ ok, data }) => { if (ok) setLabourCats((data?.lines || []).filter((l) => l.costType === "labour")); })
+      .then(({ ok, data }) => { if (ok) setLabourCats((data?.lines || []).filter((l) => l.costType === "labour" && l.workforceTaskCategory)); })
       .catch(() => {});
   }, [jobId]);
 
@@ -928,7 +928,7 @@ function TasksPanel({ jobId }) {
                 {labourCats.length > 0 && (
                   <optgroup label="Work stream (labour)">
                     {labourCats.map((c) => (
-                      <option key={c.id} value={c.workforceTaskCategory || c.categoryName}>{c.categoryName}</option>
+                      <option key={c.id} value={c.workforceTaskCategory}>{c.categoryName}</option>
                     ))}
                   </optgroup>
                 )}
