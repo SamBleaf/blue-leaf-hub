@@ -64,15 +64,21 @@
 
 | Module | Built/changed | Walkthrough status |
 |---|---|---|
-| Auth & roles | Supervisor scoping, route + API gates | ☐ to test |
-| Field App `/field` | New (A5) | ☐ to test (supervisor + employee + admin preview) |
-| Carpentry | D1–D6 (import, budget, schedule, tasks, actuals) | ☐ to test (the big one) |
-| Documents & Templates | New registry (B) | ☐ to test (list, edit‑in‑hub, set‑up‑folders) |
-| Operations / Schedule / Site Diary / WHS | existing + site‑task/voice fixes | ☐ to test |
-| Workforce / Worker PWA | hardened (parallel) | ☐ to test |
-| Finance | invoice viewer + API gate | ☐ to test |
-| Sales / Tender / Procurement / Marketing | gated admin‑only; procurement PO fix | ☐ to test |
+| Auth & roles | Supervisor scoping, route + API gates | ✅ **verified** — supervisor nav scoped (Home/Confirm/Settings only); `/finance` + `/sales` redirect to `/home`; supervisor token → `/api/finance` + `/api/sales` **403**, `/api/operations` allowed; `/carpentry` reachable |
+| Field App `/field` | New (A5) | ✅ **verified + critical fix** — all 5 pages were **dead on load** (`supabaseConfigured` boolean called as a function → hung spinner); fixed all 4 files (commit `7de7f67`, pushed). Admin preview banner + nav render; supervisor view **cost‑stripped** (no `$`). *Pending: employee role pass; A5 phase‑3 routing (supervisor still lands `/home`, not `/field`).* |
+| Carpentry | D1–D6 (import, budget, schedule, tasks, actuals) | ✅ **verified** — D1 budget = 6 real categories (not the 100‑line‑item bug); D2 auto‑layout panel (commencement + frame‑delivery + 16 milestones); D5 material budget‑vs‑actual + Variance; D4 task category = labour streams; D3 worker/supervisor toggle; burn‑rate **live** (7 staff · 21 days @ margin → cost model synced) |
+| Documents & Templates | New registry (B) | ✅ **verified** — 40 templates across all 9 module groups, 19 "not built", module/status filters, "Set up Dropbox folders" present |
+| Operations / Schedule / Site Diary / WHS | existing + site‑task/voice fixes | ◐ **smoke‑clean** (loads, no errors) — deep workflow test pending |
+| Workforce / Worker PWA | hardened (parallel) | ◐ **smoke‑clean** — deep test (timesheet→actuals, PWA token) pending |
+| Finance | invoice viewer + API gate | ◐ **smoke‑clean** — invoice‑viewer deep test pending; ⚠ dev DB has `__DRYRUN_*`/`__E2E_*` job pollution to clean |
+| Sales / Tender / Procurement / Marketing | gated admin‑only; procurement PO fix | ◐ **smoke‑clean** (all render: Sales Pipeline, Cost Intelligence, Subcontractors, Content Studio) — deep test pending |
 | Client Portal v2 | isolation verified (QA) | ✅ strongest area (QA) |
+
+### Walkthrough log — session 1 (2026‑06‑23)
+- **Env:** preview Vite on **:5180** proxying to the existing API (:8787) — non‑destructive (didn't disturb the running dev server). E2E users seeded (`e2e-admin/supervisor/employee/client` @ `…blueleafbuilding.test`).
+- **Found + fixed (critical):** the entire Field App (A5) was non‑functional — `supabaseConfigured` is an exported **boolean const**, but FieldHome/Diary/Tasks/WHS all invoked it as `supabaseConfigured()`, throwing on mount; with no `try/catch` the load promise rejected and the spinner never cleared. Fixed across all 4 files + added `try/catch/finally` robustness to FieldHome. Shipped `7de7f67`.
+- **Security confirmed solid:** supervisor cannot reach finance/sales by nav, URL, or API; field view is cost‑stripped.
+- **Data cleanup owed (end of walkthrough):** `__E2E_*` (mine) via `E2E_CLEANUP=true`; `__DRYRUN_*` + `__DEMO_DELETED` artifacts (from QA/earlier sessions — confirm with Sam before removing).
 
 ---
 
