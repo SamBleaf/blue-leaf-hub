@@ -5,7 +5,7 @@ import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, build
 import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
-import { ok, err } from "./apiResponse.mjs";
+import { ok, err, translateDbError } from "./apiResponse.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 
@@ -302,12 +302,19 @@ export async function syncTimesheetToBuildexact(timesheet, sb, opts = {}) {
     const items = [];
     for (const entry of entries) {
       const parentTask = await resolveCostCategory(timesheet, entry, sb);
+      const hrs = Number(entry.hours) || 0;
+      const lineTotal = Number(entry.cost_amount ?? 0);
+      // unitCost = the effective per-hour cost for THIS entry, derived from the booked cost_amount
+      // (the loaded break-even rate, already including any OT/double-time premiums). This keeps the
+      // BX line internally consistent (unitCost × quantity ≈ totalCost) and decouples it from the
+      // editable employees.hourly_rate column. totalCost remains the authoritative booked actual.
+      const unitCost = hrs > 0 ? Math.round((lineTotal / hrs) * 10000) / 10000 : (Number(emp.hourly_rate) || 0);
       items.push({
         costItemType: "Labour",
         description: `${emp.name} (HUB)`,
-        quantity: Number(entry.hours),
-        unitCost: Number(emp.hourly_rate),
-        totalCost: Number(entry.cost_amount ?? 0),
+        quantity: hrs,
+        unitCost,
+        totalCost: lineTotal,
         uom: "hr",
         parentTask: parentTask || undefined,
         notes: "Imported from Blue Leaf Hub",
@@ -611,11 +618,14 @@ export function registerWorkforceRoutes(app) {
 
   // ── Timesheets ────────────────────────────────────────────────────────────
 
-  app.get("/api/workforce/timesheets/pending", requireAuth, async (_req, res) => {
+  app.get("/api/workforce/timesheets/pending", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
+    // Only admins (directors) may see pay rates — mirror the sibling /timesheets endpoint so a
+    // supervisor opening Approvals doesn't receive every worker's hourly_rate/multipliers.
+    const isDirector = req.caller.role === "admin";
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade, hourly_rate, overtime_multiplier), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
       .eq("status", "submitted")
       .order("submitted_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -943,7 +953,7 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, task: data });
   });
 
-  app.post("/api/projects/:id/site-tasks/bulk", requireAuth, async (req, res) => {
+  app.post("/api/projects/:id/site-tasks/bulk", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     const { tasks, created_via } = req.body;
     if (!Array.isArray(tasks) || !tasks.length) {
@@ -973,6 +983,10 @@ export function registerWorkforceRoutes(app) {
     }
     if (req.body.status === "done" && !update.completed_at) {
       update.completed_at = new Date().toISOString();
+      // Attribute office completions: completed_by FKs employees(id), but req.caller.id is the
+      // auth/user_profiles id — resolve the caller's employee record so the audit trail isn't null.
+      const { data: callerEmp } = await sb.from("employees").select("id").eq("user_id", req.caller.id).maybeSingle();
+      if (callerEmp?.id) update.completed_by = callerEmp.id;
     }
     const { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id).select().single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -1051,7 +1065,7 @@ export function registerWorkforceRoutes(app) {
     const monStr = weekStart(today);
 
     const [todayTs, yesterdayTs, weekEntries, settings] = await Promise.all([
-      sb.from("timesheets").select("*, timesheet_entries(*)").eq("employee_id", emp.id).eq("date", today).maybeSingle(),
+      sb.from("timesheets").select("*, timesheet_entries(id, task_category, phase, hours, notes, completion_photo_url)").eq("employee_id", emp.id).eq("date", today).maybeSingle(),
       sb.from("timesheets").select("project_id, carpentry_job_id, projects(id, address)").eq("employee_id", emp.id).eq("date", yesterday).maybeSingle(),
       sb.from("timesheet_entries").select("hours, timesheets!inner(employee_id, date, status)").eq("timesheets.employee_id", emp.id).gte("timesheets.date", monStr).in("timesheets.status", ["submitted", "approved"]),
       sb.from("workforce_settings").select("*").limit(1).single(),
@@ -1243,7 +1257,7 @@ export function registerWorkforceRoutes(app) {
         status: "submitted",
         submitted_at: new Date().toISOString(),
       }).select("id").single();
-      if (tsErr) return res.status(500).json({ ok: false, error: tsErr.message });
+      if (tsErr) return res.status(500).json({ ok: false, error: translateDbError(tsErr) });
       timesheetId = ts.id;
     } else {
       await sb.from("timesheets").update({
@@ -1271,7 +1285,7 @@ export function registerWorkforceRoutes(app) {
       completion_photo_url: e.completion_photo_url || null,
     }));
     const { error: entryErr } = await sb.from("timesheet_entries").insert(entryRows);
-    if (entryErr) return res.status(500).json({ ok: false, error: entryErr.message });
+    if (entryErr) return res.status(500).json({ ok: false, error: translateDbError(entryErr) });
 
     res.json({ ok: true, timesheet_id: timesheetId });
   });
@@ -1301,7 +1315,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    const { data } = await sb.from("timesheets").select("*, timesheet_entries(*)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
+    const { data } = await sb.from("timesheets").select("*, timesheet_entries(id, task_category, phase, hours, notes, completion_photo_url)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
     res.json({ ok: true, timesheet: data || null });
   });
 
@@ -1316,8 +1330,10 @@ export function registerWorkforceRoutes(app) {
     if (ts.status === "approved") return res.status(409).json({ ok: false, error: "Cannot edit approved timesheet" });
 
     const { entries, ...rest } = req.body;
-    const todayStr = todayYmd();
-    if (rest.date && rest.date > todayStr) {
+    // Tolerate timezones ahead of UTC (AEST +10) — match the POST handler's +1 day allowance so a
+    // same-day edit late in the evening isn't falsely rejected.
+    const maxDate = addDaysYmd(todayYmd(), 1);
+    if (rest.date && rest.date > maxDate) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
     if (Array.isArray(entries) && entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {

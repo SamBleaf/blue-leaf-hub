@@ -8,11 +8,19 @@ import { authFetch } from "./authFetch.js";
 
 const TOKEN_KEY = "blhub_worker_token";
 
-// Capture a magic-link token from the URL on first import (the worker just opened their link).
+// Capture a magic-link token from the URL on first import (the worker just opened their link),
+// then STRIP it from the address bar + history so the long-lived credential doesn't linger in the
+// URL, bookmarks, screenshots, or the Referer header. The persisted localStorage copy keeps the
+// worker authenticated, so removing it from the URL is non-breaking.
 (function captureWorkerToken() {
   try {
-    const t = new URL(window.location.href).searchParams.get("token");
-    if (t) localStorage.setItem(TOKEN_KEY, t);
+    const url = new URL(window.location.href);
+    const t = url.searchParams.get("token");
+    if (t) {
+      localStorage.setItem(TOKEN_KEY, t);
+      url.searchParams.delete("token");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
   } catch { /* ignore */ }
 })();
 
@@ -24,11 +32,11 @@ export function clearWorkerToken() {
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Fetch a worker endpoint, injecting the magic-link token when present.
+// Fetch a worker endpoint, sending the magic-link token in the x-worker-token HEADER (not the URL)
+// so the credential never leaks via access logs, browser history, or the Referer header. Falls back
+// to the normal authenticated fetch when no worker token is present (e.g. an admin viewing the PWA).
 export function workerFetch(path, opts = {}) {
   const token = getWorkerToken();
   if (!token) return authFetch(path, opts);
-  const sep = path.includes("?") ? "&" : "?";
-  const url = `${path}${sep}token=${encodeURIComponent(token)}`;
-  return fetch(url, opts);
+  return fetch(path, { ...opts, headers: { ...(opts.headers || {}), "x-worker-token": token } });
 }

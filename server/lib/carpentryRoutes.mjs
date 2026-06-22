@@ -29,7 +29,7 @@
  */
 
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { signSiteTaskPhotos, isUuid } from "./siteMedia.mjs";
 import { transcribeAudio, transcriptionConfigured } from "./transcribe.mjs";
@@ -959,7 +959,7 @@ export function registerCarpentryRoutes(app) {
 
   // ── POST /api/carpentry/jobs/:id/tasks ──────────────────────────────────────
 
-  app.post("/api/carpentry/jobs/:id/tasks", requireAuth, async (req, res) => {
+  app.post("/api/carpentry/jobs/:id/tasks", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
@@ -1004,7 +1004,7 @@ export function registerCarpentryRoutes(app) {
   // ── POST /api/carpentry/jobs/:id/tasks/apply-template ───────────────────────
   // Apply the default per-stage site-task checklist to an EXISTING job. Idempotent:
   // skips any default whose title is already present, so it can be re-run safely.
-  app.post("/api/carpentry/jobs/:id/tasks/apply-template", requireAuth, async (req, res) => {
+  app.post("/api/carpentry/jobs/:id/tasks/apply-template", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
@@ -1035,7 +1035,7 @@ export function registerCarpentryRoutes(app) {
   // recording → /api/transcribe) and get back a DRAFT task list for review.
   // Creates NOTHING — the UI shows the drafts, the user edits/dedupes, then
   // posts the keepers to POST /tasks (createdVia:'ai_extraction').
-  app.post("/api/carpentry/jobs/:id/tasks/from-transcript", requireAuth, async (req, res) => {
+  app.post("/api/carpentry/jobs/:id/tasks/from-transcript", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     try {
       const transcript = String(req.body?.transcript || "").trim();
       if (!transcript) return err(res, 400, "transcript is required.");
