@@ -36,6 +36,7 @@ import { transcribeAudio, transcriptionConfigured } from "./transcribe.mjs";
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList, getCustomerContacts } from "./buildexactClient.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
+import { autoLayoutMilestones } from "./carpentryScheduleUtils.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 
@@ -765,6 +766,48 @@ export function registerCarpentryRoutes(app) {
       return ok(res, { milestone: rowToCamel(milestone) });
     } catch (e) {
       console.error("[carpentry/milestones POST]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/milestones/auto-layout ─────────────────────
+  // D2: set milestone target dates from a commencement date + frame-delivery date, using crew-scaled
+  // build durations + procurement lead-times. Returns the proposed dates for a confirm step.
+  app.post("/api/carpentry/jobs/:id/milestones/auto-layout", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const jobId = req.params.id;
+      const { commencementDate, frameDeliveryDate, apply } = req.body || {};
+      if (!commencementDate) return err(res, 400, "commencementDate is required.");
+      const { data: job } = await sb.from("carpentry_jobs").select("id, crew_size_overrides").eq("id", jobId).maybeSingle();
+      if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
+      const { data: milestones } = await sb
+        .from("carpentry_job_milestones").select("id, name, target_date, sort_order").eq("job_id", jobId).order("sort_order");
+      if (!milestones?.length) return err(res, 400, "This job has no milestones to lay out.");
+
+      const computed = autoLayoutMilestones({
+        commencementDate,
+        frameDeliveryDate,
+        milestones,
+        crewSizes: job.crew_size_overrides || {},
+      });
+      const byId = new Map(milestones.map((m) => [m.id, m]));
+      const affected = computed
+        .filter((c) => c.targetDate)
+        .map((c) => ({ id: c.id, name: c.name, oldTargetDate: byId.get(c.id)?.target_date || null, newTargetDate: c.targetDate }));
+
+      // Preview unless apply:true — so the UI can show the proposed dates first.
+      if (apply) {
+        for (const c of affected) {
+          await sb.from("carpentry_job_milestones")
+            .update({ target_date: c.newTargetDate, updated_at: new Date().toISOString() })
+            .eq("id", c.id);
+        }
+      }
+      return ok(res, { applied: Boolean(apply), affected });
+    } catch (e) {
+      console.error("[carpentry/milestones/auto-layout POST]", e);
       return err(res, 502, translateDbError(e));
     }
   });
