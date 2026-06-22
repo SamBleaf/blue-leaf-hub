@@ -532,6 +532,24 @@ export default function AppShell() {
               {showFull && <span className="text-[13px] font-semibold">Templates</span>}
             </NavLink>
           ) : null}
+          {role === "admin" ? (
+            <NavLink
+              to="/field"
+              title={!showFull ? "Field app" : undefined}
+              className={({ isActive }) =>
+                `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
+                  isActive ? "text-white" : "text-white/50 hover:text-white"
+                }`
+              }
+            >
+              <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg group-hover:bg-white/10">
+                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 18h.01M8 21h8a1 1 0 001-1V4a1 1 0 00-1-1H8a1 1 0 00-1 1v16a1 1 0 001 1z" />
+                </svg>
+              </span>
+              {showFull && <span className="text-[13px] font-semibold">Field app</span>}
+            </NavLink>
+          ) : null}
           <NavLink
             to="/tender-manager/settings"
             title={!showFull ? "Settings" : undefined}
