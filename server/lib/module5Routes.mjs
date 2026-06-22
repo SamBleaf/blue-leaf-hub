@@ -25,7 +25,7 @@ import {
   getBrandingEmailLogo,
   invalidateBrandingLogoCache
 } from "./brandingAssets.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
@@ -375,7 +375,7 @@ export function registerModule5Routes(app) {
     style === "apb" ? proposalToApbDocxData(proposalData) : proposalToDocxData(proposalData);
 
   /** Upload DOCX template to Supabase Storage (+ optionally Dropbox). */
-  app.post("/api/settings/fee-proposal-template", requireAuth, async (req, res) => {
+  app.post("/api/settings/fee-proposal-template", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const b64 = String(req.body?.dataBase64 || "").trim();
@@ -435,7 +435,7 @@ export function registerModule5Routes(app) {
    * Body: { filename: "BLB_Icon_Blue.png"|"BLB_Primary_Logo_White.png", dataBase64: string }
    * Uploads a branding asset to Supabase Storage bucket "branding".
    */
-  app.post("/api/settings/branding-logo", requireAuth, async (req, res) => {
+  app.post("/api/settings/branding-logo", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const filename = String(req.body?.filename || BRANDING_EMAIL_LOGO_PATH).trim();

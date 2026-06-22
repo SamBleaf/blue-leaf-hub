@@ -821,6 +821,29 @@ app.use((err, _req, res, next) => {
   return next(err);
 });
 
+// ── A4: Director(admin)-only API surfaces (defense-in-depth) ─────────────────
+// The frontend already hides Sales/Tender/Finance/Marketing/cost from supervisors +
+// employees (nav + RoleRoute). These prefix gates also block direct API access with a
+// non-admin token. requireAuth populates req.caller; requireRole checks the DB role.
+// NOT gated here on purpose: /api/po (PO issuance is done from the ops Procurement view —
+// admin+supervisor), /api/crm (has the public /unsubscribe + cross-role contact reads;
+// its sensitive endpoints already carry requireRole("admin")), /api/buildexact (admin
+// diagnostics + an unauthenticated webhook-events feed), /api/settings (shared). Public
+// routes live under /api/public, /api/webhooks, /api/portal. Server-internal cost-model
+// reads use the service client (not these HTTP routes), so carpentry is unaffected.
+for (const prefix of [
+  "/api/finance",           // financeCCRoutes + financeRoutes (client sign-off is /api/portal)
+  "/api/sales",             // salesRoutes — leads / pipeline / scorecard
+  "/api/marketing",         // marketingRoutes (+ publishes)
+  "/api/intelligence",      // marketing intelligence (public attribution/enquiry are /api/public)
+  "/api/cost-intelligence", // tender cost intelligence
+  "/api/cost-model",        // company cost model — pay rates / charge-up (Director-only)
+  "/api/fee-proposal",      // tender fee proposals
+  "/api/tender",            // tender win/lose/PO-check flows
+]) {
+  app.use(prefix, requireAuth, requireRole("admin"));
+}
+
 registerModule4Routes(app);
 registerModule5Routes(app);
 registerBuildexactIntegrationRoutes(app);

@@ -274,6 +274,8 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
+    // Finance is Director-only (the API now 403s non-admins) — only the badge owner polls it.
+    if (!can.accessFinance(role)) { setUnmatchedDocCount(0); return; }
     let stop = false;
     async function refresh() {
       try {
@@ -286,7 +288,7 @@ export default function AppShell() {
     refresh();
     const id = setInterval(refresh, 60_000);
     return () => { stop = true; clearInterval(id); };
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     let stop = false;
