@@ -16,7 +16,7 @@ export default function FieldTasks() {
   const [err, setErr] = useState(null);
 
   async function load() {
-    if (!supabaseConfigured()) { setLoading(false); return; }
+    if (!supabaseConfigured) { setLoading(false); return; }
     const sb = getSupabase();
     const [{ data: tasks }, { data: projects }] = await Promise.all([
       sb.from("schedule_tasks")

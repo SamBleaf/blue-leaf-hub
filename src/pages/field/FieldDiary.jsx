@@ -24,7 +24,7 @@ export default function FieldDiary() {
   const [voiceBusy, setVoiceBusy] = useState(false);
 
   useEffect(() => {
-    if (!supabaseConfigured()) { setLoading(false); return; }
+    if (!supabaseConfigured) { setLoading(false); return; }
     getSupabase().from("projects").select("id, address").order("created_at", { ascending: false }).limit(50)
       .then(({ data }) => {
         const ps = data || [];

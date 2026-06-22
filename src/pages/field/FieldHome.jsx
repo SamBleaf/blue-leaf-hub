@@ -20,30 +20,35 @@ export default function FieldHome() {
   useEffect(() => {
     let stop = false;
     (async () => {
-      setLoading(true);
-      // Today on site — schedule_tasks spanning today, not complete.
-      if (supabaseConfigured()) {
-        const sb = getSupabase();
-        const [{ data: tasks }, { data: projects }] = await Promise.all([
-          sb.from("schedule_tasks")
-            .select("id, name, trade, phase, percent_complete, status, project_id, start_date, end_date")
-            .lte("start_date", today).gte("end_date", today).neq("status", "complete").order("phase"),
-          sb.from("projects").select("id, address").limit(50),
-        ]);
-        if (stop) return;
-        const names = {};
-        for (const p of projects || []) names[p.id] = p.address;
-        const grouped = {};
-        for (const t of tasks || []) (grouped[t.project_id] ||= []).push(t);
-        setProjectName(names);
-        setTasksByProject(grouped);
+      try {
+        // Today on site — schedule_tasks spanning today, not complete.
+        if (supabaseConfigured) {
+          const sb = getSupabase();
+          const [{ data: tasks }, { data: projects }] = await Promise.all([
+            sb.from("schedule_tasks")
+              .select("id, name, trade, phase, percent_complete, status, project_id, start_date, end_date")
+              .lte("start_date", today).gte("end_date", today).neq("status", "complete").order("phase"),
+            sb.from("projects").select("id, address").limit(50),
+          ]);
+          if (!stop) {
+            const names = {};
+            for (const p of projects || []) names[p.id] = p.address;
+            const grouped = {};
+            for (const t of tasks || []) (grouped[t.project_id] ||= []).push(t);
+            setProjectName(names);
+            setTasksByProject(grouped);
+          }
+        }
+        // My carpentry jobs (active) — cost-stripped card data.
+        if (can.accessCarpentry(role)) {
+          const { ok, data } = await apiFetch("/api/carpentry/jobs?status=active");
+          if (!stop && ok) setJobs(data?.jobs || []);
+        }
+      } catch (e) {
+        console.error("[FieldHome] load failed", e);
+      } finally {
+        setLoading(false);
       }
-      // My carpentry jobs (active) — cost-stripped card data.
-      if (can.accessCarpentry(role)) {
-        const { ok, data } = await apiFetch("/api/carpentry/jobs?status=active");
-        if (!stop && ok) setJobs(data?.jobs || []);
-      }
-      if (!stop) setLoading(false);
     })();
     return () => { stop = true; };
   }, [role, today]);
