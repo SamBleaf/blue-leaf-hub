@@ -1260,19 +1260,18 @@ export function registerCarpentryRoutes(app) {
     try {
       const { data: job } = await sb.from("carpentry_jobs").select("id").eq("id", jobId).maybeSingle();
       if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
-      await sb.from("carpentry_job_budgets").delete().eq("job_id", jobId);
-      const rows = categories.map((c, i) => {
+
+      // Desired budget lines from the imported categories.
+      const desired = categories.map((c, i) => {
         const name = String(c.name || "").trim() || `Category ${i + 1}`;
         const costType = c.costType === "labour" || c.costType === "material"
           ? c.costType
           : classifyCostType(name);
-        // budget_ex_gst = the marked-up SELL price ex-GST (what Sam wants shown);
-        // cost_ex_gst = ex-markup cost (for margin). sellExGst falls back to
-        // subtotalExGst for the legacy report export (no per-category markup).
+        // budget_ex_gst = the marked-up SELL price ex-GST; cost_ex_gst = ex-markup cost.
+        // sellExGst falls back to subtotalExGst for the legacy report export (no per-category markup).
         const cost = round2(c.costExGst ?? c.subtotalExGst ?? 0);
         const sell = round2(c.sellExGst ?? c.subtotalExGst ?? c.budgetExGst ?? 0);
         return {
-          job_id: jobId,
           category_name: name,
           cost_type: costType,
           budget_ex_gst: sell,
@@ -1281,9 +1280,33 @@ export function registerCarpentryRoutes(app) {
           sort_order: i,
         };
       });
-      const { data, error } = await sb.from("carpentry_job_budgets").insert(rows).select("*");
-      if (error) return err(res, 500, translateDbError(error));
-      return ok(res, { budgets: rowsToCamel(data || []) });
+
+      // Upsert by (cost_type, category_name) so existing lines KEEP their id on re-import — this
+      // preserves any carpentry_job_costs tagged to them (D5). Without this, a delete+insert would
+      // null every cost's carpentry_job_budget_id (ON DELETE SET NULL) and silently reset per-category
+      // material actuals. Lines no longer in the estimate are removed.
+      const keyOf = (r) => `${r.cost_type}:${String(r.category_name).trim().toLowerCase()}`;
+      const { data: existing } = await sb
+        .from("carpentry_job_budgets").select("id, category_name, cost_type").eq("job_id", jobId);
+      const existingByKey = new Map((existing || []).map((e) => [keyOf(e), e.id]));
+      const keptIds = new Set();
+      const out = [];
+      for (const d of desired) {
+        const existingId = existingByKey.get(keyOf(d));
+        if (existingId) {
+          const { data: upd, error } = await sb.from("carpentry_job_budgets").update(d).eq("id", existingId).select("*").single();
+          if (error) return err(res, 500, translateDbError(error));
+          keptIds.add(existingId);
+          if (upd) out.push(upd);
+        } else {
+          const { data: ins, error } = await sb.from("carpentry_job_budgets").insert({ job_id: jobId, ...d }).select("*").single();
+          if (error) return err(res, 500, translateDbError(error));
+          if (ins) { keptIds.add(ins.id); out.push(ins); }
+        }
+      }
+      const removeIds = (existing || []).filter((e) => !keptIds.has(e.id)).map((e) => e.id);
+      if (removeIds.length) await sb.from("carpentry_job_budgets").delete().in("id", removeIds);
+      return ok(res, { budgets: rowsToCamel(out) });
     } catch (e) {
       console.error("[carpentry/budget/seed POST]", e);
       return err(res, 502, translateDbError(e));
