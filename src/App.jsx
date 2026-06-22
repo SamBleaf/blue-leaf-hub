@@ -177,7 +177,7 @@ export default function App() {
                 />
                 <Route
                   path="/tender-manager"
-                  element={<RoleRoute element={<Outlet />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<Outlet />} allowed={["admin"]} redirectTo="/home" />}
                 >
                   <Route index element={<Navigate to="/home" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
@@ -206,51 +206,51 @@ export default function App() {
 
                 <Route
                   path="/sales"
-                  element={<RoleRoute element={<SalesPipeline />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<SalesPipeline />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/sales/dashboard"
-                  element={<RoleRoute element={<SalesManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<SalesManager />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/sales/contacts"
-                  element={<RoleRoute element={<SalesManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<SalesManager />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/sales/reference-projects"
-                  element={<RoleRoute element={<ReferenceProjects />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<ReferenceProjects />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 {/* Guard: /sales/pipeline would otherwise match :leadId and trigger a UUID parse error */}
                 <Route path="/sales/pipeline" element={<Navigate to="/sales" replace />} />
                 <Route
                   path="/sales/:leadId"
-                  element={<RoleRoute element={<LeadDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<LeadDetail />} allowed={["admin"]} redirectTo="/home" />}
                 />
 
                 <Route
                   path="/finance"
-                  element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<FinanceManager />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/finance/jobs"
-                  element={<RoleRoute element={<JobDashboardSelector forcePortfolio />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<JobDashboardSelector forcePortfolio />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/finance/jobs/:jobId"
-                  element={<RoleRoute element={<JobCommandCentre />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<JobCommandCentre />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/finance/:tab"
-                  element={<RoleRoute element={<FinanceManager />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<FinanceManager />} allowed={["admin"]} redirectTo="/home" />}
                 />
 
                 <Route
                   path="/marketing"
-                  element={<RoleRoute element={<Marketing />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<Marketing />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/marketing/:tab"
-                  element={<RoleRoute element={<Marketing />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<Marketing />} allowed={["admin"]} redirectTo="/home" />}
                 />
 
                 <Route
@@ -264,15 +264,15 @@ export default function App() {
 
                 <Route
                   path="/portal-admin"
-                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/portal-admin/:projectId"
-                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<PortalAdmin />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/portal-admin/:projectId/v2"
-                  element={<RoleRoute element={<PortalV2Admin />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<PortalV2Admin />} allowed={["admin"]} redirectTo="/home" />}
                 />
 
                 <Route

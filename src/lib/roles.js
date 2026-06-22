@@ -1,31 +1,43 @@
-export const ROLES = ["admin", "supervisor", "employee", "client"];
+// Canonical DB roles. Import these constants instead of hardcoding strings.
+export const ROLE_ADMIN = "admin";        // Director / Admin — full access
+export const ROLE_SUPERVISOR = "supervisor"; // scoped field role (build/site)
+export const ROLE_EMPLOYEE = "employee";  // site-only
+export const ROLE_CLIENT = "client";      // client portal only
+export const ROLES = [ROLE_ADMIN, ROLE_SUPERVISOR, ROLE_EMPLOYEE, ROLE_CLIENT];
 
 export const ROLE_LABELS = {
-  admin: "Admin",
+  admin: "Director",
   supervisor: "Supervisor",
   employee: "Employee",
   client: "Client"
 };
 
 export const ROLE_DESCRIPTIONS = {
-  admin: "Full access — user management, all modules, portal admin",
-  supervisor: "Full operations — schedule, sales, tender, finance view, portal admin",
+  admin: "Full access — all modules, finance, costs, user management",
+  supervisor: "Field/build — operations, schedule, site tasks, WHS, workforce, carpentry (no finance, sales, marketing or cost figures)",
   employee: "Site access — site diary, WHS, schedule view only",
   client: "Client portal access only — linked to their project portal"
 };
 
+// Supervisor is a scoped FIELD role: it does Operations, Schedule, Site Diary, WHS,
+// Workforce and Carpentry — but NOT Sales, Tendering, Finance, Marketing, cost/margin
+// figures, portal admin or user management (those are Director/Admin only).
 export const can = {
   accessHome: (r) => ["admin", "supervisor", "employee"].includes(r),
-  accessSales: (r) => ["admin", "supervisor"].includes(r),
-  accessTender: (r) => ["admin", "supervisor"].includes(r),
-  accessFinance: (r) => ["admin", "supervisor"].includes(r),
+  accessSales: (r) => r === "admin",
+  accessTender: (r) => r === "admin",
+  accessFinance: (r) => r === "admin",
+  accessMarketing: (r) => r === "admin",
   accessOperations: (r) => ["admin", "supervisor", "employee"].includes(r),
+  accessCarpentry: (r) => ["admin", "supervisor"].includes(r),
   editSchedule: (r) => ["admin", "supervisor"].includes(r),
   accessSiteDiary: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWHS: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWorkforce: (r) => ["admin", "supervisor"].includes(r),
-  accessPortalAdmin: (r) => ["admin", "supervisor"].includes(r),
-  accessMarketing: (r) => ["admin", "supervisor"].includes(r),
+  accessPortalAdmin: (r) => r === "admin",
+  // Cost/margin/$ figures (carpentry budgets, AI cost intelligence) — Director only.
+  // Supervisors get a cost-stripped view (build days/scope, not dollars).
+  viewCostData: (r) => r === "admin",
   manageUsers: (r) => r === "admin",
   inviteUsers: (r) => r === "admin",
   accessClientPortal: (r) => r === "client"

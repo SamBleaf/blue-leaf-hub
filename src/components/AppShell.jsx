@@ -203,7 +203,7 @@ export default function AppShell() {
         if (dept.id === "finance_manager") return can.accessFinance(role);
         if (dept.id === "marketing_agent") return can.accessMarketing(role);
         if (dept.id === "client_portal") return can.accessPortalAdmin(role);
-        if (dept.id === "carpentry") return can.accessOperations(role);
+        if (dept.id === "carpentry") return can.accessCarpentry(role);
         return true;
       }),
     [DEPARTMENTS, role]
