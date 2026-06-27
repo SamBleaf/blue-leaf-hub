@@ -111,7 +111,9 @@ const TENDER_MODULES = [
 ];
 
 const MARKETING_MODULES = [
-  { to: "/marketing",          label: "Create",    end: true },
+  { to: "/marketing",          label: "Command Centre", end: true },
+  { to: "/marketing/planner",  label: "Weekly Planner" },
+  { to: "/marketing/studio",   label: "Content Studio" },
   { to: "/marketing/library",  label: "Library" },
   { to: "/marketing/campaigns",label: "Campaigns" },
   { to: "/marketing/media",    label: "Media" },
