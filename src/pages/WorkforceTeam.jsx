@@ -17,7 +17,7 @@ const EMPTY_FORM = {
   is_leading_hand: false, staff_code: "",
 };
 
-export default function WorkforceTeam() {
+export default function WorkforceTeam({ embedded = false }) {
   const { role } = useAuth();
   const isDirector = role === "admin";
   const [employees, setEmployees] = useState([]);
@@ -35,6 +35,14 @@ export default function WorkforceTeam() {
   const [inviteRole, setInviteRole] = useState("employee");
   const [linkBusy, setLinkBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // W17-P3 (Option B): read-only "Preview as worker" panel — employee + job pickers, Today + Tasks.
+  const [preview, setPreview] = useState(false);
+  const [pvEmpId, setPvEmpId] = useState("");
+  const [pvJobs, setPvJobs] = useState([]);
+  const [pvJobKey, setPvJobKey] = useState("");
+  const [pvToday, setPvToday] = useState(null);
+  const [pvTasks, setPvTasks] = useState([]);
+  const [pvBusy, setPvBusy] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -47,6 +55,36 @@ export default function WorkforceTeam() {
   }, [showInactive]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Preview: when the chosen worker changes, load their visible jobs + today's timesheet (read-only).
+  useEffect(() => {
+    if (!preview || !pvEmpId) { setPvJobs([]); setPvJobKey(""); setPvTasks([]); setPvToday(null); return; }
+    let stop = false;
+    setPvBusy(true); setPvJobKey(""); setPvTasks([]);
+    Promise.all([
+      authFetch(`/api/workforce/employees/${pvEmpId}/task-preview`).then(r => r.json()).catch(() => ({})),
+      authFetch(`/api/workforce/employees/${pvEmpId}/preview`).then(r => r.json()).catch(() => ({})),
+    ]).then(([tp, pv]) => {
+      if (stop) return;
+      if (tp.ok) setPvJobs(tp.jobs || []);
+      if (pv.ok) setPvToday(pv.today_timesheet || null);
+    }).finally(() => { if (!stop) setPvBusy(false); });
+    return () => { stop = true; };
+  }, [preview, pvEmpId]);
+
+  // Preview: when the chosen job changes, load that worker's task set for it (same audience rules).
+  useEffect(() => {
+    if (!pvEmpId || !pvJobKey) { setPvTasks([]); return; }
+    const [type, id] = pvJobKey.split(":");
+    let stop = false;
+    setPvBusy(true);
+    authFetch(`/api/workforce/employees/${pvEmpId}/task-preview?jobId=${encodeURIComponent(id)}&jobType=${encodeURIComponent(type)}`)
+      .then(r => r.json())
+      .then(j => { if (!stop && j.ok) setPvTasks(j.tasks || []); })
+      .catch(() => {})
+      .finally(() => { if (!stop) setPvBusy(false); });
+    return () => { stop = true; };
+  }, [pvEmpId, pvJobKey]);
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -168,12 +206,15 @@ export default function WorkforceTeam() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className={embedded ? "" : "p-6 max-w-5xl mx-auto"}>
       {toast && <div className="fixed top-4 right-4 z-50 bg-green-700 text-white px-4 py-2 rounded-lg text-sm shadow-lg">{toast}</div>}
 
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-xl font-bold text-ink">Team Directory</h1>
-        <div className="flex gap-2">
+        {embedded
+          ? <p className="text-sm text-muted">Manage employees, worker links, and invites.</p>
+          : <h1 className="text-xl font-bold text-ink">Team Directory</h1>}
+        <div className="flex gap-2 shrink-0">
+          <button type="button" onClick={() => { setPreview(true); setPvEmpId(""); }} className="px-3 py-2 rounded-lg border border-hairline text-sm font-medium text-ink">Preview as worker</button>
           <button type="button" onClick={() => setShowInactive(v => !v)} className="text-xs text-muted font-medium underline">
             {showInactive ? "Hide inactive" : "Show inactive"}
           </button>
@@ -188,7 +229,7 @@ export default function WorkforceTeam() {
         </div>
       </div>
 
-      <div className="flex gap-4">
+      <div className={`flex gap-4 ${preview ? "hidden" : ""}`}>
         {/* Employee table */}
         <div className={`flex-1 min-w-0 border border-hairline rounded-lg overflow-hidden bg-white ${panel ? "hidden md:block" : ""}`}>
           {loading ? (
@@ -354,11 +395,11 @@ export default function WorkforceTeam() {
                 return isManagement ? [invite, link] : [link, invite];
               })()}
 
-              {/* Preview */}
+              {/* W17-P3: read-only preview as this worker (fixes the old /worker?preview path that ignored employeeId) */}
               {panel !== "new" && (
                 <button
                   type="button"
-                  onClick={() => window.open(`/worker?preview=true&employeeId=${panel.id}`, "_blank")}
+                  onClick={() => { setPreview(true); setPvEmpId(panel.id); }}
                   className="w-full py-2 rounded-lg border border-hairline text-sm text-ink font-medium"
                 >
                   Preview worker view →
@@ -392,6 +433,90 @@ export default function WorkforceTeam() {
               <button type="button" onClick={() => setConfirmDeactivate(null)} className="px-4 py-2 rounded-lg border border-hairline text-sm">Cancel</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* W17-P3 (Option B): read-only "Preview as worker" — inline Team-tab panel (no modal) */}
+      {preview && (
+        <div className="border border-hairline rounded-lg bg-white p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-ink">Preview as worker</h2>
+            <button type="button" onClick={() => setPreview(false)} className="text-sm text-muted">Close ×</button>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg px-3 py-2 mb-3">
+            Read-only preview. This does not use the worker&apos;s live token and cannot submit hours or complete tasks.
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 mb-3">
+            <div className="flex-1">
+              <label className="text-xs text-muted block mb-1">Worker</label>
+              <select value={pvEmpId} onChange={e => setPvEmpId(e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm">
+                <option value="">Select a worker…</option>
+                {employees.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.name}{e.is_leading_hand ? " ⭐" : ""}</option>)}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-muted block mb-1">Job</label>
+              <select value={pvJobKey} onChange={e => setPvJobKey(e.target.value)} disabled={!pvEmpId || !pvJobs.length} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm disabled:opacity-50">
+                <option value="">{pvEmpId ? (pvJobs.length ? "Select a job…" : "No visible jobs") : "Pick a worker first"}</option>
+                {pvJobs.map(j => <option key={`${j.type}:${j.id}`} value={`${j.type}:${j.id}`}>{j.address} ({j.type === "carpentry" ? "Carpentry" : "Construction"})</option>)}
+              </select>
+            </div>
+          </div>
+
+          {!pvEmpId ? (
+            <p className="text-sm text-muted py-6 text-center">Pick a worker to preview what they would see — read-only.</p>
+          ) : (
+            <>
+              {(() => {
+                const selEmp = employees.find(e => e.id === pvEmpId);
+                const selJob = pvJobs.find(j => `${j.type}:${j.id}` === pvJobKey);
+                return (
+                  <p className="text-xs text-muted mb-3">
+                    Previewing <span className="text-ink font-medium">{selEmp?.name || "—"}</span>{selEmp?.is_leading_hand ? " (leading hand)" : ""}
+                    {selJob ? <> · <span className="text-ink font-medium">{selJob.address}</span> · {selJob.type === "carpentry" ? "Carpentry" : "Construction"}</> : null}
+                  </p>
+                );
+              })()}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-1">
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Today</p>
+                  <div className="border border-hairline rounded-lg p-3 text-sm space-y-1">
+                    {pvToday ? (
+                      <>
+                        <p className="text-ink capitalize">{(pvToday.status || "—").replace(/_/g, " ")}</p>
+                        <p className="text-muted text-xs">{(pvToday.timesheet_entries || []).reduce((s, en) => s + Number(en.hours || 0), 0)}h logged today</p>
+                      </>
+                    ) : <p className="text-muted">No timesheet today</p>}
+                    {pvJobKey && <p className="text-muted text-xs">{pvTasks.filter(t => t.status !== "done").length} open task(s)</p>}
+                  </div>
+                </div>
+                <div className="md:col-span-2">
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Tasks{pvJobKey ? ` · ${pvTasks.length}` : ""}</p>
+                  {pvBusy ? <p className="text-sm text-muted">Loading…</p>
+                   : !pvJobKey ? <p className="text-sm text-muted">Select a job to see their tasks.</p>
+                   : pvTasks.length === 0 ? <p className="text-sm text-muted">No tasks for this worker on this job.</p>
+                   : (
+                    <div className="border border-hairline rounded-lg divide-y divide-hairline">
+                      {pvTasks.map(t => (
+                        <div key={t.id} className="px-3 py-2 text-sm flex items-start gap-2">
+                          <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${t.priority === "urgent" ? "bg-red-500" : t.priority === "normal" ? "bg-gray-400" : "bg-transparent border border-gray-400"}`} />
+                          <div className="flex-1 min-w-0">
+                            <span className={t.status === "done" ? "line-through text-muted" : "text-ink"}>{t.title}</span>
+                            <div className="flex flex-wrap gap-x-1.5 mt-0.5 text-[10px] text-muted">
+                              {t.category && <span className="capitalize">{t.category.replace(/_/g, " ")}</span>}
+                              <span>· {t.status}</span>
+                              <span>· {t.assigned_to ? (t.employees?.name || "assigned") : "unassigned"}</span>
+                              {t.task_audience === "supervisor" && <span className="text-amber-600">· QC</span>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

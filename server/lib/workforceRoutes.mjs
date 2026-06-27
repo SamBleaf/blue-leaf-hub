@@ -5,7 +5,8 @@ import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, build
 import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
-import { ok, err, translateDbError } from "./apiResponse.mjs";
+import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 
@@ -447,6 +448,70 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
   updateJobLabourBudget(ts.job_id, sb).catch(e => console.error("[workforce/labour-budget]", e?.message));
 }
 
+// ── Workforce allocations (W16-A1) ────────────────────────────────────────────
+
+const ALLOCATION_SELECT = `
+  *,
+  employees(id, name),
+  projects(id, address),
+  carpentry_jobs(id, address, client_name),
+  workforce_crews(id, name)
+`;
+
+function formatAllocation(row) {
+  if (!row) return null;
+  const base = rowToCamel(row);
+  return {
+    id: base.id,
+    allocationDate: base.allocationDate,
+    employeeId: base.employeeId,
+    crewId: base.crewId,
+    projectId: base.projectId,
+    carpentryJobId: base.carpentryJobId,
+    notes: base.notes,
+    createdBy: base.createdBy,
+    createdAt: base.createdAt,
+    updatedAt: base.updatedAt,
+    employeeName: row.employees?.name ?? null,
+    projectAddress: row.projects?.address ?? null,
+    carpentryJobAddress: row.carpentry_jobs?.address ?? null,
+    carpentryJobClientName: row.carpentry_jobs?.client_name ?? null,
+    crewName: row.workforce_crews?.name ?? null,
+  };
+}
+
+function parseJobSpine(body) {
+  const projectId = body.projectId ?? body.project_id ?? null;
+  const carpentryJobId = body.carpentryJobId ?? body.carpentry_job_id ?? null;
+  const hasProject = !!projectId;
+  const hasCarpentry = !!carpentryJobId;
+  if (hasProject === hasCarpentry) {
+    return { error: "Set exactly one of projectId or carpentryJobId" };
+  }
+  return { projectId: hasProject ? projectId : null, carpentryJobId: hasCarpentry ? carpentryJobId : null };
+}
+
+async function fetchAllocationById(sb, id) {
+  const { data, error } = await sb.from("workforce_allocations").select(ALLOCATION_SELECT).eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+async function syncCrewMembers(sb, crewId, memberIds) {
+  if (!Array.isArray(memberIds)) return;
+  const ids = [...new Set(memberIds.filter(id => isUuid(id)))];
+  await sb.from("workforce_crew_members").delete().eq("crew_id", crewId);
+  if (!ids.length) return;
+  const rows = ids.map((employeeId, i) => ({
+    crew_id: crewId,
+    employee_id: employeeId,
+    sort_order: i,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await sb.from("workforce_crew_members").insert(rows);
+  if (error) throw new Error(error.message);
+}
+
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerWorkforceRoutes(app) {
@@ -535,10 +600,27 @@ export function registerWorkforceRoutes(app) {
     if (empErr) return res.status(500).json({ ok: false, error: empErr.message });
 
     const { data: ts } = await sb.from("timesheets")
-      .select("employee_id, date, status")
+      .select("id, employee_id, date, status")
       .gte("date", week_start).lte("date", week_end);
-    const byKey = {};
-    for (const t of ts || []) byKey[`${t.employee_id}|${t.date}`] = t.status;
+    const statusByKey = {};
+    const tsIdToKey = {};
+    for (const t of ts || []) {
+      const k = `${t.employee_id}|${t.date}`;
+      statusByKey[k] = t.status;
+      tsIdToKey[t.id] = k;
+    }
+    // W17-P2: hours per employee/day = sum of that day's timesheet_entries.hours (read-only).
+    const hoursByKey = {};
+    const tsIds = (ts || []).map((t) => t.id);
+    if (tsIds.length) {
+      const { data: entries } = await sb.from("timesheet_entries")
+        .select("timesheet_id, hours")
+        .in("timesheet_id", tsIds);
+      for (const en of entries || []) {
+        const k = tsIdToKey[en.timesheet_id];
+        if (k) hoursByKey[k] = (hoursByKey[k] || 0) + Number(en.hours || 0);
+      }
+    }
 
     const DONE = ["submitted", "approved"];
     const employees = (emps || []).map((e) => {
@@ -549,11 +631,18 @@ export function registerWorkforceRoutes(app) {
       const days = {};
       let done = 0, missing = 0;
       for (const d of dates) {
-        const st = byKey[`${e.id}|${d}`] || null;
-        if (st && DONE.includes(st)) { days[d] = "done"; done++; }
-        else if (st === "rejected") { days[d] = "returned"; if (expectsAllDays) missing++; }
-        else if (st) { days[d] = st; if (expectsAllDays) missing++; }
-        else { days[d] = expectsAllDays ? "missing" : "na"; if (expectsAllDays) missing++; }
+        const k = `${e.id}|${d}`;
+        const st = statusByKey[k] || null;                       // raw timesheets.status or null
+        const hours = Math.round((hoursByKey[k] || 0) * 100) / 100;
+        // W17-P2: per-day value is { state, status, hours }. state splits the old "done" into
+        // approved/submitted via the raw status; "draft"/other non-final statuses fall into the
+        // missing bucket (raw value preserved in status) so the missing COUNT is unchanged.
+        let state;
+        if (st && DONE.includes(st)) { state = st; done++; }     // "approved" | "submitted"
+        else if (st === "rejected") { state = "rejected"; if (expectsAllDays) missing++; }
+        else if (st) { state = "missing"; if (expectsAllDays) missing++; }
+        else { state = expectsAllDays ? "missing" : "na"; if (expectsAllDays) missing++; }
+        days[d] = { state, status: st, hours };
       }
       return { id: e.id, name: e.name, employment_type: e.employment_type, expects_all_days: expectsAllDays, days, done, missing };
     });
@@ -920,7 +1009,9 @@ export function registerWorkforceRoutes(app) {
   // Whitelists for worker-supplied query params. These endpoints run with the
   // service role (RLS bypassed), so every client-supplied value that reaches a
   // PostgREST filter MUST be validated against a fixed set / isUuid() first.
-  const SITE_TASK_CATEGORIES = ["general", "defect", "safety", "materials", "inspection"];
+  // W17-P3: include the carpentry labour streams (mig 114 site_tasks.category CHECK) so a worker can
+  // filter carpentry tasks by their budget category — category == budget category == timesheet task_category.
+  const SITE_TASK_CATEGORIES = ["general", "defect", "safety", "materials", "inspection", "first_fix_framing", "cladding", "second_fix", "outdoor_works", "formwork_slab_prep", "site_labouring", "site_cleanup", "supervision"];
   const WORKER_JOB_TYPES = ["project", "carpentry"];
 
   app.get("/api/projects/:id/site-tasks", requireAuth, async (req, res) => {
@@ -977,6 +1068,49 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, tasks: data });
   });
 
+  // ── W17-P6: voice-to-tasks for building projects (mirror of the carpentry path) ──
+  // Paste a site walk-through transcript → DRAFT task list for review. Creates NOTHING;
+  // the UI reviews/edits, then saves the keepers via POST /site-tasks/bulk (ai_extraction).
+  app.post("/api/projects/:id/site-tasks/from-transcript", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    try {
+      const transcript = String(req.body?.transcript || "").trim();
+      if (!transcript) return err(res, 400, "transcript is required.");
+      if (transcript.length > 20000) return err(res, 413, "Transcript too long — split it into shorter sessions.");
+      const jobLabel = String(req.body?.jobLabel || "").trim();
+      const tasks = await splitTranscriptToTasks(transcript, { jobLabel });
+      return ok(res, { tasks, draft: true });
+    } catch (e) {
+      console.error("[projects/site-tasks from-transcript]", e);
+      return err(res, 502, e.message || "Could not extract tasks from the transcript.");
+    }
+  });
+
+  // ── W17-P7: leading-hand QC checklist — apply a set of supervisor-audience inspection
+  // tasks (only leading hands see/complete them; the audience gate is enforced in /worker/tasks).
+  const QC_TEMPLATE = [
+    "Frame / first-fix inspection",
+    "Roof / trusses inspection",
+    "Box-gutter / framing inspection",
+    "External cladding inspection",
+    "Fixing / second-fix inspection",
+    "Decking / external inspection",
+    "Defects / handover walk-through",
+  ];
+  app.post("/api/projects/:id/site-tasks/apply-qc-template", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const projectId = req.params.id;
+    if (!isUuid(projectId)) return err(res, 400, "Invalid project id.");
+    const { data: existing } = await sb.from("site_tasks").select("title").eq("project_id", projectId).eq("task_audience", "supervisor");
+    const have = new Set((existing || []).map(t => (t.title || "").toLowerCase()));
+    const rows = QC_TEMPLATE.filter(t => !have.has(t.toLowerCase())).map(title => ({
+      project_id: projectId, title, task_audience: "supervisor", category: "inspection", priority: "normal", created_by: req.caller.id, created_via: "manual",
+    }));
+    if (!rows.length) return ok(res, { created: 0, skipped: QC_TEMPLATE.length });
+    const { data, error } = await sb.from("site_tasks").insert(rows).select("id");
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res, { created: (data || []).length, skipped: QC_TEMPLATE.length - rows.length });
+  });
+
   app.patch("/api/site-tasks/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     const allowed = ["title", "description", "assigned_to", "priority", "category", "status", "due_date", "completion_notes", "sort_order"];
@@ -1001,6 +1135,369 @@ export function registerWorkforceRoutes(app) {
     const { error } = await sb.from("site_tasks").update({ status: "wont_do", updated_at: new Date().toISOString() }).eq("id", req.params.id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true });
+  });
+
+  // ── Workforce crews (W16-A1) ────────────────────────────────────────────────
+
+  app.get("/api/workforce/crews", requireAuth, requireRole("admin", "supervisor"), async (_req, res) => {
+    const sb = getServiceSupabase();
+    const { data: crews, error } = await sb.from("workforce_crews")
+      .select("*, workforce_crew_members(id, employee_id, sort_order, employees(id, name))")
+      .order("name", { ascending: true });
+    if (error) return err(res, 500, translateDbError(error));
+    const out = (crews || []).map(c => ({
+      ...rowToCamel(c),
+      members: (c.workforce_crew_members || []).map(m => ({
+        id: m.id,
+        employeeId: m.employee_id,
+        sortOrder: m.sort_order,
+        employeeName: m.employees?.name ?? null,
+      })),
+    }));
+    ok(res, { crews: out });
+  });
+
+  app.post("/api/workforce/crews", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const name = String(req.body.name || "").trim();
+    if (!name) return err(res, 400, "Crew name is required");
+    const { data: crew, error } = await sb.from("workforce_crews").insert({ name }).select().single();
+    if (error) return err(res, 500, translateDbError(error));
+    try {
+      await syncCrewMembers(sb, crew.id, req.body.memberIds);
+    } catch (e) {
+      await sb.from("workforce_crews").delete().eq("id", crew.id);
+      return err(res, 500, e.message || "Could not add crew members");
+    }
+    const { data: full } = await sb.from("workforce_crews")
+      .select("*, workforce_crew_members(id, employee_id, sort_order, employees(id, name))")
+      .eq("id", crew.id).single();
+    ok(res, {
+      crew: {
+        ...rowToCamel(full),
+        members: (full?.workforce_crew_members || []).map(m => ({
+          id: m.id,
+          employeeId: m.employee_id,
+          sortOrder: m.sort_order,
+          employeeName: m.employees?.name ?? null,
+        })),
+      },
+    });
+  });
+
+  app.put("/api/workforce/crews/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const update = { updated_at: new Date().toISOString() };
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || "").trim();
+      if (!name) return err(res, 400, "Crew name cannot be empty");
+      update.name = name;
+    }
+    if (req.body.isActive !== undefined) update.is_active = !!req.body.isActive;
+    const { data: crew, error } = await sb.from("workforce_crews").update(update).eq("id", req.params.id).select().maybeSingle();
+    if (error) return err(res, 500, translateDbError(error));
+    if (!crew) return err(res, 404, "Crew not found", "NOT_FOUND");
+    if (req.body.memberIds !== undefined) {
+      try {
+        await syncCrewMembers(sb, crew.id, req.body.memberIds);
+      } catch (e) {
+        return err(res, 500, e.message || "Could not update crew members");
+      }
+    }
+    const { data: full } = await sb.from("workforce_crews")
+      .select("*, workforce_crew_members(id, employee_id, sort_order, employees(id, name))")
+      .eq("id", crew.id).single();
+    ok(res, {
+      crew: {
+        ...rowToCamel(full),
+        members: (full?.workforce_crew_members || []).map(m => ({
+          id: m.id,
+          employeeId: m.employee_id,
+          sortOrder: m.sort_order,
+          employeeName: m.employees?.name ?? null,
+        })),
+      },
+    });
+  });
+
+  // ── Workforce allocations (W16-A1) ──────────────────────────────────────────
+
+  app.get("/api/workforce/allocations", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { from, to, employeeId, projectId, carpentryJobId } = req.query;
+    let q = sb.from("workforce_allocations").select(ALLOCATION_SELECT).order("allocation_date", { ascending: true });
+    if (from) q = q.gte("allocation_date", from);
+    if (to) q = q.lte("allocation_date", to);
+    if (employeeId) q = q.eq("employee_id", employeeId);
+    if (projectId) q = q.eq("project_id", projectId);
+    if (carpentryJobId) q = q.eq("carpentry_job_id", carpentryJobId);
+    const { data, error } = await q;
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res, { allocations: (data || []).map(formatAllocation) });
+  });
+
+  app.post("/api/workforce/allocations", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const allocationDate = req.body.allocationDate ?? req.body.allocation_date;
+    const employeeId = req.body.employeeId ?? req.body.employee_id;
+    if (!allocationDate) return err(res, 400, "allocationDate is required");
+    if (!employeeId || !isUuid(employeeId)) return err(res, 400, "employeeId is required");
+    const spine = parseJobSpine(req.body);
+    if (spine.error) return err(res, 400, spine.error);
+
+    const { data: existing } = await sb.from("workforce_allocations")
+      .select("id").eq("employee_id", employeeId).eq("allocation_date", allocationDate).maybeSingle();
+    if (existing) return err(res, 409, "This employee already has an allocation on that date", "DUPLICATE_ALLOCATION");
+
+    const crewId = req.body.crewId ?? req.body.crew_id ?? null;
+    const row = {
+      allocation_date: allocationDate,
+      employee_id: employeeId,
+      crew_id: crewId && isUuid(crewId) ? crewId : null,
+      project_id: spine.projectId,
+      carpentry_job_id: spine.carpentryJobId,
+      notes: req.body.notes ?? null,
+      created_by: req.caller.id,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await sb.from("workforce_allocations").insert(row).select("id").single();
+    if (error) {
+      if (/duplicate key|unique constraint/i.test(error.message || "")) {
+        return err(res, 409, "This employee already has an allocation on that date", "DUPLICATE_ALLOCATION");
+      }
+      return err(res, 500, translateDbError(error));
+    }
+    try {
+      const full = await fetchAllocationById(sb, data.id);
+      ok(res, { allocation: formatAllocation(full) });
+    } catch (e) {
+      return err(res, 500, e.message);
+    }
+  });
+
+  app.put("/api/workforce/allocations/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data: current } = await sb.from("workforce_allocations").select("*").eq("id", req.params.id).maybeSingle();
+    if (!current) return err(res, 404, "Allocation not found", "NOT_FOUND");
+
+    const update = { updated_at: new Date().toISOString() };
+    if (req.body.allocationDate !== undefined || req.body.allocation_date !== undefined) {
+      update.allocation_date = req.body.allocationDate ?? req.body.allocation_date;
+    }
+    if (req.body.employeeId !== undefined || req.body.employee_id !== undefined) {
+      update.employee_id = req.body.employeeId ?? req.body.employee_id;
+    }
+    if (req.body.crewId !== undefined || req.body.crew_id !== undefined) {
+      const crewId = req.body.crewId ?? req.body.crew_id;
+      update.crew_id = crewId && isUuid(crewId) ? crewId : null;
+    }
+    if (req.body.notes !== undefined) update.notes = req.body.notes;
+
+    const nextProjectId = req.body.projectId ?? req.body.project_id ?? current.project_id;
+    const nextCarpentryId = req.body.carpentryJobId ?? req.body.carpentry_job_id ?? current.carpentry_job_id;
+    if (req.body.projectId !== undefined || req.body.projectId === null
+      || req.body.carpentryJobId !== undefined || req.body.carpentryJobId === null
+      || req.body.project_id !== undefined || req.body.carpentry_job_id !== undefined) {
+      const spine = parseJobSpine({ projectId: nextProjectId, carpentryJobId: nextCarpentryId });
+      if (spine.error) return err(res, 400, spine.error);
+      update.project_id = spine.projectId;
+      update.carpentry_job_id = spine.carpentryJobId;
+    }
+
+    const checkEmployeeId = update.employee_id ?? current.employee_id;
+    const checkDate = update.allocation_date ?? current.allocation_date;
+    const { data: dup } = await sb.from("workforce_allocations")
+      .select("id").eq("employee_id", checkEmployeeId).eq("allocation_date", checkDate)
+      .neq("id", req.params.id).maybeSingle();
+    if (dup) return err(res, 409, "This employee already has an allocation on that date", "DUPLICATE_ALLOCATION");
+
+    const { error } = await sb.from("workforce_allocations").update(update).eq("id", req.params.id);
+    if (error) {
+      if (/duplicate key|unique constraint/i.test(error.message || "")) {
+        return err(res, 409, "This employee already has an allocation on that date", "DUPLICATE_ALLOCATION");
+      }
+      return err(res, 500, translateDbError(error));
+    }
+    try {
+      const full = await fetchAllocationById(sb, req.params.id);
+      ok(res, { allocation: formatAllocation(full) });
+    } catch (e) {
+      return err(res, 500, e.message);
+    }
+  });
+
+  app.delete("/api/workforce/allocations/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("workforce_allocations").delete().eq("id", req.params.id).select("id").maybeSingle();
+    if (error) return err(res, 500, translateDbError(error));
+    if (!data) return err(res, 404, "Allocation not found", "NOT_FOUND");
+    ok(res);
+  });
+
+  // ── W17-P4b/P4c: per-job Planner settings (colour + board membership) — advisory/UI only.
+  // Degrades gracefully if migration 118 is not applied (table missing → empty / 503).
+  // PostgREST reports a missing table via a schema-cache error, not the raw PG 42P01 code.
+  const plannerTableMissing = (e) =>
+    !!e && (e.code === "42P01" || e.code === "PGRST205" || /could not find the table|schema cache|does not exist/i.test(e.message || ""));
+
+  app.get("/api/workforce/planner-jobs", requireAuth, requireRole("admin", "supervisor"), async (_req, res) => {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb.from("workforce_planner_jobs").select("project_id, carpentry_job_id, color, on_board");
+    if (error) {
+      if (plannerTableMissing(error)) return ok(res, { jobs: [] }); // table not present yet
+      return err(res, 500, translateDbError(error));
+    }
+    ok(res, { jobs: (data || []).map(r => ({ projectId: r.project_id, carpentryJobId: r.carpentry_job_id, color: r.color, onBoard: r.on_board })) });
+  });
+
+  app.put("/api/workforce/planner-jobs", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const hasColor = typeof req.body.color === "string";
+    const hasBoard = typeof req.body.onBoard === "boolean";
+    if (!hasColor && !hasBoard) return err(res, 400, "color or onBoard is required");
+    const spine = parseJobSpine(req.body);
+    if (spine.error) return err(res, 400, spine.error);
+    const col = spine.projectId ? "project_id" : "carpentry_job_id";
+    const val = spine.projectId || spine.carpentryJobId;
+    const { data: existing, error: lookupErr } = await sb.from("workforce_planner_jobs").select("id").eq(col, val).maybeSingle();
+    if (plannerTableMissing(lookupErr)) return err(res, 503, "Planner settings need migration 118 applied", "MIGRATION_PENDING");
+    const patch = { updated_at: new Date().toISOString() };
+    if (hasColor) patch.color = req.body.color.trim();
+    if (hasBoard) patch.on_board = req.body.onBoard;
+    const result = existing
+      ? await sb.from("workforce_planner_jobs").update(patch).eq("id", existing.id).select("id").single()
+      : await sb.from("workforce_planner_jobs").insert({ project_id: spine.projectId, carpentry_job_id: spine.carpentryJobId, color: hasColor ? req.body.color.trim() : null, on_board: hasBoard ? req.body.onBoard : false, created_by: req.caller.id }).select("id").single();
+    if (result.error) {
+      if (plannerTableMissing(result.error)) return err(res, 503, "Planner settings need migration 118 applied", "MIGRATION_PENDING");
+      return err(res, 500, translateDbError(result.error));
+    }
+    ok(res, { job: { projectId: spine.projectId, carpentryJobId: spine.carpentryJobId, ...(hasColor ? { color: req.body.color.trim() } : {}), ...(hasBoard ? { onBoard: req.body.onBoard } : {}) } });
+  });
+
+  // ── W17-P5: RDO + public-holiday DISPLAY model (advisory/UI only) ──────────
+  // Display-only: never creates/alters a timesheet, approval, or Buildxact sync.
+  // Graceful 503 MIGRATION_PENDING / empty until migration 119 is applied.
+  const ymdUTC = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  const MS_WEEK = 7 * 86400000;
+  const weekIndex = (d) => Math.floor((d.getTime() - Date.UTC(2024, 0, 1)) / MS_WEEK); // weeks since a Monday epoch
+  function nthWeekdayOfMonth(year, month0, weekday, n) {
+    const first = new Date(Date.UTC(year, month0, 1));
+    const shift = (weekday - first.getUTCDay() + 7) % 7;
+    return new Date(Date.UTC(year, month0, 1 + shift + (n - 1) * 7));
+  }
+  function easterSunday(year) {
+    const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+  function saPublicHolidays(year) {
+    const easter = easterSunday(year), addD = (dt, n) => new Date(dt.getTime() + n * 86400000);
+    return [
+      { date: `${year}-01-01`, name: "New Year's Day" },
+      { date: `${year}-01-26`, name: "Australia Day" },
+      { date: ymdUTC(nthWeekdayOfMonth(year, 2, 1, 2)), name: "Adelaide Cup Day" },
+      { date: ymdUTC(addD(easter, -2)), name: "Good Friday" },
+      { date: ymdUTC(addD(easter, -1)), name: "Easter Saturday" },
+      { date: ymdUTC(addD(easter, 1)), name: "Easter Monday" },
+      { date: `${year}-04-25`, name: "Anzac Day" },
+      { date: ymdUTC(nthWeekdayOfMonth(year, 5, 1, 2)), name: "King's Birthday" },
+      { date: ymdUTC(nthWeekdayOfMonth(year, 9, 1, 1)), name: "Labour Day" },
+      { date: `${year}-12-25`, name: "Christmas Day" },
+      { date: `${year}-12-26`, name: "Proclamation Day" },
+    ];
+  }
+
+  app.get("/api/workforce/public-holidays", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    let q = sb.from("workforce_public_holidays").select("id, holiday_date, name, region").order("holiday_date", { ascending: true });
+    if (req.query.from) q = q.gte("holiday_date", req.query.from);
+    if (req.query.to) q = q.lte("holiday_date", req.query.to);
+    const { data, error } = await q;
+    if (error) { if (plannerTableMissing(error)) return ok(res, { holidays: [] }); return err(res, 500, translateDbError(error)); }
+    ok(res, { holidays: (data || []).map(r => ({ id: r.id, date: r.holiday_date, name: r.name, region: r.region })) });
+  });
+  app.post("/api/workforce/public-holidays", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const date = req.body.date, name = (req.body.name || "").trim();
+    if (!date || !name) return err(res, 400, "date and name are required");
+    const { data, error } = await sb.from("workforce_public_holidays").insert({ holiday_date: date, name, region: req.body.region || "SA", created_by: req.caller.id }).select("id").single();
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING"); if (/duplicate|unique/i.test(error.message || "")) return err(res, 409, "That date already has a holiday", "DUPLICATE"); return err(res, 500, translateDbError(error)); }
+    ok(res, { holiday: { id: data.id, date, name } });
+  });
+  app.delete("/api/workforce/public-holidays/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { error } = await sb.from("workforce_public_holidays").delete().eq("id", req.params.id);
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res);
+  });
+  app.post("/api/workforce/public-holidays/seed-sa", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const rows = saPublicHolidays(year).map(h => ({ holiday_date: h.date, name: h.name, region: "SA", created_by: req.caller.id }));
+    const { error } = await sb.from("workforce_public_holidays").upsert(rows, { onConflict: "holiday_date,region", ignoreDuplicates: true });
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING"); return err(res, 500, translateDbError(error)); }
+    ok(res, { seeded: rows.length, year });
+  });
+
+  app.post("/api/workforce/employee-rdo", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const employeeId = req.body.employeeId, rdoDate = req.body.rdoDate;
+    if (!isUuid(employeeId) || !rdoDate) return err(res, 400, "employeeId and rdoDate are required");
+    const { data, error } = await sb.from("workforce_employee_rdo_dates").insert({ employee_id: employeeId, rdo_date: rdoDate, note: req.body.note || null, created_by: req.caller.id }).select("id").single();
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING"); if (/duplicate|unique/i.test(error.message || "")) return err(res, 409, "Already an RDO on that date", "DUPLICATE"); return err(res, 500, translateDbError(error)); }
+    ok(res, { rdo: { id: data.id, employeeId, date: rdoDate } });
+  });
+  app.delete("/api/workforce/employee-rdo/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { error } = await sb.from("workforce_employee_rdo_dates").delete().eq("id", req.params.id);
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res);
+  });
+
+  app.get("/api/workforce/rdo-patterns", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    let q = sb.from("workforce_rdo_patterns").select("id, employee_id, interval_weeks, weekday, anchor_date, active");
+    if (req.query.employeeId) q = q.eq("employee_id", req.query.employeeId);
+    const { data, error } = await q;
+    if (error) { if (plannerTableMissing(error)) return ok(res, { patterns: [] }); return err(res, 500, translateDbError(error)); }
+    ok(res, { patterns: (data || []).map(r => ({ id: r.id, employeeId: r.employee_id, intervalWeeks: r.interval_weeks, weekday: r.weekday, anchorDate: r.anchor_date, active: r.active })) });
+  });
+  app.post("/api/workforce/rdo-patterns", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const employeeId = req.body.employeeId, weekday = Number(req.body.weekday), intervalWeeks = Number(req.body.intervalWeeks) || 2, anchorDate = req.body.anchorDate;
+    if (!isUuid(employeeId) || !anchorDate || !(weekday >= 0 && weekday <= 6)) return err(res, 400, "employeeId, weekday (0-6) and anchorDate are required");
+    const { data, error } = await sb.from("workforce_rdo_patterns").insert({ employee_id: employeeId, interval_weeks: Math.min(8, Math.max(1, intervalWeeks)), weekday, anchor_date: anchorDate, created_by: req.caller.id }).select("id").single();
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING"); return err(res, 500, translateDbError(error)); }
+    ok(res, { pattern: { id: data.id, employeeId, weekday, intervalWeeks, anchorDate } });
+  });
+  app.delete("/api/workforce/rdo-patterns/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { error } = await sb.from("workforce_rdo_patterns").delete().eq("id", req.params.id);
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res);
+  });
+
+  // Combined non-working days for a date range: public holidays + manual RDO + pattern-expanded RDO.
+  app.get("/api/workforce/non-working-days", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const from = req.query.from, to = req.query.to;
+    if (!from || !to) return err(res, 400, "from and to are required");
+    const holRes = await sb.from("workforce_public_holidays").select("holiday_date, name").gte("holiday_date", from).lte("holiday_date", to);
+    if (holRes.error) { if (plannerTableMissing(holRes.error)) return ok(res, { holidays: [], rdo: [] }); return err(res, 500, translateDbError(holRes.error)); }
+    const rdoRes = await sb.from("workforce_employee_rdo_dates").select("employee_id, rdo_date, note").gte("rdo_date", from).lte("rdo_date", to);
+    const patRes = await sb.from("workforce_rdo_patterns").select("employee_id, interval_weeks, weekday, anchor_date").eq("active", true);
+    const rdo = (rdoRes.data || []).map(r => ({ employeeId: r.employee_id, date: r.rdo_date, source: "manual", note: r.note }));
+    const start = new Date(`${from}T12:00:00Z`), end = new Date(`${to}T12:00:00Z`);
+    for (const p of (patRes.data || [])) {
+      const anchorWeek = weekIndex(new Date(`${p.anchor_date}T12:00:00Z`));
+      for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 86400000)) {
+        if (d.getUTCDay() !== p.weekday) continue;
+        if ((weekIndex(d) - anchorWeek) % p.interval_weeks === 0) rdo.push({ employeeId: p.employee_id, date: ymdUTC(d), source: "pattern" });
+      }
+    }
+    ok(res, { holidays: (holRes.data || []).map(h => ({ date: h.holiday_date, name: h.name })), rdo });
   });
 
   // Generate (or rotate) a worker's magic-link token and return the shareable path. (W01)
@@ -1388,6 +1885,9 @@ export function registerWorkforceRoutes(app) {
     else if (jobType === "project") q = q.eq("project_id", jobId);
     else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
     if (category) q = q.eq("category", category);
+    // W17-P3: normal workers see only 'worker' tasks; leading hands also see 'supervisor' (QC) tasks.
+    // Closes the D3 leak where supervisor/QC tasks surfaced to every worker.
+    if (!emp.is_leading_hand) q = q.eq("task_audience", "worker");
     q = q.order("sort_order").order("created_at");
 
     const { data: tasks, error } = await q;
@@ -1402,6 +1902,48 @@ export function registerWorkforceRoutes(app) {
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
     res.json({ ok: true, tasks: sorted, jobId, jobType: jobType || null });
+  });
+
+  // W17-P3: read-only "preview as worker" for admin/supervisor (console-authenticated — NOT the worker
+  // token path). Returns the exact task set the chosen employee would see for a job, applying the SAME
+  // task_audience + assigned_to visibility, so the office preview always matches the worker's reality.
+  app.get("/api/workforce/employees/:id/task-preview", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid employee id.");
+    const { data: emp } = await sb.from("employees").select("id, name, is_leading_hand, is_active").eq("id", req.params.id).maybeSingle();
+    if (!emp) return err(res, 404, "Employee not found.", "NOT_FOUND");
+    const jobId = (req.query.jobId || "").trim();
+    const jobType = (req.query.jobType || "").trim();
+    const category = (req.query.category || "").trim();
+    if (!jobId) {
+      // W17-P3 (preview UI): no job selected yet → return the worker's visible jobs so the admin
+      // "Preview as worker" panel can offer the same job picker the worker would see.
+      const visJobs = await workerVisibleJobs(sb, emp.id);
+      const jobs = [
+        ...visJobs.projects.map((p) => ({ id: p.id, address: p.address, type: "project" })),
+        ...visJobs.carpJobs.map((j) => ({ id: j.id, address: j.address, type: "carpentry" })),
+      ];
+      return ok(res, { preview: true, employee: emp, tasks: [], jobs, needsJobSelection: true });
+    }
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.", "BAD_JOB_ID");
+    if (jobType && !WORKER_JOB_TYPES.includes(jobType)) return err(res, 400, "Invalid job type.", "BAD_JOB_TYPE");
+    if (category && !SITE_TASK_CATEGORIES.includes(category)) return err(res, 400, "Invalid category.", "BAD_CATEGORY");
+    const vis = await workerVisibleJobs(sb, emp.id);
+    if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "Employee has no access to this job.", "JOB_FORBIDDEN");
+
+    let q = sb.from("site_tasks").select("*, employees!assigned_to(id, name)").neq("status", "wont_do");
+    if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
+    else if (jobType === "project") q = q.eq("project_id", jobId);
+    else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
+    if (category) q = q.eq("category", category);
+    if (!emp.is_leading_hand) q = q.eq("task_audience", "worker");
+    q = q.order("sort_order").order("created_at");
+    const { data: tasks, error } = await q;
+    if (error) return err(res, 500, error.message);
+    const visible = (tasks || []).filter(t => t.status === "done" || t.assigned_to === null || t.assigned_to === emp.id);
+    const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
+    await signSiteTaskPhotos(sb, sorted);
+    ok(res, { preview: true, employee: emp, tasks: sorted, jobId, jobType: jobType || null });
   });
 
   // Upload a worker completion photo to the private site-media bucket; returns the storage PATH.
@@ -1456,6 +1998,12 @@ export function registerWorkforceRoutes(app) {
       update.completion_photo_url = p;
     }
 
+    // W17-P3: a normal worker cannot complete a supervisor/QC task — only a leading hand.
+    if (!emp.is_leading_hand) {
+      const { data: tk } = await sb.from("site_tasks").select("task_audience").eq("id", req.params.id).maybeSingle();
+      if (tk?.task_audience === "supervisor") return err(res, 403, "QC tasks can only be completed by a leading hand.");
+    }
+
     // Scope the update so a worker can only complete tasks assigned to them or unassigned (mirrors
     // GET /api/worker/tasks visibility). 0 rows updated -> the task isn't theirs.
     const { data, error } = await sb.from("site_tasks").update(update)
@@ -1465,6 +2013,44 @@ export function registerWorkforceRoutes(app) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return err(res, 403, "You can only complete tasks assigned to you or unassigned tasks.");
     res.json({ ok: true, task: data });
+  });
+
+  // ── Worker allocations (W16-A1) ─────────────────────────────────────────────
+
+  app.get("/api/worker/allocations/today", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller?.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+
+    const today = todayYmd();
+    const tomorrow = addDaysYmd(today, 1);
+    const { data, error } = await sb.from("workforce_allocations")
+      .select(ALLOCATION_SELECT)
+      .eq("employee_id", emp.id)
+      .in("allocation_date", [today, tomorrow])
+      .order("allocation_date", { ascending: true });
+    if (error) return err(res, 500, translateDbError(error));
+
+    const byDate = {};
+    for (const row of data || []) byDate[row.allocation_date] = formatAllocation(row);
+    ok(res, { today: byDate[today] ?? null, tomorrow: byDate[tomorrow] ?? null });
+  });
+
+  app.get("/api/worker/allocations/week", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller?.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+
+    const weekStart = mondayOf(req.query.weekStart || todayYmd());
+    const weekEnd = addDaysYmd(weekStart, 6);
+    const { data, error } = await sb.from("workforce_allocations")
+      .select(ALLOCATION_SELECT)
+      .eq("employee_id", emp.id)
+      .gte("allocation_date", weekStart)
+      .lte("allocation_date", weekEnd)
+      .order("allocation_date", { ascending: true });
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res, { weekStart, weekEnd, allocations: (data || []).map(formatAllocation) });
   });
 
   // ── CSV export (for History tab) ─────────────────────────────────────────

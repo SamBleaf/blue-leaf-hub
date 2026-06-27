@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { authFetch } from "../lib/authFetch.js";
 import { useAuth } from "../lib/useAuth.js";
+import { can } from "../lib/roles.js";
+import WorkforceTeam from "./WorkforceTeam.jsx";
+import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
 
 const TASK_LABELS = {
   first_fix_framing:    "First fix / framing",
@@ -32,6 +36,8 @@ function fmtDate(d) {
 
 function ApprovalsTab({ role }) {
   const isDirector = role === "admin";
+  const canApprove = can.approveTimesheets(role);
+  const canReject = can.accessWorkforce(role);
   const [timesheets, setTimesheets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
@@ -189,14 +195,24 @@ function ApprovalsTab({ role }) {
         </h2>
         {selected.size > 0 && (
           <div className="flex gap-2 ml-auto">
-            <button type="button" onClick={approveSelected} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white">✓ Approve {selected.size}</button>
-            <button type="button" onClick={() => { setRejectModal("selected"); setRejectNotes(""); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white">✗ Reject {selected.size}</button>
+            {canApprove && (
+              <button type="button" onClick={approveSelected} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white">✓ Approve {selected.size}</button>
+            )}
+            {canReject && (
+              <button type="button" onClick={() => { setRejectModal("selected"); setRejectNotes(""); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white">✗ Reject {selected.size}</button>
+            )}
           </div>
         )}
         {timesheets.length > 0 && selected.size === 0 && (
           <button type="button" onClick={selectAll} className="ml-auto text-xs text-primary font-medium">Select all</button>
         )}
       </div>
+
+      {!canApprove && canReject && timesheets.length > 0 && (
+        <p className="text-xs text-muted mb-4 rounded-lg border border-hairline bg-page px-3 py-2">
+          Timesheet approval is admin-only — approval can create Buildxact Work Orders. You can review, reject, and assign carpentry jobs here.
+        </p>
+      )}
 
       {loading ? (
         <div className="text-sm text-muted py-8 text-center">Loading…</div>
@@ -256,8 +272,12 @@ function ApprovalsTab({ role }) {
                     </td>
                     <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        <button type="button" disabled={isBusy} onClick={() => approveOne(ts.id)} className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50">✓</button>
-                        <button type="button" onClick={() => { setRejectModal(ts.id); setRejectNotes(""); }} className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 font-medium hover:bg-red-200">✗</button>
+                        {canApprove && (
+                          <button type="button" disabled={isBusy} onClick={() => approveOne(ts.id)} className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50">✓</button>
+                        )}
+                        {canReject && (
+                          <button type="button" onClick={() => { setRejectModal(ts.id); setRejectNotes(""); }} className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 font-medium hover:bg-red-200">✗</button>
+                        )}
                       </div>
                     </td>
                   </tr>,
@@ -722,7 +742,16 @@ function BuildexactSyncControl() {
 function SnapshotTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [weekStart, setWeekStart] = useState(""); // "" = current week
+  const [nonWork, setNonWork] = useState({ holidays: [], rdo: [] }); // W17-P5b overlay
+  // W17-P2: default to the PREVIOUS week on Mon/Tue/Wed (office reviews last week early-week);
+  // current week Thu–Sun. "" = current week (server default). Manual nav still overrides.
+  const [weekStart, setWeekStart] = useState(() => {
+    const now = new Date();
+    const dow = now.getDay(); // 0 Sun .. 6 Sat
+    if (dow < 1 || dow > 3) return "";
+    const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (1 - dow) - 7);
+    return `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -734,16 +763,50 @@ function SnapshotTab() {
       .finally(() => setLoading(false));
   }, [weekStart]);
 
+  // W17-P5b: overlay RDO + public holidays so they aren't read as "missing".
+  useEffect(() => {
+    if (!data?.dates?.length) return;
+    const from = data.dates[0], to = data.dates[data.dates.length - 1];
+    authFetch(`/api/workforce/non-working-days?from=${from}&to=${to}`)
+      .then(r => r.json())
+      .then(j => { if (j.ok) setNonWork({ holidays: j.holidays || [], rdo: j.rdo || [] }); })
+      .catch(() => {});
+  }, [data]);
+
   if (loading) return <p className="text-sm text-muted">Loading snapshot…</p>;
   if (!data) return <p className="text-sm text-muted">Could not load the snapshot.</p>;
 
+  const holSet = new Set(nonWork.holidays.map(h => h.date));
+  const rdoSet = new Set(nonWork.rdo.map(r => `${r.employeeId}|${r.date}`));
+  const nonWorkAt = (empId, d) => holSet.has(d) ? "Hol" : rdoSet.has(`${empId}|${d}`) ? "RDO" : null;
+  const dayState = (v) => (v && typeof v === "object") ? v.state : (v === "done" ? "approved" : v === "returned" ? "rejected" : v);
+  const adjustedMissing = (e) => data.dates.reduce((n, d) => (!nonWorkAt(e.id, d) && dayState(e.days[d]) === "missing") ? n + 1 : n, 0);
+
   const dayLabel = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric" });
-  const cell = (state) => {
-    if (state === "done") return <span className="inline-block w-5 h-5 rounded-full bg-green-100 text-green-700 text-xs leading-5 text-center">✓</span>;
-    if (state === "returned") return <span className="inline-block w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs leading-5 text-center" title="rejected — returned">↩</span>;
-    if (state === "missing") return <span className="inline-block w-5 h-5 rounded-full bg-red-50 text-red-400 text-xs leading-5 text-center">·</span>;
-    if (state === "na") return <span className="inline-block w-5 h-5 text-slate-300 text-xs leading-5 text-center" title="not a working day for this employee">–</span>;
-    return <span className="inline-block w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[10px] leading-5 text-center">{state[0]}</span>;
+  // W17-P2: per-day value is now { state, status, hours }; tolerate the legacy string too.
+  const GLYPH_CLS = {
+    approved: "bg-green-100 text-green-700",
+    submitted: "bg-blue-100 text-blue-700",
+    rejected: "bg-amber-100 text-amber-700",
+    missing: "bg-red-50 text-red-400",
+    na: "text-slate-300",
+  };
+  const GLYPH_CH = { approved: "✓", submitted: "○", rejected: "↩", missing: "·", na: "–" };
+  const cell = (value) => {
+    const obj = (value && typeof value === "object")
+      ? value
+      : { state: value === "done" ? "approved" : value === "returned" ? "rejected" : value, status: typeof value === "string" ? value : null, hours: null };
+    const state = obj.state || "na";
+    const hrs = (obj.hours != null && Number(obj.hours) > 0) ? Number(obj.hours).toFixed(1) : null;
+    const title = [obj.status || state, hrs ? `${hrs}h` : null].filter(Boolean).join(" · ");
+    const cls = GLYPH_CLS[state] || "bg-slate-100 text-slate-500";
+    const ch = GLYPH_CH[state] || String(state)[0];
+    return (
+      <span className="inline-flex flex-col items-center gap-0.5" title={title}>
+        <span className={`inline-block w-5 h-5 rounded-full text-xs leading-5 text-center ${cls}`}>{ch}</span>
+        {hrs && <span className="text-[9px] text-muted leading-none">{hrs}</span>}
+      </span>
+    );
   };
 
   const shiftWeek = (deltaDays) => {
@@ -762,7 +825,7 @@ function SnapshotTab() {
           <button type="button" onClick={() => shiftWeek(7)} className="px-2.5 py-1 rounded border border-hairline text-sm">→</button>
           {weekStart && <button type="button" onClick={() => setWeekStart("")} className="text-xs text-primary underline ml-1">This week</button>}
         </div>
-        <span className="text-xs text-muted">{data.employees.filter(e => e.missing > 0).length} of {data.employees.length} have missing days</span>
+        <span className="text-xs text-muted">{data.employees.filter(e => adjustedMissing(e) > 0).length} of {data.employees.length} have missing days</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
@@ -777,8 +840,13 @@ function SnapshotTab() {
             {data.employees.map(e => (
               <tr key={e.id} className="border-t border-hairline">
                 <td className="py-2 pr-3 text-ink">{e.name}{e.employment_type === "casual" && <span className="ml-1 text-[10px] text-muted">(casual)</span>}</td>
-                {data.dates.map(d => <td key={d} className="py-2 px-2 text-center">{cell(e.days[d])}</td>)}
-                <td className="py-2 pl-3 text-center">{e.missing > 0 ? <span className="font-semibold text-red-600">{e.missing}</span> : <span className="text-green-600">0</span>}</td>
+                {data.dates.map(d => {
+                  const nw = nonWorkAt(e.id, d);
+                  return <td key={d} className="py-2 px-2 text-center">{nw
+                    ? <span className="inline-block w-5 h-5 rounded-full text-[9px] leading-5 text-center bg-slate-100 text-slate-400" title={nw === "Hol" ? "Public holiday" : "Rostered day off"}>{nw}</span>
+                    : cell(e.days[d])}</td>;
+                })}
+                <td className="py-2 pl-3 text-center">{adjustedMissing(e) > 0 ? <span className="font-semibold text-red-600">{adjustedMissing(e)}</span> : <span className="text-green-600">0</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -789,11 +857,22 @@ function SnapshotTab() {
   );
 }
 
-const TABS = ["Approvals", "Snapshot", "Mass Fill", "History"];
+const TABS = ["Approvals", "Snapshot", "Mass Fill", "History", "Team"];
 
 export default function Workforce() {
   const { role } = useAuth();
-  const [tab, setTab] = useState("Approvals");
+  const [searchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  // W17-P4: Planner is admin/supervisor only (matches the allocation routes' requireRole).
+  const canPlan = role === "admin" || role === "supervisor";
+  const tabs = useMemo(() => (canPlan ? [...TABS, "Planner"] : TABS), [canPlan]);
+  const [tab, setTab] = useState(() => (TABS.includes(tabFromUrl) ? tabFromUrl : "Approvals"));
+
+  useEffect(() => {
+    if (tabFromUrl && [...TABS, "Planner"].includes(tabFromUrl)) setTab(tabFromUrl);
+  }, [tabFromUrl]);
+
+  const shownTab = tabs.includes(tab) ? tab : "Approvals";
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -803,22 +882,24 @@ export default function Workforce() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-hairline mb-6">
-        {TABS.map(t => (
+        {tabs.map(t => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${tab === t ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink"}`}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${shownTab === t ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink"}`}
           >
             {t}
           </button>
         ))}
       </div>
 
-      {tab === "Approvals" && <ApprovalsTab role={role} />}
-      {tab === "Snapshot" && <SnapshotTab />}
-      {tab === "Mass Fill" && <MassFillTab />}
-      {tab === "History" && <HistoryTab role={role} />}
+      {shownTab === "Approvals" && <ApprovalsTab role={role} />}
+      {shownTab === "Snapshot" && <SnapshotTab />}
+      {shownTab === "Mass Fill" && <MassFillTab />}
+      {shownTab === "History" && <HistoryTab role={role} />}
+      {shownTab === "Team" && <WorkforceTeam embedded />}
+      {shownTab === "Planner" && canPlan && <WorkforcePlannerTab />}
     </div>
   );
 }

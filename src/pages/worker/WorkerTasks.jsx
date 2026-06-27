@@ -6,6 +6,24 @@ import { getSelectedJob, setSelectedJob } from "../../lib/workerJob.js";
 
 const FILTER_TABS = ["All", "My tasks", "Urgent", "Done"];
 
+// W17-P3: category filter — matches site_tasks.category (mig 114), generic + carpentry labour streams.
+const CATEGORY_OPTIONS = [
+  { value: "", label: "All categories" },
+  { value: "general", label: "General" },
+  { value: "defect", label: "Defect" },
+  { value: "safety", label: "Safety" },
+  { value: "materials", label: "Materials" },
+  { value: "inspection", label: "Inspection" },
+  { value: "first_fix_framing", label: "First fix / framing" },
+  { value: "cladding", label: "Cladding" },
+  { value: "second_fix", label: "Second fix" },
+  { value: "outdoor_works", label: "Outdoor works" },
+  { value: "formwork_slab_prep", label: "Formwork / slab prep" },
+  { value: "site_labouring", label: "Site labouring" },
+  { value: "site_cleanup", label: "Site cleanup" },
+  { value: "supervision", label: "Supervision" },
+];
+
 const PRIORITY_DOT = {
   urgent: "bg-red-500",
   normal: "bg-gray-400",
@@ -23,6 +41,7 @@ export default function WorkerTasks() {
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [filter, setFilter] = useState("All");
+  const [category, setCategory] = useState("");
   const [selected, setSelected] = useState(null);
   const [completing, setCompleting] = useState(false);
   const [notes, setNotes] = useState("");
@@ -60,13 +79,14 @@ export default function WorkerTasks() {
     if (!job?.id) { setTasks([]); return; }
     let stop = false;
     setTasksLoading(true);
-    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type)}`)
+    const catParam = category ? `&category=${encodeURIComponent(category)}` : "";
+    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type)}${catParam}`)
       .then(r => r.json())
       .then(j => { if (!stop && j.ok) setTasks(j.tasks || []); })
       .catch(() => {})
       .finally(() => { if (!stop) setTasksLoading(false); });
     return () => { stop = true; };
-  }, [job?.id, job?.type]);
+  }, [job?.id, job?.type, category]);
 
   function pickJob(j) {
     const next = { id: j.id, type: j.type, address: j.address };
@@ -176,7 +196,7 @@ export default function WorkerTasks() {
       >
         <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-ink leading-snug">{task.title}</p>
+          <p className="text-sm text-ink leading-snug">{task.title}{task.task_audience === "supervisor" && <span className="ml-1.5 align-middle text-[9px] font-bold uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded">QC</span>}</p>
           {task.assigned_to && task.employees && (
             <p className="text-xs text-muted mt-0.5">{task.employees.name}</p>
           )}
@@ -235,6 +255,15 @@ export default function WorkerTasks() {
           <p className="text-sm text-muted text-center mt-10">Loading tasks…</p>
         ) : (
         <>
+        {/* W17-P3: category filter */}
+        <select
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          className="w-full mb-3 px-3 py-2 rounded-lg bg-white border border-hairline text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          {CATEGORY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+
         {/* Filter tabs */}
         <div className="flex gap-1 mb-4 overflow-x-auto">
           {FILTER_TABS.map(f => (
