@@ -70,6 +70,8 @@ flowchart LR
 
 **Batch C mapping (2026-06-25):** W10–W15 ✅ — review: [BATCH_C_REVIEW_PACK.md](./BATCH_C_REVIEW_PACK.md). **No fixes until Sam approves P0-C order.**
 
+**Batch E mapping (2026-06-28):** W22 ✅ CRM / Mailing List — [22_CRM_RELATIONSHIPS_MAILING_LIST.md](./workflows/22_CRM_RELATIONSHIPS_MAILING_LIST.md); SAM-W22-001 decided (global unsubscribe suppression); **W22-SEC-001 fix shipped** (Sam-approved, pending staging run). **W23 / W24 / W25 still to map** (W23-DRIFT-001 + W24-DRIFT-001 registered, map-gated).
+
 **W07 runtime note (2026-06-25):** Active mail transport **Resend** (`GET /api/integrations/status` → `mail.transport: "resend"`). Hub `correspondence` is outbound/inbound SoT; mailbox Sent not guaranteed.
 
 ---
@@ -103,6 +105,7 @@ Older narrative workflow descriptions remain in [docs/agent_knowledge/WORKFLOW_M
 
 | Date | Change |
 |------|--------|
+| 2026-06-28 | W22 mapped (Batch E started) — CRM/Mailing List; SAM-W22-001 decided; W22-SEC-001 fix shipped |
 | 2026-06-25 | W10–W15 mapped — Batch C complete; BATCH_C_REVIEW_PACK.md |
 | 2026-06-25 | BATCH_B_REVIEW_PACK.md linked |
 | 2026-06-25 | W09 mapped — tender win / operations handoff; Batch B mapping complete |

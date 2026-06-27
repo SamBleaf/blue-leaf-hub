@@ -45,6 +45,7 @@
 | SAM-W15-002 | W15 | Deputy cutover go-live criteria? | A) E2E green · B) Parallel run sign-off · C) Defer | **A + B before decommission** | open | 2026-06-25 |
 | SAM-W09-002 | W09 | Package-only accepted quotes at win time? | A) Block win until rfqs mirror · B) Warn only · C) Ignore | **B — warn prominently; document gap (W09-DRIFT-002)** | **decided** | 2026-06-25 |
 | SAM-W09-003 | W09 | Auto-sync leads.stage on win? | A) Yes when lead_id set · B) Manual only · C) Win only, not lose | **A eventually; document gap first (W09-DRIFT-004)** | open | 2026-06-25 |
+| SAM-W22-001 | W22 | CRM unsubscribe semantics: global vs strict per-list consent? | A) Global suppression (any unsubscribe stops all lists — Spam Act safe) · B) Strict per-list consent | **A — global suppression** (W22-SEC-001 fix shipped 2026-06-28) | **decided** | 2026-06-28 |
 | **SAM-MKT-001** | Marketing | Marketing Command Centre Run A — parked until post P0/P1 hardening | A) Proceed Run A during freeze · B) **Park Run A until post-hardening** · C) Cancel rebuild | **B — park Run A** | **decided (parked)** | 2026-06-27 |
 | SAM-HUB-001 | HUB-QA | Build a cross-Hub Role Preview / QA Console instead of scattering per-module preview buttons? | A) Central admin-only read-only console in Settings → Developer Tools · B) Keep ad-hoc per-module previews · C) Do nothing | **A — record as future tool ([HUB_QA_ROLE_PREVIEW_CONSOLE.md](./HUB_QA_ROLE_PREVIEW_CONSOLE.md)); read-only; NOT real auth; parked, do NOT build during W17; requires a separate explicit Sam approval naming the phase to start** | **decided (record + defer)** | 2026-06-26 |
 
@@ -192,6 +193,15 @@
 
 **Planning refs:** [MARKETING_RUN_A_FREEZE_PARKING_RESULT.md](../planning/MARKETING_RUN_A_FREEZE_PARKING_RESULT.md) · [MARKETING_RUN_A_B_HANDOFF_READINESS.md](../planning/MARKETING_RUN_A_B_HANDOFF_READINESS.md)
 
+**Branch / checkpoint update (2026-06-27, later same day):** Several SAM-MKT-001 reopen conditions are now *mechanically* satisfied — recorded for when Sam considers reopening (this does **not** change the parked decision):
+
+- ✅ Go-Live **P0 + P1 commits landed** (`8fe2603` stabilise hardening sprint · `f656d63` external-seam live-fire) — working tree is **clean** (0 modified / 0 untracked).
+- ✅ Branch **`marketing-run-a`** created + pushed to `origin`, cut from the clean `portal-v2` integration tip. **Note:** it is a *child of `portal-v2`* (48 commits ahead of `main`, 0 behind), **not** an independent branch off `main` — when merged it carries the whole portal-v2 stack; `main` auto-deploys to prod, so keep Run A → staging only.
+- ✅ Migration number **re-checked**: highest on disk is `121`; **`122_marketing_command_centre_mvp.sql` remains the correct next number** (not created).
+- ⛔ **Still required to reopen Run A:** explicit Sam approval of the Run A start phase — **H1** (handoff sign-off) + **H2** (authorise migration 122). A clean branch + clean tree do **not** constitute approval.
+
+Ref: [MARKETING_RUN_A_BRANCH_DOC_ALIGNMENT_RESULT.md](../planning/MARKETING_RUN_A_BRANCH_DOC_ALIGNMENT_RESULT.md)
+
 ---
 
 ## Decided notes (2026-06-27 — W18 supervised pilot)
@@ -208,6 +218,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-06-27 | **SAM-MKT-001 branch update:** `marketing-run-a` branch created; P0/P1 commits landed + tree clean; migration 122 re-confirmed next. Run A **still parked** pending H1/H2 ([MARKETING_RUN_A_BRANCH_DOC_ALIGNMENT_RESULT.md](../planning/MARKETING_RUN_A_BRANCH_DOC_ALIGNMENT_RESULT.md)) |
 | 2026-06-27 | **SAM-MKT-001:** Marketing Command Centre Run A **parked** until post P0/P1 hardening; docs-only update ([MARKETING_RUN_A_FREEZE_PARKING_RESULT.md](../planning/MARKETING_RUN_A_FREEZE_PARKING_RESULT.md)) |
 | 2026-06-27 | **W18 pilot timing:** SAM-W18-PILOT-01 **on hold** — approved with controls; wait for signed contract + active Hub job + Sam final go-ahead |
 | 2026-06-27 | **W18 pilot:** SAM-W18-PILOT-01 supervised client pilot **approved with controls**; SAM-PORTAL-CROSSROLE decided; P1-W18-04 pilot policy (JWT primary). Pack: `W18_SUPERVISED_CLIENT_PILOT_EXECUTION_PACK.md` |

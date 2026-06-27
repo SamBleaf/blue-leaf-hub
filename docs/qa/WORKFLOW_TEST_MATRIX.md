@@ -489,6 +489,19 @@ See [TEST_REGRESSION_SUITE_01.md](./TEST_REGRESSION_SUITE_01.md).
 
 ---
 
+## Workflow 22 — CRM Relationships / Mailing List (Batch E)
+
+Doc: [workflows/22_CRM_RELATIONSHIPS_MAILING_LIST.md](./workflows/22_CRM_RELATIONSHIPS_MAILING_LIST.md)
+
+| ID | Workflow step | Screen | Route / API | Test file | Status | Notes |
+|----|---------------|--------|-------------|-----------|--------|-------|
+| W22-SEC-001 | CRM send/import admin-only | Marketing / SalesManager | `POST /api/crm/sends`, `/sends/:sid/send`, `/lists/:id/import` | `e2e/tests/security/crm-send-role.spec.js` | **written — pending staging run** (`test:w22-crm-security`) | fix shipped 2026-06-28; employee/supervisor→403 |
+| W22-SEC-002 | Unsubscribed/bounced excluded from send | — | `/sends/:sid/send` suppression | — | planned | global `email_unsubscribes` suppression shipped; test pending |
+| W22-SEC-003 | Webhook retry no double-count | — | `/api/webhooks/resend` | — | planned | idempotent increments shipped; test pending |
+| W22-API-01 | Smart-list filter correctness | MailingLists | `smartListMembers()` | — | planned | |
+
+---
+
 ## Document history
 
 | Date | Change |

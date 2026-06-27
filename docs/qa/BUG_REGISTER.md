@@ -90,7 +90,52 @@
 | **Note** | Unauthenticated public enquiry is **by design** — only missing protection is the risk |
 | **Test** | W01-SEC-03 |
 | **Decision** | SAM-W01-003 |
-| **Status** | open |
+| **Verified (2026-06-27)** | Protections **present in code** — honeypot `website` field ([marketingIntelligenceRoutes.mjs](../../server/lib/marketingIntelligenceRoutes.mjs) L274-288), per-IP rate limit 5/10min → 429 (L56-73, L289-291), field whitelist on `/api/public/enquiry` + `/api/public/attribution`. Evidence: [MARKETING_ADJACENT_VERIFY_RESULT.md](./MARKETING_ADJACENT_VERIFY_RESULT.md). |
+| **Status** | **protections present — pending regression test** (downgraded Medium→Low; not closed — needs `W01-SEC-03` test; no CAPTCHA, optional) |
+
+---
+
+## Open — Batch E adversarial-audit verifications (2026-06-27)
+
+> Source: [ADVERSARIAL_AUDIT_2026-06-23.md](./ADVERSARIAL_AUDIT_2026-06-23.md) candidates, verified **read-only** by the hardening agent (Explore fan-out + main-loop code spot-check). Full method + evidence: [MARKETING_ADJACENT_VERIFY_RESULT.md](./MARKETING_ADJACENT_VERIFY_RESULT.md). **No code changed.** W22–W24 (Batch E) are not yet mapped → fixes are map-gated; **W22-SEC-001 is a Sam-gated elevation.**
+
+### W22-SEC-001 — CRM bulk send ignores global unsubscribe + role-bypass + non-idempotent stats
+
+| Field | Value |
+|-------|-------|
+| **Severity** | **High** — consent/compliance + security exposure (**Critical-candidate — elevated; do not fix without Sam**) |
+| **Module** | CRM / Mailing List (W22) |
+| **Symptom** | (a) Smart-list sends pull `crm_contacts` with **no `email_unsubscribes`/global `unsubscribed_at` check**; manual lists filter per-list only; link-unsubscribe is per-list → a globally opted-out contact can still be emailed (**AU Spam Act 2003**). (b) `POST /api/crm/sends`, `…/:sid/send`, `/lists/:id/import` are **`requireAuth` only** → any employee can fire bulk customer email / mass-import contacts. (c) `increment_send_stat` non-idempotent → webhook-retry double-counts stats. |
+| **Evidence (verified from code)** | [crmRoutes.mjs](../../server/lib/crmRoutes.mjs) L1045, L1063-1083, L1106-1119, L1256-1279; [migration 073](../../supabase/migrations/073_increment_send_stat.sql); [dev-api.mjs:879-901](../../server/dev-api.mjs) (comment claims CRM sensitive routes are admin-gated — **inaccurate**) |
+| **Exploitability** | Gated on `RESEND_API_KEY` configured + CRM bulk email in active use (latent if not yet live); consent gap is real the moment it is used |
+| **Smallest-safe fix** | Enforce global suppression on **every** send path; link-unsub writes global suppression (or check at send); inline `requireRole("admin")` on send/import (**keep `/api/crm/unsubscribe` public — do NOT extend the prefix loop**); idempotent stat increment |
+| **Test** | `e2e/tests/security/crm-send-role.spec.js` (`npm run test:w22-crm-security`, api-security project) — employee/supervisor→403, admin passes the gate, on all 3 routes. Planned follow-on: suppression-exclusion + webhook-retry no-double-count (W22-SEC-002/003). |
+| **Fix (2026-06-28, Sam-approved batch)** | [crmRoutes.mjs](../../server/lib/crmRoutes.mjs) — inline `requireRole("admin")` on `/api/crm/sends`, `/sends/:sid/send`, `/lists/:id/import`; global `email_unsubscribes` suppression applied to **every** send path (smart + manual); webhook `email.bounced` now inserts `email_unsubscribes` (so hard bounces enter global suppression); idempotent stat increments (delivered/opened/clicked/bounced guarded on first transition). **No schema / migration.** Map: [W22](./workflows/22_CRM_RELATIONSHIPS_MAILING_LIST.md). |
+| **Status** | **fix shipped (code + regression test written) — pending staging `test:w22-crm-security` + `build`/`batch-a` green before closure** (per /harden: no closure without a test run) |
+
+### W23-DRIFT-001 — Marketing media pipeline: ffmpeg on storage path; streamed upload not persisted; consent gap
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium — functional breakage in the **parked Marketing Run A** surface (verifier flagged Critical/money; downgraded — no data loss/security/tender-block) |
+| **Module** | Marketing / Media (W23) — PARKED |
+| **Symptom** | `reexportAsset`/`assembleExport` feed a Supabase **storage key** to ffmpeg with no download → export fails at runtime; `POST /api/marketing/media/upload-video` leaves `storage_path: null` (streamed upload never persisted) → later export can't find the file; `consent_for_marketing` enforced only on `/assemble`, not on generate/stream/preload/export. |
+| **Evidence (verified from code)** | [marketingMedia.mjs](../../server/lib/marketingMedia.mjs) L259-276, L637-647, L672-687; [marketingRoutes.mjs](../../server/lib/marketingRoutes.mjs) L862-944, L1454-1462; [videoIntelligence.mjs](../../server/lib/videoIntelligence.mjs) L561-617 |
+| **Smallest-safe fix** | Download-before-ffmpeg in reexport/assemble; persist streamed uploads to storage + write `storage_path`; consent check at all processing entry points |
+| **Test** | W23-DRIFT-001 |
+| **Status** | **confirmed — open (map W23 first; parked surface)** |
+
+### W24-DRIFT-001 — Marketing Intelligence: stale model id + silent failure + Meta token-in-URL
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium — admin-gated; functional (silent) + security-hygiene (verifier flagged High/Critical; downgraded — admin-gated, server↔Meta, logs-only blast radius) |
+| **Module** | Marketing Intelligence (W24) |
+| **Symptom** | Dashboard AI summary uses malformed/retired model id `claude-haiku-20240307` and `} catch { /* non-fatal */ }` swallows the error → `ai_summary: null` silently; Meta access token passed in URL query string (`…/insights?…&access_token=…`) → leaks to proxy/CDN/access logs. |
+| **Evidence (verified from code)** | [marketingIntelligenceRoutes.mjs](../../server/lib/marketingIntelligenceRoutes.mjs) L577 (model), L583 (silent catch), L603 (route is `requireRole("admin")`), L632 (token-in-URL) |
+| **Smallest-safe fix** | Use a current model id / `CLAUDE_MODEL` env; log the caught error; move Meta token to `Authorization: Bearer` header |
+| **Test** | W24-DRIFT-001 |
+| **Status** | **confirmed — open (map W24 first)** |
 
 ---
 
