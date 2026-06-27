@@ -11,7 +11,9 @@ import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqT
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { buildexactConfigured } from "./buildexactClient.mjs";
+import { assertJobReadyForRfqHandoff } from "./jobGuards.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 
 // Suggested trades to pre-select when tendering a job, by build type. A hint the
@@ -424,6 +426,9 @@ export function registerRfqPackageRoutes(app) {
       if (!project_address) return err(res, 400, "project_address required");
       if (!job_id) return err(res, 400, "job_id required — every RFQ package must be linked to a job");
 
+      const handoff = await assertJobReadyForRfqHandoff(s, job_id);
+      if (!handoff.ok) return err(res, handoff.status, handoff.error, handoff.code);
+
       const intel = await buildRfqTradeIntelligence({
         db: s,
         extraction: extraction_data || {},
@@ -477,7 +482,7 @@ export function registerRfqPackageRoutes(app) {
         if (tsErr) throw tsErr;
 
         for (const r of scope.recipients || []) {
-          await s.from("rfq_recipients").insert({
+          const { error: recErr } = await s.from("rfq_recipients").insert({
             trade_scope_id: ts.id,
             package_id: pkg.id,
             subcontractor_id: r.subcontractor_id || null,
@@ -487,9 +492,9 @@ export function registerRfqPackageRoutes(app) {
             sent_at: r.sent_at || new Date().toISOString(),
             email_subject: r.email_subject || "",
             email_body: r.email_body || "",
-            subject_variant: r.subject_variant || "",
             rfq_id: r.rfq_id || null
           });
+          if (recErr) throw recErr;
         }
       }
 
@@ -651,6 +656,12 @@ export function registerRfqPackageRoutes(app) {
         .single();
       if (scopeErr || !scope) return err(res, 404, "Trade scope not found");
 
+      const pkgJobId = (Array.isArray(scope.rfq_packages) ? scope.rfq_packages[0] : scope.rfq_packages)?.job_id;
+      if (pkgJobId) {
+        const handoff = await assertJobReadyForRfqHandoff(s, pkgJobId);
+        if (!handoff.ok) return err(res, handoff.status, handoff.error, handoff.code);
+      }
+
       const pkg = Array.isArray(scope.rfq_packages) ? scope.rfq_packages[0] : scope.rfq_packages;
       const address = pkg?.project_address || "";
       const sentAt = new Date().toISOString();
@@ -661,9 +672,13 @@ export function registerRfqPackageRoutes(app) {
         if (!to) { results.push({ email: to, ok: false, error: "No email" }); continue; }
 
         try {
-          // Capture the Resend message id (null for gmail/smtp) so the webhook can attribute
-          // delivery/open/click/bounce events to the rfqs row created below.
-          const { resendId } = await sendPlainMail({ to, subject: email_subject, text: email_body });
+          const messageId = generateOutboundMessageId();
+          const { resendId } = await sendPlainMail({
+            to,
+            subject: email_subject,
+            text: email_body,
+            headers: { "Message-ID": messageId }
+          });
 
           // Insert recipient row
           const { data: rec } = await s.from("rfq_recipients").insert({
@@ -693,6 +708,7 @@ export function registerRfqPackageRoutes(app) {
               trade: scope.trade_label,
               status: "sent",
               sent_at: sentAt,
+              sent_message_id: messageId,
               deadline: due_date || scope.due_date || pkg.tender_deadline || null,
               email_body: `Subject: ${email_subject || ""}\n\n${email_body || ""}`
             }).select("id").single();
@@ -700,8 +716,18 @@ export function registerRfqPackageRoutes(app) {
               console.warn("[rfq-package/send] rfqs insert failed:", rfqErr.message);
             } else if (rfqRow) {
               if (rec) await s.from("rfq_recipients").update({ rfq_id: rfqRow.id }).eq("id", rec.id);
-              // Resend id is best-effort (try/catch'd) — harmless no-op pre-102, auto-populates after.
               if (resendId) await captureResendId(s, rfqRow.id, resendId);
+              await s.from("correspondence").insert({
+                job_id: pkg.job_id,
+                rfq_id: rfqRow.id,
+                subcontractor_id: r.subcontractor_id,
+                direction: "outbound",
+                subject: email_subject || "",
+                body: String(email_body || "").slice(0, 16000),
+                sent_at: sentAt,
+                logged_by: "rfq-package-send",
+                message_id: messageId
+              }).then(() => {}).catch((e) => console.warn("[rfq-package/send] correspondence:", e?.message));
             }
           }
 
@@ -721,8 +747,9 @@ export function registerRfqPackageRoutes(app) {
           .eq("id", scope.id);
       }
 
-      // Recalculate coverage
-      await recomputePackageCoverage(s, req.params.packageId);
+      // Recalculate coverage — W06-DRIFT-007: unified on the trade-intelligence calculator
+      // (same as package create/refresh) instead of the legacy count/32 estimate.
+      await reconcilePackageTradeCoverage(s, req.params.packageId);
 
       const anyFailed = results.some((r) => !r.ok);
       return res.json({ ok: !anyFailed, partial: anyFailed, results });
@@ -966,16 +993,3 @@ export function registerRfqPackageRoutes(app) {
   });
 }
 
-async function recomputePackageCoverage(db, packageId) {
-  try {
-    const { data: scopes } = await db
-      .from("rfq_trade_scopes")
-      .select("trade_id")
-      .eq("package_id", packageId);
-    const count = (scopes || []).length;
-    await db.from("rfq_packages").update({
-      coverage_score: Math.min(100, Math.round((count / 32) * 100)),
-      updated_at: new Date().toISOString()
-    }).eq("id", packageId);
-  } catch { /* non-fatal */ }
-}

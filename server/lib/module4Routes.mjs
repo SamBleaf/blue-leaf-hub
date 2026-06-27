@@ -24,10 +24,17 @@ import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { quarterLabel, emailPoIssued } from "./tradeCommitment.mjs";
 import { setFact } from "./factsService.mjs";
 import { resolveTradeCategoryId } from "./buildexactParser.mjs";
+import { computeAcceptAlignment } from "./rfqAcceptAlignment.mjs";
+import { computeWinQuoteReadiness } from "./rfqWinQuoteReadiness.mjs";
+import {
+  resolvePurchaseOrderProjectId,
+  findPurchaseOrderByRfqId,
+} from "./poProjectResolve.mjs";
+import { resolveRfqQuotePdfForPo } from "./poQuoteAttachment.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 
@@ -301,6 +308,13 @@ export function registerModule4Routes(app) {
       const { error: jobUp } = await sb.from("jobs").update({ status: "won", won_at: now }).eq("id", jobId);
       if (jobUp) throw new Error(jobUp.message);
 
+      // W05-DRIFT-004 (SAM-W05-004): sync the linked lead's pipeline stage to 'won'.
+      // Preserve an existing won_at (only stamp it when absent) so re-running is idempotent.
+      if (job.lead_id) {
+        await sb.from("leads").update({ stage: "won", updated_at: now }).eq("id", job.lead_id);
+        await sb.from("leads").update({ won_at: now.slice(0, 10) }).eq("id", job.lead_id).is("won_at", null);
+      }
+
       // The status='won' update above fires trg_ensure_project_for_won_job
       // (migration 096), which guarantees a baseline projects row exists. Enrich
       // it idempotently — update the existing row if present, else insert. This
@@ -319,6 +333,13 @@ export function registerModule4Routes(app) {
         notes: req.body?.project_notes || null,
         updated_at: now
       };
+      // Portal v2 (WP-9): carry the client identity onto the project at win, so the
+      // portal can email/notify the client even before they accept an invite (with no
+      // identity, notifyClient's email leg is gated on a null portal_client_email and
+      // the client is stranded). Only set non-empty values so we never clobber an
+      // invite-provided name with a blank.
+      if (String(job.client_name || "").trim()) projectPatch.portal_client_name = String(job.client_name).trim();
+      if (String(job.client_email || "").trim()) projectPatch.portal_client_email = String(job.client_email).trim();
 
       let proj;
       const { data: existingProj } = await sb
@@ -457,6 +478,16 @@ export function registerModule4Routes(app) {
         }
       }
 
+      // DISC-WIN-01: make the per-trade cost_intelligence seed idempotent. Re-running win-finalize
+      // (double-click, retry-on-timeout, or re-winning after editing accepted amounts) previously
+      // appended a fresh row per trade on every run (N → 2N → 3N), inflating ops-readiness counts
+      // and skewing per-trade / "latest row" cost analytics. Clear this job's prior seed rows first
+      // (mirrors the job-delete cascade in jobsApiRoutes), then insert fresh below so the rows always
+      // reflect the CURRENT accepted trades. Best-effort — never blocks the win flow.
+      {
+        const { error: ciResetErr } = await sb.from("cost_intelligence").delete().eq("job_id", jobId);
+        if (ciResetErr) console.warn("[win-finalize] cost_intelligence reset:", ciResetErr.message);
+      }
       for (const t of acceptedTrades) {
         const amt = t.quote_amount != null ? Number(t.quote_amount) : null;
         if (amt == null || !Number.isFinite(amt) || amt <= 0) continue;
@@ -515,11 +546,18 @@ export function registerModule4Routes(app) {
     const jobId = String(req.body?.jobId || "").trim();
     if (!jobId) return res.status(400).json({ ok: false, error: "jobId required." });
     try {
-      const { data: job } = await sb.from("jobs").select("address").eq("id", jobId).single();
+      const { data: job } = await sb.from("jobs").select("address, lead_id").eq("id", jobId).single();
       const addr = String(job?.address || "").trim();
       const now = new Date().toISOString();
       const { error: r1 } = await sb.from("jobs").update({ status: "lost", lost_at: now }).eq("id", jobId);
       if (r1) throw new Error(r1.message);
+
+      // W05-DRIFT-004 (SAM-W05-004): sync the linked lead's pipeline stage to 'lost'.
+      // Preserve an existing lost_at (only stamp when absent) so re-running is idempotent.
+      if (job?.lead_id) {
+        await sb.from("leads").update({ stage: "lost", updated_at: now }).eq("id", job.lead_id);
+        await sb.from("leads").update({ lost_at: now.slice(0, 10) }).eq("id", job.lead_id).is("lost_at", null);
+      }
       const { error: r2 } = await sb.from("rfqs").update({ status: "declined" }).eq("job_id", jobId);
       if (r2) throw new Error(r2.message);
 
@@ -560,16 +598,13 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/po/issue", requireAuth, async (req, res) => {
+  app.post("/api/po/issue", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });
     }
-    if (!mailTransportName()) {
-      return res.status(503).json({ ok: false, error: "Mail not configured." });
-    }
 
-    const projectId = String(req.body?.projectId || "").trim();
+    const projectIdRaw = String(req.body?.projectId || "").trim();
     const jobAddress = String(req.body?.jobAddress || "").trim();
     const trade = String(req.body?.trade || "").trim();
     const prefix = String(req.body?.poPrefix || "BLB").trim() || "BLB";
@@ -588,8 +623,37 @@ export function registerModule4Routes(app) {
     const subcontractorId = String(req.body?.subcontractorId || "").trim();
     const jobId = String(req.body?.jobId || "").trim();
 
+    let projectId;
+    try {
+      projectId = await resolvePurchaseOrderProjectId(sb, { projectId: projectIdRaw, jobId });
+    } catch (e) {
+      console.error("[po/issue] project resolve:", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+
     if (!projectId || !jobAddress || !trade || !toEmail) {
       return res.status(400).json({ ok: false, error: "projectId, jobAddress, trade, toEmail required." });
+    }
+
+    if (rfqId) {
+      try {
+        const existingPo = await findPurchaseOrderByRfqId(sb, rfqId);
+        if (existingPo) {
+          return res.json({
+            ok: true,
+            purchase_order: existingPo,
+            po_number: existingPo.po_number,
+            duplicate: true,
+          });
+        }
+      } catch (e) {
+        console.error("[po/issue] rfq idempotency:", e);
+        return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      }
+    }
+
+    if (!mailTransportName()) {
+      return res.status(503).json({ ok: false, error: "Mail not configured." });
     }
 
     try {
@@ -615,6 +679,32 @@ export function registerModule4Routes(app) {
 
       const std = defaultStandardConditions(tentativeStartLabel || "TBC");
       const terms2 = String(req.body?.termsPage2 || DEFAULT_PO_TERMS).trim();
+
+      let quoteAttachment = null;
+      let quoteReference = null;
+      let quoteAttachmentWarning = null;
+      if (rfqId) {
+        try {
+          const resolved = await resolveRfqQuotePdfForPo(sb, rfqId);
+          quoteAttachment = resolved.attachment;
+          quoteReference = resolved.reference;
+          quoteAttachmentWarning = resolved.warning;
+          if (quoteAttachmentWarning) {
+            console.warn("[po/issue] quote attachment skipped:", quoteAttachmentWarning);
+          }
+        } catch (e) {
+          quoteAttachmentWarning = e?.message || String(e);
+          console.warn("[po/issue] quote attachment resolve:", quoteAttachmentWarning);
+        }
+        if (!quoteReference) {
+          quoteReference = {
+            fileName: "Unavailable",
+            attachmentStatus: "Not available",
+            acceptedAmountExGst:
+              req.body?.totalExGst != null ? Number(req.body.totalExGst) || null : null,
+          };
+        }
+      }
 
       const pdfBuf = await buildPurchaseOrderPdfBuffer({
         poNumber,
@@ -648,7 +738,8 @@ export function registerModule4Routes(app) {
         totalIncGst: inc,
         standardConditions: std,
         termsPage2: terms2,
-        logoDataUrl
+        logoDataUrl,
+        quoteReference: quoteReference || undefined,
       });
 
       let dropboxPath = "";
@@ -724,12 +815,23 @@ export function registerModule4Routes(app) {
         logo: logoSig
       });
 
+      const mailAttachments = [
+        { filename: `${poNumber}.pdf`, content: pdfBuf, mimeType: "application/pdf" },
+      ];
+      if (quoteAttachment?.content?.length) {
+        mailAttachments.push({
+          filename: quoteAttachment.filename,
+          content: quoteAttachment.content,
+          mimeType: quoteAttachment.mimeType || "application/pdf",
+        });
+      }
+
       await sendPlainMail({
         to: toEmail,
         subject: poTmpl.subject,
         text: poTmpl.text,
         html: poTmpl.html,
-        attachments: [{ filename: `${poNumber}.pdf`, content: pdfBuf, mimeType: "application/pdf" }]
+        attachments: mailAttachments,
       });
 
       let buildexact_po_id = null;
@@ -784,7 +886,14 @@ export function registerModule4Routes(app) {
         .then(() => {})
         .catch(e => console.warn("[po/issue] tcl insert:", e.message));
 
-      return res.json({ ok: true, purchase_order: { ...poRow, buildexact_po_id }, po_number: poNumber });
+      return res.json({
+        ok: true,
+        purchase_order: { ...poRow, buildexact_po_id },
+        po_number: poNumber,
+        po_email_attachment_count: mailAttachments.length,
+        quote_attachment_included: Boolean(quoteAttachment?.content?.length),
+        ...(quoteAttachmentWarning ? { quote_attachment_warning: quoteAttachmentWarning } : {}),
+      });
     } catch (e) {
       console.error("[po/issue]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
@@ -842,6 +951,48 @@ export function registerModule4Routes(app) {
       return res.json({ ok: true, trades });
     } catch (e) {
       console.error("[batch-po-check]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/tender/:jobId/accept-alignment
+   * Read-only cross-check: accepted package recipients vs accepted rfqs (P0-B2).
+   */
+  app.get("/api/tender/:jobId/accept-alignment", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const jobId = String(req.params.jobId || "").trim();
+    if (!jobId) return res.status(400).json({ ok: false, error: "jobId required" });
+    try {
+      const { data: job, error: jErr } = await sb.from("jobs").select("id").eq("id", jobId).maybeSingle();
+      if (jErr) throw jErr;
+      if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
+      const alignment = await computeAcceptAlignment(sb, jobId);
+      return res.json({ ok: true, ...alignment });
+    } catch (e) {
+      console.error("[accept-alignment]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/tender/:jobId/win-quote-readiness
+   * Read-only: accepted rfqs missing staff-confirmed quote_amount (P0-B4).
+   */
+  app.get("/api/tender/:jobId/win-quote-readiness", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const jobId = String(req.params.jobId || "").trim();
+    if (!jobId) return res.status(400).json({ ok: false, error: "jobId required" });
+    try {
+      const { data: job, error: jErr } = await sb.from("jobs").select("id").eq("id", jobId).maybeSingle();
+      if (jErr) throw jErr;
+      if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
+      const readiness = await computeWinQuoteReadiness(sb, jobId);
+      return res.json({ ok: true, ...readiness });
+    } catch (e) {
+      console.error("[win-quote-readiness]", e);
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });

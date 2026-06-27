@@ -5,7 +5,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "../apiResponse.mjs";
-import { requireAuth } from "../requireAuth.mjs";
+import { requireAuth, requireRole } from "../requireAuth.mjs";
 import { getServiceSupabase } from "../supabaseService.mjs";
 import { getJobProfile } from "../factsService.mjs";
 import { WHS_QUESTIONNAIRE, PROMOTED_FIELDS } from "./whsQuestionnaire.mjs";
@@ -254,7 +254,7 @@ export function registerWhsEngineRoutes(app) {
   });
 
   // ── Save answers → recompute risk engine → mark docs stale ──
-  app.put("/api/whs/projects/:projectId/profile", requireAuth, async (req, res) => {
+  app.put("/api/whs/projects/:projectId/profile", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database unavailable");
     const projectId = String(req.params.projectId);
@@ -313,7 +313,7 @@ export function registerWhsEngineRoutes(app) {
   });
 
   // ── Generate a document from the profile ──
-  app.post("/api/whs/projects/:projectId/generate/:templateKey", requireAuth, async (req, res) => {
+  app.post("/api/whs/projects/:projectId/generate/:templateKey", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database unavailable");
     const tpl = TEMPLATES[req.params.templateKey];

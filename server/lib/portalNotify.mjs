@@ -35,10 +35,14 @@ export async function notifyClient(projectId, { type, title, body, entityType, e
 
     const { data: project } = await sb
       .from("projects")
-      .select("id, portal_client_email, portal_client_name, address")
+      .select("id, portal_client_email, portal_client_name, address, portal_v2_enabled")
       .eq("id", projectId)
       .maybeSingle();
     if (!project) return;
+    // Single chokepoint: never notify on a non-v2 project. The email deep-links to
+    // /client-portal (unusable for a non-v2 client), so a staffer acting on a
+    // disabled-portal project must not email/notify them. Gates ALL callers at once.
+    if (project.portal_v2_enabled !== true) return;
 
     const today = new Date().toISOString().slice(0, 10);
     const nowIso = new Date().toISOString();

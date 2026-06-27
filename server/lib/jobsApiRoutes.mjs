@@ -11,10 +11,10 @@ import {
 } from "./dropboxClient.mjs";
 import { buildFeeProposalPdfBuffer } from "./feeProposalPdfKit.mjs";
 import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactClient.mjs";
-import { requireAuth } from "./requireAuth.mjs";
-
-// Draft sentinel written by the RFQ Engine when an extraction has no address yet.
-const PLACEHOLDER_ADDRESS = "Address pending";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
+import { PLACEHOLDER_ADDRESS, isAddressPending } from "./jobGuards.mjs";
+import { applyInboundQuoteToWorkflow } from "./rfqQuotePropagation.mjs";
+import { setFact, emitEvent } from "./factsService.mjs";
 
 // Columns the RFQ Engine may write to a job after extraction. Allowlisted so the
 // client can't patch arbitrary columns; `address` is re-normalised below when present.
@@ -53,7 +53,7 @@ export function registerJobsApiRoutes(app) {
       // placeholder is a draft sentinel (extraction with no address yet) — never dedup on it,
       // or unrelated drafts would collapse onto one shared job.
       const addr = normaliseAddress(address);
-      const isPlaceholder = address.trim().toLowerCase() === PLACEHOLDER_ADDRESS.toLowerCase();
+      const isPlaceholder = isAddressPending(address);
       let existing = null;
       if (!isPlaceholder) {
         if (addr.normalised) {
@@ -65,7 +65,14 @@ export function registerJobsApiRoutes(app) {
           existing = data?.[0] || null;
         }
       }
-      if (existing) return res.json({ ok: true, job: existing, deduplicated: true });
+      if (existing) {
+        if (lead_id && !existing.lead_id) {
+          await sb.from("jobs").update({ lead_id }).eq("id", existing.id);
+          await sb.from("leads").update({ job_id: existing.id }).eq("id", lead_id).is("job_id", null);
+          existing = { ...existing, lead_id };
+        }
+        return res.json({ ok: true, job: existing, deduplicated: true });
+      }
 
       const { data, error } = await sb.from("jobs").insert({
         address: address.trim(),
@@ -83,6 +90,29 @@ export function registerJobsApiRoutes(app) {
         status: JOB_STATUSES_VALID.includes(statusInput) ? statusInput : "tendering",
       }).select().single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
+
+      // P0-A4 — stamp lead.job_id when job created with lead context (RFQ extraction path).
+      if (lead_id) {
+        await sb.from("leads").update({ job_id: data.id }).eq("id", lead_id).is("job_id", null);
+      }
+
+      // W04-DRIFT-002 — stamp identity facts with provenance (Canonical Data Law). Mirrors
+      // convertLeadToJob (source 'system'); non-fatal — the job already exists. Skipped for
+      // the "Address pending" draft (no real identity yet).
+      if (!isPlaceholder) {
+        const carry = [
+          ["address", address.trim()],
+          ["client_name", client_name?.trim() || null],
+          ["client_email", client_email?.trim() || null],
+          ["client_phone", client_phone?.trim() || null],
+          ["project_type", project_type || null],
+        ];
+        for (const [key, value] of carry) {
+          if (value == null || value === "") continue;
+          const r = await setFact(data.id, key, value, { source: "system", reason: "job_create", actorId: req.caller?.id || null });
+          if (!r?.ok) console.warn(`[jobs POST] setFact ${key}:`, r?.error);
+        }
+      }
 
       // Provision the Dropbox job folders (PLANS + INTERNAL trees) at tender entry so they
       // exist well before RFQ time, and stamp the public PLANS link onto the job. Idempotent
@@ -185,6 +215,24 @@ export function registerJobsApiRoutes(app) {
     const jobId = String(req.body?.jobId || "").trim();
     if (!jobId) return res.status(400).json({ ok: false, error: "jobId required." });
     try {
+      // P0-A6 / SAM-W05-003 — block hard delete when tender has RFQ package or quote data.
+      const { count: pkgCount } = await sb
+        .from("rfq_packages")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", jobId);
+      const { count: rfqCount } = await sb
+        .from("rfqs")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", jobId);
+      if ((pkgCount || 0) > 0 || (rfqCount || 0) > 0) {
+        return err(
+          res,
+          409,
+          "This tender has linked RFQ packages or quotes. Archive it instead of deleting.",
+          "TENDER_HAS_RFQ_DATA"
+        );
+      }
+
       const { data: projIds } = await sb.from("projects").select("id").eq("job_id", jobId);
       const ids = (projIds || []).map((p) => p.id).filter(Boolean);
       for (const pid of ids) {
@@ -203,6 +251,36 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
+  // W05-DRIFT-002 (SAM-W05-002): reversible + AUDITED archive via API. Replaces the direct
+  // Supabase write in TenderBoard. Admin/supervisor only; each archive/unarchive is logged
+  // to job_events so the action has provenance.
+  async function setTenderArchiveState(req, res, nextStatus, eventType) {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "DB not configured");
+    const jobId = String(req.body?.jobId || "").trim();
+    if (!jobId) return err(res, 400, "jobId required.");
+    try {
+      const { data, error } = await sb
+        .from("jobs")
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .select("id, status")
+        .single();
+      if (error) return err(res, 400, translateDbError(error));
+      await emitEvent(jobId, eventType, {
+        actorId: req.caller?.id || null, source: "tender_board", entityType: "job", entityId: jobId,
+      });
+      return ok(res, { job: data });
+    } catch (e) {
+      console.error(`[${eventType}]`, e);
+      return err(res, 502, e?.message || String(e));
+    }
+  }
+  app.post("/api/tender/archive", requireAuth, requireRole("admin", "supervisor"), (req, res) =>
+    setTenderArchiveState(req, res, "archived", "tender.archived"));
+  app.post("/api/tender/unarchive", requireAuth, requireRole("admin", "supervisor"), (req, res) =>
+    setTenderArchiveState(req, res, "tendering", "tender.unarchived"));
+
   app.post("/api/unmatched-quotes/resolve", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
@@ -212,6 +290,15 @@ export function registerJobsApiRoutes(app) {
     const rfqId = String(req.body?.rfqId || "").trim();
     if (!unmatchedId || !rfqId) {
       return res.status(400).json({ ok: false, error: "unmatchedId and rfqId required." });
+    }
+    // DRIFT-013 — optional staff-entered quote amount (ex-GST) captured during manual resolve.
+    let quotedAmount = null;
+    if (req.body?.quotedAmount != null && req.body.quotedAmount !== "") {
+      const n = Number(req.body.quotedAmount);
+      if (!Number.isFinite(n) || n <= 0) {
+        return res.status(400).json({ ok: false, error: "quotedAmount must be a positive number (ex-GST)." });
+      }
+      quotedAmount = n;
     }
     try {
       const { data: u, error: uErr } = await sb.from("unmatched_quote_emails").select("*").eq("id", unmatchedId).single();
@@ -236,13 +323,29 @@ export function registerJobsApiRoutes(app) {
       });
       if (cErr) throw new Error(cErr.message);
 
+      const receivedAt = new Date().toISOString();
       const { error: upErr } = await sb
         .from("rfqs")
-        .update({ status: "received", received_at: new Date().toISOString() })
+        .update({ status: "received", received_at: receivedAt })
         .eq("id", rfq.id);
       if (upErr) throw new Error(upErr.message);
 
-      await sb.from("unmatched_quote_emails").delete().eq("id", unmatchedId);
+      await applyInboundQuoteToWorkflow(sb, rfq.id, {
+        status: "received",
+        receivedAt,
+        quotedAmount
+      });
+
+      const { error: resErr } = await sb
+        .from("unmatched_quote_emails")
+        .update({
+          resolved_at: receivedAt,
+          matched_rfq_id: rfq.id,
+          matched_job_id: rfq.job_id
+        })
+        .eq("id", unmatchedId);
+      if (resErr) throw new Error(resErr.message);
+
       return res.json({ ok: true });
     } catch (e) {
       console.error("[unmatched-quotes/resolve]", e);

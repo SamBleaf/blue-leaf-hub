@@ -6,6 +6,7 @@ import { config as dotenvConfig } from "dotenv";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { translateDbError } from "./apiResponse.mjs";
+import { stampLeadFeeProposalLink } from "./feeProposalLink.mjs";
 import { upsertNormalizedCost } from "./normalizedCosts.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
 // (removed) unused top-level `import PDFDocument from "pdfkit"` — it forced pdfkit's ~13s cold
@@ -1432,6 +1433,10 @@ export function registerFinanceRoutes(app) {
         }
       }
     }
+
+    // DISC-002-FINANCE-FEE-LINK-01: stamp leads.fee_proposal_id for parity with the sales accept
+    // route (W03-FEE-LINK-01) so finance-accepted proposals still resolve at W04/tender handoff.
+    await stampLeadFeeProposalLink(sb, proposal.job_id, proposal.id);
 
     res.json({ ok: true, proposalId, job_id: proposal.job_id, contract_value_set: contractValue });
   });

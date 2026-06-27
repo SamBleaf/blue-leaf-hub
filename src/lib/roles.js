@@ -34,6 +34,8 @@ export const can = {
   accessSiteDiary: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWHS: (r) => ["admin", "supervisor", "employee"].includes(r),
   accessWorkforce: (r) => ["admin", "supervisor"].includes(r),
+  /** Timesheet approve / bulk approve — admin only (approval can book Buildxact actuals). */
+  approveTimesheets: (r) => r === "admin",
   accessPortalAdmin: (r) => r === "admin",
   // Cost/margin/$ figures (carpentry budgets, AI cost intelligence) — Director only.
   // Supervisors get a cost-stripped view (build days/scope, not dollars).

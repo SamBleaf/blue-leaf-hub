@@ -113,9 +113,29 @@ export default function OperationsProjectDetail() {
   const [siteTaskFilter, setSiteTaskFilter] = useState("All");
   const [newTaskForm, setNewTaskForm] = useState(null); // null | {}
   const [newTaskBusy, setNewTaskBusy] = useState(false);
+  // W17-P6: voice/paste transcript → draft tasks for review
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [drafts, setDrafts] = useState([]); // { title, description, priority, category, _keep }
+  const [addingDrafts, setAddingDrafts] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [employees, setEmployees] = useState([]);
   const siteTaskFormRef = useRef(null);
+  const [opsReadiness, setOpsReadiness] = useState(null);
+  const [opsChecklistDismissed, setOpsChecklistDismissed] = useState(false);
+
+  const loadOpsReadiness = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await authFetch(`/api/projects/${encodeURIComponent(projectId)}/ops-readiness`);
+      const j = await res.json();
+      if (j.ok) setOpsReadiness(j);
+    } catch {
+      /* non-fatal */
+    }
+  }, [projectId]);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured || !projectId) return;
@@ -179,8 +199,17 @@ export default function OperationsProjectDetail() {
   }, [projectId]);
 
   useEffect(() => {
-    Promise.all([load(), loadDashboardData()]).finally(() => setLoading(false));
-  }, [load, loadDashboardData]);
+    if (!projectId) return;
+    try {
+      setOpsChecklistDismissed(localStorage.getItem(`blhub_ops_checklist_dismiss_${projectId}`) === "1");
+    } catch {
+      setOpsChecklistDismissed(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    Promise.all([load(), loadDashboardData(), loadOpsReadiness()]).finally(() => setLoading(false));
+  }, [load, loadDashboardData, loadOpsReadiness]);
 
   useEffect(() => {
     if (showTradesTab) loadTrades();
@@ -207,6 +236,40 @@ export default function OperationsProjectDetail() {
       if (j.ok) setSiteTasks(j.tasks || []);
     } catch { /* non-fatal */ } finally { setSiteTasksLoading(false); }
   }, [projectId]);
+
+  // W17-P6: voice-to-tasks (mirror of the carpentry path) — paste → draft → review → save.
+  async function extractFromTranscript() {
+    if (!transcript.trim()) return;
+    setExtracting(true); setVoiceError(null);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/site-tasks/from-transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: transcript.trim() }) });
+      const j = await res.json();
+      if (!j.ok) { setVoiceError(j.error || "Could not extract tasks."); return; }
+      const list = (j.tasks || []).map((t) => ({ ...t, _keep: true }));
+      if (!list.length) { setVoiceError("No tasks found in that transcript."); return; }
+      setDrafts(list);
+    } catch { setVoiceError("Network error."); } finally { setExtracting(false); }
+  }
+  async function addSelectedDrafts() {
+    const keep = drafts.filter((d) => d._keep && (d.title || "").trim());
+    if (!keep.length) return;
+    setAddingDrafts(true); setVoiceError(null);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/site-tasks/bulk`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ created_via: "ai_extraction", tasks: keep.map((d) => ({ title: d.title.trim(), description: d.description?.trim() || null, priority: d.priority || "normal", category: d.category || "general" })) }) });
+      const j = await res.json();
+      if (!j.ok) { setVoiceError(j.error || "Could not add tasks."); return; }
+      setDrafts([]); setTranscript(""); setShowTranscript(false); loadSiteTasks();
+    } catch { setVoiceError("Network error."); } finally { setAddingDrafts(false); }
+  }
+
+  // W17-P7: apply the leading-hand QC inspection checklist (supervisor-audience tasks).
+  async function applyQcTemplate() {
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/site-tasks/apply-qc-template`, { method: "POST" });
+      const j = await res.json();
+      if (j.ok) loadSiteTasks();
+    } catch { /* non-fatal */ }
+  }
 
   useEffect(() => {
     if (showSiteTasksTab) {
@@ -607,6 +670,62 @@ export default function OperationsProjectDetail() {
       </header>
 
       {error ? <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div> : null}
+
+      {opsReadiness && !opsReadiness.overallReady && !opsChecklistDismissed ? (
+        <div className="rounded-lg border border-warning/50 bg-warning/10 px-4 py-4 text-sm text-ink">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold text-primary">Operations setup checklist</p>
+              <p className="mt-1 text-xs text-muted">
+                {opsReadiness.readyCount} ready · {opsReadiness.missingCount} missing · {opsReadiness.warningCount}{" "}
+                warning — manual setup still required after Mark Won. This banner is read-only and does not block the
+                project.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="text-xs font-semibold text-muted hover:text-ink"
+              onClick={() => {
+                setOpsChecklistDismissed(true);
+                try {
+                  localStorage.setItem(`blhub_ops_checklist_dismiss_${projectId}`, "1");
+                } catch {
+                  /* ignore */
+                }
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+          <ul className="mt-3 space-y-2">
+            {opsReadiness.items
+              .filter((item) => item.status !== "ok")
+              .map((item) => (
+                <li
+                  key={item.id}
+                  className="flex flex-wrap items-start justify-between gap-2 rounded border border-warning/30 bg-surface px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className={`font-semibold uppercase tracking-wide ${
+                        item.status === "missing" ? "text-danger" : "text-warning"
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                    <div className="mt-0.5 font-semibold text-ink">{item.label}</div>
+                    <div className="mt-0.5 text-muted">{item.detail}</div>
+                  </div>
+                  {item.link ? (
+                    <Link to={item.link} className="flex-shrink-0 font-semibold text-primary underline">
+                      Open
+                    </Link>
+                  ) : null}
+                </li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* ── Insights Panel ── */}
       <section>
@@ -1092,7 +1211,18 @@ export default function OperationsProjectDetail() {
               >
                 + Add task
               </button>
+              <button type="button" onClick={() => { setShowTranscript(v => !v); setDrafts([]); setVoiceError(null); }} className="text-xs font-semibold text-primary hover:underline" title="Paste a site walk-through transcript and turn it into tasks">🎤 From transcript</button>
+              <button type="button" onClick={applyQcTemplate} className="text-xs font-semibold text-primary hover:underline" title="Add the leading-hand QC inspection checklist to this job">+ QC checklist</button>
             </div>
+
+            {/* W17-P7: incomplete-QC warning */}
+            {(() => {
+              const qc = siteTasks.filter(t => t.task_audience === "supervisor");
+              if (qc.length === 0) return null;
+              const done = qc.filter(t => t.status === "done").length;
+              const incomplete = done < qc.length;
+              return <div className={`text-xs rounded px-2 py-1 ${incomplete ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-green-50 text-green-700 border border-green-200"}`}>Leading-hand QC: {done}/{qc.length} done{incomplete ? " — incomplete" : " ✓"}</div>;
+            })()}
 
             {/* Quick-add bar — always visible */}
             <input
@@ -1104,6 +1234,40 @@ export default function OperationsProjectDetail() {
               disabled={newTaskBusy}
               className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
             />
+
+            {/* W17-P6: voice/paste → draft tasks for review */}
+            {showTranscript && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+                {voiceError && <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{voiceError}</div>}
+                {drafts.length === 0 ? (
+                  <>
+                    <label className="block text-xs font-medium text-ink">Paste a site walk-through transcript</label>
+                    <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={4} placeholder="Paste your Plaud / meeting transcript here…" className="w-full rounded border border-hairline px-3 py-2 text-sm" />
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={extractFromTranscript} disabled={extracting || !transcript.trim()} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{extracting ? "Extracting…" : "Extract tasks"}</button>
+                      <button type="button" onClick={() => { setShowTranscript(false); setTranscript(""); setVoiceError(null); }} className="text-xs text-muted">Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted">Review the {drafts.length} extracted task(s) — untick any you don&apos;t want.</p>
+                    <div className="space-y-1 max-h-56 overflow-y-auto">
+                      {drafts.map((d, i) => (
+                        <label key={i} className="flex items-start gap-2 text-sm">
+                          <input type="checkbox" checked={d._keep} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, _keep: e.target.checked } : x))} className="mt-1" />
+                          <input value={d.title} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} className="flex-1 rounded border border-hairline px-2 py-1 text-sm" />
+                          <span className="text-[10px] text-muted capitalize shrink-0 mt-1.5">{(d.category || "general").replace(/_/g, " ")}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={addSelectedDrafts} disabled={addingDrafts} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{addingDrafts ? "Adding…" : `Add ${drafts.filter(d => d._keep).length} task(s)`}</button>
+                      <button type="button" onClick={() => setDrafts([])} className="text-xs text-muted">Back</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* New task form */}
             {newTaskForm && (

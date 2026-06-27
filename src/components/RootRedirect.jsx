@@ -56,8 +56,8 @@ export default function RootRedirect() {
 
   if (!session) return <Navigate to="/login" replace />;
 
-  // Clients always go to their portal
-  if (authRole === "client") return <Navigate to="/my-portal" replace />;
+  // Clients always go to their portal (v2 — the logged-in client experience)
+  if (authRole === "client") return <Navigate to="/client-portal" replace />;
 
   // Employees (site-only) always go to supervisor home — no choice needed
   if (authRole === "employee") return <Navigate to="/supervisor" replace />;

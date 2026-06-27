@@ -80,7 +80,7 @@ async function setup() {
     project_id: pid, week_of: "2026-06-18", headline: "Frame is 90% complete — roof trusses next week",
     body: "Wall frames and top plate are done. Roof trusses are delivered and set, ready to install Monday.",
     builder_reasoning: "We used a vapour-permeable sarking rather than standard foil — it lets the wall assembly breathe while still blocking air infiltration, which matters for long-term weather-tightness in the Adelaide climate.",
-    schedule_phase: "frame", author_name: "Sam", published: true, status: "published", published_at: new Date().toISOString(),
+    author_name: "Sam", published: true, status: "published", published_at: new Date().toISOString(),
   });
 
   // Selection + options + action
@@ -115,11 +115,30 @@ async function setup() {
   await sb.from("portal_claims").insert({ project_id: pid, stage_name: "Frame & Roof", amount: 48400, status: "invoiced", due_approx: "30 Jun 2026", payment_instructions: "Account name: Blue Leaf Building Pty Ltd\nBSB: 065 000\nAccount: 1234 5678\nReference: Claim #4 — 21 Folkstone Rd", sort_order: 0 });
   await sb.from("portal_documents").insert({ project_id: pid, folder: "contract", title: "Building Contract.pdf", client_visible: true, storage_provider: "dropbox", storage_path: "/demo/contract" });
 
-  // Client login
-  const { data: u, error: uErr } = await sb.auth.admin.createUser({ email: EMAIL, password: PASSWORD, email_confirm: true });
-  if (uErr) throw new Error("create user: " + uErr.message);
-  await sb.from("user_profiles").insert({ id: u.user.id, email: EMAIL, full_name: "David Sutton (test client)", role: "client", is_active: true });
-  await sb.from("project_client_users").insert({ project_id: pid, user_id: u.user.id, role: "primary", is_active: true, invite_accepted_at: new Date().toISOString() });
+  // Client login — REUSE the auth user if the email already exists. Supabase auth
+  // deletes can be blocked by FKs from prior portal data, leaving an orphan account;
+  // reusing it (and resetting the password) is robust and avoids the duplicate-email error.
+  let userId = null;
+  const { data: created } = await sb.auth.admin.createUser({ email: EMAIL, password: PASSWORD, email_confirm: true });
+  if (created?.user) {
+    userId = created.user.id;
+  } else {
+    for (let page = 1; page <= 25 && !userId; page++) {
+      const { data } = await sb.auth.admin.listUsers({ page, perPage: 200 });
+      const existing = (data?.users || []).find((x) => x.email === EMAIL);
+      if (existing) {
+        userId = existing.id;
+        await sb.auth.admin.updateUserById(userId, { password: PASSWORD, email_confirm: true });
+      }
+      if (!data?.users?.length || data.users.length < 200) break;
+    }
+    if (!userId) throw new Error("create user: could not create or find the auth account for " + EMAIL);
+  }
+  await sb.from("user_profiles").upsert({ id: userId, email: EMAIL, full_name: "David Sutton (test client)", role: "client", is_active: true });
+  await sb.from("project_client_users").upsert(
+    { project_id: pid, user_id: userId, role: "primary", is_active: true, invite_accepted_at: new Date().toISOString() },
+    { onConflict: "project_id,user_id" }
+  );
 
   console.log("\n╔══════════════════════════════════════════════════════════════╗");
   console.log("║  Client Portal v2 demo is ready to walk                       ║");

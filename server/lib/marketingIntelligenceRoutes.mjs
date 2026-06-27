@@ -36,6 +36,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
@@ -51,6 +52,25 @@ const _aiCache = new Map();
 // ─── Strategy suggestions cache (P2.5) ───────────────────────────────────────
 // Key: ISO week string. Value: { suggestions, cachedUntil } with 14-day TTL.
 const _strategyCache = new Map();
+
+// W01-SEC-003 (SAM-W01-003): lightweight in-memory rate limit for the public enquiry
+// endpoint. No new dependency. Caps submissions per source IP per window; paired with a
+// honeypot field in the handler. Best-effort (per-process) — a real WAF/CAPTCHA is the P1 step.
+const _enquiryHits = new Map(); // ip -> number[] (submission timestamps, ms)
+const ENQUIRY_WINDOW_MS = 10 * 60 * 1000;
+const ENQUIRY_MAX = 5;
+function enquiryRateLimited(ip) {
+  const now = Date.now();
+  const recent = (_enquiryHits.get(ip) || []).filter((t) => now - t < ENQUIRY_WINDOW_MS);
+  recent.push(now);
+  _enquiryHits.set(ip, recent);
+  if (_enquiryHits.size > 5000) {
+    for (const [k, v] of _enquiryHits) {
+      if (!v.some((t) => now - t < ENQUIRY_WINDOW_MS)) _enquiryHits.delete(k);
+    }
+  }
+  return recent.length > ENQUIRY_MAX;
+}
 
 function isoWeekKey(d = new Date()) {
   const jan4 = new Date(d.getFullYear(), 0, 4);
@@ -251,7 +271,24 @@ export function registerMarketingIntelligenceRoutes(app) {
       name, email, phone, project_type, suburb, project_description,
       // Attribution
       session_id, utm_source, utm_medium, utm_campaign,
+      // W01-SEC-003 honeypot — a hidden field real users never fill.
+      website,
     } = req.body || {};
+
+    // Honeypot: bots fill hidden fields. Respond OK without creating a lead (don't tip them off).
+    const xff = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const clientIp = xff || req.ip || "unknown";
+    // In production every public hit arrives via the proxy (x-forwarded-for set). A direct
+    // loopback hit with no XFF is local/dev/test traffic — exempt it from the rate limit so
+    // internal tooling is never throttled. The honeypot still applies to everyone.
+    const isLoopback = !xff && /^(::1$|127\.|::ffff:127\.)/.test(String(req.ip || ""));
+    if (website) {
+      console.warn(`[public/enquiry] honeypot tripped from ${clientIp}`);
+      return ok(res, { skipped: true });
+    }
+    if (!isLoopback && enquiryRateLimited(clientIp)) {
+      return err(res, 429, "Too many enquiries from this connection — please try again shortly.");
+    }
 
     if (!name || !email) return err(res, 400, "name and email are required");
 
@@ -268,6 +305,8 @@ export function registerMarketingIntelligenceRoutes(app) {
     }).select().single();
 
     if (leadErr) return err(res, 500, translateDbError(leadErr));
+
+    await insertLeadCreatedActivity(sb, lead.id);
 
     // Compute attribution from session events
     let attrRow = null;

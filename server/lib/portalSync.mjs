@@ -13,6 +13,11 @@
  * the caller; returns a summary.
  */
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { notifyClient } from "./portalNotify.mjs";
+import {
+  syncVariationSent, syncVariationSigned, syncVariationVoided,
+  syncClaimIssued, syncClaimPaid, syncClaimVoided,
+} from "./portalIntegration.mjs";
 
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
@@ -57,6 +62,16 @@ async function syncProjectMilestones(sb, projectId, today) {
   const isComplete = (t) => t.status === "complete" || Number(t.percent_complete) >= 100;
   let currentAssigned = false;
 
+  // Clear is_current across ALL milestones first, so exactly one row ends up current.
+  // An admin-authored milestone whose key matches no schedule phase would otherwise
+  // keep a stale is_current=true and coexist with the synced one — making the Home
+  // query return two rows (PGRST116 → 500).
+  await sb
+    .from("portal_milestones")
+    .update({ is_current: false })
+    .eq("project_id", projectId)
+    .eq("is_current", true);
+
   for (let i = 0; i < phases.length; i++) {
     const phase = phases[i];
     const phaseTasks = byPhase.get(phase);
@@ -70,8 +85,11 @@ async function syncProjectMilestones(sb, projectId, today) {
       currentAssigned = true;
     }
 
-    // Confidence for the current phase from overdue/soon tasks.
+    // Confidence (+ plain-English note) for the current phase from overdue/soon tasks.
+    // The note is what the Home "build health" card shows under a watch/delayed badge;
+    // without it the client sees a colour with no reason.
     let confidence = "on_track";
+    let confidenceNote = null;
     if (isCurrent) {
       const overdue = phaseTasks.some((t) => t.end_date && t.end_date < today && !isComplete(t));
       const soon = phaseTasks.some((t) => {
@@ -79,8 +97,13 @@ async function syncProjectMilestones(sb, projectId, today) {
         const d = daysBetweenYmd(today, t.end_date);
         return d != null && d >= 0 && d <= 7;
       });
-      if (overdue) confidence = "delayed";
-      else if (soon) confidence = "watch";
+      if (overdue) {
+        confidence = "delayed";
+        confidenceNote = "A task in this stage is past its planned date — we're actively managing it and will keep you updated.";
+      } else if (soon) {
+        confidence = "watch";
+        confidenceNote = "A task in this stage is due within the week — on track, we're just keeping a close eye on it.";
+      }
     }
 
     const latestEnd = phaseTasks
@@ -98,13 +121,14 @@ async function syncProjectMilestones(sb, projectId, today) {
       sort_order: i,
       is_current: isCurrent,
       achieved_at: allComplete ? (latestEnd || today) : null,
-      confidence: isCurrent ? confidence : null
+      confidence: isCurrent ? confidence : null,
+      confidence_note: isCurrent ? confidenceNote : null
     };
 
     // Upsert on (project_id, key) — that UNIQUE constraint exists (027).
     const { data: existing } = await sb
       .from("portal_milestones")
-      .select("id, auto_synced")
+      .select("id, auto_synced, confidence")
       .eq("project_id", projectId)
       .eq("key", phase)
       .maybeSingle();
@@ -117,10 +141,21 @@ async function syncProjectMilestones(sb, projectId, today) {
         sort_order: i,
         is_current: isCurrent,
         achieved_at: fields.achieved_at,
-        confidence: fields.confidence
+        confidence: fields.confidence,
+        confidence_note: fields.confidence_note
       };
       if (existing.auto_synced) update.label = fields.label;
       await sb.from("portal_milestones").update(update).eq("id", existing.id);
+      // schedule_change: tell the client when the current stage NEWLY slips to delayed.
+      if (isCurrent && fields.confidence === "delayed" && existing.confidence !== "delayed") {
+        await notifyClient(projectId, {
+          type: "schedule_change",
+          title: "A schedule update on your build",
+          body: `${fields.label} has hit a delay — ${fields.confidence_note || "we're managing it and will keep you updated."}`,
+          entityType: "portal_milestone",
+          entityId: existing.id
+        }).catch(() => {});
+      }
     } else {
       await sb.from("portal_milestones").insert(fields);
     }
@@ -164,27 +199,100 @@ async function syncProjectSelectionsOverdue(sb, projectId, today) {
  * Run the full nightly portal sync across all portal-enabled projects.
  * @returns {Promise<{projects:number, milestones:number, selectionsFlagged:number, skipped:boolean}>}
  */
+/**
+ * Reconcile Finance→Portal: re-fire any variation/claim hook that never landed.
+ * Finance sync hooks are all best-effort (.catch(()=>{})), so a transient failure
+ * leaves a sent variation / issued claim with NO portal shadow — permanently, with
+ * no recovery path. This nightly sweep heals that by re-firing the missing ones.
+ */
+async function syncProjectFinanceReconcile(sb, projectId) {
+  let refired = 0;
+  const { data: project } = await sb.from("projects").select("job_id, portal_client_name, portal_client_email").eq("id", projectId).maybeSingle();
+  if (!project?.job_id) return { refired };
+  const jobId = project.job_id;
+
+  // B9: backfill portal client identity from the job if the win trigger / convert
+  // path left it NULL — otherwise notifyClient has no email and the client is stranded.
+  if (!project.portal_client_email || !project.portal_client_name) {
+    const { data: job } = await sb.from("jobs").select("client_name, client_email").eq("id", jobId).maybeSingle();
+    const patch = {};
+    if (!project.portal_client_name && String(job?.client_name || "").trim()) patch.portal_client_name = String(job.client_name).trim();
+    if (!project.portal_client_email && String(job?.client_email || "").trim()) patch.portal_client_email = String(job.client_email).trim();
+    if (Object.keys(patch).length) { await sb.from("projects").update(patch).eq("id", projectId); refired++; }
+  }
+
+  const { data: vars } = await sb
+    .from("job_variations").select("*").eq("job_id", jobId).eq("status", "sent_to_client");
+  for (const v of vars || []) {
+    const { data: dec } = await sb.from("portal_decisions").select("id").eq("job_variation_id", v.id).maybeSingle();
+    if (!dec) { await syncVariationSent({ jobId, variation: v }).catch(() => {}); refired++; }
+  }
+
+  const { data: claims } = await sb
+    .from("progress_claims").select("*").eq("job_id", jobId).eq("status", "issued");
+  for (const c of claims || []) {
+    const { data: pc } = await sb.from("portal_claims").select("id").eq("progress_claim_id", c.id).maybeSingle();
+    if (!pc) { await syncClaimIssued({ jobId, claim: c, stageLabel: c.stage }).catch(() => {}); refired++; }
+  }
+
+  // Status DRIFT (worst case): a voided variation/claim whose shadow never got
+  // withdrawn (dropped void hook) still shows a live Approve / 'I've paid' button.
+  // Re-derive the expected portal state from canonical and re-fire the void hook.
+  const { data: voidedVars } = await sb
+    .from("job_variations").select("id").eq("job_id", jobId).eq("status", "void");
+  for (const v of voidedVars || []) {
+    const { data: dec } = await sb.from("portal_decisions").select("id, status").eq("job_variation_id", v.id).maybeSingle();
+    if (dec && dec.status !== "withdrawn") { await syncVariationVoided({ variationId: v.id }).catch(() => {}); refired++; }
+  }
+  const { data: voidedClaims } = await sb
+    .from("progress_claims").select("id").eq("job_id", jobId).eq("status", "void");
+  for (const c of voidedClaims || []) {
+    const { data: pc } = await sb.from("portal_claims").select("id, status").eq("progress_claim_id", c.id).maybeSingle();
+    if (pc && pc.status !== "void") { await syncClaimVoided({ claimId: c.id }).catch(() => {}); refired++; }
+  }
+
+  // Signed variation whose decision never reached 'approved' (dropped sign hook).
+  const { data: signedVars } = await sb
+    .from("job_variations").select("id").eq("job_id", jobId).eq("status", "signed");
+  for (const v of signedVars || []) {
+    const { data: dec } = await sb.from("portal_decisions").select("id, status").eq("job_variation_id", v.id).maybeSingle();
+    if (dec && dec.status !== "approved") { await syncVariationSigned({ variationId: v.id }).catch(() => {}); refired++; }
+  }
+
+  // Paid/partly-paid claim whose portal shadow drifted (dropped pay hook).
+  const { data: paidClaims } = await sb
+    .from("progress_claims").select("id, status").eq("job_id", jobId).in("status", ["paid", "partially_paid"]);
+  for (const c of paidClaims || []) {
+    const { data: pc } = await sb.from("portal_claims").select("id, status").eq("progress_claim_id", c.id).maybeSingle();
+    if (pc && pc.status !== c.status) { await syncClaimPaid({ claimId: c.id, newStatus: c.status }).catch(() => {}); refired++; }
+  }
+  return { refired };
+}
+
 export async function runPortalNightlySync() {
   const sb = getServiceSupabase();
-  if (!sb) return { skipped: true, projects: 0, milestones: 0, selectionsFlagged: 0 };
+  if (!sb) return { skipped: true, projects: 0, milestones: 0, selectionsFlagged: 0, reconciled: 0 };
   const today = todayYmd();
 
   const { data: projects } = await sb
     .from("projects")
     .select("id")
-    .eq("portal_enabled", true);
+    .eq("portal_v2_enabled", true);
 
   let milestones = 0;
   let selectionsFlagged = 0;
+  let reconciled = 0;
   for (const p of projects || []) {
     try {
       const m = await syncProjectMilestones(sb, p.id, today);
       milestones += m.phases || 0;
       const s = await syncProjectSelectionsOverdue(sb, p.id, today);
       selectionsFlagged += s.flagged || 0;
+      const r = await syncProjectFinanceReconcile(sb, p.id);
+      reconciled += r.refired || 0;
     } catch (e) {
       console.warn(`[portalSync] project ${p.id}:`, e?.message || e);
     }
   }
-  return { skipped: false, projects: (projects || []).length, milestones, selectionsFlagged };
+  return { skipped: false, projects: (projects || []).length, milestones, selectionsFlagged, reconciled };
 }

@@ -3,6 +3,7 @@ import { requireAuth } from "./requireAuth.mjs";
 import { emailAvailabilityConflict } from "./tradeCommitment.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
+import { computeOpsReadiness } from "./opsReadiness.mjs";
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,10 @@ export function registerOperationsRoutes(app) {
       const { data: projects, error: pe } = await sb
         .from("projects")
         .select("id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)")
+        // BLH-E2E-001: hide decommissioned/anonymised projects from the active Operations board.
+        // Cleanup scripts "soft-delete" by renaming address → "…_DELETED" (projects has no deleted_at
+        // column), so that suffix is the exclusion convention. Mirrors the /global-tasks filter below.
+        .not("address", "ilike", "%_DELETED")
         .order("created_at", { ascending: false });
       if (pe) throw pe;
 
@@ -71,7 +76,8 @@ export function registerOperationsRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
-      const { data: projects } = await sb.from("projects").select("id, address");
+      // BLH-E2E-001: exclude renamed/decommissioned ("…_DELETED") projects from the global Gantt (parity with /projects).
+      const { data: projects } = await sb.from("projects").select("id, address").not("address", "ilike", "%_DELETED");
       const { data: tasks } = await sb
         .from("schedule_tasks")
         .select("id, project_id, name, phase, start_date, end_date, percent_complete, task_type, is_hold_point, assignee_trade, trade")
@@ -437,6 +443,48 @@ export function registerOperationsRoutes(app) {
       if (error) throw new Error(error.message);
       return res.json({ ok: true, tasks: tasks || [] });
     } catch (e) {
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/projects/:projectId/ops-readiness
+   * Read-only post-win operations setup checklist (P0-B5).
+   */
+  app.get("/api/projects/:projectId/ops-readiness", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const projectId = String(req.params.projectId || "").trim();
+    if (!projectId) return res.status(400).json({ ok: false, error: "projectId required" });
+    try {
+      const { data: project, error: pErr } = await sb.from("projects").select("id").eq("id", projectId).maybeSingle();
+      if (pErr) throw pErr;
+      if (!project) return res.status(404).json({ ok: false, error: "Project not found" });
+      const readiness = await computeOpsReadiness(sb, { projectId });
+      return res.json({ ok: true, ...readiness });
+    } catch (e) {
+      console.error("[ops-readiness/project]", e);
+      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * GET /api/jobs/:jobId/ops-readiness
+   * Alias — resolves project via job_id (P0-B5).
+   */
+  app.get("/api/jobs/:jobId/ops-readiness", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const jobId = String(req.params.jobId || "").trim();
+    if (!jobId) return res.status(400).json({ ok: false, error: "jobId required" });
+    try {
+      const { data: job, error: jErr } = await sb.from("jobs").select("id").eq("id", jobId).maybeSingle();
+      if (jErr) throw jErr;
+      if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
+      const readiness = await computeOpsReadiness(sb, { jobId });
+      return res.json({ ok: true, ...readiness });
+    } catch (e) {
+      console.error("[ops-readiness/job]", e);
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });

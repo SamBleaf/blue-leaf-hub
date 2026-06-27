@@ -30,6 +30,7 @@
 
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
+import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { getCanonicalContractValue } from "./factsService.mjs";
 import { recordRfqEvent } from "./rfqEngagement.mjs";
@@ -598,6 +599,8 @@ export function registerCrmRoutes(app) {
     }).select().single();
 
     if (lErr) return err(res, 500, translateDbError(lErr));
+
+    await insertLeadCreatedActivity(sb(), lead.id);
 
     // Update contact
     await sb().from("crm_contacts").update({

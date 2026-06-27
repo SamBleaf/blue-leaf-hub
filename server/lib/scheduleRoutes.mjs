@@ -15,18 +15,13 @@ import { resolveScheduleCategoryBlocks } from "./scheduleCategories.mjs";
 import { refreshJobRisk } from "./procurementService.mjs";
 import { generateSchedulePlanWithClaude } from "./scheduleClaudePlan.mjs";
 import { attachCriticalPathFlags } from "./scheduleCriticalPath.mjs";
-import {
-  getDropboxAccessToken,
-  dropboxUploadBuffer,
-  sharedJobRootPath,
-  ensureParentFoldersForFile
-} from "./dropboxClient.mjs";
+import { fileJobRecord } from "./jobRecordsFiler.mjs";
 import {
   buildScheduleAnalysisPdfBuffer,
   buildScheduleGanttPdfBuffer
 } from "./module6PdfKit.mjs";
 import { toYmd, addDaysYmd } from "./dateYmd.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { handleMilestoneComplete, handleScheduleChange } from "./scheduleReminders.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
@@ -435,11 +430,14 @@ async function loadBuildexactScheduleHints(sb, project) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+/** P0-C2 / W12-DRIFT-002 — schedule mutations limited to admin + supervisor. */
+const requireScheduleWrite = [requireAuth, requireRole("admin", "supervisor")];
+
 /**
  * @param {import("express").Express} app
  */
 export function registerScheduleRoutes(app) {
-  app.post("/api/schedule/generate", requireAuth, async (req, res) => {
+  app.post("/api/schedule/generate", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -689,7 +687,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/templates", requireAuth, async (req, res) => {
+  app.post("/api/schedule/templates", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -713,7 +711,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.put("/api/schedule/templates/:id", requireAuth, async (req, res) => {
+  app.put("/api/schedule/templates/:id", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -734,7 +732,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.delete("/api/schedule/templates/:id", requireAuth, async (req, res) => {
+  app.delete("/api/schedule/templates/:id", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -815,7 +813,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/task", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/task", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -864,7 +862,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/load-template", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/load-template", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -899,7 +897,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/save-as-template", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/save-as-template", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -949,7 +947,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/buildexact-match", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/buildexact-match", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -1009,7 +1007,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.patch("/api/schedule/task/:id", requireAuth, async (req, res) => {
+  app.patch("/api/schedule/task/:id", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -1149,7 +1147,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.delete("/api/schedule/task/:id", requireAuth, async (req, res) => {
+  app.delete("/api/schedule/task/:id", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
     try {
@@ -1190,7 +1188,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/save-analysis-pdf", requireAuth, async (req, res) => {
+  app.post("/api/schedule/save-analysis-pdf", ...requireScheduleWrite, async (req, res) => {
     try {
       const projectId = String(req.body?.projectId || "").trim();
       const analysisText = String(req.body?.analysisText || "").trim();
@@ -1206,15 +1204,12 @@ export function registerScheduleRoutes(app) {
         analysisText,
         generatedAt: new Date().toISOString()
       });
-      const rel = `${sharedJobRootPath(proj.address)}/SCHEDULE/AI-ANALYSIS-${day}.pdf`;
       let dropbox_pdf_path = null;
       try {
-        const token = await getDropboxAccessToken();
-        await ensureParentFoldersForFile(token, rel);
-        await dropboxUploadBuffer(token, rel, buf, { autorename: true });
-        dropbox_pdf_path = rel;
+        const filed = await fileJobRecord({ jobAddress: proj.address, category: "schedule", fileName: `AI-ANALYSIS-${day}.pdf`, buffer: buf });
+        if (filed?.ok) dropbox_pdf_path = filed.storagePath;
       } catch (err) {
-        console.warn("[schedule/save-analysis-pdf] Dropbox:", err?.message || err);
+        console.warn("[schedule/save-analysis-pdf] records filing:", err?.message || err);
       }
       return res.json({ ok: true, dropbox_pdf_path });
     } catch (e) {
@@ -1276,7 +1271,7 @@ export function registerScheduleRoutes(app) {
 
   // ── Baseline lock / reset ──────────────────────────────────────────────────
 
-  app.post("/api/schedule/:projectId/baseline/lock", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/baseline/lock", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
@@ -1300,7 +1295,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.delete("/api/schedule/:projectId/baseline", requireAuth, async (req, res) => {
+  app.delete("/api/schedule/:projectId/baseline", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
@@ -1333,7 +1328,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/eot", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/eot", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
@@ -1354,7 +1349,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.patch("/api/schedule/:projectId/eot/:eotId", requireAuth, async (req, res) => {
+  app.patch("/api/schedule/:projectId/eot/:eotId", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
@@ -1371,7 +1366,7 @@ export function registerScheduleRoutes(app) {
     }
   });
 
-  app.post("/api/schedule/:projectId/eot/:eotId/apply", requireAuth, async (req, res) => {
+  app.post("/api/schedule/:projectId/eot/:eotId/apply", ...requireScheduleWrite, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {

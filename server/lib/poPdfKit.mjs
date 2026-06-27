@@ -1,15 +1,21 @@
 import fs from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 // pdfkit imported lazily inside the builder (cold import is ~13s; must not block server boot).
 import { DEFAULT_PO_TERMS } from "./poDefaultTerms.mjs";
 
 const BRAND = "#006c9b";
+const PO_HEADER_LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../public/brand/logo-black.png");
+const PO_WATERMARK_LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../public/brand/icon-blue.png");
+const PO_HEADER_LOGO_X = 40;
+const PO_HEADER_LOGO_Y = 28;
+const PO_HEADER_LOGO_W = 152;
+const PO_TITLE_Y = 142;
 
-function dataUrlToBuffer(dataUrl) {
-  const s = String(dataUrl || "").trim();
-  const m = s.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i);
-  if (!m) return null;
+function loadBrandPng(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
   try {
-    return Buffer.from(m[2], "base64");
+    return fs.readFileSync(filePath);
   } catch {
     return null;
   }
@@ -28,6 +34,27 @@ function pickBodyFont(doc) {
   return "Helvetica";
 }
 
+/** Wordmark header (logo-black.png) + faint leaf watermark (icon-blue.png). */
+function drawBrandLayer(doc, headerBuf, watermarkBuf) {
+  if (watermarkBuf) {
+    try {
+      doc.save();
+      doc.opacity(0.06);
+      doc.image(watermarkBuf, 18, 580, { width: 110 });
+      doc.restore();
+    } catch {
+      /* ignore bad image */
+    }
+  }
+  if (headerBuf) {
+    try {
+      doc.image(headerBuf, PO_HEADER_LOGO_X, PO_HEADER_LOGO_Y, { width: PO_HEADER_LOGO_W });
+    } catch {
+      /* ignore bad image */
+    }
+  }
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.poNumber
@@ -44,7 +71,8 @@ function pickBodyFont(doc) {
  * @param {number} opts.totalIncGst
  * @param {string[]} opts.standardConditions
  * @param {string} [opts.termsPage2]
- * @param {string} [opts.logoDataUrl]
+ * @param {string} [opts.logoDataUrl] — ignored for PO PDF header; wordmark loaded from public/brand/logo-black.png
+ * @param {{ fileName?: string, receivedDate?: string, acceptedAmountExGst?: number|null, attachmentStatus?: string }} [opts.quoteReference]
  */
 export async function buildPurchaseOrderPdfBuffer(opts) {
   const { default: PDFDocument } = await import("pdfkit");
@@ -58,14 +86,9 @@ export async function buildPurchaseOrderPdfBuffer(opts) {
     const bodyFont = pickBodyFont(doc);
     const headingFont = bodyFont === "Helvetica" ? "Helvetica-Bold" : bodyFont;
 
-    const logoBuf = dataUrlToBuffer(opts.logoDataUrl);
-    if (logoBuf) {
-      try {
-        doc.image(logoBuf, 48, 42, { width: 110 });
-      } catch {
-        /* ignore bad image */
-      }
-    }
+    const headerBuf = loadBrandPng(PO_HEADER_LOGO_PATH);
+    const watermarkBuf = loadBrandPng(PO_WATERMARK_LOGO_PATH);
+    drawBrandLayer(doc, headerBuf, watermarkBuf);
 
     const c = opts.company || {};
     doc.fillColor(BRAND).font(headingFont).fontSize(11);
@@ -82,9 +105,8 @@ export async function buildPurchaseOrderPdfBuffer(opts) {
       .join("\n");
     doc.text(rhs, 320, 58, { width: 220, align: "right" });
 
-    doc.moveDown(4);
-    doc.fillColor(BRAND).font(headingFont).fontSize(20).text("Purchase Order", 48, doc.y);
-    doc.moveDown(0.6);
+    doc.fillColor(BRAND).font(headingFont).fontSize(20).text("Purchase Order", 48, PO_TITLE_Y);
+    doc.y = PO_TITLE_Y + 28;
 
     doc.fillColor("#111").font(headingFont).fontSize(10);
     doc.text(`Date Created: ${opts.dateCreatedIso || ""}`, { continued: false });
@@ -113,15 +135,52 @@ export async function buildPurchaseOrderPdfBuffer(opts) {
     doc.text("Draft", 310, ty + 28, { width: 70 });
     doc.text(`$${Number(opts.subtotalExGst || 0).toFixed(2)}`, 400, ty + 28, { width: 140, align: "right" });
 
-    doc.moveDown(3.2);
+    doc.moveDown(3);
     const sy = doc.y;
-    doc.rect(48, sy, 504, 120).stroke("#ccc");
-    doc.font(headingFont).fontSize(10).text("Scope of Work — standard conditions", 56, sy + 8);
-    doc.font(bodyFont).fontSize(8.5);
     const conds = Array.isArray(opts.standardConditions) ? opts.standardConditions : [];
-    doc.text(conds.join("\n"), 56, sy + 26, { width: 488 });
+    const condText = conds.join("\n");
+    doc.font(bodyFont).fontSize(8);
+    const condBodyHeight = condText
+      ? doc.heightOfString(condText, { width: 488, lineGap: 1.2 })
+      : 0;
+    const scopeBoxHeight = Math.min(108, Math.max(58, condBodyHeight + 24));
+    doc.rect(48, sy, 504, scopeBoxHeight).stroke("#ccc");
+    doc.font(headingFont).fontSize(9).fillColor("#111").text("Scope of Work — standard conditions", 56, sy + 6);
+    doc.font(bodyFont).fontSize(8).fillColor("#111");
+    if (condText) {
+      doc.text(condText, 56, sy + 20, { width: 488, lineGap: 1.2 });
+    }
+    doc.y = sy + scopeBoxHeight + 6;
 
-    doc.moveDown(6.5);
+    const qr = opts.quoteReference;
+    if (qr) {
+      const qy = doc.y;
+      doc.rect(48, qy, 504, 54).stroke("#ddd");
+      doc.font(headingFont).fontSize(9).fillColor("#111").text("Quote Reference", 56, qy + 6);
+      doc.font(bodyFont).fontSize(8);
+      const submitted =
+        qr.fileName && qr.fileName !== "Unavailable" ? qr.fileName : "Unavailable";
+      const received = qr.receivedDate || "—";
+      const amount =
+        qr.acceptedAmountExGst != null && Number(qr.acceptedAmountExGst) > 0
+          ? `$${Number(qr.acceptedAmountExGst).toFixed(2)} (ex GST)`
+          : "—";
+      const attach = qr.attachmentStatus || "Not available";
+      doc.text(
+        [
+          `Submitted quote: ${submitted}`,
+          `Received: ${received}`,
+          `Accepted amount: ${amount}`,
+          `Quote attachment: ${attach}`,
+        ].join("\n"),
+        56,
+        qy + 20,
+        { width: 488 }
+      );
+      doc.y = qy + 58;
+    }
+
+    doc.moveDown(2.5);
     doc.font(headingFont).fontSize(9).text("Line items");
     const ly = doc.y + 6;
     doc.rect(48, ly, 504, 22).stroke("#ccc");
@@ -147,7 +206,8 @@ export async function buildPurchaseOrderPdfBuffer(opts) {
     doc.text(`Total (inc GST)       $${Number(opts.totalIncGst || 0).toFixed(2)}`, 48, rowY + 40, { width: 500, align: "right" });
 
     doc.moveDown(5);
-    doc.font(bodyFont).fontSize(8.5).fillColor("#444").italic();
+    const italicFont = bodyFont === "Helvetica" ? "Helvetica-Oblique" : bodyFont;
+    doc.font(italicFont).fontSize(8.5).fillColor("#444");
     doc.text(
       "This Purchase Order is issued subject to the terms and conditions on the following page(s). " +
         "Signature below indicates acceptance of this Purchase Order and attached terms.",
@@ -169,16 +229,13 @@ export async function buildPurchaseOrderPdfBuffer(opts) {
   });
 }
 
-export function defaultStandardConditions(tentativeStartLabel) {
-  const t = tentativeStartLabel || "TBC";
+export function defaultStandardConditions(_tentativeStartLabel) {
   return [
-    "1. Please see attached for full terms and conditions",
-    "2. Supply/carry out all works as per Construction Documentation and attached quote",
-    "3. This PO is NON ACTIVE until all WH&S requirements are completed via HazardCo",
-    "4. All invoices must indicate PO number",
-    "5. No on-site activity to commence prior to receiving stamped construction drawings",
-    "6. The project manager will be in contact to confirm timing: Sam Morris — 0434 046 399",
-    `7. Indicative timing for works: ${t}`,
-    "8. All values are GST Exclusive"
+    "1. Complete all works in accordance with the construction documentation, accepted quote, and this Purchase Order.",
+    "2. This PO is not active until required WHS / site compliance items are complete.",
+    "3. All invoices must include the PO number.",
+    "4. No on-site activity is to commence before approved/stamped construction drawings are issued, unless agreed in writing.",
+    "5. Timing is indicative only and will be confirmed by the Project Manager.",
+    "6. All values are GST exclusive unless noted otherwise.",
   ];
 }

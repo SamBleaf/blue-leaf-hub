@@ -173,10 +173,10 @@ export function registerPortalV2Routes(app) {
       if (!pcu || pcu.is_active !== true) return res.status(403).end();
       const { data: photo } = await sb
         .from("project_photos")
-        .select("storage_path, project_id")
+        .select("storage_path, project_id, client_visible")
         .eq("id", photoId)
         .maybeSingle();
-      if (!photo || photo.project_id !== projectId) return res.status(404).end();
+      if (!photo || photo.project_id !== projectId || photo.client_visible !== true) return res.status(404).end();
       if (!dropboxConfigured()) return res.status(503).end();
       const accessToken = await getDropboxAccessToken();
       const buf = await dropboxDownloadBuffer(accessToken, photo.storage_path);
@@ -220,12 +220,17 @@ export function registerPortalV2Routes(app) {
       const today = todayYmd();
 
       // Current stage (is_current flag; fall back to first unachieved by order).
-      let { data: current } = await sb
+      // Use order+limit(1), NOT maybeSingle — a stray second is_current=true row
+      // (admin-authored alongside an auto-synced one) would make maybeSingle throw
+      // PGRST116 and 500 the whole Home screen.
+      const { data: currentRows } = await sb
         .from("portal_milestones")
         .select("key, label, confidence, confidence_note, eta, sort_order, stage_preview")
         .eq("project_id", projectId)
         .eq("is_current", true)
-        .maybeSingle();
+        .order("sort_order", { ascending: true })
+        .limit(1);
+      let current = (currentRows && currentRows[0]) || null;
       if (!current) {
         const { data: firstOpen } = await sb
           .from("portal_milestones")
@@ -276,11 +281,12 @@ export function registerPortalV2Routes(app) {
         .limit(1)
         .maybeSingle();
 
-      // Recent photos (cap 8).
+      // Recent photos (cap 8) — client-visible only (migration 110).
       const { data: photos } = await sb
         .from("project_photos")
         .select("id, caption, taken_at, is_hero")
         .eq("project_id", projectId)
+        .eq("client_visible", true)
         .order("taken_at", { ascending: false })
         .limit(8);
 
@@ -585,8 +591,11 @@ export function registerPortalV2Routes(app) {
         if (claim.client_payment_notified_at) {
           return ok(res, { alreadyNotified: true, notifiedAt: claim.client_payment_notified_at });
         }
-        if (claim.status === "paid") {
-          return ok(res, { alreadyNotified: true, message: "This claim is already marked paid." });
+        // App-level backstop: never accept a payment notification on a claim that's
+        // already paid, or that's been voided/disputed — even if the migration that
+        // represents those states hasn't been applied yet.
+        if (["paid", "void", "disputed"].includes(claim.status)) {
+          return ok(res, { alreadyNotified: true, message: `This claim is ${claim.status}.` });
         }
 
         const nowIso = new Date().toISOString();
@@ -787,19 +796,83 @@ export function registerPortalV2Routes(app) {
 
       // Dropbox → stream the single file (sequential, never Promise.all).
       if (doc.storage_path && dropboxConfigured()) {
-        const accessToken = await getDropboxAccessToken();
-        const buf = await dropboxDownloadBuffer(accessToken, doc.storage_path);
-        res.setHeader("Content-Type", guessContentType(doc.storage_path));
-        res.setHeader("Content-Disposition", `inline; filename="${(doc.title || "document").replace(/[^a-z0-9.\- ]/gi, "_")}"`);
-        res.setHeader("Cache-Control", "private, max-age=60");
-        return res.send(buf);
+        try {
+          const accessToken = await getDropboxAccessToken();
+          const buf = await dropboxDownloadBuffer(accessToken, doc.storage_path);
+          res.setHeader("Content-Type", guessContentType(doc.storage_path));
+          res.setHeader("Content-Disposition", `inline; filename="${(doc.title || "document").replace(/[^a-z0-9.\- ]/gi, "_")}"`);
+          res.setHeader("Cache-Control", "private, max-age=60");
+          return res.send(buf);
+        } catch (dlErr) {
+          // NEVER surface the raw Dropbox/provider error to the client (e.g.
+          // missing_scope, path/not_found). Log it for staff; show plain English.
+          console.warn("[portal] document download failed:", doc.id, dlErr?.message || dlErr);
+          return err(res, 502, "This document is temporarily unavailable. We've been notified and will sort it out.");
+        }
       }
 
       // Legacy public_url fallback.
       if (doc.public_url) return ok(res, { signedUrl: doc.public_url, expiresIn: 0 });
-      return err(res, 404, "Document file unavailable");
+      return err(res, 404, "This document isn't available to download yet.");
     } catch (e) {
-      return err(res, 500, e.message || "Failed to download");
+      console.warn("[portal] download handler error:", e?.message || e);
+      return err(res, 500, "Sorry — we couldn't open that document. Please try again shortly.");
+    }
+  });
+
+  // Client signs a document that requires a signature. Contractual write → login +
+  // primary/secondary role, immutable audit, closes the signature action.
+  app.post(`${base}/documents/:docId/sign`, requirePortalWrite, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const session = req.portalSession;
+      const project = session.project;
+      const projectId = session.projectId;
+      const { docId } = req.params;
+      const nowIso = new Date().toISOString();
+
+      // Atomic: only an unsigned, client-visible doc on THIS project can be signed.
+      const { data: doc } = await sb
+        .from("portal_documents")
+        .update({ signed_at: nowIso, signed_by_user_id: session.userId })
+        .eq("id", docId)
+        .eq("project_id", projectId)
+        .eq("client_visible", true)
+        .is("signed_at", null)
+        .select("id, title")
+        .maybeSingle();
+      if (!doc) return err(res, 409, "This document is already signed or isn't available to sign.");
+
+      const audited = await writePortalAudit(sb, {
+        project, session,
+        eventType: "document.signed",
+        entityType: "portal_document", entityId: docId,
+        snapshot: { title: doc.title }, req
+      });
+      if (!audited) {
+        await sb.from("portal_documents").update({ signed_at: null, signed_by_user_id: null }).eq("id", docId);
+        return err(res, 500, "Could not record the signature — no change made. Please retry.");
+      }
+
+      await sb
+        .from("client_actions")
+        .update({ status: "completed", updated_at: nowIso })
+        .eq("project_id", projectId)
+        .eq("related_entity_type", "portal_document")
+        .eq("related_entity_id", docId);
+
+      try {
+        await sendPlainMail({
+          to: "admin@blueleafbuilding.com.au",
+          subject: `Client signed a document — ${project.address || projectId}`,
+          text: `${project.portal_client_name || "The client"} signed "${doc.title}" in the portal.`
+        });
+      } catch (_) { /* non-fatal */ }
+
+      return ok(res, { signedAt: nowIso });
+    } catch (e) {
+      return err(res, 500, e.message || "Failed to sign document");
     }
   });
 
@@ -900,33 +973,43 @@ export function registerPortalV2Routes(app) {
 
       const { data: stages } = await sb
         .from("portal_milestones")
-        .select("id, key, label, description, what_comes_next, stage_preview, achieved_at, eta, is_current, confidence, sort_order")
+        .select("id, key, label, description, what_comes_next, stage_preview, achieved_at, eta, is_current, confidence, confidence_note, sort_order")
         .eq("project_id", projectId)
         .order("sort_order", { ascending: true });
 
+      // Updates aren't tied to a stage column (portal_updates has no schedule_phase
+      // — that lives on portal_milestones). Show the published weekly updates under
+      // the CURRENT stage, where they're most relevant.
       const { data: updates } = await sb
         .from("portal_updates")
-        .select("id, headline, body, builder_reasoning, week_of, schedule_phase, created_at")
+        .select("id, headline, body, builder_reasoning, week_of, created_at")
         .eq("project_id", projectId)
         .eq("published", true)
         .order("week_of", { ascending: false });
 
+      // Only photos a staffer has explicitly marked client-visible reach the Journey
+      // (migration 110). Pre-110 the column is absent → the query errors → no photos
+      // (graceful: photos were already empty without milestone_key tagging).
       const { data: photos } = await sb
         .from("project_photos")
         .select("id, caption, milestone_key, taken_at, is_hero")
         .eq("project_id", projectId)
+        .eq("client_visible", true)
         .order("taken_at", { ascending: false });
 
       const photoList = photos || [];
       const updateList = updates || [];
-      const enrichedStages = (stages || []).map((st) => {
-        const stageUpdates = updateList.filter(
-          (u) => u.schedule_phase && st.key && u.schedule_phase === st.key
-        );
+      const stageList = stages || [];
+      const currentStageId =
+        stageList.find((s) => s.is_current)?.id ||
+        stageList.find((s) => !s.achieved_at)?.id ||
+        stageList[stageList.length - 1]?.id ||
+        null;
+      const enrichedStages = stageList.map((st) => {
         const stagePhotos = photoList.filter((p) => p.milestone_key === st.key);
         return {
           ...rowToCamel(st),
-          updates: rowsToCamel(stageUpdates),
+          updates: st.id === currentStageId ? rowsToCamel(updateList) : [],
           photos: rowsToCamel(stagePhotos)
         };
       });
@@ -1017,16 +1100,43 @@ export function registerPortalV2Routes(app) {
       const sb = getServiceSupabase();
       if (!sb) return err(res, 503, "DB not configured");
       const projectId = req.portalSession.projectId;
+      // Scope to THIS user — portal_notifications.target_user_id. Without this,
+      // any client on a multi-user project reads every other user's notifications.
+      const userId = req.portalSession.userId;
+      if (!userId) return ok(res, { notifications: [] });
       const { data: notes } = await sb
         .from("portal_notifications")
         .select("id, notification_type, title, body, related_entity_type, related_entity_id, read_at, created_at")
         .eq("project_id", projectId)
+        .eq("target_user_id", userId)
         .eq("channel", "in_app")
         .order("created_at", { ascending: false })
         .limit(50);
       return ok(res, { notifications: rowsToCamel(notes) });
     } catch (e) {
       return err(res, 500, e.message || "Failed to load notifications");
+    }
+  });
+
+  // Mark a notification read (own notifications only).
+  app.patch(`${base}/notifications/:notificationId/read`, requirePortalLogin, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const { projectId, userId } = req.portalSession;
+      const { notificationId } = req.params;
+      const { data } = await sb
+        .from("portal_notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("id", notificationId)
+        .eq("project_id", projectId)
+        .eq("target_user_id", userId)
+        .is("read_at", null)
+        .select("id")
+        .maybeSingle();
+      return ok(res, { marked: !!data });
+    } catch (e) {
+      return err(res, 500, e.message || "Failed to mark read");
     }
   });
 }
@@ -1037,7 +1147,11 @@ export function registerPortalV2Routes(app) {
  */
 async function buildFinancialSnapshot(sb, project, jobId) {
   const snapshot = {
-    contractValue: project.contract_value != null ? Number(project.contract_value) : null,
+    // Client-facing totals are INC-GST (what the client actually pays). contract_value
+    // is stored EX-GST per the amounts law, so gross it up to match the inc-GST
+    // variation amounts it's summed with — keeps the Home contract total internally
+    // consistent. (Confirmed basis with Sam: inc-GST, 2026-06-22.)
+    contractValue: project.contract_value != null ? Number(project.contract_value) * 1.1 : null,
     approvedVariations: 0,
     pendingVariations: 0,
     claimsPaid: 0,
@@ -1064,6 +1178,9 @@ async function buildFinancialSnapshot(sb, project, jobId) {
     const decByVar = {};
     for (const d of decisions || []) decByVar[d.job_variation_id] = d.status;
     for (const v of variations || []) {
+      // A voided/rejected variation must NEVER inflate the client's contract total,
+      // even if an earlier portal decision was 'approved' before the void.
+      if (v.status === "void" || v.status === "rejected") continue;
       const amt = Number(v.amount_inc_gst) || 0;
       const clientApproved = decByVar[v.id] === "approved";
       if (v.status === "signed" || v.status === "invoiced" || clientApproved) snapshot.approvedVariations += amt;

@@ -58,14 +58,26 @@ export async function requirePortalAuth(req, res, next) {
       return res.status(403).json({ ok: false, error: "No access to this project" });
     }
 
-    const { data: project } = await sb
+    const { data: project, error: projErr } = await sb
       .from("projects")
       .select("id, job_id, address, portal_enabled, portal_v2_enabled, build_phase, portal_client_name, portal_client_email, contract_value, completion_date_est, team_members")
       .eq("id", projectId)
       .maybeSingle();
 
+    // Pre-migration safety: if the v2 columns/tables aren't applied yet, return a
+    // clear 503 rather than a raw 500 — portal v2 hard-depends on migration 103.
+    if (projErr && (projErr.code === "42703" || projErr.code === "42P01" || /does not exist/i.test(projErr.message || ""))) {
+      return res.status(503).json({ ok: false, error: "The portal is being set up. Please try again shortly." });
+    }
+
     if (!project) {
       return res.status(404).json({ ok: false, error: "Project not found" });
+    }
+
+    // Gate: the v2 app is only available on projects explicitly switched to v2.
+    // A project with portal_enabled but not portal_v2_enabled must not resolve here.
+    if (project.portal_v2_enabled !== true) {
+      return res.status(403).json({ ok: false, error: "This project's portal isn't active yet.", portalDisabled: true });
     }
 
     req.portalSession = {

@@ -23,6 +23,7 @@ import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
+import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
 import { buildexactConfigured } from "./lib/buildexactClient.mjs";
 import { sendReminderForRfqId } from "./lib/sendOneReminder.mjs";
@@ -33,7 +34,13 @@ import { registerModule6Routes } from "./lib/module6Routes.mjs";
 import { registerInductionRoutes } from "./lib/inductionRoutes.mjs";
 import { registerJobsApiRoutes } from "./lib/jobsApiRoutes.mjs";
 import { registerBuildexactIntegrationRoutes } from "./lib/buildexactIntegrationRoutes.mjs";
-import { resolveInboundRfqMatch, generateOutboundMessageId } from "./lib/imapQuoteMatch.mjs";
+import { generateOutboundMessageId } from "./lib/imapQuoteMatch.mjs";
+import {
+  resolveInboundRfqMatchWithTrace,
+  enrichTraceWithRecipientLink,
+  logRfqMatchTrace
+} from "./lib/rfqMatchTrace.mjs";
+import { applyInboundQuoteToWorkflow, findRecipientLinkForRfq } from "./lib/rfqQuotePropagation.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
@@ -99,6 +106,16 @@ function imapConfig() {
   const port = Number(process.env.IMAP_PORT) || 993;
   const secure = envBool(process.env.IMAP_SECURE, port === 993);
   return { host, port, secure, auth: { user, pass } };
+}
+
+/** QA-001: cron schedulers may pass CRON_SECRET; otherwise admin staff JWT required. */
+function requireCronSecretOrAdmin(req, res, next) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (secret) {
+    const provided = req.headers["x-cron-secret"] || req.query?.secret;
+    if (provided === secret) return next();
+  }
+  requireAuth(req, res, () => requireRole("admin")(req, res, next));
 }
 
 function formatImapAddresses(list) {
@@ -325,10 +342,22 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
       .from("correspondence")
       .select("id", { count: "exact", head: true })
       .eq("message_id", externalId);
-    if (count > 0) return { matched: true, skipped: "duplicate", uid: msg.uid };
+    if (count > 0) {
+      logRfqMatchTrace({
+        email_uid: msg.uid,
+        from_email: fromEmail,
+        subject,
+        message_id: externalId,
+        result: "duplicate",
+        match_reason: "correspondence.message_id already exists"
+      });
+      return { matched: true, skipped: "duplicate", uid: msg.uid };
+    }
   }
 
-  const best = resolveInboundRfqMatch(parsed, rfqRows);
+  const { match: best, trace: matchTrace } = resolveInboundRfqMatchWithTrace(parsed, rfqRows, {
+    email_uid: msg.uid
+  });
   if (!best) {
     await upsertUnmatchedQuoteEmail(sb, {
       external_id: externalId,
@@ -348,6 +377,7 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
       logged_by: "imap-unmatched",
       message_id: externalId
     }).then(() => {}).catch(() => {});
+    logRfqMatchTrace({ ...matchTrace, rows_updated: { unmatched_quote_emails: 1, correspondence: 1 } });
     return { matched: false, uid: msg.uid };
   }
 
@@ -439,6 +469,30 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
 
   const { error: rfqErr } = await sb.from("rfqs").update(updatePatch).eq("id", rfq.id);
   if (rfqErr) throw new Error(rfqErr.message || "Could not update RFQ status.");
+
+  const propagation = await applyInboundQuoteToWorkflow(sb, rfq.id, {
+    status: "received",
+    receivedAt: sentAt,
+    quotedAmount: quotedAmount != null && Number.isFinite(quotedAmount) ? quotedAmount : null,
+    quotePdfPath: first?.dropbox_path || null
+  });
+
+  const recipientLink = await findRecipientLinkForRfq(sb, rfq.id);
+  logRfqMatchTrace(
+    enrichTraceWithRecipientLink(
+      {
+        ...matchTrace,
+        result: "matched",
+        rows_updated: {
+          rfqs: 1,
+          correspondence: 1,
+          ...propagation,
+          job_knowledge: rfq.job_id && quotedAmount != null ? 1 : 0
+        }
+      },
+      recipientLink
+    )
+  );
 
   // Write job knowledge for Blueprint
   if (rfq.job_id && quotedAmount != null) {
@@ -909,7 +963,7 @@ app.get("/api/health/ffmpeg", async (_req, res) => {
   return res.status(503).json({ ok: false, error: "ffmpeg not found on PATH" });
 });
 
-app.post("/api/subcontractors/csv-template-sheet", async (req, res) => {
+app.post("/api/subcontractors/csv-template-sheet", requireAuth, requireRole("admin"), async (req, res) => {
   if (!driveConfigured()) {
     return res.status(503).json({ ok: false, error: "Google Drive not configured." });
   }
@@ -1427,7 +1481,7 @@ app.get("/api/integrations/status", (_req, res) => {
   });
 });
 
-app.post("/api/dropbox/ensure-job-folders", async (req, res) => {
+app.post("/api/dropbox/ensure-job-folders", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
   try {
     if (!dropboxConfigured()) {
       return res.status(503).json({
@@ -1452,7 +1506,7 @@ app.post("/api/dropbox/ensure-job-folders", async (req, res) => {
   }
 });
 
-app.post("/api/dropbox/upload-tender-document", async (req, res) => {
+app.post("/api/dropbox/upload-tender-document", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
   try {
     if (!dropboxConfigured()) {
       return res.status(503).json({
@@ -1496,7 +1550,7 @@ app.post("/api/dropbox/upload-tender-document", async (req, res) => {
   }
 });
 
-app.post("/api/dropbox/save-rfq-email-copy", async (req, res) => {
+app.post("/api/dropbox/save-rfq-email-copy", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
   try {
     if (!dropboxConfigured()) {
       return res.status(503).json({
@@ -1528,7 +1582,7 @@ app.post("/api/dropbox/save-rfq-email-copy", async (req, res) => {
   }
 });
 
-app.post("/api/dropbox/save-quote-pdf", async (req, res) => {
+app.post("/api/dropbox/save-quote-pdf", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
   try {
     if (!dropboxConfigured()) {
       return res.status(503).json({
@@ -1571,7 +1625,7 @@ app.post("/api/dropbox/save-quote-pdf", async (req, res) => {
   }
 });
 
-app.post("/api/cron/rfq-reminders", async (_req, res) => {
+app.post("/api/cron/rfq-reminders", requireCronSecretOrAdmin, async (_req, res) => {
   try {
     const days = Number(process.env.REMINDER_DAYS_BEFORE) || 2;
     const result = await runDeadlineReminders({ daysBefore: days });
@@ -1582,7 +1636,7 @@ app.post("/api/cron/rfq-reminders", async (_req, res) => {
   }
 });
 
-app.post("/api/cron/lead-time-notifications", async (req, res) => {
+app.post("/api/cron/lead-time-notifications", requireCronSecretOrAdmin, async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
   try {
@@ -1783,7 +1837,7 @@ function isFirstFriday(date = new Date()) {
   return date.getDay() === 5 && date.getDate() <= 7;
 }
 
-app.post("/api/cron/wipaa-review-tasks", async (_req, res) => {
+app.post("/api/cron/wipaa-review-tasks", requireCronSecretOrAdmin, async (_req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -1848,7 +1902,7 @@ app.post("/api/rfq/remind-one", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/quote-tracker/unmatched", async (_req, res) => {
+app.get("/api/quote-tracker/unmatched", requireAuth, requireRole("admin"), async (_req, res) => {
   const sb = getServiceSupabase();
   if (!sb) {
     return res.json({
@@ -1948,6 +2002,12 @@ app.post("/api/rfq/send", requireAuth, async (req, res) => {
       // job. Prevents double-sends when the user retries a send after a partial failure.
       const jobIdM = String(m?.jobId || "").trim();
       const subIdM = String(m?.subcontractor_id || "").trim();
+      if (sb && jobIdM) {
+        const handoff = await assertJobReadyForRfqHandoff(sb, jobIdM);
+        if (!handoff.ok) {
+          return res.status(handoff.status).json({ ok: false, error: handoff.error, code: handoff.code, results });
+        }
+      }
       if (!forceResend && sb && jobIdM && subIdM) {
         try {
           const { data: prior } = await sb
@@ -2068,7 +2128,7 @@ app.post("/api/rfq/send", requireAuth, async (req, res) => {
 });
 
 /** List recent INBOX messages via IMAP (imapflow). Optional — requires IMAP_* env. */
-app.get("/api/mail/inbox", async (req, res) => {
+app.get("/api/mail/inbox", requireAuth, requireRole("admin"), async (req, res) => {
   const cfg = imapConfig();
   if (!cfg) {
     return res.status(503).json({
@@ -2215,7 +2275,7 @@ app.post("/api/imap/quote-poll", requireAuth, requireRole("admin"), async (_req,
 });
 
 /** Re-extract quote amount from an already-received quote PDF stored in Dropbox */
-app.post("/api/rfq/:rfqId/reextract-amount", async (req, res) => {
+app.post("/api/rfq/:rfqId/reextract-amount", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "Server DB not configured." });
 

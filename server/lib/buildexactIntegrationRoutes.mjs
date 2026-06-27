@@ -4,6 +4,7 @@ import { syncBuildexactJob } from "./buildexactSync.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { upsertJobKnowledge } from "./jobResolver.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { stampLeadFeeProposalLink } from "./feeProposalLink.mjs";
 
 function pickBuildexactEstimateId(raw, estimate) {
   return String(
@@ -160,6 +161,9 @@ export function registerBuildexactIntegrationRoutes(app) {
         syncFeeProposalAcceptedToBuildexact({ buildexactJobId, estimateId: buildexactEstimateId })
           .catch((err) => console.warn("[buildexact] fee proposal accept sync:", err?.message || err));
       }
+      // W03-FEE-LINK-01 / DISC-002-FINANCE-FEE-LINK-01: stamp lead.fee_proposal_id via the shared
+      // helper so the sales + finance accept routes stay in parity (W04/tender handoff link).
+      await stampLeadFeeProposalLink(sb, proposal.job_id, proposal.id);
       return res.json({ ok: true, proposal });
     } catch (e) {
       console.error("[fee-proposal/accept]", e);

@@ -479,6 +479,8 @@ export default function RfqEngine() {
   const sendHappenedRef = useRef(false);
   /** Guards the all-sent package build so it fires exactly once. */
   const packageFinalizingRef = useRef(false);
+  /** When true, auto-finalize is blocked until staff clicks Retry (W06-DRIFT-006). */
+  const packageFinalizeFailedRef = useRef(false);
   const [activeStep, setActiveStep] = useState(1);
   /** @type {{ id: string, buffer: ArrayBuffer, name: string, size: number, type: string, docType: string, status: string, error: null|string }[]} */
   const [pdfItems, setPdfItems] = useState([]);
@@ -492,6 +494,9 @@ export default function RfqEngine() {
   const [extractProgress, setExtractProgress] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [composeDropboxBusy, setComposeDropboxBusy] = useState(false);
+  const [packageFinalizeBusy, setPackageFinalizeBusy] = useState(false);
+  /** Warning + retry when emails sent but POST /api/rfq-packages failed. */
+  const [packageSnapshotFailed, setPackageSnapshotFailed] = useState(false);
   const [banner, setBanner] = useState(null);
   const [extraction, setExtraction] = useState(() => coerceExtraction(null));
   const [selectedTrades, setSelectedTrades] = useState(() => new Set());
@@ -1179,6 +1184,9 @@ export default function RfqEngine() {
     sendInFlightRef.current = false;
     sendHappenedRef.current = false;
     packageFinalizingRef.current = false;
+    packageFinalizeFailedRef.current = false;
+    setPackageSnapshotFailed(false);
+    setPackageFinalizeBusy(false);
     void deletePdfs(RFQ_ENGINE_PDF_SCOPE).catch((err) =>
       console.warn("[rfq] failed to clear stored PDFs", err)
     );
@@ -1377,6 +1385,7 @@ export default function RfqEngine() {
       if (!supabaseConfigured) return;
       const ext = coerceExtraction(extRaw);
       const fields = buildJobFieldsFromExtraction(ext);
+      const lead = prefillLeadRef.current || {};
       // Fill-when-blank: a tender PDF rarely carries the client/architect, and the builder returns ""
       // for those. Don't PATCH a blank over a name already on the job — it's stamped/healed from the
       // source lead in persistRfqs. (Mirrors the persistRfqs heal so neither path can wipe identity.)
@@ -1384,6 +1393,16 @@ export default function RfqEngine() {
         if (!String(fields[k] || "").trim()) delete fields[k];
       }
       const addr = String(fields.address || "").trim();
+      const stampLeadJobLink = async (jobId) => {
+        if (!jobId || !lead.leadId) return;
+        const sb = getSupabase();
+        if (!sb) return;
+        const { data: jobRow } = await sb.from("jobs").select("lead_id").eq("id", jobId).maybeSingle();
+        if (!jobRow?.lead_id) {
+          await sb.from("jobs").update({ lead_id: lead.leadId }).eq("id", jobId);
+        }
+        await sb.from("leads").update({ job_id: jobId }).eq("id", lead.leadId).is("job_id", null);
+      };
       try {
         const jid = extractionJobIdRef.current;
         if (jid) {
@@ -1391,6 +1410,7 @@ export default function RfqEngine() {
           // which re-normalises the address and keeps address_normalised canonical.
           const { ok, error } = await apiPatch(`/api/jobs/${jid}`, fields);
           if (!ok) throw new Error(error || "Failed to update job");
+          await stampLeadJobLink(jid);
         } else {
           // Create via the server so the address is normalised + deduped on address_normalised —
           // avoids duplicate jobs from formatting variants ("21 Folkestone Rd" vs "…Road") that
@@ -1398,16 +1418,18 @@ export default function RfqEngine() {
           // the "Address pending" placeholder is treated as a draft and never deduped.
           const { ok, data, error } = await apiPost("/api/jobs", {
             address: addr || "Address pending",
-            client_name: fields.client_name || null,
-            client_email: fields.client_email || null,
-            client_phone: fields.client_phone || null,
+            client_name: fields.client_name || lead.clientName || null,
+            client_email: lead.clientEmail || null,
+            client_phone: lead.clientPhone || null,
             project_type: fields.project_type || null,
             arch_ref: fields.arch_ref || null,
+            lead_id: lead.leadId || null,
           });
           const newId = data?.job?.id;
           if (!ok || !newId) throw new Error(error || "Failed to create job");
           extractionJobIdRef.current = newId;
           setExtractionJobId(newId);
+          await stampLeadJobLink(newId);
           // Apply the remaining extracted fields to the new-or-matched job.
           const patchRes = await apiPatch(`/api/jobs/${newId}`, fields);
           if (!patchRes.ok) throw new Error(patchRes.error || "Failed to update job");
@@ -1662,24 +1684,47 @@ export default function RfqEngine() {
       if (jobErr) throw jobErr;
       job = data;
     } else {
-      const jobInsert = {
-        ...exFields,
-        // Stamp the client identity from the source lead (fill-when-blank vs the tender-doc extraction)
-        // so the new 'tendering' job isn't orphaned without a client.
+      const addr = String(exFields.address || "").trim() || "Address pending";
+      // Create via server spine — dedup + address_normalised (mirrors persistJobFromExtraction).
+      const { ok, data, error } = await apiPost("/api/jobs", {
+        address: addr,
         client_name: (exFields.client_name || "").trim() || lead.clientName || null,
         client_email: lead.clientEmail || null,
         client_phone: lead.clientPhone || null,
+        project_type: exFields.project_type || null,
+        arch_ref: exFields.arch_ref || null,
         lead_id: lead.leadId || null,
-        dropbox_shared_link: sharedUrl,
-        dropbox_internal_path: internalPath,
-        dropbox_link: sharedUrl,
-        status: "tendering"
-      };
-      const { data, error: jobErr } = await sb.from("jobs").insert(jobInsert).select("*").single();
-      if (jobErr) throw jobErr;
-      job = data;
-      extractionJobIdRef.current = data.id;
-      setExtractionJobId(data.id);
+        status: "tendering",
+      });
+      const newId = data?.job?.id;
+      if (!ok || !newId) throw new Error(error || "Failed to create job");
+      extractionJobIdRef.current = newId;
+      setExtractionJobId(newId);
+
+      const patch = { ...exFields };
+      for (const k of ["client_name", "architect_name"]) {
+        if (!String(patch[k] || "").trim()) delete patch[k];
+      }
+      const patchRes = await apiPatch(`/api/jobs/${newId}`, patch);
+      if (!patchRes.ok) throw new Error(patchRes.error || "Failed to update job");
+      job = patchRes.data?.job || data.job;
+      // Dropbox columns are not in JOB_PATCHABLE_FIELDS — stamp via client update (same as jid branch).
+      if (sharedUrl || internalPath) {
+        const dropboxPatch = {};
+        if (sharedUrl) {
+          dropboxPatch.dropbox_shared_link = sharedUrl;
+          dropboxPatch.dropbox_link = sharedUrl;
+        }
+        if (internalPath) dropboxPatch.dropbox_internal_path = internalPath;
+        const { data: refreshed, error: dbErr } = await sb
+          .from("jobs")
+          .update(dropboxPatch)
+          .eq("id", newId)
+          .select("*")
+          .single();
+        if (dbErr) throw dbErr;
+        if (refreshed) job = refreshed;
+      }
     }
 
     const rows = [];
@@ -1951,6 +1996,7 @@ export default function RfqEngine() {
       packageFinalizingRef.current = false; // defensive: condition no longer holds
       return;
     }
+    setPackageFinalizeBusy(true);
     try {
       const tradeGroups = {};
       for (const r of rows) {
@@ -1997,21 +2043,48 @@ export default function RfqEngine() {
         })
       });
       const pkgJson = await pkgRes.json().catch(() => null);
-      resetRfqSession();
-      if (pkgJson?.packageId) {
+      if (pkgRes.ok && pkgJson?.ok && pkgJson?.packageId) {
+        packageFinalizeFailedRef.current = false;
+        setPackageSnapshotFailed(false);
+        resetRfqSession();
         navigate(`/tender-manager/rfq-packages/${pkgJson.packageId}`);
         return;
       }
+      const errMsg =
+        typeof pkgJson?.error === "string"
+          ? pkgJson.error
+          : `Package snapshot failed (${pkgRes.status})`;
+      console.warn("[rfq-package] create failed — session kept for retry", errMsg);
+      packageFinalizeFailedRef.current = true;
+      packageFinalizingRef.current = false;
+      setPackageSnapshotFailed(true);
+      setBanner({
+        variant: "warning",
+        title: "RFQs sent — package snapshot failed",
+        body: `${errMsg}\n\nYour sent RFQs are logged in Direct RFQs. Use “Retry package creation” below — supplier emails will not be sent again.`
+      });
     } catch (pkgErr) {
-      console.warn("[rfq-package] create failed, continuing", pkgErr);
-      resetRfqSession();
+      const errMsg = pkgErr?.message || String(pkgErr);
+      console.warn("[rfq-package] create failed — session kept for retry", pkgErr);
+      packageFinalizeFailedRef.current = true;
+      packageFinalizingRef.current = false;
+      setPackageSnapshotFailed(true);
+      setBanner({
+        variant: "warning",
+        title: "RFQs sent — package snapshot failed",
+        body: `${errMsg}\n\nYour sent RFQs are logged in Direct RFQs. Use “Retry package creation” below — supplier emails will not be sent again.`
+      });
+    } finally {
+      setPackageFinalizeBusy(false);
     }
-    setBanner({
-      variant: "success",
-      title: "RFQs dispatched",
-      body: "All RFQs sent and logged — starting a fresh RFQ session."
-    });
   }, [outbound, extraction, deadline, sharedJobDropboxUrl, pdfItems, tradePlan, tradePlanById, resetRfqSession, navigate]);
+
+  const retryPackageSnapshot = useCallback(() => {
+    if (packageFinalizeBusy) return;
+    packageFinalizeFailedRef.current = false;
+    packageFinalizingRef.current = true;
+    void finalizeAllSentPackage();
+  }, [finalizeAllSentPackage, packageFinalizeBusy]);
 
   // Build the base64-encoded PDF attachments (selected plan documents) once per send batch.
   // Cached in planAttachmentsRef so a 20-recipient send doesn't re-read + re-encode the same
@@ -2236,6 +2309,7 @@ export default function RfqEngine() {
     } finally {
       sendInFlightRef.current = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- persistRfqs is stable; adding it would re-create send on every render
   }, [deadline, supabaseConfigured, ensureJobContext, getPlanAttachments]);
 
   // When every non-blocked row is sent (after a real send), build the package + reset — exactly
@@ -2243,6 +2317,7 @@ export default function RfqEngine() {
   useEffect(() => {
     if (!sendHappenedRef.current) return;
     if (packageFinalizingRef.current) return;
+    if (packageFinalizeFailedRef.current) return;
     if (sendInFlightRef.current) return;
     const rows = outbound.filter((r) => r && !r.blocked);
     if (rows.length === 0 || !rows.every((r) => r.sent)) return;
@@ -2296,17 +2371,28 @@ export default function RfqEngine() {
   };
 
   const renderBanner = () => {
-    if (!banner) return null;
+    if (!banner && !packageSnapshotFailed) return null;
     const palette = {
       error: "border-danger/40 bg-danger/10 text-ink",
       warning: "border-warning/60 bg-warning/15 text-ink",
       success: "border-success/40 bg-success/10 text-ink"
     };
+    const variant = banner?.variant || "warning";
 
     return (
-      <div className={`mb-6 rounded-card border px-4 py-3 text-sm ${palette[banner.variant]}`}>
-        <div className="font-semibold">{banner.title}</div>
-        {banner.body ? <p className="mt-2 whitespace-pre-wrap text-muted">{banner.body}</p> : null}
+      <div className={`mb-6 rounded-card border px-4 py-3 text-sm ${palette[variant]}`}>
+        <div className="font-semibold">{banner?.title || "RFQs sent — package snapshot failed"}</div>
+        {banner?.body ? <p className="mt-2 whitespace-pre-wrap text-muted">{banner.body}</p> : null}
+        {packageSnapshotFailed ? (
+          <button
+            type="button"
+            onClick={retryPackageSnapshot}
+            disabled={packageFinalizeBusy}
+            className="mt-3 rounded-lg border border-warning bg-surface px-4 py-2 text-sm font-semibold text-primary shadow-sm hover:bg-page focus-visible:focus-ring disabled:opacity-60"
+          >
+            {packageFinalizeBusy ? "Creating package…" : "Retry package creation"}
+          </button>
+        ) : null}
       </div>
     );
   };

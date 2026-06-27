@@ -70,11 +70,210 @@ export default function PortalV2Admin() {
       <SettingsSection project={project} projectId={projectId} onSaved={(m) => { flash(m); load(); }} />
       <InviteSection projectId={projectId} clients={data?.clients || []} onDone={(m) => { flash(m); load(); }} />
       <UpdateSection projectId={projectId} onDone={flash} />
+      <UpdatesListSection projectId={projectId} onDone={flash} />
       <MilestonesSection projectId={projectId} milestones={data?.milestones || []} onDone={(m) => { flash(m); load(); }} />
       <SelectionsSection projectId={projectId} selections={data?.selections || []} onDone={(m) => { flash(m); load(); }} />
       <MeetingsSection projectId={projectId} meetings={data?.meetings || []} onDone={(m) => { flash(m); load(); }} />
       <DocumentsSection projectId={projectId} onDone={flash} />
+      <RegisterContractSection projectId={projectId} onDone={flash} />
+      <PhotosSection projectId={projectId} milestones={data?.milestones || []} onDone={flash} />
+      <AwaitingSignSection projectId={projectId} />
+      <ClientsSection projectId={projectId} clients={data?.clients || []} onDone={(m) => { flash(m); load(); }} />
     </div>
+  );
+}
+
+function UpdatesListSection({ projectId, onDone }) {
+  const [updates, setUpdates] = useState([]);
+  const [busy, setBusy] = useState(null);
+  const load = useCallback(async () => {
+    const { ok, data } = await apiFetch(`/api/portal/admin/v2/${projectId}/updates`);
+    if (ok) setUpdates(data?.updates || []);
+  }, [projectId]);
+  useEffect(() => { load(); }, [load]);
+  const drafts = updates.filter((u) => !u.published);
+  if (!drafts.length) return null;
+  async function publish(u) {
+    setBusy(u.id);
+    const { ok, error } = await apiPatch(`/api/portal/admin/v2/${projectId}/updates/${u.id}`, { publish: true });
+    setBusy(null);
+    if (ok) { onDone("Update published to the Journey."); load(); } else onDone(error || "Failed");
+  }
+  return (
+    <Section title="Draft updates" desc="Auto-drafted from the site diary — review and publish to the Project Journey.">
+      <div className="space-y-2">
+        {drafts.map((u) => (
+          <div key={u.id} className="flex items-center justify-between gap-2 rounded-lg border border-hairline p-2 text-xs">
+            <span className="min-w-0 flex-1 truncate">{u.headline}{u.weekOf ? ` · ${u.weekOf}` : ""}</span>
+            <button disabled={busy === u.id} onClick={() => publish(u)} className="rounded bg-primary px-2 py-0.5 font-semibold text-white disabled:opacity-50">Publish</button>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function RegisterContractSection({ projectId, onDone }) {
+  const [path, setPath] = useState("");
+  const [title, setTitle] = useState("Building Contract");
+  const [busy, setBusy] = useState(false);
+  const [file, setFile] = useState(null);
+  const [category, setCategory] = useState("contract");
+  async function register() {
+    if (!path.trim()) return;
+    setBusy(true);
+    const { ok, error } = await apiPost(`/api/portal/admin/v2/${projectId}/register-document`, { storagePath: path.trim(), documentType: category, title });
+    setBusy(false);
+    if (ok) { setPath(""); onDone("Document registered — expose it in Documents to share."); } else onDone(error || "Failed");
+  }
+  async function upload() {
+    if (!file) return;
+    setBusy(true);
+    const fileBase64 = await new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
+    const { ok, error } = await apiPost(`/api/portal/admin/v2/${projectId}/upload-document`, { fileBase64, fileName: file.name, category, title, exposeNow: true });
+    setBusy(false);
+    if (ok) { setFile(null); onDone("Document uploaded and shared with the client."); } else onDone(error || "Upload failed");
+  }
+  return (
+    <Section title="Add a document" desc="Upload a file (e.g. the signed contract) — it's filed, registered, and shown in the client's Documents tab. Or register an existing Dropbox file.">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className={`${inputCls} flex-1`} />
+          <select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border border-hairline px-2 py-2 text-sm">
+            {["contract", "plans", "engineering", "permit", "selections", "certificate"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} className="text-xs" />
+          <button disabled={busy || !file} onClick={upload} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Uploading…" : "Upload + share"}</button>
+        </div>
+        <details className="text-xs text-muted">
+          <summary className="cursor-pointer">Or register an existing Dropbox file</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="Dropbox path…" className={`${inputCls} flex-1`} />
+            <button disabled={busy || !path.trim()} onClick={register} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold disabled:opacity-50">Register</button>
+          </div>
+        </details>
+      </div>
+    </Section>
+  );
+}
+
+function PhotosSection({ projectId, milestones, onDone }) {
+  const [photos, setPhotos] = useState([]);
+  const [busy, setBusy] = useState(null);
+  const [up, setUp] = useState({ file: null, caption: "", milestoneKey: "", clientVisible: true, uploading: false });
+  const load = useCallback(async () => {
+    const { ok, data } = await apiFetch(`/api/portal/admin/v2/${projectId}/photos`);
+    if (ok) setPhotos(data?.photos || []);
+  }, [projectId]);
+  useEffect(() => { load(); }, [load]);
+  async function tag(p, patch) {
+    setBusy(p.id);
+    const { ok, error } = await apiPatch(`/api/portal/admin/v2/${projectId}/photos/${p.id}`, patch);
+    setBusy(null);
+    if (ok) { onDone("Photo updated."); load(); } else onDone(error || "Failed");
+  }
+  async function upload() {
+    if (!up.file) return;
+    setUp((s) => ({ ...s, uploading: true }));
+    const imageBase64 = await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.readAsDataURL(up.file);
+    });
+    const { ok, error } = await apiPost(`/api/portal/admin/v2/${projectId}/photos`, {
+      imageBase64, fileName: up.file.name, caption: up.caption, milestoneKey: up.milestoneKey, clientVisible: up.clientVisible,
+    });
+    setUp({ file: null, caption: "", milestoneKey: "", clientVisible: true, uploading: false });
+    if (ok) { onDone("Photo uploaded."); load(); } else onDone(error || "Upload failed");
+  }
+  return (
+    <Section title="Photos" desc="Upload progress photos, tag them to a stage, and mark them client-visible to show on the Project Journey.">
+      <div className="mb-3 space-y-2 rounded-lg border border-dashed border-hairline p-3">
+        <input type="file" accept="image/*" onChange={(e) => setUp((s) => ({ ...s, file: e.target.files?.[0] || null }))} className="block w-full text-xs" />
+        <input value={up.caption} onChange={(e) => setUp((s) => ({ ...s, caption: e.target.value }))} placeholder="Caption (optional)" className={inputCls} />
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <select value={up.milestoneKey} onChange={(e) => setUp((s) => ({ ...s, milestoneKey: e.target.value }))} className="rounded border border-hairline px-2 py-1">
+            <option value="">— stage —</option>
+            {milestones.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+          <label className="flex items-center gap-1"><input type="checkbox" checked={up.clientVisible} onChange={(e) => setUp((s) => ({ ...s, clientVisible: e.target.checked }))} /> Show client</label>
+          <button disabled={!up.file || up.uploading} onClick={upload} className="rounded-lg bg-primary px-4 py-1.5 font-semibold text-white disabled:opacity-50">{up.uploading ? "Uploading…" : "Upload photo"}</button>
+        </div>
+      </div>
+      {photos.length === 0 ? <p className="text-xs text-muted">No photos for this project yet.</p> : (
+        <div className="space-y-2">
+          {photos.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline p-2 text-xs">
+              <span className="min-w-0 flex-1 truncate">{p.caption || "(untitled)"}{p.takenAt ? ` · ${String(p.takenAt).slice(0, 10)}` : ""}</span>
+              <select defaultValue={p.milestoneKey || ""} onChange={(e) => tag(p, { milestoneKey: e.target.value })} className="rounded border border-hairline px-1 py-0.5">
+                <option value="">— stage —</option>
+                {milestones.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              </select>
+              <button disabled={busy === p.id} onClick={() => tag(p, { clientVisible: true })} className="rounded bg-primary px-2 py-0.5 font-semibold text-white disabled:opacity-50">Show client</button>
+              <button disabled={busy === p.id} onClick={() => tag(p, { clientVisible: false })} className="rounded border border-hairline px-2 py-0.5 disabled:opacity-50">Hide</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function AwaitingSignSection({ projectId }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { ok, data } = await apiFetch(`/api/portal/admin/v2/${projectId}/awaiting-sign`);
+      if (active && ok) setItems(data?.awaitingSign || []);
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+  if (!items.length) return null;
+  return (
+    <Section title="Client-approved — awaiting your signature" desc="The client approved these in the portal. Sign them in Finance to update the contract value.">
+      <div className="space-y-1">
+        {items.map((v) => (
+          <div key={v.decisionId} className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+            <span>Variation #{v.variationNumber} — {v.title}</span>
+            <span className="font-semibold">{v.amountIncGst != null ? `$${Number(v.amountIncGst).toLocaleString()} inc GST` : ""}</span>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function ClientsSection({ projectId, clients, onDone }) {
+  const [busy, setBusy] = useState(null);
+  if (!clients.length) return null;
+  async function setActive(c, isActive) {
+    const userId = c.userId || c.user_id;
+    if (!userId) return;
+    setBusy(userId);
+    const { ok, error } = await apiPatch(`/api/portal/admin/v2/${projectId}/client-users/${userId}/active`, { isActive });
+    setBusy(null);
+    if (ok) onDone(isActive ? "Client access restored." : "Client access revoked."); else onDone(error || "Failed");
+  }
+  return (
+    <Section title="Client access" desc="Revoke or restore a client's portal access (takes effect immediately).">
+      <div className="space-y-1">
+        {clients.map((c) => {
+          const userId = c.userId || c.user_id;
+          const revoked = c.isActive === false || c.is_active === false;
+          return (
+            <div key={userId} className="flex items-center justify-between rounded-lg border border-hairline px-3 py-2 text-xs">
+              <span>{c.fullName || c.full_name || c.email}{c.role ? ` · ${c.role}` : ""}{revoked ? " · revoked" : ""}</span>
+              {revoked
+                ? <button disabled={busy === userId} onClick={() => setActive(c, true)} className="rounded bg-primary px-2 py-0.5 font-semibold text-white disabled:opacity-50">Restore</button>
+                : <button disabled={busy === userId} onClick={() => setActive(c, false)} className="rounded border border-red-300 px-2 py-0.5 text-red-600 disabled:opacity-50">Revoke</button>}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
   );
 }
 
@@ -222,7 +421,7 @@ function InviteSection({ projectId, clients, onDone }) {
 }
 
 function UpdateSection({ projectId, onDone }) {
-  const [f, setF] = useState({ headline: "", body: "", builderReasoning: "", schedulePhase: "" });
+  const [f, setF] = useState({ headline: "", body: "", builderReasoning: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -233,7 +432,7 @@ function UpdateSection({ projectId, onDone }) {
     const { ok, error } = await apiPost(`/api/portal/admin/v2/${projectId}/updates`, { ...f, publish: true });
     setBusy(false);
     if (!ok) { setErr(error); return; }
-    setF({ headline: "", body: "", builderReasoning: "", schedulePhase: "" });
+    setF({ headline: "", body: "", builderReasoning: "" });
     onDone("Update published.");
   }
 
@@ -243,7 +442,6 @@ function UpdateSection({ projectId, onDone }) {
         <input value={f.headline} onChange={set("headline")} placeholder="Headline" className={inputCls} />
         <textarea value={f.body} onChange={set("body")} placeholder="This week…" rows={3} className={inputCls} />
         <textarea value={f.builderReasoning} onChange={set("builderReasoning")} placeholder="Why we did it this way (optional)" rows={2} className={inputCls} />
-        <input value={f.schedulePhase} onChange={set("schedulePhase")} placeholder="Stage key (e.g. frame) — links to a journey stage" className={inputCls} />
         {err ? <p className="text-xs text-red-600">{err}</p> : null}
         <button disabled={busy} onClick={publish} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
           {busy ? "Publishing…" : "Publish update"}

@@ -3,6 +3,29 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getSupabase } from "../lib/supabaseClient.js";
 import { generateMissingPackageScopes } from "../lib/rfqTradeIntelligence.js";
+import {
+  packageProjectAddress,
+  packageProjectType,
+  packageTenderDeadline,
+  packageArchitectClient,
+  packageDropboxUrl,
+  packageCoverageScore,
+  packageTradeScopes,
+  packageAddenda,
+  packageSuggestedTrades,
+  packageTradeCoverage,
+  packageMissingTradeAnalysis,
+  packageMetaField,
+  scopeRecipients,
+  scopeTradeLabel,
+  scopeTradeId,
+  scopeBullets,
+  scopeDueDate,
+  scopeInternalNotes,
+  scopeContractorNotes,
+  recipientFollowUpDue,
+  recipientFollowUpSentAt,
+} from "../lib/rfqPackageUtils.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -68,12 +91,12 @@ function fmtCurrency(n) {
 // ── Scope editor modal ───────────────────────────────────────────────────────
 
 function ScopeEditorModal({ scope, onClose, onSave }) {
-  const [bullets, setBullets] = useState((scope.scope_bullets || []).join("\n"));
+  const [bullets, setBullets] = useState(scopeBullets(scope).join("\n"));
   const [exclusions, setExclusions] = useState((scope.exclusions || []).join("\n"));
   const [questions, setQuestions] = useState((scope.questions || []).join("\n"));
-  const [contractorNotes, setContractorNotes] = useState(scope.contractor_notes || "");
-  const [internalNotes, setInternalNotes] = useState(scope.internal_notes || "");
-  const [dueDate, setDueDate] = useState(scope.due_date || "");
+  const [contractorNotes, setContractorNotes] = useState(scopeContractorNotes(scope));
+  const [internalNotes, setInternalNotes] = useState(scopeInternalNotes(scope));
+  const [dueDate, setDueDate] = useState(scopeDueDate(scope));
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -94,7 +117,7 @@ function ScopeEditorModal({ scope, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
       <div className="w-full max-w-2xl rounded-card border border-hairline bg-surface shadow-xl overflow-y-auto max-h-[90vh]">
         <div className="flex items-center justify-between border-b border-hairline px-5 py-4">
-          <h2 className="section-title">Edit scope — {scope.trade_label}</h2>
+          <h2 className="section-title">Edit scope — {scopeTradeLabel(scope)}</h2>
           <button type="button" onClick={onClose} className="text-muted hover:text-ink text-xl leading-none">×</button>
         </div>
         <div className="p-5 space-y-4">
@@ -178,7 +201,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
   const [selected, setSelected] = useState([]);
   const [manualEmail, setManualEmail] = useState("");
   const [manualName, setManualName] = useState("");
-  const [emailSubject, setEmailSubject] = useState(`RFQ — ${scope.trade_label} at ${pkg.project_address}`);
+  const [emailSubject, setEmailSubject] = useState(`RFQ — ${scopeTradeLabel(scope)} at ${packageProjectAddress(pkg)}`);
   const [emailBody, setEmailBody] = useState(buildDefaultBody(scope, pkg));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
@@ -202,14 +225,14 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
   }, []);
 
   function buildDefaultBody(s, p) {
-    const bullets = (s.scope_bullets || []).map((b) => `- ${b}`).join("\n");
+    const bullets = scopeBullets(s).map((b) => `- ${b}`).join("\n");
     const exclusions = (s.exclusions || []).length ? `\nExclusions:\n${s.exclusions.map((e) => `- ${e}`).join("\n")}` : "";
     const questions = (s.questions || []).length ? `\nPlease clarify:\n${s.questions.map((q) => `- ${q}`).join("\n")}` : "";
-    const due = s.due_date || p.tender_deadline || "";
+    const due = scopeDueDate(s) || packageTenderDeadline(p) || "";
     return [
       `Hi,`,
       ``,
-      `Please find below the scope for ${s.trade_label} at ${p.project_address}.`,
+      `Please find below the scope for ${scopeTradeLabel(s)} at ${packageProjectAddress(p)}.`,
       ``,
       `Scope of works:`,
       bullets,
@@ -218,7 +241,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
       ``,
       due ? `Please submit your quote by ${due}.` : "",
       ``,
-      s.contractor_notes || "",
+      s.contractor_notes || scopeContractorNotes(s) || "",
       ``,
       "Please include all labour, materials, cartage, and equipment unless specifically excluded.",
       ``,
@@ -249,7 +272,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
     setSending(true);
     setError(null);
     try {
-      const res = await authFetch(`/api/rfq-packages/${pkg.id}/scopes/${scope.trade_id}/send`, {
+      const res = await authFetch(`/api/rfq-packages/${pkg.id}/scopes/${scopeTradeId(scope)}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -260,7 +283,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
           })),
           email_subject: emailSubject,
           email_body: emailBody,
-          due_date: scope.due_date || pkg.tender_deadline || ""
+          due_date: scopeDueDate(scope) || packageTenderDeadline(pkg) || ""
         })
       });
       const j = await res.json();
@@ -278,7 +301,7 @@ function SendRfqModal({ scope, pkg, onClose, onSent }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
       <div className="w-full max-w-3xl rounded-card border border-hairline bg-surface shadow-xl flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between border-b border-hairline px-5 py-4">
-          <h2 className="section-title">Send additional RFQ — {scope.trade_label}</h2>
+          <h2 className="section-title">Send additional RFQ — {scopeTradeLabel(scope)}</h2>
           <button type="button" onClick={onClose} className="text-muted hover:text-ink text-xl leading-none">×</button>
         </div>
         <div className="flex flex-1 min-h-0 divide-x divide-hairline">
@@ -504,11 +527,11 @@ function AddendumModal({ pkg, scopes, onClose, onAdded }) {
                 <label key={s.id} className="flex items-center gap-2 rounded-lg border border-hairline px-3 py-2 cursor-pointer hover:bg-page text-sm">
                   <input
                     type="checkbox"
-                    checked={affected.includes(s.trade_id)}
-                    onChange={(e) => setAffected((prev) => e.target.checked ? [...prev, s.trade_id] : prev.filter((t) => t !== s.trade_id))}
+                    checked={affected.includes(scopeTradeId(s))}
+                    onChange={(e) => setAffected((prev) => e.target.checked ? [...prev, scopeTradeId(s)] : prev.filter((t) => t !== scopeTradeId(s)))}
                     className="accent-primary"
                   />
-                  {s.trade_label}
+                  {scopeTradeLabel(s)}
                 </label>
               ))}
             </div>
@@ -539,7 +562,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
   const [quoteModal, setQuoteModal] = useState(null);
   const [followUpBusy, setFollowUpBusy] = useState(false);
 
-  const recipients = scope.rfq_recipients || [];
+  const recipients = scopeRecipients(scope);
   const sent = recipients.filter((r) => ["sent", "followed_up", "received", "accepted"].includes(r.status));
   const received = recipients.filter((r) => ["received", "accepted"].includes(r.status));
   const lowestQuote = received.reduce((min, r) => (r.quote_amount && (!min || r.quote_amount < min) ? r.quote_amount : min), null);
@@ -583,7 +606,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
           className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-page transition"
           onClick={() => setExpanded((v) => !v)}
         >
-          <span className="flex-1 font-semibold text-sm text-ink">{scope.trade_label}</span>
+          <span className="flex-1 font-semibold text-sm text-ink">{scopeTradeLabel(scope)}</span>
           <Badge label={scope.status} colorClass={SCOPE_STATUS_COLOR[scope.status] || "bg-slate-100 text-slate-500"} />
           <div className="flex items-center gap-3 text-xs text-muted">
             <span>{recipients.length} recipient{recipients.length !== 1 ? "s" : ""}</span>
@@ -598,11 +621,11 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
         {expanded && (
           <div className="border-t border-hairline">
             {/* Scope bullets */}
-            {(scope.scope_bullets || []).length > 0 && (
+            {scopeBullets(scope).length > 0 && (
               <div className="px-4 py-3 border-b border-hairline">
                 <p className="section-label mb-2">Scope</p>
                 <ul className="space-y-1">
-                  {scope.scope_bullets.map((b, i) => (
+                  {scopeBullets(scope).map((b, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-ink">
                       <span className="mt-1 shrink-0 w-1.5 h-1.5 rounded-full bg-primary/50" />
                       {b}
@@ -617,9 +640,9 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
                     </ul>
                   </div>
                 )}
-                {scope.internal_notes && (
+                {scopeInternalNotes(scope) && (
                   <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    <span className="font-semibold">Internal note:</span> {scope.internal_notes}
+                    <span className="font-semibold">Internal note:</span> {scopeInternalNotes(scope)}
                   </div>
                 )}
               </div>
@@ -656,7 +679,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
                           <div>{r.email}</div>
                           {r.sent_at && <div>Sent {fmtDate(r.sent_at)}</div>}
                           {r.quote_exclusions && <div className="text-amber-700">Excl: {r.quote_exclusions}</div>}
-                          {r.follow_up_sent_at && <div>Followed up {fmtDate(r.follow_up_sent_at)}</div>}
+                          {recipientFollowUpSentAt(r) && <div>Followed up {fmtDate(recipientFollowUpSentAt(r))}</div>}
                         </div>
                       </div>
                       <div className="flex gap-1 shrink-0">
@@ -723,7 +746,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
             <div className="flex flex-wrap gap-2 px-4 py-3">
               <button type="button" onClick={() => setEditModal(true)} className="text-xs font-semibold rounded-lg border border-hairline px-3 py-1.5 hover:bg-page">Edit scope</button>
               <button type="button" onClick={() => setSendModal(true)} className="text-xs font-semibold rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-primary hover:bg-primary/10">+ Send additional RFQ</button>
-              {scope.due_date && <span className="text-xs text-muted self-center">Due: {scope.due_date}</span>}
+              {scopeDueDate(scope) && <span className="text-xs text-muted self-center">Due: {scopeDueDate(scope)}</span>}
             </div>
           </div>
         )}
@@ -733,7 +756,7 @@ function TradeCard({ scope, pkg, onPatch, onRefresh }) {
         <ScopeEditorModal
           scope={scope}
           onClose={() => setEditModal(false)}
-          onSave={(patch) => onPatch(scope.trade_id, patch)}
+          onSave={(patch) => onPatch(scopeTradeId(scope), patch)}
         />
       )}
       {sendModal && (
@@ -859,28 +882,29 @@ export default function RfqPackageDetail() {
     <div className="rounded-card border border-danger/30 bg-danger/5 p-6 text-sm text-danger">{error || "Package not found"}</div>
   );
 
-  const scopes = (pkg.rfq_trade_scopes || []).sort((a, b) => a.trade_label.localeCompare(b.trade_label));
-  const addenda = (pkg.rfq_addenda || []).sort((a, b) => a.number - b.number);
-  const suggested = pkg.suggested_trades || [];
-  const tradeCoverage = pkg.trade_coverage || {};
-  const coveragePct = tradeCoverage.percent ?? pkg.coverage_score ?? 0;
+  const scopes = packageTradeScopes(pkg).sort((a, b) => scopeTradeLabel(a).localeCompare(scopeTradeLabel(b)));
+  const addenda = packageAddenda(pkg).sort((a, b) => a.number - b.number);
+  const suggested = packageSuggestedTrades(pkg);
+  const tradeCoverage = packageTradeCoverage(pkg);
+  const coveragePct = tradeCoverage.percent ?? packageCoverageScore(pkg);
   const coveredTrades = tradeCoverage.covered || [];
   const missingTrades =
-    (tradeCoverage.missing?.length ? tradeCoverage.missing : pkg.missing_trade_analysis) || [];
+    (tradeCoverage.missing?.length ? tradeCoverage.missing : packageMissingTradeAnalysis(pkg)) || [];
   const missingToGenerate = missingTrades.filter((m) =>
     (m.actions || []).includes("generate_rfq")
   );
 
-  const totalRecipients = scopes.reduce((n, s) => n + (s.rfq_recipients?.length || 0), 0);
-  const totalSent = scopes.reduce((n, s) => n + (s.rfq_recipients || []).filter((r) => ["sent", "followed_up", "received", "accepted"].includes(r.status)).length, 0);
-  const totalReceived = scopes.reduce((n, s) => n + (s.rfq_recipients || []).filter((r) => ["received", "accepted"].includes(r.status)).length, 0);
+  const totalRecipients = scopes.reduce((n, s) => n + scopeRecipients(s).length, 0);
+  const totalSent = scopes.reduce((n, s) => n + scopeRecipients(s).filter((r) => ["sent", "followed_up", "received", "accepted"].includes(r.status)).length, 0);
+  const totalReceived = scopes.reduce((n, s) => n + scopeRecipients(s).filter((r) => ["received", "accepted"].includes(r.status)).length, 0);
   const totalPending = totalSent - totalReceived;
 
   const followUpCandidates = scopes.flatMap((s) =>
-    (s.rfq_recipients || []).filter((r) => {
+    scopeRecipients(s).filter((r) => {
       if (!["sent", "followed_up"].includes(r.status)) return false;
-      if (!r.follow_up_due) return false;
-      return new Date(r.follow_up_due) < new Date();
+      const due = recipientFollowUpDue(r);
+      if (!due) return false;
+      return new Date(due) < new Date();
     })
   );
 
@@ -913,7 +937,7 @@ export default function RfqPackageDetail() {
                 <label className="section-label block mb-1">{label}</label>
                 <input
                   type="text"
-                  defaultValue={pkg[key] || ""}
+                  defaultValue={packageMetaField(pkg, key) || ""}
                   onChange={(e) => setMetaDraft((d) => ({ ...d, [key]: e.target.value }))}
                   className="w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm focus:border-primary focus:outline-none"
                 />
@@ -930,15 +954,15 @@ export default function RfqPackageDetail() {
           <div className="flex items-start gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="page-title">{pkg.project_address || "Unnamed project"}</h1>
+                <h1 className="page-title">{packageProjectAddress(pkg)}</h1>
                 <Badge label={pkg.status} colorClass={pkg.status === "active" ? "bg-primary/10 text-primary" : "bg-slate-100 text-muted"} />
               </div>
               <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted">
-                {pkg.tender_deadline && <span>📅 Tender due <strong className="text-ink">{pkg.tender_deadline}</strong></span>}
-                {pkg.architect_client && <span>🏛 {pkg.architect_client}</span>}
-                {pkg.project_type && <span>🏠 {pkg.project_type}</span>}
-                {pkg.dropbox_url && (
-                  <a href={pkg.dropbox_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+                {packageTenderDeadline(pkg) && <span>📅 Tender due <strong className="text-ink">{packageTenderDeadline(pkg)}</strong></span>}
+                {packageArchitectClient(pkg) && <span>🏛 {packageArchitectClient(pkg)}</span>}
+                {packageProjectType(pkg) && <span>🏠 {packageProjectType(pkg)}</span>}
+                {packageDropboxUrl(pkg) && (
+                  <a href={packageDropboxUrl(pkg)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
                     📁 Dropbox
                   </a>
                 )}

@@ -8,6 +8,7 @@ import { loadNotificationPrefs, saveNotificationPrefs } from "../lib/notificatio
 import { loadCompanySettings, persistCompanyLogoDataUrl, saveCompanySettings } from "../lib/companySettings.js";
 import AICostWidget from "../components/settings/AICostWidget.jsx";
 import CompanyCostModel from "../components/settings/CompanyCostModel.jsx";
+import RolePreviewConsole from "../components/settings/RolePreviewConsole.jsx";
 const BE_UI_STORAGE = "blhub_buildexact_ui_v1";
 
 async function syncUserSetting(key, value) {
@@ -558,6 +559,8 @@ export default function Settings() {
       <ResendIntegrationSection status={status} />
 
       <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
+
+      <RolePreviewConsole />
     </div>
   );
 }

@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { apiFetch, apiPost } from "./apiFetch.js";
+import { apiFetch, apiPost, apiPatch } from "./apiFetch.js";
 
 const APP_BASE = "/api/portal/app";
 
@@ -40,6 +40,14 @@ export function portalGet(projectId, path) {
  */
 export function portalPost(projectId, path, body = {}) {
   return apiPost(appUrl(projectId, path), body);
+}
+
+/**
+ * PATCH /api/portal/app/:projectId/<path> with a JSON body.
+ * @returns {Promise<{ ok: boolean, data: object|null, error: string|null }>}
+ */
+export function portalPatch(projectId, path, body = {}) {
+  return apiPatch(appUrl(projectId, path), body);
 }
 
 // ─── Session / projectId resolution ────────────────────────────────────────────

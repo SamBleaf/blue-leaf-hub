@@ -60,6 +60,13 @@ await check("103 portal_notifications.dedup_day", () => columnExists("portal_not
 console.log("\n── Migration 104 — RLS hardening ──");
 await check("104 auth_is_staff() function", () => fnExists("auth_is_staff"));
 
+console.log("\n── Migration 105 / 108 — follow-ups ──");
+await check("105 projects.payment_instructions", () => columnExists("projects", "payment_instructions"));
+// 108 adds paid_to_date in the SAME migration that widens the portal_decisions /
+// portal_claims status CHECKs (→ 'withdrawn' / 'void' / 'partially_paid'). So if
+// paid_to_date exists, 108 is applied — the void/partial-pay sync paths are live.
+await check("108 portal_claims.paid_to_date", () => columnExists("portal_claims", "paid_to_date"));
+
 console.log("\n════════════════════════════════════════");
 console.log(`  ${ok} present, ${missing} missing`);
 if (missing) {

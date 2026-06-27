@@ -89,6 +89,11 @@ export function registerAuthRoutes(app) {
       const { email, fullName, role, projectId, employeeId } = req.body || {};
       if (!isValidEmail(email)) return res.status(400).json({ error: "Valid email required." });
       if (!ROLES.includes(role)) return res.status(400).json({ error: "Invalid role." });
+      // A client login only exists in the context of a project portal — without a
+      // projectId the account is orphaned (no project_client_users row can be made).
+      if (role === "client" && !projectId) {
+        return res.status(400).json({ error: "A client invitation must specify a project." });
+      }
 
       const emailNorm = String(email).trim().toLowerCase();
 
@@ -104,10 +109,22 @@ export function registerAuthRoutes(app) {
 
       const { data: existingUser } = await sb
         .from("user_profiles")
-        .select("id")
+        .select("id, role")
         .eq("email", emailNorm)
         .maybeSingle();
       if (existingUser) {
+        // Repeat client: an existing client owner taking on a SECOND project — link
+        // them straight to the new project (they already have a login, no new invite
+        // email needed) instead of hard-409'ing. Makes the multi-project portal real.
+        if (role === "client" && projectId && existingUser.role === "client") {
+          const { error: linkErr } = await sb.from("project_client_users").upsert(
+            { project_id: projectId, user_id: existingUser.id, role: "primary", is_active: true, invite_accepted_at: new Date().toISOString() },
+            { onConflict: "project_id,user_id" }
+          );
+          if (linkErr) return res.status(500).json({ error: "Could not link the existing client to this project." });
+          await sb.from("projects").update({ portal_enabled: true, portal_v2_enabled: true }).eq("id", projectId);
+          return res.json({ ok: true, linkedExisting: true, message: "Existing client linked to this project." });
+        }
         return res.status(409).json({ error: "A user with this email already exists." });
       }
 
@@ -335,32 +352,41 @@ If you weren't expecting this, you can ignore this email.
         .eq("id", inv.id);
 
       if (inv.project_id && inv.role === "client") {
+        // Enable the portal for this project. A client invite is inherently the v2
+        // (logged-in) portal, so flip BOTH flags — without portal_enabled the
+        // project is filtered out of my-projects, and without portal_v2_enabled
+        // requirePortalAuth 403s every v2 route. Missing either = "No project linked".
         await sb
           .from("projects")
-          .update({ portal_client_email: inv.email, portal_client_name: String(fullName).trim() })
+          .update({
+            portal_client_email: inv.email,
+            portal_client_name: String(fullName).trim(),
+            portal_enabled: true,
+            portal_v2_enabled: true
+          })
           .eq("id", inv.project_id);
 
         // Portal v2: link this client account to the project. requirePortalAuth's
         // JWT path checks project_client_users(user_id, project_id) — without this
         // row the client would log in but get 403 on every portal route.
-        // Tolerate the table not existing yet (migration 103 not applied) so the
-        // existing token portal keeps working.
-        try {
-          await sb
-            .from("project_client_users")
-            .upsert(
-              {
-                project_id: inv.project_id,
-                user_id: user.id,
-                role: "primary",
-                is_active: true,
-                invited_at: inv.created_at || null,
-                invite_accepted_at: new Date().toISOString()
-              },
-              { onConflict: "project_id,user_id" }
-            );
-        } catch (linkErr) {
-          console.warn("[accept-invite] project_client_users link skipped:", linkErr?.message || linkErr);
+        // supabase-js v2 returns { error } (never throws), so check it explicitly —
+        // a swallowed error here is exactly how a client ends up stranded at 403.
+        const { error: linkErr } = await sb
+          .from("project_client_users")
+          .upsert(
+            {
+              project_id: inv.project_id,
+              user_id: user.id,
+              role: "primary",
+              is_active: true,
+              invited_at: inv.created_at || null,
+              invite_accepted_at: new Date().toISOString()
+            },
+            { onConflict: "project_id,user_id" }
+          );
+        if (linkErr) {
+          console.error("[accept-invite] project_client_users link FAILED:", linkErr.message);
+          return res.status(500).json({ error: "We couldn't finish linking your account to your project. Please contact Blue Leaf Building." });
         }
       }
 

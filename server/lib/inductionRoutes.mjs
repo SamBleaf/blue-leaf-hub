@@ -1,10 +1,5 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
-import {
-  getDropboxAccessToken,
-  dropboxUploadBuffer,
-  sharedJobRootPath,
-  ensureParentFoldersForFile
-} from "./dropboxClient.mjs";
+import { fileJobRecord } from "./jobRecordsFiler.mjs";
 import { buildInductionPdfBuffer } from "./module6PdfKit.mjs";
 
 function norm(s) {
@@ -135,13 +130,10 @@ export function registerInductionRoutes(app) {
 
       let induction_pdf_path = null;
       try {
-        const token = await getDropboxAccessToken();
-        const rel = `${sharedJobRootPath(proj.address)}/WHS/INDUCTIONS/${safeFileSegment(personName)}-${day}.pdf`;
-        await ensureParentFoldersForFile(token, rel);
-        await dropboxUploadBuffer(token, rel, pdfBuf, { autorename: true });
-        induction_pdf_path = rel;
+        const filed = await fileJobRecord({ jobAddress: proj.address, category: "induction", fileName: `${safeFileSegment(personName)}-${day}.pdf`, buffer: pdfBuf });
+        if (filed?.ok) induction_pdf_path = filed.storagePath;
       } catch (err) {
-        console.warn("[induction/submit] Dropbox:", err?.message || err);
+        console.warn("[induction/submit] records filing:", err?.message || err);
       }
 
       const { error: ie } = await sb.from("site_inductions").insert({

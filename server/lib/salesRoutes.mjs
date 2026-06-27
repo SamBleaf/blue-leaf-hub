@@ -13,11 +13,34 @@ import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { setFact } from "./factsService.mjs";
 import { recomputeReferralRollup } from "./crmRoutes.mjs";
+import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import {
   dropboxConfigured,
   ensureJobFolderStructure,
   backfillLeadDataToJobFolder,
 } from "./dropboxClient.mjs";
+
+// W01-DRIFT-003 (SAM-W02-002): stage gates are ADVISORY during hardening — never
+// hard-blocked server-side, but a bypass is logged + surfaced (non-breaking) so it is
+// observable. Mirror of the frontend GATE_REQUIREMENTS in LeadDetail.jsx.
+const STAGE_GATES = {
+  discovery:     [{ label: "Qualifying score ≥ 5",      check: l => (l.qualify_score || 0) >= 5 }],
+  winning_offer: [
+    { label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim() },
+    { label: "Design stage set",        check: l => !!l.design_stage },
+    { label: "Desired start date set",  check: l => !!l.desired_start_date },
+  ],
+  fee_proposal:  [{ label: "Pre-construction fee set",  check: l => l.preconstruction_fee != null }],
+  tender:        [
+    { label: "Site address set",        check: l => !!l.site_address?.trim() },
+    { label: "Job created from lead",   check: l => !!l.job_id },
+  ],
+};
+
+function evaluateStageGate(targetStage, mergedLead) {
+  const gates = STAGE_GATES[targetStage] || [];
+  return gates.filter(g => !g.check(mergedLead)).map(g => g.label);
+}
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -535,7 +558,7 @@ export function registerSalesRoutes(app) {
     const insert = { ...body, created_at: now, updated_at: now, stage: body.stage || "enquiry", stage_entered_at: now, last_activity_at: now };
     const { data, error } = await sb.from("leads").insert(insert).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
-    await sb.from("lead_activities").insert({ lead_id: data.id, activity_type: "note", summary: "Lead created" });
+    await insertLeadCreatedActivity(sb, data.id);
     res.json({ ok: true, lead: data });
   });
 
@@ -552,19 +575,37 @@ export function registerSalesRoutes(app) {
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     const updates = { ...body, updated_at: new Date().toISOString() };
-    const { data: current } = await sb.from("leads").select("stage").eq("id", req.params.id).single();
+    const { data: current } = await sb
+      .from("leads")
+      .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, job_id")
+      .eq("id", req.params.id)
+      .single();
+    let gateWarnings = [];
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
+      const outcomeDate = new Date().toISOString().slice(0, 10);
       updates.stage_entered_at = new Date().toISOString();
       updates.last_activity_at = new Date().toISOString();
+      if (updates.stage === "won" && !current.won_at) {
+        updates.won_at = outcomeDate;
+      }
+      if (updates.stage === "lost" && !current.lost_at) {
+        updates.lost_at = outcomeDate;
+      }
+      // W01-DRIFT-003 (SAM-W02-002): advisory gate check — log + surface, never block.
+      gateWarnings = evaluateStageGate(updates.stage, { ...current, ...updates });
+      if (gateWarnings.length) {
+        console.warn(`[gate-bypass] lead ${req.params.id} ${current.stage}→${updates.stage} missing: ${gateWarnings.join("; ")}`);
+      }
       await sb.from("lead_activities").insert({
         lead_id: req.params.id,
         activity_type: "stage_change",
-        summary: `Moved from ${current.stage} to ${updates.stage}`
+        summary: `Moved from ${current.stage} to ${updates.stage}`,
+        detail: gateWarnings.length ? `Gate bypass — missing: ${gateWarnings.join("; ")}` : null
       });
     }
     const { data, error } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
-    res.json({ ok: true, lead: data });
+    res.json({ ok: true, lead: data, gateWarnings });
   });
 
   // ── Lead → Job conversion (Phase 2: non-lossy, server-side, provenance-stamped) ──
@@ -753,6 +794,10 @@ export function registerSalesRoutes(app) {
         console.warn("[ptsa/mark-signed] Dropbox orchestration skipped:", e?.message || e);
       }
 
+      // When job creation failed (missing site_address), flag it so the frontend can
+      // show a hard warning and block tender handoff (SAM-W03-001 Option B).
+      if (!provisioning.jobId) provisioning.siteAddressWarning = true;
+
       // Return the freshly-stamped lead + a soft provisioning summary.
       const { data: finalLead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
       return ok(res, { lead: rowToCamel(finalLead || lead), provisioning });
@@ -870,7 +915,7 @@ export function registerSalesRoutes(app) {
         }
       }
 
-      const LEAD_FIELDS = ["first_name","last_name","email","phone","suburb"];
+      const LEAD_FIELDS = ["name","first_name","last_name","email","phone","suburb","site_address"];
       const PROJECT_FIELDS = ["project_type","estimated_value","floor_area_estimate","design_stage","desired_start_date","discovery_notes"];
       const QUALIFY_FIELDS = ["qualify_budget","qualify_timeframe","qualify_site","qualify_decision_maker"];
       const WINNING_FIELDS = ["preconstruction_fee","inclusions_summary"];

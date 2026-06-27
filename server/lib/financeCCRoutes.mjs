@@ -23,9 +23,13 @@ import {
   syncVariationSent,
   syncVariationSigned,
   syncVariationRejected,
+  syncVariationVoided,
   syncClaimIssued,
-  syncClaimPaid
+  syncClaimPaid,
+  syncClaimVoided,
+  syncClaimDisputed
 } from "./portalIntegration.mjs";
+import { fileJobRecord } from "./jobRecordsFiler.mjs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -1265,6 +1269,21 @@ export function registerFinanceCCRoutes(app) {
     // Portal v2: surface this claim in the client's portal + My Actions feed.
     await syncClaimIssued({ jobId, claim: updated, stageLabel: STAGE_LABELS[updated.stage] || updated.stage }).catch(() => {});
 
+    // Records: file both claim PDFs into INTERNAL/PROGRESS CLAIMS. The client PDF is
+    // registered as a job_document (portal-exposable); the internal one is record-only.
+    const claimSafeAddr = (job.address || "").replace(/[^a-zA-Z0-9]/g, "-");
+    await fileJobRecord({
+      jobAddress: job.address, jobId, category: "progress_claim",
+      fileName: `Progress-Claim-${claim.claim_number}-${claimSafeAddr}.pdf`,
+      buffer: clientPdf, register: true, exposeToPortal: true,
+      title: `Progress Claim #${claim.claim_number} — ${STAGE_LABELS[updated.stage] || updated.stage}`,
+    }).catch(() => {});
+    await fileJobRecord({
+      jobAddress: job.address, jobId, category: "progress_claim",
+      fileName: `Progress-Claim-${claim.claim_number}-${claimSafeAddr}-INTERNAL.pdf`,
+      buffer: internalPdf,
+    }).catch(() => {});
+
     // Email client PDF if address provided
     let emailSent = false;
     let trackingId = null;
@@ -1326,6 +1345,11 @@ export function registerFinanceCCRoutes(app) {
       .select("*, progress_claim_payments(payment_amount)")
       .eq("id", claimId).single();
     if (!claim) return res.status(404).json({ ok: false, error: "Not found" });
+    // Never accept payment on a cancelled/disputed claim — otherwise syncClaimPaid
+    // would overwrite the void and flip the client's cancelled invoice to 'paid'.
+    if (["void", "disputed"].includes(claim.status)) {
+      return res.status(400).json({ ok: false, error: `Cannot record payment on a ${claim.status} claim.` });
+    }
 
     await sb.from("progress_claim_payments").insert({
       progress_claim_id: claimId,
@@ -1364,6 +1388,28 @@ export function registerFinanceCCRoutes(app) {
       .update(voidUpdate)
       .eq("id", claimId).select().single();
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    // Portal v2: withdraw the claim from the client so they can't pay a voided invoice.
+    await syncClaimVoided({ claimId }).catch(() => {});
+
+    res.json({ ok: true, claim: data });
+  });
+
+  // ── Dispute claim ─────────────────────────────────────────────────────────────
+  app.post("/api/finance/jobs/:jobId/claims/:claimId/dispute", requireAuth, async (req, res) => {
+    const { claimId } = req.params;
+    const { reason } = req.body || {};
+    const sb = getServiceSupabase();
+    const update = { status: "disputed", updated_at: new Date().toISOString() };
+    if (reason) update.description = `DISPUTED: ${reason}`;
+    const { data, error } = await sb.from("progress_claims")
+      .update(update)
+      .eq("id", claimId).select().single();
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    // Portal v2: mark disputed + remove the live pay button while under review.
+    await syncClaimDisputed({ claimId, reason }).catch(() => {});
+
     res.json({ ok: true, claim: data });
   });
 
@@ -1909,6 +1955,19 @@ export function registerFinanceCCRoutes(app) {
     // Portal v2: surface this variation in the client's My Actions feed for approval.
     await syncVariationSent({ jobId, variation: updated }).catch(() => {});
 
+    // Records: file the variation PDF into INTERNAL/VARIATIONS and register it as a
+    // job_document — a permanent record AND now exposable to the client portal.
+    await fileJobRecord({
+      jobAddress: job.address,
+      jobId,
+      category: "variation",
+      fileName: `Variation-${variation.variation_number}-${(job.address || "").replace(/[^a-zA-Z0-9]/g, "-")}.pdf`,
+      buffer: pdfBuffer,
+      register: true,
+      exposeToPortal: true,
+      title: `Variation #${variation.variation_number} — ${variation.title || ""}`.trim(),
+    }).catch(() => {});
+
     let emailSent = false;
     let trackingId = null;
     if (email_to) {
@@ -2007,6 +2066,10 @@ export function registerFinanceCCRoutes(app) {
       .update({ status: "void", updated_at: new Date().toISOString() })
       .eq("id", vid).select().single();
     if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+
+    // Portal v2: withdraw the variation from the client so they can't approve a cancelled one.
+    await syncVariationVoided({ variationId: vid }).catch(() => {});
+
     res.json({ ok: true, variation: data });
   });
 

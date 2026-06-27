@@ -245,6 +245,12 @@ export default function AppShell() {
 
   const activeDept = DEPARTMENTS.find((d) => d.id === activeDeptId);
 
+  // Pass 3A Polish: on a lead-detail page the page shows its own sticky primary action
+  // (and an in-page Blueprint Insight panel). Collapse the global FABs there on
+  // mobile/tablet so they don't collide/compete with the sticky bar. Desktop (lg+)
+  // has no sticky bar, so the FABs stay. Signalled via the existing screenContext.
+  const leadDetailActionMode = screenContext?.page === "lead_detail";
+
   const projectMatch = useMatch("/operations/:projectId/*");
   const activeProjectId = projectMatch?.params?.projectId || null;
 
@@ -654,7 +660,7 @@ export default function AppShell() {
       </main>
 
       {/* ── Quick Add FAB ─────────────────────────────────────────────── */}
-      <div className="fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6">
+      <div className={`fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6 ${leadDetailActionMode ? "hidden lg:block" : ""}`}>
         {quickAddOpen ? (
           <>
             <div className="fixed inset-0 z-[-1]" onClick={() => setQuickAddOpen(false)} />
@@ -719,11 +725,13 @@ export default function AppShell() {
         </div>
       </div>
 
-      <BlueprintAgent
-        mode="widget"
-        jobContext={screenContext}
-        hubContext={{ page: location.pathname, department: activeDeptId, ...screenContext }}
-      />
+      <div className={leadDetailActionMode ? "hidden lg:contents" : "contents"}>
+        <BlueprintAgent
+          mode="widget"
+          jobContext={screenContext}
+          hubContext={{ page: location.pathname, department: activeDeptId, ...screenContext }}
+        />
+      </div>
     </div>
   );
 }

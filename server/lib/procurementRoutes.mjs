@@ -105,13 +105,43 @@ function applyLifecycle(current, upd) {
   return upd;
 }
 
+function formatGenerateResponse(result, existingBefore = 0) {
+  return {
+    summary: {
+      created: result.created ?? 0,
+      existing: existingBefore,
+      skipped: result.skipped ?? 0,
+      enriched: result.enriched ?? 0,
+      refreshed: result.refreshed ?? 0,
+      total: result.total ?? 0,
+      warnings: result.warnings ?? [],
+    },
+    result,
+  };
+}
+
+async function countProcurementItems(sb, jobId) {
+  const { count } = await sb
+    .from("procurement_items")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("required", true);
+  return count || 0;
+}
+
+async function runGenerateForJob(sb, jobId, opts) {
+  const existingBefore = await countProcurementItems(sb, jobId);
+  const result = await generateProcurementPlan(sb, jobId, opts);
+  return { result, payload: formatGenerateResponse(result, existingBefore) };
+}
+
 export function registerProcurementRoutes(app) {
   // ── Generate / regenerate ──────────────────────────────────────────────────
   app.post("/api/procurement/jobs/:jobId/generate", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const result = await generateProcurementPlan(sb, req.params.jobId, {
+      const { result, payload } = await runGenerateForJob(sb, req.params.jobId, {
         mode: "manual", actorId: req.caller?.id || null,
       });
       if (!result.ok) return err(res, 400, result.error || "Generation failed");
@@ -119,9 +149,34 @@ export function registerProcurementRoutes(app) {
       await sb.from("projects")
         .update({ procurement_plan_stale: false, procurement_plan_stale_since: null })
         .eq("job_id", req.params.jobId);
-      return ok(res, { result });
+      return ok(res, payload);
     } catch (e) {
       console.error("[procurement/generate]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // Resolve job via project spine (same generation path as job route).
+  app.post("/api/procurement/projects/:projectId/generate", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data: project } = await sb
+        .from("projects")
+        .select("id, job_id")
+        .eq("id", req.params.projectId)
+        .maybeSingle();
+      if (!project?.job_id) return err(res, 404, "Project not found or not linked to a job.");
+      const { result, payload } = await runGenerateForJob(sb, project.job_id, {
+        mode: "manual", actorId: req.caller?.id || null,
+      });
+      if (!result.ok) return err(res, 400, result.error || "Generation failed");
+      await sb.from("projects")
+        .update({ procurement_plan_stale: false, procurement_plan_stale_since: null })
+        .eq("id", req.params.projectId);
+      return ok(res, { ...payload, projectId: project.id, jobId: project.job_id });
+    } catch (e) {
+      console.error("[procurement/projects/generate]", e);
       return err(res, 502, translateDbError(e));
     }
   });

@@ -7,6 +7,7 @@ import { useAuth } from "../../lib/useAuth.js";
 import { PROJECT_STATUSES } from "../../lib/constants.js";
 import { useClientPortalProject } from "../../lib/clientPortalApi.js";
 import { ClientPortalContext } from "./clientPortalContext.js";
+import NotificationBell from "./NotificationBell.jsx";
 
 const BASE = "/client-portal";
 
@@ -120,8 +121,9 @@ export default function ClientPortalLayout() {
           className="hidden md:flex md:w-60 md:flex-col md:fixed md:inset-y-0 text-white"
           style={{ backgroundColor: PORTAL_CHROME }}
         >
-          <div className="border-b border-white/10 p-5">
+          <div className="flex items-start justify-between gap-2 border-b border-white/10 p-5">
             <PortalSidebarBrand address={ctx.address} />
+            <NotificationBell projectId={projectId} />
           </div>
           <nav className="flex-1 space-y-0.5 py-4">
             {nav.map((item) => (
@@ -161,13 +163,16 @@ export default function ClientPortalLayout() {
         >
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <PortalSidebarBrand address={ctx.address} />
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              className="shrink-0 text-[11px] font-semibold text-white/60 transition hover:text-white"
-            >
-              Log out
-            </button>
+            <div className="flex shrink-0 items-center gap-4">
+              <NotificationBell projectId={projectId} />
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="text-[11px] font-semibold text-white/60 transition hover:text-white"
+              >
+                Log out
+              </button>
+            </div>
           </div>
         </header>
 

@@ -34,6 +34,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    // UI Review Mode (non-production): never call Supabase auth — the mock value below
+    // supplies session + role. Dead branch in prod (VITE_UI_REVIEW_MODE unset).
+    if (import.meta.env.VITE_UI_REVIEW_MODE === "true") {
+      setLoading(false);
+      return undefined;
+    }
+
     if (!supabaseConfigured) {
       setSession(null);
       setProfile(null);
@@ -112,6 +119,27 @@ export function AuthProvider({ children }) {
   }, [session?.user?.id, signOut]);
 
   const value = useMemo(() => {
+    // UI Review Mode (non-production): supply a fake session + role so route guards render
+    // every view without real auth. Role comes from ?reviewRole= (director|admin|supervisor|
+    // employee|client), default admin. Dead branch in prod (VITE_UI_REVIEW_MODE unset).
+    if (import.meta.env.VITE_UI_REVIEW_MODE === "true") {
+      let role = "admin";
+      try {
+        const p = new URLSearchParams(window.location.search).get("reviewRole");
+        if (p === "director") role = "admin";
+        else if (p) role = p;
+      } catch { /* ignore */ }
+      const user = { id: "00000000-0000-4000-8000-0000000000a1", email: `${role}@uireview.local` };
+      return {
+        user,
+        session: { user, access_token: "ui-review" },
+        loading: false,
+        profile: { id: user.id, email: user.email, full_name: "UI Review", role, is_active: true },
+        role,
+        signOut: () => {},
+      };
+    }
+
     const sessionUserId = session?.user?.id ?? null;
     return {
       user: session?.user ?? null,

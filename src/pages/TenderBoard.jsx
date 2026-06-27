@@ -1,4 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
+import { apiPost } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -64,10 +65,10 @@ export default function TenderBoard() {
   }, [load]);
 
   async function archiveJobBoard(jobId) {
-    const sb = getSupabase();
-    if (!sb) return;
-    const { error: u } = await sb.from("jobs").update({ status: "archived" }).eq("id", jobId);
-    if (u) setError(u.message);
+    // W05-DRIFT-002: route through the audited server endpoint (reversible + job_events log)
+    // instead of a direct Supabase write.
+    const { ok, error } = await apiPost("/api/tender/archive", { jobId });
+    if (!ok) setError(error || "Could not archive tender.");
     else await load();
   }
 

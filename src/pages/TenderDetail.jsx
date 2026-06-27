@@ -226,9 +226,12 @@ export default function TenderDetail() {
   const [queryBody, setQueryBody] = useState("");
   const [queryBusy, setQueryBusy] = useState(false);
   const [winMessage, setWinMessage] = useState("");
+  const [lastWonProjectId, setLastWonProjectId] = useState("");
   const [winOpen, setWinOpen] = useState(false);
   const [winStep, setWinStep] = useState(1);
   const [winRows, setWinRows] = useState([]);
+  const [winAlignLoading, setWinAlignLoading] = useState(false);
+  const [winAlign, setWinAlign] = useState(null);
   const [winCostIntel, setWinCostIntel] = useState({
     floor_area_m2: "",
     storeys: "",
@@ -251,6 +254,7 @@ export default function TenderDetail() {
   const [batchPoProgress, setBatchPoProgress] = useState({}); // rfq_id → 'pending'|'ok'|'error'
   const [batchPoBusy, setBatchPoBusy] = useState(false);
   const [batchPoDismissed, setBatchPoDismissed] = useState(false);
+  const [batchPoProjectId, setBatchPoProjectId] = useState("");
   // "Email all trade recipients" — resend the (corrected) plans link as a reply to existing RFQs.
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
@@ -261,6 +265,43 @@ export default function TenderDetail() {
   const [emailResult, setEmailResult] = useState(null);
 
   const readOnly = job?.status === "archived";
+
+  async function resolveBatchPoProjectId(preferredId = "") {
+    const pid = String(preferredId || lastWonProjectId || batchPoProjectId || "").trim();
+    if (pid) return pid;
+    if (!supabaseConfigured || !job?.id) return "";
+    const sb = getSupabase();
+    const { data } = await sb
+      .from("projects")
+      .select("id")
+      .eq("job_id", job.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    return data?.id ? String(data.id) : "";
+  }
+
+  async function refreshBatchPoCheck(preferredProjectId = "") {
+    if (!job?.id) return;
+    try {
+      const bpRes = await authFetch(`/api/tender/batch-po-check/${job.id}`);
+      const bpj = await bpRes.json();
+      if (!bpj.ok) return;
+      const trades = bpj.trades || [];
+      setBatchPoTrades(trades);
+      if (trades.length > 0) {
+        const projectId = await resolveBatchPoProjectId(preferredProjectId);
+        if (projectId) setBatchPoProjectId(projectId);
+        const checked = {};
+        for (const t of trades) checked[t.rfq_id] = true;
+        setBatchPoChecked(checked);
+        setBatchPoProgress({});
+        setBatchPoDismissed(false);
+      }
+    } catch {
+      // non-critical
+    }
+  }
 
   const load = useCallback(async () => {
     if (!supabaseConfigured) {
@@ -403,22 +444,34 @@ export default function TenderDetail() {
 
   const sigFooter = useMemo(() => formatSignatureFooter(loadEmailSignature()), []);
 
-  function buildWinRowsFromRfqs(list) {
-    return list.map((r) => ({
-      id: r.id,
-      trade: r.trade,
-      sub: r.subcontractors,
-      quote_pdf_path: r.quote_pdf_path || "",
-      status:
-        r.status === "received" || r.status === "accepted"
-          ? "accepted"
-          : r.status === "declined"
-            ? "declined"
-            : "declined",
-      quote_amount: r.quote_amount ?? "",
-      received: r.status === "received" || r.status === "accepted"
-    }));
-  }
+function buildWinRowsFromRfqs(list) {
+  return list.map((r) => ({
+    id: r.id,
+    trade: r.trade,
+    sub: r.subcontractors,
+    quote_pdf_path: r.quote_pdf_path || "",
+    status:
+      r.status === "received" || r.status === "accepted"
+        ? "accepted"
+        : r.status === "declined"
+          ? "declined"
+          : "declined",
+    quote_amount: r.quote_amount ?? "",
+    quoted_amount: r.quoted_amount ?? null,
+    received: r.status === "received" || r.status === "accepted"
+  }));
+}
+
+function confirmedQuoteAmount(value) {
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function winRowMissingConfirmedQuote(row) {
+  if (row.status !== "accepted") return false;
+  return confirmedQuoteAmount(row.quote_amount) == null;
+}
 
   async function archiveJob() {
     if (!job || readOnly) return;
@@ -481,7 +534,7 @@ export default function TenderDetail() {
     else await load();
   }
 
-  function openWin() {
+  async function openWin() {
     setWinRows(buildWinRowsFromRfqs(rfqs));
     setWinCostIntel({
       floor_area_m2:
@@ -500,7 +553,18 @@ export default function TenderDetail() {
       notes: ""
     });
     setWinStep(1);
+    setWinAlign(null);
     setWinOpen(true);
+    setWinAlignLoading(true);
+    try {
+      const res = await authFetch(`/api/tender/${encodeURIComponent(jobId)}/accept-alignment`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) setWinAlign(data);
+    } catch (e) {
+      console.warn("[win-alignment]", e?.message || e);
+    } finally {
+      setWinAlignLoading(false);
+    }
   }
 
   function selectAllReceived() {
@@ -630,23 +694,11 @@ export default function TenderDetail() {
       setWinOpen(false);
       await load();
       if (fj.project?.id) {
+        setLastWonProjectId(fj.project.id);
+        setBatchPoProjectId(fj.project.id);
         setWinMessage("Tender marked won. Project created in Operations.");
       }
-      // Check for un-issued POs
-      try {
-        const bpRes = await authFetch(`/api/tender/batch-po-check/${job.id}`);
-        const bpj = await bpRes.json();
-        if (bpj.ok && bpj.trades?.length > 0) {
-          setBatchPoTrades(bpj.trades);
-          const checked = {};
-          for (const t of bpj.trades) checked[t.rfq_id] = true;
-          setBatchPoChecked(checked);
-          setBatchPoProgress({});
-          setBatchPoDismissed(false);
-        }
-      } catch {
-        // non-critical
-      }
+      await refreshBatchPoCheck(fj.project?.id || "");
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -730,13 +782,15 @@ export default function TenderDetail() {
     for (const t of selected) progress[t.rfq_id] = "pending";
     setBatchPoProgress({ ...progress });
 
+    const projectId = await resolveBatchPoProjectId();
+
     for (const t of selected) {
       try {
         const res = await authFetch("/api/po/issue", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            projectId: rfqs.find(r => r.id === t.rfq_id)?.project_id || "",
+            projectId,
             jobAddress: job?.address || "",
             trade: t.trade,
             toEmail: t.email,
@@ -757,17 +811,7 @@ export default function TenderDetail() {
       setBatchPoProgress({ ...progress });
     }
 
-    // Refresh batch check
-    try {
-      const bpRes = await authFetch(`/api/tender/batch-po-check/${job.id}`);
-      const bpj = await bpRes.json();
-      if (bpj.ok) {
-        setBatchPoTrades(bpj.trades || []);
-        const checked = {};
-        for (const t of (bpj.trades || [])) checked[t.rfq_id] = true;
-        setBatchPoChecked(checked);
-      }
-    } catch { /* non-critical */ }
+    await refreshBatchPoCheck(projectId);
 
     setBatchPoBusy(false);
   }
@@ -876,6 +920,7 @@ export default function TenderDetail() {
   const acceptedN = winRows.filter((w) => w.status === "accepted").length;
   const declinedN = winRows.filter((w) => w.status === "declined").length;
   const nrN = winRows.filter((w) => w.status === "not_required").length;
+  const winQuoteAmountWarnings = winRows.filter(winRowMissingConfirmedQuote);
 
   return (
     <div className="space-y-8 pb-24">
@@ -997,6 +1042,11 @@ export default function TenderDetail() {
       {winMessage ? (
         <div className="rounded-lg border border-accent/40 bg-accent/10 px-4 py-2 text-sm text-accent">
           {winMessage}{" "}
+          {lastWonProjectId ? (
+            <Link to={`/operations/${lastWonProjectId}`} className="font-semibold underline">
+              View operations setup checklist →
+            </Link>
+          ) : null}{" "}
           <button type="button" className="font-semibold underline" onClick={() => setWinMessage("")}>
             Dismiss
           </button>
@@ -1459,6 +1509,42 @@ export default function TenderDetail() {
               <>
                 <h2 className="text-lg font-bold text-primary">Step 1 — Quote review</h2>
                 <p className="mt-1 text-sm text-muted">Set outcome for every trade before continuing.</p>
+                {winAlignLoading ? (
+                  <p className="mt-3 text-xs text-muted">Checking quote acceptance alignment…</p>
+                ) : null}
+                {winQuoteAmountWarnings.length > 0 ? (
+                  <div className="mt-4 rounded-lg border border-warning/60 bg-warning/10 px-4 py-3 text-sm text-ink">
+                    <div className="font-semibold text-primary">Quote amount warning</div>
+                    <p className="mt-2 text-muted">
+                      Some accepted trades do not have a staff-confirmed quote amount. These trades may not be
+                      recorded in cost intelligence when the tender is marked won. Confirm the quote amount before
+                      finalising where possible.
+                    </p>
+                  </div>
+                ) : null}
+                {winAlign?.hasWarnings ? (
+                  <div className="mt-4 rounded-lg border border-warning/60 bg-warning/10 px-4 py-3 text-sm text-ink">
+                    <div className="font-semibold text-primary">Quote acceptance warning</div>
+                    <p className="mt-2 text-muted">
+                      Some accepted package quotes are not fully aligned with the Tender win path. The win wizard
+                      currently uses accepted RFQs only. Cross-check Package Detail before finalising this tender as
+                      won.
+                    </p>
+                    <ul className="mt-3 space-y-2 text-xs">
+                      {winAlign.warnings.map((w) => (
+                        <li key={`${w.type}-${w.recipientId || w.rfqId}-${w.trade}`} className="rounded border border-warning/40 bg-surface px-3 py-2">
+                          <span className="font-semibold uppercase tracking-wide text-warning">{w.type.replace(/_/g, " ")}</span>
+                          <div className="mt-1 text-muted">
+                            {w.trade}
+                            {w.recipientName ? ` · ${w.recipientName}` : ""}
+                            {w.quoteAmount != null ? ` · $${Number(w.quoteAmount).toLocaleString("en-AU")} ex GST` : ""}
+                          </div>
+                          <div className="mt-1">{w.message}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <button type="button" className="mt-3 text-xs font-semibold text-accent underline" onClick={selectAllReceived}>
                   Select all received quotes
                 </button>
@@ -1479,6 +1565,34 @@ export default function TenderDetail() {
                             setWinRows((rows) => rows.map((r) => (r.id === w.id ? { ...r, quote_amount: e.target.value } : r)))
                           }
                         />
+                        {winRowMissingConfirmedQuote(w) ? (
+                          <p className="mt-1 text-[11px] font-semibold text-warning">
+                            No staff-confirmed quote amount — may not be recorded in cost intelligence.
+                          </p>
+                        ) : null}
+                        {winRowMissingConfirmedQuote(w) &&
+                        w.quoted_amount != null &&
+                        Number(w.quoted_amount) > 0 ? (
+                          <button
+                            type="button"
+                            className="mt-1 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1 text-[11px] font-semibold text-primary"
+                            title="Auto-extracted from quote PDF — click to use in this win wizard"
+                            onClick={() =>
+                              setWinRows((rows) =>
+                                rows.map((r) =>
+                                  r.id === w.id ? { ...r, quote_amount: String(w.quoted_amount) } : r
+                                )
+                              )
+                            }
+                          >
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+                            Use extracted amount:{" "}
+                            {new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(
+                              w.quoted_amount
+                            )}{" "}
+                            ex GST
+                          </button>
+                        ) : null}
                       </div>
                       <div className="flex flex-col gap-1 text-xs">
                         <label className="flex items-center gap-2">

@@ -51,7 +51,6 @@ import RfqPackageList from "./pages/RfqPackageList.jsx";
 import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
 import Marketing from "./pages/Marketing.jsx";
 import Workforce from "./pages/Workforce.jsx";
-import WorkforceTeam from "./pages/WorkforceTeam.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
 import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
@@ -71,6 +70,16 @@ const ClientSelections = React.lazy(() => import("./pages/clientportal/ClientSel
 const ClientDocuments = React.lazy(() => import("./pages/clientportal/ClientDocuments.jsx"));
 const ClientMessages = React.lazy(() => import("./pages/clientportal/ClientMessages.jsx"));
 const ClientMyHome = React.lazy(() => import("./pages/clientportal/ClientMyHome.jsx"));
+// Review-only index at /ui-review — gated so production tree-shakes it out entirely.
+const UiReviewIndex =
+  import.meta.env.VITE_UI_REVIEW_MODE === "true"
+    ? React.lazy(() => import("./ui-review/UiReviewIndex.jsx"))
+    : null;
+// Review-only Sales redesign mock-up (Pass 2/3 design direction). Gated → tree-shaken from prod.
+const SalesRedesignMockup =
+  import.meta.env.VITE_UI_REVIEW_MODE === "true"
+    ? React.lazy(() => import("./ui-review/pages/SalesRedesignMockup.jsx"))
+    : null;
 
 export default function App() {
   return (
@@ -92,6 +101,26 @@ export default function App() {
             <Route path="/worker/timesheet/log" element={<WorkerLogHours />} />
             <Route path="/worker/tasks" element={<WorkerTasks />} />
             <Route path="/worker/week" element={<WorkerWeek />} />
+            {UiReviewIndex && (
+              <Route
+                path="/ui-review"
+                element={
+                  <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                    <UiReviewIndex />
+                  </Suspense>
+                }
+              />
+            )}
+            {SalesRedesignMockup && (
+              <Route
+                path="/ui-review/sales-redesign-mockup/*"
+                element={
+                  <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                    <SalesRedesignMockup />
+                  </Suspense>
+                }
+              />
+            )}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/accept-invite/:token" element={<AcceptInvite />} />
@@ -282,7 +311,7 @@ export default function App() {
                 />
                 <Route
                   path="/workforce/team"
-                  element={<RoleRoute element={<WorkforceTeam />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                  element={<RoleRoute element={<Navigate to="/workforce?tab=Team" replace />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route

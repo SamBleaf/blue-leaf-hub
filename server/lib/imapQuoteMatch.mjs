@@ -85,61 +85,103 @@ export function fuzzyAddressMatch(jobAddress, hint) {
   return hit >= Math.min(2, Math.ceil(tokens.length * 0.6));
 }
 
-export function matchBySubjectAddress(parsed, rfqRows) {
+function scoreSubjectAddressForRfq(parsed, rfq) {
   const hint = extractAddressHintFromSubject(parsed?.subject || "");
-  if (!hint) return null;
+  if (!hint) return 0;
+  const addr = rfq?.jobs?.address || "";
+  if (!fuzzyAddressMatch(addr, hint)) return 0;
   const subjectNorm = normalizeLooseText(parsed?.subject || "");
   const bodyNorm = normalizeLooseText(parsed?.text || parsed?.html || "");
-  let best = null;
-  let bestScore = 0;
-  for (const rfq of rfqRows) {
-    const addr = rfq?.jobs?.address || "";
-    if (!fuzzyAddressMatch(addr, hint)) continue;
-    let score = 4;
-    const tradeNorm = normalizeLooseText(rfq?.trade || "");
-    if (tradeNorm && subjectNorm.includes(tradeNorm)) score += 2;
-    if (tradeNorm && bodyNorm.includes(tradeNorm)) score += 1;
-    if (score > bestScore) {
-      best = rfq;
-      bestScore = score;
-    }
-  }
-  if (!best || bestScore < 4) return null;
-  return { rfq: best, reason: "subject_address" };
+  let score = 4;
+  const tradeNorm = normalizeLooseText(rfq?.trade || "");
+  if (tradeNorm && subjectNorm.includes(tradeNorm)) score += 2;
+  if (tradeNorm && bodyNorm.includes(tradeNorm)) score += 1;
+  return score;
 }
 
-function maybeFirstAddress(parsed) {
+/**
+ * Subject/address match on a candidate set.
+ * @returns {{ rfq, reason: 'subject_address' } | { ambiguous: true, ambiguity: 'ambiguous_address' } | null}
+ */
+export function matchBySubjectAddress(parsed, rfqRows) {
+  const scored = (rfqRows || [])
+    .map((rfq) => ({ rfq, score: scoreSubjectAddressForRfq(parsed, rfq) }))
+    .filter((row) => row.score >= 4);
+  if (!scored.length) return null;
+  const bestScore = Math.max(...scored.map((row) => row.score));
+  const top = scored.filter((row) => row.score === bestScore);
+  if (top.length > 1) {
+    return { ambiguous: true, ambiguity: "ambiguous_address" };
+  }
+  return { rfq: top[0].rfq, reason: "subject_address" };
+}
+
+export function maybeFirstAddress(parsed) {
   const from = parsed?.from?.value;
   if (!Array.isArray(from) || !from.length) return "";
   return normEmail(from[0]?.address || "");
 }
 
-/** Sender email matches subcontractor on an RFQ for a tendering job */
-export function matchBySenderSubcontractor(fromEmail, rfqRows) {
+/** All open RFQs whose subcontractor email equals fromEmail. */
+export function findSenderSubcontractorCandidates(fromEmail, rfqRows) {
   const fe = normEmail(fromEmail);
-  if (!fe) return null;
-  for (const rfq of rfqRows) {
+  if (!fe) return [];
+  return (rfqRows || []).filter((rfq) => {
     const se = normEmail(rfq?.subcontractors?.email || "");
-    if (se && se === fe) {
-      return { rfq, reason: "sender_subcontractor" };
-    }
+    return se && se === fe;
+  });
+}
+
+/** Sender email matches subcontractor on exactly one open RFQ (legacy export). */
+export function matchBySenderSubcontractor(fromEmail, rfqRows) {
+  const candidates = findSenderSubcontractorCandidates(fromEmail, rfqRows);
+  if (candidates.length === 1) {
+    return { rfq: candidates[0], reason: "sender_subcontractor" };
   }
   return null;
 }
 
 /**
- * Priority: In-Reply-To / References → subject/address → sender=sub email
+ * Full matcher with ambiguity metadata (P0-B3).
+ * @returns {{ match: { rfq, reason } | null, ambiguity: null | 'ambiguous_address' | 'ambiguous_sender' }}
+ */
+export function resolveInboundRfqMatchWithMeta(parsed, rfqRows) {
+  const thread = matchBySentMessageId(parsed, rfqRows);
+  if (thread) return { match: thread, ambiguity: null };
+
+  const subject = matchBySubjectAddress(parsed, rfqRows);
+  if (subject?.rfq) return { match: subject, ambiguity: null };
+  if (subject?.ambiguous) {
+    return { match: null, ambiguity: subject.ambiguity || "ambiguous_address" };
+  }
+
+  const fromEmail = maybeFirstAddress(parsed);
+  const senderRows = findSenderSubcontractorCandidates(fromEmail, rfqRows);
+  if (senderRows.length === 1) {
+    return {
+      match: { rfq: senderRows[0], reason: "sender_subcontractor" },
+      ambiguity: null,
+    };
+  }
+  if (senderRows.length > 1) {
+    const subSubject = matchBySubjectAddress(parsed, senderRows);
+    if (subSubject?.rfq) return { match: subSubject, ambiguity: null };
+    if (subSubject?.ambiguous) {
+      return { match: null, ambiguity: "ambiguous_address" };
+    }
+    return { match: null, ambiguity: "ambiguous_sender" };
+  }
+
+  return { match: null, ambiguity: null };
+}
+
+/**
+ * Priority: thread → unique subject/address → sender (single or disambiguated by address).
  * @param {*} parsed — mailparser result
  * @param {object[]} rfqRows
  */
 export function resolveInboundRfqMatch(parsed, rfqRows) {
-  const a = matchBySentMessageId(parsed, rfqRows);
-  if (a) return a;
-  const b = matchBySubjectAddress(parsed, rfqRows);
-  if (b) return b;
-  const c = matchBySenderSubcontractor(maybeFirstAddress(parsed), rfqRows);
-  if (c) return c;
-  return null;
+  return resolveInboundRfqMatchWithMeta(parsed, rfqRows).match;
 }
 
 export function generateOutboundMessageId() {

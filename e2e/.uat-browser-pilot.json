@@ -1,0 +1,62 @@
+{
+  "runId": "BLH-W18-BROWSER-1782553176788",
+  "createdAt": "2026-06-27T09:40:41.684Z",
+  "baseUrl": "http://[::1]:5174",
+  "apiUrl": "http://127.0.0.1:8787",
+  "branch": "portal-v2",
+  "projectA": {
+    "jobId": "b247dced-0de8-482a-bc74-6bf7556823c6",
+    "projectId": "b64abb2f-2ad7-4ce0-8305-1be607d73180",
+    "address": "  BLH TEST   W18 BROWSER-A 1782553176788 vzxgbx, Adelaide SA 5000"
+  },
+  "projectB": {
+    "jobId": "31afe8c9-efaf-4dcb-8090-bfedda5a7eaa",
+    "projectId": "2136f83c-4bb2-471a-815a-9b7992f01e16",
+    "address": "  BLH TEST   W18 BROWSER-B 1782553176789 bihijo, Adelaide SA 5000"
+  },
+  "visibleCaption": "__BLH TEST__ W18 browser pilot visible photo",
+  "hiddenCaption": "__BLH TEST__ W18 browser pilot hidden photo",
+  "screenshotDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/screenshots/BLH-W18-BROWSER-1782553176788",
+  "users": {
+    "admin": {
+      "email": "e2e-admin@blueleafbuilding.test",
+      "password": "BlueLeaf-E2E-2026!"
+    },
+    "supervisor": {
+      "email": "e2e-supervisor@blueleafbuilding.test",
+      "password": "BlueLeaf-E2E-2026!"
+    },
+    "employee": {
+      "email": "e2e-employee@blueleafbuilding.test",
+      "password": "BlueLeaf-E2E-2026!"
+    },
+    "client": {
+      "email": "blh.uat.browser.1782553176788@blueleafbuilding.test",
+      "password": "BlueLeaf-UAT-2026!",
+      "name": "__BLH TEST__ Browser Pilot Client"
+    },
+    "clientB": {
+      "email": "e2e-client-b@blueleafbuilding.test",
+      "password": "BlueLeaf-E2E-2026!"
+    }
+  },
+  "inviteUrl": "https://blueleafhub.com.au/accept-invite/a484238897555b2c01352f2a5551f539232c53a6c80a49d12fac0d125cc932e8",
+  "crossRoleApi": {
+    "admin": {
+      "status": 200,
+      "path": "/api/portal/admin/v2/b64abb2f-2ad7-4ce0-8305-1be607d73180/overview"
+    },
+    "supervisor": {
+      "status": 200,
+      "path": "/api/portal/admin/v2/b64abb2f-2ad7-4ce0-8305-1be607d73180/overview"
+    },
+    "employee": {
+      "status": 200,
+      "path": "/api/portal/admin/v2/b64abb2f-2ad7-4ce0-8305-1be607d73180/overview"
+    },
+    "client": {
+      "status": 403,
+      "path": "/api/portal/admin/v2/b64abb2f-2ad7-4ce0-8305-1be607d73180/overview"
+    }
+  }
+}

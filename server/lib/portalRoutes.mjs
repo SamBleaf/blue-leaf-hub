@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
+import { notifyClient } from "./portalNotify.mjs";
 import {
   dropboxConfigured,
   dropboxDownloadBuffer,
@@ -180,7 +181,7 @@ export function registerPortalRoutes(app) {
   // All /api/portal/admin/* routes require authentication
   app.use("/api/portal/admin", requireAuth);
 
-  app.post("/api/portal/admin/generate-token", async (req, res) => {
+  app.post("/api/portal/admin/generate-token", requireRole("admin"), async (req, res) => {
     try {
       const sb = getServiceSupabase();
       if (!sb) return res.status(500).json({ ok: false, error: "DB not configured" });
@@ -733,6 +734,17 @@ export function registerPortalRoutes(app) {
         .select()
         .single();
       if (error) return res.status(500).json({ ok: false, error: error.message });
+      // Notify the client of the builder's reply (in-app + email) — previously a
+      // builder message reached the client only if they happened to open the portal.
+      try {
+        await notifyClient(projectId, {
+          type: "message_reply",
+          title: "New message from Blue Leaf",
+          body: `${senderName || "Sam"}: ${String(body).trim().slice(0, 120)}`,
+          entityType: "portal_message",
+          entityId: data.id,
+        });
+      } catch (_) { /* non-fatal */ }
       return res.json({ ok: true, message: rowToCamel(data) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || "Failed to send message" });

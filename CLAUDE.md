@@ -129,6 +129,9 @@ ok(res, { leads: data, total: count });
 ### Dropbox sequential reads
 Never `Promise.all` for Dropbox file reads. Always a sequential `for` loop.
 
+### Hardening write test artifacts
+All **new** hardening write tests must use the **`BLH TEST`** marker via `buildTestJobAddress()` in `scripts/lib/testArtifactPrefixes.mjs`. Do **not** create new test folders with legacy prefixes (`__BATCH_A__`, `BATCHA`, `__E2E__`, `DEBUG`, etc.) — those are legacy review-only cleanup candidates. See `docs/qa/TEST_ARTIFACT_CLEANUP_POLICY.md`.
+
 ---
 
 ## Commands

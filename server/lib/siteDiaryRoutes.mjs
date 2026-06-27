@@ -1,14 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
-import {
-  getDropboxAccessToken,
-  dropboxUploadBuffer,
-  sharedJobRootPath,
-  ensureParentFoldersForFile
-} from "./dropboxClient.mjs";
+import { fileJobRecord } from "./jobRecordsFiler.mjs";
 import { buildSiteDiaryPdfBuffer } from "./module6PdfKit.mjs";
 import { requireAuth } from "./requireAuth.mjs";
+import { syncDiaryToPortalUpdate } from "./portalIntegration.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-haiku-4-5-20251001";
 
@@ -99,9 +95,12 @@ ${transcript}`;
       const { data: saved, error: se } = await sb.from("site_diary").insert(row).select("*").single();
       if (se) throw se;
 
+      // Portal v2: pre-fill a DRAFT weekly update from this diary (work_completed
+      // only — internal fields stay internal). Best-effort; never blocks the save.
+      await syncDiaryToPortalUpdate({ projectId, entry: row }).catch(() => {});
+
       let dropbox_pdf_path = null;
       try {
-        const token = await getDropboxAccessToken();
         const pdfBuf = await buildSiteDiaryPdfBuffer({
           projectAddress: proj.address,
           entryDate: row.entry_date,
@@ -114,13 +113,17 @@ ${transcript}`;
           supervisor: row.supervisor,
           generatedAt: new Date().toISOString()
         });
-        const rel = `${sharedJobRootPath(proj.address)}/SITE DIARY/${row.entry_date}.pdf`;
-        await ensureParentFoldersForFile(token, rel);
-        await dropboxUploadBuffer(token, rel, pdfBuf, { autorename: true });
-        dropbox_pdf_path = rel;
-        await sb.from("site_diary").update({ dropbox_pdf_path }).eq("id", saved.id);
+        // Records: file into INTERNAL/SITE DIARY via the central filer.
+        const filed = await fileJobRecord({
+          jobAddress: proj.address, category: "site_diary",
+          fileName: `Site-Diary-${row.entry_date}.pdf`, buffer: pdfBuf,
+        });
+        if (filed?.ok && filed.storagePath) {
+          dropbox_pdf_path = filed.storagePath;
+          await sb.from("site_diary").update({ dropbox_pdf_path }).eq("id", saved.id);
+        }
       } catch (err) {
-        console.warn("[diary/save] Dropbox:", err?.message || err);
+        console.warn("[diary/save] records filing:", err?.message || err);
       }
 
       const { data: entryOut } = await sb.from("site_diary").select("*").eq("id", saved.id).single();

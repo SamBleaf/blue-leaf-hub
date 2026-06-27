@@ -1,0 +1,43 @@
+[
+  {"module":"finance","method":"GET","path":"/api/finance/jobs","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"finance","method":"GET","path":"/api/finance/jobs","role":"employee","expectedStatusClass":"forbidden","why":"cost/margin must not be employee-readable"},
+  {"module":"finance","method":"GET","path":"/api/finance/jobs","role":"supervisor","expectedStatusClass":"forbidden","why":"finance is admin-only; supervisor denied"},
+  {"module":"finance","method":"GET","path":"/api/finance/jobs","role":"admin","expectedStatusClass":"allow","why":"admin positive control"},
+  {"module":"finance","method":"GET","path":"/api/cost-model","role":"employee","expectedStatusClass":"forbidden","why":"loaded pay rates must not leak to employee"},
+  {"module":"finance","method":"GET","path":"/api/cost-model","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"finance","method":"PATCH","path":"/api/finance/jobs/00000000-0000-0000-0000-000000000000","role":"employee","expectedStatusClass":"forbidden","why":"denied finance write before any mutation"},
+  {"module":"finance","method":"PATCH","path":"/api/finance/jobs/00000000-0000-0000-0000-000000000000","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+
+  {"module":"sales","method":"GET","path":"/api/sales/leads","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"sales","method":"GET","path":"/api/sales/leads","role":"employee","expectedStatusClass":"forbidden","why":"sales pipeline is admin-only (verified emp=403)"},
+  {"module":"sales","method":"GET","path":"/api/sales/leads","role":"supervisor","expectedStatusClass":"forbidden","why":"sales admin-only; supervisor denied"},
+  {"module":"sales","method":"GET","path":"/api/sales/leads","role":"admin","expectedStatusClass":"allow","why":"admin positive control"},
+  {"module":"sales","method":"POST","path":"/api/sales/leads","role":"employee","expectedStatusClass":"forbidden","why":"denied lead create"},
+
+  {"module":"tender","method":"POST","path":"/api/po/issue","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"tender","method":"POST","path":"/api/po/issue","role":"employee","expectedStatusClass":"forbidden","why":"PO issue admin-only (W11-PO-SEC-01)"},
+  {"module":"tender","method":"POST","path":"/api/po/issue","role":"supervisor","expectedStatusClass":"forbidden","why":"PO issue admin-only; supervisor denied"},
+  {"module":"tender","method":"POST","path":"/api/po/issue","role":"admin","expectedStatusClass":"allow","why":"admin reaches validation (400 on empty body)"},
+  {"module":"tender","method":"GET","path":"/api/trade-master","role":"employee","expectedStatusClass":"allow","why":"trade master is staff-level (not gated) — confirm staff read"},
+  {"module":"tender","method":"GET","path":"/api/trade-master","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+
+  {"module":"operations","method":"GET","path":"/api/operations/projects","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"operations","method":"GET","path":"/api/operations/projects","role":"employee","expectedStatusClass":"allow","why":"operations board is staff-readable (verified emp=200)"},
+  {"module":"operations","method":"GET","path":"/api/operations/global-tasks","role":"employee","expectedStatusClass":"allow","why":"global Gantt staff-readable"},
+  {"module":"operations","method":"GET","path":"/api/operations/global-tasks","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+
+  {"module":"schedule","method":"PATCH","path":"/api/schedule/task/00000000-0000-0000-0000-000000000000","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"schedule","method":"PATCH","path":"/api/schedule/task/00000000-0000-0000-0000-000000000000","role":"employee","expectedStatusClass":"forbidden","why":"schedule write admin/supervisor only (W12-SEC-01)"},
+  {"module":"schedule","method":"PATCH","path":"/api/schedule/task/00000000-0000-0000-0000-000000000000","role":"supervisor","expectedStatusClass":"allow","why":"supervisor may write schedule (reaches 404/400 on fake id)"},
+
+  {"module":"workforce","method":"GET","path":"/api/workforce/planner-jobs","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"workforce","method":"GET","path":"/api/workforce/planner-jobs","role":"employee","expectedStatusClass":"forbidden","why":"workforce management admin/supervisor only (verified)"},
+  {"module":"workforce","method":"GET","path":"/api/workforce/planner-jobs","role":"supervisor","expectedStatusClass":"allow","why":"supervisor has workforce"},
+
+  {"module":"portal-admin","method":"GET","path":"/api/portal/admin/v2/00000000-0000-0000-0000-000000000000/overview","role":"unauth","expectedStatusClass":"unauth","why":"no token must 401"},
+  {"module":"portal-admin","method":"GET","path":"/api/portal/admin/v2/00000000-0000-0000-0000-000000000000/overview","role":"employee","expectedStatusClass":"forbidden","why":"PORTAL-CROSSROLE decided employee=NO; code currently admits employee → expect this to FAIL (deployment finding)"},
+  {"module":"portal-admin","method":"GET","path":"/api/portal/admin/v2/00000000-0000-0000-0000-000000000000/overview","role":"supervisor","expectedStatusClass":"allow","why":"supervisor may read project portal overview (policy: yes if project-related)"},
+  {"module":"portal-admin","method":"GET","path":"/api/portal/admin/v2/00000000-0000-0000-0000-000000000000/overview","role":"admin","expectedStatusClass":"allow","why":"admin positive control"},
+
+  {"module":"whs-induction","method":"GET","path":"/api/induction/00000000-0000-0000-0000-000000000000/info","role":"unauth","expectedStatusClass":"allow","why":"public induction info by design (fake id → 404 = reached handler, auth not required)"}
+]

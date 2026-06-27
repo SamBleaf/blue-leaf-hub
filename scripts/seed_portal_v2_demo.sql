@@ -55,13 +55,13 @@ BEGIN
         confidence_note = EXCLUDED.confidence_note, stage_preview = EXCLUDED.stage_preview;
 
   -- ── A weekly update with builder reasoning (how_we_build) ─────────────────
-  INSERT INTO portal_updates (project_id, week_of, headline, body, builder_reasoning, schedule_phase, published, status, published_at)
+  INSERT INTO portal_updates (project_id, week_of, headline, body, builder_reasoning, published, status, published_at)
   VALUES (
     target_project, current_date - 3,
     'Frame is 90% complete — roof trusses next week',
     'Wall frames and top plate are done. Trusses are delivered and set, ready to install Monday.',
     'We used a vapour-permeable sarking rather than standard foil — it lets the wall assembly breathe while still blocking air infiltration, which matters for long-term weather-tightness in the Adelaide climate.',
-    'frame', true, 'published', now()
+    true, 'published', now()
   )
   ON CONFLICT DO NOTHING;
 

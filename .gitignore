@@ -40,3 +40,13 @@ playwright/.cache/
 # Hardening export archives + scratch (do not commit)
 blue-leaf-hub-hardening-*.zip
 _tmp_*.mjs
+
+# Review/screenshot export artifacts (heavy binaries/bundles — keep source only)
+*.zip
+e2e/screenshots/
+docs/ui-review/export-*/
+docs/ui-redesign/
+docs/ui-review/
+
+# CI workflows — commit separately with a workflow-scoped token (Gate 10)
+.github/workflows/

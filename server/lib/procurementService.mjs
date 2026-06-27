@@ -143,6 +143,16 @@ export async function generateProcurementPlan(sb, jobId, { mode = "manual", acto
     // template rows that absorbed an estimate keep source='template+estimate'
     (src === "template" ? existing.find((e) => e.source === "template+estimate" && e.source_ref === ref) : null);
 
+  const warnings = [];
+  if (!projectId) {
+    warnings.push("No project row linked to job — schedule date linkage skipped.");
+  }
+  if (!buildexactConfigured()) {
+    warnings.push("Buildxact not configured — estimate enrichment skipped (template-only baseline).");
+  } else if (!project?.buildexact_job_id) {
+    warnings.push("Project has no buildexact_job_id — estimate enrichment skipped (template-only baseline).");
+  }
+
   // ── SOURCE 1: master template (always available, works pre-estimate) ──
   let templates = [];
   {
@@ -285,6 +295,15 @@ export async function generateProcurementPlan(sb, jobId, { mode = "manual", acto
     .eq("required", true);
   out.total = count || 0;
   out.riskUpdated = risk.updated;
+  out.warnings = warnings;
+
+  if (projectId) {
+    const { count: taskCount } = await sb
+      .from("schedule_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId);
+    if (!taskCount) warnings.push("No schedule tasks — required-on-site dates not linked.");
+  }
 
   await emitEvent(jobId, "procurement.plan_generated", {
     actorId, source: "procurement_module",

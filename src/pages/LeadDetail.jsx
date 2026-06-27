@@ -1,9 +1,23 @@
 import { authFetch } from "../lib/authFetch.js";
+import { displayLeadName } from "../lib/leadUtils.js";
 import { apiPost } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
+import StatusBadge from "../components/ui/StatusBadge.jsx";
+import StickyActionBar from "../components/ui/StickyActionBar.jsx";
+import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
+import EmptyState from "../components/ui/EmptyState.jsx";
+import LeadCommandCentreLayout from "../components/sales/lead-detail/LeadCommandCentreLayout.jsx";
+import LeadDetailHeader from "../components/sales/lead-detail/LeadDetailHeader.jsx";
+import LeadStageStepper from "../components/sales/lead-detail/LeadStageStepper.jsx";
+import LeadNextActionCard from "../components/sales/lead-detail/LeadNextActionCard.jsx";
+import LeadMobileTabs from "../components/sales/lead-detail/LeadMobileTabs.jsx";
+import LeadSummaryPanel from "../components/sales/lead-detail/LeadSummaryPanel.jsx";
+import LeadActivityTimeline from "../components/sales/lead-detail/LeadActivityTimeline.jsx";
+import LeadStageSection from "../components/sales/lead-detail/LeadStageSection.jsx";
+import LeadAccordion from "../components/sales/lead-detail/LeadAccordion.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -31,10 +45,7 @@ const DESIGN_STAGES = [
   { value: "construction_drawings",  label: "Construction Drawings" },
 ];
 
-const ACTIVITY_ICONS = {
-  call: "📞", email: "✉️", meeting: "🤝", note: "📝",
-  stage_change: "→", blueprint_prompt: "🤖"
-};
+// ACTIVITY_ICONS relocated into LeadActivityTimeline (Pass 3A).
 
 const STAGE_ORDER = ["enquiry","qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"];
 
@@ -72,7 +83,10 @@ const GATE_REQUIREMENTS = {
   ],
   fee_proposal:  [{ field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null }],
   accepted:      [],
-  tender:        [{ field: "job_id",              label: "Job created from this lead",check: l => !!l.job_id }],
+  tender:        [
+    { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
+    { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id },
+  ],
   won:           [],
 };
 
@@ -977,6 +991,8 @@ export default function LeadDetail() {
   const [signedFile, setSignedFile] = useState(null);
   const [signedDateInput, setSignedDateInput] = useState("");
   const [signedDownloadUrl, setSignedDownloadUrl] = useState(null);
+  const [ptsaSiteAddressWarning, setPtsaSiteAddressWarning] = useState(false);
+  const [mobileTab, setMobileTab] = useState("action"); // "summary" | "action" | "activity" | "files" | "notes"
 
   const bpFetchedFor = useRef(null);
 
@@ -990,7 +1006,7 @@ export default function LeadDetail() {
       setLead(lr.lead);
       setActivities(lr.activities || []);
       setConversations(cr.conversations || []);
-      setScreenContext?.({ page: "lead_detail", leadId, stage: lr.lead.stage, name: `${lr.lead.first_name} ${lr.lead.last_name || ""}` });
+      setScreenContext?.({ page: "lead_detail", leadId, stage: lr.lead.stage, name: displayLeadName(lr.lead) });
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -1069,7 +1085,7 @@ export default function LeadDetail() {
     if (bpFetchedFor.current === cacheKey && bpInsight) return;
     setBpLoading(true); setBpInsight("");
     const stageName = STAGES.find(s => s.id === l.stage)?.label || l.stage;
-    const msg = `I have a sales lead named ${l.first_name} ${l.last_name || ""} in the ${stageName} stage of my builder sales pipeline. Qualifying score: ${l.qualify_score ?? "not assessed"}/8. Project type: ${l.project_type || "unknown"}. Suburb: ${l.suburb || "unknown"}.${l.discovery_notes ? " Discovery: " + l.discovery_notes.slice(0, 200) : ""} Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences.`;
+    const msg = `I have a sales lead named ${displayLeadName(l)} in the ${stageName} stage of my builder sales pipeline. Qualifying score: ${l.qualify_score ?? "not assessed"}/8. Project type: ${l.project_type || "unknown"}. Suburb: ${l.suburb || "unknown"}.${l.discovery_notes ? " Discovery: " + l.discovery_notes.slice(0, 200) : ""} Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences.`;
     try {
       const r = await authFetch("/api/blueprint/chat", {
         method: "POST",
@@ -1094,6 +1110,10 @@ export default function LeadDetail() {
   const [creatingJob, setCreatingJob] = useState(false);
   async function createJobFromLead() {
     if (creatingJob || lead.job_id) return;
+    if (!lead.site_address?.trim()) {
+      alert("Add a site address before creating a job.");
+      return;
+    }
     setCreatingJob(true);
     try {
       // Phase 2: server-side, non-lossy conversion. The endpoint creates the job,
@@ -1121,6 +1141,10 @@ export default function LeadDetail() {
       return;
     }
     if (creatingJob) return;
+    if (!lead.site_address?.trim()) {
+      alert("Add a site address before starting the tender.");
+      return;
+    }
     setCreatingJob(true);
     try {
       const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/convert-to-job`, {});
@@ -1170,12 +1194,13 @@ export default function LeadDetail() {
         reader.onerror = reject;
         reader.readAsDataURL(signedFile);
       });
-      const { ok, error } = await apiPost(`/api/sales/leads/${leadId}/ptsa/mark-signed`, {
+      const { ok, data, error } = await apiPost(`/api/sales/leads/${leadId}/ptsa/mark-signed`, {
         signedPdfBase64: b64,
         filename: signedFile.name,
         signedDate: signedDateInput || undefined,
       });
       if (!ok) throw new Error(error || "Failed to mark PTSA as signed.");
+      if (data?.provisioning?.siteAddressWarning) setPtsaSiteAddressWarning(true);
       setSignedFile(null);
       setSignedDateInput("");
       await load();
@@ -1206,10 +1231,12 @@ export default function LeadDetail() {
   const gateChecks = next ? (GATE_REQUIREMENTS[next] || []) : [];
   const gatePass = gateChecks.every(g => g.check(lead));
   const nextLabel = STAGES.find(s => s.id === next)?.label;
+  // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)
+  const showSiteAddressWarning = ptsaSiteAddressWarning || (lead.ptsa_status === "signed" && !lead.job_id);
   const isArchTender = lead.lead_type === "architect_tender";
   const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
   const showWinningOffer = !isArchTender && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
-  const showPreTender = ["winning_offer","accepted","tender","won"].includes(lead.stage);
+  const showPreTender = ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
 
   // ── Option A refactor ──────────────────────────────────────────────
   // Each block below is the EXISTING JSX, copied verbatim (same handlers,
@@ -1220,7 +1247,7 @@ export default function LeadDetail() {
     <div className="flex items-center gap-2 text-sm min-w-0">
       <Link to="/sales" className="text-primary hover:underline flex-shrink-0">Sales Pipeline</Link>
       <span className="text-muted">/</span>
-      <span className="text-ink font-medium truncate">{lead.first_name} {lead.last_name || ""}</span>
+      <span className="text-ink font-medium truncate">{displayLeadName(lead)}</span>
       <span className={`ml-1 flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageMeta?.color}`}>{stageMeta?.label}</span>
     </div>
   );
@@ -1259,6 +1286,14 @@ export default function LeadDetail() {
             <MarginPanel lead={lead} onSave={v => patch({ target_gp_pct: v })} />
   );
 
+  // Unanswered qualifying gates — surfaced so it's clear what's blocking advance (S1).
+  const qualifyMissing = [
+    lead.qualify_budget == null && "Budget",
+    lead.qualify_timeframe == null && "Timeframe",
+    lead.qualify_site == null && "Site",
+    lead.qualify_decision_maker == null && "Decision maker",
+  ].filter(Boolean);
+
   const qualifyingBlock = !isArchTender && (
             <div className="rounded-card border border-hairline bg-surface p-4">
               <div className="flex items-center justify-between mb-3">
@@ -1273,9 +1308,15 @@ export default function LeadDetail() {
                 <ScoreGate label="Site" value={lead.qualify_site} options={["No site", "Under contract", "Owns site"]} onChange={v => patch({ qualify_site: v })} />
                 <ScoreGate label="Decision maker" value={lead.qualify_decision_maker} options={["No", "One of two", "Yes"]} onChange={v => patch({ qualify_decision_maker: v })} />
               </div>
-              {(lead.qualify_score || 0) < 5 && lead.qualify_budget != null && (
-                <p className="mt-3 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-                  Score under 5 — APB recommends nurturing this lead rather than investing discovery time.
+              {qualifyMissing.length > 0 && (
+                <p className="mt-3 text-xs text-muted bg-page rounded-lg px-3 py-2">
+                  <span className="font-medium text-ink">Not yet scored:</span> {qualifyMissing.join(", ")}
+                </p>
+              )}
+              {(lead.qualify_score || 0) < 5 && (
+                <p className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                  Qualifying score {lead.qualify_score ?? 0}/8 — a score of <span className="font-semibold">5+</span> is required to advance to Discovery.
+                  {lead.qualify_budget != null && " APB recommends nurturing leads that stay under 5 rather than investing discovery time."}
                 </p>
               )}
             </div>
@@ -1369,33 +1410,7 @@ export default function LeadDetail() {
             </div>
   );
 
-  const timelineBlock = (
-            <div className="space-y-3">
-              <h3 className="section-label">Activity Timeline</h3>
-              {activities.length === 0 ? (
-                <p className="text-sm text-muted italic">No activities yet.</p>
-              ) : activities.map(act => (
-                <div key={act.id} className="flex gap-3">
-                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-page border border-hairline flex items-center justify-center text-sm select-none">
-                    {ACTIVITY_ICONS[act.activity_type] || "📝"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-ink capitalize">{(act.activity_type || "").replace("_", " ")}</span>
-                      <span className="text-xs text-muted flex-shrink-0">{relativeTime(act.created_at)}</span>
-                    </div>
-                    <p className="text-sm text-ink mt-0.5">{act.summary}</p>
-                    {act.next_action && (
-                      <p className="text-xs text-primary mt-1">
-                        ↪ {act.next_action}
-                        {act.next_action_date && ` · ${new Date(act.next_action_date).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-  );
+  const timelineBlock = <LeadActivityTimeline activities={activities} />;
 
   const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
@@ -1413,12 +1428,15 @@ export default function LeadDetail() {
                 <button
                   type="button"
                   onClick={startTenderRfq}
-                  disabled={creatingJob}
+                  disabled={creatingJob || !lead.site_address?.trim()}
                   className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors disabled:opacity-50"
                 >
                   {creatingJob ? "Setting up…" : "Proceed to RFQ Engine & Estimate →"}
                 </button>
-                {!lead.job_id && (
+                {!lead.site_address?.trim() && (
+                  <p className="text-[11px] text-orange-600 text-center mt-2 font-medium">Add site address before starting tender.</p>
+                )}
+                {lead.site_address?.trim() && !lead.job_id && (
                   <p className="text-[11px] text-muted text-center mt-2">A job will be created from this lead first.</p>
                 )}
               </div>
@@ -1611,9 +1629,12 @@ export default function LeadDetail() {
               </div>
   );
 
+  // PTSA scan summaries (S1 accordion sections) — display only.
+  const ptsaServiceCount = (lead.ptsa_services?.length > 0 ? lead.ptsa_services : PTSA_DEFAULT_SERVICES).length;
+  const ptsaScopeSet = !!lead.ptsa_project_scope?.trim();
   const ptsaBlock = showPreTender && (
               <div className="rounded-card border border-amber-200 bg-amber-50/20 p-4">
-                {/* Header + status */}
+                {/* Header + status (always visible) */}
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="section-label">Pre-Tender Service Agreement</h3>
                   {lead.ptsa_status === "signed" ? (
@@ -1638,17 +1659,16 @@ export default function LeadDetail() {
                   )}
                 </div>
 
-                {/* PTSA fee (read-only — set in Winning Offer section above) */}
-                <div className="flex items-center justify-between py-1.5 border-b border-amber-100 mb-3">
+                {/* PTSA fee (read-only — set in Winning Offer section above), always visible */}
+                <div className="flex items-center justify-between py-1.5">
                   <span className="text-xs text-muted">PTSA fee</span>
                   {lead.preconstruction_fee
                     ? <span className="text-sm font-semibold text-ink">${Number(lead.preconstruction_fee).toLocaleString("en-AU")}</span>
                     : <span className="text-xs text-muted italic">Set &ldquo;Pre-construction fee&rdquo; above ↑</span>}
                 </div>
 
-                {/* Services checklist */}
-                <div className="mb-3">
-                  <p className="text-xs font-medium text-ink mb-2">Pre-tender services included:</p>
+                {/* ── Services ───────────────────────────────────────────── */}
+                <LeadAccordion title="Services" summary={`${ptsaServiceCount} of ${PTSA_SERVICES.length} included`}>
                   <div className="space-y-2">
                     {PTSA_SERVICES.map(s => {
                       const activeServices = lead.ptsa_services?.length > 0 ? lead.ptsa_services : PTSA_DEFAULT_SERVICES;
@@ -1672,13 +1692,11 @@ export default function LeadDetail() {
                       );
                     })}
                   </div>
-                </div>
+                </LeadAccordion>
 
-                {/* Project scope — client-facing, appears verbatim in PTSA document */}
-                <div className="mb-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs text-muted">Project scope <span className="font-medium text-ink">(appears in PTSA — client-facing)</span></label>
-                  </div>
+                {/* ── Scope (client-facing; opens by default when unset) ──── */}
+                <LeadAccordion title="Project scope" summary={ptsaScopeSet ? "Set" : "Not set"} defaultOpen={!ptsaScopeSet}>
+                  <p className="text-xs text-muted mb-1">Appears verbatim in the PTSA — <span className="font-medium text-ink">client-facing</span>.</p>
                   {!lead.ptsa_project_scope && (
                     <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-1.5">
                       <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -1703,125 +1721,131 @@ export default function LeadDetail() {
                     defaultValue={lead.ptsa_project_scope || ""}
                     onBlur={e => { if (e.target.value !== (lead.ptsa_project_scope || "")) patch({ ptsa_project_scope: e.target.value || null }); }}
                   />
-                </div>
+                </LeadAccordion>
 
-                {/* Validity period */}
-                <div className="flex items-center justify-between py-1.5 border-b border-hairline">
-                  <span className="text-xs text-muted">Agreement valid for</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min="7"
-                      max="90"
-                      className="w-14 rounded border border-hairline px-2 py-1 text-xs text-right bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
-                      defaultValue={lead.ptsa_validity_days || 14}
-                      onBlur={e => {
-                        const v = parseInt(e.target.value, 10);
-                        if (!isNaN(v) && v !== (lead.ptsa_validity_days || 14)) patch({ ptsa_validity_days: v });
-                      }}
-                    />
-                    <span className="text-xs text-muted">days</span>
-                  </div>
-                </div>
-
-                {/* Credit to contract toggle */}
-                <div className="flex items-center justify-between py-1.5 border-b border-hairline">
-                  <span className="text-xs text-muted">Fee credited back on contract signing</span>
-                  <input
-                    type="checkbox"
-                    checked={lead.ptsa_credit_to_contract !== false}
-                    onChange={e => patch({ ptsa_credit_to_contract: e.target.checked })}
-                    className="w-4 h-4 rounded accent-primary"
-                  />
-                </div>
-
-                {/* Special terms */}
-                <div className="mt-2 mb-2">
-                  <label className="block text-xs text-muted mb-1">Special terms <span className="font-normal">(optional)</span></label>
-                  <textarea
-                    className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
-                    rows={2}
-                    placeholder="Additional conditions, exclusions, or notes for the agreement…"
-                    defaultValue={lead.ptsa_special_terms || ""}
-                    onBlur={e => { if (e.target.value !== (lead.ptsa_special_terms || "")) patch({ ptsa_special_terms: e.target.value || null }); }}
-                  />
-                </div>
-
-                {/* Signed date */}
-                <div className="flex items-center justify-between py-1.5 border-b border-hairline mb-3">
-                  <span className="text-xs text-muted">Date signed by client</span>
-                  <input
-                    type="date"
-                    className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    value={lead.pretender_signed_date || ""}
-                    onChange={e => patch({ pretender_signed_date: e.target.value || null })}
-                  />
-                </div>
-
-                {/* Generate button */}
-                {ptsaError && <p className="text-xs text-red-600 mb-2">{ptsaError}</p>}
-                <button
-                  onClick={generatePTSA}
-                  disabled={generatingPTSA}
-                  className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                >
-                  {generatingPTSA ? "Generating…" : "⬇ Generate PTSA Document"}
-                </button>
-                <p className="text-xs text-muted text-center mt-1.5">Downloads a branded DOCX ready to send to the client</p>
-
-                {/* Mark PTSA as signed — stores the signed PDF, stamps the lead, and
-                    provisions the job + Dropbox folder tree (server-side, one event). */}
-                <div className="mt-4 pt-4 border-t border-amber-100">
-                  {lead.ptsa_status === "signed" ? (
-                    <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-2.5">
-                      <div className="flex items-center gap-1.5 text-sm font-semibold text-green-800">
-                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                          <path d="M20 6L9 17l-5-5" />
-                        </svg>
-                        PTSA signed{lead.pretender_signed_date ? ` on ${lead.pretender_signed_date}` : ""}
-                      </div>
-                      {signedDownloadUrl ? (
-                        <a
-                          href={signedDownloadUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1.5 inline-block text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
-                        >
-                          View signed PTSA PDF ↗
-                        </a>
-                      ) : (
-                        <p className="mt-1.5 text-xs text-muted">Signed PDF stored.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-xs font-medium text-ink mb-2">Mark PTSA as signed</p>
-                      <p className="text-xs text-muted mb-2">Upload the client-signed PDF. This stores the document, marks the lead signed, and creates the job folder.</p>
+                {/* ── Terms ──────────────────────────────────────────────── */}
+                <LeadAccordion title="Terms" summary={`${lead.ptsa_validity_days || 14} days${lead.ptsa_credit_to_contract !== false ? " · credited" : ""}`}>
+                  {/* Validity period */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-hairline">
+                    <span className="text-xs text-muted">Agreement valid for</span>
+                    <div className="flex items-center gap-1.5">
                       <input
-                        type="file"
-                        accept="application/pdf,.pdf"
-                        onChange={e => { setSignedFile(e.target.files?.[0] || null); setPtsaError(""); }}
-                        className="block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-page file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-hairline/40 mb-2"
+                        type="number"
+                        min="7"
+                        max="90"
+                        className="w-14 rounded border border-hairline px-2 py-1 text-xs text-right bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        defaultValue={lead.ptsa_validity_days || 14}
+                        onBlur={e => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!isNaN(v) && v !== (lead.ptsa_validity_days || 14)) patch({ ptsa_validity_days: v });
+                        }}
                       />
-                      <div className="flex items-center justify-between py-1.5 mb-2">
-                        <span className="text-xs text-muted">Date signed <span className="font-normal">(optional)</span></span>
-                        <input
-                          type="date"
-                          value={signedDateInput}
-                          onChange={e => setSignedDateInput(e.target.value)}
-                          className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
-                        />
+                      <span className="text-xs text-muted">days</span>
+                    </div>
+                  </div>
+
+                  {/* Credit to contract toggle */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-hairline">
+                    <span className="text-xs text-muted">Fee credited back on contract signing</span>
+                    <input
+                      type="checkbox"
+                      checked={lead.ptsa_credit_to_contract !== false}
+                      onChange={e => patch({ ptsa_credit_to_contract: e.target.checked })}
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                  </div>
+
+                  {/* Special terms */}
+                  <div className="mt-2 mb-2">
+                    <label className="block text-xs text-muted mb-1">Special terms <span className="font-normal">(optional)</span></label>
+                    <textarea
+                      className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
+                      rows={2}
+                      placeholder="Additional conditions, exclusions, or notes for the agreement…"
+                      defaultValue={lead.ptsa_special_terms || ""}
+                      onBlur={e => { if (e.target.value !== (lead.ptsa_special_terms || "")) patch({ ptsa_special_terms: e.target.value || null }); }}
+                    />
+                  </div>
+
+                  {/* Signed date */}
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-xs text-muted">Date signed by client</span>
+                    <input
+                      type="date"
+                      className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      value={lead.pretender_signed_date || ""}
+                      onChange={e => patch({ pretender_signed_date: e.target.value || null })}
+                    />
+                  </div>
+                </LeadAccordion>
+
+                {/* ── Signing (open by default — the primary PTSA action) ─── */}
+                <LeadAccordion title="Signing" summary={lead.ptsa_status === "signed" ? "Signed" : "Generate / mark signed"} defaultOpen>
+                  {/* Generate button — behaviour unchanged */}
+                  {ptsaError && <p className="text-xs text-red-600 mb-2">{ptsaError}</p>}
+                  <button
+                    onClick={generatePTSA}
+                    disabled={generatingPTSA}
+                    className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {generatingPTSA ? "Generating…" : "⬇ Generate PTSA Document"}
+                  </button>
+                  <p className="text-xs text-muted text-center mt-1.5">Downloads a branded DOCX ready to send to the client</p>
+
+                  {/* Mark PTSA as signed — stores the signed PDF, stamps the lead, and
+                      provisions the job + Dropbox folder tree (server-side, one event). */}
+                  <div className="mt-4 pt-4 border-t border-amber-100">
+                    {lead.ptsa_status === "signed" ? (
+                      <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-2.5">
+                        <div className="flex items-center gap-1.5 text-sm font-semibold text-green-800">
+                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                          PTSA signed{lead.pretender_signed_date ? ` on ${lead.pretender_signed_date}` : ""}
+                        </div>
+                        {signedDownloadUrl ? (
+                          <a
+                            href={signedDownloadUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1.5 inline-block text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
+                          >
+                            View signed PTSA PDF ↗
+                          </a>
+                        ) : (
+                          <p className="mt-1.5 text-xs text-muted">Signed PDF stored.</p>
+                        )}
                       </div>
-                      <button
-                        onClick={markPtsaSigned}
-                        disabled={markingSigned || !signedFile}
-                        className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                      >
-                        {markingSigned ? "Marking signed…" : "✓ Mark PTSA as signed"}
-                      </button>
-                    </>
-                  )}
-                </div>
+                    ) : (
+                      <>
+                        <p className="text-xs font-medium text-ink mb-2">Mark PTSA as signed</p>
+                        <p className="text-xs text-muted mb-2">Upload the client-signed PDF. This stores the document, marks the lead signed, and creates the job folder.</p>
+                        <input
+                          type="file"
+                          accept="application/pdf,.pdf"
+                          onChange={e => { setSignedFile(e.target.files?.[0] || null); setPtsaError(""); }}
+                          className="block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-page file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-hairline/40 mb-2"
+                        />
+                        <div className="flex items-center justify-between py-1.5 mb-2">
+                          <span className="text-xs text-muted">Date signed <span className="font-normal">(optional)</span></span>
+                          <input
+                            type="date"
+                            value={signedDateInput}
+                            onChange={e => setSignedDateInput(e.target.value)}
+                            className="rounded border border-hairline px-2 py-1 text-xs bg-page text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          />
+                        </div>
+                        <button
+                          onClick={markPtsaSigned}
+                          disabled={markingSigned || !signedFile}
+                          className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                        >
+                          {markingSigned ? "Marking signed…" : "✓ Mark PTSA as signed"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </LeadAccordion>
               </div>
   );
 
@@ -1856,23 +1880,29 @@ export default function LeadDetail() {
                 {next === "tender" && !lead.job_id && (
                   <button
                     onClick={createJobFromLead}
-                    disabled={creatingJob}
+                    disabled={creatingJob || !lead.site_address?.trim()}
                     className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3 disabled:opacity-50"
                   >
                     {creatingJob ? "Creating…" : "Create Job from Lead →"}
                   </button>
+                )}
+                {next === "tender" && !lead.job_id && !lead.site_address?.trim() && (
+                  <p className="text-xs text-orange-600 text-center mb-3 font-medium">Add site address before creating a job.</p>
                 )}
                 {next === "tender" && lead.job_id && (
                   <p className="text-xs text-green-700 text-center mb-3">Job linked — ready to advance</p>
                 )}
                 <button
                   onClick={advanceStage}
-                  disabled={!gatePass}
+                  disabled={!gatePass || (showSiteAddressWarning && next === "tender")}
                   className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Move to {nextLabel} →
                 </button>
-                {!gatePass && (
+                {showSiteAddressWarning && next === "tender" && (
+                  <p className="mt-2 text-xs text-orange-600 text-center font-medium">Add site address before advancing to Tender.</p>
+                )}
+                {!gatePass && !(showSiteAddressWarning && next === "tender") && (
                   <p className="mt-2 text-xs text-muted text-center">Complete the requirements above to advance.</p>
                 )}
               </div>
@@ -1899,33 +1929,7 @@ export default function LeadDetail() {
               </div>
   );
 
-  // ── Stage stepper (header) ──────────────────────────────────────────
-  const currentStageIdx = STAGE_ORDER.indexOf(lead.stage);
-  const stageStepper = isArchTender ? (
-    <div className="rounded-lg border border-primary/30 bg-primary/[0.04] px-3 py-1.5 text-xs text-primary font-semibold whitespace-nowrap">
-      Architect Tender — fast-tracked
-    </div>
-  ) : (
-    <div className="flex items-center gap-1 overflow-x-auto -mx-1 px-1 py-0.5">
-      {STAGE_ORDER.map((sid, i) => {
-        const meta = STAGES.find(s => s.id === sid);
-        const isCurrent = sid === lead.stage;
-        const isPast = currentStageIdx >= 0 && i < currentStageIdx;
-        return (
-          <div key={sid} className="flex items-center flex-shrink-0">
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${
-                isCurrent ? meta?.color + " ring-1 ring-primary" : isPast ? "bg-page text-muted" : "bg-page text-muted/60"
-              }`}
-            >
-              {meta?.label}
-            </span>
-            {i < STAGE_ORDER.length - 1 && <span className="mx-0.5 text-muted/40 text-[10px]">›</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
+  // Stage stepper now rendered via <LeadStageStepper /> in the header (Pass 3A).
 
   // ── Key facts (header) ──────────────────────────────────────────────
   const keyFactsBlock = (
@@ -1951,18 +1955,20 @@ export default function LeadDetail() {
   if (lead.stage === "enquiry" || lead.stage === "qualify") {
     focusContent = qualifyingBlock;
   } else if (lead.stage === "discovery") {
+    // Pass 4A: keep conversation/transcript prominent in the Discovery workspace
+    // (excluded from the Activity group below to avoid a within-tree double).
     focusContent = <>{discoveryBlock}{conversationsBlock}</>;
   } else if (lead.stage === "winning_offer") {
     focusContent = winningOfferBlock;
   } else if (lead.stage === "fee_proposal") {
-    focusContent = <>{ptsaBlock}{advanceBlock}</>;
+    // advanceBlock moved to the single next-action slot (rail / Action tab).
+    focusContent = ptsaBlock;
   } else if (lead.stage === "tender") {
     focusContent = tenderBlock;
   } else if (lead.stage === "accepted") {
     focusContent = (
       <div className="rounded-card border border-emerald-200 bg-emerald-50/40 p-4">
-        <p className="text-sm font-medium text-ink mb-3">Offer accepted — proceed to tender.</p>
-        {advanceBlock}
+        <p className="text-sm font-medium text-ink">Offer accepted — proceed to tender.</p>
       </div>
     );
   } else {
@@ -1970,106 +1976,162 @@ export default function LeadDetail() {
     focusShown = false;
   }
 
+  // ── Pass 3A: one obvious primary action (reuses existing handlers) ──────────
+  let primaryAction = null;
+  if (lead.stage === "won") {
+    primaryAction = lead.job_id
+      ? { label: "View job dashboard →", onClick: () => nav(`/finance/jobs/${lead.job_id}`) }
+      : { label: creatingJob ? "Creating…" : "Create Job from Lead →", onClick: createJobFromLead, disabled: creatingJob || !lead.site_address?.trim() };
+  } else if (lead.stage === "tender") {
+    primaryAction = { label: creatingJob ? "Setting up…" : "Proceed to RFQ Engine →", onClick: startTenderRfq, disabled: creatingJob || !lead.site_address?.trim() };
+  } else if (next) {
+    primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage, disabled: !gatePass || (showSiteAddressWarning && next === "tender") };
+  }
+
+  // ── WON special case — success marker + hand-off CTAs (no "Next: Won →") ────
+  const wonCard = lead.stage === "won" ? (
+    <div className="rounded-card border border-accent/30 bg-accent/[0.04] p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xl leading-none">🎉</span>
+        <span className="text-base font-bold text-ink">Lead won</span>
+        <StatusBadge variant="success" dot>Won</StatusBadge>
+      </div>
+      <p className="mt-1 text-sm text-muted">{displayLeadName(lead)} is won — hand off to delivery.</p>
+      <div className="mt-3 space-y-2">
+        {lead.job_id ? (
+          <button type="button" onClick={() => nav(`/finance/jobs/${lead.job_id}`)} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">View job dashboard →</button>
+        ) : (
+          <button type="button" onClick={createJobFromLead} disabled={creatingJob || !lead.site_address?.trim()} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{creatingJob ? "Creating…" : "Create Job from Lead →"}</button>
+        )}
+        <button type="button" onClick={() => nav("/tender-manager/board")} className="w-full rounded-lg border border-hairline px-4 py-2 text-sm font-semibold text-ink hover:bg-page">Hand off to Tender Manager</button>
+      </div>
+      {!lead.job_id && !lead.site_address?.trim() && <p className="mt-2 text-center text-[11px] font-medium text-orange-600">Add site address before creating a job.</p>}
+    </div>
+  ) : null;
+
+  // ── Pass 3A content slots (each existing block rendered once per tree) ──────
+  const focusBlockId = { enquiry: "qualifying", qualify: "qualifying", discovery: "discovery", winning_offer: "winning_offer", fee_proposal: "ptsa" }[lead.stage] || null;
+  const conversationsInFocus = lead.stage === "discovery"; // conversations live in the Discovery focus, not the Activity group
+  const focusEl = focusShown ? (
+    <LeadNextActionCard stageLabel={stageMeta?.label}>{archTenderBlock}{focusContent}</LeadNextActionCard>
+  ) : null;
+  const nextActionEl = lead.stage === "won" ? wonCard : advanceBlock;
+
+  const samBanner = showSiteAddressWarning ? (
+    <div className="mt-4 rounded-card border border-orange-400 bg-orange-50 px-4 py-3 flex items-start gap-3">
+      <span className="text-orange-500 text-lg leading-none flex-shrink-0">⚠</span>
+      <div>
+        <p className="text-sm font-semibold text-orange-800">Job not created — site address is missing</p>
+        <p className="text-xs text-orange-700 mt-0.5">The PTSA has been signed and stored, but no job could be created because this lead has no site address. Add a site address below, then this lead can proceed to Tender.</p>
+      </div>
+    </div>
+  ) : null;
+
+  // Deep stage-work blocks not currently in focus (so nothing renders twice in a tree).
+  const qualifyingDeep   = qualifyingBlock   && focusBlockId !== "qualifying"     ? qualifyingBlock   : null;
+  const discoveryDeep    = discoveryBlock    && focusBlockId !== "discovery"      ? discoveryBlock    : null;
+  const winningOfferDeep = winningOfferBlock && focusBlockId !== "winning_offer"  ? winningOfferBlock : null;
+  const ptsaDeep         = ptsaBlock         && focusBlockId !== "ptsa"           ? ptsaBlock         : null;
+  // Pass 4A: prior/relevant stage work shown as COLLAPSED summaries (the current stage
+  // is the expanded focus above; future stages stay hidden via the show-flags). Blocks
+  // are unchanged — each is rendered verbatim inside its collapsed accordion.
+  const priorStageSections = [
+    qualifyingDeep   && { id: "qualifying",   title: "Qualifying",           summary: `${lead.qualify_score ?? 0}/8`, block: qualifyingDeep },
+    discoveryDeep    && { id: "discovery",    title: "Discovery",            summary: lead.discovery_notes?.trim() ? "Notes captured" : "No notes yet", block: discoveryDeep },
+    winningOfferDeep && { id: "winningOffer", title: "Winning Offer",        summary: lead.preconstruction_fee ? `Fee $${Number(lead.preconstruction_fee).toLocaleString("en-AU")}` : "In progress", block: winningOfferDeep },
+    ptsaDeep         && { id: "ptsa",         title: "Pre-Tender Agreement", summary: PTSA_STATUS_LABELS[lead.ptsa_status || "draft"], block: ptsaDeep },
+  ].filter(Boolean);
+  const stageWorkDeep = priorStageSections.length ? (
+    <div>
+      <p className="section-label mb-2">Earlier stages</p>
+      <div className="space-y-2">
+        {priorStageSections.map((s) => (
+          <LeadStageSection key={s.id} title={s.title} summary={s.summary}>{s.block}</LeadStageSection>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  const detailsGroup = (
+    <div>
+      <p className="section-label mb-2">Lead details</p>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}</div>
+    </div>
+  );
+
+  const activityGroup = (
+    <div className="space-y-4">
+      <p className="section-label">Conversations &amp; activity</p>
+      <div className="grid grid-cols-1 gap-4">{!conversationsInFocus && conversationsBlock}{logActivityBlock}</div>
+      {timelineBlock}
+    </div>
+  );
+
+  const MOBILE_TABS = [
+    { value: "summary", label: "Summary" },
+    { value: "action", label: "Action" },
+    { value: "activity", label: "Activity" },
+    { value: "files", label: "Files" },
+    { value: "notes", label: "Notes" },
+  ];
+
   return (
     <div>
-      {/* 1) STICKY HEADER */}
-      <div className="sticky top-0 z-10 bg-page border-b border-hairline -mx-4 px-4 sm:-mx-5 sm:px-5 pt-2 pb-3 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          {breadcrumbBlock}
-          {headerActionsBlock}
-        </div>
-        {stageStepper}
-        <div className="flex items-end justify-between gap-3 flex-wrap">
-          {keyFactsBlock}
-          {/* Primary "Next →" control */}
-          {next && !["fee_proposal", "accepted"].includes(lead.stage) && (
-            <details className="ml-auto rounded-lg border border-hairline bg-surface">
-              <summary className="cursor-pointer select-none list-none px-4 py-2 text-sm font-semibold text-white bg-primary rounded-lg hover:opacity-90 flex items-center gap-2">
-                Next: {nextLabel} →
-                {!gatePass && <span className="text-[10px] font-normal bg-white/20 rounded px-1.5 py-0.5">checklist</span>}
-              </summary>
-              <div className="p-3 w-72 max-w-[80vw]">
-                {advanceBlock}
-              </div>
-            </details>
+      <LeadDetailHeader
+        breadcrumb={breadcrumbBlock}
+        stepper={<LeadStageStepper stageOrder={STAGE_ORDER} stages={STAGES} current={lead.stage} isArchTender={isArchTender} />}
+        keyFacts={keyFactsBlock}
+        primaryAction={primaryAction}
+        secondaryActions={headerActionsBlock}
+      />
+
+      {samBanner}
+
+      {/* DESKTOP command-centre (main workspace + sticky right rail) */}
+      <LeadCommandCentreLayout
+        className="hidden lg:grid"
+        main={<>{focusEl}{stageWorkDeep}{detailsGroup}{activityGroup}</>}
+        rightRail={<>
+          {nextActionEl}
+          <LeadSummaryPanel lead={lead} />
+          {blueprintBlock}
+          {notesBlock}
+          {documentsBlock}
+          {nurtureBlock}
+        </>}
+      />
+
+      {/* TABLET + MOBILE (tabs + sticky action bar) */}
+      <div className="lg:hidden">
+        <div className="mt-4"><LeadMobileTabs tabs={MOBILE_TABS} value={mobileTab} onChange={setMobileTab} /></div>
+        <div className="mt-4 space-y-5">
+          {mobileTab === "summary" && <><LeadSummaryPanel lead={lead} />{detailsGroup}{stageWorkDeep}{nurtureBlock}</>}
+          {mobileTab === "action" && (
+            <div className="space-y-5">
+              {focusEl}
+              {nextActionEl}
+              {blueprintBlock}
+              {!focusEl && !nextActionEl && <EmptyState compact title="No current action" hint="See the Summary tab for details." />}
+            </div>
           )}
+          {mobileTab === "activity" && activityGroup}
+          {mobileTab === "files" && documentsBlock}
+          {mobileTab === "notes" && notesBlock}
         </div>
+        {/* Sticky primary action — sits clearly above the mobile bottom nav (~75px);
+            flush at md+ where the nav is hidden. AppShell collapses its FABs on this
+            page so nothing overlaps. */}
+        {primaryAction && (
+          <StickyActionBar position="fixed" className="!bottom-[78px] md:!bottom-0">
+            <button type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {primaryAction.label}
+            </button>
+          </StickyActionBar>
+        )}
+        {/* AppShell <main> already adds pb-24 (mobile) / pb-10 (tablet); this only needs
+            to clear the sticky bar above that. */}
+        <SafeBottomSpacer height={44} />
       </div>
-
-      {/* 2) "DO THIS NOW" FOCUS PANEL */}
-      {focusShown && (
-        <div className="mt-4 rounded-card border border-primary/30 bg-primary/[0.03] p-4 sm:p-5 space-y-4">
-          <p className="text-xs font-bold uppercase tracking-wide text-primary">Do this now · {stageMeta?.label}</p>
-          {archTenderBlock}
-          {focusContent}
-        </div>
-      )}
-
-      {/* 3) "LEAD FILE" DRAWER */}
-      <details open className="mt-4 rounded-card border border-hairline bg-surface">
-        <summary className="cursor-pointer select-none list-none px-4 py-3 text-sm font-semibold text-ink flex items-center gap-2 hover:bg-page rounded-t-card">
-          <span className="text-muted">▸</span> Lead file
-          <span className="text-xs font-normal text-muted ml-1">all details, editable at any stage</span>
-        </summary>
-        <div className="border-t border-hairline p-4 sm:p-5 space-y-6">
-          {/* Lead details */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {contactBlock}
-            {projectBlock}
-            {marginBlock}
-            {blueprintBlock}
-          </div>
-
-          {/* Qualifying */}
-          {qualifyingBlock && (
-            <div>
-              <p className="section-label mb-2">Qualifying</p>
-              {qualifyingBlock}
-            </div>
-          )}
-
-          {/* Stage work — kept accessible at any stage */}
-          {(discoveryBlock || winningOfferBlock || ptsaBlock) && (
-            <div>
-              <p className="section-label mb-2">Stage work</p>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {discoveryBlock}
-                {winningOfferBlock}
-                {ptsaBlock}
-              </div>
-            </div>
-          )}
-
-          {/* Conversations & activity */}
-          <div>
-            <p className="section-label mb-2">Conversations &amp; activity</p>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {conversationsBlock}
-              {logActivityBlock}
-            </div>
-            <div className="mt-4">
-              {timelineBlock}
-            </div>
-          </div>
-
-          {/* Notes & documents */}
-          <div>
-            <p className="section-label mb-2">Notes &amp; documents</p>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {notesBlock}
-              {documentsBlock}
-            </div>
-          </div>
-
-          {/* Nurture */}
-          {nurtureBlock && (
-            <div>
-              <p className="section-label mb-2">Nurture</p>
-              {nurtureBlock}
-            </div>
-          )}
-        </div>
-      </details>
 
       <ConversationPanel
         leadId={leadId}

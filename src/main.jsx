@@ -22,7 +22,21 @@ registerSW({
   }
 });
 
-clearDevServiceWorkers().finally(() => {
+async function boot() {
+  // ── UI Review Mode (non-production) ─────────────────────────────────────────
+  // Dead in production: VITE_UI_REVIEW_MODE is unset, so this branch is statically
+  // false and the dynamic import is tree-shaken out of the prod bundle. To remove
+  // the feature entirely: delete this block, src/ui-review/, and the
+  // VITE_UI_REVIEW_MODE branch in src/lib/AuthContext.jsx.
+  if (import.meta.env.VITE_UI_REVIEW_MODE === "true") {
+    try {
+      const { installUiReview } = await import("./ui-review/install.js");
+      installUiReview();
+    } catch (e) {
+      console.error("[ui-review] install failed", e);
+    }
+  }
+  await clearDevServiceWorkers().catch(() => {});
   createRoot(document.getElementById("root")).render(
     <StrictMode>
       <ErrorBoundary>
@@ -30,4 +44,6 @@ clearDevServiceWorkers().finally(() => {
       </ErrorBoundary>
     </StrictMode>
   );
-});
+}
+
+boot();

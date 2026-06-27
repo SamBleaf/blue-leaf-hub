@@ -4,6 +4,18 @@ import { useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
 import { useProject } from "../lib/ProjectContext.jsx";
+import {
+  packageProjectAddress,
+  packageProjectType,
+  packageTenderDeadline,
+  packageArchitectClient,
+  packageCreatedAt,
+  packageCoverageScore,
+  packageTradeScopes,
+  packageJobId,
+  scopeRecipients,
+  recipientFollowUpDue,
+} from "../lib/rfqPackageUtils.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,7 +81,7 @@ function PackageStatusSummary({ scopes }) {
   const sent = (scopes || []).filter((s) => ["sent", "followed_up"].includes(s.status)).length;
   const received = (scopes || []).filter((s) => s.status === "received").length;
   const pending = sent - received;
-  const totalRecipients = (scopes || []).reduce((n, s) => n + (s.rfq_recipients?.length || 0), 0);
+  const totalRecipients = (scopes || []).reduce((n, s) => n + scopeRecipients(s).length, 0);
   return (
     <div className="mt-3 grid grid-cols-4 gap-2 text-center">
       {[
@@ -90,10 +102,11 @@ function PackageStatusSummary({ scopes }) {
 function FollowUpAlert({ scopes }) {
   const today = new Date();
   const overdue = (scopes || []).flatMap((s) =>
-    (s.rfq_recipients || []).filter((r) => {
+    scopeRecipients(s).filter((r) => {
       if (!["sent", "followed_up"].includes(r.status)) return false;
-      if (!r.follow_up_due) return false;
-      return new Date(r.follow_up_due) < today;
+      const due = recipientFollowUpDue(r);
+      if (!due) return false;
+      return new Date(due) < today;
     })
   );
   if (!overdue.length) return null;
@@ -111,7 +124,7 @@ function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) 
   const navigate = useNavigate();
   const [filter, setFilter] = useState("active");
 
-  const jobFiltered = activeJobId ? packages.filter((p) => p.job_id === activeJobId) : packages;
+  const jobFiltered = activeJobId ? packages.filter((p) => packageJobId(p) === activeJobId) : packages;
   const filtered = filter === "all" ? jobFiltered : jobFiltered.filter((p) => p.status === filter);
 
   if (loading) return (
@@ -165,7 +178,9 @@ function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) 
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((pkg) => (
+        {filtered.map((pkg) => {
+          const scopes = packageTradeScopes(pkg);
+          return (
           <div
             key={pkg.id}
             className="rounded-card border border-hairline bg-surface p-5 hover:border-primary/30 hover:shadow-sm transition cursor-pointer"
@@ -173,39 +188,39 @@ function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) 
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="font-semibold text-ink text-sm leading-tight truncate">{pkg.project_address || "Unnamed project"}</div>
-                {pkg.project_type && <div className="text-xs text-muted mt-0.5">{pkg.project_type}</div>}
+                <div className="font-semibold text-ink text-sm leading-tight truncate">{packageProjectAddress(pkg)}</div>
+                {packageProjectType(pkg) && <div className="text-xs text-muted mt-0.5">{packageProjectType(pkg)}</div>}
               </div>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PKG_STATUS_CLS[pkg.status] || PKG_STATUS_CLS.active}`}>
                 {pkg.status}
               </span>
             </div>
 
-            {pkg.tender_deadline && (
+            {packageTenderDeadline(pkg) && (
               <div className="mt-2 flex items-center gap-1.5 text-xs text-muted">
                 <span>📅</span>
-                <span>Tender due <span className="font-semibold text-ink">{pkg.tender_deadline}</span></span>
+                <span>Tender due <span className="font-semibold text-ink">{packageTenderDeadline(pkg)}</span></span>
               </div>
             )}
-            {pkg.architect_client && (
+            {packageArchitectClient(pkg) && (
               <div className="mt-1 flex items-center gap-1.5 text-xs text-muted">
                 <span>🏛</span>
-                <span>{pkg.architect_client}</span>
+                <span>{packageArchitectClient(pkg)}</span>
               </div>
             )}
 
-            <PackageStatusSummary scopes={pkg.rfq_trade_scopes} />
-            <CoverageBar score={pkg.coverage_score || 0} />
-            <FollowUpAlert scopes={pkg.rfq_trade_scopes} />
+            <PackageStatusSummary scopes={scopes} />
+            <CoverageBar score={packageCoverageScore(pkg)} />
+            <FollowUpAlert scopes={scopes} />
 
             <div className="mt-3 pt-3 border-t border-hairline flex items-center justify-between">
               <span className="text-[10px] text-muted">
-                {fmtDateSafe(pkg.created_at)}
+                {fmtDateSafe(packageCreatedAt(pkg))}
               </span>
               <span className="text-xs font-semibold text-primary">Open →</span>
             </div>
           </div>
-        ))}
+        );})}
       </div>
     </div>
   );

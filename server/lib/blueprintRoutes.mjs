@@ -5,7 +5,7 @@ import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
 import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus, buildChatSystemPrompt } from '../../src/blueprint/agent/runAgent.js';
-import { requireAuth } from './requireAuth.mjs';
+import { requireAuth, requireRole } from './requireAuth.mjs';
 import { courseNameFromMarkdown } from '../../src/blueprint/lib/knowledgeChunking.js';
 import { indexLearnedKnowledge } from '../../src/blueprint/lib/knowledgeIndex.js';
 import { runAttachmentDocumentReview } from '../../src/blueprint/lib/documentReview.js';
@@ -394,7 +394,7 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  app.post('/api/blueprint/learn', async (req, res) => {
+  app.post('/api/blueprint/learn', requireAuth, requireRole('admin'), async (req, res) => {
     try {
       if (!requireLearnAccess(req, res)) return;
 
@@ -445,7 +445,7 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  app.post('/api/blueprint/review-document', async (req, res) => {
+  app.post('/api/blueprint/review-document', requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const documentText = String(req.body?.documentText || '').trim();
       const documentType = String(req.body?.documentType || 'rfq').trim() || 'rfq';
@@ -487,7 +487,7 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  app.post('/api/blueprint/generate-sop', async (req, res) => {
+  app.post('/api/blueprint/generate-sop', requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const { messages } = req.body;
       const reply = await callClaude('sop', messages);
@@ -498,7 +498,7 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  app.post('/api/blueprint/troubleshoot', async (req, res) => {
+  app.post('/api/blueprint/troubleshoot', requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const { messages } = req.body;
       const reply = await callClaude('troubleshoot', messages);
