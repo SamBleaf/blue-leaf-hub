@@ -48,5 +48,16 @@ export default [
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }]
     }
+  },
+  {
+    // E2E (Playwright) + the playwright config run in Node — give them Node globals
+    // (process, etc.) and relax unused-vars (test setup often binds for clarity).
+    files: ["e2e/**/*.{js,mjs,jsx}", "playwright.config.js"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser }
+    },
+    rules: {
+      "no-unused-vars": "off"
+    }
   }
 ];

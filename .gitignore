@@ -24,7 +24,19 @@ yarn-error.log*
 .cache
 server/luts/*.cube
 
-# AI agent local files (never commit)
+# Test output (local PDF samples etc.)
+scripts/output/
 .agent-test-context.local.md
 .test-credentials.local
+e2e/.runtime.json
+.export-redacted-tmp/
+e2e/report/
+e2e/tests/**/__snapshots__/
+test-results/
+playwright-report/
+playwright/.cache/
 .claude/launch.json
+
+# Hardening export archives + scratch (do not commit)
+blue-leaf-hub-hardening-*.zip
+_tmp_*.mjs
