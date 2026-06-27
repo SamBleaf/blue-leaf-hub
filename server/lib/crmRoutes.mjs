@@ -919,7 +919,7 @@ export function registerCrmRoutes(app) {
 
   // ─── CSV import ───────────────────────────────────────────────────────────
 
-  app.post("/api/crm/lists/:id/import", requireAuth, async (req, res) => {
+  app.post("/api/crm/lists/:id/import", requireAuth, requireRole("admin"), async (req, res) => {
     const { id } = req.params;
     const { rows } = req.body; // [{ firstName, lastName, email, phone, contactType, consentSource, suburb }]
 
@@ -991,7 +991,7 @@ export function registerCrmRoutes(app) {
 
   // ─── Create email send draft ──────────────────────────────────────────────
 
-  app.post("/api/crm/sends", requireAuth, async (req, res) => {
+  app.post("/api/crm/sends", requireAuth, requireRole("admin"), async (req, res) => {
     const { mailingListId, subject, previewText, htmlBody, contentItemId, scheduledAt } = req.body;
     if (!mailingListId) return err(res, 400, "mailingListId is required");
     if (!subject) return err(res, 400, "subject is required");
@@ -1042,7 +1042,7 @@ export function registerCrmRoutes(app) {
 
   // ─── Trigger send ─────────────────────────────────────────────────────────
 
-  app.post("/api/crm/sends/:sid/send", requireAuth, async (req, res) => {
+  app.post("/api/crm/sends/:sid/send", requireAuth, requireRole("admin"), async (req, res) => {
     const { sid } = req.params;
 
     if (!process.env.RESEND_API_KEY) {
@@ -1080,6 +1080,19 @@ export function registerCrmRoutes(app) {
       recipients = (members || [])
         .map(m => m.crm_contacts)
         .filter(c => c && c.email);
+    }
+
+    // W22-SEC-001: global unsubscribe suppression. email_unsubscribes is the global opt-out log
+    // (link / manual / bounce / complaint). Smart-list recipients are pulled straight from
+    // crm_contacts and otherwise honour NO unsubscribe state, so this guard applies to every path.
+    const candidateEmails = recipients.map(r => r.email).filter(Boolean);
+    if (candidateEmails.length) {
+      const { data: unsubRows } = await sb()
+        .from("email_unsubscribes").select("email_address").in("email_address", candidateEmails);
+      const suppressed = new Set((unsubRows || []).map(u => (u.email_address || "").toLowerCase()));
+      if (suppressed.size) {
+        recipients = recipients.filter(r => !suppressed.has((r.email || "").toLowerCase()));
+      }
     }
 
     if (recipients.length === 0) return err(res, 400, "No active recipients with email addresses on this list");
@@ -1256,38 +1269,54 @@ export function registerCrmRoutes(app) {
     const emailId = data.email_id;
 
     try {
+      // W22-SEC-001: each counter increments only on the FIRST state transition (guarded by the
+      // timestamp / status being unset), so Resend webhook retries can no longer double-count.
       if (type === "email.delivered") {
-        await getServiceSupabase().from("email_send_recipients")
+        const { data: changed } = await getServiceSupabase().from("email_send_recipients")
           .update({ status: "delivered", delivered_at: new Date().toISOString() })
-          .eq("resend_email_id", emailId);
-        // Increment delivered_count on send
-        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "delivered_count" }).maybeSingle();
+          .eq("resend_email_id", emailId).is("delivered_at", null).select("id");
+        if (changed?.length) {
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "delivered_count" }).maybeSingle();
+        }
 
       } else if (type === "email.opened") {
-        await getServiceSupabase().from("email_send_recipients")
+        const { data: changed } = await getServiceSupabase().from("email_send_recipients")
           .update({ status: "opened", opened_at: new Date().toISOString() })
-          .eq("resend_email_id", emailId);
-        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "opened_count" }).maybeSingle();
+          .eq("resend_email_id", emailId).is("opened_at", null).select("id");
+        if (changed?.length) {
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "opened_count" }).maybeSingle();
+        }
 
       } else if (type === "email.clicked") {
-        await getServiceSupabase().from("email_send_recipients")
+        const { data: changed } = await getServiceSupabase().from("email_send_recipients")
           .update({ status: "clicked", clicked_at: new Date().toISOString() })
-          .eq("resend_email_id", emailId);
-        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "clicked_count" }).maybeSingle();
+          .eq("resend_email_id", emailId).is("clicked_at", null).select("id");
+        if (changed?.length) {
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "clicked_count" }).maybeSingle();
+        }
 
       } else if (type === "email.bounced") {
-        await getServiceSupabase().from("email_send_recipients")
+        // Idempotent (only first bounce) + add to the global suppression log so a hard-bounced
+        // address can't be re-emailed via a smart list (which reads crm_contacts directly).
+        const { data: bChanged } = await getServiceSupabase().from("email_send_recipients")
           .update({ status: "bounced", bounce_reason: data.bounce?.message || null })
-          .eq("resend_email_id", emailId);
-        await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "bounced_count" }).maybeSingle();
-
-        // Hard bounce = remove from all lists
-        const { data: recipient } = await getServiceSupabase()
-          .from("email_send_recipients").select("contact_id, email_address").eq("resend_email_id", emailId).maybeSingle();
-        if (recipient?.contact_id) {
-          await getServiceSupabase().from("mailing_list_members")
-            .update({ unsubscribed_at: new Date().toISOString(), unsubscribed_via: "bounce" })
-            .eq("contact_id", recipient.contact_id);
+          .eq("resend_email_id", emailId).neq("status", "bounced")
+          .select("contact_id, email_address, email_send_id");
+        if (bChanged?.length) {
+          const recipient = bChanged[0];
+          await getServiceSupabase().rpc("increment_send_stat", { p_resend_email_id: emailId, p_field: "bounced_count" }).maybeSingle();
+          if (recipient?.contact_id) {
+            await getServiceSupabase().from("mailing_list_members")
+              .update({ unsubscribed_at: new Date().toISOString(), unsubscribed_via: "bounce" })
+              .eq("contact_id", recipient.contact_id);
+          }
+          await getServiceSupabase().from("email_unsubscribes").insert({
+            contact_id: recipient?.contact_id || null,
+            email_address: recipient?.email_address || "",
+            email_send_id: recipient?.email_send_id || null,
+            unsubscribed_via: "bounce",
+            resend_event_id: data.event_id || null,
+          });
         }
 
       } else if (type === "email.complained") {
