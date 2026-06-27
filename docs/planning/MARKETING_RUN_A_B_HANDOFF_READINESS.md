@@ -8,6 +8,7 @@
 
 > **HARDENING FREEZE — read first:**  
 > Marketing Command Centre rebuild is **planned, not cancelled**. **Run A is parked** until post P0/P1 hardening.  
+> **Branch state (2026-06-27):** branch `marketing-run-a` exists (cut from the clean `portal-v2` tip; on `origin`); tree clean; P0/P1 commits landed; migration **122** re-confirmed as the next number. **Run A is still NOT approved** — awaits explicit Sam go (H1 handoff sign-off + H2 migration authorisation). A clean branch is not approval.  
 > **Not approved during freeze:** Claude Run A · product code · route changes · migration 122 · `dev-api.mjs` auth middleware edits · marketing UI rebuild · commits/deploys.  
 > **Security:** `/api/marketing` and `/api/intelligence` are already admin-gated via blanket middleware in `dev-api.mjs`. Run A security workstream is **superseded by QA-001 / hardening baseline** — future Run A should cite `npm run test:qa-sec-baseline` only; do not bulk-edit marketing route guards.  
 > **Migration:** Do not create `111_*.sql` or `122_marketing_command_centre_mvp.sql`. Re-check highest migration number when Run A is later authorised.  
