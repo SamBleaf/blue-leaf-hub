@@ -124,6 +124,20 @@ export default function UserManagement() {
     setEditName(u.full_name || "");
   }
 
+  async function deleteUser(u) {
+    if (u.id === profile?.id) return;
+    if (!window.confirm(`Permanently delete ${u.full_name || u.email}?\n\nTheir login is removed and any linked staff record is unlinked so it can be re-invited. This cannot be undone.`)) return;
+    setError("");
+    try {
+      const res = await authedFetch(`/api/auth/users/${u.id}`, { method: "DELETE" });
+      const j = await readApiJson(res, "deleteUser");
+      if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
+      await loadUsers();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function saveEdit(userId) {
     setSaving(true);
     setError("");
@@ -312,13 +326,24 @@ export default function UserManagement() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(u)}
-                        className="text-sm font-semibold text-primary hover:underline"
-                      >
-                        Edit
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(u)}
+                          className="text-sm font-semibold text-primary hover:underline"
+                        >
+                          Edit
+                        </button>
+                        {!isSelf && !(u.role === "admin" && adminCount <= 1) && (
+                          <button
+                            type="button"
+                            onClick={() => deleteUser(u)}
+                            className="text-sm font-semibold text-danger hover:underline"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

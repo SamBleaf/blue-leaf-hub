@@ -471,6 +471,46 @@ If you weren't expecting this, you can ignore this email.
     }
   });
 
+  // DELETE /api/auth/users/:userId — hard-delete a team member's login.
+  // Unlinks any staff record (so it can be re-invited cleanly), removes portal links, then deletes
+  // the auth user + profile. Guards: not yourself, not the last admin.
+  app.delete("/api/auth/users/:userId", async (req, res) => {
+    try {
+      const caller = await getCallerProfile(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorised" });
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const sb = getServiceSupabase();
+      if (!sb) return res.status(503).json({ error: "DB not configured" });
+
+      const userId = req.params.userId;
+      if (userId === caller.id) return res.status(400).json({ error: "You cannot delete your own account." });
+
+      const { data: target } = await sb.from("user_profiles").select("id, role, email").eq("id", userId).maybeSingle();
+      if (!target) return res.status(404).json({ error: "User not found." });
+
+      if (target.role === "admin") {
+        const { count } = await sb.from("user_profiles").select("id", { count: "exact", head: true }).eq("role", "admin");
+        if ((count || 0) <= 1) return res.status(400).json({ error: "Cannot delete the only admin." });
+      }
+
+      // Unlink staff record so the employee can be re-invited, and drop any portal links.
+      await sb.from("employees").update({ user_id: null, updated_at: new Date().toISOString() }).eq("user_id", userId);
+      await sb.from("project_client_users").delete().eq("user_id", userId);
+
+      // Remove the auth user (cascades the profile in most schemas), then ensure the profile is gone.
+      const { error: authErr } = await sb.auth.admin.deleteUser(userId);
+      if (authErr && !/not found/i.test(authErr.message)) {
+        return res.status(500).json({ error: `Could not delete the login: ${authErr.message}` });
+      }
+      await sb.from("user_profiles").delete().eq("id", userId);
+
+      return res.json({ ok: true, deleted: userId, email: target.email });
+    } catch (e) {
+      return res.status(500).json({ error: e.message || "Delete failed." });
+    }
+  });
+
   app.get("/api/auth/invitations", async (req, res) => {
     try {
       const caller = await getCallerProfile(req);
