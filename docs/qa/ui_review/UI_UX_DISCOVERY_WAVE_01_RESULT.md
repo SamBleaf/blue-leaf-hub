@@ -197,35 +197,38 @@ against first-viewport rubric + Sales-standard scorecard. Prior export notes in
 
 ---
 
-## 6. Claude review (2026-06-28) — triage + ratified 01B plan
+## 7. Claude review — finalized 01B plan (2026-06-28, post-follow-up)
 
-**Scope verdict:** PASS — Cursor changed docs only (no `src/**`/`server/**`/migrations). Evidence
-is strong enough to plan Wave 01B. Full per-ID triage is in
-[../BUG_REGISTER.md](../BUG_REGISTER.md) → "Claude Review — Wave 01A triage".
+**Scope verdict:** PASS. Cursor's follow-up commit `4ae2b34` touched only
+`src/ui-review/fixtures/**` + `e2e/ui-review/` + docs — **no production code** (verified via
+`git show --name-only`). **Control check:** `src/ui-review/**` is review-only (gated by
+`VITE_UI_REVIEW_MODE`, tree-shaken from prod) → **Option 1: allowed test-only path** (master
+plan §4). Per-ID detail in [../BUG_REGISTER.md](../BUG_REGISTER.md) follow-up resolution.
 
-**Lanes:**
-- **Diagnose first (no-code, runs now):** UI-FIELD-001, UI-FIELD-002 (fixture-vs-component),
-  UI-PORTAL-002 (behaviour-feed-vs-copy).
-- **Test-only (no approval):** UI-CRM-001 coverage; UI-WORKFORCE-001 fixture enrichment.
-- **Wave 01B presentational (needs Sam's one approval):** UI-NAV-001, UI-FINANCE-001/002/003,
-  UI-PORTAL-001, UI-SCHEDULE-001, UI-VISUAL-001 (sequence last), UI-WORKFORCE-001 (copy),
-  UI-SALES-001 (or accepted-gap).
-- **Accepted-gap decisions (Sam):** UI-TENDER-001; UI-SALES-001 (if semantics intended).
+**Diagnose-first items — RESOLVED (none is a code bug):** UI-FIELD-001/002 fixture-only → **closed**,
+Field **UI LOCKED**. UI-PORTAL-002 fixture gap (live `portalV2Routes.mjs` syncs the action feed —
+verified) → **closed**. No Field/Portal Fix-Agent packet needed.
 
-**Ratified Wave 01B plan (pending Sam approval — presentational-only, preserve all behaviour):**
+**Finalized Wave 01B plan (pending Sam approval — presentational-only, preserve all behaviour):**
 
 | Order | Module | IDs | Presentational change | Risk |
 |------|--------|-----|----------------------|------|
 | 1 | AppShell (global) | UI-NAV-001 | scrollable / "More" mobile bottom nav | low |
 | 2 | Finance | UI-FINANCE-001/002/003 | empty-state KPI copy · mobile claims cards · single FAB | low |
-| 3 | Client Portal | UI-PORTAL-001 | fix em-dash title (UI-PORTAL-002 held for diagnosis) | low |
-| 4 | Schedule | UI-SCHEDULE-001 | mobile toolbar overflow menu | low |
-| 5 | Workforce | UI-WORKFORCE-001 | empty-state copy (fixture part is test-only) | low |
-| 6 | Sales | UI-SALES-001 | KPI label/help alignment (or accepted-gap) | low |
-| 7 | Design system | UI-VISUAL-001 | shared status-badge component | **med — last** |
+| 3 | Client Portal | UI-PORTAL-001 | fix em-dash title | low |
+| 4 | CRM | UI-CRM-002 | mobile card layout for contacts table | low |
+| 5 | Schedule | UI-SCHEDULE-001 | mobile toolbar overflow menu | low |
+| 6 | Workforce | UI-WORKFORCE-001 | empty-state copy | low |
+| 7 | Sales | UI-SALES-001 | KPI label/help alignment (or accepted-gap) | low |
+| 8 | Design system | UI-VISUAL-001 | shared status-badge component | **med — sequence LAST** |
 
-**Field (UI-FIELD-001/002) and Portal feed (UI-PORTAL-002) are deliberately excluded from 01B**
-— they are code/behaviour fixes pending diagnosis, not presentational polish.
+**Accepted-gap decisions for Sam:** UI-TENDER-001 (accept RFQ wizard as a distinct surface) ·
+UI-SALES-001 (accept KPI semantics, or do the cheap label fix above).
 
-**Next:** no-code follow-up `UI-UX-WAVE-01A-FOLLOWUP` (Field diagnosis + CRM coverage) runs now;
-the table above is queued for Sam's approval before any 01B polish begins.
+**Status:** **0 deploy-blocking UI bugs open.** Per Sam direction (2026-06-28): no 01B polish yet,
+no product-code fixes yet, badge refactor sequence-last, Marketing paused, watcher dry-run only.
+This plan + the dirty-tree blocker are presented in
+[../hardening_loop/SAM_APPROVAL_REQUIRED.md](../hardening_loop/SAM_APPROVAL_REQUIRED.md);
+the staged 01B packet is in
+[../hardening_loop/NEXT_CURSOR_TASK.md](../hardening_loop/NEXT_CURSOR_TASK.md) and runs only on
+Sam approval + a clean tree.

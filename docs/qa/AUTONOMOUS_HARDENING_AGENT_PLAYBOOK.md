@@ -83,7 +83,9 @@ docs/tests.** The **only** product-code writers are the **Fix Agent** (approved 
   (`npm run test:ui-review`, `chromium-mobile`/`chromium-tablet`); log findings to BUG_REGISTER
   with a `Type:` token + `UI-<MODULE>-###` id; fill `ui_review/` docs.
 - **Cannot do:** edit product code; change layout/handlers/API/routes/auth/calc/mutations; fix anything.
-- **Allowed files:** `docs/qa/ui_review/**`, `docs/qa/BUG_REGISTER.md`, `hardening_loop/**`, `e2e/ui-review/**` (fixtures, if safe).
+- **Allowed files:** `docs/qa/ui_review/**`, `docs/qa/BUG_REGISTER.md`, `hardening_loop/**`,
+  `e2e/ui-review/**`, **`src/ui-review/**`** (UI Review fixtures/harness — review-only,
+  tree-shaken from prod; see master plan §4 carve-out, recorded 2026-06-28).
 - **Forbidden:** `src/**`, `server/**`, migrations; integrations; deploy.
 - **Output:** `UI_UX_DISCOVERY_WAVE_01_RESULT.md`, `UI_MODULE_LOCK_MATRIX.md`,
   `UI_SCREEN_EVIDENCE_INDEX.md`; BUG_REGISTER entries; updated `CURRENT_STATE.md` +

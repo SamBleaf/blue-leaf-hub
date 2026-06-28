@@ -304,6 +304,26 @@ fix** if diagnosis confirms a component/behaviour bug; (3) **ACCEPTED-GAP** deci
 UI-TENDER-001 / UI-SALES-001. The no-code follow-up (`UI-UX-WAVE-01A-FOLLOWUP`) needs **no**
 approval and runs first.
 
+### Follow-up resolution (2026-06-28, Claude review of `UI-UX-WAVE-01A-FOLLOWUP`)
+
+The three "diagnose-first" items above are resolved — **none is a product-code bug.** Claude
+independently re-verified (UI Review 171/171; live-code citation re-checked first-hand).
+
+| ID | Verdict | Status now |
+|----|---------|-----------|
+| **UI-FIELD-001 / -002** | **Fixture-only.** UI-Review mock `/rest/v1/projects` returned an object; `FieldWHS`/`FieldDiary` correctly expect arrays (matches live Supabase). Fix was in `src/ui-review/fixtures/operations.js` (test-only). | **closed** — Field → **UI LOCKED**; NO-GO lifted. Not a Fix-Agent item. |
+| **UI-PORTAL-002** | **Fixture gap, not behaviour.** Live API *does* surface the pending action — **verified** `server/lib/portalV2Routes.mjs` L258–266 (queries `client_actions` for `actionCount`/`nextAction`) → L331–332 (returns them). Review fixture didn't reflect it. | **closed** — not Fix-Agent. UI-PORTAL-001 (em-dash title) stays **01B**. |
+| **UI-CRM-001** | Coverage added (3 routes + fixtures, test-only). | **closed** — CRM → **UI CONDITIONAL**; new **UI-CRM-002** (mobile contacts table) → **01B** candidate. |
+
+**Net: 0 deploy-blocking UI bugs open.** Remaining open are all **01B presentational** (UI-NAV-001
+· UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 ·
+UI-VISUAL-001) or **accepted-gap candidates** (UI-TENDER-001; UI-SALES-001).
+
+**Control check (recorded):** `src/ui-review/**` confirmed **review-only** (gated by
+`VITE_UI_REVIEW_MODE`, tree-shaken from production; no prod import of its fixtures) → **Option 1:
+allowed test-only path** (master plan §4). Cursor's follow-up commit `4ae2b34` touched only
+`src/ui-review/fixtures/**` + `e2e/ui-review/` + docs — **no production code.** Not a scope breach.
+
 ---
 
 ## Open — Workflow 01 Lead / CRM Intake

@@ -1,6 +1,9 @@
 # NEXT CLAUDE REVIEW
 
-**Status:** READY — Cursor completed `UI-UX-WAVE-01A-FOLLOWUP` 2026-06-28
+**Status:** ✅ CONSUMED 2026-06-28 — Claude reviewed the follow-up. Verdicts confirmed
+(Field/Portal/CRM-001 closed; control check Option 1; **BLOCKER 0** dirty tree caught). 01B plan
+finalized and **halted at Sam gate** → [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md);
+staged 01B in [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md). (Original Cursor packet below.)
 
 ## Follow-up verdicts (for 01B plan update)
 

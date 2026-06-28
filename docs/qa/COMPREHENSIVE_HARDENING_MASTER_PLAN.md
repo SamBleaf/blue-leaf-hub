@@ -85,8 +85,20 @@ If a need seems to require a *new* register/matrix/runner, **stop** — almost a
 
 1. **Audit and test agents never edit product code** (`src/**`, `server/**`,
    `supabase/migrations/**`). They may *read* it freely.
-2. Audit/test agents may write only to: `docs/qa/**`, `docs/sops/**` (SOP fixes are docs), and
-   **clearly test-only** files under `e2e/**` and `scripts/**`.
+2. Audit/test agents may write only to: `docs/qa/**`, `docs/sops/**` (SOP fixes are docs),
+   **clearly test-only** files under `e2e/**` and `scripts/**`, and **`src/ui-review/**`** — see
+   the carve-out note below.
+
+   > **Allowed-path carve-out — `src/ui-review/**` (recorded 2026-06-28, control check).**
+   > Although it lives under `src/`, the `src/ui-review/**` tree is **review-only infrastructure**:
+   > it is gated behind `import.meta.env.VITE_UI_REVIEW_MODE === "true"` and **statically
+   > tree-shaken out of production** (verified in `src/main.jsx`, `src/App.jsx` lazy/dynamic
+   > imports, `src/ui-review/config.js`; no production component imports its fixtures). Editing
+   > `src/ui-review/**` (UI Review fixtures/registry/config/pages) **cannot change production
+   > behaviour, APIs, auth, calculations, or schema**, so it is treated as **test-only** and is
+   > allowed for UI Review fixture/coverage tasks. The rest of `src/**` and all of `server/**` /
+   > `supabase/migrations/**` remain **forbidden** to audit/test agents. (Resolves the
+   > Wave-01A-follow-up scope question: Option 1 — safe to allow.)
 3. **Findings go to [BUG_REGISTER.md](./BUG_REGISTER.md)** — never fixed inline by an audit pass.
 4. **The only product-code writers are:** the **Fix Agent** (approved bug IDs only) and the
    **UI Polish Agent in Wave 01B** (presentational-only, after Sam approves the 01A plan; see
