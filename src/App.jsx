@@ -49,7 +49,7 @@ import PortalAdmin from "./pages/PortalAdmin.jsx";
 const PortalV2Admin = React.lazy(() => import("./pages/PortalV2Admin.jsx"));
 import RfqPackageList from "./pages/RfqPackageList.jsx";
 import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
-import Marketing from "./pages/Marketing.jsx";
+const MarketingRouter = React.lazy(() => import("./components/marketing/MarketingRouter.jsx"));
 import Workforce from "./pages/Workforce.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
 import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
@@ -327,12 +327,18 @@ export default function App() {
                 />
 
                 <Route
-                  path="/marketing"
-                  element={<RoleRoute element={<Marketing />} allowed={["admin"]} redirectTo="/home" />}
-                />
-                <Route
-                  path="/marketing/:tab"
-                  element={<RoleRoute element={<Marketing />} allowed={["admin"]} redirectTo="/home" />}
+                  path="/marketing/*"
+                  element={
+                    <RoleRoute
+                      element={
+                        <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                          <MarketingRouter />
+                        </Suspense>
+                      }
+                      allowed={["admin"]}
+                      redirectTo="/home"
+                    />
+                  }
                 />
 
                 <Route

@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-06-21  
-> Total SOPs: 120  
+> Last updated: 2026-06-28  
+> Total SOPs: 122  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -111,12 +111,13 @@
 | 17-03 | Log an interaction | [17-03_log_interaction.md](17_crm_mailing_list/17-03_log_interaction.md) | CRM | Admin, Staff | Draft | untested | No | High |
 | 17-04 | Manage mailing lists and send emails | [17-04_mailing_lists.md](17_crm_mailing_list/17-04_mailing_lists.md) | CRM | Admin | Draft | untested | No | High |
 | 18-01 | Content Studio — overview and navigation | [18-01_content_studio_overview.md](18_marketing_agent/18-01_content_studio_overview.md) | Marketing | All | Draft | untested | No | High |
-| 18-02 | Generate content with the AI | [18-02_generate_content_ai.md](18_marketing_agent/18-02_generate_content_ai.md) | Marketing | Admin, Staff | Draft | untested | No | High |
-| 18-03 | Upload a photo and generate content from it | [18-03_upload_photo_generate_content.md](18_marketing_agent/18-03_upload_photo_generate_content.md) | Marketing | Admin, Staff | Draft | untested | No | High |
-| 18-04 | Review and approve content | [18-04_review_approve_content.md](18_marketing_agent/18-04_review_approve_content.md) | Marketing | Admin | Draft | untested | No | High |
-| 18-05 | Create and manage campaigns | [18-05_create_manage_campaigns.md](18_marketing_agent/18-05_create_manage_campaigns.md) | Marketing | Admin | Draft | untested | No | Medium |
-| 18-06 | Upload and manage media assets | [18-06_upload_manage_media.md](18_marketing_agent/18-06_upload_manage_media.md) | Marketing | Admin, Staff | Draft | untested | No | High |
-| 18-07 | Manage the music library | [18-07_music_library.md](18_marketing_agent/18-07_music_library.md) | Marketing | Admin | Draft | untested | No | Low |
+| 18-02 | Weekly marketing planning (Weekly Planner) | [18-02_weekly_marketing_planning.md](18_marketing_agent/18-02_weekly_marketing_planning.md) | Marketing | Admin | Draft | untested | No | High |
+| 18-03 | Media capture and upload (Media Vault) | [18-03_media_capture_and_upload.md](18_marketing_agent/18-03_media_capture_and_upload.md) | Marketing | Admin | Draft | untested | No | High |
+| 18-04 | Content package review and approval (Approval Queue) | [18-04_content_package_review_and_approval.md](18_marketing_agent/18-04_content_package_review_and_approval.md) | Marketing | Admin | Draft | untested | No | High |
+| 18-05 | Calendar scheduling and manual publishing | [18-05_calendar_scheduling_and_manual_publishing.md](18_marketing_agent/18-05_calendar_scheduling_and_manual_publishing.md) | Marketing | Admin | Draft | untested | No | High |
+| 18-06 | Evergreen Library | [18-06_evergreen_library.md](18_marketing_agent/18-06_evergreen_library.md) | Marketing | Admin | Draft | untested | No | Medium |
+| 18-07 | Marketing Intelligence and Attribution | [18-07_marketing_intelligence_and_attribution.md](18_marketing_agent/18-07_marketing_intelligence_and_attribution.md) | Marketing | Admin, Director | Draft | untested | No | Medium |
+| 18-08 | Staging runtime smoke checklist | [18-08_staging_runtime_smoke_checklist.md](18_marketing_agent/18-08_staging_runtime_smoke_checklist.md) | Marketing | Admin, Developer | Draft | untested | No | High |
 | 19-01 | Use the Marketing Intelligence dashboard | [19-01_intelligence_dashboard.md](19_marketing_intelligence/19-01_intelligence_dashboard.md) | Marketing Intelligence | Admin, Director | Draft | untested | Yes | High |
 | 19-02 | Record a social media publish | [19-02_record_social_publish.md](19_marketing_intelligence/19-02_record_social_publish.md) | Marketing Intelligence | Admin, Staff | Draft | untested | Yes | High |
 | 19-03 | View content performance | [19-03_content_performance.md](19_marketing_intelligence/19-03_content_performance.md) | Marketing Intelligence | Admin, Director | Draft | untested | Yes | High |

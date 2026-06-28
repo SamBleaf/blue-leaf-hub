@@ -1,7 +1,5 @@
-import { useState, useEffect } from "react";
-import { flushSync } from "react-dom";
+import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import ContentGenerator from "../components/marketing/ContentGenerator.jsx";
 import ContentLibrary from "../components/marketing/ContentLibrary.jsx";
 import CampaignManager from "../components/marketing/CampaignManager.jsx";
 import MediaUpload from "../components/marketing/MediaUpload.jsx";
@@ -10,8 +8,10 @@ import MarketingIntelligence from "../components/marketing/MarketingIntelligence
 import MailingLists from "../components/crm/MailingLists.jsx";
 import { useAuth } from "../lib/useAuth.js";
 
+// Legacy tab container (Run A). The primary entry points are now Command Centre (/marketing),
+// Weekly Planner (/marketing/planner) and Content Studio (/marketing/studio). Content creation
+// lives in Studio / Legacy Studio; this component hosts the remaining classic tabs.
 const TABS = [
-  { id: "create",        label: "Create" },
   { id: "library",       label: "Library" },
   { id: "campaigns",     label: "Campaigns" },
   { id: "media",         label: "Media" },
@@ -25,36 +25,44 @@ export default function Marketing() {
   const navigate = useNavigate();
   const { role } = useAuth();
   const isAdmin = role === "admin";
-  const activeTab = tab || "create";
-  const [seedAsset, setSeedAsset] = useState(null);
+  const activeTab = tab || "library";
 
   const visibleTabs = TABS.filter((t) => !t.adminOnly || isAdmin);
 
   useEffect(() => {
     if ((tab === "music" || tab === "intelligence") && !isAdmin) {
-      navigate("/marketing", { replace: true });
+      navigate("/marketing/library", { replace: true });
     }
   }, [tab, isAdmin, navigate]);
 
   function goTab(id) {
-    navigate(id === "create" ? "/marketing" : `/marketing/${id}`);
+    navigate(`/marketing/${id}`);
   }
 
+  // Media "Generate post from this photo" → route to Legacy Studio with the asset id.
+  // Query-param seeding replaces the old in-page seedAsset state so it survives the route move
+  // (and Run B's media-first Creator inherits the same ?asset_id= mechanism).
   function handleGeneratePost(asset) {
-    // flushSync ensures seedAsset is committed to state before navigate() fires,
-    // so ContentGenerator mounts with the asset already available on its first render.
-    flushSync(() => setSeedAsset(asset));
-    goTab("create");
+    if (!asset?.id) return;
+    navigate(`/marketing/studio/legacy?asset_id=${asset.id}`);
   }
 
   return (
     <div className="space-y-6 pb-24">
       {/* Page header */}
       <header>
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Marketing Agent</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-primary">Content Studio</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Marketing</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-primary">Content &amp; Campaigns</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          AI-assisted external content for Blue Leaf Building — social, website, email and video.
+          Library, campaigns, media and lists. To create content, use{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/marketing/studio")}
+            className="font-semibold text-primary underline"
+          >
+            Content Studio
+          </button>
+          .
         </p>
       </header>
 
@@ -77,9 +85,8 @@ export default function Marketing() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "create"       && <ContentGenerator seedAsset={seedAsset} onSeedConsumed={() => setSeedAsset(null)} />}
       {activeTab === "library"      && <ContentLibrary />}
-      {activeTab === "campaigns"    && <CampaignManager onGoCreate={() => goTab("create")} />}
+      {activeTab === "campaigns"    && <CampaignManager onGoCreate={() => navigate("/marketing/studio")} />}
       {activeTab === "media"        && <MediaUpload onGeneratePost={handleGeneratePost} />}
       {activeTab === "lists"        && <MailingLists />}
       {activeTab === "intelligence" && isAdmin && <MarketingIntelligence />}

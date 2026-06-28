@@ -1376,9 +1376,14 @@ export function registerFinanceRoutes(app) {
     });
   });
 
-  // Auto-poll every 15 minutes
-  if (invoiceImapConfigs().length) {
-    console.log("[blue-leaf-api] IMAP_POLL_ENABLED: polling inbox every 15 min.");
+  // Auto-poll every 15 minutes.
+  // INVOICE_IMAP_POLL_ENABLED=false disables this invoice poller without touching credentials
+  // (e.g. an isolated/staging smoke run on a shared .env). Defaults to ON to preserve production
+  // behaviour. NOTE: this is a SEPARATE flag from the quote-reply poller's IMAP_POLL_ENABLED —
+  // this poller previously ignored that flag, so a full boot started it regardless.
+  const invoicePollEnabled = String(process.env.INVOICE_IMAP_POLL_ENABLED ?? "true").toLowerCase() !== "false";
+  if (invoiceImapConfigs().length && invoicePollEnabled) {
+    console.log("[blue-leaf-api] INVOICE_IMAP_POLL_ENABLED: polling invoice inbox every 15 min.");
     setTimeout(async () => {
       try { await pollInvoiceEmails(); } catch { /* ignore */ }
       setInterval(async () => {

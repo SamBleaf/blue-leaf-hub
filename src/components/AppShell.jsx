@@ -111,8 +111,16 @@ const TENDER_MODULES = [
 ];
 
 const MARKETING_MODULES = [
-  { to: "/marketing",          label: "Create",    end: true },
-  { to: "/marketing/library",  label: "Library" },
+  { to: "/marketing",          label: "Command Centre", end: true },
+  { to: "/marketing/planner",  label: "Weekly Planner" },
+  { to: "/marketing/studio",   label: "Content Studio" },
+  { to: "/marketing/approval", label: "Approval Queue" },
+  { to: "/marketing/calendar", label: "Calendar" },
+  { to: "/marketing/vault",    label: "Media Vault" },
+  { to: "/marketing/evergreen",    label: "Evergreen" },
+  { to: "/marketing/intelligence", label: "Intelligence" },
+  { to: "/marketing/attribution",  label: "Attribution" },
+  { to: "/marketing/library",      label: "Library" },
   { to: "/marketing/campaigns",label: "Campaigns" },
   { to: "/marketing/media",    label: "Media" },
   { to: "/marketing/lists",    label: "Lists" },
