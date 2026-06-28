@@ -1,11 +1,11 @@
 ---
 loop_enabled: true
-next_agent: sam
+next_agent: cursor
 current_wave: SOP-DOCS-WAVE-02
-current_task_file: docs/qa/hardening_loop/SAM_APPROVAL_REQUIRED.md
+current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
-approval_required: true
+approval_required: false
 live_integrations_allowed: false
 deploy_allowed: false
 max_iterations_this_session: 3
@@ -19,14 +19,17 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `SOP-DOCS-WAVE-02` — **staged, HALTED at Sam gate** |
-| **Last completed agent** | Claude Code — reviewed SOP Wave 01 (scope PASS, docs-only) |
-| **Current gate** | **Sam** → [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md) (PORTAL-STACK + WHS-SETUP decisions; Fix-Agent batch; greenlight Wave 02) |
-| **Open blockers** | SOP/training deploy-gate drift (`SOP-DRIFT-SEC14-11` High; PORTAL-STACK) — no-code Wave 02 + Sam decision |
-| **Next required agent** | **Sam** (decide), then **Cursor** runs staged `SOP-DOCS-WAVE-02` |
-| **Approval required?** | **Yes** — app-bug Fix batch (product code) + 2 accepted-gap decisions |
-| **Product-code changes allowed?** | **No** (Wave 02 is no-code; app-bug fixes are a separate Sam-gated packet) |
+| **Phase / wave** | `SOP-DOCS-WAVE-02` — **RELEASED to Cursor** (Sam, 2026-06-29) |
+| **Last completed agent** | Sam — decided PORTAL-STACK (v2 canonical) + WHS-SETUP (write 08-07); deferred 5 app bugs; greenlit Wave 02 |
+| **Current gate** | None — Cursor may run the no-code Wave 02 packet |
+| **Open blockers** | None (SOP/training drift addressed by Wave 02; portal decision made) |
+| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-02`, no-code) |
+| **Approval required?** | No |
+| **Product-code changes allowed?** | **No** (Wave 02 is docs-only) |
 
-**SOP Wave 01:** 71 audited · 7 SOPs fixed · §14 26/20/25 · **5 app bugs (all Med/Low,
-non-blocking)** · 2 accepted-gap candidates. **0 code deploy-blockers.** UI lane complete (01B).
-Marketing `PAUSED`. Watcher: dry-run + run-once built; **interval not enabled yet**.
+**Sam decisions (2026-06-29):** Portal **v2 canonical** (v1 = legacy/fallback, must be labelled);
+WHS-SETUP → **write SOP 08-07**; **5 app bugs DEFERRED** (logged, non-blocking — no Fix Agent yet).
+**Wave 02 scope:** Sales rewrite · RFQ nav · §14 backfill 07/10 · portal legacy/v2 matrix (v2
+canonical) · WHS 08-07. Marketing `PAUSED`. No product code · no live integrations · no deploy.
+Watcher dry-run/run-once only (interval not enabled). If any deferred bug becomes deploy-blocking,
+bring it back as a specific Fix-Agent approval packet.

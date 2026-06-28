@@ -195,6 +195,15 @@ ID is **SOP-BUG-09-JOBVIEW** (result doc's "09-07" is the SOP ref, not the bug I
 (Sales + RFQ rewrite, §14 backfill 07/10; portal rewrite after PORTAL-STACK decided). App-bug Fix
 batch recommended **deferred** (non-blocking). No fixes approved by Claude.
 
+**Sam decisions applied (2026-06-29):**
+- **5 app bugs DEFERRED** (SOP-BUG-02-07 · -05-05 · -07-03 · -09-JOBVIEW · -11-12) — kept logged +
+  triaged; **no Fix-Agent product-code batch.** Re-raise individually only if one becomes
+  deploy-blocking. Status: `deferred — Sam 2026-06-29 (non-blocking)`.
+- **SOP-GAP-PORTAL-STACK → DECIDED (SAM-SOP-001): v2 canonical**; v1 = legacy/fallback (label it).
+  Closed via the `SOP-DOCS-WAVE-02` portal rewrite + `SOP-DRIFT-SEC14-11`.
+- **SOP-GAP-WHS-SETUP → DECIDED (SAM-SOP-002): write SOP 08-07** in `SOP-DOCS-WAVE-02`.
+- **`SOP-DOCS-WAVE-02` greenlit (no-code).** Released to Cursor (`next_agent: cursor`).
+
 ---
 
 ## Open — UI/UX Discovery Wave 01A (2026-06-28)

@@ -1,28 +1,32 @@
 # NEXT CLAUDE REVIEW
 
-**Status:** ACTIVE — Cursor completed `SOP-MODULE-AUDIT-WAVE-01` (2026-06-29)
+**Status:** PENDING — fires after Cursor completes `SOP-DOCS-WAVE-02`.
+**Issued by:** Claude Code (Hardening Controller), 2026-06-29.
 
-## Delivery summary
+> Prior review (SOP Wave 01) CONSUMED — verdict in `SOP_MODULE_AUDIT_WAVE_01_RESULT.md` §
+> "Claude review verdict" + BUG_REGISTER triage. Sam decisions recorded (`SAM-SOP-001/002`);
+> 5 app bugs deferred; Wave 02 released.
 
-| Item | Detail |
-|------|--------|
-| **SOPs audited** | 71 (folders 02–11) |
-| **§14 gaps** | 25 missing · 20 partial · 26 complete |
-| **SOP fixes applied** | 04-01, 05-05, 05-06, 08-02/05/06, 10-01 |
-| **App bugs** | SOP-BUG-02-07, 05-05, 07-03, 09-JOBVIEW, 11-12 |
-| **ACCEPTED-GAP candidates** | SOP-GAP-PORTAL-STACK, SOP-GAP-WHS-SETUP |
+## Review task (after Wave 02 lands)
+Review the no-code SOP rewrite + §14 backfill output.
 
-## Evidence
+## Files to inspect
+- `docs/qa/SOP_DOCS_WAVE_02_RESULT.md`
+- Rewritten SOPs in `docs/sops/{02_sales,04_rfq_engine,07_site_diary,10_workforce,11_client_portal,08_whs,03_tendering}/`
+- `docs/sops/SOP_INDEX.md` (`test_status`) + `docs/sops/SOP_CHANGELOG.md`
+- BUG_REGISTER `SOP-DRIFT-*` / `SOP-DRIFT-SEC14-*` status changes
 
-- [SOP_MODULE_AUDIT_WAVE_01_RESULT.md](../SOP_MODULE_AUDIT_WAVE_01_RESULT.md)
-- [BUG_REGISTER.md](../BUG_REGISTER.md) — SOP Wave 01 section
-- [SOP_CHANGELOG.md](../../sops/SOP_CHANGELOG.md)
+## Questions
+1. Scope held (docs-only, no product code)?
+2. Were the deploy-blocking SOP-DRIFT items closed — esp. **SEC14-11** (portal, High) and **SEC14-07** (site diary)?
+3. Is portal SOP set now correct: **v2 canonical**, v1 labelled legacy/fallback, canonical/legacy stated where both exist?
+4. Was **SOP 08-07** created?
+5. §14 backfilled for 07 + 10? New §14 completion count?
+6. Does the deploy gate "SOP drift fixed or accepted" now move toward met? What remains (e.g. Wave 03 folders 12–17)?
 
-## Claude tasks
+## Likely next steps
+- If SOP drift mostly closed → recommend **SOP Wave 03** (folders 12–17) or **P0 E2E re-verification**.
+- If any deferred app bug now blocks → raise a specific Fix-Agent approval packet (Sam-gated).
 
-1. Confirm audit scope held (no product code).
-2. Prioritize **Wave 02** SOP rewrite packet vs **Fix Agent** for 5 app bugs.
-3. Present **ACCEPTED-GAP candidates** to Sam (portal dual-stack, whs-setup SOP).
-4. Decide whether deploy gate accepts “drift logged + Wave 02 planned” or blocks until Sales/RFQ SOPs rewritten.
-
-**Approval required before Fix Agent or next product-code wave:** Yes.
+## Output
+Update state files, append handoff log, write the next packet.
