@@ -127,21 +127,28 @@ export function registerAdminRoutes(app) {
   // Anchored-at-start test markers. Real records never start with these, so matching is safe.
   const TEST_MARKERS = ["BLH TEST%", "__BLH TEST%", "__HARDENING TEST%", "__BATCH_A__%", "BATCHA%", "BATCH A%", "__E2E%", "E2E %", "DEBUG%", "DEBUG2%", "__DRYRUN%", "__DEMO%", "__P0A5%", "__RFQ TEST%"];
 
-  async function scanTable(sb, table, col) {
+  // Which columns carry a test marker per table. Leads store their test name in first_name/last_name
+  // (name is often blank), so all three are checked.
+  const TABLE_COLS = { projects: ["address"], jobs: ["address"], leads: ["name", "first_name", "last_name"] };
+
+  async function scanTable(sb, table) {
+    const cols = TABLE_COLS[table];
+    const sel = `id, ${cols.join(", ")}`;
     const map = new Map();
-    for (const m of TEST_MARKERS) {
-      const { data } = await sb.from(table).select(`id, ${col}`).ilike(col, m);
-      for (const r of data || []) map.set(r.id, r[col]);
+    for (const m of TEST_MARKERS) for (const col of cols) {
+      const { data } = await sb.from(table).select(sel).ilike(col, m);
+      for (const r of data || []) map.set(r.id, r.name || [r.first_name, r.last_name].filter(Boolean).join(" ") || r.address || r.id);
     }
     return [...map.entries()].map(([id, label]) => ({ id, label }));
   }
 
-  // Re-validate ids server-side: only ids that STILL match a test marker survive. The tool can
-  // therefore never delete a real record, even if the client sends a bad id.
-  async function testMarkedIds(sb, table, col, ids) {
+  // Re-validate ids server-side: only ids that STILL match a test marker (on any of the table's
+  // marker columns) survive. The tool can therefore never delete a real record.
+  async function testMarkedIds(sb, table, ids) {
     if (!ids?.length) return [];
+    const cols = TABLE_COLS[table];
     const safe = new Set();
-    for (const m of TEST_MARKERS) {
+    for (const m of TEST_MARKERS) for (const col of cols) {
       const { data } = await sb.from(table).select("id").ilike(col, m).in("id", ids);
       for (const r of data || []) safe.add(r.id);
     }
@@ -154,9 +161,9 @@ export function registerAdminRoutes(app) {
       const sb = getServiceSupabase();
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
       const [projects, jobs, leads] = await Promise.all([
-        scanTable(sb, "projects", "address"),
-        scanTable(sb, "jobs", "address"),
-        scanTable(sb, "leads", "name"),
+        scanTable(sb, "projects"),
+        scanTable(sb, "jobs"),
+        scanTable(sb, "leads"),
       ]);
       res.json({ ok: true, projects, jobs, leads });
     } catch (err) {
@@ -174,9 +181,9 @@ export function registerAdminRoutes(app) {
       if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
       const { projectIds = [], jobIds = [], leadIds = [] } = req.body || {};
 
-      const pSafe = await testMarkedIds(sb, "projects", "address", projectIds);
-      const jSafe = await testMarkedIds(sb, "jobs", "address", jobIds);
-      const lSafe = await testMarkedIds(sb, "leads", "name", leadIds);
+      const pSafe = await testMarkedIds(sb, "projects", projectIds);
+      const jSafe = await testMarkedIds(sb, "jobs", jobIds);
+      const lSafe = await testMarkedIds(sb, "leads", leadIds);
       const rejected =
         (projectIds.length - pSafe.length) + (jobIds.length - jSafe.length) + (leadIds.length - lSafe.length);
 
@@ -200,7 +207,11 @@ export function registerAdminRoutes(app) {
         counts.jobs = (data || []).length;
       }
       if (lSafe.length) {
-        const { data } = await sb.from("leads").delete().in("id", lSafe).select("id");
+        for (const ch of ["lead_documents", "lead_notes", "lead_conversations"]) {
+          await sb.from(ch).delete().in("lead_id", lSafe); // tolerate missing table/col
+        }
+        const { data, error } = await sb.from("leads").delete().in("id", lSafe).select("id");
+        if (error) return res.status(500).json({ ok: false, error: error.message });
         counts.leads = (data || []).length;
       }
 
