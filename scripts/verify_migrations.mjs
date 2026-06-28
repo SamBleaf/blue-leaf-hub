@@ -1,7 +1,12 @@
 /**
- * Verify migrations 099–104 actually applied to the live Supabase DB.
+ * Verify migrations 099–122 actually applied to the live Supabase DB.
  * Probes PostgREST with the service-role key (the SQL-editor "untitled query"
  * labels are irrelevant — this checks whether the OBJECTS exist).
+ *
+ * Covers the portal-v2 release set 108,110,117,118,119,120,121,122 (the release
+ * code hard-depends on these). NOTE: 121 is an RLS policy change — the service
+ * role bypasses RLS, so it is NOT probeable here and must be verified manually in
+ * the SQL editor (see MIGRATION_VERIFICATION_CHECKLIST.md).
  *
  * Run: node scripts/verify_migrations.mjs
  */
@@ -30,6 +35,8 @@ async function fnExists(fn) {
   // 42883 = function does not exist; anything else (incl. ok or a different error) = exists
   return !error || !/(does not exist|42883|could not find|PGRST202)/i.test(`${error.message || ""} ${error.code || ""} ${error.hint || ""}`);
 }
+
+async function columnAbsent(table, col) { return !(await columnExists(table, col)); }
 
 async function check(label, fn) {
   const present = await fn();
@@ -66,6 +73,27 @@ await check("105 projects.payment_instructions", () => columnExists("projects", 
 // portal_claims status CHECKs (→ 'withdrawn' / 'void' / 'partially_paid'). So if
 // paid_to_date exists, 108 is applied — the void/partial-pay sync paths are live.
 await check("108 portal_claims.paid_to_date", () => columnExists("portal_claims", "paid_to_date"));
+
+console.log("\n── Migration 110 — portal dispute + photo visibility ──");
+await check("110 portal_claims.dispute_reason", () => columnExists("portal_claims", "dispute_reason"));
+await check("110 project_photos.client_visible", () => columnExists("project_photos", "client_visible"));
+
+console.log("\n── Migrations 117–119 — workforce ──");
+await check("117 workforce_crews table", () => tableExists("workforce_crews"));
+await check("117 workforce_allocations table", () => tableExists("workforce_allocations"));
+await check("118 workforce_planner_jobs table", () => tableExists("workforce_planner_jobs"));
+await check("119 workforce_public_holidays table", () => tableExists("workforce_public_holidays"));
+await check("119 workforce_rdo_patterns table", () => tableExists("workforce_rdo_patterns"));
+
+console.log("\n── Migration 120 — drop leads.ptsa_scope_notes (inverse check) ──");
+await check("120 leads.ptsa_scope_notes DROPPED", () => columnAbsent("leads", "ptsa_scope_notes"));
+
+console.log("\n── Migration 122 — Marketing Command Centre ──");
+await check("122 marketing_content_packages table", () => tableExists("marketing_content_packages"));
+await check("122 marketing_content_items.evergreen_score", () => columnExists("marketing_content_items", "evergreen_score"));
+
+console.log("\n── Migration 121 — site_diary RLS (NOT auto-probeable) ──");
+console.log("  ⚠ 121 site_diary deny_clients/staff RLS — service role bypasses RLS; verify manually in SQL editor.");
 
 console.log("\n════════════════════════════════════════");
 console.log(`  ${ok} present, ${missing} missing`);

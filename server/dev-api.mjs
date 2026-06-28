@@ -79,7 +79,7 @@ import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
-import { requireAuth, requireRole } from "./lib/requireAuth.mjs";
+import { requireAuth, requireRole, requireCronSecretOrAdmin } from "./lib/requireAuth.mjs";
 import { captureResendId } from "./lib/rfqEngagement.mjs";
 import dns from "node:dns";
 
@@ -114,15 +114,7 @@ function imapConfig() {
   return { host, port, secure, auth: { user, pass } };
 }
 
-/** QA-001: cron schedulers may pass CRON_SECRET; otherwise admin staff JWT required. */
-function requireCronSecretOrAdmin(req, res, next) {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (secret) {
-    const provided = req.headers["x-cron-secret"] || req.query?.secret;
-    if (provided === secret) return next();
-  }
-  requireAuth(req, res, () => requireRole("admin")(req, res, next));
-}
+// requireCronSecretOrAdmin now lives in ./lib/requireAuth.mjs (shared, fail-closed).
 
 function formatImapAddresses(list) {
   if (!Array.isArray(list) || !list.length) return "";
@@ -1666,12 +1658,7 @@ app.post("/api/cron/lead-time-notifications", requireCronSecretOrAdmin, async (r
 // Secured by an optional shared secret: when CRON_SECRET is set, callers must
 // present it (x-cron-secret header or ?secret=). Mutates every project, so this
 // must not be open once a secret is configured at cron-job.org.
-app.post("/api/cron/portal-sync", async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const provided = req.headers["x-cron-secret"] || req.query?.secret;
-    if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
+app.post("/api/cron/portal-sync", requireCronSecretOrAdmin, async (req, res) => {
   try {
     const result = await runPortalNightlySync();
     return res.json({ ok: true, ...result });
@@ -1680,13 +1667,8 @@ app.post("/api/cron/portal-sync", async (req, res) => {
   }
 });
 
-app.post("/api/cron/cost-insights", async (req, res) => {
-  // Same CRON_SECRET guard as /api/cron/portal-sync — this triggers paid Claude batches.
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const provided = req.headers["x-cron-secret"] || req.query?.secret;
-    if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
+app.post("/api/cron/cost-insights", requireCronSecretOrAdmin, async (req, res) => {
+  // Fail-closed cron guard (triggers paid Claude batches) — see requireCronSecretOrAdmin.
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 

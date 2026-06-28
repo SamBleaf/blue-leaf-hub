@@ -1,5 +1,5 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireCronSecretOrAdmin } from "./requireAuth.mjs";
 import { emailAvailabilityConflict } from "./tradeCommitment.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
@@ -495,12 +495,7 @@ export function registerOperationsRoutes(app) {
    * CRON_SECRET shared-secret as /api/cron/portal-sync: when CRON_SECRET is set,
    * callers must present it (x-cron-secret header or ?secret=).
    */
-  app.post("/api/cron/trade-ghost-check", async (req, res) => {
-    const secret = process.env.CRON_SECRET;
-    if (secret) {
-      const provided = req.headers["x-cron-secret"] || req.query?.secret;
-      if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
-    }
+  app.post("/api/cron/trade-ghost-check", requireCronSecretOrAdmin, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     try {

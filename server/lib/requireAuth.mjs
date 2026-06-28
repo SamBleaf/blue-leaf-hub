@@ -35,3 +35,20 @@ export function requireRole(...roles) {
     next();
   };
 }
+
+/**
+ * QA-001 / cron auth — canonical guard for scheduled (cron-job.org) mutation endpoints.
+ * A caller may present the shared CRON_SECRET (x-cron-secret header or ?secret=); otherwise
+ * an admin staff JWT is required. FAILS CLOSED: if CRON_SECRET is unset (or doesn't match)
+ * the route falls back to requireAuth + requireRole("admin") — it is NEVER wide-open.
+ * Use this for every /api/cron/* endpoint instead of an inline `if (secret) {...}` check,
+ * which fails OPEN when the env var is absent.
+ */
+export function requireCronSecretOrAdmin(req, res, next) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (secret) {
+    const provided = req.headers["x-cron-secret"] || req.query?.secret;
+    if (provided === secret) return next();
+  }
+  requireAuth(req, res, () => requireRole("admin")(req, res, next));
+}
