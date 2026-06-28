@@ -1,38 +1,37 @@
 # NEXT CLAUDE REVIEW
 
-**Status:** ✅ CONSUMED 2026-06-28 — Claude reviewed the follow-up. Verdicts confirmed
-(Field/Portal/CRM-001 closed; control check Option 1; **BLOCKER 0** dirty tree caught). 01B plan
-finalized and **halted at Sam gate** → [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md);
-staged 01B in [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md). (Original Cursor packet below.)
+**Status:** ACTIVE — Cursor completed `UI-UX-POLISH-WAVE-01B` (2026-06-28)
 
-## Follow-up verdicts (for 01B plan update)
+## Cursor delivery summary
 
-| Item | Verdict | Action |
-|---|---|---|
-| **UI-FIELD-001/002** | **Fixture-only** | Closed. `/rest/v1/projects` returned object for all queries; Field components correctly expect arrays. Test fix in `operations.js`. Field → **UI LOCKED**. |
-| **UI-PORTAL-002** | **Fixture gap (review)** — live API syncs `actionCount` + `nextAction` from `client_actions` ([portalV2Routes.mjs:258–272](../../server/lib/portalV2Routes.mjs)) | Closed. Not Fix Agent. UI-PORTAL-001 (`weekOf` dash) remains **01B**. |
-| **UI-CRM-001** | **Closed** | CRM fixtures + 3 routes; **UI CONDITIONAL** (mobile contacts table — UI-CRM-002). |
+| Item | Verdict requested |
+|------|-------------------|
+| **Scope guard** | Confirm all changes presentational-only (no behaviour/API/auth/schema/schedule-logic) |
+| **Items 1–7** | UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 → **closed** |
+| **Item 8 (badge)** | Partial StatusBadge migration (Finance claims + CRM contacts); confirm acceptable partial close |
+| **UI-TENDER-001** | Remains accepted gap |
+| **UI-VISUAL-001** | Partial — other modules still inline badges |
 
-## UI Review
+## Tests
 
-**171/171 pass** — includes Field WHS/Diary + CRM desktop/mobile.
+- `npm run lint` ✅
+- `npm run build` ✅
+- `npm run test:ui-review` **171/171** ✅
 
-## Test-only files changed
+## Evidence
 
-- `src/ui-review/fixtures/operations.js` — `/rest/v1/projects` array vs object by Accept header
-- `src/ui-review/fixtures/crm.js` — new
-- `src/ui-review/fixtures/finance.js` — KPI + budget field names
-- `src/ui-review/fixtures/index.js` — import crm
-- `e2e/ui-review/routes.mjs` — CRM routes
+- [UI_UX_POLISH_WAVE_01B_RESULT.md](../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md)
+- Screenshots: `docs/ui-review/screenshots/` (mobile: `finance-command-centre`, `schedule-manager`, `crm-contacts`, `sales-pipeline`, `portal-home`, `workforce`)
 
-## Remaining open UI bugs (01B candidates)
+## Product files touched
 
-UI-NAV-001 · UI-FINANCE-002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-VISUAL-001 · UI-SALES-001 · UI-WORKFORCE-001 · UI-TENDER-001 (accepted-gap?)
+`AppShell.jsx` · `JobCommandCentre.jsx` · `ProgressClaims.jsx` · `ClientHome.jsx` · `CrmContacts.jsx` · `ScheduleToolbar.jsx` · `WorkforceKpiStrip.jsx` · `SalesPipeline.jsx` · `statusBadge.js`
 
-**No deploy-blocking UI bugs open.**
+## Claude tasks
 
-## Claude task
+1. Spot-check diffs for scope violations (especially Finance KPI helper — display only).
+2. Update lock matrix final states if evidence confirms LOCKED.
+3. Decide next wave: full StatusBadge rollout (01C?) vs module hardening vs SOP audit.
+4. Write next agent packet (`NEXT_CURSOR_TASK.md` or Fix-Agent lane if behaviour bugs found).
 
-1. Update 01B plan in [UI_UX_DISCOVERY_WAVE_01_RESULT.md](../ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md) §6 — remove Field Fix Agent lane.
-2. Present updated plan via [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md).
-3. On Sam approval: write `NEXT_CURSOR_TASK.md` = `UI-UX-POLISH-WAVE-01B`.
+**Approval required before next product-code wave:** Yes (standard gate — presentational 01B was pre-approved).

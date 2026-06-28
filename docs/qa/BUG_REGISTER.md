@@ -60,7 +60,8 @@
 | **Evidence** | `…/mobile/finance-command-centre.png`, `…/mobile/sales-pipeline.png` |
 | **Suggested test** | Visual: `npm run test:ui-review` mobile captures; assert nav scroll or “More” menu |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `AppShell.jsx` — horizontal scroll bottom nav (`overflow-x-auto`, `min-w-max`). |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-SALES-001 — “Needs action” KPI contradicts overdue count
 
@@ -78,7 +79,8 @@
 | **Evidence** | `…/desktop/sales-pipeline.png` |
 | **Suggested test** | Visual regression on KPI strip after copy/logic alignment |
 | **blocks-deployability** | no |
-| **Status** | open — 01B or accepted-gap |
+| **Fix (01B)** | `SalesPipeline.jsx` — KPI sub-labels clarify semantics (no filter change): “next action date due” / “14d+ no activity”. |
+| **Status** | **closed — 01B copy (2026-06-28)** |
 
 ### UI-FINANCE-001 — Job command centre KPI tiles show em-dash instead of empty-state copy
 
@@ -94,7 +96,8 @@
 | **Follow-up note** | Fixture used wrong KPI keys (`billed_to_date` vs `claims_issued`). Enriched in `finance.js` — KPIs now render. Remaining gap: live jobs with zero claims still need friendly empty copy (01B). |
 | **Evidence** | `…/desktop/finance-command-centre.png` (post-fix) |
 | **blocks-deployability** | no |
-| **Status** | open — **01B empty-state copy** |
+| **Fix (01B)** | `JobCommandCentre.jsx` — `fmtMoneyKpi()` friendly empty labels. |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-FINANCE-002 — Progress Claims table squeezed on mobile
 
@@ -112,7 +115,8 @@
 | **Evidence** | `…/mobile/finance-command-centre.png` |
 | **Suggested test** | Visual mobile finance-command-centre |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `ProgressClaims.jsx` — mobile card layout (`md:hidden`). |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-FINANCE-003 — Dual floating action buttons overlap content on mobile
 
@@ -130,7 +134,8 @@
 | **Evidence** | `…/mobile/finance-command-centre.png` |
 | **Suggested test** | Visual regression mobile finance-command-centre |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `AppShell.jsx` — hide Quick Add FAB on `/finance/jobs/*` mobile (Blueprint widget remains). |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-PORTAL-001 — “Latest update” title shows stray em-dash
 
@@ -148,7 +153,8 @@
 | **Evidence** | `…/desktop/portal-home.png`, `…/mobile/portal-home.png` |
 | **Suggested test** | UI Review portal-home |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `ClientHome.jsx` — title omits em-dash when `weekOf` absent. |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-PORTAL-002 — Greeting next-step contradicts “all up to date” action card
 
@@ -182,7 +188,8 @@
 | **Evidence** | `…/desktop/workforce.png` |
 | **Suggested test** | Enrich workforce fixture + visual |
 | **blocks-deployability** | no |
-| **Status** | open — fixture + 01B copy |
+| **Fix (01B)** | `WorkforceKpiStrip.jsx` — zero-crew empty copy. |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-TENDER-001 — RFQ Engine / subsheets lack tender command-centre home pattern
 
@@ -218,7 +225,8 @@
 | **Evidence** | `…/mobile/schedule-manager.png` |
 | **Suggested test** | Visual mobile schedule-manager |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `ScheduleToolbar.jsx` — mobile “More ⋯” overflow menu. |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ### UI-VISUAL-001 — Inconsistent status badge styling across modules
 
@@ -236,7 +244,8 @@
 | **Evidence** | Multiple screenshots in export; seed item 5 in `UI_REVIEW_REDESIGN_NOTES_SEED.md` |
 | **Suggested test** | Design-system visual suite |
 | **blocks-deployability** | no |
-| **Status** | open — 01B / design-system |
+| **Fix (01B partial)** | `ProgressClaims.jsx`, `CrmContacts.jsx`, `statusBadge.js` — StatusBadge migration (Finance + CRM). Tender/Portal/Sales chips deferred. |
+| **Status** | **partial — 01B seed (2026-06-28)** |
 
 ### UI-CRM-001 — No UI Review coverage for CRM / Relationships screens
 
@@ -264,7 +273,8 @@
 | **Expected** | Card-per-contact or scroll hint on mobile |
 | **Evidence** | `…/mobile/crm-contacts.png` |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Fix (01B)** | `CrmContacts.jsx` — mobile card layout + StatusBadge. |
+| **Status** | **closed — 01B (2026-06-28)** |
 
 ---
 
@@ -315,9 +325,8 @@ independently re-verified (UI Review 171/171; live-code citation re-checked firs
 | **UI-PORTAL-002** | **Fixture gap, not behaviour.** Live API *does* surface the pending action — **verified** `server/lib/portalV2Routes.mjs` L258–266 (queries `client_actions` for `actionCount`/`nextAction`) → L331–332 (returns them). Review fixture didn't reflect it. | **closed** — not Fix-Agent. UI-PORTAL-001 (em-dash title) stays **01B**. |
 | **UI-CRM-001** | Coverage added (3 routes + fixtures, test-only). | **closed** — CRM → **UI CONDITIONAL**; new **UI-CRM-002** (mobile contacts table) → **01B** candidate. |
 
-**Net: 0 deploy-blocking UI bugs open.** Remaining open are all **01B presentational** (UI-NAV-001
-· UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 ·
-UI-VISUAL-001) or **accepted-gap candidates** (UI-TENDER-001; UI-SALES-001).
+**Net: 0 deploy-blocking UI bugs open.** Wave 01B closed all presentational candidates. **Remaining:**
+UI-VISUAL-001 (partial — full badge rollout deferred) · UI-TENDER-001 (accepted gap).
 
 **Control check (recorded):** `src/ui-review/**` confirmed **review-only** (gated by
 `VITE_UI_REVIEW_MODE`, tree-shaken from production; no prod import of its fixtures) → **Option 1:

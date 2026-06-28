@@ -5,7 +5,9 @@
 
 **Evidence root:** `docs/ui-review/export-2026-06-27/screenshots/<viewport>/<route-name>.png`  
 **Result JSON:** `docs/ui-review/export-2026-06-27/raw/results/<viewport>__<route-name>.json`  
-**Capture command:** `npm run test:ui-review` — **171/171 pass** (2026-06-28 follow-up)
+**Capture command:** `npm run test:ui-review` — **171/171 pass** (2026-06-28 follow-up + **01B refresh**)
+
+**Post-01B evidence:** `docs/ui-review/screenshots/<viewport>/` — refreshed 2026-06-28 after Wave 01B polish.
 
 **Viewports:** desktop `1440×900` · tablet `834×1112` · mobile `390×844`
 
@@ -60,8 +62,8 @@ export folder is the canonical store. Playwright browsers must be installed (`np
 |----------------|----------|-------|-----------------|------------|
 | `/finance` | desktop | good | `…/desktop/finance-manager.png` | Pass |
 | `/finance` | mobile | good | `…/mobile/finance-manager.png` | Pass |
-| `/finance/jobs/job-1001` | desktop | thin KPIs | `…/desktop/finance-command-centre.png` | Pass (thin data) |
-| `/finance/jobs/job-1001` | mobile | squeezed table | `…/mobile/finance-command-centre.png` | Pass (UI-FINANCE-002) |
+| `/finance/jobs/job-1001` | desktop | thin KPIs | `…/desktop/finance-command-centre.png` | Pass (01B empty copy) |
+| `/finance/jobs/job-1001` | mobile | claims cards | `…/mobile/finance-command-centre.png` | Pass (01B mobile cards) |
 
 ## Workforce
 

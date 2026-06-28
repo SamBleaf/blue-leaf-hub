@@ -1,10 +1,10 @@
 ---
 loop_enabled: true
-next_agent: cursor
+next_agent: claude
 current_wave: UI-UX-POLISH-WAVE-01B
-current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
+current_task_file: docs/qa/hardening_loop/NEXT_CLAUDE_REVIEW.md
 fix_mode_allowed: false
-product_code_changes_allowed: true
+product_code_changes_allowed: false
 approval_required: false
 live_integrations_allowed: false
 deploy_allowed: false
@@ -20,17 +20,12 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `UI-UX-POLISH-WAVE-01B` — **APPROVED & RELEASED to Cursor** (Sam, 2026-06-29) |
-| **Last completed agent** | Sam — approved 01B (items 1–7 + badge last); BLOCKER 0 cleared (`d7dbd3e`) |
-| **Current gate** | None — Cursor may run the 01B packet |
-| **Open blockers** | **None** (tree clean) |
-| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`UI-UX-POLISH-WAVE-01B`) |
-| **Approval required?** | No (01B approved) |
-| **Product-code changes allowed?** | **YES — limited to approved presentational UI only** (01B packet scope; stop+log on anything beyond presentational) |
+| **Phase / wave** | `UI-UX-POLISH-WAVE-01B` — **COMPLETE** (Cursor, 2026-06-28) |
+| **Last completed agent** | Cursor — 01B presentational polish (items 1–8) |
+| **Current gate** | Claude review → [NEXT_CLAUDE_REVIEW.md](./NEXT_CLAUDE_REVIEW.md) |
+| **Open blockers** | None |
+| **Next required agent** | **Claude** — review 01B, plan next wave |
+| **Approval required?** | No (01B complete; Claude review lane — Sam gate before *next* product-code wave) |
+| **Product-code changes allowed?** | **No** (01B complete; revert to docs/review lane) |
 
-**Scope guards (Sam 2026-06-29):** presentational only — **no** behaviour / API / auth / schema /
-calc / mutation / RFQ / PO / Buildxact / Xero / Dropbox / Gmail / Resend / WHS / workforce-logic /
-client-portal-access / **schedule-logic** changes (do not touch the just-landed commit-on-blur
-logic). Shared badge (UI-VISUAL-001) runs **last as its own sub-batch** after items 1–7 pass
-screenshots. UI-TENDER-001 **accepted as a gap**. Marketing `PAUSED UNTIL MERGE`. Watcher stays
-`--dry-run` only. Live integrations + deploy **disabled**.
+**01B closed IDs:** UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 · UI-VISUAL-001 (partial). **Accepted gap:** UI-TENDER-001. Marketing `PAUSED UNTIL MERGE`. Watcher `--dry-run` only.
