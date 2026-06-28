@@ -1060,6 +1060,14 @@ export function registerScheduleRoutes(app) {
 
       const merged = { ...cur, ...patch };
       merged.end_date = body.end_date != null ? toYmd(body.end_date) : computeTaskEnd(merged.start_date, merged.duration_days, merged.is_hold_point || merged.task_type === "milestone");
+      // If the finish date was edited directly (no duration supplied), keep duration_days
+      // in sync so the downstream cascade and any later edits stay consistent. Skip
+      // milestones / hold points — they are zero-duration points (end === start), so a
+      // recomputed multi-day duration would be corrupt and the cascade would reset end→start.
+      const isMilestoneTask = merged.is_hold_point || merged.task_type === "milestone";
+      if (body.end_date != null && body.duration_days == null && merged.start_date && merged.end_date && !isMilestoneTask) {
+        merged.duration_days = Math.max(1, daysBetween(merged.start_date, merged.end_date) + 1);
+      }
       const computedOrderBy = computeOrderBy(merged);
       if (computedOrderBy) {
         merged.order_by_date = computedOrderBy;
@@ -1111,7 +1119,7 @@ export function registerScheduleRoutes(app) {
       if (ue) throw ue;
 
       let updatedIds = [id];
-      if (!body.no_cascade && (body.start_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on))) {
+      if (!body.no_cascade && (body.start_date != null || body.end_date != null || body.duration_days != null || body.is_hold_point != null || Array.isArray(body.depends_on))) {
         const more = await cascadeScheduleForward(sb, cur.project_id, id);
         updatedIds = [...new Set([...updatedIds, ...more])];
       }

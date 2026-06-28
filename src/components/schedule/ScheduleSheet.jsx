@@ -1,22 +1,63 @@
+import { useState, useEffect, useRef } from "react";
 import BuildexactCostBadge from "./BuildexactCostBadge.jsx";
 import { groupTasksByPhase, phaseColor, phaseLabel, taskStatusFromPercent } from "../../lib/scheduleUtils.js";
 
-function EditableCell({ value, type = "text", onCommit, options }) {
-  if (options) {
-    return (
-      <select value={value ?? ""} onChange={(e) => onCommit(e.target.value)} className="w-full rounded border border-transparent bg-transparent px-1 py-1 text-xs hover:border-hairline focus:border-primary">
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    );
-  }
+const CELL_CLASS = "w-full rounded border border-transparent bg-transparent px-1 py-1 text-xs hover:border-hairline focus:border-primary";
+
+function SelectCell({ value, onCommit, options }) {
+  return (
+    <select value={value ?? ""} onChange={(e) => onCommit(e.target.value)} className={CELL_CLASS}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+// Commit-on-blur/Enter editor. Previously this committed on every keystroke,
+// which fired a PATCH + full task reload per character — stealing focus mid-edit,
+// persisting half-typed values, and masking the dependency cascade. Now the user
+// types freely and we commit ONCE on blur or Enter, so date/duration changes apply
+// cleanly and ripple to dependent tasks.
+function InputCell({ value, type = "text", onCommit }) {
+  const [draft, setDraft] = useState(value ?? "");
+  const focused = useRef(false);
+  // Keep the field in sync with external updates (e.g. a cascade reload) — but
+  // never clobber what the user is actively typing.
+  useEffect(() => { if (!focused.current) setDraft(value ?? ""); }, [value]);
+
+  const commit = () => {
+    focused.current = false;
+    const original = value ?? "";
+    if (type === "number") {
+      if (draft === "" || draft === null) return;         // don't commit an empty number
+      const n = Number(draft);
+      if (Number.isNaN(n)) return;                        // ignore non-numeric input
+      if (n === Number(original)) return;                 // compare numerically: "5.0" === 5 → no PATCH
+      onCommit(n);
+    } else {
+      if (String(draft) === String(original)) return;     // no change → no PATCH, no reload
+      onCommit(draft);
+    }
+  };
+
   return (
     <input
       type={type}
-      value={value ?? ""}
-      onChange={(e) => onCommit(type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
-      className="w-full rounded border border-transparent bg-transparent px-1 py-1 text-xs hover:border-hairline focus:border-primary"
+      value={draft}
+      onFocus={() => { focused.current = true; }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.currentTarget.blur(); }
+        else if (e.key === "Escape") { setDraft(value ?? ""); focused.current = false; e.currentTarget.blur(); }
+      }}
+      className={CELL_CLASS}
     />
   );
+}
+
+function EditableCell({ value, type = "text", onCommit, options }) {
+  if (options) return <SelectCell value={value} onCommit={onCommit} options={options} />;
+  return <InputCell value={value} type={type} onCommit={onCommit} />;
 }
 
 export default function ScheduleSheet({ tasks = [], phaseLabels = {}, selectedIds = [], onSelectIds, onPatchTask, _onOpenTask, onAddTask, onBulkDelete }) {
