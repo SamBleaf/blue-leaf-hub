@@ -126,7 +126,7 @@ Booting the **full** `dev-api` against the live `.env` starts live background jo
 
 | Job | Location | Gate | Risk on boot |
 |---|---|---|---|
-| Invoice IMAP poll | `financeRoutes.mjs:~1380` | **`invoiceImapConfigs().length` only — ignores `IMAP_POLL_ENABLED`** | **Connects to live invoice inbox ~10s after boot** |
+| Invoice IMAP poll | `financeRoutes.mjs:~1380` | **FIXED (Hardening Prep B1):** now `invoiceImapConfigs().length && INVOICE_IMAP_POLL_ENABLED` (default ON) | Set `INVOICE_IMAP_POLL_ENABLED=false` to disable for a smoke boot |
 | Quote IMAP poll | `dev-api.mjs:2394` | `IMAP_POLL_ENABLED` (default true) | Live Gmail poll (disablable) |
 | Portal nightly sync | `dev-api.mjs:2382` | `PORTAL_SYNC_ENABLED` (default **true**) | Finance reconcile / portal milestone advance |
 | RFQ reminder cron | `dev-api.mjs:2358` | `REMINDER_CRON_ENABLED` (default false) | Off by default |
@@ -167,13 +167,13 @@ W22 commits (`crmRoutes.mjs`, `package.json`, e2e spec) touch **zero** marketing
 - [ ] All 10 routes render real (non-demo) data
 - [ ] Write flows: package → approval cascade → calendar schedule → publish-log (`publish_mode=manual`); evergreen mark persists
 - [ ] Legacy Studio generate/save no regression
-- [ ] Fix or neutralise **finance IMAP poller** (`IMAP_POLL_ENABLED` not honoured) before live boot
-- [ ] Add explicit `requireRole("admin")` to package/approve/schedule/publish-log writes (defense-in-depth)
+- [x] ~~Fix finance IMAP poller~~ — **done (Hardening Prep B1):** `INVOICE_IMAP_POLL_ENABLED` flag (default ON)
+- [x] ~~Add explicit `requireRole("admin")` to writes~~ — **done (Hardening Prep B1):** applied to every endpoint in the 5 mutation-bearing modules
 - [ ] RLS spot-check on new 122 tables (service client bypasses RLS today)
 
 **P2 — cleanup after deploy**
 - [ ] Audit or retire legacy tab page (`Marketing.jsx`) + nav tabs (library/campaigns/media/lists)
-- [ ] Remove `ContentCreatorShell.jsx` (orphan) + old-name SOP files (18-02..18-07 pre-rebuild)
+- [x] ~~Remove `ContentCreatorShell.jsx` (orphan)~~ — **done (Hardening Prep B1).** Old-name SOP files (18-02..18-07 pre-rebuild) still pending (kept until SOP audit)
 - [ ] Gate/remove demo constants once staging-verified
 - [ ] Address pre-existing main-bundle size warning (code-split marketing)
 

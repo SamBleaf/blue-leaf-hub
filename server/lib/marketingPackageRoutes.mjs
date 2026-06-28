@@ -10,7 +10,7 @@
 // applied at runtime; without it these queries return a translated DB error (UI shows a demo fallback).
 
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 
 function sb() {
@@ -31,7 +31,7 @@ function shapePackage(row) {
 
 export function registerMarketingPackageRoutes(app) {
   // ─── Persist a package from already-generated drafts (no AI, no posting) ───
-  app.post("/api/marketing/packages", requireAuth, async (req, res) => {
+  app.post("/api/marketing/packages", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
 
@@ -83,7 +83,7 @@ export function registerMarketingPackageRoutes(app) {
   });
 
   // ─── List packages (Approval Queue) ───────────────────────────────────────
-  app.get("/api/marketing/packages", requireAuth, async (req, res) => {
+  app.get("/api/marketing/packages", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
 
@@ -96,7 +96,7 @@ export function registerMarketingPackageRoutes(app) {
   });
 
   // ─── Package detail ───────────────────────────────────────────────────────
-  app.get("/api/marketing/packages/:id", requireAuth, async (req, res) => {
+  app.get("/api/marketing/packages/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { data, error } = await db
@@ -110,7 +110,7 @@ export function registerMarketingPackageRoutes(app) {
   });
 
   // ─── Approval decision (no publishing) ────────────────────────────────────
-  app.patch("/api/marketing/packages/:id/approve", requireAuth, async (req, res) => {
+  app.patch("/api/marketing/packages/:id/approve", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
 

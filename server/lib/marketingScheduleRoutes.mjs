@@ -9,7 +9,7 @@
 // Uses migration 122 columns (content_items.scheduled_at, social_post_publishes.publish_mode/status).
 
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 
 function sb() {
@@ -17,7 +17,7 @@ function sb() {
 }
 
 export function registerMarketingScheduleRoutes(app) {
-  app.get("/api/marketing/calendar", requireAuth, async (req, res) => {
+  app.get("/api/marketing/calendar", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { from, to } = req.query;
@@ -46,7 +46,7 @@ export function registerMarketingScheduleRoutes(app) {
     return ok(res, { scheduledContent: rowsToCamel(content || []), slots: slotRows });
   });
 
-  app.post("/api/marketing/schedule", requireAuth, async (req, res) => {
+  app.post("/api/marketing/schedule", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { contentItemId, scheduledAt, slotId } = req.body || {};
@@ -70,7 +70,7 @@ export function registerMarketingScheduleRoutes(app) {
   });
 
   // Manual publish log — records that a human posted externally. No external API call.
-  app.post("/api/marketing/publish-log", requireAuth, async (req, res) => {
+  app.post("/api/marketing/publish-log", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { contentItemId, platform, platformPostId, publishedUrl, captionUsed, mediaAssetId, campaignId } = req.body || {};
@@ -101,7 +101,7 @@ export function registerMarketingScheduleRoutes(app) {
     return ok(res, { publish: rowToCamel(data) });
   });
 
-  app.get("/api/marketing/publish-log", requireAuth, async (req, res) => {
+  app.get("/api/marketing/publish-log", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { data, error } = await db

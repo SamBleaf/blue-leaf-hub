@@ -176,7 +176,7 @@ export function registerMarketingRoutes(app) {
    * POST /api/marketing/generate
    * Generate content via AI. Does NOT auto-save — user reviews first.
    */
-  app.post("/api/marketing/generate", requireAuth, async (req, res) => {
+  app.post("/api/marketing/generate", requireAuth, requireRole("admin"), async (req, res) => {
     const {
       mode,
       pillar,
@@ -241,7 +241,7 @@ export function registerMarketingRoutes(app) {
    * POST /api/marketing/generate/stream
    * SSE streaming version of content generation. Falls through to non-streaming on error.
    */
-  app.post("/api/marketing/generate/stream", requireAuth, async (req, res) => {
+  app.post("/api/marketing/generate/stream", requireAuth, requireRole("admin"), async (req, res) => {
     const {
       mode, channel, pillar, client_stage, context = {}, topic, user_request,
       photo_analysis, photo_asset_id, content_mode = "educational",
@@ -315,7 +315,7 @@ export function registerMarketingRoutes(app) {
    * POST /api/marketing/generate/all-save
    * Bulk-save an array of generated results to marketing_content_items.
    */
-  app.post("/api/marketing/generate/all-save", requireAuth, async (req, res) => {
+  app.post("/api/marketing/generate/all-save", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ error: "DB not configured" });
 
@@ -355,7 +355,7 @@ export function registerMarketingRoutes(app) {
    * POST /api/marketing/content
    * Save approved or draft content item.
    */
-  app.post("/api/marketing/content", requireAuth, async (req, res) => {
+  app.post("/api/marketing/content", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -407,7 +407,7 @@ export function registerMarketingRoutes(app) {
    * GET /api/marketing/content
    * Paginated list with filters.
    */
-  app.get("/api/marketing/content", requireAuth, async (req, res) => {
+  app.get("/api/marketing/content", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -433,7 +433,7 @@ export function registerMarketingRoutes(app) {
   /**
    * GET /api/marketing/content/:id
    */
-  app.get("/api/marketing/content/:id", requireAuth, async (req, res) => {
+  app.get("/api/marketing/content/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_content_items").select("*").eq("id", req.params.id).single();
@@ -444,7 +444,7 @@ export function registerMarketingRoutes(app) {
   /**
    * PUT /api/marketing/content/:id
    */
-  app.put("/api/marketing/content/:id", requireAuth, async (req, res) => {
+  app.put("/api/marketing/content/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -471,7 +471,7 @@ export function registerMarketingRoutes(app) {
   /**
    * DELETE /api/marketing/content/:id — soft delete (status → archived)
    */
-  app.delete("/api/marketing/content/:id", requireAuth, async (req, res) => {
+  app.delete("/api/marketing/content/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { error } = await sb.from("marketing_content_items")
@@ -483,7 +483,7 @@ export function registerMarketingRoutes(app) {
 
   // ── Stage 1: Campaigns ────────────────────────────────────────────────────
 
-  app.post("/api/marketing/campaigns", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { name, objective, channels, start_at, end_at, status, tags } = req.body;
@@ -501,7 +501,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, campaign: data });
   });
 
-  app.get("/api/marketing/campaigns", requireAuth, async (req, res) => {
+  app.get("/api/marketing/campaigns", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_campaigns")
@@ -520,7 +520,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, campaigns });
   });
 
-  app.get("/api/marketing/campaigns/:id", requireAuth, async (req, res) => {
+  app.get("/api/marketing/campaigns/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_campaigns")
@@ -533,7 +533,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, campaign: { ...campaign, content_count } });
   });
 
-  app.put("/api/marketing/campaigns/:id", requireAuth, async (req, res) => {
+  app.put("/api/marketing/campaigns/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { id } = req.params;
@@ -568,7 +568,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, campaign: data });
   });
 
-  app.get("/api/marketing/campaigns/:id/slots", requireAuth, async (req, res) => {
+  app.get("/api/marketing/campaigns/:id/slots", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     let q = sb.from("campaign_schedule_slots")
@@ -583,7 +583,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, slots: data || [] });
   });
 
-  app.post("/api/marketing/campaigns/:id/slots", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/slots", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { id } = req.params;
@@ -630,7 +630,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, created: data.length });
   });
 
-  app.put("/api/marketing/campaigns/:id/slots/:slotId", requireAuth, async (req, res) => {
+  app.put("/api/marketing/campaigns/:id/slots/:slotId", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { content_item_id, status } = req.body;
@@ -647,7 +647,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, slot: data });
   });
 
-  app.get("/api/marketing/campaigns/:id/content", requireAuth, async (req, res) => {
+  app.get("/api/marketing/campaigns/:id/content", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_content_items")
@@ -659,7 +659,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, items: data || [] });
   });
 
-  app.post("/api/marketing/campaigns/:id/content/:itemId", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/content/:itemId", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_content_items")
@@ -672,7 +672,7 @@ export function registerMarketingRoutes(app) {
   });
 
   // POST /api/marketing/campaigns/:id/slots/:slotId/publish
-  app.post("/api/marketing/campaigns/:id/slots/:slotId/publish", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/slots/:slotId/publish", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { metrics = {} } = req.body;
@@ -693,7 +693,7 @@ export function registerMarketingRoutes(app) {
 
   // POST /api/marketing/campaigns/:id/slots/auto-assign
   // Body: { content_item_ids: [uuid...] } — ordered, assigns to next empty slots in date order
-  app.post("/api/marketing/campaigns/:id/slots/auto-assign", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/slots/auto-assign", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { content_item_ids = [] } = req.body;
@@ -720,7 +720,7 @@ export function registerMarketingRoutes(app) {
   // POST /api/marketing/campaigns/:id/preload
   // Body: { count: 8, content_modes: ['educational','story','behind_scenes','authority'] }
   // Returns generated items (not saved) for preview before user approves
-  app.post("/api/marketing/campaigns/:id/preload", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/preload", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
@@ -818,7 +818,7 @@ export function registerMarketingRoutes(app) {
    * GET /api/marketing/media
    * List all media assets (newest first), with latest export status joined.
    */
-  app.get("/api/marketing/media", requireAuth, async (req, res) => {
+  app.get("/api/marketing/media", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { project_id, media_type, limit = 50, offset = 0 } = req.query;
@@ -859,7 +859,7 @@ export function registerMarketingRoutes(app) {
    *   4. Runs video intelligence pipeline on the temp file in background
    *   5. Returns { ok: true, media_asset_id }
    */
-  app.post("/api/marketing/media/upload-video", requireAuth, async (req, res) => {
+  app.post("/api/marketing/media/upload-video", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
@@ -957,7 +957,7 @@ export function registerMarketingRoutes(app) {
    * For photos: analyse immediately.
    * For videos: kick off async pipeline, return media_asset_id.
    */
-  app.post("/api/marketing/media/upload", requireAuth, async (req, res) => {
+  app.post("/api/marketing/media/upload", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -1022,7 +1022,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, media_asset_id: asset.id, status: "ready", asset: withPreview });
   });
 
-  app.get("/api/marketing/media/:id", requireAuth, async (req, res) => {
+  app.get("/api/marketing/media/:id", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb.from("marketing_media_assets").select("*, marketing_media_exports(*)").eq("id", req.params.id).single();
@@ -1031,7 +1031,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, asset });
   });
 
-  app.get("/api/marketing/media/:id/status", requireAuth, async (req, res) => {
+  app.get("/api/marketing/media/:id/status", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { data, error } = await sb
@@ -1044,7 +1044,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, exports: data || [], pipeline_complete: allReady });
   });
 
-  app.post("/api/marketing/media/:id/export", requireAuth, async (req, res) => {
+  app.post("/api/marketing/media/:id/export", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { export_format, colour_preset = "brand" } = req.body;
@@ -1074,7 +1074,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, export_id: exportRecord.id, status: "processing" });
   });
 
-  app.post("/api/marketing/media/:id/analyse", requireAuth, async (req, res) => {
+  app.post("/api/marketing/media/:id/analyse", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     if (!_apiKey) return res.status(503).json({ ok: false, error: "AI not configured" });
@@ -1187,7 +1187,7 @@ export function registerMarketingRoutes(app) {
     return { ...story, clips };
   }
 
-  app.get("/api/marketing/media/:id/story-sequence", requireAuth, async (req, res) => {
+  app.get("/api/marketing/media/:id/story-sequence", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -1223,7 +1223,7 @@ export function registerMarketingRoutes(app) {
     return res.json({ ok: true, ready: true, story_sequence: story });
   });
 
-  app.get("/api/marketing/media/:id/clip-alternative", requireAuth, async (req, res) => {
+  app.get("/api/marketing/media/:id/clip-alternative", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 
@@ -1257,7 +1257,7 @@ export function registerMarketingRoutes(app) {
     }
   });
 
-  app.post("/api/marketing/media/:id/consent", requireAuth, async (req, res) => {
+  app.post("/api/marketing/media/:id/consent", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const { consent } = req.body;
@@ -1278,7 +1278,7 @@ export function registerMarketingRoutes(app) {
    *                      suggested_caption_hook?, content_opportunities?,
    *                      build_stage?, ... } }
    */
-  app.patch("/api/marketing/media/:id/analysis", requireAuth, async (req, res) => {
+  app.patch("/api/marketing/media/:id/analysis", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     const analysis = req.body?.analysis;
@@ -1307,7 +1307,7 @@ export function registerMarketingRoutes(app) {
 
   // ── Stage 2: Music Library ─────────────────────────────────────────────────
 
-  app.get("/api/marketing/music", requireAuth, async (req, res) => {
+  app.get("/api/marketing/music", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     let q = sb.from("marketing_music_library").select("*").eq("is_active", true).order("mood").order("title");
@@ -1418,7 +1418,7 @@ export function registerMarketingRoutes(app) {
    * POST /api/marketing/assemble
    * Apply music + colour grade + export to final formats.
    */
-  app.post("/api/marketing/assemble", requireAuth, async (req, res) => {
+  app.post("/api/marketing/assemble", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = sbClient();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
 

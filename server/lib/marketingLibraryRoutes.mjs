@@ -7,7 +7,7 @@
 // No AI, no external publishing.
 
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 
 function sb() {
@@ -15,7 +15,7 @@ function sb() {
 }
 
 export function registerMarketingLibraryRoutes(app) {
-  app.get("/api/marketing/evergreen", requireAuth, async (req, res) => {
+  app.get("/api/marketing/evergreen", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { data, error } = await db
@@ -28,7 +28,7 @@ export function registerMarketingLibraryRoutes(app) {
     return ok(res, { items: rowsToCamel(data || []) });
   });
 
-  app.post("/api/marketing/content/:id/evergreen", requireAuth, async (req, res) => {
+  app.post("/api/marketing/content/:id/evergreen", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const score = typeof req.body?.score === "number" ? req.body.score : 1;

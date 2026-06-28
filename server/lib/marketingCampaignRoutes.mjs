@@ -7,7 +7,7 @@
 // Mounts under the blanket /api/marketing admin gate (dev-api.mjs). Standards: apiResponse + camelCase.
 
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 
 function sb() {
@@ -60,7 +60,7 @@ function buildSlotsFromPattern(campaignId, startYmd, endYmd, pattern) {
 
 export function registerMarketingCampaignRoutes(app) {
   // ─── List campaign templates ──────────────────────────────────────────────
-  app.get("/api/marketing/templates", requireAuth, async (req, res) => {
+  app.get("/api/marketing/templates", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
     const { data, error } = await db
@@ -73,7 +73,7 @@ export function registerMarketingCampaignRoutes(app) {
   });
 
   // ─── Instantiate a campaign (+ slots) from a template ─────────────────────
-  app.post("/api/marketing/campaigns/from-template", requireAuth, async (req, res) => {
+  app.post("/api/marketing/campaigns/from-template", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
 
@@ -153,7 +153,7 @@ export function registerMarketingCampaignRoutes(app) {
   });
 
   // ─── Weekly Planner — slots + gaps for a week, across active campaigns ─────
-  app.get("/api/marketing/planner", requireAuth, async (req, res) => {
+  app.get("/api/marketing/planner", requireAuth, requireRole("admin"), async (req, res) => {
     const db = sb();
     if (!db) return err(res, 503, "Database not configured");
 

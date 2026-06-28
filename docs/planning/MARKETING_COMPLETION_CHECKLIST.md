@@ -49,9 +49,14 @@ Do **not** merge until these pass. Main tree currently has an active redesign ag
 
 ## 3. Hardening checklist (pre-deploy — after merge)
 
+**Already done (Hardening Prep Batch 1, `marketing-run-a`):**
+- [x] Explicit `requireRole("admin")` on every endpoint in the 5 mutation-bearing marketing modules (defense-in-depth; was relying on the blanket prefix gate only)
+- [x] Finance invoice poller now honours `INVOICE_IMAP_POLL_ENABLED` (default ON) — set `=false` for a safe smoke boot without touching credentials
+- [x] Orphan `ContentCreatorShell.jsx` removed
+
 Runtime smoke (deferred from every prior batch — gated on a safe environment):
 
-- [ ] Boot against **staging** (or live with explicit approval) — **never** a blind full-boot against the live `.env` (it starts finance IMAP polling + portal sync; see verification result doc)
+- [ ] Boot against **staging** (or live with explicit approval) — **never** a blind full-boot against the live `.env`. To neutralise background jobs on a shared `.env`: `PORTAL_SYNC_ENABLED=false IMAP_POLL_ENABLED=false INVOICE_IMAP_POLL_ENABLED=false`
 - [ ] Auth gate: `/marketing/*` 401 without token; admin-only (non-admin blocked, UI + API)
 - [ ] Each of the 10 routes renders real data (no demo banner on live)
 - [ ] Write flows: package send → Approval → Calendar schedule → Mark-as-posted (`publish_mode=manual`)
