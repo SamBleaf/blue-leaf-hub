@@ -6,15 +6,7 @@ import {
   CRM_CONSENT_SOURCES
 } from "../../lib/constants.js";
 import ContactDrawer from "./ContactDrawer.jsx";
-
-const STATUS_COLORS = {
-  new:         "bg-slate-100 text-slate-700",
-  active:      "bg-green-100 text-green-700",
-  future:      "bg-blue-100 text-blue-700",
-  client:      "bg-emerald-100 text-emerald-700",
-  past_client: "bg-purple-100 text-purple-700",
-  lost:        "bg-red-100 text-red-700",
-};
+import StatusBadge from "../ui/StatusBadge.jsx";
 
 const ACTION_ICONS = { call: "📞", email: "📧", meeting: "📅", dm: "💬", none: "—", waiting: "⏳" };
 
@@ -373,7 +365,41 @@ export default function CrmContacts() {
             <button onClick={() => setNewModal(true)} className="text-primary hover:underline">Add one →</button>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <>
+            {/* Mobile: contact cards */}
+            <div className="md:hidden divide-y divide-hairline">
+              {contacts.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedId(c.id)}
+                  className="w-full text-left px-4 py-3 hover:bg-page transition"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-ink truncate">{fullName(c)}</div>
+                      {c.email && <div className="text-xs text-muted truncate">{c.email}</div>}
+                    </div>
+                    <StatusBadge status={c.status}>{CRM_STATUS_LABELS[c.status] || c.status}</StatusBadge>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                    <span>{typeLabel(c.contactType)}</span>
+                    <span>Score {c.relationshipScore || 0}</span>
+                    {c.nextActionType && c.nextActionType !== "none" ? (
+                      <span className={dueDateColor(c.nextActionDueDate)}>
+                        {ACTION_ICONS[c.nextActionType]} {c.nextActionType.charAt(0).toUpperCase() + c.nextActionType.slice(1)}
+                        {c.nextActionDueDate ? ` · ${formatDate(c.nextActionDueDate)}` : ""}
+                      </span>
+                    ) : (
+                      <span>No next action</span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Desktop: table */}
+            <table className="hidden md:table w-full text-sm">
             <thead>
               <tr className="border-b border-hairline bg-page">
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Name</th>
@@ -397,9 +423,7 @@ export default function CrmContacts() {
                   </td>
                   <td className="px-4 py-2.5 text-muted">{typeLabel(c.contactType)}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_COLORS[c.status] || "bg-slate-100 text-slate-700"}`}>
-                      {CRM_STATUS_LABELS[c.status] || c.status}
-                    </span>
+                    <StatusBadge status={c.status}>{CRM_STATUS_LABELS[c.status] || c.status}</StatusBadge>
                   </td>
                   <td className="px-4 py-2.5">
                     <span className="text-xs font-semibold text-muted">{c.relationshipScore || 0}</span>
@@ -424,6 +448,7 @@ export default function CrmContacts() {
               ))}
             </tbody>
           </table>
+          </>
         )}
         {total > contacts.length && (
           <div className="px-4 py-2.5 border-t border-hairline text-xs text-muted">

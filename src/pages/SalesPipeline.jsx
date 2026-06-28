@@ -455,8 +455,8 @@ export default function SalesPipeline() {
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             <KpiCard label="Pipeline value" value={formatValue(totalValue) || "$0"} sub={`${activeLeads.length} active`} tone="primary" />
             <KpiCard label="Weighted" value={formatValue(weighted) || "$0"} sub="stage-probability" />
-            <KpiCard label="Needs action" value={String(needsActionCount)} sub="due / overdue" tone="warning" />
-            <KpiCard label="Overdue" value={String(overdueCount)} sub="no activity 14d+" tone="danger" />
+            <KpiCard label="Needs action" value={String(needsActionCount)} sub="next action date due" tone="warning" />
+            <KpiCard label="Overdue" value={String(overdueCount)} sub="14d+ no activity" tone="danger" />
             <KpiCard label="Won / lost" value={`${wonLeads.length} / ${lostLeads.length}`} sub="won / lost" tone="success" />
           </div>
 

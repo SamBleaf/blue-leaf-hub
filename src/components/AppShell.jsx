@@ -670,8 +670,8 @@ export default function AppShell() {
         <Outlet />
       </main>
 
-      {/* ── Quick Add FAB ─────────────────────────────────────────────── */}
-      <div className={`fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6 ${leadDetailActionMode ? "hidden lg:block" : ""}`}>
+      {/* ── Quick Add FAB (hidden on finance command centre mobile — page has inline actions) ── */}
+      <div className={`fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6 ${leadDetailActionMode ? "hidden lg:block" : ""} ${location.pathname.startsWith("/finance/jobs/") ? "hidden md:block" : ""}`}>
         {quickAddOpen ? (
           <>
             <div className="fixed inset-0 z-[-1]" onClick={() => setQuickAddOpen(false)} />
@@ -700,9 +700,10 @@ export default function AppShell() {
         </button>
       </div>
 
-      {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
+      {/* ── Mobile bottom nav (horizontal scroll — all modules reachable on 390px) ── */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-surface md:hidden">
-        <div className="flex justify-around px-1 py-2">
+        <div className="overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-w-max gap-0.5 px-2 py-2">
           {visibleDepts.filter(d => d.id !== "client_portal").map((dept) => {
             const active =
               (dept.id === "sales_marketing" && location.pathname.startsWith("/sales")) ||
@@ -733,6 +734,7 @@ export default function AppShell() {
               </button>
             );
           })}
+          </div>
         </div>
       </div>
 

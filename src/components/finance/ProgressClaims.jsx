@@ -1,18 +1,10 @@
 import { authFetch } from "../../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
+import StatusBadge from "../ui/StatusBadge.jsx";
 
 const fmt = n => n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-const STATUS_STYLES = {
-  draft:           "text-muted bg-page border-hairline",
-  issued:          "text-blue-700 bg-blue-50 border-blue-200",
-  overdue:         "text-red-700 bg-red-50 border-red-200",
-  partially_paid:  "text-amber-700 bg-amber-50 border-amber-200",
-  paid:            "text-green-700 bg-green-50 border-green-200",
-  disputed:        "text-orange-700 bg-orange-50 border-orange-200",
-  void:            "text-muted bg-page border-hairline line-through",
-};
 const STATUS_LABELS = {
   draft: "Draft", issued: "Issued", overdue: "Overdue",
   partially_paid: "Part paid", paid: "Paid", disputed: "Disputed", void: "Void"
@@ -388,7 +380,47 @@ export default function ProgressClaims({ jobId, onUpdate }) {
           <p className="text-sm text-muted">No progress claims yet.</p>
         </div>
       ) : (
-        <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+        <>
+          {/* Mobile: card list */}
+          <div className="md:hidden space-y-2">
+            {claims.map(claim => (
+              <div key={claim.id} className="rounded-card border border-hairline bg-surface p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-ink">
+                      #{claim.claim_number} · {claim.description || (claim.stage ? claim.stage.replace(/_/g, " ") : "—")}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5">
+                      Issued {fmtDate(claim.issued_date)} · Due {fmtDate(claim.due_date)}
+                    </div>
+                  </div>
+                  <StatusBadge status={claim.status} className={claim.status === "void" ? "line-through" : ""}>
+                    {STATUS_LABELS[claim.status] || claim.status}
+                  </StatusBadge>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  <span className="text-ink"><span className="text-muted text-xs">Ex GST </span>{fmt(claim.amount_ex_gst)}</span>
+                  <span className="font-semibold text-ink"><span className="text-muted text-xs font-normal">Inc GST </span>{fmt(Number(claim.amount_ex_gst || 0) * 1.1)}</span>
+                  {claim.amount_paid > 0 && (
+                    <span className="text-xs text-muted">{fmt(claim.amount_paid)} paid</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  {claim.status === "draft" && (
+                    <button type="button" onClick={() => setIssuing(claim)}
+                      className="text-xs text-primary hover:underline font-semibold">Issue</button>
+                  )}
+                  {["issued", "overdue", "partially_paid"].includes(claim.status) && (
+                    <button type="button" onClick={() => setPaying(claim)}
+                      className="text-xs text-accent hover:underline font-semibold">Record payment</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block rounded-card border border-hairline bg-surface overflow-hidden">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-hairline bg-page">
@@ -409,9 +441,9 @@ export default function ProgressClaims({ jobId, onUpdate }) {
                   <td className="px-3 py-2.5 text-sm text-muted">{fmtDate(claim.issued_date)}</td>
                   <td className="px-3 py-2.5 text-sm text-muted">{fmtDate(claim.due_date)}</td>
                   <td className="px-3 py-2.5">
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[claim.status] || ""}`}>
+                    <StatusBadge status={claim.status} className={claim.status === "void" ? "line-through" : ""}>
                       {STATUS_LABELS[claim.status] || claim.status}
-                    </span>
+                    </StatusBadge>
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
@@ -433,6 +465,7 @@ export default function ProgressClaims({ jobId, onUpdate }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Modals */}

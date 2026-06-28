@@ -9,12 +9,12 @@
  */
 const STATUS_VARIANT = {
   won: "success", paid: "success", approved: "success", complete: "success", completed: "success",
-  active: "success", on_track: "success", signed: "success",
+  active: "success", on_track: "success", signed: "success", client: "success",
   pending: "warning", watch: "warning", awaiting_client: "warning", in_review: "warning", partially_paid: "warning",
-  issued: "info", invoiced: "info", sent_to_client: "info", upcoming: "info",
+  issued: "info", invoiced: "info", sent_to_client: "info", upcoming: "info", future: "info",
   overdue: "danger", delayed: "danger", rejected: "danger", void: "danger", disputed: "danger", lost: "danger",
   blocked: "blocked",
-  inactive: "neutral", nurture: "neutral", draft: "neutral", withdrawn: "neutral",
+  inactive: "neutral", nurture: "neutral", draft: "neutral", withdrawn: "neutral", new: "neutral", past_client: "neutral",
 };
 
 export function statusToVariant(status) {

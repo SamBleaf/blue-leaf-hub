@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { SCHEDULE_VIEWS } from "../../lib/scheduleUtils.js";
 
 export default function ScheduleToolbar({
@@ -24,6 +25,25 @@ export default function ScheduleToolbar({
   busy = {},
   canEdit = true
 }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const close = (e) => {
+      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [moreOpen]);
+
+  const overflowActions = [
+    { key: "pdf", label: busy.pdf ? "PDF…" : "Export PDF", onClick: onExportPdf, disabled: busy.pdf },
+    { key: "csv", label: "Export CSV", onClick: onExportCsv },
+    { key: "bx", label: busy.buildexact ? "Matching…" : "BX Match", onClick: onBuildexactMatch, disabled: busy.buildexact },
+    { key: "template", label: "Save template", onClick: onSaveTemplate },
+  ];
+
   return (
     <div className="rounded-card border border-hairline bg-surface p-3 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -54,18 +74,51 @@ export default function ScheduleToolbar({
               )}
             </button>
           ) : null}
-          <button type="button" onClick={onExportPdf} disabled={busy.pdf} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
-            {busy.pdf ? "PDF..." : "Export PDF"}
-          </button>
-          <button type="button" onClick={onExportCsv} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
-            Export CSV
-          </button>
-          <button type="button" onClick={onBuildexactMatch} disabled={busy.buildexact} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
-            {busy.buildexact ? "Matching..." : "BX Match"}
-          </button>
-          <button type="button" onClick={onSaveTemplate} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
-            Save template
-          </button>
+          {/* Desktop: inline export / template actions */}
+          <div className="hidden md:flex flex-wrap items-center gap-2">
+            <button type="button" onClick={onExportPdf} disabled={busy.pdf} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
+              {busy.pdf ? "PDF..." : "Export PDF"}
+            </button>
+            <button type="button" onClick={onExportCsv} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
+              Export CSV
+            </button>
+            <button type="button" onClick={onBuildexactMatch} disabled={busy.buildexact} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50">
+              {busy.buildexact ? "Matching..." : "BX Match"}
+            </button>
+            <button type="button" onClick={onSaveTemplate} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">
+              Save template
+            </button>
+          </div>
+          {/* Mobile: overflow menu for secondary actions */}
+          <div className="relative md:hidden" ref={moreRef}>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink"
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
+            >
+              More ⋯
+            </button>
+            {moreOpen ? (
+              <div className="absolute right-0 top-full z-20 mt-1 min-w-[10.5rem] rounded-lg border border-hairline bg-surface py-1 shadow-lg">
+                {overflowActions.map((action) => (
+                  <button
+                    key={action.key}
+                    type="button"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      action.onClick?.();
+                      setMoreOpen(false);
+                    }}
+                    className="block w-full px-3 py-2 text-left text-sm font-semibold text-ink hover:bg-page disabled:opacity-50"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 

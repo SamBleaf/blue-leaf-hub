@@ -239,6 +239,12 @@ function fmt(n, opts = {}) {
   }).format(n);
 }
 
+/** Presentational empty-state copy for KPI tiles (no calc change). */
+function fmtMoneyKpi(n, emptyLabel = "None yet") {
+  if (n == null || !Number.isFinite(Number(n)) || Number(n) === 0) return emptyLabel;
+  return fmt(n);
+}
+
 function fmtPct(n) {
   if (n == null) return "—";
   return `${Number(n).toFixed(1)}%`;
@@ -624,9 +630,9 @@ export default function JobCommandCentre() {
       {/* KPI bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Contract" value={fmt(kpis.contract_value)} />
-        <KpiCard label="Claims issued" value={fmt(kpis.claims_issued)} />
-        <KpiCard label="Claims paid" value={fmt(kpis.claims_paid)} />
-        <KpiCard label="Actual costs" value={fmt(kpis.actual_costs)} />
+        <KpiCard label="Claims issued" value={fmtMoneyKpi(kpis.claims_issued, "No claims yet")} />
+        <KpiCard label="Claims paid" value={fmtMoneyKpi(kpis.claims_paid, "None paid yet")} />
+        <KpiCard label="Actual costs" value={fmtMoneyKpi(kpis.actual_costs, "No costs booked")} />
         {kpis.committed_cost > 0 && <KpiCard label="Committed" value={fmt(kpis.committed_cost)} />}
         <MarginIndicator label="Working margin" pct={kpis.working_margin_pct} target={target} floor={floor} />
         <MarginIndicator label="Forecast margin" pct={kpis.forecast_data_quality_warning ? null : kpis.forecast_margin_pct} target={target} floor={floor} warning={kpis.forecast_data_quality_warning ? "⚠ Forecast cost doesn't match contract — review" : null} />

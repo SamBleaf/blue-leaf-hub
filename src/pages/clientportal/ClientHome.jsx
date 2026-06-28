@@ -148,7 +148,7 @@ export default function ClientHome() {
 
       {/* Latest update */}
       {home.latestUpdate ? (
-        <Card title={`Latest update · ${fmtDate(home.latestUpdate.weekOf)}`}>
+        <Card title={home.latestUpdate.weekOf ? `Latest update · ${fmtDate(home.latestUpdate.weekOf)}` : "Latest update"}>
           <p className="text-sm font-semibold text-ink">{home.latestUpdate.headline}</p>
           {home.latestUpdate.body ? <p className="mt-1 text-sm leading-relaxed text-muted">{home.latestUpdate.body}</p> : null}
           {home.latestUpdate.builderReasoning ? (
