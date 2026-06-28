@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
-import { workerFetch } from "../../lib/workerFetch.js";
+import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
 
 // Read an image file, downscale it, and return a compressed JPEG data URL so a
 // completion photo stays small enough to store inline (a few hundred KB).
@@ -57,6 +57,7 @@ export default function WorkerLogHours() {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const preview = isWorkerPreview();
   const [me, setMe] = useState(null);
   const [date, setDate] = useState(() => params.get("date") || todayStr());
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -396,16 +397,18 @@ export default function WorkerLogHours() {
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || !entries.length || !selectedProject}
+          disabled={preview || submitting || !entries.length || !selectedProject}
           className="w-full py-3 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50"
         >
-          {submitting
-            ? "Submitting…"
-            : !selectedProject
-              ? "Pick a site to submit"
-              : !entries.length
-                ? "Add a task to submit"
-                : `${existingId ? "Update" : "Submit"} ${totalHours}h`}
+          {preview
+            ? "Read-only preview"
+            : submitting
+              ? "Submitting…"
+              : !selectedProject
+                ? "Pick a site to submit"
+                : !entries.length
+                  ? "Add a task to submit"
+                  : `${existingId ? "Update" : "Submit"} ${totalHours}h`}
         </button>
       </div>
     </WorkerLayout>

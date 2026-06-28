@@ -42,11 +42,51 @@ export function clearWorkerToken() {
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
+// --- Admin "preview as worker" (read-only) ---------------------------------
+// An admin/supervisor can open /worker?previewEmployeeId=<id> to see exactly what that worker
+// sees. We capture the id into sessionStorage (ephemeral, per-tab — never localStorage, so it
+// can't be mistaken for a worker login) and send it as a header on every worker call. The admin
+// stays authenticated by their own Supabase session; the backend serves the previewed worker's
+// data for GETs and rejects any write. A worker on their own device never has this set.
+const PREVIEW_KEY = "blhub_worker_preview_employee_id";
+
+(function capturePreviewId() {
+  try {
+    const url = new URL(window.location.href);
+    const pid = url.searchParams.get("previewEmployeeId");
+    if (pid) {
+      sessionStorage.setItem(PREVIEW_KEY, pid);
+      url.searchParams.delete("previewEmployeeId");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
+  } catch { /* ignore */ }
+})();
+
+export function getPreviewEmployeeId() {
+  try {
+    // A real worker token always wins — never preview on a worker's own device.
+    if (localStorage.getItem(TOKEN_KEY)) return null;
+    return sessionStorage.getItem(PREVIEW_KEY) || null;
+  } catch { return null; }
+}
+
+export function clearPreviewEmployeeId() {
+  try { sessionStorage.removeItem(PREVIEW_KEY); } catch { /* ignore */ }
+}
+
+export function isWorkerPreview() {
+  return !!getPreviewEmployeeId();
+}
+
 // Fetch a worker endpoint, sending the magic-link token in the x-worker-token HEADER (not the URL)
 // so the credential never leaks via access logs, browser history, or the Referer header. Falls back
 // to the normal authenticated fetch when no worker token is present (e.g. an admin viewing the PWA).
 export function workerFetch(path, opts = {}) {
   const token = getWorkerToken();
-  if (!token) return authFetch(path, opts);
+  if (!token) {
+    const previewId = getPreviewEmployeeId();
+    if (previewId) return authFetch(path, { ...opts, headers: { ...(opts.headers || {}), "x-preview-employee-id": previewId } });
+    return authFetch(path, opts);
+  }
   return fetch(path, { ...opts, headers: { ...(opts.headers || {}), "x-worker-token": token } });
 }

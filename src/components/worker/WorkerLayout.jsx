@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { isWorkerPreview, clearPreviewEmployeeId } from "../../lib/workerFetch.js";
 
 const PWA_DISMISS_KEY = "blhub_pwa_prompt_dismissed";
 
@@ -28,6 +29,12 @@ export default function WorkerLayout({ children, onBack }) {
 
   const isHome = HOME_PATHS.includes(location.pathname);
   const handleBack = onBack ?? (() => navigate(-1));
+  const preview = isWorkerPreview();
+
+  function exitPreview() {
+    clearPreviewEmployeeId();
+    navigate("/workforce/team");
+  }
 
   useEffect(() => {
     if (localStorage.getItem(PWA_DISMISS_KEY)) return;
@@ -106,6 +113,14 @@ export default function WorkerLayout({ children, onBack }) {
         {/* Right spacer to keep logo centred */}
         <div className="w-9 shrink-0" />
       </header>
+
+      {/* Admin "preview as worker" banner — read-only; this is NOT the worker's own device */}
+      {preview && (
+        <div className="bg-indigo-600 text-white text-xs font-medium px-4 py-2 flex items-center justify-between gap-3 shrink-0">
+          <span>👁 Preview mode — read-only. You&apos;re seeing this worker&apos;s app; you can&apos;t submit or complete on their behalf.</span>
+          <button type="button" onClick={exitPreview} className="shrink-0 rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30">Exit preview</button>
+        </div>
+      )}
 
       {/* Offline banner — field connectivity is unreliable */}
       {offline && (

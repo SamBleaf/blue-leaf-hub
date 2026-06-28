@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
-import { workerFetch } from "../../lib/workerFetch.js";
+import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
 import { uploadWorkerPhoto } from "../../lib/workerPhoto.js";
 import { getSelectedJob, setSelectedJob } from "../../lib/workerJob.js";
 
@@ -37,6 +37,7 @@ const PRIORITY_BADGE = {
 };
 
 export default function WorkerTasks() {
+  const preview = isWorkerPreview();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -394,10 +395,10 @@ export default function WorkerTasks() {
               <button
                 type="button"
                 onClick={() => completeTask(selected.id)}
-                disabled={completing}
+                disabled={preview || completing}
                 className="flex-1 py-3 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50"
               >
-                {completing ? "Marking done…" : "Mark as done"}
+                {preview ? "Read-only preview" : completing ? "Marking done…" : "Mark as done"}
               </button>
               <button
                 type="button"

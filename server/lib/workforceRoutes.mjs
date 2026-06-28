@@ -1595,7 +1595,32 @@ export function registerWorkforceRoutes(app) {
       if (emp) { req.workerEmployee = emp; return next(); }
       return res.status(401).json({ ok: false, error: "This worker link is invalid or has been reset." });
     }
-    return requireAuth(req, res, next);
+    // No worker token → authenticate as a console user. An admin/supervisor may then PREVIEW a
+    // specific worker's view (read-only) by passing previewEmployeeId, so the office sees exactly
+    // what that worker sees in the PWA. Preview is GET-only and never uses the worker's live token —
+    // it can never submit hours, edit timesheets, complete tasks, or upload photos as the worker.
+    return requireAuth(req, res, async () => {
+      const previewId = String(req.query.previewEmployeeId || req.get("x-preview-employee-id") || "").trim();
+      if (!previewId) return next();
+      // Full worker-view preview is a DIRECTOR (admin) tool only. Admins already see every
+      // employee's timesheets/tasks/photos across the console, so previewing grants no new data.
+      // Supervisors are deliberately excluded from the full impersonated view (read-only or not).
+      if (req.caller?.role !== "admin") {
+        return res.status(403).json({ ok: false, error: "Forbidden" });
+      }
+      if (!isUuid(previewId)) {
+        return res.status(400).json({ ok: false, error: "Invalid employee id." });
+      }
+      if (req.method !== "GET") {
+        return res.status(403).json({ ok: false, error: "Read-only preview — you can't submit or complete work as a worker." });
+      }
+      const sb = getServiceSupabase();
+      const { data: emp } = await sb.from("employees").select("*").eq("id", previewId).eq("is_active", true).maybeSingle();
+      if (!emp) return res.status(404).json({ ok: false, error: "Employee not found." });
+      req.workerEmployee = emp;
+      req.workerPreview = true;
+      return next();
+    });
   }
 
   app.get("/api/worker/me", workerAuth, async (req, res) => {

@@ -395,14 +395,16 @@ export default function WorkforceTeam({ embedded = false }) {
                 return isManagement ? [invite, link] : [link, invite];
               })()}
 
-              {/* W17-P3: read-only preview as this worker (fixes the old /worker?preview path that ignored employeeId) */}
-              {panel !== "new" && (
+              {/* Load this worker's actual PWA view (read-only). Director-only (matches the backend
+                  gate). Full navigation (not SPA) so previewEmployeeId is captured on load, the same
+                  way the worker magic-link token is. */}
+              {panel !== "new" && isDirector && (
                 <button
                   type="button"
-                  onClick={() => { setPreview(true); setPvEmpId(panel.id); }}
+                  onClick={() => { window.location.href = `/worker?previewEmployeeId=${encodeURIComponent(panel.id)}`; }}
                   className="w-full py-2 rounded-lg border border-hairline text-sm text-ink font-medium"
                 >
-                  Preview worker view →
+                  Open worker view →
                 </button>
               )}
 
