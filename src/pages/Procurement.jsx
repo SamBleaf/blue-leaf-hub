@@ -14,6 +14,8 @@ import {
 import {
   CalendarTab, BoardTab, SuppliersTab, LongLeadTab, AiDraftModal,
 } from "../components/procurement/ProcurementExtras.jsx";
+import ProcurementKpiStrip from "../components/procurement/ProcurementKpiStrip.jsx";
+import ProcurementItemCard from "../components/procurement/ProcurementItemCard.jsx";
 
 // ── small presentational helpers ─────────────────────────────────────────────
 const RISK_PILL = {
@@ -70,7 +72,7 @@ export default function Procurement() {
 
   // jobs available for the register (projects that have a linked job)
   const jobOptions = useMemo(
-    () => (allProjects || [])
+    () => (Array.isArray(allProjects) ? allProjects : [])
       .map((p) => ({ jobId: p.jobId || p.job_id, address: p.address }))
       .filter((p) => p.jobId),
     [allProjects]
@@ -154,17 +156,17 @@ function CommandCentre({ onOpenItem }) {
   if (err) return <div className="rounded-card border border-red-200 bg-red-50 text-red-700 text-sm p-4">{err}</div>;
 
   const total = CC_SECTIONS.reduce((a, s) => a + (buckets?.[s.key]?.length || 0), 0);
-  if (!total) {
-    return (
-      <div className="rounded-card border border-hairline bg-surface p-10 text-center">
-        <div className="text-lg font-semibold text-ink mb-1">Nothing at risk this week</div>
-        <div className="text-sm text-muted">Generate a plan on a locked job, or check back as order-by dates approach.</div>
-      </div>
-    );
-  }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <>
+      <ProcurementKpiStrip buckets={buckets} />
+      {!total ? (
+        <div className="rounded-card border border-hairline bg-surface p-10 text-center">
+          <div className="text-lg font-semibold text-ink mb-1">Nothing at risk this week</div>
+          <div className="text-sm text-muted">Generate a plan on a locked job, or check back as order-by dates approach.</div>
+        </div>
+      ) : (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {CC_SECTIONS.map((s) => {
         const rows = buckets?.[s.key] || [];
         if (!rows.length) return null;
@@ -198,7 +200,9 @@ function CommandCentre({ onOpenItem }) {
           </div>
         );
       })}
-    </div>
+      </div>
+      )}
+    </>
   );
 }
 
@@ -326,7 +330,7 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
       )}
 
       {selectedJobId && !loading && items.length > 0 && (
-        <div className="rounded-card border border-hairline bg-surface overflow-x-auto">
+        <div className="hidden rounded-card border border-hairline bg-surface overflow-x-auto lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-hairline text-left text-xs font-semibold text-muted">
@@ -421,6 +425,15 @@ function Register({ jobOptions, selectedJobId, setSelectedJobId, isAdmin, canEdi
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Mobile/tablet: order/chase lookahead cards (read view; editing stays on the desktop table) */}
+      {selectedJobId && !loading && items.length > 0 && (
+        <div className="space-y-2 lg:hidden">
+          {items.map((it) => (
+            <ProcurementItemCard key={it.id} item={it} supplierName={suppliers.find((s) => s.id === it.supplierId)?.name} />
+          ))}
         </div>
       )}
     </div>

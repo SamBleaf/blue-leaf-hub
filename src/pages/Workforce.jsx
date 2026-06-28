@@ -5,6 +5,7 @@ import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
+import WorkforceKpiStrip from "../components/workforce/WorkforceKpiStrip.jsx";
 
 const TASK_LABELS = {
   first_fix_framing:    "First fix / framing",
@@ -219,7 +220,9 @@ function ApprovalsTab({ role }) {
       ) : timesheets.length === 0 ? (
         <div className="text-sm text-muted py-8 text-center">No pending timesheets</div>
       ) : (
-        <div className="border border-hairline rounded-lg overflow-hidden bg-white">
+        <>
+        {/* Desktop / tablet (≥ sm): table — unchanged */}
+        <div className="hidden sm:block border border-hairline rounded-lg overflow-hidden bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-hairline">
               <tr>
@@ -320,6 +323,90 @@ function ApprovalsTab({ role }) {
             </tbody>
           </table>
         </div>
+
+        {/* Mobile (< sm): stacked cards */}
+        <div className="sm:hidden space-y-3">
+          <label className="flex items-center gap-2 text-xs text-muted px-1">
+            <input type="checkbox" checked={selected.size === timesheets.length} onChange={selectAll} className="accent-primary" />
+            Select all ({timesheets.length})
+          </label>
+          {timesheets.map(ts => {
+            const totalHrs = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
+            const otHrs = totalOtHours(ts);
+            const isBusy = busy.has(ts.id);
+            const project = ts.carpentry_jobs
+              ? `${ts.carpentry_jobs.address || ts.carpentry_jobs.reference} (${ts.carpentry_jobs.reference})`
+              : (ts.projects?.address || "—");
+            return (
+              <div
+                key={ts.id}
+                className={`border rounded-lg bg-white p-3 ${selected.has(ts.id) ? "border-primary bg-blue-50" : "border-hairline"}`}
+              >
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(ts.id)}
+                    onChange={() => toggleSelect(ts.id)}
+                    className="accent-primary mt-1"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-ink truncate">{ts.employees?.name}</p>
+                    {ts.employees?.trade && <p className="text-xs text-muted">{ts.employees.trade}</p>}
+                  </div>
+                  {otHrs > 0 && <span className="text-xs text-amber-600 font-medium whitespace-nowrap">⚠ +{otHrs}h OT</span>}
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <div className="col-span-2">
+                    <dt className="text-muted inline">Project: </dt>
+                    <dd className="inline text-ink">{project}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted inline">Date: </dt>
+                    <dd className="inline text-ink">{fmtDate(ts.date)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted inline">Hours: </dt>
+                    <dd className="inline text-ink font-medium">{totalHrs}h</dd>
+                  </div>
+                  {isDirector && (
+                    <div className="col-span-2">
+                      <dt className="text-muted inline">Cost: </dt>
+                      <dd className="inline text-ink">
+                        {ts.employees?.hourly_rate
+                          ? `~$${(totalHrs * Number(ts.employees.hourly_rate)).toFixed(2)}${otHrs > 0 ? "+" : ""}`
+                          : "—"}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                {(canApprove || canReject) && (
+                  <div className="mt-3 flex gap-2">
+                    {canApprove && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => approveOne(ts.id)}
+                        className="flex-1 text-sm px-3 py-2 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50"
+                      >
+                        ✓ Approve
+                      </button>
+                    )}
+                    {canReject && (
+                      <button
+                        type="button"
+                        onClick={() => { setRejectModal(ts.id); setRejectNotes(""); }}
+                        className="flex-1 text-sm px-3 py-2 rounded bg-red-100 text-red-700 font-medium hover:bg-red-200"
+                      >
+                        ✗ Reject
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        </>
       )}
 
       {/* Reject modal */}
@@ -874,9 +961,46 @@ export default function Workforce() {
 
   const shownTab = tabs.includes(tab) ? tab : "Approvals";
 
+  // H4-A: home KPI strip — fed from existing endpoints (no new backend).
+  const [wfStats, setWfStats] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [pendingRes, empRes] = await Promise.all([
+          authFetch("/api/workforce/timesheets/pending").then(r => r.json()).catch(() => ({})),
+          authFetch("/api/workforce/employees").then(r => r.json()).catch(() => ({})),
+        ]);
+        if (cancelled) return;
+        const timesheets = Array.isArray(pendingRes?.timesheets) ? pendingRes.timesheets : [];
+        const employees = Array.isArray(empRes?.employees) ? empRes.employees : [];
+        const hours = timesheets.reduce(
+          (sum, ts) => sum + (Array.isArray(ts.timesheet_entries)
+            ? ts.timesheet_entries.reduce((h, e) => h + (Number(e.hours) || 0), 0)
+            : 0),
+          0,
+        );
+        const crew = employees.filter(e => e.is_active).length;
+        const linked = employees.filter(e => e.has_worker_link).length;
+        setWfStats({ pending: timesheets.length, hours, crew, linked });
+      } catch {
+        if (!cancelled) setWfStats(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-xl font-bold text-ink mb-5">Workforce</h1>
+    <div className="space-y-6 pb-24 p-6 max-w-5xl mx-auto">
+      <header>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Workforce</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-primary">Crew &amp; timesheets</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          Approve hours, track your crew, and keep the field app in sync.
+        </p>
+      </header>
+
+      {wfStats && <WorkforceKpiStrip kpis={wfStats} />}
 
       {role === "admin" && <BuildexactSyncControl />}
 

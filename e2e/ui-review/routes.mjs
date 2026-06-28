@@ -19,6 +19,16 @@ export const ROUTES = [
   { name: "sales-redesign-mockup-lead",     area: "Sales redesign", role: "admin", path: "/ui-review/sales-redesign-mockup/lead",     state: "Lead detail redesign — command-centre / tabs + sticky action" },
   { name: "sales-redesign-mockup-won",      area: "Sales redesign", role: "admin", path: "/ui-review/sales-redesign-mockup/lead-won", state: "Lead detail redesign — WON special case" },
 
+  // ── Operations + Schedule redesign mock-up (H2 design direction — review-only) ─
+  { name: "ops-redesign-mockup-home",     area: "Ops redesign", role: "admin", path: "/ui-review/ops-redesign-mockup",          state: "Operations home — KPI strip, Action Queue, Board/Actions/List/Scorecard, project cards by phase" },
+  { name: "ops-redesign-mockup-job",      area: "Ops redesign", role: "admin", path: "/ui-review/ops-redesign-mockup/job",      state: "Job command centre — compact header, phase stepper, workspace + sticky right rail / mobile tabs" },
+  { name: "ops-redesign-mockup-schedule", area: "Ops redesign", role: "admin", path: "/ui-review/ops-redesign-mockup/schedule", state: "Schedule — Gantt w/ baseline + critical + ripple; mobile lookahead (not squeezed Gantt)" },
+
+  // ── Tender/RFQ + Procurement redesign mock-up (H3 design direction — review-only) ─
+  { name: "h3-redesign-mockup-home",       area: "H3 redesign", role: "admin", path: "/ui-review/h3-redesign-mockup",             state: "Tender/RFQ home — KPI strip, Action Queue (missing quotes/chases), jobs by tender stage" },
+  { name: "h3-redesign-mockup-package",    area: "H3 redesign", role: "admin", path: "/ui-review/h3-redesign-mockup/package",     state: "RFQ package detail — quote compare + recipient/chase rail + mobile tabs" },
+  { name: "h3-redesign-mockup-procurement",area: "H3 redesign", role: "admin", path: "/ui-review/h3-redesign-mockup/procurement", state: "Procurement — order-by Action Queue + register; mobile lookahead (not a table)" },
+
   // ── Admin / Director ────────────────────────────────────────────────────────
   { name: "admin-dashboard",        area: "Dashboard",        role: "director",   path: "/home",                              state: "Director home — KPIs, active jobs, pipeline" },
   { name: "sales-pipeline",         area: "Sales",            role: "admin",      path: "/sales",                             state: "Kanban with a lead in every APB stage" },
@@ -35,12 +45,15 @@ export const ROUTES = [
   { name: "tender-detail",          area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/board/job-1003",     state: "Tender detail — RFQ rows + quotes" },
   { name: "rfq-package-list",       area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/rfq-packages",       state: "RFQ package list" },
   { name: "rfq-package-detail",     area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/rfq-packages/pkg-1", state: "RFQ package detail — trades + recipients" },
+  { name: "rfq-engine",             area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/rfq-engine",         state: "RFQ engine (carry-forward — not redesigned in H3)" },
   { name: "subcontractors",         area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/subcontractors",     state: "Subcontractor directory" },
   { name: "cost-intelligence",      area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/cost-intelligence",  state: "Cost intelligence by trade" },
   { name: "fee-proposals",          area: "Tender/RFQ",       role: "admin",      path: "/tender-manager/fee-proposal",       state: "Fee proposal list" },
   { name: "operations-list",        area: "Operations",       role: "admin",      path: "/operations",                        state: "Operations project list" },
   { name: "operations-project",     area: "Operations",       role: "admin",      path: "/operations/proj-1",                 state: "Project command centre" },
   { name: "schedule-manager",       area: "Schedule",         role: "admin",      path: "/operations/proj-1/schedule",        state: "Schedule (Gantt) with baseline" },
+  { name: "operations-diary",       area: "Operations",       role: "admin",      path: "/operations/proj-1/diary",           state: "Site diary (original — not redesigned in H2)" },
+  { name: "operations-whs",         area: "Operations",       role: "admin",      path: "/operations/proj-1/whs",             state: "WHS compliance/incidents (original — not redesigned in H2)" },
   { name: "procurement",            area: "Procurement",      role: "admin",      path: "/operations/procurement",            state: "Purchase orders" },
   { name: "finance-manager",        area: "Finance",          role: "admin",      path: "/finance",                           state: "Finance manager" },
   { name: "finance-command-centre", area: "Finance",          role: "admin",      path: "/finance/jobs/job-1001",             state: "Job command centre (finance)" },

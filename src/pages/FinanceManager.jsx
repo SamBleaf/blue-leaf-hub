@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import FinancialInbox from "../components/finance/FinancialInbox.jsx";
 import ApprovalQueue from "../components/finance/ApprovalQueue.jsx";
 import JobFinancials from "../components/finance/JobFinancials.jsx";
+import FinanceKpiStrip from "../components/finance/FinanceKpiStrip.jsx";
 
 const TABS = [
   { id: "inbox", label: "Inbox" },
@@ -15,15 +16,6 @@ const TABS = [
 function fmtCurrency(n) {
   if (n == null || isNaN(n)) return "—";
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
-}
-
-function StatChip({ label, value, color = "text-ink" }) {
-  return (
-    <div className="rounded-card border border-hairline bg-surface px-4 py-3 text-center">
-      <div className={`text-lg font-bold ${color}`}>{value}</div>
-      <div className="text-xs text-muted">{label}</div>
-    </div>
-  );
 }
 
 function XeroSettings({ xeroStatus }) {
@@ -92,14 +84,16 @@ export default function FinanceManager() {
         </p>
       </header>
 
-      {/* Stats row */}
+      {/* KPI strip */}
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatChip label="Unmatched" value={stats.counts?.unmatched || 0} color="text-warning" />
-          <StatChip label="Pending approval" value={pendingCount} color={pendingCount > 0 ? "text-primary" : "text-ink"} />
-          <StatChip label="Filed this month" value={stats.counts?.filed || 0} color="text-accent" />
-          <StatChip label="Total approved" value={fmtCurrency(stats.totalApprovedValue)} />
-        </div>
+        <FinanceKpiStrip
+          kpis={{
+            unmatched: stats.counts?.unmatched || 0,
+            pending: pendingCount,
+            filed: stats.counts?.filed || 0,
+            totalApproved: fmtCurrency(stats.totalApprovedValue),
+          }}
+        />
       )}
 
       {/* Tabs */}

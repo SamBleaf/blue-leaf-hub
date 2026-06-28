@@ -13,6 +13,22 @@ const GROUPS = [
     ],
   },
   {
+    area: "Operations redesign (mock-up — H2 direction)",
+    routes: [
+      ["Operations home redesign mock-up", "/ui-review/ops-redesign-mockup", "admin"],
+      ["Job command centre redesign mock-up", "/ui-review/ops-redesign-mockup/job", "admin"],
+      ["Schedule redesign mock-up", "/ui-review/ops-redesign-mockup/schedule", "admin"],
+    ],
+  },
+  {
+    area: "Tender/RFQ + Procurement redesign (mock-up — H3 direction)",
+    routes: [
+      ["Tender/RFQ home redesign mock-up", "/ui-review/h3-redesign-mockup", "admin"],
+      ["RFQ package detail redesign mock-up", "/ui-review/h3-redesign-mockup/package", "admin"],
+      ["Procurement redesign mock-up", "/ui-review/h3-redesign-mockup/procurement", "admin"],
+    ],
+  },
+  {
     area: "Admin / Director",
     routes: [
       ["Director dashboard", "/home", "director"],

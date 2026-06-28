@@ -9,6 +9,11 @@ import TaskDetailPanel from "../components/schedule/TaskDetailPanel.jsx";
 import RippleWarningModal from "../components/schedule/RippleWarningModal.jsx";
 import DelaysTab from "../components/schedule/DelaysTab.jsx";
 import DependencyMap from "../components/schedule/DependencyMap.jsx";
+import ScheduleLookahead from "../components/schedule/ScheduleLookahead.jsx";
+import FilterChips from "../components/ui/FilterChips.jsx";
+import StatusBadge from "../components/ui/StatusBadge.jsx";
+import StickyActionBar from "../components/ui/StickyActionBar.jsx";
+import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
@@ -17,6 +22,7 @@ import {
   VIEW_GANTT,
   VIEW_DELAYS,
   VIEW_MAP,
+  computeCriticalPath,
   computeEndDate,
   daysBetween,
   normalizeTask,
@@ -66,6 +72,7 @@ export default function ScheduleManager() {
   const [subcontractors, setSubcontractors] = useState([]);
   const [phaseLabels, setPhaseLabels] = useState({});
   const [currentView, setCurrentView] = useState(VIEW_GANTT);
+  const [lens, setLens] = useState("all"); // decision-first lens: all|today|week|delayed|blocked|critical|procurement
   const [zoom, setZoom] = useState("Month");
   const [showCritical, setShowCritical] = useState(true);
   const [lookahead, setLookahead] = useState(false);
@@ -118,7 +125,8 @@ export default function ScheduleManager() {
       projectId,
       projectName: project?.address || "",
       currentView,
-      selectedTaskId
+      selectedTaskId,
+      ownsMobileStickyAction: true // page owns a mobile sticky action → AppShell collapses global FABs
     });
     return () => setScreenContext?.(null);
   }, [setScreenContext, projectId, project?.address, currentView, selectedTaskId]);
@@ -270,6 +278,16 @@ export default function ScheduleManager() {
     }
 
     return alerts;
+  }, [tasks]);
+
+  // Decision-first derived signals (display-only; reuses computeCriticalPath — no maths rewrite).
+  const criticalIds = useMemo(() => {
+    const r = computeCriticalPath(tasks);
+    return r instanceof Set ? r : new Set(r || []);
+  }, [tasks]);
+  const overdueCount = useMemo(() => {
+    const t = new Date().toISOString().slice(0, 10);
+    return tasks.filter((x) => x.status !== "complete" && x.end_date && x.end_date < t).length;
   }, [tasks]);
 
   async function patchTask(id, patch, options = {}) {
@@ -723,22 +741,29 @@ export default function ScheduleManager() {
         <Link to={`/operations/${projectId}`} className="text-sm font-semibold text-accent underline">Back to project</Link>
       </div>
 
-      <header className="rounded-card border border-hairline bg-surface p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-primary">{project?.address || "Project"}</h1>
-            <p className="text-sm text-muted">Schedule Manager</p>
+      {/* Compact schedule header — status + baseline + critical/overdue signal + primary action */}
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
+        <div className="min-w-0">
+          <h1 className="page-title truncate">{project?.address || "Project"}</h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted">Schedule</span>
+            {project?.schedule_baseline_locked_at
+              ? <StatusBadge variant="success">Baseline locked</StatusBadge>
+              : <StatusBadge variant="neutral">No baseline</StatusBadge>}
+            {overdueCount > 0 ? <StatusBadge variant="danger">{overdueCount} overdue</StatusBadge> : null}
+            {criticalIds.size > 0 ? <StatusBadge variant="warning">{criticalIds.size} on critical path</StatusBadge> : null}
+            {tasks.length ? <StatusBadge variant="neutral">{tasks.length} tasks</StatusBadge> : null}
           </div>
-          {canEdit ? (
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Generate with AI</button>
-              <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Load from template</button>
-              <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Start blank</button>
-            </div>
-          ) : (
-            <p className="text-xs text-muted">View only — schedule editing requires supervisor access.</p>
-          )}
         </div>
+        {canEdit ? (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setGenerateOpen(true)} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Generate with AI</button>
+            <button type="button" onClick={() => setTemplateOpen(true)} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">Load from template</button>
+            <button type="button" onClick={() => addTask()} className="rounded-lg border border-hairline px-3 py-2 text-sm font-semibold text-ink">+ Add task</button>
+          </div>
+        ) : (
+          <p className="text-xs text-muted">View only — schedule editing requires supervisor access.</p>
+        )}
       </header>
 
       {/* Post-generation insights */}
@@ -782,6 +807,23 @@ export default function ScheduleManager() {
         onToggleClickToEdit={toggleClickToEdit}
         busy={busy}
       />
+
+      {/* Decision-first lens chips — drive the mobile lookahead + the desktop focused list */}
+      {!loading && tasks.length ? (
+        <FilterChips
+          options={[
+            { value: "all", label: "All" },
+            { value: "today", label: "Today" },
+            { value: "week", label: "This week" },
+            { value: "delayed", label: "Delayed", count: overdueCount },
+            { value: "blocked", label: "Blocked" },
+            { value: "critical", label: "Critical path" },
+            { value: "procurement", label: "Procurement" },
+          ]}
+          value={lens}
+          onChange={setLens}
+        />
+      ) : null}
 
       {/* Intelligence panel */}
       {(() => {
@@ -853,27 +895,40 @@ export default function ScheduleManager() {
       ) : null}
 
       {!loading && tasks.length && currentView === VIEW_GANTT ? (
-        <ScheduleGantt
-          tasks={tasks}
-          phaseLabels={phaseLabels}
-          zoom={zoom}
-          showCritical={showCritical}
-          lookahead={lookahead}
-          filterTrade={filterTrade}
-          onOpenTask={openTask}
-          onDateChange={onGanttDateChange}
-          onProgressChange={(id, progress) => patchTask(id, { percent_complete: progress, status: taskStatusFromPercent(progress) })}
-          onAddTask={addTask}
-          showColumns={showGanttColumns}
-          onToggleColumns={toggleGanttColumns}
-          onQuickPatch={quickPatchTask}
-          onContextDelete={directDeleteTask}
-          baselineLocked={project?.schedule_baseline_locked_at || null}
-          onLockBaseline={lockBaseline}
-          onResetBaseline={resetBaseline}
-          canEdit={canEdit}
-          clickToEdit={clickToEdit}
-        />
+        <>
+          {/* DESKTOP: Gantt stays the primary visual (unchanged internally). A non-"all" lens
+              shows a focused action list above it. */}
+          <div className="hidden space-y-4 lg:block">
+            {lens !== "all" ? (
+              <ScheduleLookahead tasks={tasks} criticalIds={criticalIds} lens={lens} phaseLabels={phaseLabels} onOpenTask={openTask} />
+            ) : null}
+            <ScheduleGantt
+              tasks={tasks}
+              phaseLabels={phaseLabels}
+              zoom={zoom}
+              showCritical={showCritical}
+              lookahead={lookahead}
+              filterTrade={filterTrade}
+              onOpenTask={openTask}
+              onDateChange={onGanttDateChange}
+              onProgressChange={(id, progress) => patchTask(id, { percent_complete: progress, status: taskStatusFromPercent(progress) })}
+              onAddTask={addTask}
+              showColumns={showGanttColumns}
+              onToggleColumns={toggleGanttColumns}
+              onQuickPatch={quickPatchTask}
+              onContextDelete={directDeleteTask}
+              baselineLocked={project?.schedule_baseline_locked_at || null}
+              onLockBaseline={lockBaseline}
+              onResetBaseline={resetBaseline}
+              canEdit={canEdit}
+              clickToEdit={clickToEdit}
+            />
+          </div>
+          {/* MOBILE/TABLET: lookahead / action list — never a squeezed Gantt as the primary surface. */}
+          <div className="lg:hidden">
+            <ScheduleLookahead tasks={tasks} criticalIds={criticalIds} lens={lens} phaseLabels={phaseLabels} onOpenTask={openTask} />
+          </div>
+        </>
       ) : null}
       {!loading && tasks.length && currentView === "sheet" ? (
         <ScheduleSheet tasks={tasks} phaseLabels={phaseLabels} selectedIds={selectedIds} onSelectIds={setSelectedIds} onPatchTask={(id, patch) => patchTask(id, patch)} onOpenTask={openTask} onAddTask={addTask} onBulkDelete={bulkDelete} />
@@ -918,6 +973,18 @@ export default function ScheduleManager() {
       {templateOpen ? <ScheduleTemplateModal templates={templates} onClose={() => setTemplateOpen(false)} onLoad={loadTemplate} busy={busy.template} /> : null}
       <TaskDetailPanel task={editTask} tasks={tasks} phaseOptions={phaseOptions} subcontractors={subcontractors} onChange={setEditTask} onClose={() => setEditTask(null)} onSave={saveTask} onDelete={deleteTask} onAskBlueprint={askBlueprintTaskAdvice} advice={taskAdvice} busy={busy} />
       <RippleWarningModal preview={ripple} onConfirm={() => confirmRipple(false)} onBreakDependency={() => confirmRipple(true)} onCancel={() => setRipple(null)} busy={busy.ripple} />
+
+      {/* Mobile sticky primary action (page owns it → global FABs collapse via screenContext) */}
+      <div className="lg:hidden">
+        <StickyActionBar position="fixed" className="!bottom-[60px] md:!bottom-0">
+          {canEdit ? (
+            <button type="button" onClick={() => addTask()} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white">+ Add task</button>
+          ) : (
+            <Link to={`/operations/${projectId}`} className="block w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-semibold text-white">Back to project</Link>
+          )}
+        </StickyActionBar>
+        <SafeBottomSpacer height={120} />
+      </div>
     </div>
   );
 }

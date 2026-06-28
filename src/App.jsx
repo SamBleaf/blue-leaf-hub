@@ -80,6 +80,16 @@ const SalesRedesignMockup =
   import.meta.env.VITE_UI_REVIEW_MODE === "true"
     ? React.lazy(() => import("./ui-review/pages/SalesRedesignMockup.jsx"))
     : null;
+// Review-only Operations + Schedule redesign mock-up (H2 design direction). Gated → tree-shaken from prod.
+const OpsRedesignMockup =
+  import.meta.env.VITE_UI_REVIEW_MODE === "true"
+    ? React.lazy(() => import("./ui-review/pages/OpsRedesignMockup.jsx"))
+    : null;
+// Review-only Tender/RFQ + Procurement redesign mock-up (H3 design direction). Gated → tree-shaken from prod.
+const H3RedesignMockup =
+  import.meta.env.VITE_UI_REVIEW_MODE === "true"
+    ? React.lazy(() => import("./ui-review/pages/H3RedesignMockup.jsx"))
+    : null;
 
 export default function App() {
   return (
@@ -117,6 +127,26 @@ export default function App() {
                 element={
                   <Suspense fallback={<div className="min-h-screen bg-page" />}>
                     <SalesRedesignMockup />
+                  </Suspense>
+                }
+              />
+            )}
+            {OpsRedesignMockup && (
+              <Route
+                path="/ui-review/ops-redesign-mockup/*"
+                element={
+                  <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                    <OpsRedesignMockup />
+                  </Suspense>
+                }
+              />
+            )}
+            {H3RedesignMockup && (
+              <Route
+                path="/ui-review/h3-redesign-mockup/*"
+                element={
+                  <Suspense fallback={<div className="min-h-screen bg-page" />}>
+                    <H3RedesignMockup />
                   </Suspense>
                 }
               />

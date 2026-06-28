@@ -3,8 +3,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { useProject } from "../lib/ProjectContext.jsx";
+import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { loadCompanySettings } from "../lib/companySettings.js";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
+import SectionCard from "../components/ui/SectionCard.jsx";
+import MobileTabs from "../components/ui/MobileTabs.jsx";
+import StickyActionBar from "../components/ui/StickyActionBar.jsx";
+import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
+import OpsJobHeader from "../components/operations/OpsJobHeader.jsx";
+import OpsJobKpiStrip from "../components/operations/OpsJobKpiStrip.jsx";
+import OpsJobRightRail from "../components/operations/OpsJobRightRail.jsx";
 
 const PHASE_ORDER = ["pre_construction", "site_prep", "substructure", "frame", "rough_in", "lock_up", "fitout", "completion"];
 const PHASE_LABELS = {
@@ -76,10 +84,40 @@ function ModuleCard({ to, title, description, stat, statLabel, icon }) {
   );
 }
 
+// Collapsible workspace section (desktop main column). Lazy content stays gated by the page's
+// show* flags + load-on-expand effects — this only renders the button + content when open.
+function Collapsible({ title, badge, open, onToggle, children }) {
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <h2 className="section-label">{title}</h2>
+          {badge ? <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{badge}</span> : null}
+        </div>
+        <span className="text-xs text-muted">{open ? "Hide ▲" : "Show ▼"}</span>
+      </button>
+      {open ? children : null}
+    </section>
+  );
+}
+
+const MOBILE_TABS = [
+  { value: "today", label: "Today" },
+  { value: "schedule", label: "Schedule" },
+  { value: "trades", label: "Trades" },
+  { value: "tasks", label: "Tasks" },
+  { value: "files", label: "Files" },
+];
+
 export default function OperationsProjectDetail() {
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
   const { selectProject } = useProject();
+  const { setScreenContext } = useBlueprintContext() || {};
   const siteTasksRef = useRef(null);
 
   const [project, setProject] = useState(null);
@@ -125,6 +163,7 @@ export default function OperationsProjectDetail() {
   const siteTaskFormRef = useRef(null);
   const [opsReadiness, setOpsReadiness] = useState(null);
   const [opsChecklistDismissed, setOpsChecklistDismissed] = useState(false);
+  const [tab, setTab] = useState("today"); // mobile/tablet command-centre tabs
 
   const loadOpsReadiness = useCallback(async () => {
     if (!projectId) return;
@@ -210,6 +249,12 @@ export default function OperationsProjectDetail() {
   useEffect(() => {
     Promise.all([load(), loadDashboardData(), loadOpsReadiness()]).finally(() => setLoading(false));
   }, [load, loadDashboardData, loadOpsReadiness]);
+
+  // Page owns a mobile sticky primary action → collapse global FABs via the existing screenContext.
+  useEffect(() => {
+    setScreenContext?.({ page: "ops_job", projectId, jobAddress: project?.address, jobId: project?.job_id });
+    return () => setScreenContext?.(null);
+  }, [projectId, project?.address, project?.job_id, setScreenContext]);
 
   useEffect(() => {
     if (showTradesTab) loadTrades();
@@ -605,6 +650,20 @@ export default function OperationsProjectDetail() {
     return { currentPhase, total, completeN, pct, projected, todayTasks, nextMilestone };
   }, [tasks]);
 
+  const overdueCount = useMemo(() => {
+    const t = todayIso();
+    return tasks.filter((x) => x.end_date && x.end_date < t && x.status !== "complete").length;
+  }, [tasks]);
+
+  const whsCounts = useMemo(() => {
+    let exp = 0, soon = 0;
+    for (const s of complianceSubs) for (const d of s.documents || []) {
+      const st = d.computed_status || d.status;
+      if (st === "expired") exp++; else if (st === "expiring_soon") soon++;
+    }
+    return { exp, soon };
+  }, [complianceSubs]);
+
   if (loading && !project) {
     return <p className="text-sm text-muted">Loading…</p>;
   }
@@ -621,113 +680,94 @@ export default function OperationsProjectDetail() {
   const trades = Array.isArray(project.accepted_trades) ? project.accepted_trades : [];
   const drop = String(project.dropbox_shared_link || project.jobs?.dropbox_shared_link || project.jobs?.dropbox_link || "").trim();
   const issuedForTrade = (t) => pos.some((p) => p.trade === t.trade && p.status === "issued");
+  const portalUrl = project.portal_token && project.portal_enabled ? `/portal/${project.portal_token}` : null;
 
-  return (
-    <div className="space-y-5 pb-24">
+  // ── Derived command-centre data (pure) ──
+  const healthMeta = overdueCount >= 4 ? { label: "Behind", tone: "danger" } : overdueCount >= 1 ? { label: "At risk", tone: "warning" } : { label: "On track", tone: "success" };
+  const whsTotal = whsCounts.exp + whsCounts.soon;
+  const kpis = [
+    { label: "Progress", value: `${summary.pct}%`, sub: `${summary.completeN}/${summary.total} tasks`, tone: "primary" },
+    { label: "Schedule", value: healthMeta.label, sub: summary.currentPhase || "Not started", tone: healthMeta.tone },
+    { label: "Overdue", value: String(overdueCount), sub: "tasks past due", tone: overdueCount > 0 ? "danger" : "muted" },
+    { label: "Today on site", value: String(summary.todayTasks.length), sub: "active tasks", tone: "primary" },
+    { label: "WHS", value: whsTotal > 0 ? String(whsTotal) : "OK", sub: whsTotal > 0 ? "docs to action" : "compliance clear", tone: whsCounts.exp > 0 ? "danger" : whsCounts.soon > 0 ? "warning" : "success" },
+  ];
+  const blockers = insights.filter((a) => a.level === "danger" || a.level === "warning");
+  const topInsight = insights.find((a) => a.level === "danger") || insights.find((a) => a.level === "warning") || insights[0];
+  const keyDetails = [
+    ["Phase", summary.currentPhase || "—"],
+    ["Progress", `${summary.pct}%`],
+    ["Projected end", summary.projected || "—"],
+    ["Commencement", commencementDate || project.tentative_start_date || "—"],
+    ["Buildexact", project.buildexact_job_id ? "Linked" : "Not linked"],
+  ];
+  const files = drop ? [{ label: "Open Dropbox folder", href: drop }] : [];
+  const openSiteTaskCount = siteTasks.filter((t) => t.status !== "done" && t.status !== "wont_do").length;
+  const openSchedule = (
+    <Link to={`/operations/${projectId}/schedule`} className="block w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-semibold text-white focus-ring">Open full schedule →</Link>
+  );
 
-      {/* ── Header ── */}
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-hairline pb-5 pt-1">
-        <div className="min-w-0">
-          <Link to="/operations" className="text-xs font-semibold text-muted hover:text-primary">← Projects</Link>
-          <h1 className="mt-1 page-title">{project.address}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {summary.currentPhase ? (
-              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{summary.currentPhase}</span>
-            ) : null}
-            {summary.pct > 0 ? (
-              <span className="text-xs text-muted">{summary.pct}% complete</span>
-            ) : null}
-            {summary.projected ? (
-              <span className="text-xs text-muted">· ETA {summary.projected}</span>
-            ) : null}
-            {project.tentative_start_date && !summary.total ? (
-              <span className="text-xs text-muted">Tentative start {project.tentative_start_date}</span>
-            ) : null}
+  function renderOpsReadinessBanner() {
+    if (!(opsReadiness && !opsReadiness.overallReady && !opsChecklistDismissed)) return null;
+    return (
+      <div className="rounded-lg border border-warning/50 bg-warning/10 px-4 py-4 text-sm text-ink">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-semibold text-primary">Operations setup checklist</p>
+            <p className="mt-1 text-xs text-muted">
+              {opsReadiness.readyCount} ready · {opsReadiness.missingCount} missing · {opsReadiness.warningCount}{" "}
+              warning — manual setup still required after Mark Won. This banner is read-only and does not block the
+              project.
+            </p>
           </div>
-          {summary.pct > 0 ? (
-            <div className="mt-3 h-1.5 w-48 overflow-hidden rounded-full bg-hairline">
-              <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${summary.pct}%` }} />
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className="text-xs font-semibold text-muted hover:text-ink"
+            onClick={() => {
+              setOpsChecklistDismissed(true);
+              try {
+                localStorage.setItem(`blhub_ops_checklist_dismiss_${projectId}`, "1");
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Dismiss
+          </button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {project.portal_token && project.portal_enabled ? (
-            <a
-              href={`/portal/${project.portal_token}`}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary hover:text-white"
-            >
-              View as client
-            </a>
-          ) : null}
-          {drop ? (
-            <a href={drop} target="_blank" rel="noreferrer" className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-semibold text-primary hover:bg-page">
-              Dropbox
-            </a>
-          ) : null}
-        </div>
-      </header>
+        <ul className="mt-3 space-y-2">
+          {opsReadiness.items
+            .filter((item) => item.status !== "ok")
+            .map((item) => (
+              <li
+                key={item.id}
+                className="flex flex-wrap items-start justify-between gap-2 rounded border border-warning/30 bg-surface px-3 py-2 text-xs"
+              >
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={`font-semibold uppercase tracking-wide ${
+                      item.status === "missing" ? "text-danger" : "text-warning"
+                    }`}
+                  >
+                    {item.status}
+                  </span>
+                  <div className="mt-0.5 font-semibold text-ink">{item.label}</div>
+                  <div className="mt-0.5 text-muted">{item.detail}</div>
+                </div>
+                {item.link ? (
+                  <Link to={item.link} className="flex-shrink-0 font-semibold text-primary underline">
+                    Open
+                  </Link>
+                ) : null}
+              </li>
+            ))}
+        </ul>
+      </div>
+    );
+  }
 
-      {error ? <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div> : null}
-
-      {opsReadiness && !opsReadiness.overallReady && !opsChecklistDismissed ? (
-        <div className="rounded-lg border border-warning/50 bg-warning/10 px-4 py-4 text-sm text-ink">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="font-semibold text-primary">Operations setup checklist</p>
-              <p className="mt-1 text-xs text-muted">
-                {opsReadiness.readyCount} ready · {opsReadiness.missingCount} missing · {opsReadiness.warningCount}{" "}
-                warning — manual setup still required after Mark Won. This banner is read-only and does not block the
-                project.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="text-xs font-semibold text-muted hover:text-ink"
-              onClick={() => {
-                setOpsChecklistDismissed(true);
-                try {
-                  localStorage.setItem(`blhub_ops_checklist_dismiss_${projectId}`, "1");
-                } catch {
-                  /* ignore */
-                }
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
-          <ul className="mt-3 space-y-2">
-            {opsReadiness.items
-              .filter((item) => item.status !== "ok")
-              .map((item) => (
-                <li
-                  key={item.id}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded border border-warning/30 bg-surface px-3 py-2 text-xs"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span
-                      className={`font-semibold uppercase tracking-wide ${
-                        item.status === "missing" ? "text-danger" : "text-warning"
-                      }`}
-                    >
-                      {item.status}
-                    </span>
-                    <div className="mt-0.5 font-semibold text-ink">{item.label}</div>
-                    <div className="mt-0.5 text-muted">{item.detail}</div>
-                  </div>
-                  {item.link ? (
-                    <Link to={item.link} className="flex-shrink-0 font-semibold text-primary underline">
-                      Open
-                    </Link>
-                  ) : null}
-                </li>
-              ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {/* ── Insights Panel ── */}
+  function renderInsights() {
+    return (
       <section>
         <h2 className="mb-2 section-label">Insights</h2>
         <div className="space-y-2">
@@ -736,11 +776,14 @@ export default function OperationsProjectDetail() {
           ))}
         </div>
       </section>
+    );
+  }
 
-      {/* ── Schedule snapshot ── */}
-      {summary.total > 0 ? (
+  function renderScheduleSnapshot() {
+    if (summary.total > 0) {
+      return (
         <section>
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2 flex items-center justify-between">
             <h2 className="section-label">Schedule</h2>
             <Link to={`/operations/${projectId}/schedule`} className="text-xs font-semibold text-primary hover:underline">
               Open full schedule →
@@ -750,7 +793,7 @@ export default function OperationsProjectDetail() {
             <div className="rounded-lg border border-hairline bg-surface p-3">
               <p className="text-xs text-muted">Today on site</p>
               <p className="mt-1 text-lg font-bold text-ink">{summary.todayTasks.length}</p>
-              <p className="text-xs text-muted truncate">{summary.todayTasks.map((t) => t.trade).filter(Boolean).join(", ") || "No trades"}</p>
+              <p className="truncate text-xs text-muted">{summary.todayTasks.map((t) => t.trade).filter(Boolean).join(", ") || "No trades"}</p>
             </div>
             <div className="rounded-lg border border-hairline bg-surface p-3">
               <p className="text-xs text-muted">Complete</p>
@@ -759,7 +802,7 @@ export default function OperationsProjectDetail() {
             </div>
             <div className="rounded-lg border border-hairline bg-surface p-3">
               <p className="text-xs text-muted">Next milestone</p>
-              <p className="mt-1 text-sm font-semibold text-ink leading-snug">{summary.nextMilestone?.name || "—"}</p>
+              <p className="mt-1 text-sm font-semibold leading-snug text-ink">{summary.nextMilestone?.name || "—"}</p>
               {summary.nextMilestone?.start_date ? <p className="text-xs text-muted">{summary.nextMilestone.start_date}</p> : null}
             </div>
             <div className="rounded-lg border border-hairline bg-surface p-3">
@@ -768,18 +811,22 @@ export default function OperationsProjectDetail() {
             </div>
           </div>
         </section>
-      ) : (
-        <section>
-          <div className="rounded-lg border border-hairline bg-surface p-4 text-center">
-            <p className="text-sm text-muted">No schedule yet</p>
-            <Link to={`/operations/${projectId}/schedule`} className="mt-2 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">
-              Generate schedule
-            </Link>
-          </div>
-        </section>
-      )}
+      );
+    }
+    return (
+      <section>
+        <div className="rounded-lg border border-hairline bg-surface p-4 text-center">
+          <p className="text-sm text-muted">No schedule yet</p>
+          <Link to={`/operations/${projectId}/schedule`} className="mt-2 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">
+            Generate schedule
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
-      {/* ── Module cards ── */}
+  function renderModuleCards() {
+    return (
       <section>
         <h2 className="mb-2 section-label">Manage</h2>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -808,656 +855,698 @@ export default function OperationsProjectDetail() {
           />
         </div>
       </section>
+    );
+  }
 
-      {/* ── Recent diary ── */}
-      {diaryPreview.length > 0 ? (
-        <section>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="section-label">Recent diary</h2>
-            <Link to={`/operations/${projectId}/diary`} className="text-xs font-semibold text-primary hover:underline">View all →</Link>
-          </div>
-          <div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
-            {diaryPreview.map((en) => (
-              <div key={en.id} className="px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-ink">{en.entry_date}</span>
-                  <span className="text-xs text-muted">{en.weather || ""}</span>
-                  <span className="text-xs text-muted">{(en.trades_onsite || []).join(", ")}</span>
-                </div>
-                <p className="mt-1 line-clamp-2 text-sm text-muted">{String(en.work_completed || "").slice(0, 120)}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {/* ── Trades tab (collapsible) ── */}
+  function renderRecentDiary() {
+    if (!diaryPreview.length) return null;
+    return (
       <section>
-        <button
-          type="button"
-          onClick={() => setShowTradesTab(v => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
-        >
-          <div className="flex items-center gap-2">
-            <h2 className="section-label">Trades</h2>
-            {supervisorTasks.length > 0 && (
-              <span className="rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-white">
-                {supervisorTasks.length}
-              </span>
-            )}
-          </div>
-          <span className="text-xs text-muted">{showTradesTab ? "Hide ▲" : "Show ▼"}</span>
-        </button>
-        {showTradesTab ? (
-          <div className="mt-2 space-y-4 rounded-lg border border-hairline bg-surface p-4">
-
-            {/* ── Supervisor Actions panel ── */}
-            {supervisorTasks.length > 0 && (() => {
-              const today = new Date().toISOString().slice(0, 10);
-              const TASK_ICONS = {
-                call_trade_schedule_change: { icon: "⚠", cls: "border-warning/40 bg-warning/5" },
-                call_trade_no_response: { icon: "📞", cls: "border-primary/30 bg-primary/5" },
-                find_backup_trade: { icon: "🔴", cls: "border-danger/30 bg-danger/5" },
-                follow_up_trade: { icon: "📋", cls: "border-hairline bg-page" },
-              };
-              return (
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">
-                    Supervisor Actions <span className="text-warning">({supervisorTasks.length} open)</span>
-                  </p>
-                  <div className="space-y-2">
-                    {supervisorTasks.map(task => {
-                      const style = TASK_ICONS[task.task_type] || TASK_ICONS.follow_up_trade;
-                      const isOverdue = task.due_date && task.due_date < today;
-                      const sub = task.subcontractors || {};
-                      const busy = taskActionBusy[task.id];
-
-                      const dueLabel = (() => {
-                        if (!task.due_date) return null;
-                        if (isOverdue) {
-                          const daysAgo = Math.ceil((new Date(today) - new Date(`${task.due_date}T00:00:00`)) / 86400000);
-                          return <span className="text-danger font-semibold">{daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`} (overdue)</span>;
-                        }
-                        const diff = Math.ceil((new Date(`${task.due_date}T00:00:00`) - new Date(today)) / 86400000);
-                        if (diff === 0) return "today";
-                        if (diff === 1) return "tomorrow";
-                        return `in ${diff} days`;
-                      })();
-
-                      return (
-                        <div
-                          key={task.id}
-                          className={`rounded-lg border px-4 py-3 ${style.cls} ${isOverdue ? "border-danger/40" : ""}`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-ink">
-                                {style.icon} {task.title}
-                              </p>
-                              {task.description && (
-                                <p className="mt-0.5 text-xs text-muted whitespace-pre-line">{task.description}</p>
-                              )}
-                              {sub.phone && (
-                                <p className="mt-0.5 text-xs text-ink">Contact: {sub.phone}</p>
-                              )}
-                            </div>
-                            {dueLabel && (
-                              <span className="flex-shrink-0 text-xs text-muted">{dueLabel}</span>
-                            )}
-                          </div>
-                          <div className="mt-2 flex gap-2">
-                            <button
-                              type="button"
-                              disabled={!!busy}
-                              onClick={() => completeSupervisorTask(task.id)}
-                              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              {busy === "done" ? "…" : "Done"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!!busy}
-                              onClick={() => dismissSupervisorTask(task.id)}
-                              className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
-                            >
-                              {busy === "dismiss" ? "…" : "Dismiss"}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <hr className="my-4 border-hairline" />
-                </div>
-              );
-            })()}
-
-            {/* Commencement date */}
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-semibold text-muted">
-                Commencement date
-              </label>
-              <input
-                type="date"
-                value={commencementDate}
-                className="rounded border border-hairline px-2 py-1 text-sm"
-                onChange={e => setCommencementDate(e.target.value)}
-                onBlur={e => saveCommencementDate(e.target.value)}
-              />
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="section-label">Recent diary</h2>
+          <Link to={`/operations/${projectId}/diary`} className="text-xs font-semibold text-primary hover:underline">View all →</Link>
+        </div>
+        <div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+          {diaryPreview.map((en) => (
+            <div key={en.id} className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-ink">{en.entry_date}</span>
+                <span className="text-xs text-muted">{en.weather || ""}</span>
+                <span className="text-xs text-muted">{(en.trades_onsite || []).join(", ")}</span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-sm text-muted">{String(en.work_completed || "").slice(0, 120)}</p>
             </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
-            {tradesLoading ? (
-              <p className="text-sm text-muted">Loading…</p>
-            ) : !tradesData?.trades?.length ? (
-              <p className="text-sm text-muted">No accepted trades yet. Issue POs from the Tender Manager.</p>
-            ) : (
-              <div className="space-y-3">
-                {tradesData.trades.map((trade, idx) => {
-                  // Supervisor tasks for this PO
-                  const noResponseTasks = (trade.supervisor_tasks || []).filter(t => t.task_type === "call_trade_no_response");
+  function renderTradesContent() {
+    return (
+      <div className="mt-2 space-y-4 rounded-lg border border-hairline bg-surface p-4">
+        {/* ── Supervisor Actions panel ── */}
+        {supervisorTasks.length > 0 && (() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const TASK_ICONS = {
+            call_trade_schedule_change: { icon: "⚠", cls: "border-warning/40 bg-warning/5" },
+            call_trade_no_response: { icon: "📞", cls: "border-primary/30 bg-primary/5" },
+            find_backup_trade: { icon: "🔴", cls: "border-danger/30 bg-danger/5" },
+            follow_up_trade: { icon: "📋", cls: "border-hairline bg-page" },
+          };
+          return (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">
+                Supervisor Actions <span className="text-warning">({supervisorTasks.length} open)</span>
+              </p>
+              <div className="space-y-2">
+                {supervisorTasks.map(task => {
+                  const style = TASK_ICONS[task.task_type] || TASK_ICONS.follow_up_trade;
+                  const isOverdue = task.due_date && task.due_date < today;
+                  const sub = task.subcontractors || {};
+                  const busy = taskActionBusy[task.id];
 
-                  const statusCls = trade.is_ghosting && !trade.response_received_at
-                    ? "text-warning font-semibold"
-                    : trade.response_received_at
-                    ? "text-green-600"
-                    : trade.status_label === "PO not issued"
-                    ? "text-muted"
-                    : "text-ink";
-
-                  const rowKey = trade.id || `nopo-${idx}`;
-                  const isExpanded = expandedTradeId === rowKey;
+                  const dueLabel = (() => {
+                    if (!task.due_date) return null;
+                    if (isOverdue) {
+                      const daysAgo = Math.ceil((new Date(today) - new Date(`${task.due_date}T00:00:00`)) / 86400000);
+                      return <span className="text-danger font-semibold">{daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`} (overdue)</span>;
+                    }
+                    const diff = Math.ceil((new Date(`${task.due_date}T00:00:00`) - new Date(today)) / 86400000);
+                    if (diff === 0) return "today";
+                    if (diff === 1) return "tomorrow";
+                    return `in ${diff} days`;
+                  })();
 
                   return (
-                    <div key={rowKey} className="rounded-lg border border-hairline bg-page">
-                      {/* Supervisor task action cards */}
-                      {noResponseTasks.map(task => (
-                        <div key={task.id} className="rounded-t-lg border-b border-warning/30 bg-warning/5 px-4 py-3">
-                          <p className="text-sm font-semibold text-warning">Action required</p>
-                          <p className="text-sm text-ink mt-0.5">{task.title}</p>
-                          {trade.subcontractor?.phone && (
-                            <p className="text-xs text-muted mt-0.5">Contact: {trade.subcontractor.phone}</p>
-                          )}
-                          {task.due_date && (
-                            <p className="text-xs text-muted">Due: {task.due_date}</p>
-                          )}
-                          {taskUnsureId === task.id ? (
-                            <div className="mt-2 space-y-2">
-                              <input
-                                type="text"
-                                placeholder="Note (optional)"
-                                value={taskUnsureNote}
-                                onChange={e => setTaskUnsureNote(e.target.value)}
-                                className="w-full rounded border border-hairline px-3 py-1.5 text-sm"
-                              />
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  disabled={!!taskActionBusy[task.id]}
-                                  onClick={() => snoozeTask(task, taskUnsureNote)}
-                                  className="rounded-lg bg-warning px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                                >
-                                  {taskActionBusy[task.id] ? "Saving…" : "Confirm — try again in 7 days"}
-                                </button>
-                                <button type="button" onClick={() => { setTaskUnsureId(null); setTaskUnsureNote(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                disabled={!!taskActionBusy[task.id]}
-                                onClick={() => markResponded(task, trade.id)}
-                                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                              >
-                                {taskActionBusy[task.id] === true ? "…" : "✅ Responded"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!!taskActionBusy[task.id]}
-                                onClick={() => setTaskUnsureId(task.id)}
-                                className="rounded-lg border border-warning bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning disabled:opacity-50"
-                              >
-                                ⏸ Unsure
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!!taskActionBusy[task.id]}
-                                onClick={() => markGhosted(task, trade.id)}
-                                className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-1.5 text-xs font-semibold text-danger disabled:opacity-50"
-                              >
-                                {taskActionBusy[task.id] === "ghosted" ? "…" : "🔴 Ghosted"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!!taskActionBusy[task.id]}
-                                onClick={() => markUnavailable(task, trade.id)}
-                                className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted disabled:opacity-50"
-                              >
-                                {taskActionBusy[task.id] === "unavailable" ? "…" : "Can't make it"}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-
-                      {/* Trade row */}
-                      <button
-                        type="button"
-                        onClick={() => setExpandedTradeId(isExpanded ? null : rowKey)}
-                        className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-hairline/30 rounded-b-lg"
-                      >
-                        <div className="w-32 flex-shrink-0">
-                          <p className="text-sm font-semibold text-ink">{trade.trade}</p>
-                        </div>
+                    <div
+                      key={task.id}
+                      className={`rounded-lg border px-4 py-3 ${style.cls} ${isOverdue ? "border-danger/40" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm text-ink truncate">{trade.subcontractor?.business_name || "—"}</p>
-                          <p className="text-xs text-muted truncate">{trade.subcontractor?.phone || ""}</p>
-                        </div>
-                        <div className="w-24 flex-shrink-0 text-center">
-                          <p className="text-xs font-mono text-muted">{trade.po_number || "—"}</p>
-                        </div>
-                        <div className="w-28 flex-shrink-0 text-center">
-                          <p className="text-xs text-muted">
-                            {trade.last_contact_at
-                              ? `${trade.days_since_contact}d ago`
-                              : "—"}
+                          <p className="text-sm font-semibold text-ink">
+                            {style.icon} {task.title}
                           </p>
-                        </div>
-                        <div className="w-48 flex-shrink-0 text-right">
-                          <p className={`text-xs ${statusCls}`}>
-                            {trade.is_ghosting && !trade.response_received_at
-                              ? `⚠ No response (${trade.days_since_contact}d)`
-                              : trade.status_label}
-                          </p>
-                        </div>
-                        <span className="text-xs text-muted">{isExpanded ? "▲" : "▼"}</span>
-                      </button>
-
-                      {/* Expanded log */}
-                      {isExpanded ? (
-                        <div className="border-t border-hairline px-4 pb-4 pt-3 space-y-2">
-                          {!trade.id ? (
-                            <p className="text-xs text-muted">No PO issued yet.</p>
-                          ) : trade.log.length === 0 ? (
-                            <p className="text-xs text-muted">No communication logged yet.</p>
-                          ) : (
-                            <div className="space-y-1">
-                              {trade.log.map(ev => (
-                                <div key={ev.id} className="flex items-start gap-3 text-xs">
-                                  <span className="w-36 flex-shrink-0 text-muted">{new Date(ev.sent_at).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</span>
-                                  <span className="text-ink capitalize">{ev.event_type.replace(/_/g, " ")}</span>
-                                  {ev.email_subject ? <span className="text-muted truncate">— {ev.email_subject}</span> : null}
-                                </div>
-                              ))}
-                            </div>
+                          {task.description && (
+                            <p className="mt-0.5 text-xs text-muted whitespace-pre-line">{task.description}</p>
                           )}
-                          {trade.id && !trade.response_received_at && (
-                            <button
-                              type="button"
-                              onClick={() => markTradeResponded(trade.id)}
-                              className="mt-2 rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-hairline"
-                            >
-                              Mark responded
-                            </button>
+                          {sub.phone && (
+                            <p className="mt-0.5 text-xs text-ink">Contact: {sub.phone}</p>
                           )}
                         </div>
-                      ) : null}
+                        {dueLabel && (
+                          <span className="flex-shrink-0 text-xs text-muted">{dueLabel}</span>
+                        )}
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() => completeSupervisorTask(task.id)}
+                          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                        >
+                          {busy === "done" ? "…" : "Done"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() => dismissSupervisorTask(task.id)}
+                          className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+                        >
+                          {busy === "dismiss" ? "…" : "Dismiss"}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            )}
-          </div>
-        ) : null}
-      </section>
-
-      {/* ── Labour (collapsible) ── */}
-      <section>
-        <button
-          type="button"
-          onClick={() => setShowLabourTab(v => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
-        >
-          <h2 className="section-label">Labour</h2>
-          <span className="text-xs text-muted">{showLabourTab ? "Hide ▲" : "Show ▼"}</span>
-        </button>
-        {showLabourTab && (
-          <div className="mt-2 rounded-lg border border-hairline bg-surface p-4">
-            {labourLoading ? (
-              <p className="text-sm text-muted">Loading…</p>
-            ) : !labourData ? (
-              <p className="text-sm text-muted">No labour data</p>
-            ) : (
-              <div className="space-y-3">
-                {labourData.entries_by_category?.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-hairline">
-                          <th className="py-2 text-left text-xs font-semibold text-muted">Category</th>
-                          <th className="py-2 text-right text-xs font-semibold text-muted">Hours</th>
-                          <th className="py-2 pr-3" />
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-hairline">
-                        {labourData.entries_by_category.map(cat => (
-                          <tr key={cat.task_category}>
-                            <td className="py-2 text-ink font-medium">{cat.label}</td>
-                            <td className="py-2 text-right text-muted">{cat.total_hours}h</td>
-                            <td className="py-2 pr-3 w-32">
-                              <div className="h-1.5 rounded-full bg-hairline overflow-hidden">
-                                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(cat.total_hours / 200 * 100, 100)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                <div className="flex items-center gap-4 pt-1 border-t border-hairline text-sm">
-                  <div>
-                    <p className="text-xs text-muted">Total hours</p>
-                    <p className="font-bold text-ink">{labourData.total_hours}h</p>
-                  </div>
-                  {labourData.workers_this_week?.length > 0 && (
-                    <div>
-                      <p className="text-xs text-muted">Active this week</p>
-                      <p className="text-ink">{labourData.workers_this_week.map(w => w.name).join(" · ")}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* ── Site Tasks (collapsible) ── */}
-      <section ref={siteTasksRef}>
-        <button
-          type="button"
-          onClick={() => setShowSiteTasksTab(v => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
-        >
-          <div className="flex items-center gap-2">
-            <h2 className="section-label">Site Tasks</h2>
-            {siteTasks.filter(t => t.status !== "done" && t.status !== "wont_do").length > 0 && (
-              <span className="rounded-full bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5">
-                {siteTasks.filter(t => t.status !== "done" && t.status !== "wont_do").length}
-              </span>
-            )}
-          </div>
-          <span className="text-xs text-muted">{showSiteTasksTab ? "Hide ▲" : "Show ▼"}</span>
-        </button>
-        {showSiteTasksTab && (
-          <div className="mt-2 rounded-lg border border-hairline bg-surface p-4 space-y-3">
-            {/* Filter + add */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {["All", "Urgent", "Defects", "Done"].map(f => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setSiteTaskFilter(f)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition ${siteTaskFilter === f ? "bg-primary text-white" : "bg-page border border-hairline text-ink"}`}
-                >
-                  {f}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setNewTaskForm({ title: "", description: "", priority: "normal", category: "general", assigned_to: "" })}
-                className="ml-auto text-xs font-semibold text-primary hover:underline"
-              >
-                + Add task
-              </button>
-              <button type="button" onClick={() => { setShowTranscript(v => !v); setDrafts([]); setVoiceError(null); }} className="text-xs font-semibold text-primary hover:underline" title="Paste a site walk-through transcript and turn it into tasks">🎤 From transcript</button>
-              <button type="button" onClick={applyQcTemplate} className="text-xs font-semibold text-primary hover:underline" title="Add the leading-hand QC inspection checklist to this job">+ QC checklist</button>
+              <hr className="my-4 border-hairline" />
             </div>
+          );
+        })()}
 
-            {/* W17-P7: incomplete-QC warning */}
-            {(() => {
-              const qc = siteTasks.filter(t => t.task_audience === "supervisor");
-              if (qc.length === 0) return null;
-              const done = qc.filter(t => t.status === "done").length;
-              const incomplete = done < qc.length;
-              return <div className={`text-xs rounded px-2 py-1 ${incomplete ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-green-50 text-green-700 border border-green-200"}`}>Leading-hand QC: {done}/{qc.length} done{incomplete ? " — incomplete" : " ✓"}</div>;
-            })()}
+        {/* Commencement date */}
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-semibold text-muted">
+            Commencement date
+          </label>
+          <input
+            type="date"
+            value={commencementDate}
+            className="rounded border border-hairline px-2 py-1 text-sm"
+            onChange={e => setCommencementDate(e.target.value)}
+            onBlur={e => saveCommencementDate(e.target.value)}
+          />
+        </div>
 
-            {/* Quick-add bar — always visible */}
-            <input
-              type="text"
-              placeholder="Add a task… (press Enter)"
-              value={quickTaskTitle}
-              onChange={e => setQuickTaskTitle(e.target.value)}
-              onKeyDown={handleQuickAddTask}
-              disabled={newTaskBusy}
-              className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-            />
+        {tradesLoading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : !tradesData?.trades?.length ? (
+          <p className="text-sm text-muted">No accepted trades yet. Issue POs from the Tender Manager.</p>
+        ) : (
+          <div className="space-y-3">
+            {tradesData.trades.map((trade, idx) => {
+              // Supervisor tasks for this PO
+              const noResponseTasks = (trade.supervisor_tasks || []).filter(t => t.task_type === "call_trade_no_response");
 
-            {/* W17-P6: voice/paste → draft tasks for review */}
-            {showTranscript && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-                {voiceError && <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{voiceError}</div>}
-                {drafts.length === 0 ? (
-                  <>
-                    <label className="block text-xs font-medium text-ink">Paste a site walk-through transcript</label>
-                    <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={4} placeholder="Paste your Plaud / meeting transcript here…" className="w-full rounded border border-hairline px-3 py-2 text-sm" />
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={extractFromTranscript} disabled={extracting || !transcript.trim()} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{extracting ? "Extracting…" : "Extract tasks"}</button>
-                      <button type="button" onClick={() => { setShowTranscript(false); setTranscript(""); setVoiceError(null); }} className="text-xs text-muted">Cancel</button>
+              const statusCls = trade.is_ghosting && !trade.response_received_at
+                ? "text-warning font-semibold"
+                : trade.response_received_at
+                ? "text-green-600"
+                : trade.status_label === "PO not issued"
+                ? "text-muted"
+                : "text-ink";
+
+              const rowKey = trade.id || `nopo-${idx}`;
+              const isExpanded = expandedTradeId === rowKey;
+
+              return (
+                <div key={rowKey} className="rounded-lg border border-hairline bg-page">
+                  {/* Supervisor task action cards */}
+                  {noResponseTasks.map(task => (
+                    <div key={task.id} className="rounded-t-lg border-b border-warning/30 bg-warning/5 px-4 py-3">
+                      <p className="text-sm font-semibold text-warning">Action required</p>
+                      <p className="text-sm text-ink mt-0.5">{task.title}</p>
+                      {trade.subcontractor?.phone && (
+                        <p className="text-xs text-muted mt-0.5">Contact: {trade.subcontractor.phone}</p>
+                      )}
+                      {task.due_date && (
+                        <p className="text-xs text-muted">Due: {task.due_date}</p>
+                      )}
+                      {taskUnsureId === task.id ? (
+                        <div className="mt-2 space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Note (optional)"
+                            value={taskUnsureNote}
+                            onChange={e => setTaskUnsureNote(e.target.value)}
+                            className="w-full rounded border border-hairline px-3 py-1.5 text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={!!taskActionBusy[task.id]}
+                              onClick={() => snoozeTask(task, taskUnsureNote)}
+                              className="rounded-lg bg-warning px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {taskActionBusy[task.id] ? "Saving…" : "Confirm — try again in 7 days"}
+                            </button>
+                            <button type="button" onClick={() => { setTaskUnsureId(null); setTaskUnsureNote(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={!!taskActionBusy[task.id]}
+                            onClick={() => markResponded(task, trade.id)}
+                            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            {taskActionBusy[task.id] === true ? "…" : "✅ Responded"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!!taskActionBusy[task.id]}
+                            onClick={() => setTaskUnsureId(task.id)}
+                            className="rounded-lg border border-warning bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning disabled:opacity-50"
+                          >
+                            ⏸ Unsure
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!!taskActionBusy[task.id]}
+                            onClick={() => markGhosted(task, trade.id)}
+                            className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-1.5 text-xs font-semibold text-danger disabled:opacity-50"
+                          >
+                            {taskActionBusy[task.id] === "ghosted" ? "…" : "🔴 Ghosted"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!!taskActionBusy[task.id]}
+                            onClick={() => markUnavailable(task, trade.id)}
+                            className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-muted disabled:opacity-50"
+                          >
+                            {taskActionBusy[task.id] === "unavailable" ? "…" : "Can't make it"}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs text-muted">Review the {drafts.length} extracted task(s) — untick any you don&apos;t want.</p>
-                    <div className="space-y-1 max-h-56 overflow-y-auto">
-                      {drafts.map((d, i) => (
-                        <label key={i} className="flex items-start gap-2 text-sm">
-                          <input type="checkbox" checked={d._keep} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, _keep: e.target.checked } : x))} className="mt-1" />
-                          <input value={d.title} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} className="flex-1 rounded border border-hairline px-2 py-1 text-sm" />
-                          <span className="text-[10px] text-muted capitalize shrink-0 mt-1.5">{(d.category || "general").replace(/_/g, " ")}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={addSelectedDrafts} disabled={addingDrafts} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{addingDrafts ? "Adding…" : `Add ${drafts.filter(d => d._keep).length} task(s)`}</button>
-                      <button type="button" onClick={() => setDrafts([])} className="text-xs text-muted">Back</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+                  ))}
 
-            {/* New task form */}
-            {newTaskForm && (
-              <div ref={siteTaskFormRef} className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-                <input
-                  type="text"
-                  placeholder="Task title *"
-                  value={newTaskForm.title}
-                  onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
-                  className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                <input
-                  type="text"
-                  placeholder="Description (optional)"
-                  value={newTaskForm.description}
-                  onChange={e => setNewTaskForm(f => ({ ...f, description: e.target.value }))}
-                  className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                <div className="flex gap-2 flex-wrap">
-                  <select value={newTaskForm.priority} onChange={e => setNewTaskForm(f => ({ ...f, priority: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
-                    <option value="urgent">Urgent</option>
-                    <option value="normal">Normal</option>
-                    <option value="when_time_permits">When time permits</option>
-                  </select>
-                  <select value={newTaskForm.category} onChange={e => setNewTaskForm(f => ({ ...f, category: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
-                    <option value="general">General</option>
-                    <option value="defect">Defect</option>
-                    <option value="safety">Safety</option>
-                    <option value="materials">Materials</option>
-                    <option value="inspection">Inspection</option>
-                  </select>
-                  <select value={newTaskForm.assigned_to} onChange={e => setNewTaskForm(f => ({ ...f, assigned_to: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
-                    <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" disabled={newTaskBusy || !newTaskForm.title.trim()} onClick={() => createSiteTask({ title: newTaskForm.title, description: newTaskForm.description, priority: newTaskForm.priority, category: newTaskForm.category, assigned_to: newTaskForm.assigned_to || undefined })} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
-                    {newTaskBusy ? "Saving…" : "Add task"}
+                  {/* Trade row */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedTradeId(isExpanded ? null : rowKey)}
+                    className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-hairline/30 rounded-b-lg"
+                  >
+                    <div className="w-32 flex-shrink-0">
+                      <p className="text-sm font-semibold text-ink">{trade.trade}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-ink truncate">{trade.subcontractor?.business_name || "—"}</p>
+                      <p className="text-xs text-muted truncate">{trade.subcontractor?.phone || ""}</p>
+                    </div>
+                    <div className="w-24 flex-shrink-0 text-center">
+                      <p className="text-xs font-mono text-muted">{trade.po_number || "—"}</p>
+                    </div>
+                    <div className="w-28 flex-shrink-0 text-center">
+                      <p className="text-xs text-muted">
+                        {trade.last_contact_at
+                          ? `${trade.days_since_contact}d ago`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="w-48 flex-shrink-0 text-right">
+                      <p className={`text-xs ${statusCls}`}>
+                        {trade.is_ghosting && !trade.response_received_at
+                          ? `⚠ No response (${trade.days_since_contact}d)`
+                          : trade.status_label}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted">{isExpanded ? "▲" : "▼"}</span>
                   </button>
-                  <button type="button" onClick={() => setNewTaskForm(null)} className="text-xs text-muted">Cancel</button>
-                </div>
-              </div>
-            )}
 
-            {siteTasksLoading ? (
-              <p className="text-sm text-muted">Loading…</p>
-            ) : (
-              (() => {
-                const PRIORITY_DOT = { urgent: "bg-red-500", normal: "bg-gray-400", when_time_permits: "bg-transparent border border-gray-400 rounded-full" };
-                const filtered = siteTasks.filter(t => {
-                  if (siteTaskFilter === "Done") return t.status === "done";
-                  if (siteTaskFilter === "Urgent") return t.priority === "urgent" && t.status !== "done";
-                  if (siteTaskFilter === "Defects") return t.category === "defect" && t.status !== "done";
-                  return t.status !== "done" && t.status !== "wont_do";
-                });
-                const groups = [
-                  { label: "Urgent", tasks: filtered.filter(t => t.priority === "urgent") },
-                  { label: "Normal", tasks: filtered.filter(t => t.priority === "normal") },
-                  { label: "When time permits", tasks: filtered.filter(t => t.priority === "when_time_permits") },
-                  { label: "Done", tasks: filtered.filter(t => t.status === "done") },
-                ].filter(g => (siteTaskFilter === "Done" ? g.label === "Done" : g.label !== "Done") && g.tasks.length > 0);
-
-                if (!groups.length && !newTaskForm) return <p className="text-sm text-muted text-center py-4">No tasks</p>;
-                return (
-                  <div className="space-y-3">
-                    {groups.map(g => (
-                      <div key={g.label}>
-                        <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">{g.label}</p>
-                        <div className="divide-y divide-hairline rounded-lg border border-hairline">
-                          {g.tasks.map(task => (
-                            <div key={task.id} className="flex items-start gap-3 px-3 py-2.5">
-                              <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-sm text-ink ${task.status === "done" ? "line-through text-muted" : ""}`}>{task.title}</p>
-                                {task.employees?.name && <p className="text-xs text-muted mt-0.5">assigned: {task.employees.name}</p>}
-                                {(task.created_via === "voice_note" || task.created_via === "ai_extraction") && (
-                                  <p className="text-xs text-muted">via voice note</p>
-                                )}
-                                {task.completion_notes && (
-                                  <p className="text-xs text-muted mt-0.5">{task.completion_notes}</p>
-                                )}
-                                {task.completion_photo_signed_url && (
-                                  <a href={task.completion_photo_signed_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
-                                    <img src={task.completion_photo_signed_url} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-hairline" />
-                                  </a>
-                                )}
-                              </div>
-                              {task.status !== "done" && (
-                                <button
-                                  type="button"
-                                  onClick={() => completeSiteTask(task.id)}
-                                  className="text-xs text-green-700 font-medium hover:underline shrink-0"
-                                >
-                                  Done
-                                </button>
-                              )}
-                              {task.status === "done" && (
-                                <span className="text-green-500 text-xs shrink-0">✓</span>
-                              )}
+                  {/* Expanded log */}
+                  {isExpanded ? (
+                    <div className="border-t border-hairline px-4 pb-4 pt-3 space-y-2">
+                      {!trade.id ? (
+                        <p className="text-xs text-muted">No PO issued yet.</p>
+                      ) : trade.log.length === 0 ? (
+                        <p className="text-xs text-muted">No communication logged yet.</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {trade.log.map(ev => (
+                            <div key={ev.id} className="flex items-start gap-3 text-xs">
+                              <span className="w-36 flex-shrink-0 text-muted">{new Date(ev.sent_at).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</span>
+                              <span className="text-ink capitalize">{ev.event_type.replace(/_/g, " ")}</span>
+                              {ev.email_subject ? <span className="text-muted truncate">— {ev.email_subject}</span> : null}
                             </div>
                           ))}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()
-            )}
+                      )}
+                      {trade.id && !trade.response_received_at && (
+                        <button
+                          type="button"
+                          onClick={() => markTradeResponded(trade.id)}
+                          className="mt-2 rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-hairline"
+                        >
+                          Mark responded
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         )}
-      </section>
+      </div>
+    );
+  }
 
-      {/* ── Financials (collapsible) ── */}
-      <section>
-        <button
-          type="button"
-          onClick={() => setShowFinancials((v) => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-hairline bg-surface px-4 py-3 text-left"
-        >
-          <h2 className="section-label">Financials &amp; POs</h2>
-          <span className="text-xs text-muted">{showFinancials ? "Hide ▲" : "Show ▼"}</span>
-        </button>
-        {showFinancials ? (
-          <div className="mt-2 space-y-5 rounded-lg border border-hairline bg-surface p-4">
-            <div className="flex flex-wrap gap-3">
-              <label className="text-xs font-semibold text-muted">
-                Tentative start
-                <input
-                  type="date"
-                  defaultValue={project.tentative_start_date || ""}
-                  className="ml-2 rounded border border-hairline px-2 py-1 text-sm"
-                  onBlur={(e) => saveTentative(e.target.value)}
-                />
-              </label>
-            </div>
-            <div className="border-t border-hairline pt-4">
-              <h3 className="text-xs font-bold text-muted uppercase">Buildexact</h3>
-              {project.buildexact_job_id ? (
-                <p className="mt-2 text-sm text-ink">
-                  Job ID: <code className="text-xs">{project.buildexact_job_id}</code>
-                  {project.buildexact_last_sync ? <span className="text-muted"> — last sync {new Date(project.buildexact_last_sync).toLocaleString("en-AU")}</span> : null}
-                </p>
-              ) : (
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  <label className="text-xs font-semibold text-muted">
-                    Job ID (manual)
-                    <input value={beId} onChange={(e) => setBeId(e.target.value)} className="ml-2 rounded border px-2 py-1 text-sm" />
-                  </label>
-                  <button type="button" onClick={manualLinkBuildexact} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Save link</button>
-                  <span className="text-xs text-warning">Waiting for webhook…</span>
+  function renderLabourContent() {
+    return (
+      <div className="mt-2 rounded-lg border border-hairline bg-surface p-4">
+        {labourLoading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : !labourData ? (
+          <p className="text-sm text-muted">No labour data</p>
+        ) : (
+          <div className="space-y-3">
+            {labourData.entries_by_category?.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline">
+                      <th className="py-2 text-left text-xs font-semibold text-muted">Category</th>
+                      <th className="py-2 text-right text-xs font-semibold text-muted">Hours</th>
+                      <th className="py-2 pr-3" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hairline">
+                    {labourData.entries_by_category.map(cat => (
+                      <tr key={cat.task_category}>
+                        <td className="py-2 text-ink font-medium">{cat.label}</td>
+                        <td className="py-2 text-right text-muted">{cat.total_hours}h</td>
+                        <td className="py-2 pr-3 w-32">
+                          <div className="h-1.5 rounded-full bg-hairline overflow-hidden">
+                            <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(cat.total_hours / 200 * 100, 100)}%` }} />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="flex items-center gap-4 pt-1 border-t border-hairline text-sm">
+              <div>
+                <p className="text-xs text-muted">Total hours</p>
+                <p className="font-bold text-ink">{labourData.total_hours}h</p>
+              </div>
+              {labourData.workers_this_week?.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted">Active this week</p>
+                  <p className="text-ink">{labourData.workers_this_week.map(w => w.name).join(" · ")}</p>
                 </div>
               )}
             </div>
-            {trades.length > 0 ? (
-              <div className="border-t border-hairline pt-4">
-                <h3 className="mb-2 text-xs font-bold uppercase text-muted">Accepted trades</h3>
-                <div className="overflow-x-auto rounded-lg border border-hairline">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-page text-left text-xs uppercase text-muted">
-                      <tr>
-                        <th className="px-3 py-2">Trade</th>
-                        <th className="px-3 py-2">Subcontractor</th>
-                        <th className="px-3 py-2">Quote</th>
-                        <th className="px-3 py-2">PO</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trades.map((t, i) => (
-                        <tr key={i} className="border-t border-hairline">
-                          <td className="px-3 py-2 font-semibold">{t.trade}</td>
-                          <td className="px-3 py-2">{t.subcontractor || "—"}</td>
-                          <td className="px-3 py-2">{t.quote_amount != null ? `$${Number(t.quote_amount).toFixed(2)}` : "—"}</td>
-                          <td className="px-3 py-2">
-                            {issuedForTrade(t) ? (
-                              <span className="text-accent">Issued</span>
-                            ) : (
-                              <button type="button" className="text-xs font-bold text-primary underline" onClick={() => setPoTrade({ ...t })}>Issue PO</button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderSiteTasksContent() {
+    return (
+      <div className="mt-2 rounded-lg border border-hairline bg-surface p-4 space-y-3">
+        {/* Filter + add */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {["All", "Urgent", "Defects", "Done"].map(f => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setSiteTaskFilter(f)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition ${siteTaskFilter === f ? "bg-primary text-white" : "bg-page border border-hairline text-ink"}`}
+            >
+              {f}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setNewTaskForm({ title: "", description: "", priority: "normal", category: "general", assigned_to: "" })}
+            className="ml-auto text-xs font-semibold text-primary hover:underline"
+          >
+            + Add task
+          </button>
+          <button type="button" onClick={() => { setShowTranscript(v => !v); setDrafts([]); setVoiceError(null); }} className="text-xs font-semibold text-primary hover:underline" title="Paste a site walk-through transcript and turn it into tasks">🎤 From transcript</button>
+          <button type="button" onClick={applyQcTemplate} className="text-xs font-semibold text-primary hover:underline" title="Add the leading-hand QC inspection checklist to this job">+ QC checklist</button>
+        </div>
+
+        {/* W17-P7: incomplete-QC warning */}
+        {(() => {
+          const qc = siteTasks.filter(t => t.task_audience === "supervisor");
+          if (qc.length === 0) return null;
+          const done = qc.filter(t => t.status === "done").length;
+          const incomplete = done < qc.length;
+          return <div className={`text-xs rounded px-2 py-1 ${incomplete ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-green-50 text-green-700 border border-green-200"}`}>Leading-hand QC: {done}/{qc.length} done{incomplete ? " — incomplete" : " ✓"}</div>;
+        })()}
+
+        {/* Quick-add bar — always visible */}
+        <input
+          type="text"
+          placeholder="Add a task… (press Enter)"
+          value={quickTaskTitle}
+          onChange={e => setQuickTaskTitle(e.target.value)}
+          onKeyDown={handleQuickAddTask}
+          disabled={newTaskBusy}
+          className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+        />
+
+        {/* W17-P6: voice/paste → draft tasks for review */}
+        {showTranscript && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+            {voiceError && <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{voiceError}</div>}
+            {drafts.length === 0 ? (
+              <>
+                <label className="block text-xs font-medium text-ink">Paste a site walk-through transcript</label>
+                <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={4} placeholder="Paste your Plaud / meeting transcript here…" className="w-full rounded border border-hairline px-3 py-2 text-sm" />
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={extractFromTranscript} disabled={extracting || !transcript.trim()} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{extracting ? "Extracting…" : "Extract tasks"}</button>
+                  <button type="button" onClick={() => { setShowTranscript(false); setTranscript(""); setVoiceError(null); }} className="text-xs text-muted">Cancel</button>
                 </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-muted">Review the {drafts.length} extracted task(s) — untick any you don&apos;t want.</p>
+                <div className="space-y-1 max-h-56 overflow-y-auto">
+                  {drafts.map((d, i) => (
+                    <label key={i} className="flex items-start gap-2 text-sm">
+                      <input type="checkbox" checked={d._keep} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, _keep: e.target.checked } : x))} className="mt-1" />
+                      <input value={d.title} onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} className="flex-1 rounded border border-hairline px-2 py-1 text-sm" />
+                      <span className="text-[10px] text-muted capitalize shrink-0 mt-1.5">{(d.category || "general").replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={addSelectedDrafts} disabled={addingDrafts} className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-50">{addingDrafts ? "Adding…" : `Add ${drafts.filter(d => d._keep).length} task(s)`}</button>
+                  <button type="button" onClick={() => setDrafts([])} className="text-xs text-muted">Back</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* New task form */}
+        {newTaskForm && (
+          <div ref={siteTaskFormRef} className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Task title *"
+              value={newTaskForm.title}
+              onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
+              className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <input
+              type="text"
+              placeholder="Description (optional)"
+              value={newTaskForm.description}
+              onChange={e => setNewTaskForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full rounded border border-hairline px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <div className="flex gap-2 flex-wrap">
+              <select value={newTaskForm.priority} onChange={e => setNewTaskForm(f => ({ ...f, priority: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                <option value="urgent">Urgent</option>
+                <option value="normal">Normal</option>
+                <option value="when_time_permits">When time permits</option>
+              </select>
+              <select value={newTaskForm.category} onChange={e => setNewTaskForm(f => ({ ...f, category: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                <option value="general">General</option>
+                <option value="defect">Defect</option>
+                <option value="safety">Safety</option>
+                <option value="materials">Materials</option>
+                <option value="inspection">Inspection</option>
+              </select>
+              <select value={newTaskForm.assigned_to} onChange={e => setNewTaskForm(f => ({ ...f, assigned_to: e.target.value }))} className="border border-hairline rounded px-2 py-1.5 text-xs">
+                <option value="">Unassigned</option>
+                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" disabled={newTaskBusy || !newTaskForm.title.trim()} onClick={() => createSiteTask({ title: newTaskForm.title, description: newTaskForm.description, priority: newTaskForm.priority, category: newTaskForm.category, assigned_to: newTaskForm.assigned_to || undefined })} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50">
+                {newTaskBusy ? "Saving…" : "Add task"}
+              </button>
+              <button type="button" onClick={() => setNewTaskForm(null)} className="text-xs text-muted">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {siteTasksLoading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : (
+          (() => {
+            const PRIORITY_DOT = { urgent: "bg-red-500", normal: "bg-gray-400", when_time_permits: "bg-transparent border border-gray-400 rounded-full" };
+            const filtered = siteTasks.filter(t => {
+              if (siteTaskFilter === "Done") return t.status === "done";
+              if (siteTaskFilter === "Urgent") return t.priority === "urgent" && t.status !== "done";
+              if (siteTaskFilter === "Defects") return t.category === "defect" && t.status !== "done";
+              return t.status !== "done" && t.status !== "wont_do";
+            });
+            const groups = [
+              { label: "Urgent", tasks: filtered.filter(t => t.priority === "urgent") },
+              { label: "Normal", tasks: filtered.filter(t => t.priority === "normal") },
+              { label: "When time permits", tasks: filtered.filter(t => t.priority === "when_time_permits") },
+              { label: "Done", tasks: filtered.filter(t => t.status === "done") },
+            ].filter(g => (siteTaskFilter === "Done" ? g.label === "Done" : g.label !== "Done") && g.tasks.length > 0);
+
+            if (!groups.length && !newTaskForm) return <p className="text-sm text-muted text-center py-4">No tasks</p>;
+            return (
+              <div className="space-y-3">
+                {groups.map(g => (
+                  <div key={g.label}>
+                    <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">{g.label}</p>
+                    <div className="divide-y divide-hairline rounded-lg border border-hairline">
+                      {g.tasks.map(task => (
+                        <div key={task.id} className="flex items-start gap-3 px-3 py-2.5">
+                          <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm text-ink ${task.status === "done" ? "line-through text-muted" : ""}`}>{task.title}</p>
+                            {task.employees?.name && <p className="text-xs text-muted mt-0.5">assigned: {task.employees.name}</p>}
+                            {(task.created_via === "voice_note" || task.created_via === "ai_extraction") && (
+                              <p className="text-xs text-muted">via voice note</p>
+                            )}
+                            {task.completion_notes && (
+                              <p className="text-xs text-muted mt-0.5">{task.completion_notes}</p>
+                            )}
+                            {task.completion_photo_signed_url && (
+                              <a href={task.completion_photo_signed_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
+                                <img src={task.completion_photo_signed_url} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-hairline" />
+                              </a>
+                            )}
+                          </div>
+                          {task.status !== "done" && (
+                            <button
+                              type="button"
+                              onClick={() => completeSiteTask(task.id)}
+                              className="text-xs text-green-700 font-medium hover:underline shrink-0"
+                            >
+                              Done
+                            </button>
+                          )}
+                          {task.status === "done" && (
+                            <span className="text-green-500 text-xs shrink-0">✓</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ) : null}
+            );
+          })()
+        )}
+      </div>
+    );
+  }
+
+  function renderFinancialsContent() {
+    return (
+      <div className="mt-2 space-y-5 rounded-lg border border-hairline bg-surface p-4">
+        <div className="flex flex-wrap gap-3">
+          <label className="text-xs font-semibold text-muted">
+            Tentative start
+            <input
+              type="date"
+              defaultValue={project.tentative_start_date || ""}
+              className="ml-2 rounded border border-hairline px-2 py-1 text-sm"
+              onBlur={(e) => saveTentative(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="border-t border-hairline pt-4">
+          <h3 className="text-xs font-bold text-muted uppercase">Buildexact</h3>
+          {project.buildexact_job_id ? (
+            <p className="mt-2 text-sm text-ink">
+              Job ID: <code className="text-xs">{project.buildexact_job_id}</code>
+              {project.buildexact_last_sync ? <span className="text-muted"> — last sync {new Date(project.buildexact_last_sync).toLocaleString("en-AU")}</span> : null}
+            </p>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-semibold text-muted">
+                Job ID (manual)
+                <input value={beId} onChange={(e) => setBeId(e.target.value)} className="ml-2 rounded border px-2 py-1 text-sm" />
+              </label>
+              <button type="button" onClick={manualLinkBuildexact} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Save link</button>
+              <span className="text-xs text-warning">Waiting for webhook…</span>
+            </div>
+          )}
+        </div>
+        {trades.length > 0 ? (
+          <div className="border-t border-hairline pt-4">
+            <h3 className="mb-2 text-xs font-bold uppercase text-muted">Accepted trades</h3>
+            <div className="overflow-x-auto rounded-lg border border-hairline">
+              <table className="min-w-full text-sm">
+                <thead className="bg-page text-left text-xs uppercase text-muted">
+                  <tr>
+                    <th className="px-3 py-2">Trade</th>
+                    <th className="px-3 py-2">Subcontractor</th>
+                    <th className="px-3 py-2">Quote</th>
+                    <th className="px-3 py-2">PO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.map((t, i) => (
+                    <tr key={i} className="border-t border-hairline">
+                      <td className="px-3 py-2 font-semibold">{t.trade}</td>
+                      <td className="px-3 py-2">{t.subcontractor || "—"}</td>
+                      <td className="px-3 py-2">{t.quote_amount != null ? `$${Number(t.quote_amount).toFixed(2)}` : "—"}</td>
+                      <td className="px-3 py-2">
+                        {issuedForTrade(t) ? (
+                          <span className="text-accent">Issued</span>
+                        ) : (
+                          <button type="button" className="text-xs font-bold text-primary underline" onClick={() => setPoTrade({ ...t })}>Issue PO</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
-      </section>
+      </div>
+    );
+  }
+
+  function selectTab(t) {
+    setTab(t);
+    if (t === "trades") setShowTradesTab(true);
+    if (t === "tasks") setShowSiteTasksTab(true);
+    if (t === "files") { setShowFinancials(true); setShowLabourTab(true); }
+  }
+
+  const headerActions = (
+    <>
+      {portalUrl ? (
+        <a href={portalUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary hover:text-white">
+          View as client
+        </a>
+      ) : null}
+      {drop ? (
+        <a href={drop} target="_blank" rel="noreferrer" className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-semibold text-primary hover:bg-page">
+          Dropbox
+        </a>
+      ) : null}
+      <Link to={`/operations/${projectId}/schedule`} className="hidden rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white lg:inline-block">
+        Open schedule →
+      </Link>
+    </>
+  );
+
+  const tradesBadge = supervisorTasks.length || null;
+
+  return (
+    <div className="space-y-5 pb-24">
+      <OpsJobHeader project={project} summary={summary}>{headerActions}</OpsJobHeader>
+
+      {error ? <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</div> : null}
+
+      <OpsJobKpiStrip items={kpis} />
+
+      {/* ── DESKTOP command-centre: workspace + sticky right rail ── */}
+      <div className="hidden gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_320px]">
+        <main className="space-y-5">
+          {renderOpsReadinessBanner()}
+          {renderScheduleSnapshot()}
+          <Collapsible title="Trades" badge={tradesBadge} open={showTradesTab} onToggle={() => setShowTradesTab(v => !v)}>{renderTradesContent()}</Collapsible>
+          <Collapsible title="Labour" open={showLabourTab} onToggle={() => setShowLabourTab(v => !v)}>{renderLabourContent()}</Collapsible>
+          <div ref={siteTasksRef}>
+            <Collapsible title="Site Tasks" badge={openSiteTaskCount || null} open={showSiteTasksTab} onToggle={() => setShowSiteTasksTab(v => !v)}>{renderSiteTasksContent()}</Collapsible>
+          </div>
+          <Collapsible title="Financials &amp; POs" open={showFinancials} onToggle={() => setShowFinancials(v => !v)}>{renderFinancialsContent()}</Collapsible>
+          {renderModuleCards()}
+          {renderRecentDiary()}
+        </main>
+        <OpsJobRightRail
+          nextAction={topInsight}
+          primaryAction={openSchedule}
+          blockers={blockers}
+          keyDetails={keyDetails}
+          clientUpdate={{ portalUrl }}
+          files={files}
+        />
+      </div>
+
+      {/* ── TABLET + MOBILE: tabs + sticky action (no giant scroll) ── */}
+      <div className="lg:hidden">
+        <MobileTabs tabs={MOBILE_TABS} value={tab} onChange={selectTab} />
+        <div className="mt-3 space-y-4">
+          {tab === "today" && (<>{renderOpsReadinessBanner()}{renderInsights()}</>)}
+          {tab === "schedule" && (<>{renderScheduleSnapshot()}{renderModuleCards()}{renderRecentDiary()}</>)}
+          {tab === "trades" && renderTradesContent()}
+          {tab === "tasks" && renderSiteTasksContent()}
+          {tab === "files" && (
+            <>
+              {renderFinancialsContent()}
+              {renderLabourContent()}
+              <SectionCard title="Key details">
+                {keyDetails.map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-3 py-1.5 text-sm"><span className="text-muted">{k}</span><span className="truncate text-right font-medium text-ink">{v}</span></div>
+                ))}
+              </SectionCard>
+              {portalUrl ? (
+                <a href={portalUrl} target="_blank" rel="noreferrer" className="block rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 text-center text-sm font-semibold text-primary">View as client →</a>
+              ) : null}
+            </>
+          )}
+        </div>
+        {/* sits above the shell's fixed bottom nav on mobile; nav is hidden ≥md so flush there */}
+        <StickyActionBar position="fixed" className="!bottom-[60px] md:!bottom-0">
+          {openSchedule}
+        </StickyActionBar>
+        <SafeBottomSpacer height={140} />
+      </div>
 
       {/* ── Issue PO modal ── */}
       {poTrade ? (

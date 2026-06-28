@@ -26,7 +26,7 @@ route("GET", "/api/finance/inbox", () => ({ ok: true, invoices: [
 ] }));
 
 // FinanceManager (FinancialInbox tab) + dashboard stats
-route("GET", "/api/finance/stats", () => ({ ok: true, stats: { inbox: 3, approved_this_month: 11, unmatched: 1, awaiting_approval: 2 } }));
+route("GET", "/api/finance/stats", () => ({ ok: true, counts: { unmatched: 1, pending_approval: 2, filed: 11 }, totalApprovedValue: 312000 }));
 route("GET", "/api/finance/xero/status", () => ({ ok: true, connected: false, status: "not_connected" }));
 route("GET", "/api/finance/documents", () => ({ ok: true, documents: [
   { id: "fd-1", vendor: "SA Concreting", supplier: "SA Concreting", amount: 41200, total: 41200, status: "pending", job_id: "job-1001", filename: "sa-concreting-inv-3312.pdf", received_at: "2026-06-15", notes: "", carpentry_job_id: null, carpentry_cost_category: null, line_items: [] },

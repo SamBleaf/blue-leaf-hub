@@ -8,6 +8,33 @@ const JOBS = [
 route("GET", "/api/tender/jobs", () => ({ ok: true, jobs: JOBS }));
 route("GET", "/api/jobs/:id", ({ params }) => ({ ok: true, job: JOBS.find((j) => j.id === params.id) || JOBS[0] }));
 
+// TenderBoard reads jobs DIRECTLY via getSupabase().from("jobs").select(...rfqs) → /rest/v1/jobs.
+// Return an ARRAY (no .single()) with nested rfqs across stages so the board renders missing /
+// chase-due / ready-to-award states. (today ~2026-06-28: sent_at ≥7d ago + no quote = chase due.)
+route("GET", "/rest/v1/jobs", () => ([
+  { id: "job-1003", address: "2 Forrest Ave, Marino SA", status: "tendering", created_at: "2026-06-01T00:00:00Z", won_at: null, lost_at: null, dropbox_shared_link: null, dropbox_link: null,
+    rfqs: [
+      { id: "r1", status: "received", sent_at: "2026-06-12", received_at: "2026-06-18", reminder_sent_at: null },
+      { id: "r2", status: "accepted", sent_at: "2026-06-12", received_at: "2026-06-17", reminder_sent_at: null },
+      { id: "r3", status: "sent", sent_at: "2026-06-12", received_at: null, reminder_sent_at: null },
+      { id: "r4", status: "sent", sent_at: "2026-06-25", received_at: null, reminder_sent_at: null },
+    ] },
+  { id: "job-1006", address: "9 Esplanade, Seacliff SA", status: "tendering", created_at: "2026-06-08T00:00:00Z", won_at: null, lost_at: null, dropbox_shared_link: null, dropbox_link: null,
+    rfqs: [
+      { id: "r5", status: "received", sent_at: "2026-06-10", received_at: "2026-06-16", reminder_sent_at: null },
+      { id: "r6", status: "received", sent_at: "2026-06-10", received_at: "2026-06-15", reminder_sent_at: null },
+      { id: "r7", status: "received", sent_at: "2026-06-10", received_at: "2026-06-19", reminder_sent_at: null },
+      { id: "r8", status: "sent", sent_at: "2026-06-26", received_at: null, reminder_sent_at: null },
+    ] },
+  { id: "job-1001", address: "9 Beulah Rd, Norwood SA", status: "won", created_at: "2026-04-02T00:00:00Z", won_at: "2026-06-10", lost_at: null, dropbox_shared_link: "https://www.dropbox.com/scl/fo/beulah", dropbox_link: null,
+    rfqs: [
+      { id: "r9", status: "accepted", sent_at: "2026-04-10", received_at: "2026-04-18", reminder_sent_at: null },
+      { id: "r10", status: "accepted", sent_at: "2026-04-10", received_at: "2026-04-17", reminder_sent_at: null },
+    ] },
+  { id: "job-1099", address: "12 Maple St, Hove SA", status: "lost", created_at: "2026-05-01T00:00:00Z", won_at: null, lost_at: "2026-06-05", dropbox_shared_link: null, dropbox_link: null,
+    rfqs: [{ id: "r11", status: "declined", sent_at: "2026-05-08", received_at: "2026-05-20", reminder_sent_at: null }] },
+]));
+
 const PACKAGES = [
   { id: "pkg-1", job_id: "job-1003", project_address: "2 Forrest Ave, Marino SA", project_type: "extension", tender_deadline: "2026-07-18", created_at: "2026-06-10T00:00:00Z", trade_count: 9, sent_count: 7, received_count: 4, status: "in_progress" },
   { id: "pkg-2", job_id: "job-1006", project_address: "9 Esplanade, Seacliff SA", project_type: "new_home", tender_deadline: "2026-07-25", created_at: "2026-06-14T00:00:00Z", trade_count: 14, sent_count: 14, received_count: 9, status: "in_progress" },

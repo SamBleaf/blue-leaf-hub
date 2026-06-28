@@ -245,11 +245,14 @@ export default function AppShell() {
 
   const activeDept = DEPARTMENTS.find((d) => d.id === activeDeptId);
 
-  // Pass 3A Polish: on a lead-detail page the page shows its own sticky primary action
-  // (and an in-page Blueprint Insight panel). Collapse the global FABs there on
-  // mobile/tablet so they don't collide/compete with the sticky bar. Desktop (lg+)
-  // has no sticky bar, so the FABs stay. Signalled via the existing screenContext.
-  const leadDetailActionMode = screenContext?.page === "lead_detail";
+  // A page that owns a mobile/tablet sticky primary action collapses the global FABs there so
+  // they don't collide with the sticky bar. Desktop (lg+) has no sticky bar, so the FABs stay.
+  // Signalled via the existing screenContext: a recognised page value, or a generic flag so new
+  // command-centre pages opt in without editing this condition (H1 §AppShell). (H2-B: ops_job.)
+  const leadDetailActionMode =
+    screenContext?.ownsMobileStickyAction === true ||
+    screenContext?.page === "lead_detail" ||
+    screenContext?.page === "ops_job";
 
   const projectMatch = useMatch("/operations/:projectId/*");
   const activeProjectId = projectMatch?.params?.projectId || null;
