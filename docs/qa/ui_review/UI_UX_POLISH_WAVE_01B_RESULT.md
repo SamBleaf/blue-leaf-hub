@@ -15,7 +15,7 @@
 | 5 | Schedule | UI-SCHEDULE-001 | Mobile “More ⋯” overflow for Export PDF/CSV/BX Match/Save template | ✅ closed |
 | 6 | Workforce | UI-WORKFORCE-001 | Zero-crew KPI copy (`—` + helper sub) | ✅ closed |
 | 7 | Sales | UI-SALES-001 | KPI sub-label clarity (no filter logic change) | ✅ closed |
-| 8 | Design system | UI-VISUAL-001 | StatusBadge migration in Finance claims + CRM contacts; CRM status map in `statusBadge.js` | ✅ closed (partial — seed modules only) |
+| 8 | Design system | UI-VISUAL-001 | StatusBadge migration in Finance claims + CRM contacts; CRM status map in `statusBadge.js` | ◐ **partial / deferred** — seed only (Finance + CRM); Tender/Portal/Sales chips NOT migrated (future isolated sub-batch) |
 
 **Not in scope:** Marketing (paused) · UI-TENDER-001 (accepted gap) · behaviour/API/auth/schema/schedule-logic.
 
@@ -64,3 +64,35 @@
 ## Next agent
 
 **Claude** — review 01B evidence, confirm presentational-only scope held, plan next wave (01C or module-specific).
+
+---
+
+## Claude review verdict (2026-06-29) — 01B ACCEPTED
+
+**Scope: PASS (verified from the diff, not the report).** Product commit `82a90a3` = 9 presentational
+files only; **no** `server/**`, migrations, routes, auth, `scheduleUtils`, calc, mutation, or
+integration changes; **`ScheduleSheet.jsx` (commit-on-blur) untouched**; tree clean (BLOCKER 0 did
+not reappear); docs commit `1086409` docs-only.
+- ScheduleToolbar: identical `onExport*/onBuildexactMatch/onSaveTemplate` handlers, just
+  desktop-inline vs mobile overflow menu; lone `useEffect` = outside-click-to-close (presentational).
+- JobCommandCentre `fmtMoneyKpi` = display-only empty copy (no `kpis` calc change).
+- SalesPipeline = KPI **sub-labels only** (counts/filter unchanged). AppShell FAB = route-based
+  CSS visibility. statusBadge.js = variant map. ClientHome = title guard. WorkforceKpiStrip = copy.
+
+**Evidence: PASS.** `npm run lint` re-run by Claude → **pass**. `build` + `test:ui-review` 171/171
+accepted from Cursor. Screenshots refreshed: `docs/ui-review/screenshots/{desktop,mobile,tablet}/`
+(120 PNGs).
+
+**Bug statuses: confirmed.** 9 IDs genuinely closed by presentational evidence. **UI-VISUAL-001
+= partial/deferred** (Tender/Portal/Sales chips not migrated) — *not* fully closed (correct in
+BUG_REGISTER). UI-TENDER-001 = accepted gap. **No new deploy-blocking UI bugs introduced.**
+
+**Lock matrix: justified.** Finance/CRM/Schedule/Workforce/Portal/Sales → UI LOCKED (deploy-relevant
+UI issues closed; screenshots pass). The deferred **UI-VISUAL-001 is Low/non-blocking**, so LOCKED
+stands — but "LOCKED" here means *deploy-ready*, not *badge-consistent*; the badge rollout remains a
+tracked future sub-batch.
+
+**Decision:** 01B accepted. **0 deploy-blocking UI bugs open.** Next wave = **SOP-to-module audit
+(no-code)** — see [../hardening_loop/NEXT_CURSOR_TASK.md](../hardening_loop/NEXT_CURSOR_TASK.md).
+UI-VISUAL-001 full rollout (01C, product-code, Low) is **deferred** — needs separate Sam approval,
+"only if justified", sequence-last.

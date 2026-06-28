@@ -1,8 +1,8 @@
 ---
 loop_enabled: true
-next_agent: claude
-current_wave: UI-UX-POLISH-WAVE-01B
-current_task_file: docs/qa/hardening_loop/NEXT_CLAUDE_REVIEW.md
+next_agent: cursor
+current_wave: SOP-MODULE-AUDIT-WAVE-01
+current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
 approval_required: false
@@ -18,13 +18,15 @@ expected_branch: portal-v2
 
 | Field | Value |
 |---|---|
-| **Loop number** | 2 (01B complete) |
-| **Current wave** | `UI-UX-POLISH-WAVE-01B` — **done** |
-| **Active module(s)** | — (awaiting Claude review) |
-| **Bug IDs closed (01B)** | UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 · UI-VISUAL-001 (partial) |
-| **Accepted gap** | UI-TENDER-001 |
-| **Tests baseline** | `test:ui-review` **171/171** |
+| **Loop number** | 3 (SOP audit) |
+| **Current wave** | `SOP-MODULE-AUDIT-WAVE-01` — no-code SOP-vs-module audit |
+| **Active scope** | SOP folders 02→11 (lead→handover journey); Marketing SOPs excluded (paused) |
+| **Bug IDs in scope** | new `SOP-DRIFT` / `TRAINING-GAP` / app-bug findings as discovered |
+| **UI lane** | 01A + follow-up + 01B **complete & accepted**; UI-VISUAL-001 partial/deferred |
+| **Tests baseline** | `test:ui-review` 171/171 |
 | **Fix mode allowed?** | No |
-| **Sam approval required?** | No (Claude review); **Yes** before next product-code wave |
+| **Sam approval required?** | No (no-code audit); **Yes** before any product-code wave |
 
+**Deferred (needs Sam, product-code):** UI-VISUAL-001 full badge rollout (01C, Low, sequence-last).
 **Guards:** live integrations + deploy disabled; watcher dry-run only; Marketing paused.
+**Iteration budget:** 3.

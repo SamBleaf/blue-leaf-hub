@@ -1,37 +1,32 @@
 # NEXT CLAUDE REVIEW
 
-**Status:** ACTIVE — Cursor completed `UI-UX-POLISH-WAVE-01B` (2026-06-28)
+**Status:** PENDING — fires after Cursor completes `SOP-MODULE-AUDIT-WAVE-01`.
+**Issued by:** Claude Code (Hardening Controller), 2026-06-29.
 
-## Cursor delivery summary
+> Prior review (01B) is CONSUMED — verdict **01B ACCEPTED** recorded in
+> [../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md](../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md)
+> "Claude review verdict".
 
-| Item | Verdict requested |
-|------|-------------------|
-| **Scope guard** | Confirm all changes presentational-only (no behaviour/API/auth/schema/schedule-logic) |
-| **Items 1–7** | UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 → **closed** |
-| **Item 8 (badge)** | Partial StatusBadge migration (Finance claims + CRM contacts); confirm acceptable partial close |
-| **UI-TENDER-001** | Remains accepted gap |
-| **UI-VISUAL-001** | Partial — other modules still inline badges |
+## Review task (after SOP audit lands)
+Review the SOP-vs-module audit output and turn it into the next step.
 
-## Tests
+## Files to inspect
+- `docs/qa/SOP_MODULE_AUDIT_WAVE_01_RESULT.md`
+- New `SOP-DRIFT` / `TRAINING-GAP` / app-bug entries in [../BUG_REGISTER.md](../BUG_REGISTER.md)
+- SOP text fixes + `docs/sops/SOP_INDEX.md` / `SOP_CHANGELOG.md`
+- [AGENT_HANDOFF_LOG.md](./AGENT_HANDOFF_LOG.md)
 
-- `npm run lint` ✅
-- `npm run build` ✅
-- `npm run test:ui-review` **171/171** ✅
+## Questions to answer
+1. Which findings are **SOP-DRIFT** (doc fixed in-wave) vs **app bugs** (→ Fix Agent, Sam-gated)
+   vs **TRAINING-GAP** vs **ACCEPTED-GAP candidates** (→ Sam)?
+2. Any **deploy-blocking** drift (a staff role can't run the journey from the SOP)?
+3. Did every audited SOP get a valid **Section 14**?
+4. Did anything stray outside no-code scope? (It should not have.)
 
-## Evidence
+## Likely next steps
+- Present ACCEPTED-GAP candidates + any app-bug Fix-Agent packet to Sam (gated).
+- Continue SOP audit (`-WAVE-02`: folders 12–17) if 01 was scoped/split.
+- Or move to **P0 E2E re-verification** (Hybrid-by-risk) once SOP drift is logged.
 
-- [UI_UX_POLISH_WAVE_01B_RESULT.md](../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md)
-- Screenshots: `docs/ui-review/screenshots/` (mobile: `finance-command-centre`, `schedule-manager`, `crm-contacts`, `sales-pipeline`, `portal-home`, `workforce`)
-
-## Product files touched
-
-`AppShell.jsx` · `JobCommandCentre.jsx` · `ProgressClaims.jsx` · `ClientHome.jsx` · `CrmContacts.jsx` · `ScheduleToolbar.jsx` · `WorkforceKpiStrip.jsx` · `SalesPipeline.jsx` · `statusBadge.js`
-
-## Claude tasks
-
-1. Spot-check diffs for scope violations (especially Finance KPI helper — display only).
-2. Update lock matrix final states if evidence confirms LOCKED.
-3. Decide next wave: full StatusBadge rollout (01C?) vs module hardening vs SOP audit.
-4. Write next agent packet (`NEXT_CURSOR_TASK.md` or Fix-Agent lane if behaviour bugs found).
-
-**Approval required before next product-code wave:** Yes (standard gate — presentational 01B was pre-approved).
+## Output
+Update state files, append handoff log, write the next packet.
