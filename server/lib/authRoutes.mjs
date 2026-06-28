@@ -125,6 +125,24 @@ export function registerAuthRoutes(app) {
           await sb.from("projects").update({ portal_enabled: true, portal_v2_enabled: true }).eq("id", projectId);
           return res.json({ ok: true, linkedExisting: true, message: "Existing client linked to this project." });
         }
+        // Staff self-heal: inviting an employee (employeeId) whose email already has a login that
+        // isn't linked to ANY employee — and the employee has no login yet (verified above). This
+        // happens when someone was invited via the generic Users page (no employeeId), leaving their
+        // login orphaned from their staff record. Adopt the existing login into the employee link
+        // instead of a dead-end 409. No new email — they keep their current password.
+        if (employeeId) {
+          const { data: prof } = await sb.from("user_profiles").select("id, employee_id").eq("id", existingUser.id).maybeSingle();
+          if (prof && !prof.employee_id) {
+            const { data: linked } = await sb.from("employees")
+              .update({ user_id: existingUser.id, updated_at: new Date().toISOString() })
+              .eq("id", employeeId).is("user_id", null).select("id");
+            if (linked && linked.length) {
+              await sb.from("user_profiles").update({ employee_id: employeeId }).eq("id", existingUser.id);
+              await sb.from("employees").update({ invite_sent_at: now, updated_at: now }).eq("id", employeeId);
+              return res.json({ ok: true, linkedExisting: true, message: "Linked the existing login to this staff record — they keep their current password." });
+            }
+          }
+        }
         return res.status(409).json({ error: "A user with this email already exists." });
       }
 
