@@ -491,9 +491,16 @@ export function registerOperationsRoutes(app) {
 
   /**
    * POST /api/cron/trade-ghost-check
-   * Manual trigger for testing ghost check (no auth — same pattern as rfq-reminders).
+   * Mutates trade-commitment state (marks trades unresponsive). Guarded by the same
+   * CRON_SECRET shared-secret as /api/cron/portal-sync: when CRON_SECRET is set,
+   * callers must present it (x-cron-secret header or ?secret=).
    */
-  app.post("/api/cron/trade-ghost-check", async (_req, res) => {
+  app.post("/api/cron/trade-ghost-check", async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (secret) {
+      const provided = req.headers["x-cron-secret"] || req.query?.secret;
+      if (provided !== secret) return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
     try {
