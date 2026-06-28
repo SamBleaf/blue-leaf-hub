@@ -8,6 +8,28 @@ const WD = ["M", "T", "W", "T", "F", "S", "S"];
 // Local calendar date (NOT toISOString — that shifts a day in AU timezones).
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const firstOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const WEEKDAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const addDaysD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = (d) => addDaysD(d, -((d.getDay() + 6) % 7));
+
+// Where the worker is scheduled that day (Planner allocation): site + crew.
+function siteLabel(a) {
+  if (!a) return null;
+  return { where: a.carpentryJobClientName || a.carpentryJobAddress || a.projectAddress || "Allocated", crew: a.crewName || null };
+}
+
+// Timesheet status for a roster day. "Missing" only flags an allocated working day with nothing logged.
+function tsLabel(ts, { isFuture, hasAlloc }) {
+  if (ts && (ts.status === "submitted" || ts.status === "approved")) {
+    const h = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
+    return { text: `${ts.status === "approved" ? "Approved" : "Submitted"}${h ? ` · ${h}h` : ""}`, tone: "green" };
+  }
+  if (ts && ts.status === "rejected") return { text: "Returned", tone: "amber" };
+  if (ts && ts.status === "draft") return { text: "Draft", tone: "muted" };
+  if (isFuture) return { text: "Not due yet", tone: "muted" };
+  if (!hasAlloc) return { text: "Not required", tone: "muted" };
+  return { text: "Missing", tone: "red" };
+}
 
 // Worker "My timesheets" calendar — green = logged, red = a working day with nothing
 // logged, so the boys can work backward and keep every day complete.
@@ -17,6 +39,8 @@ export default function WorkerWeek() {
   const [byDate, setByDate] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null); // null | "auth" | "load"
+  const [weekAllocs, setWeekAllocs] = useState(null); // null = not loaded
+  const [weekTs, setWeekTs] = useState({});
 
   const monthStart = ymd(view);
   const monthEnd = ymd(new Date(view.getFullYear(), view.getMonth() + 1, 0));
@@ -38,6 +62,41 @@ export default function WorkerWeek() {
       .finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
   }, [monthStart, monthEnd]);
+
+  // "This week" roster — current Mon–Sun Planner allocations + that week's timesheet status.
+  // Independent of the month calendar below (always shows the live current week).
+  useEffect(() => {
+    let stop = false;
+    const monday = mondayOf(new Date());
+    const from = ymd(monday), to = ymd(addDaysD(monday, 6));
+    Promise.all([
+      workerFetch(`/api/worker/allocations/week`).then(r => r.json()).catch(() => ({ ok: false })),
+      workerFetch(`/api/worker/timesheets?from=${from}&to=${to}`).then(r => r.json()).catch(() => ({ ok: false })),
+    ]).then(([aJ, tJ]) => {
+      if (stop) return;
+      if (aJ.ok) setWeekAllocs(aJ.allocations || []);
+      if (tJ.ok) { const m = {}; for (const t of (tJ.timesheets || [])) m[t.date] = t; setWeekTs(m); }
+    });
+    return () => { stop = true; };
+  }, []);
+
+  const weekRows = useMemo(() => {
+    if (weekAllocs === null) return null;
+    const monday = mondayOf(new Date());
+    const byDay = {}; for (const a of weekAllocs) byDay[a.allocationDate] = a;
+    const todayStr = ymd(new Date());
+    const rows = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDaysD(monday, i);
+      const key = ymd(d);
+      const isWeekend = i >= 5;
+      const a = byDay[key] || null;
+      const ts = weekTs[key] || null;
+      if (isWeekend && !a && !ts) continue; // hide empty weekends
+      rows.push({ key, label: WEEKDAY_FULL[d.getDay()].slice(0, 3), site: siteLabel(a), ts, isToday: key === todayStr, isFuture: key > todayStr });
+    }
+    return rows;
+  }, [weekAllocs, weekTs]);
 
   const cells = useMemo(() => {
     const offset = (view.getDay() + 6) % 7; // Monday = 0
@@ -66,7 +125,44 @@ export default function WorkerWeek() {
   return (
     <WorkerLayout>
       <div className="px-4 pb-8">
-        <h1 className="text-lg font-bold text-ink pt-4 mb-1">My timesheets</h1>
+        <h1 className="text-lg font-bold text-ink pt-4 mb-3">My Week</h1>
+
+        {/* This week — roster: where I'm scheduled + did I log it */}
+        {weekRows && weekRows.length > 0 && (
+          <div className="mb-5">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">This week</h2>
+            <div className="rounded-card bg-white shadow-sm border border-hairline divide-y divide-hairline overflow-hidden">
+              {weekRows.map((row) => {
+                const st = tsLabel(row.ts, { isFuture: row.isFuture, hasAlloc: !!row.site });
+                const tone = st.tone === "green" ? "text-green-600" : st.tone === "red" ? "text-red-600" : st.tone === "amber" ? "text-amber-600" : "text-muted";
+                return (
+                  <button
+                    key={row.key}
+                    type="button"
+                    disabled={row.isFuture}
+                    onClick={() => navigate(`/worker/timesheet/log?date=${row.key}`)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left ${row.isFuture ? "opacity-60" : "active:bg-page"}`}
+                  >
+                    <span className={`w-9 shrink-0 text-sm font-semibold ${row.isToday ? "text-primary" : "text-ink"}`}>{row.label}</span>
+                    <span className="flex-1 min-w-0">
+                      {row.site ? (
+                        <>
+                          <span className="block text-sm text-ink truncate">{row.site.where}</span>
+                          {row.site.crew && <span className="block text-xs text-muted truncate">{row.site.crew}</span>}
+                        </>
+                      ) : (
+                        <span className="block text-sm text-muted">Not allocated</span>
+                      )}
+                    </span>
+                    <span className={`shrink-0 text-xs font-medium ${tone}`}>{st.text}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1">Timesheet history</h2>
         <p className="text-sm text-muted mb-3 leading-relaxed">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 align-middle mr-1" />Logged
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 align-middle ml-3 mr-1" />Not logged

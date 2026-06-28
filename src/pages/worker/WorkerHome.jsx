@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
-import { selectedJobQuery } from "../../lib/workerJob.js";
+import { selectedJobQuery, setSelectedJob } from "../../lib/workerJob.js";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -18,26 +18,111 @@ const STATUS_BADGE = {
   draft:     "bg-gray-100 text-gray-600",
 };
 
+// Normalise a Planner allocation into the worker's job shape (matches workerJob.js / WORKER_JOB_TYPES).
+// Building = project (address is the identifier); Carpentry = client name + address.
+function allocJob(a) {
+  if (!a) return null;
+  if (a.carpentryJobId) return { id: a.carpentryJobId, type: "carpentry", name: a.carpentryJobClientName || a.carpentryJobAddress || "Carpentry job", address: a.carpentryJobAddress || "", kind: "Carpentry" };
+  if (a.projectId) return { id: a.projectId, type: "project", name: a.projectAddress || "Building site", address: a.projectAddress || "", kind: "Building" };
+  return null;
+}
+
+// Today's site — the worker's daily start: where am I, with which crew, and what's waiting on me.
+function TodaySiteCard({ today, tomorrow, counts, onOpenTasks }) {
+  const t = allocJob(today);
+  const tm = allocJob(tomorrow);
+  return (
+    <div className="rounded-card bg-white shadow-sm border border-hairline p-4 mb-3">
+      <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Today&apos;s site</h2>
+      {t ? (
+        <>
+          <p className="text-base font-bold text-ink leading-tight">{t.name}</p>
+          {t.address && t.address !== t.name && <p className="text-sm text-muted">{t.address}</p>}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            {today.crewName && <span className="text-ink">Crew: <span className="font-medium">{today.crewName}</span></span>}
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">{t.kind}</span>
+          </div>
+          {today.notes && <p className="mt-2 text-sm text-muted italic">“{today.notes}”</p>}
+          {counts && (counts.open > 0 || counts.done > 0) && (
+            <button
+              type="button"
+              onClick={onOpenTasks}
+              className="mt-3 w-full flex items-center justify-between rounded-lg bg-page px-3 py-2 text-sm"
+            >
+              <span className="text-ink">
+                <span className="font-semibold">{counts.open}</span> open
+                {counts.urgent > 0 && <> · <span className="font-semibold text-red-600">{counts.urgent}</span> urgent</>}
+                {counts.done > 0 && <> · <span className="text-muted">{counts.done} done</span></>}
+              </span>
+              <span className="text-primary font-medium">Tasks →</span>
+            </button>
+          )}
+        </>
+      ) : (
+        <p className="text-sm text-muted">Not scheduled yet — check with your supervisor.</p>
+      )}
+
+      {tm && (
+        <div className="mt-3 pt-3 border-t border-hairline">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1">Tomorrow</p>
+          <p className="text-sm font-medium text-ink leading-tight">{tm.name}</p>
+          {tm.address && tm.address !== tm.name && <p className="text-xs text-muted">{tm.address}</p>}
+          {tomorrow.crewName && <p className="text-xs text-muted mt-0.5">Crew: {tomorrow.crewName}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function WorkerHome() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState(null);
+  const [alloc, setAlloc] = useState(null);
+  const [counts, setCounts] = useState(null);
   const [error, setError] = useState(null);
 
+  // Home loads two things together: the worker summary (/me) and today+tomorrow's Planner
+  // allocation. The allocation is non-blocking — if it fails, Home still renders.
   useEffect(() => {
     let stop = false;
     const q = selectedJobQuery();
-    workerFetch(`/api/worker/me${q ? `?${q}` : ""}`)
-      .then(r => r.json())
-      .then(j => {
-        if (stop) return;
-        if (!j.ok) { setError(j.error || "Failed to load"); return; }
-        setMe(j);
-      })
-      .catch(() => { if (!stop) setError("Network error"); })
-      .finally(() => { if (!stop) setLoading(false); });
+    Promise.all([
+      workerFetch(`/api/worker/me${q ? `?${q}` : ""}`).then(r => r.json()).catch(() => ({ ok: false, error: "Network error" })),
+      workerFetch(`/api/worker/allocations/today`).then(r => r.json()).catch(() => ({ ok: false })),
+    ]).then(([meJ, allocJ]) => {
+      if (stop) return;
+      if (!meJ.ok) { setError(meJ.error || "Failed to load"); return; }
+      setMe(meJ);
+      if (allocJ.ok) setAlloc(allocJ);
+    }).finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
   }, []);
+
+  // Today's task counts are scoped to today's ALLOCATED job (not the global open-task count),
+  // so "3 open · 1 urgent" reflects what's waiting on the worker where they actually are.
+  useEffect(() => {
+    const j = allocJob(alloc?.today);
+    if (!j) { setCounts(null); return; }
+    let stop = false;
+    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(j.id)}&jobType=${j.type}`)
+      .then(r => r.json())
+      .then(d => {
+        if (stop || !d.ok) return;
+        const tasks = d.tasks || [];
+        const active = tasks.filter(t => t.status !== "done");
+        setCounts({ open: active.length, urgent: active.filter(t => t.priority === "urgent").length, done: tasks.length - active.length });
+      })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [alloc]);
+
+  // Tapping today's task counts opens Tasks already set to today's allocated job (P4B→P4C bridge).
+  function openTodayTasks() {
+    const j = allocJob(alloc?.today);
+    if (j) setSelectedJob({ id: j.id, type: j.type, address: j.address });
+    navigate("/worker/tasks");
+  }
 
   if (loading) {
     return (
@@ -100,6 +185,9 @@ export default function WorkerHome() {
           <h1 className="text-lg font-bold text-ink">Hi {firstName}</h1>
           <p className="text-sm text-muted">{fmtDate(today)}</p>
         </div>
+
+        {/* Today's site — where am I going + what matters today (Planner allocation) */}
+        <TodaySiteCard today={alloc?.today} tomorrow={alloc?.tomorrow} counts={counts} onOpenTasks={openTodayTasks} />
 
         {/* Timesheet card */}
         <div className="rounded-card bg-white shadow-sm border border-hairline p-4 mb-3">
