@@ -162,6 +162,39 @@
 
 **Wave 01 SOP fixes applied:** 04-01, 05-05, 05-06, 08-02/05/06, 10-01. See [SOP_CHANGELOG.md](../sops/SOP_CHANGELOG.md).
 
+### Claude review — SOP Wave 01 triage (2026-06-29)
+
+**Scope: PASS.** Commit `b6b9e4c` is **docs-only** (`docs/qa` + `docs/sops`); no product/server/
+migrations/integrations; tree clean. Verified via `git show --name-only`.
+
+**Numbers (verified from diff, not report):** 71 SOPs audited ✓ (matrix sums 7+4+9+6+8+3+6+12+3+13).
+§14 26 complete / 20 partial / 25 missing = 71 ✓. 5 app bugs ✓. 2 accepted-gap candidates ✓.
+**Corrections:** SOP **text fixes = 7 files** (04-01, operations_global_gantt, operations_trade_conflicts,
+whs_check_compliance_status, whs_log_incident, whs_resolve_incident, workforce_overview), **not 8**
+as the result-doc summary states (the "8" appears to miscount or include the index). The app-bug
+ID is **SOP-BUG-09-JOBVIEW** (result doc's "09-07" is the SOP ref, not the bug ID).
+
+**Classification & deploy impact:**
+- **App bugs (Fix Agent, Sam-gated): 5 — SOP-BUG-02-07, -05-05, -07-03, -09-JOBVIEW, -11-12.**
+  All **Medium/Low**, all **`blocks-deployability: no`.** Not urgent; defer-able low-priority batch.
+  (SOP-BUG-05-05 may be an **accepted descope** — its SOP was already corrected to drop the promise.)
+- **SOP-DRIFT already fixed in docs (7 files).** Remaining substantive drift + §14 = Wave 02 (no-code).
+- **TRAINING-GAP: 4** (SOP-TRAIN-03-01, -06-07, -11-01, -11-10) — non-blocking, doc/training.
+- **ACCEPTED-GAP candidates (Sam): 2** — **SOP-GAP-PORTAL-STACK** (Medium, **blocks-deploy: yes/training** —
+  canonical portal for new jobs) and **SOP-GAP-WHS-SETUP** (Low, no).
+
+**Deploy blockers (deploy gate "SOP drift fixed or accepted" — NOT met):**
+- **Code: none.**
+- **SOP/training: yes** — `SOP-DRIFT-SEC14-11` (**High**, portal legacy §14 + v2 matrix),
+  `SOP-DRIFT-SEC14-07` (Medium, site-diary §14), `SOP-GAP-PORTAL-STACK` (training), plus the P0
+  Sales Lead-Detail + RFQ Engine/Quote-Tracker drift. These are **no-code (Wave 02)** to fix,
+  **except** the portal set which is **blocked on Sam's PORTAL-STACK decision**.
+
+**Next:** halt at **Sam gate** (app bugs + 2 accepted-gap decisions) — see
+`hardening_loop/SAM_APPROVAL_REQUIRED.md`. **Recommended immediate work = no-code `SOP-DOCS-WAVE-02`**
+(Sales + RFQ rewrite, §14 backfill 07/10; portal rewrite after PORTAL-STACK decided). App-bug Fix
+batch recommended **deferred** (non-blocking). No fixes approved by Claude.
+
 ---
 
 ## Open — UI/UX Discovery Wave 01A (2026-06-28)

@@ -1,11 +1,11 @@
 ---
 loop_enabled: true
-next_agent: claude
-current_wave: SOP-MODULE-AUDIT-WAVE-01
-current_task_file: docs/qa/hardening_loop/NEXT_CLAUDE_REVIEW.md
+next_agent: sam
+current_wave: SOP-DOCS-WAVE-02
+current_task_file: docs/qa/hardening_loop/SAM_APPROVAL_REQUIRED.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
-approval_required: false
+approval_required: true
 live_integrations_allowed: false
 deploy_allowed: false
 max_iterations_this_session: 3
@@ -19,17 +19,14 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `SOP-MODULE-AUDIT-WAVE-01` — **COMPLETE** (Cursor, 2026-06-29) |
-| **Last completed agent** | Cursor — 71 SOPs audited (folders 02–11), 8 SOP text fixes |
-| **Current gate** | Claude review → [NEXT_CLAUDE_REVIEW.md](./NEXT_CLAUDE_REVIEW.md) |
-| **Open blockers** | None (SOP drift logged; deploy training gate open) |
-| **Next required agent** | **Claude** |
-| **Approval required?** | No (audit wave). **Yes** before Fix Agent / Sam ACCEPTED-GAP decisions |
-| **Product-code changes allowed?** | **No** |
+| **Phase / wave** | `SOP-DOCS-WAVE-02` — **staged, HALTED at Sam gate** |
+| **Last completed agent** | Claude Code — reviewed SOP Wave 01 (scope PASS, docs-only) |
+| **Current gate** | **Sam** → [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md) (PORTAL-STACK + WHS-SETUP decisions; Fix-Agent batch; greenlight Wave 02) |
+| **Open blockers** | SOP/training deploy-gate drift (`SOP-DRIFT-SEC14-11` High; PORTAL-STACK) — no-code Wave 02 + Sam decision |
+| **Next required agent** | **Sam** (decide), then **Cursor** runs staged `SOP-DOCS-WAVE-02` |
+| **Approval required?** | **Yes** — app-bug Fix batch (product code) + 2 accepted-gap decisions |
+| **Product-code changes allowed?** | **No** (Wave 02 is no-code; app-bug fixes are a separate Sam-gated packet) |
 
-**UI lane:** complete (01B). **SOP lane:** Wave 01 done; Wave 02 recommended (Sales + RFQ + §14 backfill). Marketing `PAUSED`.
-**Watcher:** `--run-once` / `--interval=30` now BUILT (supervised) — invokes the next agent via
-`HARDENING_CURSOR_CMD` / `HARDENING_CLAUDE_CMD`; stops cleanly if unset. ⚠ **Run-once is currently
-blocked by a dirty tree:** `src/pages/worker/WorkerHome.jsx` (unrelated workstream) is uncommitted
-— its owner must commit/stash it before an autonomous cycle. Next pending handoff = **Claude SOP
-review** (`next_agent: claude`).
+**SOP Wave 01:** 71 audited · 7 SOPs fixed · §14 26/20/25 · **5 app bugs (all Med/Low,
+non-blocking)** · 2 accepted-gap candidates. **0 code deploy-blockers.** UI lane complete (01B).
+Marketing `PAUSED`. Watcher: dry-run + run-once built; **interval not enabled yet**.

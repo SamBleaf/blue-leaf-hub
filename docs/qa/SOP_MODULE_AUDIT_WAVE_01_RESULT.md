@@ -110,3 +110,25 @@ Full §14 compliance requires TC-01 through TC-05 plus ≥1 feature-specific cas
 ## Next agent
 
 **Claude** — review findings, prioritize Wave 02 SOP rewrite vs Fix Agent bugs, present ACCEPTED-GAP candidates to Sam.
+
+---
+
+## Claude review verdict (2026-06-29)
+
+**Scope: PASS** — `b6b9e4c` docs-only; tree clean. **Numbers verified** from the diff (71 audited;
+§14 26/20/25; 5 app bugs; 2 accepted-gap). **Correction:** **7** SOP text files were fixed, not 8;
+canonical app-bug ID for the finance issue is **SOP-BUG-09-JOBVIEW**.
+
+**App bugs (5):** all **Medium/Low**, **none deploy-blocking** → Fix Agent batch is **Sam-gated but
+deferrable** (SOP-BUG-05-05 likely an accepted descope). **No fixes approved.**
+
+**Deploy blockers:** **0 code**; **SOP/training YES** — `SOP-DRIFT-SEC14-11` (High, portal),
+`SOP-DRIFT-SEC14-07` (Medium, site diary), `SOP-GAP-PORTAL-STACK` (training) + P0 Sales/RFQ drift.
+The portal SOP rewrite is **blocked on Sam's PORTAL-STACK decision**.
+
+**Section 14:** 26/71 complete · 20 partial · 25 missing. Zero-compliant modules: 07_site_diary,
+10_workforce. Backfill = Wave 02 (no-code).
+
+**Decision:** **HALT at Sam gate** (`SAM_APPROVAL_REQUIRED.md`): (1) decide PORTAL-STACK +
+WHS-SETUP; (2) greenlight no-code `SOP-DOCS-WAVE-02` (recommended immediate); (3) Fix Agent for the
+5 app bugs (recommend **defer** — non-blocking). Wave 02 packet **staged** in `NEXT_CURSOR_TASK.md`.
