@@ -8,8 +8,10 @@ import ApprovalQueue from "./ApprovalQueue.jsx";
 import MarketingCalendar from "./MarketingCalendar.jsx";
 import MediaVault from "./MediaVault.jsx";
 import EvergreenLibrary from "./EvergreenLibrary.jsx";
+import MarketingDashboard from "./MarketingDashboard.jsx";
+import MarketingAttribution from "./MarketingAttribution.jsx";
 
-// Marketing internal router (Run A). Mounted at /marketing/* in App.jsx (admin-gated).
+// Marketing internal router (Run A + Batch 3). Mounted at /marketing/* in App.jsx (admin-gated).
 // Supports the two-segment /marketing/studio/legacy route that the old /marketing/:tab
 // pattern could not match, while keeping the legacy tab pages working for one sprint.
 export default function MarketingRouter() {
@@ -21,11 +23,13 @@ export default function MarketingRouter() {
       <Route path="calendar" element={<MarketingCalendar />} />
       <Route path="vault" element={<MediaVault />} />
       <Route path="evergreen" element={<EvergreenLibrary />} />
+      <Route path="intelligence" element={<MarketingDashboard />} />
+      <Route path="attribution" element={<MarketingAttribution />} />
       <Route path="studio" element={<ContentCreator />} />
       <Route path="studio/legacy" element={<LegacyStudio />} />
       {/* Legacy redirect: old Create tab → new Studio */}
       <Route path="create" element={<Navigate to="/marketing/studio" replace />} />
-      {/* Legacy tab pages (Library / Campaigns / Media / Lists / Intelligence / Music) — 1 sprint */}
+      {/* Legacy tab pages (Library / Campaigns / Media / Lists / Music) — 1 sprint */}
       <Route path=":tab" element={<Marketing />} />
     </Routes>
   );
