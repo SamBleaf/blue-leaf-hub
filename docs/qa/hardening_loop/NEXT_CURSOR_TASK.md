@@ -1,15 +1,18 @@
-# NEXT CURSOR TASK (STAGED — DO NOT RUN UNTIL UNLOCKED)
+# NEXT CURSOR TASK — ACTIVE
 
 **Task ID:** `UI-UX-POLISH-WAVE-01B` · **Mode:** presentational-only UI polish (product code)
-**Date staged:** 2026-06-28 · **Issued by:** Claude Code (Hardening Controller)
+**Date staged:** 2026-06-28 · **Released:** 2026-06-29 · **Issued by:** Claude Code (Hardening Controller)
 
-> ⛔ **GATED.** This task is **staged, not active.** Do not start until **all** of:
-> 1. Sam approves Decision 1 in [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md),
-> 2. BLOCKER 0 is cleared (the unrelated `scheduleRoutes.mjs` + `ScheduleSheet.jsx` edits are
->    committed/stashed → clean tree), and
-> 3. [CURRENT_STATE.md](./CURRENT_STATE.md) shows `next_agent: cursor`,
->    `product_code_changes_allowed: true`, `approval_required: false`.
-> Until then `next_agent: sam` and `hardening:watch --dry-run` will report run-blocked (exit 2).
+> ✅ **APPROVED & RELEASED (Sam, 2026-06-29).** Preconditions met: 01B approved (items 1–7 + badge
+> last); **BLOCKER 0 cleared** (schedule edits committed in `d7dbd3e` → clean tree);
+> [CURRENT_STATE.md](./CURRENT_STATE.md) = `next_agent: cursor`, `product_code_changes_allowed: true`,
+> `approval_required: false`. `hardening:watch --dry-run` → READY. **Cursor may run from this packet.**
+>
+> **Sam scope (2026-06-29):** items 1–7 approved; **UI-TENDER-001 accepted as a gap** (dropped from
+> 01B); **UI-SALES-001 = the cheap label-clarity fix** (keep, it's presentational); shared badge
+> (UI-VISUAL-001) **last, own sub-batch** after 1–7 pass screenshots. **No behaviour/API/auth/schema/
+> calc/mutation/RFQ/PO/Buildxact/Xero/Dropbox/Gmail/Resend/WHS/workforce-logic/client-portal-access/
+> schedule-logic changes** (do not touch the just-landed commit-on-blur logic). Marketing paused.
 
 ## Objective
 Apply **presentational-only** polish to the Sales standard for the approved modules. **Preserve
@@ -25,7 +28,7 @@ mutation behaviour, prod data flow, integrations, schema/migrations.
 | 4 | CRM | UI-CRM-002 | mobile card layout for contacts |
 | 5 | Schedule | UI-SCHEDULE-001 | mobile toolbar overflow menu |
 | 6 | Workforce | UI-WORKFORCE-001 | empty-state copy |
-| 7 | Sales | UI-SALES-001 | KPI label/help alignment (skip if Sam accepts as gap) |
+| 7 | Sales | UI-SALES-001 | KPI label/help alignment (cheap clarity fix — **keep**, per Sam) |
 | 8 | Design system | UI-VISUAL-001 | shared status-badge component — **SEPARATE sub-batch, LAST**, with screenshot diffs |
 
 ## Hard rules

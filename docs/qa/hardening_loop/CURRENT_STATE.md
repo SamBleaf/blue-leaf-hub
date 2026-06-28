@@ -1,11 +1,11 @@
 ---
 loop_enabled: true
-next_agent: sam
+next_agent: cursor
 current_wave: UI-UX-POLISH-WAVE-01B
-current_task_file: docs/qa/hardening_loop/SAM_APPROVAL_REQUIRED.md
+current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
-product_code_changes_allowed: false
-approval_required: true
+product_code_changes_allowed: true
+approval_required: false
 live_integrations_allowed: false
 deploy_allowed: false
 max_iterations_this_session: 3
@@ -20,15 +20,17 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `UI-UX-POLISH-WAVE-01B` — **staged, HALTED at Sam gate** |
-| **Last completed agent** | Claude Code — reviewed Wave 01A follow-up; resolved control check; finalized 01B plan |
-| **Current gate** | **Sam** → [SAM_APPROVAL_REQUIRED.md](./SAM_APPROVAL_REQUIRED.md) (01B approval + accepted-gaps) |
-| **Open blockers** | **BLOCKER 0** — unrelated uncommitted product edits (`server/lib/scheduleRoutes.mjs`, `src/components/schedule/ScheduleSheet.jsx`) must be cleared for a clean tree |
-| **Next required agent** | **Sam** (approve 01B + clear blocker), then **Cursor** runs staged 01B |
-| **Approval required?** | **Yes** — Wave 01B is product-code polish |
-| **Product-code changes allowed?** | **NO** (until Sam approves 01B → flip to yes) |
+| **Phase / wave** | `UI-UX-POLISH-WAVE-01B` — **APPROVED & RELEASED to Cursor** (Sam, 2026-06-29) |
+| **Last completed agent** | Sam — approved 01B (items 1–7 + badge last); BLOCKER 0 cleared (`d7dbd3e`) |
+| **Current gate** | None — Cursor may run the 01B packet |
+| **Open blockers** | **None** (tree clean) |
+| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`UI-UX-POLISH-WAVE-01B`) |
+| **Approval required?** | No (01B approved) |
+| **Product-code changes allowed?** | **YES — limited to approved presentational UI only** (01B packet scope; stop+log on anything beyond presentational) |
 
-**Notes:** Wave 01A + follow-up complete. UI Review **171/171**. Field NO-GO **lifted**
-(fixture-only). Portal-002 closed (live feed verified). CRM assessed (CONDITIONAL). **0
-deploy-blocking UI bugs open.** Control check: `src/ui-review/**` is review-only → allowed
-test-only path (master plan §4). Watcher stays `--dry-run` only; Marketing `PAUSED UNTIL MERGE`.
+**Scope guards (Sam 2026-06-29):** presentational only — **no** behaviour / API / auth / schema /
+calc / mutation / RFQ / PO / Buildxact / Xero / Dropbox / Gmail / Resend / WHS / workforce-logic /
+client-portal-access / **schedule-logic** changes (do not touch the just-landed commit-on-blur
+logic). Shared badge (UI-VISUAL-001) runs **last as its own sub-batch** after items 1–7 pass
+screenshots. UI-TENDER-001 **accepted as a gap**. Marketing `PAUSED UNTIL MERGE`. Watcher stays
+`--dry-run` only. Live integrations + deploy **disabled**.

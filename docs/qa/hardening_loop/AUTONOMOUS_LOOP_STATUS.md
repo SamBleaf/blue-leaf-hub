@@ -1,11 +1,11 @@
 ---
 loop_enabled: true
-next_agent: sam
+next_agent: cursor
 current_wave: UI-UX-POLISH-WAVE-01B
-current_task_file: docs/qa/hardening_loop/SAM_APPROVAL_REQUIRED.md
+current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
-product_code_changes_allowed: false
-approval_required: true
+product_code_changes_allowed: true
+approval_required: false
 live_integrations_allowed: false
 deploy_allowed: false
 max_iterations_this_session: 3
@@ -18,16 +18,15 @@ expected_branch: portal-v2
 
 | Field | Value |
 |---|---|
-| **Loop number** | 1 |
-| **Current wave** | `UI-UX-POLISH-WAVE-01B` — **staged, awaiting Sam approval** |
-| **Active module(s)** | 8-item 01B presentational plan (badge sub-batch last) |
-| **Bug IDs in scope (01B)** | UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 · UI-VISUAL-001 |
-| **Closed this loop** | UI-FIELD-001/002 (fixture) · UI-PORTAL-002 (fixture) · UI-CRM-001 (coverage) |
-| **Tests passed** | `test:ui-review` **171/171** |
-| **Tests failed** | 0 |
-| **Fix mode allowed?** | **No** (until Sam approves 01B) |
-| **Sam approval required?** | **Yes** — 01B polish + accepted-gap decisions + clear BLOCKER 0 |
+| **Loop number** | 2 (01B execution) |
+| **Current wave** | `UI-UX-POLISH-WAVE-01B` — approved, released to Cursor |
+| **Active module(s)** | Items 1–7 presentational; badge (UI-VISUAL-001) sub-batch **last** |
+| **Bug IDs in scope (01B)** | UI-NAV-001 · UI-FINANCE-001/002/003 · UI-PORTAL-001 · UI-CRM-002 · UI-SCHEDULE-001 · UI-WORKFORCE-001 · UI-SALES-001 · then UI-VISUAL-001 (last) |
+| **Accepted gap** | UI-TENDER-001 (Sam 2026-06-29) |
+| **Closed prior** | UI-FIELD-001/002 · UI-PORTAL-002 · UI-CRM-001 |
+| **Tests baseline** | `test:ui-review` 171/171 |
+| **Fix mode allowed?** | No (presentational lane via `product_code_changes_allowed`) |
+| **Sam approval required?** | No (01B approved); **Yes** before any behaviour/API/schema fix |
 
-**Deploy-blocking UI bugs open:** **0.** **Blocker:** unrelated uncommitted product edits (clean
-tree needed). **Control check:** `src/ui-review/**` confirmed review-only (allowed test-only).
-**Iteration budget:** 3.
+**Guards:** presentational-only; live integrations + deploy disabled; watcher dry-run only;
+Marketing paused. **Iteration budget:** 3.

@@ -200,7 +200,7 @@
 | **Evidence** | `…/desktop/rfq-engine.png` vs `tender-board.png` |
 | **Suggested test** | — |
 | **blocks-deployability** | no |
-| **Status** | open — propose ACCEPTED-GAP or 01B wayfinding banner |
+| **Status** | **ACCEPTED-GAP — Sam 2026-06-29.** RFQ wizard may remain a distinct tool surface without a full module-home KPI strip. Not deploy-blocking; out of 01B scope. |
 
 ### UI-SCHEDULE-001 — Schedule mobile secondary toolbar overcrowded
 
