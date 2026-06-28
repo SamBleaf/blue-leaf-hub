@@ -34,10 +34,16 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { config as loadEnv } from "dotenv";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..");
 const LOOP_DIR = join(REPO_ROOT, "docs", "qa", "hardening_loop");
+
+// Optional ergonomic config: load HARDENING_* command templates from a local env file
+// (gitignored) so the user sets them once instead of exporting each run. Never overrides
+// values already present in the real environment. No-ops if the file is absent.
+loadEnv({ path: process.env.HARDENING_WATCH_ENV || join(SCRIPT_DIR, "hardening-watch.env"), override: false });
 const STATE_FILE = join(LOOP_DIR, "CURRENT_STATE.md");
 const STATUS_FILE = join(LOOP_DIR, "AUTONOMOUS_LOOP_STATUS.md");
 const APPROVAL_FILE = join(LOOP_DIR, "SAM_APPROVAL_REQUIRED.md");
@@ -341,20 +347,20 @@ function runOnce() {
     return { status: "sam-gate", code: 2 };
   }
 
-  // --- Hard guards that need a human (write blocker + set sam) ---
+  // --- Pre-run stop conditions (environmental — print + stop; DO NOT mutate state or write a
+  // blocker. These are transient/setup issues the operator fixes; the handoff stays valid.
+  // ORCHESTRATOR_BLOCKED.md + Sam-flip are reserved for post-run agent/validation failures.) ---
   const guardFails = [];
   if (a.git.error) guardFails.push(`git unavailable: ${a.git.error}`);
   if (a.git && "expected_branch" in s && a.git.branch !== s.expected_branch) {
     guardFails.push(`branch ${a.git.branch} != expected_branch ${s.expected_branch}`);
   }
-  if (a.git && a.git.dirty) guardFails.push(`dirty tree — clean it before a cycle:\n${a.git.statusText}`);
+  if (a.git && a.git.dirty) guardFails.push(`dirty tree — commit/stash before a cycle:\n${a.git.statusText}`);
   if (!existsSync(join(REPO_ROOT, s.current_task_file || ""))) guardFails.push(`task file missing: ${s.current_task_file}`);
   if (!["cursor", "claude"].includes(s.next_agent)) guardFails.push(`unknown next_agent: ${s.next_agent}`);
   if (guardFails.length) {
-    printList("GUARD FAILURE:", guardFails);
-    writeBlocked("preflight guard failed", guardFails);
-    setSamGate(false); // human cleanup, not an approval
-    return { status: "blocked", code: 2 };
+    printList("STOP — preflight not satisfied (fix and re-run; no state changed):", guardFails);
+    return { status: "preflight-stop", code: 2 };
   }
 
   // --- Determine + invoke the agent (honest: only via configured template) ---
@@ -367,18 +373,19 @@ function runOnce() {
 
   if (!tpl) {
     const envVar = agent === "cursor" ? "HARDENING_CURSOR_CMD" : "HARDENING_CLAUDE_CMD";
-    console.log(`\n  ⚠ agent invocation NOT configured (${envVar} unset).`);
-    console.log("  Run this handoff manually, then re-run the watcher:");
-    console.log(`    • ${agent}: execute the packet at ${taskFile}`);
-    if (agent === "claude") console.log(`    • e.g. (if Claude CLI available):  claude -p "$(cat ${taskFile})"`);
-    if (agent === "cursor") console.log(`    • e.g. (if Cursor CLI available):  cursor-agent --file ${taskFile}`);
-    console.log(`  Or set ${envVar} to a command template using {{TASK_FILE}} / {{AGENT}} / {{WAVE}}.`);
-    writeBlocked("agent invocation not configured", [
-      `next_agent=${agent}; ${envVar} is unset, so the watcher cannot auto-run the agent.`,
-      `Run the packet manually: ${taskFile}`,
-      `Then re-run \`npm run hardening:watch -- --run-once\`. (Handoff state is preserved; next_agent stays ${agent}.)`,
-    ]);
-    return { status: "not-configured", code: 4 };
+    // Manual-execution mode: not configured is the NORMAL handoff point, not a failure.
+    // Print the action and exit non-zero — but do NOT write a blocker (keep the tree clean).
+    console.log(`\n${line()}`);
+    console.log(`  ▶ ACTION REQUIRED — run the ${agent.toUpperCase()} step (no auto-invoke configured)`);
+    console.log(`     packet : ${taskFile}`);
+    console.log(`     wave   : ${s.current_wave}`);
+    console.log(`     how    : run ${agent} on that packet (Cursor in the IDE, or invoke Claude),`);
+    console.log(`              then re-run \`npm run hardening:watch -- --run-once\`.`);
+    console.log(`     auto   : to let the watcher invoke it, set ${envVar} in scripts/hardening-watch.env`);
+    console.log(`              (template uses {{TASK_FILE}} / {{AGENT}} / {{WAVE}}). See RUNBOOK.md.`);
+    console.log(`  Handoff state preserved (next_agent stays ${agent}). No blocker written.`);
+    console.log(line("═"));
+    return { status: "manual-step", code: 4 };
   }
 
   const prevHead = a.git.head;

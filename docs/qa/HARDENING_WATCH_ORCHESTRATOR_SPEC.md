@@ -141,16 +141,21 @@ env command templates, with placeholders `{{TASK_FILE}}`, `{{AGENT}}`, `{{WAVE}}
 | `HARDENING_CURSOR_CMD` | `next_agent: cursor` | `cursor-agent --file {{TASK_FILE}}` *(if a Cursor CLI is installed/authed)* |
 | `HARDENING_CLAUDE_CMD` | `next_agent: claude` | `claude -p "$(cat {{TASK_FILE}})"` *(Claude Code headless print mode)* |
 
-- **If the relevant template is unset:** the watcher detects the next agent, prints the exact
-  packet/command to run manually, writes `ORCHESTRATOR_BLOCKED.md` ("agent invocation not
-  configured"), and exits `4`. It does **not** flip `next_agent` — when you configure the
-  template (or run the agent by hand and let it update the handoff), re-running resumes.
-- **If set:** the template is substituted and run with `stdio: inherit` (output streams live).
-  `--run-once` waits for it to finish, then validates.
+- **Config source:** templates are read from the environment; for convenience the watcher also
+  loads `scripts/hardening-watch.env` (gitignored; path override `HARDENING_WATCH_ENV`) via
+  dotenv, **without overriding** real env vars. See `scripts/hardening-watch.env.example`.
+- **If the relevant template is unset (supervised manual mode):** the watcher detects the next
+  agent, prints **▶ ACTION REQUIRED — run the <agent> step** with the packet path, and exits `4`.
+  This is the **normal manual-handoff signal, not a failure** — it does **not** write
+  `ORCHESTRATOR_BLOCKED.md` and does **not** flip `next_agent`. Run the agent (Cursor in the IDE,
+  or Claude in chat); when it updates the handoff, re-running resumes.
+- **If set (auto-invoke):** the template is substituted and run with `stdio: inherit` (output
+  streams live). `--run-once` waits for it to finish, then validates.
 
-> Honesty: Cursor's in-IDE agent and Claude Code may or may not be CLI-invokable in a given local
-> setup. The watcher does **not** assume — unset templates ⇒ clean "not configured" stop, never a
-> false claim of autonomy.
+> Honesty (environment finding 2026-06-29): **no agent CLI is installed here** — no
+> `cursor-agent`/`cursor`, and no working `claude` on PATH. So auto-invoke is **off** and the loop
+> runs in supervised manual mode. The watcher never fakes autonomy: unset template ⇒ clean
+> ACTION-REQUIRED stop. Operator procedure: [hardening_loop/RUNBOOK.md](./hardening_loop/RUNBOOK.md).
 
 ## 11. Path-allow rules (post-run diff validation)
 

@@ -9,6 +9,8 @@ dist
 .env
 .env.*
 !.env.sandbox.example
+scripts/hardening-watch.env
+!scripts/hardening-watch.env.example
 
 # Logs
 npm-debug.log*
