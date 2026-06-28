@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { apiFetch, apiPatch } from "../../lib/apiFetch.js";
 import JoshLabelBadge from "./JoshLabelBadge.jsx";
 
@@ -83,6 +84,8 @@ export default function ApprovalQueue() {
         <h1 className="text-3xl font-semibold tracking-tight text-primary">Approval Queue</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           Content packages awaiting review. Approve, request changes, or reject — nothing is published from here.
+          Approved packages become schedule-ready in the{" "}
+          <Link to="/marketing/calendar" className="font-semibold text-primary underline">Calendar</Link>.
         </p>
       </header>
 

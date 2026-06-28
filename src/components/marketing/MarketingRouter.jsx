@@ -5,6 +5,9 @@ import ContentCreator from "./ContentCreator.jsx";
 import LegacyStudio from "./LegacyStudio.jsx";
 import WeeklyPlanner from "./WeeklyPlanner.jsx";
 import ApprovalQueue from "./ApprovalQueue.jsx";
+import MarketingCalendar from "./MarketingCalendar.jsx";
+import MediaVault from "./MediaVault.jsx";
+import EvergreenLibrary from "./EvergreenLibrary.jsx";
 
 // Marketing internal router (Run A). Mounted at /marketing/* in App.jsx (admin-gated).
 // Supports the two-segment /marketing/studio/legacy route that the old /marketing/:tab
@@ -15,6 +18,9 @@ export default function MarketingRouter() {
       <Route index element={<MarketingCommandCentre />} />
       <Route path="planner" element={<WeeklyPlanner />} />
       <Route path="approval" element={<ApprovalQueue />} />
+      <Route path="calendar" element={<MarketingCalendar />} />
+      <Route path="vault" element={<MediaVault />} />
+      <Route path="evergreen" element={<EvergreenLibrary />} />
       <Route path="studio" element={<ContentCreator />} />
       <Route path="studio/legacy" element={<LegacyStudio />} />
       {/* Legacy redirect: old Create tab → new Studio */}
