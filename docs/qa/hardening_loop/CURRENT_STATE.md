@@ -1,7 +1,7 @@
 ---
 loop_enabled: true
 next_agent: cursor
-current_wave: SOP-DOCS-WAVE-02
+current_wave: SOP-DOCS-WAVE-02B
 current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
@@ -19,17 +19,15 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `SOP-DOCS-WAVE-02` — **RELEASED to Cursor** (Sam, 2026-06-29) |
-| **Last completed agent** | Sam — decided PORTAL-STACK (v2 canonical) + WHS-SETUP (write 08-07); deferred 5 app bugs; greenlit Wave 02 |
-| **Current gate** | None — Cursor may run the no-code Wave 02 packet |
-| **Open blockers** | None (SOP/training drift addressed by Wave 02; portal decision made) |
-| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-02`, no-code) |
-| **Approval required?** | No |
-| **Product-code changes allowed?** | **No** (Wave 02 is docs-only) |
+| **Phase / wave** | `SOP-DOCS-WAVE-02B` (no-code SOP rewrite — continuation; 02A done) |
+| **Last completed agent** | Cursor — Wave 02A: wrote SOP 08-07 (WHS Setup); split wave for size |
+| **Current gate** | None — 02B is no-code (same Sam-approved wave family) |
+| **Open blockers** | None (deploy-gate SOP/training drift being cleared by Wave 02B) |
+| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-02B`) |
+| **Approval required?** | No (no-code). **Yes** if a deferred app bug is escalated to Fix Agent |
+| **Product-code changes allowed?** | **No** |
 
-**Sam decisions (2026-06-29):** Portal **v2 canonical** (v1 = legacy/fallback, must be labelled);
-WHS-SETUP → **write SOP 08-07**; **5 app bugs DEFERRED** (logged, non-blocking — no Fix Agent yet).
-**Wave 02 scope:** Sales rewrite · RFQ nav · §14 backfill 07/10 · portal legacy/v2 matrix (v2
-canonical) · WHS 08-07. Marketing `PAUSED`. No product code · no live integrations · no deploy.
-Watcher dry-run/run-once only (interval not enabled). If any deferred bug becomes deploy-blocking,
-bring it back as a specific Fix-Agent approval packet.
+**Wave 02A:** SOP **08-07** (WHS Setup) created — `SAM-SOP-002` closed. Sharper diagnosis:
+`SOP-DRIFT-SEC14-07` is a §12→§14 renumber + 07-03 content drift (not missing). **Wave 02B priority:**
+portal v2-canonical rewrite (**High `SOP-DRIFT-SEC14-11`**) → site-diary §14 + 07-03 → sales Pass 3A →
+RFQ nav → workforce §14. Marketing `PAUSED`. Watcher dry-run/run-once only. 5 app bugs deferred.

@@ -204,6 +204,22 @@ batch recommended **deferred** (non-blocking). No fixes approved by Claude.
 - **SOP-GAP-WHS-SETUP → DECIDED (SAM-SOP-002): write SOP 08-07** in `SOP-DOCS-WAVE-02`.
 - **`SOP-DOCS-WAVE-02` greenlit (no-code).** Released to Cursor (`next_agent: cursor`).
 
+**SOP Docs Wave 02A result (2026-06-29) — split for size (sanctioned):**
+- **SOP-GAP-WHS-SETUP → CLOSED.** New SOP **08-07** (`docs/sops/08_whs/08-07_whs_setup.md`) written
+  (full template + §14, grounded in `WhsEngine.jsx` + `/api/whs/projects/:id/*`). SOP_INDEX +
+  SOP_CHANGELOG updated. (`SAM-SOP-002` satisfied.)
+- **Sharper diagnosis (corrects Wave 01):** `SOP-DRIFT-SEC14-07` is **not** a literally-missing test
+  script — the 3 site-diary SOPs already carry a Troubleshoot Agent Test Script, but **at §12 (wrong
+  section number) under an abbreviated 11-section template**. Real fix = **renumber to §14 + add
+  §12 Edge-cases / §13 Owner**. Also **07-03 has content drift**: it documents an **Edit + date-range
+  filter** the app lacks (ties to deferred **SOP-BUG-07-03**) — the SOP must describe current
+  view-only reality + flag the gap. Re-scoped into **Wave 02B** (status of `SOP-DRIFT-SEC14-07`
+  unchanged = open; now precisely scoped).
+- **Wave 02B (next, no-code):** 07_site_diary §14 renumber + 07-03 content fix · 10_workforce §14
+  (verify number/compliance) · 02_sales 02-02..02-07 Pass 3A rewrite · 04_rfq 04-02..04-09 Quote
+  Tracker nav · **11_client_portal v2-canonical rewrite + v1/v2 matrix + §14** (closes **High**
+  `SOP-DRIFT-SEC14-11`). Packet staged in `hardening_loop/NEXT_CURSOR_TASK.md`.
+
 ---
 
 ## Open — UI/UX Discovery Wave 01A (2026-06-28)

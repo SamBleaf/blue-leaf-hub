@@ -67,6 +67,7 @@
 | 08-04 | Complete a site induction | [whs_complete_induction.md](08_whs/whs_complete_induction.md) | WHS | Employee, Subcontractor | Draft | untested | Yes | High |
 | 08-05 | Log a WHS incident or near miss | [whs_log_incident.md](08_whs/whs_log_incident.md) | WHS | Supervisor, Employee | Draft | untested | Yes | High |
 | 08-06 | Resolve a WHS incident | [whs_resolve_incident.md](08_whs/whs_resolve_incident.md) | WHS | Admin, Supervisor | Draft | untested | Yes | Medium |
+| 08-07 | Set up the WHS profile (WHS Setup / risk engine) | [08-07_whs_setup.md](08_whs/08-07_whs_setup.md) | WHS | Admin, Supervisor | Draft | untested | Yes | High |
 | 09-01 | Upload an invoice | [finance_upload_invoice.md](09_finance/finance_upload_invoice.md) | Finance | Admin | Draft | untested | Yes | High |
 | 09-02 | Review AI invoice extraction | [finance_review_ai_extraction.md](09_finance/finance_review_ai_extraction.md) | Finance | Admin | Draft | untested | Yes | High |
 | 09-03 | Match an invoice to a job | [finance_match_invoice_to_job.md](09_finance/finance_match_invoice_to_job.md) | Finance | Admin | Draft | untested | Yes | High |
