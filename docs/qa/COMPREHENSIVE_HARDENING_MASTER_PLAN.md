@@ -121,9 +121,14 @@ Claude Code (review pass/fail, rank bugs, plan next batch)
 … regression … repeat until RELEASE_READINESS is green.
 ```
 
-- **Source of truth = the handoff files** in [hardening_loop/](./hardening_loop/). The optional
-  watch orchestrator (`scripts/hardening-watch.mjs`) only *drives* these files; it never
-  replaces them. Full mechanics: [HARDENING_AUTONOMOUS_LOOP_SPEC.md](./HARDENING_AUTONOMOUS_LOOP_SPEC.md)
+- **Source of truth = the handoff files** in [hardening_loop/](./hardening_loop/). The watch
+  orchestrator (`scripts/hardening-watch.mjs`) reads + *drives* these files; it never replaces
+  them. It can now **actively invoke the next agent** (`--run-once` / `--interval=N`, supervised)
+  via configurable command templates (`HARDENING_CURSOR_CMD` / `HARDENING_CLAUDE_CMD`) — and if a
+  template is unset it stops cleanly with an "agent invocation not configured" blocker rather than
+  faking autonomy. Every approval gate, dirty-tree check, forbidden-path rule, and the
+  no-deploy / no-live-integration / no-self-approve guards are enforced around each invocation.
+  Full mechanics: [HARDENING_AUTONOMOUS_LOOP_SPEC.md](./HARDENING_AUTONOMOUS_LOOP_SPEC.md)
   and [HARDENING_WATCH_ORCHESTRATOR_SPEC.md](./HARDENING_WATCH_ORCHESTRATOR_SPEC.md).
 - **Self-start contract:** every agent boots by reading `CURRENT_STATE.md`,
   `NEXT_CURSOR_TASK.md`, `NEXT_CLAUDE_REVIEW.md`, `AUTONOMOUS_LOOP_STATUS.md`; ends by writing

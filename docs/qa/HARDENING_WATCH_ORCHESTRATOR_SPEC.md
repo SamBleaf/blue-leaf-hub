@@ -2,7 +2,8 @@
 
 **Status:** 2026-06-28 · Governed by [COMPREHENSIVE_HARDENING_MASTER_PLAN.md](./COMPREHENSIVE_HARDENING_MASTER_PLAN.md).
 **Implements:** `scripts/hardening-watch.mjs` (`npm run hardening:watch`).
-**Built so far:** `--dry-run` only. `--run-once` and `--interval` are documented + stubbed.
+**Built:** `--dry-run`, `--run-once`, and `--interval=N` (supervised). Agent invocation is
+configurable + honest — see §10. Prove `--run-once` before using `--interval`.
 
 A local scheduled watch process that drives the loop so Cursor/Claude continue without Sam
 re-prompting each step. **It does not replace the handoff files** —
@@ -114,25 +115,55 @@ loop_enabled: true
 Stop when `next_agent: sam`, or when `SAM_APPROVAL_REQUIRED.md` is active. Sam remains the sole
 approval authority.
 
-## 9. Modes + exit codes
+## 9. Modes + exit codes  *(run-once + interval now BUILT)*
 
 | Mode | Behaviour | Status |
 |---|---|---|
-| `--dry-run` | Read handoff files; parse + validate state; print next agent, wave, task file, allowed/forbidden actions, and any **run-mode blockers**; **run nothing, modify nothing.** | **Built.** |
-| `--run-once` | One supervised cycle (preflight → execute → validate → log). | **Stubbed** — "not implemented, supervised build pending". |
-| `--interval=N` | Continuous every N min; stops at approval gates/blockers/max-iterations; never deploys, never runs live integrations, never ignores a dirty tree, never self-approves fixes. | **Stubbed.** |
+| `--dry-run` | Read handoff files; validate state; print next agent/wave/task + allowed/forbidden + **invocation availability** + run-mode blockers; **run nothing, modify nothing.** | **Built.** |
+| `--run-once` | One supervised cycle: preflight → **invoke next agent via its command template** → post-run validation → stop. Stops cleanly (no agent run) if invocation is not configured. | **Built.** |
+| `--interval=N` | Repeats `--run-once` every N min, up to `max_iterations_this_session`; stops on any non-completed cycle (gate/blocker/dirty/validation/not-configured). Never deploys, never runs live integrations, never self-approves. | **Built (supervised — prove `--run-once` first).** |
 
-**Exit codes (dry-run):**
-- `0` — state valid **and** no run-mode blockers → ready to run.
-- `1` — invalid/missing/contradictory state, or a required handoff file is absent → broken setup.
-- `2` — state valid but a run-mode blocker is present (dirty tree, active approval gate,
-  `next_agent: sam`, etc.) → would not run.
+**Exit codes (all modes):**
+- `0` — dry-run READY · or run-once completed one validated handoff · or interval finished its budget cleanly.
+- `1` — invalid/contradictory state config (broken setup).
+- `2` — Sam gate / run-mode blocker (`approval_required`, `SAM_APPROVAL_REQUIRED.md` active, `next_agent: sam`, dirty tree, wrong branch, missing task file, unknown agent, `loop_enabled: false`).
+- `4` — **agent invocation not configured** — handoff detected, nothing run; exact manual command printed; `ORCHESTRATOR_BLOCKED.md` written. Handoff state preserved (re-run when configured).
+- `5` — agent command failed (non-zero exit) → blocker written + `next_agent: sam`.
+- `6` — post-run validation failed (result rejected) → blocker written + `next_agent: sam` (+ `approval_required: true` if a forbidden path / behaviour change is implicated).
 
-`--dry-run` is a **preview**: it reports blockers (exit 2) rather than acting on them, so it's
-safe to inspect setup at any time. In `--run-once`/`--interval`, every §6 stop condition is a
-hard stop.
+## 10. Agent invocation — honest + configurable
 
-## 10. Build progression
+The watcher **never hardcodes** how to launch Cursor or Claude. It runs **only** what you put in
+env command templates, with placeholders `{{TASK_FILE}}`, `{{AGENT}}`, `{{WAVE}}`:
 
-`--dry-run` → prove stable → `--run-once` (several safe cycles) → only then `--interval=30`.
-Continuous mode is added **last**, local-only, supervised.
+| Env var | Used when | Example template |
+|---|---|---|
+| `HARDENING_CURSOR_CMD` | `next_agent: cursor` | `cursor-agent --file {{TASK_FILE}}` *(if a Cursor CLI is installed/authed)* |
+| `HARDENING_CLAUDE_CMD` | `next_agent: claude` | `claude -p "$(cat {{TASK_FILE}})"` *(Claude Code headless print mode)* |
+
+- **If the relevant template is unset:** the watcher detects the next agent, prints the exact
+  packet/command to run manually, writes `ORCHESTRATOR_BLOCKED.md` ("agent invocation not
+  configured"), and exits `4`. It does **not** flip `next_agent` — when you configure the
+  template (or run the agent by hand and let it update the handoff), re-running resumes.
+- **If set:** the template is substituted and run with `stdio: inherit` (output streams live).
+  `--run-once` waits for it to finish, then validates.
+
+> Honesty: Cursor's in-IDE agent and Claude Code may or may not be CLI-invokable in a given local
+> setup. The watcher does **not** assume — unset templates ⇒ clean "not configured" stop, never a
+> false claim of autonomy.
+
+## 11. Path-allow rules (post-run diff validation)
+
+A completed agent must have **committed** its work; the watcher validates the new commit's diff:
+
+- **Always allowed:** `docs/**`, `e2e/**`, `scripts/**`, `src/ui-review/**` (review-only carve-out).
+- **`src/**` (non-review) + `package.json`:** allowed **only if** `product_code_changes_allowed: true`.
+- **`server/**` + `supabase/migrations/**`:** **always halt for Sam** (validation fails) — the
+  watcher never auto-clears server/schema changes, regardless of flags.
+- Anything else → halt for Sam.
+
+## 12. Build progression
+
+`--dry-run` (stable) → `--run-once` (several supervised cycles) → only then `--interval=30`.
+Continuous mode is local-only, supervised, capped by `max_iterations_this_session`; **not**
+overnight/unattended yet.

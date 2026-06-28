@@ -100,3 +100,12 @@ either  → (gate hit)        → sam   (loop halts until Sam acts)
 `next_agent: sam` or the presence of an active `SAM_APPROVAL_REQUIRED.md` halts any automation.
 The machine-readable state block lives at the top of `CURRENT_STATE.md` and
 `AUTONOMOUS_LOOP_STATUS.md` (see orchestrator spec).
+
+**Active driving (supervised).** The watcher now *drives* these transitions, not just reports
+them: `npm run hardening:watch -- --run-once` preflights, **invokes the `next_agent` via its
+configured command template** (`HARDENING_CURSOR_CMD` / `HARDENING_CLAUDE_CMD`), validates the
+result, and stops after one handoff; `--interval=N` repeats up to `max_iterations_this_session`.
+If the agent's command template is unset, the watcher stops cleanly with an "agent invocation not
+configured" blocker (it never fakes a run). Every gate in this spec + the orchestrator spec is
+enforced **before** each invocation and the result is **path-validated** after — so automation
+never crosses an approval gate, a dirty tree, a forbidden path, or a `server/**`/migrations change.
