@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, NavLink } from "react-router-dom";
 import { isWorkerPreview, clearPreviewEmployeeId } from "../../lib/workerFetch.js";
 
 const PWA_DISMISS_KEY = "blhub_pwa_prompt_dismissed";
+
+// Persistent bottom nav — the three things a worker does daily. Log Hours stays a spoke
+// reached from Today (it has its own sticky Submit bar, so no tab for it).
+const NAV = [
+  { to: "/worker", end: true, label: "Today", d: "M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" },
+  { to: "/worker/tasks", label: "Tasks", d: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" },
+  { to: "/worker/week", label: "Week", d: "M7 3v3M17 3v3M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" },
+];
+const NAV_PATHS = ["/worker", "/worker/", "/worker/tasks", "/worker/week"];
 
 // Show back arrow on all worker pages except home
 const HOME_PATHS = ["/worker", "/worker/"];
@@ -30,6 +39,7 @@ export default function WorkerLayout({ children, onBack }) {
   const isHome = HOME_PATHS.includes(location.pathname);
   const handleBack = onBack ?? (() => navigate(-1));
   const preview = isWorkerPreview();
+  const showNav = NAV_PATHS.includes(location.pathname);
 
   function exitPreview() {
     clearPreviewEmployeeId();
@@ -176,6 +186,27 @@ export default function WorkerLayout({ children, onBack }) {
       <main className="flex-1 overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {children}
       </main>
+
+      {/* Bottom nav — the three daily screens, big thumb targets */}
+      {showNav && (
+        <nav className="shrink-0 border-t border-hairline bg-white flex" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                `flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-medium ${isActive ? "text-primary" : "text-muted"}`
+              }
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                <path d={item.d} />
+              </svg>
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

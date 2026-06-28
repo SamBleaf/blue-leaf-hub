@@ -38,10 +38,7 @@ function TodaySiteCard({ today, tomorrow, counts, onOpenTasks }) {
         <>
           <p className="text-base font-bold text-ink leading-tight">{t.name}</p>
           {t.address && t.address !== t.name && <p className="text-sm text-muted">{t.address}</p>}
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            {today.crewName && <span className="text-ink">Crew: <span className="font-medium">{today.crewName}</span></span>}
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">{t.kind}</span>
-          </div>
+          {today.crewName && <p className="mt-1.5 text-sm text-ink">Crew: <span className="font-medium">{today.crewName}</span></p>}
           {today.notes && <p className="mt-2 text-sm text-muted italic">“{today.notes}”</p>}
           {counts && (counts.open > 0 || counts.done > 0) && (
             <button
@@ -63,12 +60,9 @@ function TodaySiteCard({ today, tomorrow, counts, onOpenTasks }) {
       )}
 
       {tm && (
-        <div className="mt-3 pt-3 border-t border-hairline">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1">Tomorrow</p>
-          <p className="text-sm font-medium text-ink leading-tight">{tm.name}</p>
-          {tm.address && tm.address !== tm.name && <p className="text-xs text-muted">{tm.address}</p>}
-          {tomorrow.crewName && <p className="text-xs text-muted mt-0.5">Crew: {tomorrow.crewName}</p>}
-        </div>
+        <p className="mt-3 pt-3 border-t border-hairline text-sm text-muted">
+          <span className="font-medium text-ink">Tomorrow:</span> {tm.name}{tomorrow.crewName ? ` · ${tomorrow.crewName}` : ""}
+        </p>
       )}
     </div>
   );
@@ -153,7 +147,7 @@ export default function WorkerHome() {
     );
   }
 
-  const { employee, today_timesheet: ts, yesterday_project, weekly_hours, open_task_count } = me;
+  const { employee, today_timesheet: ts, yesterday_project, weekly_hours } = me;
   const today = new Date();
   const firstName = (employee?.name || "").split(" ")[0];
   const hasEntries = ts?.timesheet_entries?.length > 0;
@@ -261,29 +255,10 @@ export default function WorkerHome() {
           )}
         </div>
 
-        {/* Site tasks card */}
-        <div className="rounded-card bg-white shadow-sm border border-hairline p-4 mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-ink">Site tasks</h2>
-            {open_task_count > 0 && (
-              <span className="text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">{open_task_count} open</span>
-            )}
-          </div>
-          {open_task_count === 0 ? (
-            <p className="text-sm text-muted">No open tasks</p>
-          ) : (
-            <p className="text-sm text-muted mb-2">{open_task_count} task{open_task_count !== 1 ? "s" : ""} waiting</p>
-          )}
-          <Link to="/worker/tasks" className="text-sm text-primary font-medium">View all →</Link>
-        </div>
-
-        {/* Weekly hours chip */}
-        <p className="text-center text-sm text-muted mt-3">
+        {/* Weekly hours — tasks live on the Today card + the Tasks tab now */}
+        <p className="text-center text-sm text-muted mt-4">
           This week: <span className="font-semibold text-ink">{weekly_hours} hrs</span>
         </p>
-        <div className="text-center mt-2">
-          <Link to="/worker/week" className="text-sm text-primary font-semibold">My timesheets — check for missed days →</Link>
-        </div>
       </div>
     </WorkerLayout>
   );
