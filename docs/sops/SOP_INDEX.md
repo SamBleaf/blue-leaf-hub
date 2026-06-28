@@ -1,6 +1,6 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-06-28  
+> Last updated: 2026-06-29 (SOP Module Audit Wave 01 — folders 02–11 reviewed; see `docs/qa/SOP_MODULE_AUDIT_WAVE_01_RESULT.md`)
 > Total SOPs: 122  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 

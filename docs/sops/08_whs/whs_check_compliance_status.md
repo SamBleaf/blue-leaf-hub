@@ -9,7 +9,7 @@ test_status: static_pass
 
 # SOP 08-02: Check Compliance Status for a Project
 
-**Module:** Operations → WHS Manager → Compliance  
+**Module:** Operations → WHS Manager → Contractors (compliance)  
 **SOP ID:** 08-02  
 **Status:** Draft  
 **Priority:** High
@@ -31,7 +31,7 @@ Lists every subcontractor with a purchase order on the project and shows their c
 
 ## 5. Step-by-step process
 
-1. Open the project in Operations, then open **WHS → Compliance**
+1. Open the project in Operations, then open **WHS** (`/operations/:projectId/whs`) → **Contractors** tab (compliance documents per subcontractor)
 2. The list shows each subcontractor (those with a PO on this project)
 3. For each, review their documents and status badges:
    - 🟢 **Current** — valid, more than 30 days to expiry

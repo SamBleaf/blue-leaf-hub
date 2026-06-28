@@ -46,10 +46,21 @@ The RFQ Engine manages the request-for-quote process:
 
 ## 5. How to open the RFQ Engine
 
-1. Navigate to **Tender Manager** in the sidebar
-2. Click **RFQ Engine**
-3. The RFQ package list appears showing all active tenders
-4. Click any package to open it, or click **+ New package** to start a new one
+The RFQ workflow uses **two surfaces**:
+
+| Surface | Nav label | Route | Use for |
+|---------|-----------|-------|---------|
+| **RFQ Engine** | Tender Manager → **RFQ Engine** | `/tender-manager/rfq-engine` | New tender: upload docs → AI scope extract → assign trades → **send** emails (4-step wizard) |
+| **Quote Tracker** | Tender Manager → **Quote Tracker** | `/tender-manager/rfq-packages` | After send: receive quotes, compare, accept, addendum |
+
+**To start a new tender RFQ:**
+1. Navigate to **Tender Manager** → **RFQ Engine**
+2. Follow the wizard (upload → extract → trades → send)
+3. When emails are sent, the package appears in **Quote Tracker** for follow-up (SOP 04-06 onward)
+
+**To work an existing package:**
+1. Navigate to **Tender Manager** → **Quote Tracker**
+2. Click the package to open `/tender-manager/rfq-packages/:packageId`
 
 ## 6. Related SOPs
 - [Create an RFQ package](04-02_create_rfq_package.md) — SOP 04-02

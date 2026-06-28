@@ -31,7 +31,7 @@ Changes a WHS report's status from `open` to `resolved` and stamps the resolutio
 
 ## 5. Step-by-step process
 
-1. Open the project in Operations, then open **WHS → Reports**
+1. Open the project in Operations, then open **WHS** → **Incidents** tab
 2. Find the open report
 3. Confirm the corrective action is complete
 4. Click **Mark resolved**
@@ -56,7 +56,7 @@ The report status changes to `resolved` and the resolution time is recorded.
 | Problem | Solution |
 |---------|----------|
 | "Invalid request." (400) | The endpoint only accepts `status: "resolved"` with a valid report id — any other status is rejected |
-| Report still shows open after clicking | Reload the Reports tab; confirm the PATCH returned `{ ok: true }` |
+| Report still shows open after clicking | Reload the **Incidents** tab; confirm the PATCH returned `{ ok: true }` |
 | Need to reopen a resolved report | This endpoint only sets `resolved` — reopening would require a separate action/admin change |
 
 ## 9. Related modules

@@ -31,12 +31,15 @@ Scans all active projects' incomplete tasks and flags any trade that is schedule
 
 ## 5. Step-by-step process
 
-1. From Operations, open **Trade Conflicts**
-2. The system scans active projects for overlapping trade bookings
-3. Each conflict shows:
+1. Go to **Operations** (`/operations`)
+2. On the landing page, review the **Trade scheduling conflicts** banner (if any clashes exist) — it appears above the project list when the scan finds overlaps
+3. The system scans active projects automatically via `GET /api/operations/trade-conflicts`
+4. Each conflict in the banner shows:
    - The **trade** in conflict
    - The **projects** involved, with the conflicting task name and date range on each
-4. For each conflict, decide which project takes priority and re-sequence the other in its schedule (SOP 06-03)
+5. For each conflict, decide which project takes priority and re-sequence the other in its schedule (SOP 06-03)
+
+> **Note:** There is no separate “Trade Conflicts” page — conflicts surface on the Operations dashboard banner and in the global Gantt panel badge when clashes exist.
 
 ## 6. What happens next
 

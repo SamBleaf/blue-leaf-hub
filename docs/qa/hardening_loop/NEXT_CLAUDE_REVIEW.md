@@ -1,32 +1,28 @@
 # NEXT CLAUDE REVIEW
 
-**Status:** PENDING — fires after Cursor completes `SOP-MODULE-AUDIT-WAVE-01`.
-**Issued by:** Claude Code (Hardening Controller), 2026-06-29.
+**Status:** ACTIVE — Cursor completed `SOP-MODULE-AUDIT-WAVE-01` (2026-06-29)
 
-> Prior review (01B) is CONSUMED — verdict **01B ACCEPTED** recorded in
-> [../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md](../ui_review/UI_UX_POLISH_WAVE_01B_RESULT.md)
-> "Claude review verdict".
+## Delivery summary
 
-## Review task (after SOP audit lands)
-Review the SOP-vs-module audit output and turn it into the next step.
+| Item | Detail |
+|------|--------|
+| **SOPs audited** | 71 (folders 02–11) |
+| **§14 gaps** | 25 missing · 20 partial · 26 complete |
+| **SOP fixes applied** | 04-01, 05-05, 05-06, 08-02/05/06, 10-01 |
+| **App bugs** | SOP-BUG-02-07, 05-05, 07-03, 09-JOBVIEW, 11-12 |
+| **ACCEPTED-GAP candidates** | SOP-GAP-PORTAL-STACK, SOP-GAP-WHS-SETUP |
 
-## Files to inspect
-- `docs/qa/SOP_MODULE_AUDIT_WAVE_01_RESULT.md`
-- New `SOP-DRIFT` / `TRAINING-GAP` / app-bug entries in [../BUG_REGISTER.md](../BUG_REGISTER.md)
-- SOP text fixes + `docs/sops/SOP_INDEX.md` / `SOP_CHANGELOG.md`
-- [AGENT_HANDOFF_LOG.md](./AGENT_HANDOFF_LOG.md)
+## Evidence
 
-## Questions to answer
-1. Which findings are **SOP-DRIFT** (doc fixed in-wave) vs **app bugs** (→ Fix Agent, Sam-gated)
-   vs **TRAINING-GAP** vs **ACCEPTED-GAP candidates** (→ Sam)?
-2. Any **deploy-blocking** drift (a staff role can't run the journey from the SOP)?
-3. Did every audited SOP get a valid **Section 14**?
-4. Did anything stray outside no-code scope? (It should not have.)
+- [SOP_MODULE_AUDIT_WAVE_01_RESULT.md](../SOP_MODULE_AUDIT_WAVE_01_RESULT.md)
+- [BUG_REGISTER.md](../BUG_REGISTER.md) — SOP Wave 01 section
+- [SOP_CHANGELOG.md](../../sops/SOP_CHANGELOG.md)
 
-## Likely next steps
-- Present ACCEPTED-GAP candidates + any app-bug Fix-Agent packet to Sam (gated).
-- Continue SOP audit (`-WAVE-02`: folders 12–17) if 01 was scoped/split.
-- Or move to **P0 E2E re-verification** (Hybrid-by-risk) once SOP drift is logged.
+## Claude tasks
 
-## Output
-Update state files, append handoff log, write the next packet.
+1. Confirm audit scope held (no product code).
+2. Prioritize **Wave 02** SOP rewrite packet vs **Fix Agent** for 5 app bugs.
+3. Present **ACCEPTED-GAP candidates** to Sam (portal dual-stack, whs-setup SOP).
+4. Decide whether deploy gate accepts “drift logged + Wave 02 planned” or blocks until Sales/RFQ SOPs rewritten.
+
+**Approval required before Fix Agent or next product-code wave:** Yes.

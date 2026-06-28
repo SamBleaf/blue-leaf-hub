@@ -26,15 +26,21 @@ Admin and managers who approve timesheets and manage site workers. Site workers 
 - When a worker cannot access the PWA and needs their timesheet entered manually
 
 ## 3. What this does
-The Workforce module has three tabs for managers and a separate mobile PWA for workers:
+The **Timesheets** module (sidebar label; route `/workforce`) has these manager tabs:
 
-**Approvals tab** — lists all submitted timesheets waiting for manager approval. Review each entry, approve or reject.
+**Approvals** — submitted timesheets waiting for approval.
 
-**Mass Fill tab** — lets a manager enter a week of timesheets for multiple workers at once. Useful when workers do not have phones or prefer not to use the app.
+**Snapshot** — week-at-a-glance crew hours summary.
 
-**History tab** — a searchable record of all past timesheets (approved, rejected, and pending) filtered by employee, project, or date range.
+**Mass Fill** — bulk entry for a whole crew when workers are not using the PWA.
 
-**Worker PWA** (`/worker`) — the mobile interface where workers log their own hours and check their assigned site tasks for the day. No login required beyond the site link.
+**History** — searchable past timesheets (approved, rejected, pending).
+
+**Team** — employee directory and worker magic-link issuance (`POST /api/workforce/employees/:id/worker-link`).
+
+**Planner** (admin/supervisor) — crew allocation planner.
+
+**Worker PWA** (`/worker?token=…`) — mobile interface where workers log hours and check site tasks. Workers **must open the magic link** issued from Team — there is no name-picker login on `/worker` alone.
 
 ## 4. Before you start
 - Employees exist in the system (check the Team Directory tab)

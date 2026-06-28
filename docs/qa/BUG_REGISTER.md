@@ -3,7 +3,164 @@
 **Status:** W01 mapped + RFQ phases 2–5 (2026-06-22)  
 **Template:** Each entry needs reproduction steps, severity, owner module, regression test ID when fixed.
 
-**Naming:** `W01-DRIFT-*` = Workflow 01 Lead/CRM. `DRIFT-*` (no prefix) = RFQ/Tender. `UI-<MODULE>-###` = Wave 01A UI/UX discovery (2026-06-28).
+**Naming:** `W01-DRIFT-*` = Workflow 01 Lead/CRM. `DRIFT-*` (no prefix) = RFQ/Tender. `UI-<MODULE>-###` = Wave 01A UI/UX discovery (2026-06-28). `SOP-*` = SOP Module Audit Wave 01 (2026-06-29).
+
+---
+
+## Open — SOP Module Audit Wave 01 (2026-06-29)
+
+> Source: [SOP_MODULE_AUDIT_WAVE_01_RESULT.md](./SOP_MODULE_AUDIT_WAVE_01_RESULT.md) · **71 SOPs audited, no product code.**
+
+### SOP-DRIFT-SEC14-02 — Sales §14 incomplete (module aggregate)
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | Medium |
+| **Module** | 02_sales (7 SOPs) |
+| **Summary** | 5/7 SOPs missing full §14 (TC-01..05 + feature TC). 6/7 have substantive navigation drift (Lead Detail command-centre vs tabs). |
+| **blocks-deployability** | yes (training gate) |
+| **Status** | open — Wave 02 SOP rewrite |
+
+### SOP-DRIFT-SEC14-04 — RFQ Engine §14 + navigation drift (module aggregate)
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | High |
+| **Module** | 04_rfq_engine (9 SOPs) |
+| **Summary** | 8/9 §14 gaps; 04-02–04-09 describe wrong entry path (RFQ Engine vs Quote Tracker). 04-01 fixed in Wave 01. |
+| **blocks-deployability** | yes |
+| **Status** | open — Wave 02 |
+
+### SOP-DRIFT-02-SALES — Lead Detail tab SOPs stale (Pass 3A redesign)
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | High |
+| **Module** | Sales |
+| **SOPs** | 02-02, 02-03, 02-04, 02-05, 02-06, 02-07 |
+| **Summary** | SOPs reference Overview/Qualifying/Blueprint/Conversations tabs; app uses command-centre layout, Activity panel, + Add Transcript, BlueprintAgent FAB. |
+| **blocks-deployability** | yes |
+| **Status** | open — Wave 02 rewrite |
+
+### SOP-DRIFT-03-TENDER — Tender Board filter model changed
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | Medium |
+| **Module** | 03_tendering |
+| **SOP** | 03-03 |
+| **Summary** | SOP describes status filter tabs; app uses Board/Actions/List/Scorecard view chips. |
+| **blocks-deployability** | yes |
+| **Status** | open |
+
+### SOP-BUG-02-07 — Conversation history not viewable
+
+| Field | Value |
+|-------|-------|
+| **Type** | bug |
+| **Severity** | Medium |
+| **Module** | Sales |
+| **SOP** | 02-07 |
+| **Summary** | Clicking saved conversation opens new-transcript flow; no read-only history view. |
+| **blocks-deployability** | no |
+| **Status** | open — Fix Agent |
+
+### SOP-BUG-05-05 — Global Gantt task click navigation missing
+
+| Field | Value |
+|-------|-------|
+| **Type** | bug |
+| **Severity** | Low |
+| **Module** | Operations |
+| **SOP** | 05-05 (SOP updated to remove promise) |
+| **Summary** | `GlobalGanttPanel` does not navigate to project schedule on task click. |
+| **blocks-deployability** | no |
+| **Status** | open — Fix Agent or accepted descope |
+
+### SOP-BUG-07-03 — Site diary edit and date filter missing
+
+| Field | Value |
+|-------|-------|
+| **Type** | bug |
+| **Severity** | Medium |
+| **Module** | Site Diary |
+| **SOP** | 07-03 |
+| **Summary** | SOP promises date range filter + Edit→Save; `DiaryRow` read-only; no PATCH route. |
+| **blocks-deployability** | no |
+| **Status** | open — Fix Agent |
+
+### SOP-BUG-09-JOBVIEW — Finance Job View tab unreachable
+
+| Field | Value |
+|-------|-------|
+| **Type** | bug |
+| **Severity** | Medium |
+| **Module** | Finance |
+| **SOP** | 09-07 |
+| **Summary** | FinanceManager Job View tab → `/finance/jobs` renders JobDashboardSelector; legacy JobFinancials panel unreachable. |
+| **blocks-deployability** | no |
+| **Status** | open — Fix Agent |
+
+### SOP-BUG-11-12 — Portal v2 admin access gaps
+
+| Field | Value |
+|-------|-------|
+| **Type** | bug |
+| **Severity** | Medium |
+| **Module** | Client Portal |
+| **SOP** | 11-10, 11-12 |
+| **Summary** | No link from v1 PortalAdmin to v2 console; `PortalV2Admin` admin-only (SOP lists supervisor). |
+| **blocks-deployability** | no |
+| **Status** | open — Fix Agent |
+
+### SOP-GAP-PORTAL-STACK — Legacy v1 vs v2 portal coexistence (candidate)
+
+| Field | Value |
+|-------|-------|
+| **Type** | ACCEPTED-GAP candidate |
+| **Severity** | Medium |
+| **Module** | 11_client_portal |
+| **Summary** | v1 `/portal/:token` + v1 PortalAdmin coexist with v2 `/client-portal` + PortalV2Admin. SOPs 11-01–11-09 don't state when each applies. **Sam must decide** canonical path for new projects. |
+| **blocks-deployability** | yes (training) |
+| **Status** | **candidate — not accepted** |
+
+### SOP-GAP-WHS-SETUP — Missing SOP for WHS Setup engine (candidate)
+
+| Field | Value |
+|-------|-------|
+| **Type** | ACCEPTED-GAP candidate |
+| **Severity** | Low |
+| **Module** | 08_whs |
+| **Summary** | Route `/operations/:projectId/whs-setup` (WhsEngine) documented in app but no SOP in 08_whs. |
+| **blocks-deployability** | no |
+| **Status** | **candidate — not accepted** |
+
+### SOP-DRIFT-SEC14-07 — Site diary §14 missing (all 3 SOPs)
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | Medium |
+| **Module** | 07_site_diary |
+| **blocks-deployability** | yes |
+| **Status** | open — §14 backfill Wave 02 |
+
+### SOP-DRIFT-SEC14-11 — Client portal legacy SOPs §14 + v2 matrix
+
+| Field | Value |
+|-------|-------|
+| **Type** | SOP-DRIFT |
+| **Severity** | High |
+| **Module** | 11_client_portal |
+| **Summary** | 9 legacy SOPs missing §14; v2 SOPs 11-12 outdated on Documents UI; dual-stack guidance absent. |
+| **blocks-deployability** | yes |
+| **Status** | open |
+
+**Wave 01 SOP fixes applied:** 04-01, 05-05, 05-06, 08-02/05/06, 10-01. See [SOP_CHANGELOG.md](../sops/SOP_CHANGELOG.md).
 
 ---
 

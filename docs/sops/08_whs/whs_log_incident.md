@@ -32,7 +32,7 @@ Records a WHS report against the project: the type, severity, what happened, the
 
 ## 5. Step-by-step process
 
-1. Open the project in Operations, then open **WHS → Reports**
+1. Open the project in Operations, then open **WHS** → **Incidents** tab (Report incident)
 2. Click **New report**
 3. Fill in:
    - **Report type** (required) — e.g. incident, near miss, hazard
@@ -126,7 +126,7 @@ Next review: 2026-11-30
 - [ ] Pass  [ ] Fail
 
 **TC-05 — Report appears in list**
-1. After logging, open WHS → Reports
+1. After logging, open WHS → **Incidents**
 2. Expected: the new report appears at the top (newest first) with `open` status
 3. Expected: `GET /api/whs/:projectId/reports` includes it
 - [ ] Pass  [ ] Fail

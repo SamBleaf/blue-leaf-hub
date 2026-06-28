@@ -31,12 +31,15 @@ Shows all projects and all their (non-deleted) schedule tasks on one combined Ga
 
 ## 5. Step-by-step process
 
-1. From Operations, open the **Global Gantt**
-2. All projects' tasks load onto one timeline, ordered by start date
-3. Use the **trade filter** to show only one trade across all sites (e.g. all "Concrete" tasks everywhere)
-4. Use the **month zoom** to widen or narrow the time window
-5. Each bar is colour-coded by project so you can tell sites apart
-6. Click a task to jump to its project schedule
+1. Go to **Operations** (`/operations`)
+2. Scroll to the **All Projects — Schedule** panel (collapsible global Gantt section on the dashboard — not a separate route)
+3. Expand the panel if collapsed — all projects' tasks load onto one timeline, ordered by start date
+4. Use the **trade filter** to show only one trade across all sites (e.g. all "Concrete" tasks everywhere)
+5. Use the **month zoom** to widen or narrow the time window
+6. Each bar is colour-coded by project so you can tell sites apart
+7. To edit a task, open that project's schedule from the project card (SOP 06-03) — the global panel is read-only aggregation
+
+> **Note:** A conflict badge on this panel links to the trade-conflict banner (SOP 05-06).
 
 ## 6. What happens next
 
