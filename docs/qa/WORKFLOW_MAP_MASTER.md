@@ -80,6 +80,7 @@ flowchart LR
 
 | Doc | Role |
 |-----|------|
+| [COMPREHENSIVE_HARDENING_MASTER_PLAN.md](./COMPREHENSIVE_HARDENING_MASTER_PLAN.md) | **Autonomous hardening machine — constitution** (loop, agents, gates, handoff in [hardening_loop/](./hardening_loop/)) |
 | [BATCH_C_REVIEW_PACK.md](./BATCH_C_REVIEW_PACK.md) | Batch C review — P0-C candidates (W10–W15) |
 | [BATCH_B_REVIEW_PACK.md](./BATCH_B_REVIEW_PACK.md) | Batch B review — P0-B1–B5 candidates (W06–W09) |
 | [BATCH_A_REVIEW_PACK.md](./BATCH_A_REVIEW_PACK.md) | Days 6–8 actionable review (P0 candidates, tests, decisions) |

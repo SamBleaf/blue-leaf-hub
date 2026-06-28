@@ -116,7 +116,8 @@
     "test:w18-portal-api01:write": "node scripts/batch-a/run-w18-portal-api01-invite.mjs --write",
     "test:w18-portal-ui01": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/portal/portal-v2-admin-overview.spec.js --project=chromium-desktop",
     "test:qa-sec-baseline": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/security/unauthenticated-routes.spec.js --project=api-security",
-    "test:w22-crm-security": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/security/crm-send-role.spec.js --project=api-security"
+    "test:w22-crm-security": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/security/crm-send-role.spec.js --project=api-security",
+    "hardening:watch": "node scripts/hardening-watch.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
