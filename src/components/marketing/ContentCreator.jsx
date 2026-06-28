@@ -9,9 +9,13 @@ import {
   PLATFORMS,
   PLATFORM_TO_CHANNEL,
   deriveAnglesFromAnalysis,
+  deriveJoshLabels,
+  deriveRiskLevel,
   DEMO_ANGLES,
   demoDraftFor,
 } from "./creatorData.js";
+
+const RISK_ORDER = { low: 0, medium: 1, high: 2 };
 
 // ContentCreator (Run B) — media-first Content Studio at /marketing/studio.
 // "The asset is the brief": select media → see analysis → pick an angle → target → generate
@@ -47,6 +51,8 @@ export default function ContentCreator() {
   const [genError, setGenError] = useState("");
   const [savingIdx, setSavingIdx] = useState(null);
   const [savedIdx, setSavedIdx] = useState({});
+  const [savingPackage, setSavingPackage] = useState(false);
+  const [packageSaved, setPackageSaved] = useState(false);
 
   // Resolve ?asset_id= deep link → media asset (inherits Run A seeding contract).
   useEffect(() => {
@@ -99,6 +105,7 @@ export default function ContentCreator() {
     setGenError("");
     setPackageDrafts([]);
     setSavedIdx({});
+    setPackageSaved(false);
     const topic = mode === "idea" ? ideaTopic.trim() : selectedAngle?.title || asset?.analysis?.summary || "";
     const results = [];
     // Sequential (not parallel) — gentle on the AI service and deterministic ordering.
@@ -157,6 +164,55 @@ export default function ContentCreator() {
     setSavingIdx(null);
     if (ok) setSavedIdx((prev) => ({ ...prev, [idx]: data?.item?.id || data?.id || "saved" }));
     else setGenError(error || "Could not save draft (needs a running API / staging).");
+  }
+
+  // Group the generated (non-demo) drafts into a persisted content package and send it to the
+  // Approval Queue. Demo drafts are excluded so placeholder copy never reaches the queue.
+  async function savePackage() {
+    const realDrafts = packageDrafts.filter((d) => !d.draft.demo);
+    if (!realDrafts.length) {
+      setGenError("No savable drafts — demo drafts cannot be sent to the Approval Queue.");
+      return;
+    }
+    setSavingPackage(true);
+    setGenError("");
+    let maxRisk = "low";
+    const labelSet = new Set();
+    const drafts = realDrafts.map((item) => {
+      const labels = deriveJoshLabels({ reviewScores: item.draft.review_scores, hasMedia });
+      const risk = deriveRiskLevel(item.draft.review_scores);
+      labels.forEach((l) => labelSet.add(l));
+      if (RISK_ORDER[risk] > RISK_ORDER[maxRisk]) maxRisk = risk;
+      return {
+        channel: PLATFORM_TO_CHANNEL[item.platform] || "instagram",
+        title: item.draft.content?.title || "",
+        body: item.draft.content?.body || "",
+        cta: item.draft.content?.cta || "",
+        hashtags: item.draft.content?.hashtags || [],
+        reviewScores: item.draft.review_scores || {},
+        operationalLabels: labels,
+        riskLevel: risk,
+        generationMetadata: {
+          angle_id: selectedAngle?.id || null,
+          why: selectedAngle?.why || null,
+          audience: audiences,
+          platform: item.platform,
+        },
+      };
+    });
+    const { ok, error } = await apiPost("/api/marketing/packages", {
+      topic: selectedAngle?.title || ideaTopic || null,
+      pillar: selectedAngle?.pillar || asset?.analysis?.suggested_pillar || null,
+      angle: selectedAngle || null,
+      audience: audiences,
+      platforms,
+      sourceAssetId: asset?.id && !asset?.demo ? asset.id : null,
+      reviewSummary: { risk: maxRisk, labels: Array.from(labelSet) },
+      drafts,
+    });
+    setSavingPackage(false);
+    if (ok) setPackageSaved(true);
+    else setGenError(error || "Could not save the package (needs a running API / staging).");
   }
 
   return (
@@ -427,6 +483,31 @@ export default function ContentCreator() {
               </div>
             </div>
           ))}
+
+          {packageDrafts.length > 0 && (
+            <div className="rounded-card border border-hairline bg-page p-3">
+              {packageSaved ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm text-accent">
+                  <span className="font-semibold">Package sent to Approval Queue.</span>
+                  <Link to="/marketing/approval" className="font-semibold text-primary underline">
+                    Open Approval Queue
+                  </Link>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={savePackage}
+                  disabled={savingPackage || packageDrafts.every((d) => d.draft.demo)}
+                  className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingPackage ? "Saving package…" : "Send package to Approval Queue"}
+                </button>
+              )}
+              {packageDrafts.every((d) => d.draft.demo) && !packageSaved && (
+                <p className="mt-2 text-[11px] text-muted">Demo drafts cannot be sent — generate real drafts on staging.</p>
+              )}
+            </div>
+          )}
         </section>
       </div>
 

@@ -63,6 +63,7 @@ import { registerCostIntelligenceRoutes } from "./lib/costIntelligenceRoutes.mjs
 import { registerMarketingRoutes } from "./lib/marketingRoutes.mjs";
 import { registerMarketingCommandRoutes } from "./lib/marketingCommandRoutes.mjs";
 import { registerMarketingCampaignRoutes } from "./lib/marketingCampaignRoutes.mjs";
+import { registerMarketingPackageRoutes } from "./lib/marketingPackageRoutes.mjs";
 import { registerAdminRoutes } from "./lib/adminRoutes.mjs";
 import { registerWorkforceRoutes } from "./lib/workforceRoutes.mjs";
 import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligenceRoutes.mjs";
@@ -931,6 +932,7 @@ registerCostIntelligenceRoutes(app);
 registerMarketingRoutes(app);
 registerMarketingCampaignRoutes(app);
 registerMarketingCommandRoutes(app);
+registerMarketingPackageRoutes(app);
 registerAdminRoutes(app);
 registerWorkforceRoutes(app);
 registerMarketingIntelligenceRoutes(app);
