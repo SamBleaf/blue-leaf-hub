@@ -21,6 +21,8 @@ Legend: ✅ done · ⏳ pending · ⛔ blocked / needs Sam
 | Demo never shown on a successful-but-empty response; never implies a save | ✅ |
 | Module readiness panel (Command Centre) | ✅ |
 | Field helper text (Vault filters, Planner template/slot/channel, Studio modes) | ✅ |
+| Content Studio & package-review polish (numbered steps, audience/platform helpers, package summary, shared review legend, next-step copy) | ✅ |
+| Review vocabulary consistent (shared `ReviewLegend` in Studio + Approval Queue) | ✅ |
 | SOP suite 18-01..18-08 (14-section template) | ✅ (copy refresh optional) |
 | Lint + build clean | ✅ |
 | Legacy tab retirement (`/library`, `/campaigns`, `/media`, `/lists`) | ⏳ after runtime verify |

@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { apiFetch, apiPost } from "../../lib/apiFetch.js";
 import AngleCards from "./AngleCards.jsx";
 import ReviewSummary from "./ReviewSummary.jsx";
+import ReviewLegend from "./ReviewLegend.jsx";
 import MediaPickerModal from "./MediaPickerModal.jsx";
 import {
   AUDIENCES,
@@ -264,7 +265,7 @@ export default function ContentCreator() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* LEFT — ASSET */}
         <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Asset</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">1 · Source</h2>
 
           {mode === "idea" ? (
             <div className="rounded-card border border-hairline bg-surface p-4">
@@ -335,7 +336,7 @@ export default function ContentCreator() {
 
         {/* MIDDLE — DECISIONS */}
         <section className="space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Decisions</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">2 · Decisions</h2>
 
           {mode === "media" && asset && (
             <div className="rounded-card border border-hairline bg-surface p-4">
@@ -374,7 +375,8 @@ export default function ContentCreator() {
 
           {/* Targeting */}
           <div>
-            <p className="mb-1.5 text-sm font-medium text-ink">Audience <span className="text-xs font-normal text-muted">(max 2)</span></p>
+            <p className="mb-1 text-sm font-medium text-ink">Audience <span className="text-xs font-normal text-muted">(max 2)</span></p>
+            <p className="mb-1.5 text-[11px] text-muted">Who the post is written for — shapes the tone. Optional.</p>
             <div className="flex flex-wrap gap-1.5">
               {AUDIENCES.map((a) => (
                 <button
@@ -394,7 +396,8 @@ export default function ContentCreator() {
           </div>
 
           <div>
-            <p className="mb-1.5 text-sm font-medium text-ink">Platforms</p>
+            <p className="mb-1 text-sm font-medium text-ink">Platforms</p>
+            <p className="mb-1.5 text-[11px] text-muted">One draft per platform. Manual posting only — nothing is published from here.</p>
             <div className="flex flex-wrap gap-1.5">
               {PLATFORMS.map((p) => (
                 <button
@@ -425,15 +428,44 @@ export default function ContentCreator() {
           >
             {generating ? "Generating…" : "Generate package"}
           </button>
+          {!canGenerate && !generating && (
+            <p className="text-[11px] text-muted">
+              {platforms.length === 0
+                ? "Pick at least one platform to generate."
+                : mode === "idea"
+                  ? "Enter an idea above to generate."
+                  : "Pick an angle to generate."}
+            </p>
+          )}
         </section>
 
         {/* RIGHT — PACKAGE */}
         <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Package</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">3 · Review &amp; send</h2>
+          <p className="text-[11px] text-muted">Edit each draft, check the labels, then send to the Approval Queue. Nothing is posted from here.</p>
 
           {mode === "idea" && !hasMedia && packageDrafts.length > 0 && (
             <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
               Needs photo — attach a project photo before approving or scheduling.
+            </div>
+          )}
+
+          {packageDrafts.length > 0 && (
+            <div className="rounded-card border border-hairline bg-surface p-3 text-xs">
+              <p className="mb-1.5 font-semibold uppercase tracking-wide text-muted">This package</p>
+              <div className="space-y-1">
+                {[
+                  ["Angle", selectedAngle?.title || ideaTopic || "—"],
+                  ["From", asset ? (asset.original_filename || asset.analysis?.summary || "Selected photo") : "No photo (idea)"],
+                  ["Audience", audiences.length ? audiences.map((v) => AUDIENCES.find((a) => a.value === v)?.label || v).join(", ") : "Not set"],
+                  ["Platforms", platforms.join(", ") || "—"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <span className="w-16 shrink-0 text-muted">{k}</span>
+                    <span className="flex-1 text-ink">{v}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -456,6 +488,7 @@ export default function ContentCreator() {
                 {item.draft.content?.title && <span className="text-xs text-muted">{item.draft.content.title}</span>}
               </div>
 
+              <p className="text-[11px] font-medium text-muted">Draft — edit before posting</p>
               <textarea
                 value={item.draft.content?.body || ""}
                 onChange={(e) => updateDraftBody(idx, e.target.value)}
@@ -491,11 +524,16 @@ export default function ContentCreator() {
           {packageDrafts.length > 0 && (
             <div className="rounded-card border border-hairline bg-page p-3">
               {packageSaved ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm text-accent">
-                  <span className="font-semibold">Package sent to Approval Queue.</span>
-                  <Link to="/marketing/approval" className="font-semibold text-primary underline">
-                    Open Approval Queue
-                  </Link>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-accent">
+                    <span className="font-semibold">Package sent to Approval Queue.</span>
+                    <Link to="/marketing/approval" className="font-semibold text-primary underline">
+                      Open Approval Queue →
+                    </Link>
+                  </div>
+                  <p className="text-[11px] text-muted">
+                    Next: Josh or Sam reviews it. Once approved it becomes schedule-ready in the Calendar — then you post manually and mark it as posted.
+                  </p>
                 </div>
               ) : (
                 <button
@@ -512,6 +550,8 @@ export default function ContentCreator() {
               )}
             </div>
           )}
+
+          {packageDrafts.length > 0 && <ReviewLegend />}
         </section>
       </div>
 

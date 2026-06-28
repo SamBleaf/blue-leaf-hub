@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../../lib/apiFetch.js";
 import { DEMO_ASSET } from "./creatorData.js";
+import { DemoBanner } from "./MarketingStateBanner.jsx";
 
 // MediaPickerModal (Run B) — pick a media asset from the vault. Falls back to a safe
 // demo asset when the vault is unreachable (no staging data), so the flow stays usable.
@@ -17,7 +18,8 @@ export default function MediaPickerModal({ open, onClose, onSelect }) {
       const { ok, data } = await apiFetch("/api/marketing/media?limit=24");
       if (cancelled) return;
       const list = data?.assets || data?.media || data?.items || [];
-      if (ok && list.length) {
+      if (ok) {
+        // Live response (even if empty) → real media or a true empty state, never demo.
         setAssets(list);
         setUsingDemo(false);
       } else {
@@ -47,13 +49,17 @@ export default function MediaPickerModal({ open, onClose, onSelect }) {
         </div>
 
         {usingDemo && (
-          <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
-            No vault media reachable in this environment — showing a demo asset so you can try the flow.
+          <div className="mb-3">
+            <DemoBanner note="Showing a demo asset so you can try the flow." />
           </div>
         )}
 
         {loading ? (
           <p className="p-6 text-sm text-muted">Loading media…</p>
+        ) : assets.length === 0 ? (
+          <p className="p-6 text-center text-sm text-muted">
+            No media yet. Upload site photos from the Media tab, then pick one here.
+          </p>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {assets.map((a) => (

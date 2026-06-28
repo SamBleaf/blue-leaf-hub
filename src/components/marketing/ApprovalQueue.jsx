@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPatch } from "../../lib/apiFetch.js";
 import JoshLabelBadge from "./JoshLabelBadge.jsx";
+import ReviewLegend from "./ReviewLegend.jsx";
 import { DemoBanner, ErrorNote } from "./MarketingStateBanner.jsx";
 
 // Approval Queue foundation (Run C1) — lists content packages awaiting review and lets Josh/Sam
@@ -94,6 +95,8 @@ export default function ApprovalQueue() {
       {usingDemo && <DemoBanner note="The package below is an example so you can see the review layout." />}
 
       <ErrorNote error={error} />
+
+      <ReviewLegend />
 
       {loading && (
         <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">Loading queue…</div>
