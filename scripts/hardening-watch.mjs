@@ -394,8 +394,14 @@ function runOnce() {
   try {
     execSync(cmd, { cwd: REPO_ROOT, stdio: "inherit" });
   } catch (e) {
-    writeBlocked("agent command failed", [`Command: ${cmd}`, `Error: ${e.message}`]);
-    setSamGate(false);
+    // Command never produced a valid handoff (e.g. binary not found / bad template). This is a
+    // CONFIG issue, not a Sam decision — preserve next_agent, write no blocker, just report.
+    console.log(`\n${line()}`);
+    console.log("  ✗ agent command failed — config/template issue (state preserved; no blocker):");
+    console.log(`     command : ${cmd}`);
+    console.log(`     error   : ${(e.message || "").split("\n")[0]}`);
+    console.log(`  Fix ${agent === "cursor" ? "HARDENING_CURSOR_CMD" : "HARDENING_CLAUDE_CMD"} (or unset it for manual mode), then re-run. next_agent stays ${agent}.`);
+    console.log(line("═"));
     return { status: "agent-failed", code: 5 };
   }
 
