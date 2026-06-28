@@ -142,6 +142,20 @@ export default function Settings() {
       <CompanyCostModel />
 
       <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-primary">Data Cleanup</h2>
+        <p className="mt-1 text-sm text-muted">
+          Remove test-marked records (BLH TEST / __BATCH_A__ / __E2E / __DRYRUN / __DEMO…) left over from building.
+          Admin only; deletes test data only.
+        </p>
+        <Link
+          to="/settings/data-cleanup"
+          className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
+        >
+          Open Data Cleanup →
+        </Link>
+      </section>
+
+      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Email signature</h2>
         <p className="mt-1 text-sm text-muted">Used for RFQ emails and reminders. Stored in the browser; export to Supabase below when online.</p>
         <button

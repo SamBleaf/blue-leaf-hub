@@ -123,5 +123,93 @@ export function registerAdminRoutes(app) {
     }
   );
 
+  // ── Data Cleanup (admin) ────────────────────────────────────────────────────
+  // Anchored-at-start test markers. Real records never start with these, so matching is safe.
+  const TEST_MARKERS = ["BLH TEST%", "__BLH TEST%", "__HARDENING TEST%", "__BATCH_A__%", "BATCHA%", "BATCH A%", "__E2E%", "E2E %", "DEBUG%", "DEBUG2%", "__DRYRUN%", "__DEMO%", "__P0A5%", "__RFQ TEST%"];
+
+  async function scanTable(sb, table, col) {
+    const map = new Map();
+    for (const m of TEST_MARKERS) {
+      const { data } = await sb.from(table).select(`id, ${col}`).ilike(col, m);
+      for (const r of data || []) map.set(r.id, r[col]);
+    }
+    return [...map.entries()].map(([id, label]) => ({ id, label }));
+  }
+
+  // Re-validate ids server-side: only ids that STILL match a test marker survive. The tool can
+  // therefore never delete a real record, even if the client sends a bad id.
+  async function testMarkedIds(sb, table, col, ids) {
+    if (!ids?.length) return [];
+    const safe = new Set();
+    for (const m of TEST_MARKERS) {
+      const { data } = await sb.from(table).select("id").ilike(col, m).in("id", ids);
+      for (const r of data || []) safe.add(r.id);
+    }
+    return ids.filter((id) => safe.has(id));
+  }
+
+  // GET /api/admin/cleanup/scan — list test-marked projects/jobs/leads.
+  app.get("/api/admin/cleanup/scan", requireAuth, requireRole("admin"), async (_req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+      const [projects, jobs, leads] = await Promise.all([
+        scanTable(sb, "projects", "address"),
+        scanTable(sb, "jobs", "address"),
+        scanTable(sb, "leads", "name"),
+      ]);
+      res.json({ ok: true, projects, jobs, leads });
+    } catch (err) {
+      console.error("[admin/cleanup/scan]", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/admin/cleanup/delete { projectIds, jobIds, leadIds }
+  // Deletes only test-marked records (re-validated). Projects go via admin_delete_projects()
+  // which bypasses the append-only audit trigger; jobs/leads delete directly.
+  app.post("/api/admin/cleanup/delete", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+      const { projectIds = [], jobIds = [], leadIds = [] } = req.body || {};
+
+      const pSafe = await testMarkedIds(sb, "projects", "address", projectIds);
+      const jSafe = await testMarkedIds(sb, "jobs", "address", jobIds);
+      const lSafe = await testMarkedIds(sb, "leads", "name", leadIds);
+      const rejected =
+        (projectIds.length - pSafe.length) + (jobIds.length - jSafe.length) + (leadIds.length - lSafe.length);
+
+      const counts = { projects: 0, jobs: 0, leads: 0 };
+
+      if (pSafe.length) {
+        // Clear children that may not cascade, then delete projects past the audit trigger.
+        await sb.from("workforce_allocations").delete().in("project_id", pSafe);
+        await sb.from("schedule_tasks").delete().in("project_id", pSafe);
+        const { data, error } = await sb.rpc("admin_delete_projects", { p_ids: pSafe });
+        if (error) {
+          const hint = /admin_delete_projects|PGRST202|function/i.test(`${error.message} ${error.code}`)
+            ? "Migration 123 (admin_delete_projects) isn't applied yet — apply it in Supabase, then retry."
+            : error.message;
+          return res.status(500).json({ ok: false, error: hint });
+        }
+        counts.projects = typeof data === "number" ? data : pSafe.length;
+      }
+      if (jSafe.length) {
+        const { data } = await sb.from("jobs").delete().in("id", jSafe).select("id");
+        counts.jobs = (data || []).length;
+      }
+      if (lSafe.length) {
+        const { data } = await sb.from("leads").delete().in("id", lSafe).select("id");
+        counts.leads = (data || []).length;
+      }
+
+      res.json({ ok: true, ...counts, rejected });
+    } catch (err) {
+      console.error("[admin/cleanup/delete]", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   console.log("[admin] routes registered");
 }

@@ -13,6 +13,7 @@ import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
 import UserManagement from "./pages/UserManagement.jsx";
+import DataCleanup from "./pages/DataCleanup.jsx";
 import DocumentsTemplates from "./pages/DocumentsTemplates.jsx";
 import FieldLayout from "./pages/field/FieldLayout.jsx";
 import FieldHome from "./pages/field/FieldHome.jsx";
@@ -246,6 +247,10 @@ export default function App() {
                 <Route
                   path="/settings/users"
                   element={<RoleRoute element={<UserManagement />} allowed={["admin"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/settings/data-cleanup"
+                  element={<RoleRoute element={<DataCleanup />} allowed={["admin"]} redirectTo="/home" />}
                 />
                 <Route
                   path="/documents-templates"
