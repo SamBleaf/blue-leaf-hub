@@ -59,6 +59,11 @@ export const ROUTES = [
   { name: "finance-command-centre", area: "Finance",          role: "admin",      path: "/finance/jobs/job-1001",             state: "Job command centre (finance)" },
   { name: "workforce",              area: "Workforce",        role: "admin",      path: "/workforce",                         state: "Approvals / team / history" },
 
+  // ── CRM / Relationships (Sales sub-routes) ──────────────────────────────────
+  { name: "crm-dashboard",          area: "CRM",              role: "admin",      path: "/sales/dashboard",                   state: "Relationship dashboard — action list + health" },
+  { name: "crm-contacts",           area: "CRM",              role: "admin",      path: "/sales/contacts",                    state: "CRM contacts directory" },
+  { name: "crm-mailing-lists",      area: "CRM",              role: "admin",      path: "/marketing/lists",                   state: "Mailing lists (CRM component under Marketing shell)" },
+
   // ── Supervisor / Field ──────────────────────────────────────────────────────
   { name: "supervisor-home",        area: "Field",            role: "supervisor", path: "/supervisor",                        state: "Supervisor home" },
   { name: "field-home",             area: "Field",            role: "supervisor", path: "/field",                             state: "Field app home" },

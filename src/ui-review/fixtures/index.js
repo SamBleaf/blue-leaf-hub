@@ -21,6 +21,7 @@ import "./workforce.js";
 import "./worker.js";
 import "./field.js";
 import "./portal.js";
+import "./crm.js";
 
 // ── Supabase auth/session shape (a few components read the user via supabase) ────
 route("GET", "/rest/v1/user_profiles", () => {

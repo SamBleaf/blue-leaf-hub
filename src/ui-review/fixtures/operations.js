@@ -73,10 +73,9 @@ route("GET", "/api/operations/trade-conflicts", () => ({
 route("GET", "/api/operations/:projectId", ({ params }) => ({ ok: true, project: PROJECTS.find((p) => p.id === params.projectId) || PROJECTS[0] }));
 route("GET", "/api/projects/:id", ({ params }) => ({ ok: true, project: PROJECTS.find((p) => p.id === params.id) || PROJECTS[0] }));
 
-// ── Direct Supabase reads for OperationsProjectDetail (review shim intercepts supabase.co/rest/v1) ──
-// projects is queried with .single() → MUST return a single OBJECT (not an array). Includes the
-// nested jobs embed + the fields the command centre reads.
-route("GET", "/rest/v1/projects", () => ({
+// ── Direct Supabase reads (Field WHS/Diary + OperationsProjectDetail) ──
+// .select() expects an ARRAY; .single() sends Accept: application/vnd.pgrst.object+json → OBJECT.
+const PROJECT_DETAIL = {
   id: "proj-1", job_id: "job-1001", address: "5A Gibson Street, Marino SA", status: "active",
   buildexact_job_id: "bx-eca075ee", buildexact_link_source: "auto", buildexact_last_sync: "2026-06-25T22:10:00Z",
   tentative_start_date: "2026-04-15", schedule_baseline_locked_at: "2026-04-10T00:00:00Z",
@@ -88,7 +87,17 @@ route("GET", "/rest/v1/projects", () => ({
     { trade: "Electrician", subcontractor: "Voltaic Electrical", quote_amount: 28800 },
   ],
   jobs: { id: "job-1001", address: "5A Gibson Street, Marino SA", won_at: "2026-04-02", dropbox_shared_link: "https://www.dropbox.com/scl/fo/marino-5a", dropbox_link: null, dropbox_internal_path: "/PROJECTS/5A Gibson Street/INTERNAL" },
-}));
+};
+const PROJECT_LIST = [
+  { id: "proj-1", address: "5A Gibson Street, Marino SA", created_at: "2026-04-01T00:00:00Z" },
+  { id: "proj-2", address: "24 Naldera Cres, Glenelg SA", created_at: "2026-03-15T00:00:00Z" },
+  { id: "proj-3", address: "11 Cliff St, Seacliff SA", created_at: "2026-02-20T00:00:00Z" },
+];
+route("GET", "/rest/v1/projects", ({ opts }) => {
+  const accept = String(opts?.headers?.Accept || opts?.headers?.accept || "");
+  if (accept.includes("application/vnd.pgrst.object")) return PROJECT_DETAIL;
+  return PROJECT_LIST;
+});
 route("GET", "/rest/v1/purchase_orders", () => ([
   { id: "po-1", project_id: "proj-1", trade: "Carpenter", status: "issued" },
 ]));

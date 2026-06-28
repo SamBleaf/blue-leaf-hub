@@ -182,7 +182,18 @@ against first-viewport rubric + Sales-standard scorecard. Prior export notes in
 | NEXT_CLAUDE_REVIEW | yes |
 | AGENT_HANDOFF_LOG | yes |
 
-**Next agent:** Claude (review + assemble 01B plan for Sam).
+**Next agent:** Claude (finalize 01B plan for Sam — no Fix Agent needed for Field).
+
+---
+
+## 6. Wave 01A follow-up (2026-06-28)
+
+| Item | Verdict |
+|---|---|
+| UI-FIELD-001/002 | **Fixture-only** — closed; Field **UI LOCKED** |
+| UI-PORTAL-002 | **Fixture gap** — live API consistent; closed |
+| UI-CRM-001 | **Closed** — CRM **UI CONDITIONAL** (UI-CRM-002 mobile table) |
+| UI Review | **171/171 pass** |
 
 ---
 

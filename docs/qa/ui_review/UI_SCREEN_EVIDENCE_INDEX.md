@@ -5,7 +5,7 @@
 
 **Evidence root:** `docs/ui-review/export-2026-06-27/screenshots/<viewport>/<route-name>.png`  
 **Result JSON:** `docs/ui-review/export-2026-06-27/raw/results/<viewport>__<route-name>.json`  
-**Capture command:** `npm run test:ui-review` (2026-06-28 refresh: 156/162 pass)
+**Capture command:** `npm run test:ui-review` — **171/171 pass** (2026-06-28 follow-up)
 
 **Viewports:** desktop `1440×900` · tablet `834×1112` · mobile `390×844`
 
@@ -78,8 +78,8 @@ export folder is the canonical store. Playwright browsers must be installed (`np
 | `/field/home` | mobile | good | `…/mobile/field-home.png` | Pass |
 | `/field/jobs` | mobile | good | `…/mobile/field-jobs.png` | Pass |
 | `/field/tasks` | mobile | good | `…/mobile/field-tasks.png` | Pass |
-| `/field/whs` | desktop/tablet/mobile | **error** | `…/*/field-whs.png` | **Fail** UI-FIELD-001 |
-| `/field/diary` | desktop/tablet/mobile | **error** | `…/*/field-diary.png` | **Fail** UI-FIELD-002 |
+| `/field/whs` | desktop/tablet/mobile | good | `…/*/field-whs.png` | **Pass** (fixture fix) |
+| `/field/diary` | desktop/tablet/mobile | good | `…/*/field-diary.png` | **Pass** (fixture fix) |
 | `/worker` | mobile | good | `…/mobile/worker-home.png` | Pass |
 | `/worker/timesheet/log` | mobile | good | `…/mobile/worker-log-hours.png` | Pass |
 | `/worker/tasks` | mobile | good | `…/mobile/worker-tasks.png` | Pass |
@@ -101,9 +101,12 @@ export folder is the canonical store. Playwright browsers must be installed (`np
 
 | Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
 |----------------|----------|-------|-----------------|------------|
-| `/sales/dashboard` (Relationships) | — | — | _none_ | **Gap** UI-CRM-001 |
-| `/sales/contacts` | — | — | _none_ | **Gap** UI-CRM-001 |
-| Mailing lists (Settings) | — | — | _none_ | **Gap** UI-CRM-001 |
+| `/sales/dashboard` | desktop | good | `…/desktop/crm-dashboard.png` | Pass |
+| `/sales/dashboard` | mobile | good | `…/mobile/crm-dashboard.png` | Pass |
+| `/sales/contacts` | desktop | good | `…/desktop/crm-contacts.png` | Pass |
+| `/sales/contacts` | mobile | table squeeze | `…/mobile/crm-contacts.png` | Pass (UI-CRM-002) |
+| `/marketing/lists` | desktop | good | `…/desktop/crm-mailing-lists.png` | Pass |
+| `/marketing/lists` | mobile | good | `…/mobile/crm-mailing-lists.png` | Pass |
 
 ## Marketing
 

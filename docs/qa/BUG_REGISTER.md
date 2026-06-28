@@ -16,36 +16,33 @@
 | Field | Value |
 |-------|-------|
 | **Type** | UI-ERROR-STATE |
-| **Severity** | High |
+| **Severity** | ~~High~~ → **Low** (reclassified 2026-06-28 follow-up) |
 | **Module** | Field / WHS |
 | **Route / screen** | `/field/whs` |
 | **Role** | supervisor |
-| **Viewport** | desktop 1440×900 · tablet 834×1112 · mobile 390×844 |
-| **Reproduction** | UI Review mode: open `/field/whs?reviewRole=supervisor` (or live supervisor session) |
-| **Expected** | Field WHS checklist renders project list + compliance items |
-| **Actual** | ErrorBoundary: “Something went wrong”; console `projects.map is not a function` |
-| **Evidence** | `docs/ui-review/export-2026-06-27/screenshots/desktop/field-whs.png`; JSON `raw/results/desktop__field-whs.json` |
-| **Suggested test** | `npm run test:ui-review` — `@desktop desktop · field-whs` (extend fixture or fix component) |
-| **blocks-deployability** | **yes** (supervisor field WHS unusable) |
-| **Status** | open — Fix Agent (behaviour/fixture); not 01B |
+| **Viewport** | all three |
+| **Root cause (follow-up)** | **Fixture-only.** `FieldWHS.jsx` correctly expects Supabase `.select()` to return an **array** (`data \|\| []` then `.map`). UI Review `/rest/v1/projects` returned a **single object** (for Operations `.single()`), so `data` was truthy but not array → `projects.map is not a function`. Live PostgREST always returns arrays for list queries. |
+| **Fix applied (test-only)** | `src/ui-review/fixtures/operations.js` — return array unless `Accept: application/vnd.pgrst.object+json` (`.single()`). |
+| **Evidence** | `…/desktop/field-whs.png` (pass after fix); `npm run test:ui-review` 171/171 pass |
+| **Suggested test** | `npm run test:ui-review` — `field-whs` all viewports |
+| **blocks-deployability** | **no** (was review-harness only) |
+| **Status** | **closed — fixture-only (2026-06-28 follow-up)** |
 
 ### UI-FIELD-002 — Field Diary screen crashes (ErrorBoundary)
 
 | Field | Value |
 |-------|-------|
 | **Type** | UI-ERROR-STATE |
-| **Severity** | High |
+| **Severity** | ~~High~~ → **Low** (reclassified 2026-06-28 follow-up) |
 | **Module** | Field |
 | **Route / screen** | `/field/diary` |
 | **Role** | supervisor |
 | **Viewport** | all three |
-| **Reproduction** | UI Review: `/field/diary?reviewRole=supervisor` |
-| **Expected** | Site diary entry list for selected project |
-| **Actual** | ErrorBoundary; console `projects.find is not a function` |
-| **Evidence** | `…/screenshots/mobile/field-diary.png`; `raw/results/mobile__field-diary.json` |
-| **Suggested test** | `npm run test:ui-review` — `field-diary` all viewports |
-| **blocks-deployability** | **yes** |
-| **Status** | open — Fix Agent |
+| **Root cause (follow-up)** | **Same fixture-only issue as UI-FIELD-001.** `FieldDiary.jsx:37` — `projects.find(...)` on non-array from `/rest/v1/projects` object response. Component assumption matches live Supabase behaviour. |
+| **Fix applied (test-only)** | Same `/rest/v1/projects` handler fix in `operations.js`. |
+| **Evidence** | `…/mobile/field-diary.png` (pass after fix) |
+| **blocks-deployability** | **no** |
+| **Status** | **closed — fixture-only (2026-06-28 follow-up)** |
 
 ### UI-NAV-001 — Mobile bottom module nav overflows viewport
 
@@ -94,12 +91,10 @@
 | **Role** | admin |
 | **Viewport** | desktop + mobile |
 | **Reproduction** | UI Review `/finance/jobs/job-1001` — CLAIMS ISSUED/PAID, ACTUAL COSTS, WORKING MARGIN = `—` |
-| **Expected** | “No claims yet” / “No costs booked” explanatory empty state |
-| **Actual** | Blank em-dash tiles read as broken or unloaded |
-| **Evidence** | `…/desktop/finance-command-centre.png` |
-| **Suggested test** | UI Review + live job with zero claims |
+| **Follow-up note** | Fixture used wrong KPI keys (`billed_to_date` vs `claims_issued`). Enriched in `finance.js` — KPIs now render. Remaining gap: live jobs with zero claims still need friendly empty copy (01B). |
+| **Evidence** | `…/desktop/finance-command-centre.png` (post-fix) |
 | **blocks-deployability** | no |
-| **Status** | open — 01B candidate |
+| **Status** | open — **01B empty-state copy** |
 
 ### UI-FINANCE-002 — Progress Claims table squeezed on mobile
 
@@ -160,18 +155,16 @@
 | Field | Value |
 |-------|-------|
 | **Type** | UI-ACTION-CLARITY |
-| **Severity** | Medium |
+| **Severity** | Low (downgraded after follow-up diagnosis) |
 | **Module** | Client Portal |
 | **Route / screen** | `/client-portal` home |
 | **Role** | client |
-| **Viewport** | mobile + desktop |
-| **Reproduction** | Read greeting (“Approve the kitchen benchtop selection”) vs action card (“You're all up to date”) |
-| **Expected** | Pending client decision surfaced in action queue or greeting omits it |
-| **Actual** | Conflicting signals — client may miss required approval |
+| **Root cause (follow-up)** | **Review-mode fixture gap, not live behaviour bug.** `ClientHome.jsx:109` reads `home.actionCount`; greeting reads `home.nextAction.title` (`ClientHome.jsx:19`). Live API builds **both** from `client_actions` in one handler ([portalV2Routes.mjs:258–272](../../server/lib/portalV2Routes.mjs)) — they stay in sync. UI Review fixture set `nextAction` but omitted `actionCount` → false “all up to date”. |
+| **Verdict** | **Fixture-only for review evidence.** Live mismatch would require investigating `client_actions` data, not presentational polish. Optional fixture add: `actionCount: 2` to match session `outstanding_actions`. |
+| **01B?** | UI-PORTAL-001 (`Latest update · —` missing `weekOf`) is **copy/01B**; this item is **not 01B** unless reproduced on live data. |
 | **Evidence** | `…/mobile/portal-home.png` |
-| **Suggested test** | Portal home with pending selection fixture |
-| **blocks-deployability** | no (pilot-gated) |
-| **Status** | open — may need behaviour fix for action queue feed |
+| **blocks-deployability** | no |
+| **Status** | **closed — fixture gap documented (2026-06-28 follow-up)** |
 
 ### UI-WORKFORCE-001 — Crew / app-linked KPIs show zero in populated demo
 
@@ -252,16 +245,26 @@
 | **Type** | UI-VISUAL-REGRESSION |
 | **Severity** | Medium |
 | **Module** | CRM / Mailing List |
-| **Route / screen** | `/sales/dashboard`, `/sales/contacts`; mailing lists in Settings |
-| **Role** | admin |
-| **Viewport** | — (not captured) |
-| **Reproduction** | `e2e/ui-review/routes.mjs` has no CRM routes; no `/api/crm/dashboard` fixture |
-| **Expected** | Desktop + mobile screenshots in Wave 01A |
-| **Actual** | Module lock = UI NOT ASSESSED |
-| **Evidence** | Gap row in [UI_SCREEN_EVIDENCE_INDEX.md](./ui_review/UI_SCREEN_EVIDENCE_INDEX.md) |
-| **Suggested test** | Add routes + fixtures; re-run `npm run test:ui-review` |
-| **blocks-deployability** | no (coverage gap) |
-| **Status** | open — test-only fixture task then re-assess |
+| **Route / screen** | `/sales/dashboard`, `/sales/contacts`, `/marketing/lists` |
+| **Resolution (follow-up)** | Added `src/ui-review/fixtures/crm.js` + routes in `e2e/ui-review/routes.mjs`. `npm run test:ui-review` **171/171 pass**; desktop + mobile screenshots captured. |
+| **Evidence** | `…/desktop/crm-dashboard.png`, `…/mobile/crm-contacts.png`, `…/mobile/crm-mailing-lists.png` |
+| **blocks-deployability** | no |
+| **Status** | **closed (2026-06-28 follow-up)** |
+
+### UI-CRM-002 — CRM contacts table squeezed on mobile
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-MOBILE |
+| **Severity** | Low |
+| **Module** | CRM |
+| **Route / screen** | `/sales/contacts` |
+| **Viewport** | mobile 390×844 |
+| **Reproduction** | UI Review mobile contacts — 3-column table (Name/Type/Status) without card collapse |
+| **Expected** | Card-per-contact or scroll hint on mobile |
+| **Evidence** | `…/mobile/crm-contacts.png` |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
 
 ---
 

@@ -41,11 +41,18 @@ route("GET", "/api/finance/jobs/:jobId/command-centre", ({ params }) => ({
   job: { id: params.jobId, reference: "J1171", address: "5A Gibson Street, Marino SA", client_name: "Denberger Built", status: "active",
          contract_value: 845000, original_contract_value: 820000, progress_billed: 355000, forecast_total_cost: 690000, estimated_total_cost: 668000,
          target_margin_pct: 18.5, floor_margin_pct: 12.0 },
-  kpis: { contract_value: 845000, forecast_cost: 690000, forecast_margin_pct: 18.3, billed_to_date: 355000, cost_to_date: 312000, retention: 0 },
+  kpis: {
+    contract_value: 845000, forecast_cost: 690000, forecast_margin_pct: 18.3, working_margin_pct: 18.3,
+    billed_to_date: 355000, cost_to_date: 312000, claims_issued: 355000, claims_paid: 211250,
+    actual_costs: 312000, committed_cost: 173600, retention: 0,
+  },
   variations: { signed_total: 12500, sent_total: 3200 },
   budget_vs_actual: [
-    { trade_category_id: "tc-1", category: "Carpentry", budget: 184000, committed: 132400, actual: 61200 },
-    { trade_category_id: "tc-2", category: "Concrete", budget: 96000, committed: 41200, actual: 41200 },
+    { trade_category_id: "tc-1", category: "Carpentry", budget_amount: 184000, actual_amount: 61200, forecast_amount: 132400 },
+    { trade_category_id: "tc-2", category: "Concrete", budget_amount: 96000, actual_amount: 41200, forecast_amount: 41200 },
+  ],
+  claims: [
+    { id: "pc-3", stage: "frame", amount: 143650, status: "issued", due_date: "2026-07-02" },
   ],
 }));
 route("GET", "/api/finance/jobs/:jobId/cashflow", () => ({ ok: true, cashflow: { rows: [] }, rows: [] }));
