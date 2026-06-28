@@ -3,7 +3,303 @@
 **Status:** W01 mapped + RFQ phases 2–5 (2026-06-22)  
 **Template:** Each entry needs reproduction steps, severity, owner module, regression test ID when fixed.
 
-**Naming:** `W01-DRIFT-*` = Workflow 01 Lead/CRM. `DRIFT-*` (no prefix) = RFQ/Tender.
+**Naming:** `W01-DRIFT-*` = Workflow 01 Lead/CRM. `DRIFT-*` (no prefix) = RFQ/Tender. `UI-<MODULE>-###` = Wave 01A UI/UX discovery (2026-06-28).
+
+---
+
+## Open — UI/UX Discovery Wave 01A (2026-06-28)
+
+> Source: [ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md](./ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md) · Run `BLH-UIUX-01A-2026-06-28-1` · **No code changed in 01A.**
+
+### UI-FIELD-001 — Field WHS screen crashes (ErrorBoundary)
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-ERROR-STATE |
+| **Severity** | High |
+| **Module** | Field / WHS |
+| **Route / screen** | `/field/whs` |
+| **Role** | supervisor |
+| **Viewport** | desktop 1440×900 · tablet 834×1112 · mobile 390×844 |
+| **Reproduction** | UI Review mode: open `/field/whs?reviewRole=supervisor` (or live supervisor session) |
+| **Expected** | Field WHS checklist renders project list + compliance items |
+| **Actual** | ErrorBoundary: “Something went wrong”; console `projects.map is not a function` |
+| **Evidence** | `docs/ui-review/export-2026-06-27/screenshots/desktop/field-whs.png`; JSON `raw/results/desktop__field-whs.json` |
+| **Suggested test** | `npm run test:ui-review` — `@desktop desktop · field-whs` (extend fixture or fix component) |
+| **blocks-deployability** | **yes** (supervisor field WHS unusable) |
+| **Status** | open — Fix Agent (behaviour/fixture); not 01B |
+
+### UI-FIELD-002 — Field Diary screen crashes (ErrorBoundary)
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-ERROR-STATE |
+| **Severity** | High |
+| **Module** | Field |
+| **Route / screen** | `/field/diary` |
+| **Role** | supervisor |
+| **Viewport** | all three |
+| **Reproduction** | UI Review: `/field/diary?reviewRole=supervisor` |
+| **Expected** | Site diary entry list for selected project |
+| **Actual** | ErrorBoundary; console `projects.find is not a function` |
+| **Evidence** | `…/screenshots/mobile/field-diary.png`; `raw/results/mobile__field-diary.json` |
+| **Suggested test** | `npm run test:ui-review` — `field-diary` all viewports |
+| **blocks-deployability** | **yes** |
+| **Status** | open — Fix Agent |
+
+### UI-NAV-001 — Mobile bottom module nav overflows viewport
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-MOBILE |
+| **Severity** | Medium |
+| **Module** | Global / AppShell |
+| **Route / screen** | All staff modules (e.g. `/finance/jobs/job-1001`, `/sales`, `/workforce`) |
+| **Role** | admin |
+| **Viewport** | mobile 390×844 |
+| **Reproduction** | Open any module with AppShell bottom nav on 390 px width |
+| **Expected** | All module shortcuts reachable without clipping |
+| **Actual** | 7 items (Sales · Tender · Ops · Workforce · Finance · Marketing · Carp) overflow; “Carp” clipped |
+| **Evidence** | `…/mobile/finance-command-centre.png`, `…/mobile/sales-pipeline.png` |
+| **Suggested test** | Visual: `npm run test:ui-review` mobile captures; assert nav scroll or “More” menu |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-SALES-001 — “Needs action” KPI contradicts overdue count
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-WORKFLOW-CLARITY |
+| **Severity** | Low |
+| **Module** | Sales |
+| **Route / screen** | `/sales` pipeline home |
+| **Role** | admin |
+| **Viewport** | desktop + mobile |
+| **Reproduction** | UI Review `/sales` — KPI strip shows Needs action **0**, Overdue **7**, filter “Overdue (8)” |
+| **Expected** | KPI labels align with filter counts or explain difference |
+| **Actual** | Staff may ignore “Needs action” tile; overdue/leads all show red dots |
+| **Evidence** | `…/desktop/sales-pipeline.png` |
+| **Suggested test** | Visual regression on KPI strip after copy/logic alignment |
+| **blocks-deployability** | no |
+| **Status** | open — 01B or accepted-gap |
+
+### UI-FINANCE-001 — Job command centre KPI tiles show em-dash instead of empty-state copy
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-EMPTY-STATE |
+| **Severity** | Medium |
+| **Module** | Finance |
+| **Route / screen** | `/finance/jobs/:id` command centre |
+| **Role** | admin |
+| **Viewport** | desktop + mobile |
+| **Reproduction** | UI Review `/finance/jobs/job-1001` — CLAIMS ISSUED/PAID, ACTUAL COSTS, WORKING MARGIN = `—` |
+| **Expected** | “No claims yet” / “No costs booked” explanatory empty state |
+| **Actual** | Blank em-dash tiles read as broken or unloaded |
+| **Evidence** | `…/desktop/finance-command-centre.png` |
+| **Suggested test** | UI Review + live job with zero claims |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-FINANCE-002 — Progress Claims table squeezed on mobile
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-MOBILE |
+| **Severity** | Medium |
+| **Module** | Finance |
+| **Route / screen** | `/finance/jobs/:id` — Progress Claims |
+| **Role** | admin |
+| **Viewport** | mobile 390×844 |
+| **Reproduction** | Scroll to Progress Claims on finance command centre mobile |
+| **Expected** | Card-per-claim or horizontal scroll with readable dates |
+| **Actual** | 6-column table; headers wrap (“EX GST”/“INC GST”); dates wrap to 3 lines |
+| **Evidence** | `…/mobile/finance-command-centre.png` |
+| **Suggested test** | Visual mobile finance-command-centre |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-FINANCE-003 — Dual floating action buttons overlap content on mobile
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-USABILITY |
+| **Severity** | Low |
+| **Module** | Finance (global FAB pattern) |
+| **Route / screen** | `/finance/jobs/:id` |
+| **Role** | admin |
+| **Viewport** | mobile |
+| **Reproduction** | Open finance command centre mobile; scroll WIPAA / claims sections |
+| **Expected** | Single clear primary FAB or docked actions |
+| **Actual** | Green “layers” FAB (bottom-left) + blue “+” FAB (bottom-right) obscure accordion content |
+| **Evidence** | `…/mobile/finance-command-centre.png` |
+| **Suggested test** | Visual regression mobile finance-command-centre |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-PORTAL-001 — “Latest update” title shows stray em-dash
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-VISUAL-REGRESSION |
+| **Severity** | Low |
+| **Module** | Client Portal |
+| **Route / screen** | `/client-portal` home |
+| **Role** | client |
+| **Viewport** | desktop + mobile |
+| **Reproduction** | UI Review portal home — “Latest update · —” heading |
+| **Expected** | Date or “No updates yet” |
+| **Actual** | Literal `—` after bullet |
+| **Evidence** | `…/desktop/portal-home.png`, `…/mobile/portal-home.png` |
+| **Suggested test** | UI Review portal-home |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-PORTAL-002 — Greeting next-step contradicts “all up to date” action card
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-ACTION-CLARITY |
+| **Severity** | Medium |
+| **Module** | Client Portal |
+| **Route / screen** | `/client-portal` home |
+| **Role** | client |
+| **Viewport** | mobile + desktop |
+| **Reproduction** | Read greeting (“Approve the kitchen benchtop selection”) vs action card (“You're all up to date”) |
+| **Expected** | Pending client decision surfaced in action queue or greeting omits it |
+| **Actual** | Conflicting signals — client may miss required approval |
+| **Evidence** | `…/mobile/portal-home.png` |
+| **Suggested test** | Portal home with pending selection fixture |
+| **blocks-deployability** | no (pilot-gated) |
+| **Status** | open — may need behaviour fix for action queue feed |
+
+### UI-WORKFORCE-001 — Crew / app-linked KPIs show zero in populated demo
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-DEMO-LIVE |
+| **Severity** | Low |
+| **Module** | Workforce |
+| **Route / screen** | `/workforce` Approvals |
+| **Role** | admin |
+| **Viewport** | desktop + mobile |
+| **Reproduction** | UI Review workforce — 3 pending timesheets but Crew **0**, App-linked **0/0** |
+| **Expected** | KPIs reflect fixture crew or show “—” with explanation |
+| **Actual** | Reads as misconfigured workforce |
+| **Evidence** | `…/desktop/workforce.png` |
+| **Suggested test** | Enrich workforce fixture + visual |
+| **blocks-deployability** | no |
+| **Status** | open — fixture + 01B copy |
+
+### UI-TENDER-001 — RFQ Engine / subsheets lack tender command-centre home pattern
+
+| Field | Value |
+|-------|-------|
+| **Type** | ACCEPTED-GAP |
+| **Severity** | Low |
+| **Module** | Tender / RFQ |
+| **Route / screen** | `/tender-manager/rfq-engine`, quote tracker, etc. |
+| **Role** | admin |
+| **Viewport** | desktop |
+| **Reproduction** | Compare Tender Board (KPI + queue) vs RFQ Engine (4-step wizard) |
+| **Expected** | Sam may accept wizard as distinct tool surface |
+| **Actual** | No module-home KPI strip on engine; staff must know sidebar entry |
+| **Evidence** | `…/desktop/rfq-engine.png` vs `tender-board.png` |
+| **Suggested test** | — |
+| **blocks-deployability** | no |
+| **Status** | open — propose ACCEPTED-GAP or 01B wayfinding banner |
+
+### UI-SCHEDULE-001 — Schedule mobile secondary toolbar overcrowded
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-MOBILE |
+| **Severity** | Low |
+| **Module** | Schedule |
+| **Route / screen** | `/operations/:id/schedule` |
+| **Role** | admin |
+| **Viewport** | mobile |
+| **Reproduction** | Open schedule mobile — note Export PDF, Export CSV, BX Match, Save template row |
+| **Expected** | Overflow “⋯” menu on narrow viewports |
+| **Actual** | Many small targets; lookahead cards good but toolbar dense |
+| **Evidence** | `…/mobile/schedule-manager.png` |
+| **Suggested test** | Visual mobile schedule-manager |
+| **blocks-deployability** | no |
+| **Status** | open — 01B candidate |
+
+### UI-VISUAL-001 — Inconsistent status badge styling across modules
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-VISUAL-REGRESSION |
+| **Severity** | Low |
+| **Module** | Global |
+| **Route / screen** | Portal “On track”, Finance “Paid/Issued”, Tender “Tendering/Won”, Sales stage chips |
+| **Role** | various |
+| **Viewport** | desktop |
+| **Reproduction** | Compare badges across module screenshots |
+| **Expected** | Shared badge component + status→colour token map |
+| **Actual** | Mixed shapes, casing, colours |
+| **Evidence** | Multiple screenshots in export; seed item 5 in `UI_REVIEW_REDESIGN_NOTES_SEED.md` |
+| **Suggested test** | Design-system visual suite |
+| **blocks-deployability** | no |
+| **Status** | open — 01B / design-system |
+
+### UI-CRM-001 — No UI Review coverage for CRM / Relationships screens
+
+| Field | Value |
+|-------|-------|
+| **Type** | UI-VISUAL-REGRESSION |
+| **Severity** | Medium |
+| **Module** | CRM / Mailing List |
+| **Route / screen** | `/sales/dashboard`, `/sales/contacts`; mailing lists in Settings |
+| **Role** | admin |
+| **Viewport** | — (not captured) |
+| **Reproduction** | `e2e/ui-review/routes.mjs` has no CRM routes; no `/api/crm/dashboard` fixture |
+| **Expected** | Desktop + mobile screenshots in Wave 01A |
+| **Actual** | Module lock = UI NOT ASSESSED |
+| **Evidence** | Gap row in [UI_SCREEN_EVIDENCE_INDEX.md](./ui_review/UI_SCREEN_EVIDENCE_INDEX.md) |
+| **Suggested test** | Add routes + fixtures; re-run `npm run test:ui-review` |
+| **blocks-deployability** | no (coverage gap) |
+| **Status** | open — test-only fixture task then re-assess |
+
+---
+
+## Claude Review — Wave 01A triage (2026-06-28)
+
+Scope verified: **Cursor changed docs only — no `src/**`/`server/**`/migrations**. Evidence
+(156/162 UI Review + screenshots) is strong enough to plan Wave 01B. The 14 findings are routed
+into four lanes. **Two items are blocked on root-cause diagnosis before they can be classified as
+deploy-blocking code fixes vs free test-only fixes** — that diagnosis is no-code and runs next.
+
+| ID | Sev | Lane | Next action |
+|----|-----|------|-------------|
+| UI-FIELD-001 | High | **Diagnose first** | Root-cause `projects.map is not a function`: UI-Review **fixture** (wrong data shape) vs **component** bug. Fixture → fix fixture (test-only) + re-run + downgrade. Component → confirmed High deploy-blocker → **Fix Agent under Sam approval**. |
+| UI-FIELD-002 | High | **Diagnose first** | Same for `projects.find is not a function` (`/field/diary`). |
+| UI-PORTAL-002 | Med | **Diagnose first** | Is the pending selection meant to surface in the portal action queue (**behaviour/data-feed** → Fix Agent under Sam) or just a copy mismatch (→ 01B)? Hold from 01B until known. |
+| UI-CRM-001 | Med | **Test-only (no approval)** | Add CRM UI-Review routes + fixtures via existing mechanism; if it needs a product-code change to render, **stop + log**. Re-run; capture; re-assess lock. |
+| UI-WORKFORCE-001 | Low | **Test-only + 01B** | Enrich workforce fixture (test-only) to disambiguate empty vs thin data; empty-state copy is 01B. |
+| UI-NAV-001 | Med | **01B presentational** | Scrollable / "More" bottom nav on mobile. |
+| UI-FINANCE-001 | Med | **01B presentational** | Empty-state copy for `—` KPI tiles (confirm thin-data via fixture, not a load bug). |
+| UI-FINANCE-002 | Med | **01B presentational** | Mobile card/scroll layout for Progress Claims. |
+| UI-FINANCE-003 | Low | **01B presentational** | Consolidate dual FABs. |
+| UI-PORTAL-001 | Low | **01B presentational** | Fix stray em-dash title. |
+| UI-SCHEDULE-001 | Low | **01B presentational** | Mobile toolbar overflow menu. |
+| UI-VISUAL-001 | Low | **01B (sequence last)** | Shared status-badge component — higher blast radius; do after lower-risk modules. |
+| UI-SALES-001 | Low | **01B copy OR ACCEPTED-GAP** | Align "Needs action" KPI with overdue/filter semantics, **or** Sam accepts the semantics as intended. |
+| UI-TENDER-001 | Low | **ACCEPTED-GAP candidate (Sam)** | Sam: accept the RFQ wizard as a distinct tool surface, or add a presentational tender-home wayfinding banner (01B). |
+
+**SOP drift / training gaps this wave:** none (UI-only wave).
+
+**Severity check:** no Criticals. The two High items (UI-FIELD-001/002) are **provisional** —
+their deploy-blocking status is confirmed only if diagnosis shows a component bug. No High is
+"accepted" yet.
+
+**Approval gates raised:** (1) **Wave 01B presentational polish** (one approval unlocks the
+approved modules — see `hardening_loop/SAM_APPROVAL_REQUIRED.md`); (2) any **Field/Portal code
+fix** if diagnosis confirms a component/behaviour bug; (3) **ACCEPTED-GAP** decisions on
+UI-TENDER-001 / UI-SALES-001. The no-code follow-up (`UI-UX-WAVE-01A-FOLLOWUP`) needs **no**
+approval and runs first.
 
 ---
 

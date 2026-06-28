@@ -1,34 +1,117 @@
 # UI Screen Evidence Index
 
-**Status:** TEMPLATE / live index — *Wave 01A fills the rows.* · Governed by
+**Status:** LIVE — Wave 01A · **Run ID:** `BLH-UIUX-01A-2026-06-28-1` · Governed by
 [../FULL_E2E_HARDENING_STRATEGY.md](../FULL_E2E_HARDENING_STRATEGY.md).
 
-UI Review is the visual hub. Per module, capture/document **viewports × states**. A module
-can't be marked visually locked unless its screenshots pass or the missing coverage is logged as
-a gap (`Gap` row + a `UI-VISUAL-REGRESSION` / `UI-MOBILE` finding where relevant).
+**Evidence root:** `docs/ui-review/export-2026-06-27/screenshots/<viewport>/<route-name>.png`  
+**Result JSON:** `docs/ui-review/export-2026-06-27/raw/results/<viewport>__<route-name>.json`  
+**Capture command:** `npm run test:ui-review` (2026-06-28 refresh: 156/162 pass)
 
 **Viewports:** desktop `1440×900` · tablet `834×1112` · mobile `390×844`
-**States:** good/loaded · empty · blocked/needs-action · overdue/risk · loading · error ·
-permission-denied/role-limited
-**Screenshot path convention:** `e2e/screenshots/BLH-UIUX-01A-<date>/<module>-<viewport>-<state>.png`
 
-| Module | Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
-|--------|----------------|----------|-------|-----------------|------------|
-| Sales | `/sales` | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Sales | `/sales` | mobile 390×844 | good | _tbd_ | _tbd_ |
-| Tender/RFQ | `/tender-manager` | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Operations | `/operations` | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Operations | `/operations` | tablet 834×1112 | good | _tbd_ | _tbd_ |
-| Schedule | `/operations` (Gantt) | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Procurement | `/operations` (procurement) | desktop 1440×900 | empty | _tbd_ | _tbd_ |
-| Finance | `/finance` | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Workforce | `/workforce` | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Field/Worker | `/worker` | mobile 390×844 | good | _tbd_ | _tbd_ |
-| WHS | `/operations` (WHS) | desktop 1440×900 | good | _tbd_ | _tbd_ |
-| Client Portal | portal home | mobile 390×844 | good | _tbd_ | _tbd_ |
-| CRM | `/sales` (CRM) | desktop 1440×900 | empty | _tbd_ | _tbd_ |
-| Marketing | `/marketing` | — | — | **PAUSED UNTIL MERGE** | n/a |
+**Command gap:** Wave convention `e2e/screenshots/BLH-UIUX-01A-<date>/` not created — UI Review
+export folder is the canonical store. Playwright browsers must be installed (`npx playwright install chromium`).
 
-> Add rows until every priority module has, at minimum, desktop + mobile `good` + `empty`
-> states, and any state where a finding was raised. Loading/error/permission rows are added
-> where fixtures exist or can be safely created.
+---
+
+## Sales (reference)
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/sales` | desktop | good | `…/desktop/sales-pipeline.png` | Pass |
+| `/sales` | mobile | good | `…/mobile/sales-pipeline.png` | Pass |
+| `/sales?view=actions` | desktop | needs-action | `…/desktop/sales-action-queue.png` | Pass |
+| `/sales/lead-1` … `lead-8` | desktop | stage variants | `…/desktop/lead-*.png` | Pass |
+| `/sales/lead-*` | mobile | good | `…/mobile/lead-*.png` | Pass |
+| `/sales/lead-*` | tablet | good | `…/tablet/lead-*.png` | Pass |
+
+## Tender / RFQ
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/tender-manager/board` | desktop | good | `…/desktop/tender-board.png` | Pass |
+| `/tender-manager/board` | mobile | good | `…/mobile/tender-board.png` | Pass |
+| `/tender-manager/rfq-packages` | desktop | good | `…/desktop/rfq-package-list.png` | Pass |
+| `/tender-manager/rfq-packages/pkg-1` | desktop | good | `…/desktop/rfq-package-detail.png` | Pass |
+| `/tender-manager/rfq-engine` | desktop | empty/wizard | `…/desktop/rfq-engine.png` | Pass |
+| `/tender-manager/subcontractors` | desktop | good | `…/desktop/subcontractors.png` | Pass |
+| `/tender-manager/cost-intelligence` | desktop | good | `…/desktop/cost-intelligence.png` | Pass |
+| `/tender-manager/fee-proposal` | desktop | good | `…/desktop/fee-proposals.png` | Pass |
+| Tender subsheets | mobile | good | `…/mobile/tender-*.png` etc. | Pass (table squeeze likely) |
+
+## Operations / Schedule / Procurement
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/operations` | desktop | good | `…/desktop/operations-list.png` | Pass |
+| `/operations` | mobile | good | `…/mobile/operations-list.png` | Pass |
+| `/operations` | tablet | good | `…/tablet/operations-list.png` | Pass |
+| `/operations/proj-1` | desktop | good | `…/desktop/operations-project.png` | Pass |
+| `/operations/proj-1/schedule` | desktop | good/overdue | `…/desktop/schedule-manager.png` | Pass |
+| `/operations/proj-1/schedule` | mobile | overdue/lookahead | `…/mobile/schedule-manager.png` | Pass |
+| `/operations/proj-1/diary` | desktop | good | `…/desktop/operations-diary.png` | Pass |
+| `/operations/proj-1/whs` | desktop | needs-action | `…/desktop/operations-whs.png` | Pass |
+| `/operations/procurement` | desktop | blocked/risk | `…/desktop/procurement.png` | Pass |
+| `/operations/procurement` | mobile | good | `…/mobile/procurement.png` | Pass |
+
+## Finance
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/finance` | desktop | good | `…/desktop/finance-manager.png` | Pass |
+| `/finance` | mobile | good | `…/mobile/finance-manager.png` | Pass |
+| `/finance/jobs/job-1001` | desktop | thin KPIs | `…/desktop/finance-command-centre.png` | Pass (thin data) |
+| `/finance/jobs/job-1001` | mobile | squeezed table | `…/mobile/finance-command-centre.png` | Pass (UI-FINANCE-002) |
+
+## Workforce
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/workforce` | desktop | pending approval | `…/desktop/workforce.png` | Pass |
+| `/workforce` | mobile | pending approval | `…/mobile/workforce.png` | Pass |
+| `/workforce` | tablet | pending approval | `…/tablet/workforce.png` | Pass |
+
+## Field / Worker
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/field/home` | mobile | good | `…/mobile/field-home.png` | Pass |
+| `/field/jobs` | mobile | good | `…/mobile/field-jobs.png` | Pass |
+| `/field/tasks` | mobile | good | `…/mobile/field-tasks.png` | Pass |
+| `/field/whs` | desktop/tablet/mobile | **error** | `…/*/field-whs.png` | **Fail** UI-FIELD-001 |
+| `/field/diary` | desktop/tablet/mobile | **error** | `…/*/field-diary.png` | **Fail** UI-FIELD-002 |
+| `/worker` | mobile | good | `…/mobile/worker-home.png` | Pass |
+| `/worker/timesheet/log` | mobile | good | `…/mobile/worker-log-hours.png` | Pass |
+| `/worker/tasks` | mobile | good | `…/mobile/worker-tasks.png` | Pass |
+| `/worker/week` | mobile | good | `…/mobile/worker-week.png` | Pass |
+
+## Client Portal
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/client-portal` | desktop | good | `…/desktop/portal-home.png` | Pass |
+| `/client-portal` | mobile | good | `…/mobile/portal-home.png` | Pass |
+| `/client-portal/actions` | mobile | good | `…/mobile/portal-actions.png` | Pass |
+| `/client-portal/journey` | mobile | good | `…/mobile/portal-journey.png` | Pass |
+| `/client-portal/selections` | mobile | good | `…/mobile/portal-selections.png` | Pass |
+| `/client-portal/documents` | mobile | good | `…/mobile/portal-documents.png` | Pass |
+| `/client-portal/messages` | mobile | good | `…/mobile/portal-messages.png` | Pass |
+
+## CRM / Mailing List
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/sales/dashboard` (Relationships) | — | — | _none_ | **Gap** UI-CRM-001 |
+| `/sales/contacts` | — | — | _none_ | **Gap** UI-CRM-001 |
+| Mailing lists (Settings) | — | — | _none_ | **Gap** UI-CRM-001 |
+
+## Marketing
+
+| Screen / Route | Viewport | State | Screenshot path | Pass / Gap |
+|----------------|----------|-------|-----------------|------------|
+| `/marketing` | — | — | **PAUSED UNTIL MERGE** | n/a |
+
+---
+
+**Redesign mock-ups** (reference only, not production): `ops-redesign-mockup-*`, `h3-redesign-mockup-*`,
+`sales-redesign-mockup-*` — captured in same export folder for Claude 01B planning.

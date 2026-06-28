@@ -1,106 +1,84 @@
 # NEXT CURSOR TASK
 
-**Task ID:** `UI-UX-USABILITY-WAVE-01A` · **Mode:** no-code discovery · **Date issued:** 2026-06-28
-**Issued by:** Claude Code (Hardening Controller) · **Governed by:**
-[../COMPREHENSIVE_HARDENING_MASTER_PLAN.md](../COMPREHENSIVE_HARDENING_MASTER_PLAN.md),
-[../FULL_E2E_HARDENING_STRATEGY.md](../FULL_E2E_HARDENING_STRATEGY.md),
-[../AUTONOMOUS_HARDENING_AGENT_PLAYBOOK.md](../AUTONOMOUS_HARDENING_AGENT_PLAYBOOK.md) (UI/UX Agent, Mode 01A).
+**Task ID:** `UI-UX-WAVE-01A-FOLLOWUP` · **Mode:** no-code diagnosis + test-only coverage
+**Date issued:** 2026-06-28 · **Issued by:** Claude Code (Hardening Controller)
+**Why now:** This work needs **no Sam approval** (safe autonomous classes) and de-risks the
+Wave 01B plan, which is queued separately for Sam's approval. Do **not** start 01B polish here.
 
 ## Objective
-Run the **UI/UX usability + visual discovery sweep** across the Hub. Assess each module against
-the **Sales reference standard** and the first-viewport rubric, capture visual evidence across
-desktop/tablet/mobile, classify each module's UI lock status, and **log every finding to
-BUG_REGISTER**. **Do not fix anything.**
-
-## Wave 01A scope confirmations (Sam, 2026-06-28)
-- **Sales** is the reference standard — **do not redesign unless a regression is found** (#9).
-- **Client Portal = light-touch verification only** (#10): confirm it renders and is usable;
-  only open findings if the audit surfaces a **real** issue in one of — deployability,
-  **access/client isolation**, **mobile usability**, **document/selections clarity**, or a
-  **client-action** (variation/EOT/question) problem. Do **not** do a full cosmetic pass on the
-  portal.
-- **Marketing** — record only `MARKETING — PAUSED UNTIL MERGE` (#11); do not assess.
-- This stays **no-code discovery** (#6/#7): no product code, layout, route, API, auth, mutation,
-  calc, **schema**, or integration changes.
+Resolve the three classification unknowns from Wave 01A and close the CRM coverage gap, so the
+01B plan and the deploy-blocker list are correct before any product code is touched.
 
 ## Preflight
-- `git branch --show-current` → must be `portal-v2`.
-- `git status --short` → clean (or only this loop's docs). Stop if unrelated dirty files.
+- `git branch --show-current` → `portal-v2`; `git status --short` → clean (or only loop docs).
+- `npm run hardening:watch -- --dry-run` → expect READY, next: cursor.
 
-## Module priority order
-1. **Sales** (reference check only — **do not redesign unless a regression is found**)
-2. Tender / RFQ
-3. Operations / Project Command Centre
-4. Schedule
-5. Procurement
-6. Finance
-7. Workforce
-8. Field / Worker App
-9. WHS
-10. **Client Portal — light-touch verification only** (see scope note; findings only on a real issue)
-11. CRM / Mailing List
-12. **Marketing — DO NOT ASSESS. Record `MARKETING — PAUSED UNTIL MERGE`.**
+## Tasks
 
-## For each module
-- Capture screenshots: desktop **1440×900**, tablet **834×1112**, mobile **390×844**; states
-  good/loaded · empty · blocked/needs-action · overdue/risk · (loading/error/permission where practical).
-- Score the **first-viewport rubric**: Where am I? · What matters now? · What is blocked? · What
-  needs action? · What happens next?
-- Score the **Sales-standard scorecard** (clear home · action queue · KPI strip · one obvious
-  next action · status/phase awareness · empty/loading/error states · mobile cards/tabs not
-  squeezed tables · no undefined/null/test-data leaks · consistent Blue Leaf styling).
-- Flag demo/live masking risk (demo data hiding a live-empty state).
-- Assign a lock status: UI LOCKED / CONDITIONAL / NO-GO (default NOT ASSESSED until reviewed).
+### 1. Root-cause UI-FIELD-001 / UI-FIELD-002 (READ-ONLY diagnosis)
+- Read the Field WHS + Field Diary components and the UI-Review route/fixture that feeds them
+  (`e2e/ui-review/**`, the `/field/whs` + `/field/diary` review-mode data path).
+- Determine: is `projects.map/find is not a function` caused by the **UI-Review fixture** passing
+  a non-array, or by the **component** assuming an array the live API may not return?
+- **If fixture-only:** fix the fixture (test-only, allowed), re-run `npm run test:ui-review`,
+  update evidence + lock matrix, and **downgrade** UI-FIELD-001/002 (not a real deploy blocker).
+- **If component bug:** **DO NOT fix it.** Record the root cause + the exact file/line, keep
+  severity High + deploy-blocking, and mark for **Fix Agent under Sam approval**.
+- Either way, write the verdict into BUG_REGISTER (update the two entries' Status).
+
+### 2. Diagnose UI-PORTAL-002 (READ-ONLY)
+- Determine whether a pending client selection is supposed to surface in the portal **action
+  queue** (a behaviour/data-feed gap → Fix Agent under Sam) or whether the greeting/action-card
+  mismatch is **copy only** (→ 01B). Record the verdict; **do not fix.**
+
+### 3. Close UI-CRM-001 — CRM coverage (TEST-ONLY)
+- Add CRM / Relationships / contacts (+ mailing-list settings) routes to the UI-Review harness
+  (`e2e/ui-review/routes.mjs`) with fixtures, using the **existing** UI-Review fixture mechanism.
+- **If rendering CRM in review mode requires a product-code change** (e.g. CrmDashboard has no
+  review-mode data path), **STOP and log** — do not change product code; flag for Sam.
+- Re-run `npm run test:ui-review`; capture desktop + mobile CRM screenshots; update
+  [../ui_review/UI_SCREEN_EVIDENCE_INDEX.md](../ui_review/UI_SCREEN_EVIDENCE_INDEX.md) and set the
+  CRM row in [../ui_review/UI_MODULE_LOCK_MATRIX.md](../ui_review/UI_MODULE_LOCK_MATRIX.md)
+  (LOCKED/CONDITIONAL/NO-GO). Resolve/close UI-CRM-001 accordingly.
+
+### 4. (Optional, test-only) Disambiguate empty vs thin data
+- Enrich the workforce + finance UI-Review fixtures so empty-state vs populated-state is
+  unambiguous, confirming UI-FINANCE-001 / UI-WORKFORCE-001 are copy/empty-state issues (01B) and
+  not data-load bugs. Test-only.
 
 ## Allowed files
-- `docs/qa/ui_review/**` (the 3 result/matrix/index docs)
-- `docs/qa/BUG_REGISTER.md`
-- `docs/qa/hardening_loop/**` (state + log + next-review packet)
-- `e2e/ui-review/**` and `e2e/tests/visual/**` fixtures **only if** a safe, additive screenshot
-  fixture is needed (test-only).
+- `e2e/ui-review/**`, `e2e/tests/visual/**` (fixtures/routes — test-only)
+- `docs/qa/ui_review/**`, `docs/qa/BUG_REGISTER.md`, `docs/qa/hardening_loop/**`
 
 ## Forbidden
-- **No product code:** `src/**`, `server/**`, `supabase/migrations/**`.
-- No layout/handler/API/route/auth/calc/mutation changes; no integrations; no email/RFQ/PO; no deploy.
-- **No fixes** — log to BUG_REGISTER instead.
-- Do not assess or touch Marketing beyond recording the paused status.
-
-## Tests to run (read-only / capture-only)
-- `npm run test:ui-review`
-- Visual capture via Playwright `chromium-mobile` / `chromium-tablet` projects (local; not CI).
-- These **capture screenshots only** — no app mutation, no live integration.
-
-## Bug logging format (per finding)
-`UI-<MODULE>-###` · `Type:` one of {UI-USABILITY, UI-MOBILE, UI-EMPTY-STATE, UI-LOADING-STATE,
-UI-ERROR-STATE, UI-DEMO-LIVE, UI-NAVIGATION, UI-WORKFLOW-CLARITY, UI-ACTION-CLARITY,
-UI-ACCESSIBILITY, UI-VISUAL-REGRESSION} · severity · module/owner · route/screen · role ·
-viewport · expected vs actual · screenshot/evidence path · suggested visual/regression test ·
-`blocks-deployability (y/n)`.
+- **No product code:** `src/**`, `server/**`, `supabase/migrations/**`. If any task *requires* it
+  → **stop + log**, do not change it.
+- No 01B presentational polish (that waits for Sam's approval of the 01B plan).
+- No live integrations / email / RFQ / PO / deploy.
 
 ## Stop conditions
-- Any finding that would need a behaviour/API/auth/calc/schema/integration change → **log it,
-  don't fix.**
-- Any [forbidden task class](../HARDENING_WATCH_ORCHESTRATOR_SPEC.md#5-forbidden-autonomous-task-classes)
-  → stop + write `SAM_APPROVAL_REQUIRED.md`.
-- Dirty tree with unrelated work; missing QA docs.
+- A diagnosis concludes a **component/behaviour fix** is required → log it, set the item to
+  "Fix Agent — pending Sam approval", **do not fix**.
+- CRM coverage needs a product-code change → stop + log.
+- Any [forbidden task class](../HARDENING_WATCH_ORCHESTRATOR_SPEC.md#5-forbidden-autonomous-task-classes).
 
-## Expected output docs
-- [../ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md](../ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md) (filled)
-- [../ui_review/UI_MODULE_LOCK_MATRIX.md](../ui_review/UI_MODULE_LOCK_MATRIX.md) (statuses set)
-- [../ui_review/UI_SCREEN_EVIDENCE_INDEX.md](../ui_review/UI_SCREEN_EVIDENCE_INDEX.md) (rows + paths)
-- [../BUG_REGISTER.md](../BUG_REGISTER.md) (findings)
+## Expected outputs
+- BUG_REGISTER: updated statuses for UI-FIELD-001/002, UI-PORTAL-002, UI-CRM-001 (+ any new test-only fixture notes).
+- ui_review: evidence index + lock matrix updated (CRM assessed; Field re-classified).
 - Update [CURRENT_STATE.md](./CURRENT_STATE.md) + [AUTONOMOUS_LOOP_STATUS.md](./AUTONOMOUS_LOOP_STATUS.md)
-  (set `next_agent: claude`), append [AGENT_HANDOFF_LOG.md](./AGENT_HANDOFF_LOG.md), and write
+  (set `next_agent: claude`), append [AGENT_HANDOFF_LOG.md](./AGENT_HANDOFF_LOG.md), write
   [NEXT_CLAUDE_REVIEW.md](./NEXT_CLAUDE_REVIEW.md).
 
 ## Commit rule
-Docs + test-only fixtures only: `docs(qa): UI/UX discovery wave 01A — <modules covered>`.
+Docs + test-only fixtures only: `docs(qa): Wave 01A follow-up — Field diagnosis + CRM coverage`.
 **No product code in this commit.**
 
 ## Final report format
-`task done · files changed · tests/screenshots run · blockers · next agent (claude) ·
-next task file (NEXT_CLAUDE_REVIEW.md) · approval required (y/n)`.
+`task done · files changed · tests/screenshots run · Field verdict (fixture|component) · Portal
+verdict (copy|behaviour) · CRM lock status · blockers · next agent (claude) · next task file ·
+approval required (y/n)`.
 
-## After this task
-Claude assembles the **module-polish plan** from the findings and presents it to Sam. **Wave 01B
-(presentational polish) does not start until Sam approves that plan.**
+## In parallel (Sam, not blocking this task)
+The **Wave 01B presentational polish plan** is in `SAM_APPROVAL_REQUIRED.md` (prepared) +
+[../ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md](../ui_review/UI_UX_DISCOVERY_WAVE_01_RESULT.md) §6,
+awaiting Sam's one approval. 01B does not start until then.
