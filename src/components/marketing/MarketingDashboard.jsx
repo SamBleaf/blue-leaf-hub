@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch.js";
+import { DemoBanner } from "./MarketingStateBanner.jsx";
 
 // Marketing Intelligence dashboard (Batch 3). Read-only — content pipeline health.
 // Falls back to clearly-labelled DEMO data when the API is unreachable (no staging DB).
@@ -75,11 +76,7 @@ export default function MarketingDashboard() {
         </p>
       </header>
 
-      {usingDemo && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
-          Showing demo data — API unreachable or no staging DB. Real data requires staging + migration 122.
-        </div>
-      )}
+      {usingDemo && <DemoBanner />}
 
       {nextActions && nextActions.length > 0 && (
         <section className="space-y-2">

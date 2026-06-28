@@ -1,6 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch.js";
+import MarketingReadinessPanel from "./MarketingReadinessPanel.jsx";
+
+// The marketing loop, in order — the spine every screen plugs into.
+const WORKFLOW = [
+  { to: "/marketing/planner", label: "Plan" },
+  { to: "/marketing/studio", label: "Create from media" },
+  { to: "/marketing/approval", label: "Review & approve" },
+  { to: "/marketing/calendar", label: "Schedule" },
+  { to: "/marketing/calendar", label: "Post & log" },
+  { to: "/marketing/intelligence", label: "Measure" },
+  { to: "/marketing/evergreen", label: "Reuse" },
+];
 
 // Marketing Command Centre (Run A) — Josh's weekly home screen.
 // Reads GET /api/marketing/command-centre and surfaces "what needs action this week".
@@ -65,6 +77,25 @@ export default function MarketingCommandCentre() {
         </Link>
       </div>
 
+      {/* The marketing loop — orient Josh on where each step lives */}
+      <nav aria-label="Marketing workflow" className="rounded-card border border-hairline bg-surface p-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">The weekly loop</p>
+        <ol className="flex flex-wrap items-center gap-x-1 gap-y-2 text-sm">
+          {WORKFLOW.map((step, i) => (
+            <li key={`${step.label}-${i}`} className="flex items-center">
+              <Link
+                to={step.to}
+                className="rounded-lg px-2 py-1 font-medium text-ink transition hover:bg-page hover:text-primary"
+              >
+                <span className="mr-1.5 text-xs font-bold text-accent">{i + 1}</span>
+                {step.label}
+              </Link>
+              {i < WORKFLOW.length - 1 && <span aria-hidden className="px-0.5 text-muted">→</span>}
+            </li>
+          ))}
+        </ol>
+      </nav>
+
       {/* Snapshot */}
       {loading && (
         <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">
@@ -114,6 +145,9 @@ export default function MarketingCommandCentre() {
             </p>
           </div>
         )}
+
+      {/* Module readiness — collapsed status board for the build/verification state */}
+      <MarketingReadinessPanel />
     </div>
   );
 }

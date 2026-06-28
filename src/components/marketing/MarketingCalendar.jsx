@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPost } from "../../lib/apiFetch.js";
+import { DemoBanner, ErrorNote } from "./MarketingStateBanner.jsx";
 
 // Marketing Calendar (Batch 2) — week view of scheduled content + campaign slots.
 // Manual "Mark as posted" logging only — NO external publishing / auto-posting.
@@ -82,8 +83,8 @@ export default function MarketingCalendar() {
         <Link to="/marketing/approval" className="ml-auto text-xs font-semibold text-primary underline">Approval Queue</Link>
       </div>
 
-      {usingDemo && <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">Showing demo data — calendar needs staging + migration 122.</div>}
-      {error && <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-xs text-muted">{error}</div>}
+      {usingDemo && <DemoBanner note="“Mark as posted” is disabled on preview data." />}
+      <ErrorNote error={error} />
 
       {loading && <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">Loading…</div>}
 

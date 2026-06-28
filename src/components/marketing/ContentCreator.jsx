@@ -256,6 +256,10 @@ export default function ContentCreator() {
           </button>
         ))}
       </div>
+      <p className="-mt-2 text-[11px] text-muted">
+        <span className="font-medium text-ink">From media</span> starts from a project photo (best — the shot drives the angle);{" "}
+        <span className="font-medium text-ink">From idea</span> starts from a topic. You’ll pick which channels to draft for next.
+      </p>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* LEFT — ASSET */}

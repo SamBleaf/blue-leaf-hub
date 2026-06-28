@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPatch } from "../../lib/apiFetch.js";
 import JoshLabelBadge from "./JoshLabelBadge.jsx";
+import { DemoBanner, ErrorNote } from "./MarketingStateBanner.jsx";
 
 // Approval Queue foundation (Run C1) — lists content packages awaiting review and lets Josh/Sam
 // approve / request changes / reject. No publishing. Falls back to a clearly-labelled demo package
@@ -52,14 +53,15 @@ export default function ApprovalQueue() {
     setError(null);
     const { ok, data, error: e } = await apiFetch("/api/marketing/packages?status=in_review");
     const list = data?.packages || [];
-    if (ok && list.length) {
+    if (ok) {
+      // Live response (even if empty) → real queue or a true "nothing waiting" state, never demo.
       setPackages(list);
       setUsingDemo(false);
     } else {
-      // No reachable packages (or no staging DB) → show a demo package so the flow is reviewable.
+      // API unreachable → show a demo package so the review flow is still reviewable; not actionable.
       setPackages([DEMO_PACKAGE]);
       setUsingDemo(true);
-      if (!ok) setError(e || null);
+      setError(e || null);
     }
     setLoading(false);
   }, []);
@@ -89,15 +91,9 @@ export default function ApprovalQueue() {
         </p>
       </header>
 
-      {usingDemo && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
-          Showing a demo package — no packages are reachable in this environment (needs staging + migration 122).
-        </div>
-      )}
+      {usingDemo && <DemoBanner note="The package below is an example so you can see the review layout." />}
 
-      {error && (
-        <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-xs text-muted">{error}</div>
-      )}
+      <ErrorNote error={error} />
 
       {loading && (
         <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">Loading queue…</div>

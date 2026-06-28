@@ -50,6 +50,9 @@ export default function WeeklyPlanner() {
         <h1 className="text-3xl font-semibold tracking-tight text-primary">Weekly Planner</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           Plan the week from a campaign template, then fill each slot from real project media.
+          A <span className="font-medium text-ink">template</span> lays out the week’s posts; each{" "}
+          <span className="font-medium text-ink">slot</span> is one post on one{" "}
+          <span className="font-medium text-ink">channel</span> (Instagram, Facebook…) waiting for media.
         </p>
       </header>
 

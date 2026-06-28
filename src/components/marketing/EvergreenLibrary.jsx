@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../lib/apiFetch.js";
 import JoshLabelBadge from "./JoshLabelBadge.jsx";
+import { DemoBanner, ErrorNote } from "./MarketingStateBanner.jsx";
 
 // Evergreen Library (Batch 2) — high-value reusable content (evergreen_score > 0).
 // Read-only foundation with demo fallback. No AI regeneration, no external publishing.
@@ -37,13 +38,14 @@ export default function EvergreenLibrary() {
     setError(null);
     const { ok, data, error: e } = await apiFetch("/api/marketing/evergreen");
     const list = data?.items || [];
-    if (ok && list.length) {
+    if (ok) {
+      // Live response (even if empty) → real data or a true empty state, never demo.
       setItems(list);
       setUsingDemo(false);
     } else {
       setItems(DEMO_ITEMS);
       setUsingDemo(true);
-      if (!ok) setError(e || null);
+      setError(e || null);
     }
     setLoading(false);
   }, []);
@@ -60,8 +62,8 @@ export default function EvergreenLibrary() {
         <p className="mt-1 text-sm text-muted">High-value content worth reusing. Flag pieces as evergreen from review; resurface them here.</p>
       </header>
 
-      {usingDemo && <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">Showing demo evergreen items — needs staging + migration 122.</div>}
-      {error && <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-xs text-muted">{error}</div>}
+      {usingDemo && <DemoBanner />}
+      <ErrorNote error={error} />
 
       {loading ? (
         <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">Loading…</div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch.js";
 import { DEMO_ASSET } from "./creatorData.js";
+import { DemoBanner, ErrorNote } from "./MarketingStateBanner.jsx";
 
 // Media Vault (Batch 2) — browse + filter marketing media. Client-side filters over the
 // existing media list; demo fallback when the vault is unreachable. No live Supabase required.
@@ -27,13 +28,15 @@ export default function MediaVault() {
     setError(null);
     const { ok, data, error: e } = await apiFetch("/api/marketing/media?limit=200");
     const list = data?.assets || data?.media || data?.items || [];
-    if (ok && list.length) {
+    if (ok) {
+      // Live response (even if empty) → show real data / a true empty state, never demo.
       setAssets(list);
       setUsingDemo(false);
     } else {
+      // API unreachable → demo so the vault is still reviewable; clearly labelled, nothing saved.
       setAssets(DEMO_ASSETS);
       setUsingDemo(true);
-      if (!ok) setError(e || null);
+      setError(e || null);
     }
     setLoading(false);
   }, []);
@@ -68,7 +71,7 @@ export default function MediaVault() {
       <header>
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Marketing</p>
         <h1 className="text-3xl font-semibold tracking-tight text-primary">Media Vault</h1>
-        <p className="mt-1 text-sm text-muted">Browse and filter project media. Open a photo in the Content Studio to create from it.</p>
+        <p className="mt-1 text-sm text-muted">Browse and filter project media, then open a photo in the Content Studio to create a post from it.</p>
       </header>
 
       <div className="flex flex-wrap gap-2">
@@ -77,9 +80,12 @@ export default function MediaVault() {
         <Select value={analysis} onChange={setAnalysis} options={["complete", "processing", "pending", "error"]} label="Any analysis" />
         <Select value={project} onChange={setProject} options={projects} label="All projects" />
       </div>
+      <p className="text-[11px] text-muted">
+        Stage = the build phase detected in the shot · Analysis = whether AI has described the photo yet (analysed photos give the Studio better angles).
+      </p>
 
-      {usingDemo && <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">Showing demo media — vault needs staging data.</div>}
-      {error && <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-xs text-muted">{error}</div>}
+      {usingDemo && <DemoBanner />}
+      <ErrorNote error={error} />
 
       {loading ? (
         <div className="rounded-card border border-hairline bg-surface p-6 text-sm text-muted">Loading media…</div>
@@ -101,7 +107,13 @@ export default function MediaVault() {
               </div>
             </div>
           ))}
-          {filtered.length === 0 && <p className="col-span-full text-sm text-muted">No media matches these filters.</p>}
+          {filtered.length === 0 && (
+            <p className="col-span-full text-sm text-muted">
+              {assets.length === 0
+                ? "No media yet. Upload site photos from the Media tab, then they’ll appear here to create from."
+                : "No media matches these filters — clear a filter to see more."}
+            </p>
+          )}
         </div>
       )}
     </div>

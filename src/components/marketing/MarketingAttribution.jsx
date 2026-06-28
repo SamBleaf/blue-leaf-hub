@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../lib/apiFetch.js";
+import { DemoBanner } from "./MarketingStateBanner.jsx";
 
 // Leads & Attribution read-only dashboard (Batch 3).
 // Shows where marketing enquiries appear to come from. No CRM mutation, no sales pipeline mutation.
@@ -83,11 +84,7 @@ export default function MarketingAttribution() {
         </p>
       </header>
 
-      {usingDemo && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
-          Showing demo data — API unreachable or no staging DB.
-        </div>
-      )}
+      {usingDemo && <DemoBanner />}
 
       {/* Time window picker */}
       <div className="flex items-center gap-2 text-xs">
