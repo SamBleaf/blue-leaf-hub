@@ -12,12 +12,23 @@ the **Sales reference standard** and the first-viewport rubric, capture visual e
 desktop/tablet/mobile, classify each module's UI lock status, and **log every finding to
 BUG_REGISTER**. **Do not fix anything.**
 
+## Wave 01A scope confirmations (Sam, 2026-06-28)
+- **Sales** is the reference standard — **do not redesign unless a regression is found** (#9).
+- **Client Portal = light-touch verification only** (#10): confirm it renders and is usable;
+  only open findings if the audit surfaces a **real** issue in one of — deployability,
+  **access/client isolation**, **mobile usability**, **document/selections clarity**, or a
+  **client-action** (variation/EOT/question) problem. Do **not** do a full cosmetic pass on the
+  portal.
+- **Marketing** — record only `MARKETING — PAUSED UNTIL MERGE` (#11); do not assess.
+- This stays **no-code discovery** (#6/#7): no product code, layout, route, API, auth, mutation,
+  calc, **schema**, or integration changes.
+
 ## Preflight
 - `git branch --show-current` → must be `portal-v2`.
 - `git status --short` → clean (or only this loop's docs). Stop if unrelated dirty files.
 
 ## Module priority order
-1. **Sales** (reference check only — **do not redesign**)
+1. **Sales** (reference check only — **do not redesign unless a regression is found**)
 2. Tender / RFQ
 3. Operations / Project Command Centre
 4. Schedule
@@ -26,7 +37,7 @@ BUG_REGISTER**. **Do not fix anything.**
 7. Workforce
 8. Field / Worker App
 9. WHS
-10. Client Portal
+10. **Client Portal — light-touch verification only** (see scope note; findings only on a real issue)
 11. CRM / Mailing List
 12. **Marketing — DO NOT ASSESS. Record `MARKETING — PAUSED UNTIL MERGE`.**
 

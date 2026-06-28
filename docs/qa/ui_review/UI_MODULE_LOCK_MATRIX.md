@@ -28,6 +28,9 @@ as a gap) and it has no `blocks-deployability` findings open.
 
 **Notes:**
 - Sales is the reference check only — **do not redesign** unless a regression is found.
+- **Client Portal = light-touch verification only** (Sam, 2026-06-28): mark LOCKED/CONDITIONAL on
+  basic render + usability; raise findings only on a **real** deployability, access/client-isolation,
+  mobile-usability, document/selections-clarity, or client-action issue.
 - Marketing stays `PAUSED UNTIL MERGE`; on `marketing-run-a` merge it becomes `UI NOT ASSESSED`
   and is driven by [../MARKETING_POST_MERGE_HARDENING_PLAN.md](../MARKETING_POST_MERGE_HARDENING_PLAN.md).
 - The deploy gate requires no module at **UI NO-GO** on a staff-touched journey surface (or the

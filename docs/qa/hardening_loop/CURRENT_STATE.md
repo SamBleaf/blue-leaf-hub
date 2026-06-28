@@ -32,3 +32,6 @@ expected_branch: portal-v2
 
 **Notes:** 0 open Critical · 0 actionable High. First wave is UI/UX discovery (Sales = reference
 standard). Marketing is `PAUSED UNTIL MERGE`. Trust model = Hybrid by risk tier.
+**Watcher stays `--dry-run` only** — do not move to `--run-once`/`--interval` until Wave 01A +
+the Claude review loop prove stable (Sam, 2026-06-28). Client Portal in 01A = **light-touch
+verification only** (see [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) scope note).
