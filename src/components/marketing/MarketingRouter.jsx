@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Marketing from "../../pages/Marketing.jsx";
 import MarketingCommandCentre from "./MarketingCommandCentre.jsx";
-import ContentCreatorShell from "./ContentCreatorShell.jsx";
+import ContentCreator from "./ContentCreator.jsx";
 import LegacyStudio from "./LegacyStudio.jsx";
 import WeeklyPlanner from "./WeeklyPlanner.jsx";
 
@@ -13,7 +13,7 @@ export default function MarketingRouter() {
     <Routes>
       <Route index element={<MarketingCommandCentre />} />
       <Route path="planner" element={<WeeklyPlanner />} />
-      <Route path="studio" element={<ContentCreatorShell />} />
+      <Route path="studio" element={<ContentCreator />} />
       <Route path="studio/legacy" element={<LegacyStudio />} />
       {/* Legacy redirect: old Create tab → new Studio */}
       <Route path="create" element={<Navigate to="/marketing/studio" replace />} />
