@@ -38,6 +38,29 @@ export const TASK_LABELS = {
 
 const TASK_CATEGORIES = Object.keys(TASK_LABELS);
 
+// ── Per-entry hours validation (deployment hardening) ─────────────────────────
+// The client clamps hours to 0.5–24, but the server is the system of record and
+// must enforce it independently. Rejects NaN/Infinity/null/undefined/non-numeric
+// strings, zero, negatives, and any single entry above the per-entry ceiling.
+// Returns an error message string if invalid, or null if every entry is valid.
+const MAX_ENTRY_HOURS = 24;
+function validateEntryHours(entries) {
+  for (const e of entries) {
+    // Reject raw values that are not a number or a cleanly-parsing numeric string.
+    if (e == null || (typeof e.hours !== "number" && typeof e.hours !== "string")) {
+      return "Each entry must have valid hours.";
+    }
+    if (typeof e.hours === "string" && e.hours.trim() === "") {
+      return "Each entry must have valid hours.";
+    }
+    const h = Number(e.hours);
+    if (!Number.isFinite(h) || h <= 0 || h > MAX_ENTRY_HOURS) {
+      return `Each entry must have hours greater than 0 and no more than ${MAX_ENTRY_HOURS}.`;
+    }
+  }
+  return null;
+}
+
 // ── Cost helpers ──────────────────────────────────────────────────────────────
 
 // Split a day's hours into three pay bands:
@@ -418,6 +441,14 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
     .single();
   if (tsErr || !ts) throw new Error("Timesheet not found");
 
+  // Idempotency guard: an already-approved timesheet is never re-approved. We do not
+  // recompute cost, do not re-stamp approved_by/approved_at, and do not re-trigger
+  // Buildexact sync. Re-approval is only possible after an explicit unapprove resets
+  // status back to "submitted".
+  if (ts.status === "approved") {
+    return { alreadyApproved: true };
+  }
+
   const { data: entries } = await sb.from("timesheet_entries").select("*").eq("timesheet_id", timesheetId);
   const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
   const cm = await getCostModel(sb); // P4: loaded break-even rate (null until mig 090 + sync)
@@ -446,6 +477,7 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
     syncTimesheetToBuildexact(ts, sb).catch(e => console.error("[workforce/sync]", e?.message));
   }
   updateJobLabourBudget(ts.job_id, sb).catch(e => console.error("[workforce/labour-budget]", e?.message));
+  return { alreadyApproved: false };
 }
 
 // ── Workforce allocations (W16-A1) ────────────────────────────────────────────
@@ -794,22 +826,25 @@ export function registerWorkforceRoutes(app) {
       return res.status(400).json({ ok: false, error: "timesheet_ids[] required" });
     }
     const results = [];
+    let approvedCount = 0;
+    let alreadyApprovedCount = 0;
     for (const id of timesheet_ids) {
       try {
-        await approveSingleTimesheet(id, req.caller.id, sb);
-        results.push({ id, ok: true });
+        const r = await approveSingleTimesheet(id, req.caller.id, sb);
+        if (r?.alreadyApproved) alreadyApprovedCount++; else approvedCount++;
+        results.push({ id, ok: true, alreadyApproved: !!r?.alreadyApproved });
       } catch (err) {
         results.push({ id, ok: false, error: err?.message });
       }
     }
-    res.json({ ok: true, results });
+    res.json({ ok: true, results, approvedCount, alreadyApprovedCount });
   });
 
   app.post("/api/workforce/timesheets/:id/approve", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     try {
-      await approveSingleTimesheet(req.params.id, req.caller.id, sb);
-      res.json({ ok: true });
+      const r = await approveSingleTimesheet(req.params.id, req.caller.id, sb);
+      res.json({ ok: true, alreadyApproved: !!r?.alreadyApproved });
     } catch (err) {
       res.status(500).json({ ok: false, error: err?.message });
     }
@@ -993,10 +1028,18 @@ export function registerWorkforceRoutes(app) {
       }
     }
 
+    // Pay-derived cost is director-only. Non-directors keep hours/names/categories
+    // but every cost field is nulled — consistent with hourly_rate being hidden on
+    // the employees endpoint and the aggregate total_cost gate below. Shape is stable.
+    const categoriesOut = Object.values(byCategory).map(c =>
+      isDirector ? c : { ...c, total_cost: null });
+    const workersOut = Object.values(workerMap).map(w =>
+      isDirector ? w : { ...w, cost: null });
+
     res.json({
       ok: true,
-      entries_by_category: Object.values(byCategory),
-      workers_this_week: Object.values(workerMap),
+      entries_by_category: categoriesOut,
+      workers_this_week: workersOut,
       total_hours: totalHours,
       total_cost: isDirector ? totalCost : null,
       buildexact_estimates: buildexactEstimates,
@@ -1737,8 +1780,29 @@ export function registerWorkforceRoutes(app) {
     if (date > maxDate) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
-    if (entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {
+    // Per-entry hours validation (server-side; client clamps are not trusted).
+    const hoursError = validateEntryHours(entries);
+    if (hoursError) {
+      return res.status(400).json({ ok: false, error: hoursError });
+    }
+    if (entries.reduce((s, e) => s + Number(e.hours), 0) > 24) {
       return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
+    }
+    // Validate every entry's category against the known set.
+    if (entries.some(e => !TASK_CATEGORIES.includes(e.task_category))) {
+      return res.status(400).json({ ok: false, error: "Invalid task category" });
+    }
+
+    // Worker job-visibility validation: the worker may only log hours against a job
+    // that is visible/assignable to them. Carpentry job wins if both are supplied.
+    {
+      const jobType = carpentry_job_id ? "carpentry" : "project";
+      const jobId = carpentry_job_id || project_id;
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error) return res.status(500).json({ ok: false, error: translateDbError(vis.error) });
+      if (!workerMaySeeJob(vis, jobId, jobType)) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this job." });
+      }
     }
 
     // Check existing timesheet for today
@@ -1824,7 +1888,7 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    const { data: ts } = await sb.from("timesheets").select("id, employee_id, status").eq("id", req.params.id).single();
+    const { data: ts } = await sb.from("timesheets").select("id, employee_id, status, project_id, job_id, carpentry_job_id").eq("id", req.params.id).single();
     if (!ts) return res.status(404).json({ ok: false, error: "Timesheet not found" });
     if (ts.employee_id !== emp.id) return res.status(403).json({ ok: false, error: "Forbidden" });
     if (ts.status === "approved") return res.status(409).json({ ok: false, error: "Cannot edit approved timesheet" });
@@ -1836,10 +1900,50 @@ export function registerWorkforceRoutes(app) {
     if (rest.date && rest.date > maxDate) {
       return res.status(400).json({ ok: false, error: "Cannot log hours for a future date" });
     }
-    if (Array.isArray(entries) && entries.reduce((s, e) => s + (Number(e.hours) || 0), 0) > 24) {
-      return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
+    if (Array.isArray(entries)) {
+      const hoursError = validateEntryHours(entries);
+      if (hoursError) return res.status(400).json({ ok: false, error: hoursError });
+      if (entries.reduce((s, e) => s + Number(e.hours), 0) > 24) {
+        return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
+      }
+      if (entries.some(e => !TASK_CATEGORIES.includes(e.task_category))) {
+        return res.status(400).json({ ok: false, error: "Invalid task category" });
+      }
     }
-    await sb.from("timesheets").update({ ...rest, status: "submitted", submitted_at: new Date().toISOString(), rejection_notes: null, updated_at: new Date().toISOString() }).eq("id", ts.id);
+
+    // Build the timesheet update from an explicit allow-list — never spread the raw
+    // body. This prevents a worker from writing arbitrary columns, and means a job
+    // can only be reassigned through the visibility check below.
+    const update = {
+      status: "submitted",
+      submitted_at: new Date().toISOString(),
+      rejection_notes: null,
+      updated_at: new Date().toISOString(),
+    };
+    if ("date" in rest) update.date = rest.date;
+    if ("job_id" in rest) update.job_id = rest.job_id || null;
+
+    // Resolve the effective job after this edit (body value if supplied, else current),
+    // and validate the worker may log against it. Blocks silent reassignment.
+    const reassigns = ("project_id" in rest) || ("carpentry_job_id" in rest);
+    const effProjectId = ("project_id" in rest) ? (rest.project_id || null) : (ts.project_id || null);
+    const effCarpentryId = ("carpentry_job_id" in rest) ? (rest.carpentry_job_id || null) : (ts.carpentry_job_id || null);
+    if (!effProjectId && !effCarpentryId) {
+      return res.status(400).json({ ok: false, error: "Select a site or job before submitting." });
+    }
+    if (reassigns) {
+      const jobType = effCarpentryId ? "carpentry" : "project";
+      const jobId = effCarpentryId || effProjectId;
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error) return res.status(500).json({ ok: false, error: translateDbError(vis.error) });
+      if (!workerMaySeeJob(vis, jobId, jobType)) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this job." });
+      }
+      update.project_id = effProjectId;
+      update.carpentry_job_id = effCarpentryId;
+    }
+
+    await sb.from("timesheets").update(update).eq("id", ts.id);
     if (Array.isArray(entries)) {
       await sb.from("timesheet_entries").delete().eq("timesheet_id", ts.id);
       const rows = entries.map(e => ({
