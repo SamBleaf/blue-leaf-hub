@@ -520,20 +520,26 @@ function plannerAutoColorKey(key, orderedKeys) {
   if (i < 0) { let h = 0; const s = String(key); for (let c = 0; c < s.length; c++) h = (h * 31 + s.charCodeAt(c)) | 0; idx = Math.abs(h); }
   return PLANNER_COLOR_KEYS[idx % PLANNER_COLOR_KEYS.length];
 }
-// Attach each allocation's Planner colourKey (saved colour wins, else auto by board order) so the
-// worker's shift widget matches the Workforce Planner. Workers can't call the admin planner-jobs
-// endpoint, so we resolve it server-side here.
+// Attach each allocation's Planner colourKey so the worker's shift widget matches the Workforce
+// Planner exactly. Mirrors WorkforcePlannerTab: a saved colour wins, else auto-colour by the
+// job's position in the *board* — i.e. the active jobs (projects, then carpentry by created_at
+// DESC) filtered to those on-board or allocated in the CURRENT week. Resolved server-side because
+// workers can't call the admin planner-jobs endpoint.
 async function attachAllocationColors(sb, allocations) {
   if (!allocations.length) return allocations;
-  const { data: pj } = await sb.from("workforce_planner_jobs")
-    .select("project_id, carpentry_job_id, color, on_board, created_at")
-    .order("created_at", { ascending: true });
-  const savedMap = {}; const orderedKeys = [];
-  for (const r of pj || []) {
-    const key = r.project_id ? `project:${r.project_id}` : `carpentry:${r.carpentry_job_id}`;
-    if (r.color) savedMap[key] = r.color;
-    if (r.on_board) orderedKeys.push(key);
-  }
+  const weekFrom = mondayOf(todayYmd());
+  const weekTo = addDaysYmd(weekFrom, 6);
+  const [{ data: pj }, { data: wk }, { data: projs }, { data: carps }] = await Promise.all([
+    sb.from("workforce_planner_jobs").select("project_id, carpentry_job_id, color, on_board"),
+    sb.from("workforce_allocations").select("project_id, carpentry_job_id").gte("allocation_date", weekFrom).lte("allocation_date", weekTo),
+    sb.from("projects").select("id, created_at").order("created_at", { ascending: true }),
+    sb.from("carpentry_jobs").select("id").order("created_at", { ascending: false }),
+  ]);
+  const savedMap = {}; const onBoard = new Set(); const allocKeys = new Set();
+  for (const r of pj || []) { const k = r.project_id ? `project:${r.project_id}` : `carpentry:${r.carpentry_job_id}`; if (r.color) savedMap[k] = r.color; if (r.on_board) onBoard.add(k); }
+  for (const a of wk || []) allocKeys.add(a.project_id ? `project:${a.project_id}` : `carpentry:${a.carpentry_job_id}`);
+  const universe = [...(projs || []).map((p) => `project:${p.id}`), ...(carps || []).map((c) => `carpentry:${c.id}`)];
+  const orderedKeys = universe.filter((k) => onBoard.has(k) || allocKeys.has(k));
   for (const a of allocations) {
     const key = a.projectId ? `project:${a.projectId}` : a.carpentryJobId ? `carpentry:${a.carpentryJobId}` : null;
     a.colorKey = key ? (savedMap[key] || plannerAutoColorKey(key, orderedKeys)) : "slate";

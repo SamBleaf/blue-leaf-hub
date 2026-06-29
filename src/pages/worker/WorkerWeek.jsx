@@ -4,139 +4,124 @@ import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
 import { paletteByKey } from "../../lib/plannerColors.js";
 
-const MON = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const WD = ["M", "T", "W", "T", "F", "S", "S"];
-// Local calendar date (NOT toISOString — that shifts a day in AU timezones).
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const firstOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const addDaysD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = (d) => addDaysD(d, -((d.getDay() + 6) % 7));
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// Where the worker is scheduled that day — address leads (where to go), carpentry client is the sub-label.
+// Where the worker is scheduled — address leads (where to go); carpentry client is the sub-label.
 function shiftSite(a) {
   if (!a) return { name: "", sub: "", kind: "" };
   if (a.carpentryJobId) return { name: a.carpentryJobAddress || a.carpentryJobClientName || "Carpentry job", sub: (a.carpentryJobAddress && a.carpentryJobClientName) ? a.carpentryJobClientName : "", kind: "Carpentry" };
   return { name: a.projectAddress || "Building site", sub: "", kind: "Building" };
 }
 
-// Worker "My Week" — a logged/missing calendar so the boys work backward and keep every day complete.
+// Timesheet status for a day. "Missing" only flags a past/today working day with nothing logged.
+function tsStatus(ts, { isFuture, isWeekend, hasShift }) {
+  if (ts && (ts.status === "submitted" || ts.status === "approved")) {
+    const h = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
+    return { text: `${ts.status === "approved" ? "Approved" : "Logged"}${h ? ` · ${h}h` : ""}`, tone: "green" };
+  }
+  if (ts && ts.status === "rejected") return { text: "Returned", tone: "amber" };
+  if (ts && ts.status === "draft") return { text: "Draft", tone: "muted" };
+  if (isFuture) return { text: "", tone: "muted" };
+  if (!hasShift && isWeekend) return { text: "", tone: "muted" };
+  if (!hasShift) return { text: "Not logged", tone: "red" };
+  return { text: "Not logged", tone: "red" };
+}
+
 export default function WorkerWeek() {
   const navigate = useNavigate();
-  const [view, setView] = useState(() => firstOfMonth(new Date()));
-  const [byDate, setByDate] = useState({});
+  const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [allocByDate, setAllocByDate] = useState({});
-  const [shift, setShift] = useState(null); // tapped scheduled shift (modal)
+  const [tsByDate, setTsByDate] = useState({});
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null); // null | "auth" | "load"
+  const [loadError, setLoadError] = useState(null);
+  const [shift, setShift] = useState(null);
 
-  const monthStart = ymd(view);
-  const monthEnd = ymd(new Date(view.getFullYear(), view.getMonth() + 1, 0));
-
-  // Scheduled shifts (Planner allocations) for the visible month — colour-coded per job.
-  useEffect(() => {
-    let stop = false;
-    workerFetch(`/api/worker/allocations/week?from=${monthStart}&to=${monthEnd}`)
-      .then((r) => r.json())
-      .then((j) => { if (!stop && j.ok) { const m = {}; for (const a of j.allocations || []) m[a.allocationDate] = a; setAllocByDate(m); } })
-      .catch(() => {});
-    return () => { stop = true; };
-  }, [monthStart, monthEnd]);
+  const weekFrom = ymd(monday);
+  const weekTo = ymd(addDaysD(monday, 6));
+  const todayStr = ymd(new Date());
+  const isThisWeek = ymd(mondayOf(new Date())) === weekFrom;
 
   useEffect(() => {
     let stop = false;
-    setLoading(true);
-    setLoadError(null);
-    workerFetch(`/api/worker/timesheets?from=${monthStart}&to=${monthEnd}`)
-      .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
-      .then(({ status, body }) => {
-        if (stop) return;
-        // Don't paint a failed load as "every day missing" — surface the error instead.
-        if (status === 401) { setLoadError("auth"); return; }
-        if (!body.ok) { setLoadError("load"); return; }
-        const m = {}; for (const t of (body.timesheets || [])) m[t.date] = t; setByDate(m);
-      })
-      .catch(() => { if (!stop) setLoadError("load"); })
-      .finally(() => { if (!stop) setLoading(false); });
+    setLoading(true); setLoadError(null);
+    Promise.all([
+      workerFetch(`/api/worker/allocations/week?from=${weekFrom}&to=${weekTo}`).then((r) => r.json()).catch(() => ({ ok: false })),
+      workerFetch(`/api/worker/timesheets?from=${weekFrom}&to=${weekTo}`).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) })),
+    ]).then(([aJ, tR]) => {
+      if (stop) return;
+      if (aJ.ok) { const m = {}; for (const a of aJ.allocations || []) m[a.allocationDate] = a; setAllocByDate(m); }
+      if (tR.status === 401) { setLoadError("auth"); return; }
+      if (tR.body?.ok) { const m = {}; for (const t of tR.body.timesheets || []) m[t.date] = t; setTsByDate(m); }
+    }).finally(() => { if (!stop) setLoading(false); });
     return () => { stop = true; };
-  }, [monthStart, monthEnd]);
+  }, [weekFrom, weekTo]);
 
-  const cells = useMemo(() => {
-    const offset = (view.getDay() + 6) % 7; // Monday = 0
-    const daysInMonth = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
-    const todayStr = ymd(new Date());
-    const out = [];
-    for (let i = 0; i < offset; i++) out.push(null);
-    for (let day = 1; day <= daysInMonth; day++) {
-      const d = new Date(view.getFullYear(), view.getMonth(), day);
-      const key = ymd(d);
-      const ts = byDate[key] || null;
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      const isFuture = key > todayStr;
-      let dot = null;
-      if (ts && (ts.status === "submitted" || ts.status === "approved")) dot = "green";
-      else if (ts && ts.status === "rejected") dot = "amber"; // returned — needs resubmit
-      else if (!ts && !isWeekend && !isFuture && !loadError) dot = "red"; // working day, nothing logged
-      out.push({ key, day, dot, isFuture, isToday: key === todayStr, isWeekend });
-    }
-    return out;
-  }, [view, byDate, loadError]);
+  const rows = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = addDaysD(monday, i);
+    const key = ymd(d);
+    return { key, d, isToday: key === todayStr, isFuture: key > todayStr, isWeekend: i >= 5, alloc: allocByDate[key], ts: tsByDate[key] };
+  }), [monday, allocByDate, tsByDate, todayStr]);
 
-  const canForward = view < firstOfMonth(new Date());
-  const missing = cells.filter((c) => c && c.dot === "red").length;
+  const missing = rows.filter((r) => tsStatus(r.ts, { isFuture: r.isFuture, isWeekend: r.isWeekend, hasShift: !!r.alloc }).tone === "red").length;
 
   return (
     <WorkerLayout>
       <div className="px-4 pb-8">
-        <h1 className="text-lg font-bold text-ink pt-4 mb-2">My Week</h1>
+        <h1 className="text-lg font-bold text-ink pt-4 mb-3">My Week</h1>
 
-        {/* Lead with the answer: are you caught up? */}
-        {loadError && (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-sm mb-3 text-red-700">
-            {loadError === "auth"
-              ? "Your worker link has expired or been reset — ask the office for a new link."
-              : <>Couldn&apos;t load your timesheets. <button type="button" onClick={() => window.location.reload()} className="font-semibold underline">Retry</button></>}
+        {/* Week nav */}
+        <div className="flex items-center justify-between mb-3">
+          <button type="button" onClick={() => setMonday((m) => addDaysD(m, -7))} aria-label="Previous week" className="w-9 h-9 rounded-full border border-hairline text-ink text-lg flex items-center justify-center">‹</button>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-ink">{monday.getDate()} {MON[monday.getMonth()]} – {addDaysD(monday, 6).getDate()} {MON[addDaysD(monday, 6).getMonth()]}</p>
+            {!isThisWeek && <button type="button" onClick={() => setMonday(mondayOf(new Date()))} className="text-xs text-primary font-medium">This week</button>}
           </div>
+          <button type="button" onClick={() => setMonday((m) => addDaysD(m, 7))} aria-label="Next week" className="w-9 h-9 rounded-full border border-hairline text-ink text-lg flex items-center justify-center">›</button>
+        </div>
+
+        {loadError === "auth" && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-sm mb-3 text-red-700">Your worker link expired — ask the office for a new one.</div>
         )}
-        {!loadError && missing > 0 && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm mb-3 text-amber-800">
-            <span className="font-semibold">{missing}</span> day{missing > 1 ? "s" : ""} not logged — the red ones. Tap to fix.
-          </div>
+        {!loadError && !loading && missing > 0 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm mb-3 text-amber-800"><span className="font-semibold">{missing}</span> day{missing > 1 ? "s" : ""} not logged this week — tap to fix.</div>
         )}
         {!loadError && !loading && missing === 0 && (
-          <div className="rounded-lg bg-green-50 border border-green-200 p-2.5 text-sm mb-3 text-green-700 font-medium">
-            ✓ All caught up this month — nice one.
-          </div>
+          <div className="rounded-lg bg-green-50 border border-green-200 p-2.5 text-sm mb-3 text-green-700 font-medium">✓ This week&apos;s all logged — nice one.</div>
         )}
 
-        <p className="text-xs text-muted mb-3">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 align-middle mr-1" />Logged
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 align-middle ml-3 mr-1" />Missing
-          <span className="block text-[11px] mt-1">Coloured bar = scheduled shift — tap a day to see where you&apos;re working + any notes.</span>
-        </p>
-
-        <div className="flex items-center justify-between mb-2">
-          <button type="button" onClick={() => setView((v) => new Date(v.getFullYear(), v.getMonth() - 1, 1))} aria-label="Previous month" className="w-9 h-9 rounded-full border border-hairline text-ink text-lg flex items-center justify-center">‹</button>
-          <span className="text-sm font-semibold text-ink">{MON[view.getMonth()]} {view.getFullYear()}</span>
-          <button type="button" disabled={!canForward} onClick={() => canForward && setView((v) => new Date(v.getFullYear(), v.getMonth() + 1, 1))} aria-label="Next month" className="w-9 h-9 rounded-full border border-hairline text-ink text-lg flex items-center justify-center disabled:opacity-30">›</button>
-        </div>
-
-        <div className="grid grid-cols-7 gap-1 mb-1">
-          {WD.map((w, i) => <div key={i} className="text-center text-[11px] font-semibold text-muted py-1">{w}</div>)}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((c, i) => {
-            if (c === null) return <div key={i} />;
-            const alloc = allocByDate[c.key];
-            const pal = alloc ? paletteByKey(alloc.colorKey) : null;
+        {/* Day rows */}
+        <div className="rounded-card border border-hairline bg-surface divide-y divide-hairline overflow-hidden">
+          {rows.map((r) => {
+            const site = shiftSite(r.alloc);
+            const pal = r.alloc ? paletteByKey(r.alloc.colorKey) : null;
+            const st = tsStatus(r.ts, { isFuture: r.isFuture, isWeekend: r.isWeekend, hasShift: !!r.alloc });
+            const tone = st.tone === "green" ? "text-green-600" : st.tone === "red" ? "text-red-600" : st.tone === "amber" ? "text-amber-600" : "text-muted";
             return (
               <button
-                key={i}
+                key={r.key}
                 type="button"
-                disabled={c.isFuture && !alloc}
-                onClick={() => (alloc ? setShift({ ...alloc, dateKey: c.key }) : navigate(`/worker/timesheet/log?date=${c.key}`))}
-                className={`relative aspect-square rounded-lg flex flex-col items-center justify-center text-sm overflow-hidden ${c.isToday ? "ring-2 ring-primary" : "border border-hairline"} ${c.isFuture && !alloc ? "opacity-30" : "bg-white active:scale-95"}`}
+                onClick={() => (r.alloc ? setShift({ ...r.alloc, dateKey: r.key }) : !r.isFuture && navigate(`/worker/timesheet/log?date=${r.key}`))}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 text-left ${r.isWeekend && !r.alloc && !r.ts ? "bg-page/40" : "active:bg-page"}`}
               >
-                <span className={`${c.isWeekend ? "text-muted" : "text-ink"} font-medium leading-none`}>{c.day}</span>
-                {c.dot && <span className={`w-2 h-2 rounded-full mt-1 ${c.dot === "green" ? "bg-green-500" : c.dot === "amber" ? "bg-amber-500" : "bg-red-500"}`} />}
-                {alloc && <span className="absolute bottom-0 inset-x-0 h-1.5" style={{ background: pal.dot }} title="Scheduled shift" />}
+                <span className={`w-10 shrink-0 text-center ${r.isToday ? "text-primary" : "text-ink"}`}>
+                  <span className="block text-[11px] font-semibold uppercase">{DOW[r.d.getDay()]}</span>
+                  <span className="block text-base font-bold leading-none">{r.d.getDate()}</span>
+                </span>
+                <span className="flex-1 min-w-0">
+                  {r.alloc ? (
+                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: pal.bg, color: pal.text }}>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: pal.dot }} />
+                      <span className="text-xs font-medium truncate">{site.name}</span>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted">{r.isWeekend ? "—" : "Not scheduled"}</span>
+                  )}
+                </span>
+                <span className={`shrink-0 text-xs font-medium ${tone}`}>{st.text}</span>
               </button>
             );
           })}
@@ -149,11 +134,7 @@ export default function WorkerWeek() {
           const d = new Date(`${shift.dateKey}T00:00:00`);
           return (
             <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50" onClick={() => setShift(null)}>
-              <div
-                className="w-full sm:max-w-sm bg-surface rounded-t-2xl sm:rounded-card p-5"
-                onClick={(e) => e.stopPropagation()}
-                style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
-              >
+              <div className="w-full sm:max-w-sm bg-surface rounded-t-2xl sm:rounded-card p-5" onClick={(e) => e.stopPropagation()} style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-3 h-3 rounded-full shrink-0" style={{ background: pal.dot }} />
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Scheduled shift</span>
