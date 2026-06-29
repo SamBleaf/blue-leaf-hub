@@ -359,6 +359,30 @@ export default function TenderDetail() {
     }
   }, [load]);
 
+  const [backlogBusy, setBacklogBusy] = useState(false);
+  const importBacklog = useCallback(async () => {
+    if (!window.confirm("Import quote replies from the inbox since this job's first RFQ was sent? Safe to run more than once.")) return;
+    setBacklogBusy(true);
+    setScanResult(null);
+    try {
+      const res = await authFetch("/api/imap/quote-poll-backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId })
+      });
+      const json = await res.json();
+      if (!json.ok) setScanResult(json.error || "Backlog import failed");
+      else {
+        setScanResult(`Backlog (since ${json.since}): ${json.matched} matched, ${json.unmatched} unmatched`);
+        if (json.matched > 0) load();
+      }
+    } catch {
+      setScanResult("Backlog import failed — check server logs");
+    } finally {
+      setBacklogBusy(false);
+    }
+  }, [jobId, load]);
+
   const openEmailRecipients = useCallback(async () => {
     setEmailOpen(true);
     setEmailResult(null);
@@ -1311,6 +1335,15 @@ function winRowMissingConfirmedQuote(row) {
                   Scan inbox
                 </>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={importBacklog}
+              disabled={backlogBusy}
+              title="One-time: pull quote replies that arrived BEFORE live polling started, from this job's first RFQ date onward. Safe to re-run."
+              className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-muted shadow-sm transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
+            >
+              {backlogBusy ? "Importing…" : "Import backlog"}
             </button>
           </div>
         </div>

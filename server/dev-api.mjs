@@ -2372,6 +2372,56 @@ async function pollImapForQuoteReplies() {
   }
 }
 
+// One-time SCOPED backlog import: re-read INBOX mail SINCE the earliest RFQ sent for a given job and
+// run each through the SAME idempotent matcher/ingest as the live poller (dedup by message-id, so it
+// is safe to run repeatedly). Does NOT touch the live UID cursor. Pulls quote replies that arrived
+// before the poller's cursor was seeded — date-floored so older unrelated mail is ignored.
+async function importQuoteBacklogForJob(sb, jobId) {
+  const cfg = imapConfig();
+  if (!cfg) return { ok: false, error: "IMAP not configured." };
+  const { data: jobRfqs } = await sb.from("rfqs").select("sent_at").eq("job_id", jobId)
+    .not("sent_at", "is", null).order("sent_at", { ascending: true }).limit(1);
+  if (!jobRfqs || !jobRfqs.length) return { ok: false, error: "No sent RFQs found for this job — nothing to import against." };
+  const since = new Date(jobRfqs[0].sent_at);
+  since.setDate(since.getDate() - 1); // pad a day for timezone safety
+
+  const client = new ImapFlow({ host: cfg.host, port: cfg.port, secure: cfg.secure, auth: cfg.auth });
+  await client.connect();
+  await client.mailboxOpen("INBOX");
+  try {
+    const candidates = await fetchOpenRfqCandidates(sb);
+    const found = await client.search({ since }, { uid: true });
+    const uids = (Array.isArray(found) ? found : []).slice(-300); // cap a runaway backlog
+    let checked = 0, matched = 0, unmatched = 0;
+    if (uids.length) {
+      for await (const msg of client.fetch(uids, { uid: true, envelope: true, internalDate: true, source: true }, { uid: true })) {
+        checked += 1;
+        try {
+          const out = await processIncomingQuoteMessage(sb, msg, candidates);
+          if (out.matched) matched += 1; else unmatched += 1;
+        } catch (e) { console.error("[imap-backlog-process]", e); }
+      }
+    }
+    return { ok: true, since: since.toISOString().slice(0, 10), checked, matched, unmatched };
+  } finally {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+}
+
+app.post("/api/imap/quote-poll-backlog", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const jobId = String(req.body?.jobId || "").trim();
+    if (!jobId) return res.status(400).json({ ok: false, error: "jobId required." });
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+    const out = await importQuoteBacklogForJob(sb, jobId);
+    return res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    console.error("[imap-quote-poll-backlog]", err);
+    return res.status(500).json({ ok: false, error: err?.message || "Backlog import failed." });
+  }
+});
+
 app.post("/api/imap/quote-poll", requireAuth, requireRole("admin"), async (_req, res) => {
   try {
     const out = await pollImapForQuoteReplies();
