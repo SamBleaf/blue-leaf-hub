@@ -1,6 +1,7 @@
 import { gmailSendConfigured, sendViaGmail } from "./gmailSend.mjs";
 import { getSmtpTransporter, smtpFromAddress, smtpReady } from "./smtpSend.mjs";
 import { resendSendConfigured, sendViaResend } from "./resendSend.mjs";
+import { mirrorToSentMailbox } from "./imapSentAppend.mjs";
 
 export function mailTransportName() {
   // Resend (HTTPS) is preferred when configured — not blocked by host egress, no OAuth token expiry.
@@ -52,7 +53,7 @@ export async function sendPlainMail(opts) {
       const resendId = await sendViaResend(opts);
       // sendViaResend returns the Resend message id (truthy string) on success, or null if not
       // actually configured at call time.
-      if (resendId) return { transport: "resend", resendId };
+      if (resendId) { mirrorToSentMailbox(opts, "resend"); return { transport: "resend", resendId }; }
     } catch (resendErr) {
       console.warn("[mail] Resend send failed, trying Gmail/SMTP fallback:", resendErr?.message || resendErr);
       errors.push(`Resend: ${resendErr?.message || resendErr}`);
@@ -73,7 +74,7 @@ export async function sendPlainMail(opts) {
   // 3) SMTP (same connected account, app password).
   try {
     const viaSmtp = await sendViaSmtp(opts);
-    if (viaSmtp) return { transport: "smtp", resendId: null };
+    if (viaSmtp) { mirrorToSentMailbox(opts, "smtp"); return { transport: "smtp", resendId: null }; }
   } catch (smtpErr) {
     errors.push(`SMTP: ${smtpErr?.message || smtpErr}`);
   }
