@@ -149,19 +149,27 @@ const FREE_MAIL_DOMAINS = new Set([
   "tpg.com.au", "exetel.com.au", "proton.me", "protonmail.com",
 ]);
 
+// Blue Leaf's own domains — every RFQ reply has admin@blueleafbuilding.com.au in To/CC, so these
+// must be excluded from sender/company resolution or they'd match our own domain on every email.
+const OWN_DOMAINS = new Set(["blueleafbuilding.com.au", "blueleafbuilding.test"]);
+
 function domainOf(email) {
   const e = normEmail(email);
   const at = e.lastIndexOf("@");
   return at >= 0 ? e.slice(at + 1) : "";
 }
 
-/** Every sender-ish address on the inbound mail: from + reply-to + cc + to. Catches colleague /
- *  shared-inbox / reply-all replies where the original contact isn't the From address. */
+/** Every sender-ish address on the inbound mail: from + reply-to + cc + to (minus our own
+ *  addresses). Catches colleague / shared-inbox / reply-all replies where the original contact
+ *  isn't the From address. */
 export function collectSenderAddresses(parsed) {
   const out = new Set();
   for (const field of ["from", "replyTo", "cc", "to"]) {
     const v = parsed?.[field]?.value;
-    if (Array.isArray(v)) for (const a of v) { const e = normEmail(a?.address); if (e) out.add(e); }
+    if (Array.isArray(v)) for (const a of v) {
+      const e = normEmail(a?.address);
+      if (e && !OWN_DOMAINS.has(domainOf(e))) out.add(e);
+    }
   }
   return [...out];
 }
