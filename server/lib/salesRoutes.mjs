@@ -605,7 +605,18 @@ export function registerSalesRoutes(app) {
     }
     const { data, error } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
-    res.json({ ok: true, lead: data, gateWarnings });
+    // Auto-retry: a signed PTSA blocked only by a missing site address should now create the job +
+    // Dropbox folder once the address is filled in — so the "job not created" warning clears itself.
+    let leadOut = data;
+    let provisioning;
+    if (data?.ptsa_status === "signed" && !data?.job_id && String(data?.site_address || "").trim()) {
+      provisioning = await provisionSignedLeadJob(sb, req.params.id, req.caller?.id || null, data);
+      if (provisioning?.jobId) {
+        const { data: refreshed } = await sb.from("leads").select("*").eq("id", req.params.id).maybeSingle();
+        if (refreshed) leadOut = refreshed;
+      }
+    }
+    res.json({ ok: true, lead: leadOut, gateWarnings, provisioning });
   });
 
   // ── Lead → Job conversion (Phase 2: non-lossy, server-side, provenance-stamped) ──
@@ -638,6 +649,66 @@ export function registerSalesRoutes(app) {
       return err(res, 500, "Failed to convert lead to job.");
     }
   });
+
+  // Provision the job + Dropbox folder for a lead whose PTSA is signed. Idempotent + NON-FATAL,
+  // so it's safe to re-run once a previously-missing site address is added (markers no-op repeats).
+  // Returns the same `provisioning` summary shape the mark-signed route returns.
+  async function provisionSignedLeadJob(sb, leadId, actorId, fallbackLead) {
+    const provisioning = { jobId: null, jobCreated: false, dropboxProvisioned: false, leadDataBackfilled: false, dropboxConfigured: dropboxConfigured() };
+    try {
+      if (dropboxConfigured()) {
+        let { data: freshLead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+        freshLead = freshLead || fallbackLead;
+        let job = null;
+        if (freshLead?.job_id) {
+          const { data: existing } = await sb.from("jobs").select("*").eq("id", freshLead.job_id).maybeSingle();
+          job = existing || null;
+        }
+        if (!job && freshLead) {
+          try {
+            const result = await convertLeadToJob(sb, freshLead, actorId);
+            job = result.job;
+            provisioning.jobCreated = !result.alreadyConverted;
+          } catch (e) {
+            console.warn("[provisionSignedLeadJob] convertLeadToJob skipped:", e?.publicMessage || e?.message || e);
+          }
+        }
+        if (job) {
+          provisioning.jobId = job.id;
+          const jobAddress = job.address;
+          if (!job.dropbox_provisioned_at && jobAddress) {
+            try {
+              const fld = await ensureJobFolderStructure({ jobAddress });
+              const jobUpdate = { dropbox_provisioned_at: new Date().toISOString() };
+              if (fld?.dropboxSharedLinkUrl) { jobUpdate.dropbox_shared_link = fld.dropboxSharedLinkUrl; jobUpdate.dropbox_link = fld.dropboxSharedLinkUrl; }
+              await sb.from("jobs").update(jobUpdate).eq("id", job.id);
+              provisioning.dropboxProvisioned = true;
+            } catch (e) {
+              console.warn("[provisionSignedLeadJob] ensureJobFolderStructure skipped:", e?.message || e);
+            }
+          } else if (job.dropbox_provisioned_at) {
+            provisioning.dropboxProvisioned = true;
+          }
+          if (!job.lead_data_backfilled_at && jobAddress) {
+            try {
+              const bf = await backfillLeadDataToJobFolder({ sb, leadId, jobAddress });
+              await sb.from("jobs").update({ lead_data_backfilled_at: new Date().toISOString() }).eq("id", job.id);
+              provisioning.leadDataBackfilled = true;
+              provisioning.backfill = bf;
+            } catch (e) {
+              console.warn("[provisionSignedLeadJob] backfillLeadDataToJobFolder skipped:", e?.message || e);
+            }
+          } else if (job.lead_data_backfilled_at) {
+            provisioning.leadDataBackfilled = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[provisionSignedLeadJob] orchestration skipped:", e?.message || e);
+    }
+    if (!provisioning.jobId) provisioning.siteAddressWarning = true;
+    return provisioning;
+  }
 
   // ── Mark a PTSA as SIGNED (sole writer of the signed state) ───────────────────
   // One event: (a) store the signed PDF in the 'lead-documents' bucket (source of

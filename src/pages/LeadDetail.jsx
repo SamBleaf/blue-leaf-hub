@@ -1232,7 +1232,7 @@ export default function LeadDetail() {
   const gatePass = gateChecks.every(g => g.check(lead));
   const nextLabel = STAGES.find(s => s.id === next)?.label;
   // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)
-  const showSiteAddressWarning = ptsaSiteAddressWarning || (lead.ptsa_status === "signed" && !lead.job_id);
+  const showSiteAddressWarning = !lead.job_id && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
   const isArchTender = lead.lead_type === "architect_tender";
   const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
   const showWinningOffer = !isArchTender && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
