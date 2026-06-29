@@ -141,36 +141,126 @@ export function matchBySenderSubcontractor(fromEmail, rfqRows) {
   return null;
 }
 
+// Free-mail / shared providers — a domain here can't identify a company, so domain matching is skipped.
+const FREE_MAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "live.com.au", "msn.com",
+  "yahoo.com", "yahoo.com.au", "ymail.com", "icloud.com", "me.com", "mac.com", "aol.com",
+  "bigpond.com", "bigpond.net.au", "optusnet.com.au", "iinet.net.au", "internode.on.net",
+  "tpg.com.au", "exetel.com.au", "proton.me", "protonmail.com",
+]);
+
+function domainOf(email) {
+  const e = normEmail(email);
+  const at = e.lastIndexOf("@");
+  return at >= 0 ? e.slice(at + 1) : "";
+}
+
+/** Every sender-ish address on the inbound mail: from + reply-to + cc + to. Catches colleague /
+ *  shared-inbox / reply-all replies where the original contact isn't the From address. */
+export function collectSenderAddresses(parsed) {
+  const out = new Set();
+  for (const field of ["from", "replyTo", "cc", "to"]) {
+    const v = parsed?.[field]?.value;
+    if (Array.isArray(v)) for (const a of v) { const e = normEmail(a?.address); if (e) out.add(e); }
+  }
+  return [...out];
+}
+
+const RFQ_TOKEN_RE = /BLH-RFQ-([0-9a-f]{8,36})/i;
+
+/** L1 — durable RFQ token: X-BlueLeaf-RFQ-ID header (full id) or "BLH-RFQ-<id>" in subject/body.
+ *  Transport- and sender-proof: survives a colleague reply, a shared inbox, and forwards. */
+export function matchByRfqToken(parsed, rfqRows) {
+  const rows = rfqRows || [];
+  let headerId = "";
+  try { headerId = String(parsed?.headers?.get?.("x-blueleaf-rfq-id") || "").trim().toLowerCase(); } catch { /* no headers map */ }
+  if (headerId) {
+    const hit = rows.find((r) => String(r.id).toLowerCase() === headerId);
+    if (hit) return { rfq: hit, reason: "rfq_token_header" };
+  }
+  const m = `${parsed?.subject || ""} ${parsed?.text || parsed?.html || ""}`.match(RFQ_TOKEN_RE);
+  if (m?.[1]) {
+    const tok = m[1].toLowerCase();
+    const hits = rows.filter((r) => String(r.id).toLowerCase().startsWith(tok));
+    if (hits.length === 1) return { rfq: hits[0], reason: "rfq_token_body" };
+  }
+  return null;
+}
+
+/** Resolve the COMPANY (subcontractor) by any sender address — exact email first, then non-free-mail
+ *  domain. Returns the company's RFQ rows + whether the signal spans >1 company (ambiguous). */
+function findCompanyCandidates(addrs, rfqRows) {
+  const rows = rfqRows || [];
+  const subId = (r) => r?.subcontractor_id || normEmail(r?.subcontractors?.email);
+  const byEmail = rows.filter((r) => addrs.includes(normEmail(r?.subcontractors?.email)));
+  if (byEmail.length) {
+    return { rows: byEmail, multiCompany: new Set(byEmail.map(subId)).size > 1, via: "email" };
+  }
+  const domains = new Set(addrs.map(domainOf).filter((d) => d && !FREE_MAIL_DOMAINS.has(d)));
+  if (!domains.size) return { rows: [], multiCompany: false, via: null };
+  const byDomain = rows.filter((r) => domains.has(domainOf(r?.subcontractors?.email)));
+  return { rows: byDomain, multiCompany: new Set(byDomain.map(subId)).size > 1, via: "domain" };
+}
+
+/** Does the matched RFQ's trade appear in the email? Used to disambiguate within a company. */
+function tradeSignal(parsed, rfq) {
+  const tradeNorm = normalizeLooseText(rfq?.trade || "");
+  if (!tradeNorm) return 0;
+  const hay = normalizeLooseText(`${parsed?.subject || ""} ${parsed?.text || parsed?.html || ""}`);
+  return hay.includes(tradeNorm) ? 3 : 0;
+}
+
+/** Pick ONE RFQ from a single company's set, by trade signal. Never guesses on a tie. */
+function disambiguateByTrade(parsed, rows) {
+  if (rows.length === 1) return { rfq: rows[0], reason: "company_single_rfq" };
+  const scored = rows.map((rfq) => ({ rfq, score: scoreSubjectAddressForRfq(parsed, rfq) + tradeSignal(parsed, rfq) }));
+  const best = Math.max(...scored.map((s) => s.score));
+  if (best <= 0) return { ambiguous: true, ambiguity: "ambiguous_trade" };
+  const top = scored.filter((s) => s.score === best);
+  if (top.length > 1) return { ambiguous: true, ambiguity: "ambiguous_trade" };
+  return { rfq: top[0].rfq, reason: "company_trade" };
+}
+
+/** STRICT subject/address: only stands alone when it uniquely fixes BOTH the address AND the trade.
+ *  Replaces the old address-only auto-attribution that mis-filed Spaellacy under Andrew Evans. */
+export function matchBySubjectAddressStrict(parsed, rfqRows) {
+  const scored = (rfqRows || [])
+    .map((rfq) => ({ rfq, addr: scoreSubjectAddressForRfq(parsed, rfq), trade: tradeSignal(parsed, rfq) }))
+    .filter((r) => r.addr >= 4 && r.trade > 0);
+  if (!scored.length) return null;
+  const best = Math.max(...scored.map((r) => r.addr + r.trade));
+  const top = scored.filter((r) => r.addr + r.trade === best);
+  if (top.length > 1) return { ambiguous: true, ambiguity: "ambiguous_address" };
+  return { rfq: top[0].rfq, reason: "subject_address_strict" };
+}
+
 /**
- * Full matcher with ambiguity metadata (P0-B3).
- * @returns {{ match: { rfq, reason } | null, ambiguity: null | 'ambiguous_address' | 'ambiguous_sender' }}
+ * Layered, confidence-ranked matcher. Golden rule: a WRONG auto-match is worse than unmatched, so
+ * uncertain results return an ambiguity reason and fall to the unmatched queue.
+ * Order: L1 token → L2 thread → L3 company (exact email / domain) then trade → L5 strict address+trade.
+ * @returns {{ match: { rfq, reason } | null, ambiguity: string | null }}
  */
 export function resolveInboundRfqMatchWithMeta(parsed, rfqRows) {
+  const token = matchByRfqToken(parsed, rfqRows);
+  if (token) return { match: token, ambiguity: null };
+
   const thread = matchBySentMessageId(parsed, rfqRows);
   if (thread) return { match: thread, ambiguity: null };
 
-  const subject = matchBySubjectAddress(parsed, rfqRows);
-  if (subject?.rfq) return { match: subject, ambiguity: null };
-  if (subject?.ambiguous) {
-    return { match: null, ambiguity: subject.ambiguity || "ambiguous_address" };
+  // L3 — resolve the company by any sender address, then the trade within it.
+  const addrs = collectSenderAddresses(parsed);
+  const company = findCompanyCandidates(addrs, rfqRows);
+  if (company.rows.length) {
+    if (company.multiCompany) return { match: null, ambiguity: "ambiguous_company" };
+    const picked = disambiguateByTrade(parsed, company.rows);
+    if (picked?.rfq) return { match: picked, ambiguity: null };
+    return { match: null, ambiguity: picked?.ambiguity || "ambiguous_trade" };
   }
 
-  const fromEmail = maybeFirstAddress(parsed);
-  const senderRows = findSenderSubcontractorCandidates(fromEmail, rfqRows);
-  if (senderRows.length === 1) {
-    return {
-      match: { rfq: senderRows[0], reason: "sender_subcontractor" },
-      ambiguity: null,
-    };
-  }
-  if (senderRows.length > 1) {
-    const subSubject = matchBySubjectAddress(parsed, senderRows);
-    if (subSubject?.rfq) return { match: subSubject, ambiguity: null };
-    if (subSubject?.ambiguous) {
-      return { match: null, ambiguity: "ambiguous_address" };
-    }
-    return { match: null, ambiguity: "ambiguous_sender" };
-  }
+  // L5 — strict address+trade only. Address ALONE no longer auto-attributes across companies.
+  const strict = matchBySubjectAddressStrict(parsed, rfqRows);
+  if (strict?.rfq) return { match: strict, ambiguity: null };
+  if (strict?.ambiguous) return { match: null, ambiguity: strict.ambiguity };
 
   return { match: null, ambiguity: null };
 }

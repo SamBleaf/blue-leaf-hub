@@ -264,7 +264,9 @@ assertAmbiguity(
   "MATCH-09 Multi-RFQ same supplier weak subject",
   parsed({ from: "sparky@example.com", subject: "Our quote" }),
   dupRowsSameSub,
-  "ambiguous_sender"
+  // New layered matcher: company resolves by sender email, but the trade can't be disambiguated
+  // from a weak subject → ambiguous_trade (same safe outcome: unmatched, not a wrong bucket).
+  "ambiguous_trade"
 );
 
 assertMatch(
@@ -369,10 +371,10 @@ pass("MATCH-19 Paul/Sam separate inboxes (documented — single IMAP poller)");
     parsed({ from: "sparky@example.com", subject: "Our quote" }),
     dupRowsSameSub
   );
-  if (trace.result === "unmatched" && trace.ambiguity === "ambiguous_sender") {
-    pass("TRACE ambiguous_sender reason");
+  if (trace.result === "unmatched" && trace.ambiguity === "ambiguous_trade") {
+    pass("TRACE ambiguous (company resolved, trade not) reason");
   } else {
-    fail("TRACE ambiguous_sender reason", `result=${trace.result} ambiguity=${trace.ambiguity}`);
+    fail("TRACE ambiguous (company resolved, trade not) reason", `result=${trace.result} ambiguity=${trace.ambiguity}`);
   }
 }
 
