@@ -46,7 +46,7 @@ async function check(label, fn) {
 
 console.log("\n── Prerequisites (099–102) ──");
 await check("100 invitations.employee_id", () => columnExists("invitations", "employee_id"));
-await check("101 lead_documents.ptsa_signed_document_path", () => columnExists("lead_documents", "ptsa_signed_document_path"));
+await check("101 leads.ptsa_signed_document_path", () => columnExists("leads", "ptsa_signed_document_path"));
 await check("102 rfq_events table", () => tableExists("rfq_events"));
 
 console.log("\n── Migration 103 — portal v2 tables ──");
