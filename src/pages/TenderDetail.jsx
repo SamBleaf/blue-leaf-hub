@@ -150,8 +150,8 @@ function CorrespondenceBlock({ rfq, rows, readOnly, onLog }) {
           })}
           {!readOnly ? (
             <div className="rounded border border-dashed border-hairline p-2">
-              <div className="font-semibold text-ink">Log reply</div>
-              <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={3} className="mt-1 w-full rounded border border-hairline p-1 text-sm" />
+              <div className="font-semibold text-ink">Reply to {rfq.subcontractors?.business_name || "subcontractor"}</div>
+              <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={3} placeholder="Type your reply — sent to them by email, threaded to this RFQ, with your signature." className="mt-1 w-full rounded border border-hairline p-1 text-sm" />
               <button
                 type="button"
                 className="mt-1 rounded bg-primary px-2 py-1 text-xs font-semibold text-white"
@@ -161,7 +161,7 @@ function CorrespondenceBlock({ rfq, rows, readOnly, onLog }) {
                   setReply("");
                 }}
               >
-                Save
+                Send reply
               </button>
             </div>
           ) : null}
@@ -617,20 +617,27 @@ function winRowMissingConfirmedQuote(row) {
     }
   }
 
+  // Send a real reply to the subcontractor, threaded to their RFQ (subject "Re: …"), with the
+  // settings signature appended. Reuses /api/rfq/send (force:true to bypass the already-sent guard);
+  // the server stamps the token + logs it as outbound correspondence, so no manual insert needed.
   async function logReply(rfqId, body) {
-    const sb = getSupabase();
     const r = rfqs.find((x) => x.id === rfqId);
-    const { error: ins } = await sb.from("correspondence").insert({
-      job_id: jobId,
-      rfq_id: rfqId,
-      subcontractor_id: r?.subcontractor_id || null,
-      direction: "inbound",
-      subject: "Logged reply",
-      body,
-      logged_by: "sam"
-    });
-    if (ins) setError(ins.message);
-    else await load();
+    const to = r?.subcontractors?.email;
+    if (!to) { setError("That subcontractor has no email address on file."); return; }
+    const subject = `Re: RFQ — ${r.trade || ""} — ${job?.address || ""}`.replace(/\s+—\s*$/, "").trim();
+    const fullBody = sigFooter ? `${body}\n\n${sigFooter}` : body;
+    try {
+      const res = await authFetch("/api/rfq/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true, messages: [{ to, subject, body: fullBody, html: plainBodyToHtml(fullBody), rfqId, jobId, subcontractor_id: r?.subcontractor_id || null }] })
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) { setError(json?.error || "Reply failed to send."); return; }
+      await load();
+    } catch (e) {
+      setError(e?.message || "Reply failed to send.");
+    }
   }
 
   async function openWin() {
