@@ -12,6 +12,7 @@ import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
+import { randomUUID } from "crypto";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { assertJobReadyForRfqHandoff } from "./jobGuards.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
@@ -673,11 +674,19 @@ export function registerRfqPackageRoutes(app) {
 
         try {
           const messageId = generateOutboundMessageId();
+          // Durable RFQ token (L1): pre-generate the rfqs id and stamp a "Ref: BLH-RFQ-<id8>" line
+          // into the body. It survives the reply (the matcher reads the full inbound body incl.
+          // quoted history) and is sender/transport-proof — fixes colleague/shared-inbox/forward
+          // replies that the thread + exact-sender tiers can't. Only when we'll create the rfqs row.
+          const willTrack = !!(pkg?.job_id && r.subcontractor_id);
+          const rfqId = willTrack ? randomUUID() : null;
+          const refToken = rfqId ? rfqId.slice(0, 8) : null;
+          const bodyWithRef = refToken ? `${email_body}\n\nRef: BLH-RFQ-${refToken}` : email_body;
           const { resendId } = await sendPlainMail({
             to,
             subject: email_subject,
-            text: email_body,
-            headers: { "Message-ID": messageId }
+            text: bodyWithRef,
+            headers: { "Message-ID": messageId, ...(rfqId ? { "X-BlueLeaf-RFQ-ID": rfqId } : {}) }
           });
 
           // Insert recipient row
@@ -703,6 +712,7 @@ export function registerRfqPackageRoutes(app) {
             // resend_email_id is captured SEPARATELY below (best-effort) so an unknown column can
             // never PostgREST-400 the whole INSERT and silently drop the send from tracking.
             const { data: rfqRow, error: rfqErr } = await s.from("rfqs").insert({
+              id: rfqId,
               job_id: pkg.job_id,
               subcontractor_id: r.subcontractor_id,
               trade: scope.trade_label,
