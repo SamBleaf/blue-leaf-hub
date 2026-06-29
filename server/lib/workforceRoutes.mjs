@@ -512,6 +512,35 @@ function formatAllocation(row) {
   };
 }
 
+// Planner palette keys, in the same order as src/lib/plannerColors.js PLANNER_PALETTE.
+const PLANNER_COLOR_KEYS = ["blue", "teal", "amber", "purple", "coral", "pink", "green", "red", "slate", "indigo"];
+function plannerAutoColorKey(key, orderedKeys) {
+  const i = orderedKeys.indexOf(key);
+  let idx = i;
+  if (i < 0) { let h = 0; const s = String(key); for (let c = 0; c < s.length; c++) h = (h * 31 + s.charCodeAt(c)) | 0; idx = Math.abs(h); }
+  return PLANNER_COLOR_KEYS[idx % PLANNER_COLOR_KEYS.length];
+}
+// Attach each allocation's Planner colourKey (saved colour wins, else auto by board order) so the
+// worker's shift widget matches the Workforce Planner. Workers can't call the admin planner-jobs
+// endpoint, so we resolve it server-side here.
+async function attachAllocationColors(sb, allocations) {
+  if (!allocations.length) return allocations;
+  const { data: pj } = await sb.from("workforce_planner_jobs")
+    .select("project_id, carpentry_job_id, color, on_board, created_at")
+    .order("created_at", { ascending: true });
+  const savedMap = {}; const orderedKeys = [];
+  for (const r of pj || []) {
+    const key = r.project_id ? `project:${r.project_id}` : `carpentry:${r.carpentry_job_id}`;
+    if (r.color) savedMap[key] = r.color;
+    if (r.on_board) orderedKeys.push(key);
+  }
+  for (const a of allocations) {
+    const key = a.projectId ? `project:${a.projectId}` : a.carpentryJobId ? `carpentry:${a.carpentryJobId}` : null;
+    a.colorKey = key ? (savedMap[key] || plannerAutoColorKey(key, orderedKeys)) : "slate";
+  }
+  return allocations;
+}
+
 function parseJobSpine(body) {
   const projectId = body.projectId ?? body.project_id ?? null;
   const carpentryJobId = body.carpentryJobId ?? body.carpentry_job_id ?? null;
@@ -2160,8 +2189,10 @@ export function registerWorkforceRoutes(app) {
       .order("allocation_date", { ascending: true });
     if (error) return err(res, 500, translateDbError(error));
 
+    const formatted = (data || []).map(formatAllocation);
+    await attachAllocationColors(sb, formatted);
     const byDate = {};
-    for (const row of data || []) byDate[row.allocation_date] = formatAllocation(row);
+    for (const a of formatted) byDate[a.allocationDate] = a;
     ok(res, { today: byDate[today] ?? null, tomorrow: byDate[tomorrow] ?? null });
   });
 
@@ -2170,16 +2201,20 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller?.id, sb);
     if (!emp) return err(res, 403, "No employee record found");
 
-    const weekStart = mondayOf(req.query.weekStart || todayYmd());
-    const weekEnd = addDaysYmd(weekStart, 6);
+    // Accept an explicit from/to range (the worker calendar passes the visible month); default to
+    // the current Mon–Sun week.
+    const from = req.query.from || mondayOf(req.query.weekStart || todayYmd());
+    const to = req.query.to || addDaysYmd(from, 6);
     const { data, error } = await sb.from("workforce_allocations")
       .select(ALLOCATION_SELECT)
       .eq("employee_id", emp.id)
-      .gte("allocation_date", weekStart)
-      .lte("allocation_date", weekEnd)
+      .gte("allocation_date", from)
+      .lte("allocation_date", to)
       .order("allocation_date", { ascending: true });
     if (error) return err(res, 500, translateDbError(error));
-    ok(res, { weekStart, weekEnd, allocations: (data || []).map(formatAllocation) });
+    const allocations = (data || []).map(formatAllocation);
+    await attachAllocationColors(sb, allocations);
+    ok(res, { weekStart: from, weekEnd: to, allocations });
   });
 
   // ── CSV export (for History tab) ─────────────────────────────────────────

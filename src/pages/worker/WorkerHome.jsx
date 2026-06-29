@@ -22,8 +22,9 @@ const STATUS_BADGE = {
 // Building = project (address is the identifier); Carpentry = client name + address.
 function allocJob(a) {
   if (!a) return null;
-  if (a.carpentryJobId) return { id: a.carpentryJobId, type: "carpentry", name: a.carpentryJobClientName || a.carpentryJobAddress || "Carpentry job", address: a.carpentryJobAddress || "", kind: "Carpentry" };
-  if (a.projectId) return { id: a.projectId, type: "project", name: a.projectAddress || "Building site", address: a.projectAddress || "", kind: "Building" };
+  // Workers need WHERE to go → lead with the address; the carpentry client name is the sub-label.
+  if (a.carpentryJobId) return { id: a.carpentryJobId, type: "carpentry", name: a.carpentryJobAddress || a.carpentryJobClientName || "Carpentry job", address: (a.carpentryJobAddress && a.carpentryJobClientName) ? a.carpentryJobClientName : "", kind: "Carpentry" };
+  if (a.projectId) return { id: a.projectId, type: "project", name: a.projectAddress || "Building site", address: "", kind: "Building" };
   return null;
 }
 
