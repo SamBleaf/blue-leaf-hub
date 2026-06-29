@@ -2205,27 +2205,33 @@ async function pollImapForQuoteReplies() {
   try {
     await client.connect();
     await client.mailboxOpen("INBOX");
-    const exists = Number(client.mailbox?.exists || 0);
     let lastUid = await loadImapLastUid(sb);
     if (lastUid == null) {
-      await saveImapLastUid(sb, exists);
+      // First run: seed the cursor to the mailbox high-water UID (uidNext-1), NOT the message
+      // count. The old code stored `exists` (a count) and then compared it to a UID, so after the
+      // first poll the gate was ~always true and the poller silently ingested nothing.
+      const uidNext = Number(client.mailbox?.uidNext || 0);
+      const seed = uidNext > 0 ? uidNext - 1 : Number(client.mailbox?.exists || 0);
+      await saveImapLastUid(sb, seed);
       await client.logout();
-      return { ok: true, initialized: true, lastUid: exists, checked: 0, matched: 0, unmatched: 0 };
-    }
-    if (exists <= lastUid) {
-      await client.logout();
-      return { ok: true, checked: 0, matched: 0, unmatched: 0, lastUid };
+      return { ok: true, initialized: true, lastUid: seed, checked: 0, matched: 0, unmatched: 0 };
     }
 
     const candidates = await fetchOpenRfqCandidates(sb);
     const maxPerPoll = Math.min(200, Math.max(1, Number(process.env.IMAP_POLL_MAX_PER_RUN) || 80));
     const rows = [];
+    // UID-based fetch: the THIRD arg { uid: true } makes `${lastUid+1}:*` a UID range. Without it,
+    // imapflow treats the range as SEQUENCE numbers — the bug that broke ingestion. Mirrors the
+    // finance invoice poller (financeRoutes.mjs).
     for await (const msg of client.fetch(`${lastUid + 1}:*`, {
       uid: true,
       envelope: true,
       internalDate: true,
       source: true
-    })) {
+    }, { uid: true })) {
+      // A UID range `N:*` re-returns the highest message even when N > highest UID; skip anything
+      // already at/below the cursor so we don't reprocess the last email every poll.
+      if ((Number(msg.uid) || 0) <= lastUid) continue;
       rows.push(msg);
       if (rows.length >= maxPerPoll) break;
     }
