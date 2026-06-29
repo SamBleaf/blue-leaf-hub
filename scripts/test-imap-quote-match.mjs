@@ -12,7 +12,9 @@ import {
   resolveInboundRfqMatchWithMeta,
   collectInboundMessageIds,
   extractAddressHintFromSubject,
+  matchByRfqToken,
 } from "../server/lib/imapQuoteMatch.mjs";
+import { appendRfqRefToBody, rfqRefLine } from "../server/lib/rfqSendRef.mjs";
 import { resolveInboundRfqMatchWithTrace } from "../server/lib/rfqMatchTrace.mjs";
 
 const STRICT = process.argv.includes("--strict");
@@ -173,6 +175,69 @@ assertMatch(
   "rfq-2",
   "in_reply_to"
 );
+
+// L1 durable RFQ token (cross-sender / quoted-reply survival)
+const RFQ_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+const rowsSameJobDiffTrade = [
+  rfqRow({ id: RFQ_UUID, trade: "electrical", subEmail: "sparky@example.com", subId: SUB_SPARKY }),
+  rfqRow({
+    id: "rfq-plumb-same-job",
+    trade: "plumbing",
+    subEmail: "plumber@example.com",
+    subId: SUB_PLUMBER
+  })
+];
+assertMatch(
+  "MATCH-L1 token in quoted reply from colleague",
+  parsed({
+    from: "accounts@sparky.com.au",
+    subject: "Re: RFQ electrical",
+    text: [
+      "Please find our quote attached.",
+      "",
+      "On Mon, Sam wrote:",
+      `> ${appendRfqRefToBody("Original RFQ package", RFQ_UUID)}`
+    ].join("\n")
+  }),
+  rowsSameJobDiffTrade,
+  RFQ_UUID,
+  "rfq_token_body"
+);
+assertMatch(
+  "MATCH-L1 token prevents wrong-bucket on same job",
+  parsed({
+    from: "colleague@plumber.com.au",
+    subject: "Re: quote",
+    text: `Thanks — see attached.\n\nRef: BLH-RFQ-${RFQ_UUID.slice(0, 8)}`
+  }),
+  rowsSameJobDiffTrade,
+  RFQ_UUID,
+  "rfq_token_body"
+);
+{
+  const stamped = appendRfqRefToBody("Hello subbie", RFQ_UUID);
+  if (stamped.includes(`Ref: BLH-RFQ-${RFQ_UUID.slice(0, 8)}`)) {
+    pass("SEND-REF appendRfqRefToBody stamps 8-char token");
+  } else {
+    fail("SEND-REF appendRfqRefToBody stamps 8-char token");
+  }
+  if (appendRfqRefToBody(stamped, RFQ_UUID) === stamped) {
+    pass("SEND-REF idempotent when token already present");
+  } else {
+    fail("SEND-REF idempotent when token already present");
+  }
+}
+{
+  const tok = matchByRfqToken(
+    parsed({ from: "other@example.com", text: rfqRefLine(RFQ_UUID) || "" }),
+    rowsSameJobDiffTrade
+  );
+  if (tok?.rfq?.id === RFQ_UUID && tok.reason === "rfq_token_body") {
+    pass("MATCH-L1 matchByRfqToken direct");
+  } else {
+    fail("MATCH-L1 matchByRfqToken direct");
+  }
+}
 
 // Subject + address regressions
 assertMatch(

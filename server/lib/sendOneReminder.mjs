@@ -1,4 +1,5 @@
 import { sendPlainMail } from "./notifyMail.mjs";
+import { appendRfqRefToBody, rfqRefHeaders } from "./rfqSendRef.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
@@ -63,11 +64,11 @@ export async function sendReminderForRfqId(rfqId, opts = {}) {
     sigName
   ].join("\n");
 
-  const text = footer ? `${baseText}\n\n${footer}` : baseText;
+  const text = footer ? `${appendRfqRefToBody(baseText, rfqId)}\n\n${footer}` : appendRfqRefToBody(baseText, rfqId);
   const html =
-    logo || footer ? wrapPlainTextEmailHtml(baseText, { footerText: footer, logoDataUrl: logo }) : undefined;
+    logo || footer ? wrapPlainTextEmailHtml(appendRfqRefToBody(baseText, rfqId), { footerText: footer, logoDataUrl: logo }) : undefined;
 
-  await sendPlainMail({ to, subject, text, html });
+  await sendPlainMail({ to, subject, text, html, headers: rfqRefHeaders(rfqId) });
 
   const { error: upErr } = await sb
     .from("rfqs")

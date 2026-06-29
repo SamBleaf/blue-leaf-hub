@@ -12,6 +12,7 @@ import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
+import { appendRfqRefToBody, rfqRefHeaders } from "./rfqSendRef.mjs";
 import { randomUUID } from "crypto";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { assertJobReadyForRfqHandoff } from "./jobGuards.mjs";
@@ -290,7 +291,6 @@ export function registerRfqPackageRoutes(app) {
       const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
 
       const rows = rfqs || [];
-      const htmlBody = wrapPlainTextEmailHtml(body);
       const nowIso = new Date().toISOString();
 
       // Build one send spec per recipient that has an email; the rest are recorded as failures.
@@ -311,13 +311,15 @@ export function registerRfqPackageRoutes(app) {
         specs.push({ r, to, subject, headers });
       }
 
+      const bodyForRfq = (rfqId) => appendRfqRefToBody(body, rfqId);
+
       // Log everyone who actually went out, in ONE batched insert (best-effort).
       const logCorrespondence = async (out) => {
         if (!out.length) return;
         try {
-          await s.from("correspondence").insert(out.map(({ r, subject }) => ({
+          await s.from("correspondence").insert(out.map(({ r, subject, bodyText }) => ({
             job_id: job.id, rfq_id: r.id, subcontractor_id: r.subcontractor_id || null,
-            direction: "outbound", subject, body, sent_at: nowIso, logged_by: "rfq-notify"
+            direction: "outbound", subject, body: bodyText, sent_at: nowIso, logged_by: "rfq-notify"
           })));
         } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
       };
@@ -328,16 +330,27 @@ export function registerRfqPackageRoutes(app) {
       let batched = false;
       if (specs.length && resendSendConfigured()) {
         try {
-          const ids = await sendBatchViaResend(specs.map((sp) => ({
-            to: sp.to, subject: sp.subject, text: body, html: htmlBody, headers: sp.headers
-          })));
+          const ids = await sendBatchViaResend(specs.map((sp) => {
+            const bodyText = bodyForRfq(sp.r.id);
+            return {
+              to: sp.to,
+              subject: sp.subject,
+              text: bodyText,
+              html: wrapPlainTextEmailHtml(bodyText),
+              headers: { ...sp.headers, ...rfqRefHeaders(sp.r.id) }
+            };
+          }));
           for (let i = 0; i < specs.length; i++) {
             results.push({ rfqId: specs[i].r.id, ok: true, to: specs[i].to, transport: "resend-batch", messageId: ids[i]?.id || null });
             // Capture the per-recipient Resend id (ids[] maps 1:1 to specs[]) so the Resend webhook
             // can attribute delivery/open/click/bounce events to this RFQ. Best-effort, sequential.
             if (ids[i]?.id) await captureResendId(s, specs[i].r.id, ids[i].id);
           }
-          await logCorrespondence(specs.map((sp) => ({ r: sp.r, subject: sp.subject })));
+          await logCorrespondence(specs.map((sp) => ({
+            r: sp.r,
+            subject: sp.subject,
+            bodyText: bodyForRfq(sp.r.id)
+          })));
           batched = true;
         } catch (batchErr) {
           console.warn("[rfq/notify] Resend batch failed, falling back to per-send:", batchErr?.message || batchErr);
@@ -362,12 +375,19 @@ export function registerRfqPackageRoutes(app) {
           while (cursor < specs.length) {
             const i = cursor++;
             const sp = specs[i];
+            const bodyText = bodyForRfq(sp.r.id);
             try {
               const transport = await withTimeout(
-                sendPlainMail({ to: sp.to, subject: sp.subject, text: body, html: htmlBody, headers: sp.headers }),
+                sendPlainMail({
+                  to: sp.to,
+                  subject: sp.subject,
+                  text: bodyText,
+                  html: wrapPlainTextEmailHtml(bodyText),
+                  headers: { ...sp.headers, ...rfqRefHeaders(sp.r.id) }
+                }),
                 SEND_TIMEOUT_MS, `Send to ${sp.to}`
               );
-              outcome[i] = { ok: true, sp, transport };
+              outcome[i] = { ok: true, sp, transport, bodyText };
             } catch (sendErr) {
               outcome[i] = { ok: false, sp, error: sendErr?.message || String(sendErr) };
             }
@@ -376,7 +396,10 @@ export function registerRfqPackageRoutes(app) {
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, specs.length) || 1 }, worker));
         const okOnes = [];
         for (const o of outcome) {
-          if (o.ok) { results.push({ rfqId: o.sp.r.id, ok: true, to: o.sp.to, transport: o.transport }); okOnes.push({ r: o.sp.r, subject: o.sp.subject }); }
+          if (o.ok) {
+            results.push({ rfqId: o.sp.r.id, ok: true, to: o.sp.to, transport: o.transport });
+            okOnes.push({ r: o.sp.r, subject: o.sp.subject, bodyText: o.bodyText });
+          }
           else { results.push({ rfqId: o.sp.r.id, ok: false, to: o.sp.to, error: o.error }); }
         }
         await logCorrespondence(okOnes);
@@ -680,13 +703,12 @@ export function registerRfqPackageRoutes(app) {
           // replies that the thread + exact-sender tiers can't. Only when we'll create the rfqs row.
           const willTrack = !!(pkg?.job_id && r.subcontractor_id);
           const rfqId = willTrack ? randomUUID() : null;
-          const refToken = rfqId ? rfqId.slice(0, 8) : null;
-          const bodyWithRef = refToken ? `${email_body}\n\nRef: BLH-RFQ-${refToken}` : email_body;
+          const bodyWithRef = appendRfqRefToBody(email_body, rfqId);
           const { resendId } = await sendPlainMail({
             to,
             subject: email_subject,
             text: bodyWithRef,
-            headers: { "Message-ID": messageId, ...(rfqId ? { "X-BlueLeaf-RFQ-ID": rfqId } : {}) }
+            headers: { "Message-ID": messageId, ...rfqRefHeaders(rfqId) }
           });
 
           // Insert recipient row
@@ -866,7 +888,14 @@ export function registerRfqPackageRoutes(app) {
             sigName
           });
           const subject = `Follow-up — ${scope?.trade_label || "quote"} at ${pkg?.project_address || "project"}`;
-          await sendPlainMail({ to, subject, text, html: wrapPlainTextEmailHtml(text, {}) });
+          const stampedText = appendRfqRefToBody(text, r.rfq_id || null);
+          await sendPlainMail({
+            to,
+            subject,
+            text: stampedText,
+            html: wrapPlainTextEmailHtml(stampedText, {}),
+            headers: rfqRefHeaders(r.rfq_id || null)
+          });
           await s.from("rfq_recipients")
             .update({ status: "followed_up", follow_up_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq("id", r.id);
@@ -918,7 +947,7 @@ export function registerRfqPackageRoutes(app) {
         // Fetch recipients for affected trades in this package
         const { data: scopes } = await s
           .from("rfq_trade_scopes")
-          .select("id, trade_label, rfq_recipients(id, email, business_name, status)")
+          .select("id, trade_label, rfq_recipients(id, email, business_name, status, rfq_id)")
           .eq("package_id", req.params.packageId)
           .in("trade_id", affected_trades);
 
@@ -947,10 +976,12 @@ export function registerRfqPackageRoutes(app) {
                 "Thanks,",
                 sigName
               ].join("\n");
+              const stampedText = appendRfqRefToBody(text, r.rfq_id || null);
               await sendPlainMail({
                 to,
                 subject: `Addendum ${nextNum} — ${pkg?.project_address || "project"}`,
-                text
+                text: stampedText,
+                headers: rfqRefHeaders(r.rfq_id || null)
               });
               results.push({ email: to, ok: true });
             } catch (e) {

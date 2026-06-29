@@ -1000,6 +1000,26 @@ export async function uploadImapReplyQuotePdfToSharedQuotes(jobAddress, original
   return { path: uploadedPath, sharedUrl, uploadMeta };
 }
 
+/** Holding folder for inbound quote PDFs that could not be matched to a job yet. */
+export const DROPBOX_UNMATCHED_QUOTES_BASE = `${DROPBOX_PRIVATE_INTERNAL_BASE}/UNMATCHED QUOTES`;
+
+/** Upload an unmatched inbound quote PDF until staff manually resolve it to an RFQ. */
+export async function uploadUnmatchedQuotePdf(externalId, originalFileName, buffer) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  if (!buf.length) throw new Error("uploadUnmatchedQuotePdf: empty buffer");
+  const token = await getDropboxAccessToken();
+  await createFolderIfNotExists(token, DROPBOX_UNMATCHED_QUOTES_BASE);
+  const safeId = String(externalId || "unknown")
+    .replace(/[^\w.-]/g, "_")
+    .slice(0, 80);
+  const safe = sanitizeOriginalPdfFileNameUpper(originalFileName);
+  const fullPath = `${DROPBOX_UNMATCHED_QUOTES_BASE}/${safeId}-${safe}`;
+  const uploadMeta = await dropboxUploadBuffer(token, fullPath, buf, { autorename: true });
+  const uploadedPath = uploadMeta.path_display || uploadMeta.path_lower || fullPath;
+  const sharedUrl = await getOrCreateSharedLinkForPath(token, uploadedPath);
+  return { path: uploadedPath, sharedUrl, uploadMeta };
+}
+
 /** INTERNAL/P.O for purchase order PDFs. */
 export async function ensureInternalPoFolder(jobAddress) {
   const token = await getDropboxAccessToken();

@@ -1,4 +1,5 @@
 import { sendPlainMail } from "./notifyMail.mjs";
+import { appendRfqRefToBody, rfqRefHeaders } from "./rfqSendRef.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 
 function dateInDays(daysFromNow) {
@@ -73,7 +74,8 @@ export async function runDeadlineReminders({ daysBefore = 2 } = {}) {
     ].join("\n");
 
     try {
-      await sendPlainMail({ to, subject, text });
+      const stampedText = appendRfqRefToBody(text, row.id);
+      await sendPlainMail({ to, subject, text: stampedText, headers: rfqRefHeaders(row.id) });
       const { error: upErr } = await sb
         .from("rfqs")
         .update({

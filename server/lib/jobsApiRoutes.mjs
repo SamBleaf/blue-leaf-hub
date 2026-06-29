@@ -310,6 +310,21 @@ export function registerJobsApiRoutes(app) {
         .single();
       if (rErr || !rfq) throw new Error(rErr?.message || "RFQ not found.");
 
+      const extId = String(u.external_id || "").trim();
+      let quotePdfPath = null;
+      let quotePdfUrl = null;
+      if (extId) {
+        const { data: inboundCorr } = await sb
+          .from("correspondence")
+          .select("attachments")
+          .eq("message_id", extId)
+          .eq("logged_by", "imap-unmatched")
+          .maybeSingle();
+        const firstAtt = Array.isArray(inboundCorr?.attachments) ? inboundCorr.attachments[0] : null;
+        if (firstAtt?.dropbox_path) quotePdfPath = firstAtt.dropbox_path;
+        if (firstAtt?.url) quotePdfUrl = firstAtt.url;
+      }
+
       const body = String(u.body_preview || u.subject || "(matched manually)").slice(0, 16000);
       const { error: cErr } = await sb.from("correspondence").insert({
         job_id: rfq.job_id,
@@ -324,16 +339,21 @@ export function registerJobsApiRoutes(app) {
       if (cErr) throw new Error(cErr.message);
 
       const receivedAt = new Date().toISOString();
+      const rfqPatch = { status: "received", received_at: receivedAt };
+      if (quotedAmount != null) rfqPatch.quoted_amount = quotedAmount;
+      if (quotePdfPath) rfqPatch.quote_pdf_path = quotePdfPath;
+      if (quotePdfUrl) rfqPatch.quote_pdf_url = quotePdfUrl;
       const { error: upErr } = await sb
         .from("rfqs")
-        .update({ status: "received", received_at: receivedAt })
+        .update(rfqPatch)
         .eq("id", rfq.id);
       if (upErr) throw new Error(upErr.message);
 
       await applyInboundQuoteToWorkflow(sb, rfq.id, {
         status: "received",
         receivedAt,
-        quotedAmount
+        quotedAmount,
+        quotePdfPath
       });
 
       const { error: resErr } = await sb

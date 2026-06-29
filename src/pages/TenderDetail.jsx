@@ -368,7 +368,7 @@ export default function TenderDetail() {
       const json = await res.json();
       const recips = json?.recipients || [];
       setEmailRecips(recips);
-      setEmailSel(new Set(recips.map((r) => r.rfqId)));
+      setEmailSel(new Set()); // start with NONE ticked — you usually only update individual trades
       const link = json?.job?.dropboxLink || "";
       setEmailMsg(
         `Hi,\n\nA quick update on the ${json?.job?.address || "project"} tender — please use the updated project documentation link below. ` +
@@ -443,6 +443,81 @@ export default function TenderDetail() {
   );
 
   const sigFooter = useMemo(() => formatSignatureFooter(loadEmailSignature()), []);
+
+  // --- Add RFQ recipient (new sub on an existing trade) — auto-fills from the same trade's RFQ ---
+  const [addOpen, setAddOpen] = useState(false);
+  const [addSubs, setAddSubs] = useState([]);
+  const [addTrade, setAddTrade] = useState("");
+  const [addSubId, setAddSubId] = useState("");
+  const [addSubject, setAddSubject] = useState("");
+  const [addBody, setAddBody] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addResult, setAddResult] = useState(null);
+
+  const existingTrades = useMemo(
+    () => [...new Set(rfqs.map((r) => r.trade).filter(Boolean))],
+    [rfqs]
+  );
+
+  // Copy the most recent RFQ sent for this trade, swap the salutation to the new sub, and refresh
+  // the project documents link — "a slightly modified version with the correct update link".
+  const buildPrefill = useCallback((trade, sub) => {
+    const contact = (sub?.contact || "there").trim();
+    const prior = rfqs
+      .filter((r) => r.trade === trade && (r.email_body || r.email_subject))
+      .sort((a, b) => String(b.sent_at || "").localeCompare(String(a.sent_at || "")))[0];
+    let subject = prior?.email_subject || `RFQ — ${TRADE_LABEL[trade] || trade} — ${job?.address || ""}`.trim();
+    let body = (prior?.email_body || "").replace(/^Subject:.*\n+/i, "");
+    if (body) {
+      body = body.replace(/^\s*(hi|hello|dear)\b[^\n]*/i, `Hi ${contact},`);
+      if (dropboxUrl) {
+        if (/https?:\/\/(www\.)?dropbox\.com\/\S+/i.test(body)) body = body.replace(/https?:\/\/(www\.)?dropbox\.com\/\S+/gi, dropboxUrl);
+        else body += `\n\nProject documents: ${dropboxUrl}`;
+      }
+    } else {
+      body = `Hi ${contact},\n\nWe'd like to invite ${sub?.business_name || "you"} to quote the ${TRADE_LABEL[trade] || trade} works at ${job?.address || "our project"}.${dropboxUrl ? `\n\nProject documents: ${dropboxUrl}` : ""}${sigFooter ? `\n\n${sigFooter}` : "\n\nKind regards,\nBlue Leaf Building"}`;
+    }
+    return { subject, body };
+  }, [rfqs, job, dropboxUrl, sigFooter]);
+
+  const openAddRecipient = useCallback(async () => {
+    setAddResult(null);
+    setAddOpen(true);
+    setAddTrade(existingTrades[0] || "");
+    setAddSubId(""); setAddSubject(""); setAddBody("");
+    if (!addSubs.length) {
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.from("subcontractors").select("id, business_name, contact, email").order("business_name");
+        setAddSubs(data || []);
+      }
+    }
+  }, [existingTrades, addSubs.length]);
+
+  const reprefill = useCallback((trade, subId) => {
+    const sub = addSubs.find((s) => String(s.id) === String(subId));
+    if (sub && trade) { const { subject, body } = buildPrefill(trade, sub); setAddSubject(subject); setAddBody(body); }
+  }, [addSubs, buildPrefill]);
+
+  const sendAddRecipient = useCallback(async () => {
+    if (!addTrade || !addSubId) { setAddResult({ error: "Pick a trade and a subcontractor." }); return; }
+    if (!addSubject.trim() || !addBody.trim()) { setAddResult({ error: "Subject and message can't be empty." }); return; }
+    setAddBusy(true); setAddResult(null);
+    try {
+      const res = await authFetch("/api/rfq/add-recipient", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, trade: addTrade, subcontractorId: addSubId, subject: addSubject, body: addBody })
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) setAddResult({ error: json?.error || "Send failed." });
+      else { setAddResult({ sent: json.recipient }); setAddSubId(""); setAddSubject(""); setAddBody(""); load(); }
+    } catch (e) {
+      setAddResult({ error: e?.message || "Send failed." });
+    } finally {
+      setAddBusy(false);
+    }
+  }, [addTrade, addSubId, addSubject, addBody, jobId, load]);
 
 function buildWinRowsFromRfqs(list) {
   return list.map((r) => ({
@@ -1204,6 +1279,16 @@ function winRowMissingConfirmedQuote(row) {
                 ✉ Email recipients
               </button>
             )}
+            {!readOnly && job.status === "tendering" && (
+              <button
+                type="button"
+                onClick={openAddRecipient}
+                title="Send an RFQ to a new subcontractor on this job — auto-fills from the same trade's existing RFQ with the current documents link"
+                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition hover:border-primary/40"
+              >
+                + Add recipient
+              </button>
+            )}
             <button
               type="button"
               onClick={scanInbox}
@@ -1252,7 +1337,18 @@ function winRowMissingConfirmedQuote(row) {
                   <p className="mt-2 text-xs text-muted">
                     Toggle trades/recipients, then send. Each email goes as a reply to that subcontractor&apos;s original RFQ thread.
                   </p>
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 flex items-center justify-between border-b border-hairline pb-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={emailRecips.length > 0 && emailSel.size === emailRecips.length}
+                        onChange={(e) => setEmailSel(e.target.checked ? new Set(emailRecips.map((r) => r.rfqId)) : new Set())}
+                      />
+                      Select all ({emailRecips.length})
+                    </label>
+                    <span className="text-xs text-muted">{emailSel.size} selected</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
                     {[...new Set(emailRecips.map((r) => r.trade))].map((trade) => {
                       const rows = emailRecips.filter((r) => r.trade === trade);
                       const allOn = rows.every((r) => emailSel.has(r.rfqId));
@@ -1305,6 +1401,61 @@ function winRowMissingConfirmedQuote(row) {
             </div>
           </div>
         )}
+        {addOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !addBusy && setAddOpen(false)}>
+            <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-card border border-hairline bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-primary">Add RFQ recipient</h3>
+                <button type="button" onClick={() => setAddOpen(false)} className="text-muted hover:text-ink">✕</button>
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                Pick a trade and subcontractor — the email auto-fills from that trade&apos;s existing RFQ with the current documents link. Edit if needed, then send.
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-semibold uppercase text-muted">Trade</label>
+                  <select
+                    value={addTrade}
+                    onChange={(e) => { setAddTrade(e.target.value); reprefill(e.target.value, addSubId); }}
+                    className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs"
+                  >
+                    <option value="">Select trade…</option>
+                    {existingTrades.map((t) => <option key={t} value={t}>{t}</option>)}
+                    {RFQ_TRADE_ORDER.filter((t) => !existingTrades.includes(t)).map((t) => <option key={t} value={t}>{TRADE_LABEL[t] || t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase text-muted">Subcontractor</label>
+                  <select
+                    value={addSubId}
+                    onChange={(e) => { setAddSubId(e.target.value); reprefill(addTrade, e.target.value); }}
+                    className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs"
+                  >
+                    <option value="">Select subcontractor…</option>
+                    {addSubs.map((s) => <option key={s.id} value={s.id} disabled={!s.email}>{s.business_name}{s.email ? "" : " (no email)"}</option>)}
+                  </select>
+                </div>
+              </div>
+              <label className="mt-3 block text-xs font-semibold uppercase text-muted">Subject</label>
+              <input value={addSubject} onChange={(e) => setAddSubject(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs" />
+              <label className="mt-3 block text-xs font-semibold uppercase text-muted">Message</label>
+              <textarea rows={11} value={addBody} onChange={(e) => setAddBody(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs font-mono leading-relaxed" />
+              {addResult?.error ? <p className="mt-2 text-xs text-danger">{addResult.error}</p> : null}
+              {addResult?.sent ? <p className="mt-2 text-xs text-success">RFQ sent to {addResult.sent}.</p> : null}
+              <div className="mt-4 flex items-center justify-end gap-3">
+                <button type="button" onClick={() => setAddOpen(false)} className="rounded-lg border border-hairline bg-page px-4 py-2 text-xs font-semibold">Close</button>
+                <button
+                  type="button"
+                  disabled={addBusy || !addSubId || !addTrade}
+                  onClick={sendAddRecipient}
+                  className="rounded-lg bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm disabled:opacity-40"
+                >
+                  {addBusy ? "Sending…" : "Send RFQ"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {rfqs.map((r) => {
           const sub = r.subcontractors;
           const vis = isOverdue(r.deadline, r.status)
@@ -1312,7 +1463,10 @@ function winRowMissingConfirmedQuote(row) {
             : RFQ_STATUS_VIS[r.status] || RFQ_STATUS_VIS.sent;
           const pdfHref = String(r.quote_pdf_url || r.dropbox_pdf_url || "").trim();
           const pdfOpenUrl = pdfHref.startsWith("http") ? pdfHref : "";
-          const canToggle = !readOnly && r.quote_amount != null && Number(r.quote_amount) > 0;
+          const canToggle = !readOnly && (
+            (r.quote_amount != null && Number(r.quote_amount) > 0)
+            || (r.quoted_amount != null && Number(r.quoted_amount) > 0)
+          );
           return (
             <div key={r.id} className="rounded-card border border-hairline bg-surface p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">

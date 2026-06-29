@@ -17,8 +17,11 @@ import {
   uploadTenderDocumentToJob,
   saveRfqEmailCopyToDropbox,
   uploadReceivedQuotePdfToJob,
-  uploadImapReplyQuotePdfToSharedQuotes
+  uploadImapReplyQuotePdfToSharedQuotes,
+  uploadUnmatchedQuotePdf
 } from "./lib/dropboxClient.mjs";
+import { appendRfqRefToBody, rfqRefHeaders } from "./lib/rfqSendRef.mjs";
+import { randomUUID } from "crypto";
 import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
@@ -353,10 +356,44 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
     }
   }
 
+  const pdfRows = [];
+  for (const att of parsed.attachments || []) {
+    const fName = String(att?.filename || "quote.pdf").trim();
+    const ct = String(att?.contentType || "").toLowerCase();
+    const isPdf =
+      ct.includes("pdf") ||
+      ct.includes("application/octet-stream") ||
+      /\.pdf$/i.test(fName);
+    if (!isPdf) continue;
+    const raw = att?.content;
+    const buf = Buffer.isBuffer(raw) ? raw : Buffer.isBuffer(raw?.data) ? raw.data : Buffer.from(raw || []);
+    if (!buf.length) continue;
+    pdfRows.push({ filename: fName, size: buf.length, buffer: buf });
+  }
+
   const { match: best, trace: matchTrace } = resolveInboundRfqMatchWithTrace(parsed, rfqRows, {
     email_uid: msg.uid
   });
   if (!best) {
+    const unmatchedAttachments = [];
+    if (pdfRows.length && dropboxConfigured()) {
+      for (const row of pdfRows) {
+        try {
+          const { path, sharedUrl } = await uploadUnmatchedQuotePdf(externalId, row.filename, row.buffer);
+          unmatchedAttachments.push({
+            filename: row.filename,
+            size: row.size,
+            dropbox_path: path,
+            url: sharedUrl
+          });
+        } catch (e) {
+          console.warn("[imap-unmatched-pdf-upload]", row.filename, e?.message || e);
+        }
+      }
+    } else if (pdfRows.length && !dropboxConfigured()) {
+      console.warn("[imap-unmatched-pdf-upload] Dropbox not configured — PDF attachments not stored.");
+    }
+
     await upsertUnmatchedQuoteEmail(sb, {
       external_id: externalId,
       from_email: fromEmail,
@@ -373,7 +410,8 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
       body: bodyForLog.slice(0, 16000),
       sent_at: safeIsoDate(msg.internalDate || parsed?.date || new Date()),
       logged_by: "imap-unmatched",
-      message_id: externalId
+      message_id: externalId,
+      attachments: unmatchedAttachments.length ? unmatchedAttachments : []
     }).then(() => {}).catch(() => {});
     logRfqMatchTrace({ ...matchTrace, rows_updated: { unmatched_quote_emails: 1, correspondence: 1 } });
     return { matched: false, uid: msg.uid };
@@ -382,21 +420,6 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
   const rfq = best.rfq;
   const sentAt = safeIsoDate(msg.internalDate || parsed?.date || new Date());
   const jobAddress = String(rfq?.jobs?.address || "").trim();
-
-  const pdfRows = [];
-  for (const att of parsed.attachments || []) {
-    const fName = String(att?.filename || "quote.pdf").trim();
-    const ct = String(att?.contentType || "").toLowerCase();
-    const isPdf =
-      ct.includes("pdf") ||
-      ct.includes("application/octet-stream") ||
-      /\.pdf$/i.test(fName);
-    if (!isPdf) continue;
-    const raw = att?.content;
-    const buf = Buffer.isBuffer(raw) ? raw : Buffer.isBuffer(raw?.data) ? raw.data : Buffer.from(raw || []);
-    if (!buf.length) continue;
-    pdfRows.push({ filename: fName, size: buf.length, buffer: buf });
-  }
 
   const uploadedMeta = [];
   if (pdfRows.length && jobAddress && dropboxConfigured()) {
@@ -1915,7 +1938,90 @@ app.get("/api/quote-tracker/unmatched", requireAuth, requireRole("admin"), async
   if (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
-  return res.json({ ok: true, serviceConfigured: true, items: data || [] });
+  const items = data || [];
+  const extIds = items.map((i) => i.external_id).filter(Boolean);
+  let corrByMessageId = {};
+  if (extIds.length) {
+    const { data: corrs } = await sb
+      .from("correspondence")
+      .select("message_id, attachments, body")
+      .in("message_id", extIds)
+      .eq("logged_by", "imap-unmatched");
+    corrByMessageId = Object.fromEntries((corrs || []).map((c) => [c.message_id, c]));
+  }
+  const enriched = items.map((u) => {
+    const corr = corrByMessageId[u.external_id];
+    const firstAtt = Array.isArray(corr?.attachments) ? corr.attachments[0] : null;
+    return {
+      ...u,
+      quote_pdf_url: firstAtt?.url || null,
+      attachments: corr?.attachments || []
+    };
+  });
+  return res.json({ ok: true, serviceConfigured: true, items: enriched });
+});
+
+// Add a single NEW subcontractor to an existing job/trade and send them the RFQ. Self-contained
+// create+send (mirrors the package-scope send): pre-generates the rfqs id so the durable Ref token
+// is stamped, sends, then records the rfqs row + correspondence. The body is composed client-side
+// (auto-filled from the same trade's existing RFQ with the current docs link) and posted here.
+app.post("/api/rfq/add-recipient", requireAuth, async (req, res) => {
+  try {
+    const jobId = String(req.body?.jobId || "").trim();
+    const trade = String(req.body?.trade || "").trim();
+    const subcontractorId = String(req.body?.subcontractorId || "").trim();
+    const subject = String(req.body?.subject || "").trim();
+    const body = req.body?.body;
+    if (!jobId || !trade || !subcontractorId || !subject || typeof body !== "string" || !body.trim()) {
+      return res.status(400).json({ ok: false, error: "jobId, trade, subcontractorId, subject and body are all required." });
+    }
+    const transport = mailTransportName();
+    if (!transport) return res.status(500).json({ ok: false, error: "Mail not configured — add Gmail OAuth or SMTP in `.env`, then restart the API." });
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+
+    const handoff = await assertJobReadyForRfqHandoff(sb, jobId);
+    if (!handoff.ok) return res.status(handoff.status).json({ ok: false, error: handoff.error, code: handoff.code });
+
+    const { data: sub } = await sb.from("subcontractors").select("id, business_name, contact, email").eq("id", subcontractorId).maybeSingle();
+    if (!sub) return res.status(404).json({ ok: false, error: "Subcontractor not found." });
+    const to = String(sub.email || "").trim();
+    if (!to) return res.status(400).json({ ok: false, error: `${sub.business_name || "That subcontractor"} has no email address — add one on their profile first.` });
+
+    // Don't double-send: if they already have a SENT rfq for this job+trade, stop.
+    const { data: prior } = await sb.from("rfqs").select("id").eq("job_id", jobId).eq("subcontractor_id", subcontractorId).eq("trade", trade).eq("status", "sent").limit(1);
+    if (prior && prior.length) return res.status(409).json({ ok: false, error: `${sub.business_name} already has a sent RFQ for ${trade} on this job.` });
+
+    const rfqId = randomUUID();
+    const msgId = generateOutboundMessageId();
+    const bodyToSend = appendRfqRefToBody(body, rfqId);
+    const { resendId } = await sendPlainMail({
+      to,
+      subject,
+      text: bodyToSend,
+      headers: { "Message-ID": msgId, ...rfqRefHeaders(rfqId) }
+    });
+    const sentAt = new Date().toISOString();
+    const { error: insErr } = await sb.from("rfqs").insert({
+      id: rfqId, job_id: jobId, subcontractor_id: subcontractorId, trade,
+      status: "sent", sent_at: sentAt, sent_message_id: msgId,
+      email_body: `Subject: ${subject}\n\n${body}`
+    });
+    if (insErr) {
+      console.warn("[rfq/add-recipient] rfqs insert:", insErr.message);
+      return res.status(500).json({ ok: false, error: "Email sent, but saving the RFQ record failed — refresh and check the trade." });
+    }
+    if (resendId) await captureResendId(sb, rfqId, resendId);
+    await sb.from("correspondence").insert({
+      job_id: jobId, rfq_id: rfqId, subcontractor_id: subcontractorId,
+      direction: "outbound", subject, body: bodyToSend, sent_at: sentAt,
+      message_id: msgId.replace(/^<|>$/g, ""), logged_by: "rfq-add-recipient"
+    });
+    return res.json({ ok: true, rfqId, recipient: sub.business_name || to });
+  } catch (e) {
+    console.error("[rfq/add-recipient]", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Send failed." });
+  }
 });
 
 app.post("/api/rfq/send", requireAuth, async (req, res) => {
@@ -2022,19 +2128,21 @@ app.post("/api/rfq/send", requireAuth, async (req, res) => {
 
       try {
         const msgId = generateOutboundMessageId();
-        const headers = { "Message-ID": msgId };
+        const rfqIdForSend = String(m.rfqId || "").trim();
+        const bodyToSend = appendRfqRefToBody(body, rfqIdForSend || null);
+        const headers = { "Message-ID": msgId, ...rfqRefHeaders(rfqIdForSend || null) };
         // Capture the Resend message id (null for gmail/smtp) so the Resend webhook can attribute
         // delivery/open/click/bounce events to this RFQ (rfqs.resend_email_id).
         const { resendId } = await sendPlainMail({
           to,
           subject,
-          text: body,
+          text: bodyToSend,
           html: typeof html === "string" && html.trim() ? html.trim() : undefined,
           headers,
           attachments
         });
         let jobId = String(m.jobId || "").trim();
-        const rfqId = String(m.rfqId || "").trim();
+        const rfqId = rfqIdForSend;
         const subId = String(m.subcontractor_id || "").trim();
         if (sb && rfqId) {
           const { data: rRow } = await sb.from("rfqs").select("job_id, subcontractor_id").eq("id", rfqId).maybeSingle();
@@ -2062,7 +2170,7 @@ app.post("/api/rfq/send", requireAuth, async (req, res) => {
             subcontractor_id: scId || null,
             direction: "outbound",
             subject,
-            body,
+            body: bodyToSend,
             sent_at: new Date().toISOString(),
             message_id: msgId.replace(/^<|>$/g, ""),
             logged_by: "rfq-send"

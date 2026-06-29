@@ -603,7 +603,13 @@ function UnmatchedTab() {
               <button
                 type="button"
                 className="rounded-lg border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent/10"
-                onClick={() => { setMatchModal({ id: u.id, subject: u.subject }); setMatchJobId(""); setMatchRfqId(""); }}
+                onClick={() => { setMatchModal({
+                  id: u.id,
+                  subject: u.subject,
+                  fromEmail: u.from_email,
+                  bodyPreview: u.body_preview,
+                  quotePdfUrl: u.quote_pdf_url
+                }); setMatchJobId(""); setMatchRfqId(""); }}
               >
                 Match to job
               </button>
@@ -617,6 +623,24 @@ function UnmatchedTab() {
           <div className="max-w-lg w-full rounded-card border border-hairline bg-surface p-6 shadow-lg">
             <h3 className="text-lg font-bold text-primary">Match quote email to RFQ</h3>
             <p className="mt-2 text-xs text-muted">{matchModal.subject || "(no subject)"}</p>
+            {matchModal.fromEmail ? (
+              <p className="mt-1 text-xs text-muted">From: {matchModal.fromEmail}</p>
+            ) : null}
+            {matchModal.bodyPreview ? (
+              <p className="mt-2 max-h-24 overflow-y-auto rounded border border-hairline bg-page p-2 text-xs text-muted whitespace-pre-wrap">
+                {matchModal.bodyPreview.slice(0, 800)}
+              </p>
+            ) : null}
+            {matchModal.quotePdfUrl ? (
+              <a
+                href={matchModal.quotePdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-block text-xs font-semibold text-accent underline"
+              >
+                View quote PDF
+              </a>
+            ) : null}
             <label className="mt-4 block text-xs font-semibold text-ink">
               Job
               <select className="mt-1 w-full rounded border px-2 py-2 text-sm" value={matchJobId} onChange={(e) => { setMatchJobId(e.target.value); setMatchRfqId(""); }}>
