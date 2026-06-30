@@ -54,15 +54,16 @@ export async function sendReminderForRfqId(rfqId, opts = {}) {
   const deadlineFmt = formatAuDate(row.deadline);
   const sigName = process.env.SAM_NAME?.trim() || "Sam Morris";
   const subject = `Reminder — quote for ${address}`;
-  const baseText = [
+  const baseLines = [
     `Hi ${name},`,
     "",
     `Just a quick reminder that we're hoping to receive your price for ${address} by ${deadlineFmt}.`,
     "Let us know if you need anything from us.",
-    "",
-    "Thanks,",
-    sigName
-  ].join("\n");
+  ];
+  // Only add a plain sign-off when there's no real signature footer — the footer already provides
+  // the sign-off, so adding "Thanks, <sigName>" here would double the signature.
+  if (!footer) baseLines.push("", "Thanks,", sigName);
+  const baseText = baseLines.join("\n");
 
   const text = footer ? `${appendRfqRefToBody(baseText, rfqId)}\n\n${footer}` : appendRfqRefToBody(baseText, rfqId);
   const html =
