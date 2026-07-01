@@ -55,6 +55,94 @@ export const LEAD_STAGE_LABELS = {
   lost:          "Lost",
 };
 
+/** leads.fit_quality — are they the right kind of client? (migration 127) */
+export const LEAD_FIT_QUALITY = {
+  STRONG:        "strong",
+  POSSIBLE:      "possible",
+  NURTURE:       "nurture",
+  POOR:          "poor",
+  PRICE_SHOPPER: "price_shopper",
+};
+
+export const LEAD_FIT_QUALITY_LABELS = {
+  strong:        "Strong fit",
+  possible:      "Possible fit",
+  nurture:       "Nurture",
+  poor:          "Poor fit",
+  price_shopper: "Price shopper",
+};
+
+/** leads.readiness — are they ready to move? (migration 127) */
+export const LEAD_READINESS = {
+  EARLY_RESEARCH:    "early_research",
+  NOT_READY_YET:     "not_ready_yet",
+  READY_FOR_CONSULT: "ready_for_consult",
+};
+
+export const LEAD_READINESS_LABELS = {
+  early_research:    "Early research",
+  not_ready_yet:     "Not ready yet",
+  ready_for_consult: "Ready for consult",
+};
+
+/** leads.action_type — the driven next-action queue (migration 127) */
+export const LEAD_ACTION_TYPES = {
+  RESPONSE_DUE:        "response_due",
+  NO_REPLY_FOLLOW_UP:  "no_reply_follow_up",
+  PLANS_REQUESTED:     "plans_requested",
+  PLANS_RECEIVED:      "plans_received",
+  PROPOSAL_FOLLOW_UP:  "proposal_follow_up",
+  NURTURE_CHECK_IN:    "nurture_check_in",
+  LOST_REVIEW:         "lost_review",
+  REACTIVATION:        "reactivation",
+};
+
+export const LEAD_ACTION_TYPE_LABELS = {
+  response_due:       "Response due",
+  no_reply_follow_up: "No-reply follow-up",
+  plans_requested:    "Plans requested",
+  plans_received:     "Plans received",
+  proposal_follow_up: "Proposal follow-up",
+  nurture_check_in:   "Nurture check-in",
+  lost_review:        "Lost lead review",
+  reactivation:       "Reactivation",
+};
+
+/** Queue display order (matches the plan's 8 buckets) */
+export const LEAD_ACTION_TYPE_ORDER = [
+  LEAD_ACTION_TYPES.RESPONSE_DUE,
+  LEAD_ACTION_TYPES.NO_REPLY_FOLLOW_UP,
+  LEAD_ACTION_TYPES.PLANS_REQUESTED,
+  LEAD_ACTION_TYPES.PLANS_RECEIVED,
+  LEAD_ACTION_TYPES.PROPOSAL_FOLLOW_UP,
+  LEAD_ACTION_TYPES.NURTURE_CHECK_IN,
+  LEAD_ACTION_TYPES.LOST_REVIEW,
+  LEAD_ACTION_TYPES.REACTIVATION,
+];
+
+/** leads.lead_source_category — mandatory on every create path (migration 127) */
+export const LEAD_SOURCE_CATEGORIES = {
+  WEBSITE:     "website",
+  REFERRAL:    "referral",
+  REPEAT:      "repeat",
+  SOCIAL:      "social",
+  SEARCH:      "search",
+  ADVERTISING: "advertising",
+  WALK_IN:     "walk_in",
+  OTHER:       "other",
+};
+
+export const LEAD_SOURCE_CATEGORY_LABELS = {
+  website:     "Website",
+  referral:    "Referral",
+  repeat:      "Repeat client",
+  social:      "Social media",
+  search:      "Search",
+  advertising: "Advertising",
+  walk_in:     "Walk-in",
+  other:       "Other",
+};
+
 export const CRM_CONTACT_TYPES = {
   PROSPECT:    "prospect",
   REFERRER:    "referrer",

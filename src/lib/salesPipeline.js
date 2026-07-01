@@ -110,6 +110,11 @@ export const PIPELINE_FILTERS = [
   { value: "overdue", label: "Overdue",           test: isOverdue },
   { value: "high",    label: "High value",        test: isHighValue },
   { value: "recent",  label: "Recently updated",  test: isRecentlyUpdated },
+  // CRM Control Spine (migration 127) — fit filters, same single-select chip bar.
+  { value: "fit_strong",   label: "Strong fit",   test: (l) => l.fit_quality === "strong" },
+  { value: "fit_possible", label: "Possible fit", test: (l) => l.fit_quality === "possible" },
+  { value: "fit_poor",     label: "Poor fit",     test: (l) => l.fit_quality === "poor" || l.fit_quality === "price_shopper" },
+  { value: "ready_consult", label: "Ready for consult", test: (l) => l.readiness === "ready_for_consult" },
 ];
 
 export function matchesFilter(lead, filterId) {
@@ -179,4 +184,35 @@ export function actionBucket(lead) {
     (Number(lead.qualify_score) || 0) >= 7;
   if (di.status === "none" && notable) return "attention";
   return "watch";
+}
+
+// ── CRM Control Spine (migration 127) — driven action-type queue ────────────
+// Complements the urgency buckets above (when): this groups by WHAT kind of action is owed,
+// via the explicit action_type field a human (or the stage-change rule default) sets.
+export const LEAD_ACTION_TYPE_BUCKETS = [
+  { id: "response_due",        label: "Response due",        variant: "danger" },
+  { id: "no_reply_follow_up",  label: "No-reply follow-up",  variant: "warning" },
+  { id: "plans_requested",     label: "Plans requested",     variant: "info" },
+  { id: "plans_received",      label: "Plans received",      variant: "info" },
+  { id: "proposal_follow_up",  label: "Proposal follow-up",  variant: "warning" },
+  { id: "nurture_check_in",    label: "Nurture check-in",    variant: "neutral" },
+  { id: "lost_review",         label: "Lost lead review",    variant: "neutral" },
+  { id: "reactivation",        label: "Reactivation",        variant: "neutral" },
+];
+
+/** Is this lead currently snoozed (hidden from the action-type queue until snoozed_until)? */
+export function isSnoozed(lead) {
+  return !!lead.snoozed_until && new Date(lead.snoozed_until) > new Date();
+}
+
+/** Due status for action_due_at, same shape as dueInfo() but for the driven queue. */
+export function actionDueInfo(lead) {
+  if (!lead.action_due_at) return { status: "none", label: "No due date", days: null };
+  const due = new Date(lead.action_due_at);
+  if (isNaN(due)) return { status: "none", label: "No due date", days: null };
+  const today = new Date();
+  const days = Math.round((due - today) / 86_400_000);
+  if (days < 0) return { status: "overdue", label: `${Math.abs(days)}d overdue`, days };
+  if (days === 0) return { status: "today", label: "Due today", days };
+  return { status: "soon", label: `Due ${due.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`, days };
 }

@@ -24,6 +24,23 @@ export function MoneyBadge({ value }) {
   return <StatusBadge variant="money">{f}</StatusBadge>;
 }
 
+// CRM Control Spine (migration 127) — fit_quality + readiness chips. Reused in Pipeline rows,
+// Lead Detail, and anywhere else a lead's fit needs to be shown at a glance.
+const FIT_QUALITY_LABELS = { strong: "Strong fit", possible: "Possible fit", nurture: "Nurture", poor: "Poor fit", price_shopper: "Price shopper" };
+const FIT_QUALITY_VARIANT = { strong: "success", possible: "info", nurture: "neutral", poor: "warning", price_shopper: "danger" };
+const READINESS_LABELS = { early_research: "Early research", not_ready_yet: "Not ready yet", ready_for_consult: "Ready for consult" };
+const READINESS_VARIANT = { early_research: "neutral", not_ready_yet: "warning", ready_for_consult: "success" };
+
+export function FitQualityBadge({ value }) {
+  if (!value) return null;
+  return <StatusBadge variant={FIT_QUALITY_VARIANT[value] || "neutral"}>{FIT_QUALITY_LABELS[value] || value}</StatusBadge>;
+}
+
+export function ReadinessBadge({ value }) {
+  if (!value) return null;
+  return <StatusBadge variant={READINESS_VARIANT[value] || "neutral"}>{READINESS_LABELS[value] || value}</StatusBadge>;
+}
+
 export function StagePill({ stageId }) {
   const s = STAGES.find((x) => x.id === stageId);
   if (!s) return <span className="text-xs text-muted">—</span>;

@@ -14,6 +14,8 @@ import { normaliseAddress } from "./addressNormalise.mjs";
 import { setFact } from "./factsService.mjs";
 import { recomputeReferralRollup } from "./crmRoutes.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
+import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
+import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
 import {
   dropboxConfigured,
   ensureJobFolderStructure,
@@ -555,6 +557,20 @@ export function registerSalesRoutes(app) {
     const body = req.body;
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+
+    // CRM Control Spine (migration 127): every lead must have a lead_source_category. Prefer an
+    // explicit value; else derive it from lead_source (the existing picklist already maps cleanly).
+    // Only reject if neither resolves — never blocks a well-formed create.
+    if (body.lead_source_category) {
+      if (!isValidLeadSourceCategory(body.lead_source_category)) {
+        return res.status(400).json({ ok: false, error: "Invalid lead_source_category." });
+      }
+    } else {
+      const derived = normalizeLeadSourceCategory(body.lead_source);
+      if (!derived) return res.status(400).json({ ok: false, error: "lead_source_category is required (or a lead_source we can classify)." });
+      body.lead_source_category = derived;
+    }
+
     const insert = { ...body, created_at: now, updated_at: now, stage: body.stage || "enquiry", stage_entered_at: now, last_activity_at: now };
     const { data, error } = await sb.from("leads").insert(insert).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
@@ -574,7 +590,28 @@ export function registerSalesRoutes(app) {
     }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
+
+    // CRM Control Spine (migration 127) — validate the new fields. Build 1A is manual-only: fit
+    // and action fields are set by hand here, never inferred/overwritten by AI.
+    if (body.fit_quality !== undefined && body.fit_quality !== null && !["strong", "possible", "nurture", "poor", "price_shopper"].includes(body.fit_quality)) {
+      return err(res, 400, "Invalid fit_quality.");
+    }
+    if (body.readiness !== undefined && body.readiness !== null && !["early_research", "not_ready_yet", "ready_for_consult"].includes(body.readiness)) {
+      return err(res, 400, "Invalid readiness.");
+    }
+    if (body.action_type !== undefined && body.action_type !== null && !isValidActionType(body.action_type)) {
+      return err(res, 400, "Invalid action_type.");
+    }
+    if (body.lead_source_category !== undefined && body.lead_source_category !== null && !isValidLeadSourceCategory(body.lead_source_category)) {
+      return err(res, 400, "Invalid lead_source_category.");
+    }
+    const fitChanged = "fit_quality" in body || "readiness" in body;
+
     const updates = { ...body, updated_at: new Date().toISOString() };
+    if (fitChanged) {
+      updates.fit_set_by = req.caller?.id || null;
+      updates.fit_set_at = new Date().toISOString();
+    }
     const { data: current } = await sb
       .from("leads")
       .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, job_id")
@@ -590,6 +627,13 @@ export function registerSalesRoutes(app) {
       }
       if (updates.stage === "lost" && !current.lost_at) {
         updates.lost_at = outcomeDate;
+      }
+      // Rule-based action-queue default (plan §5) — only fills the gap when this same request
+      // didn't already set an explicit action_type, so a human choice is never overridden.
+      if (!("action_type" in body)) {
+        const defaults = deriveActionForStage(updates.stage);
+        if (defaults) { updates.action_type = defaults.action_type; updates.action_due_at = defaults.action_due_at; }
+        else { updates.action_type = null; updates.action_due_at = null; }
       }
       // W01-DRIFT-003 (SAM-W02-002): advisory gate check — log + surface, never block.
       gateWarnings = evaluateStageGate(updates.stage, { ...current, ...updates });

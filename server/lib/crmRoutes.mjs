@@ -34,6 +34,7 @@ import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { getCanonicalContractValue } from "./factsService.mjs";
 import { recordRfqEvent } from "./rfqEngagement.mjs";
+import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
@@ -583,6 +584,13 @@ export function registerCrmRoutes(app) {
       return err(res, 409, "Contact has already been converted to a lead");
     }
 
+    // CRM Control Spine (migration 127) — every lead needs a lead_source_category. A contact
+    // convert with a referrer link is always 'referral'; otherwise normalise the contact's
+    // lead_source text, falling back to 'other' (a convert must never be blocked by this).
+    const leadSourceCategory = contact.referred_by_contact_id
+      ? "referral"
+      : (normalizeLeadSourceCategory(contact.lead_source) || "other");
+
     // Create a lead from the contact
     const { data: lead, error: lErr } = await sb().from("leads").insert({
       first_name: contact.first_name,
@@ -593,6 +601,7 @@ export function registerCrmRoutes(app) {
       project_type: projectType || contact.project_type,
       estimated_value: estimatedValue || null,
       lead_source: contact.lead_source,
+      lead_source_category: leadSourceCategory,
       referred_by_contact_id: id,
       discovery_notes: notes || null,
       stage: "enquiry",

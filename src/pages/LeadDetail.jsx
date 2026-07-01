@@ -1286,6 +1286,46 @@ export default function LeadDetail() {
             <MarginPanel lead={lead} onSave={v => patch({ target_gp_pct: v })} />
   );
 
+  // CRM Control Spine (migration 127) — fit classification, two axes, manual only in this build.
+  const fitBlock = (
+            <div className="rounded-card border border-hairline bg-surface p-4">
+              <h3 className="section-label mb-3">Fit</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted">Fit quality</label>
+                  <select
+                    className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink"
+                    value={lead.fit_quality || ""}
+                    onChange={e => patch({ fit_quality: e.target.value || null })}
+                  >
+                    <option value="">Not set</option>
+                    <option value="strong">Strong fit</option>
+                    <option value="possible">Possible fit</option>
+                    <option value="nurture">Nurture</option>
+                    <option value="poor">Poor fit</option>
+                    <option value="price_shopper">Price shopper</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted">Readiness</label>
+                  <select
+                    className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink"
+                    value={lead.readiness || ""}
+                    onChange={e => patch({ readiness: e.target.value || null })}
+                  >
+                    <option value="">Not set</option>
+                    <option value="early_research">Early research</option>
+                    <option value="not_ready_yet">Not ready yet</option>
+                    <option value="ready_for_consult">Ready for consult</option>
+                  </select>
+                </div>
+              </div>
+              {lead.fit_set_at && (
+                <p className="mt-2 text-xs text-muted">Last set {new Date(lead.fit_set_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</p>
+              )}
+            </div>
+  );
+
   // Unanswered qualifying gates — surfaced so it's clear what's blocking advance (S1).
   const qualifyMissing = [
     lead.qualify_budget == null && "Budget",
@@ -2055,7 +2095,7 @@ export default function LeadDetail() {
   const detailsGroup = (
     <div>
       <p className="section-label mb-2">Lead details</p>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}</div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}{fitBlock}</div>
     </div>
   );
 

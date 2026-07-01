@@ -7,7 +7,7 @@ import {
   STAGES, PROJECT_TYPES, LEAD_SOURCES,
   formatValue, projectTypeLabel, relativeTime, weightedValue, matchesFilter,
 } from "../lib/salesPipeline.js";
-import { RotDot, ScoreBadge, StagePill } from "../components/sales/SalesBits.jsx";
+import { RotDot, ScoreBadge, StagePill, FitQualityBadge, ReadinessBadge } from "../components/sales/SalesBits.jsx";
 import SalesScorecard from "../components/sales/SalesScorecard.jsx";
 import SalesPipelineHeader from "../components/sales/SalesPipelineHeader.jsx";
 import PipelineFilterBar from "../components/sales/PipelineFilterBar.jsx";
@@ -31,6 +31,7 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
   async function submit(e) {
     e.preventDefault();
     if (!form.first_name.trim()) { setErr("First name is required."); return; }
+    if (!form.lead_source) { setErr("Lead source is required — it's how we track which marketing produces good leads."); return; }
     setBusy(true); setErr("");
     try {
       const body = { ...form };
@@ -97,7 +98,7 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
             <input type="number" min="0" step="1000" className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.estimated_value} onChange={(e) => set("estimated_value", e.target.value)} placeholder="e.g. 650000" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Lead source</label>
+            <label className="mb-1 block text-xs font-medium text-muted">Lead source *</label>
             <select className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.lead_source} onChange={(e) => set("lead_source", e.target.value)}>
               <option value="">Select…</option>
               {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -319,6 +320,7 @@ function ListView({ leads, onQuickNote, onNav }) {
             <Th col="stage" label="Stage" />
             <Th col="estimated_value" label="Value" />
             <Th col="qualify_score" label="Score" />
+            <th className="section-label whitespace-nowrap px-4 py-2.5 text-left">Fit</th>
             <th className="section-label whitespace-nowrap px-4 py-2.5 text-left">Suburb</th>
             <Th col="last_activity_at" label="Last Activity" />
             <th className="section-label whitespace-nowrap px-4 py-2.5 text-left">Next Action</th>
@@ -338,6 +340,13 @@ function ListView({ leads, onQuickNote, onNav }) {
               <td className="px-4 py-3"><StagePill stageId={lead.stage} /></td>
               <td className="px-4 py-3 font-medium text-accent">{formatValue(lead.estimated_value) || <span className="text-muted">—</span>}</td>
               <td className="px-4 py-3"><ScoreBadge score={lead.qualify_score} /></td>
+              <td className="px-4 py-3">
+                <div className="flex flex-col gap-1">
+                  <FitQualityBadge value={lead.fit_quality} />
+                  <ReadinessBadge value={lead.readiness} />
+                  {!lead.fit_quality && !lead.readiness && <span className="text-muted">—</span>}
+                </div>
+              </td>
               <td className="px-4 py-3 text-muted">{lead.suburb || "—"}</td>
               <td className="px-4 py-3 text-muted">{relativeTime(lead.last_activity_at || lead.created_at)}</td>
               <td className="px-4 py-3">
@@ -382,6 +391,7 @@ export default function SalesPipeline() {
   })();
   const [view, setView] = useState(initialView); // "board" | "actions" | "list" | "scorecard"
   const [filter, setFilter] = useState("all");
+  const [queueMode, setQueueMode] = useState("urgency"); // "urgency" | "actionType" — CRM Control Spine (127)
 
   useEffect(() => {
     setScreenContext?.({ page: "sales_pipeline", description: "Sales pipeline board — all active leads by stage" });
@@ -416,6 +426,16 @@ export default function SalesPipeline() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage: newStage }),
+    });
+    load();
+  }
+
+  async function snoozeLead(lead) {
+    const until = new Date(); until.setDate(until.getDate() + 7);
+    await authFetch(`/api/sales/leads/${lead.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snoozed_until: until.toISOString() }),
     });
     load();
   }
@@ -493,12 +513,19 @@ export default function SalesPipeline() {
 
       {view === "actions" && (
         <div className="mt-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-xs font-medium text-muted">Group by:</span>
+            <button type="button" onClick={() => setQueueMode("urgency")} className={`rounded-full px-3 py-1 text-xs font-semibold ${queueMode === "urgency" ? "bg-primary text-white" : "border border-hairline text-ink"}`}>Urgency</button>
+            <button type="button" onClick={() => setQueueMode("actionType")} className={`rounded-full px-3 py-1 text-xs font-semibold ${queueMode === "actionType" ? "bg-primary text-white" : "border border-hairline text-ink"}`}>Action type</button>
+          </div>
           <SalesActionQueue
             leads={activeLeads.filter((l) => matchesFilter(l, filter))}
             loading={loading}
             onMoveStage={moveStage}
             onQuickNote={setQuickNoteLead}
             onOpen={openLead}
+            onSnooze={queueMode === "actionType" ? snoozeLead : undefined}
+            mode={queueMode}
           />
         </div>
       )}

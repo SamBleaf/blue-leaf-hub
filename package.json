@@ -49,6 +49,8 @@
     "test:w04-w06-job-spine:write": "node scripts/batch-a/run-w04-w06-job-spine.mjs --write",
     "test:w02-qualification": "node scripts/batch-a/run-w02-qualification.mjs",
     "test:w02-qualification:write": "node scripts/batch-a/run-w02-qualification.mjs --write",
+    "test:w1a-crm-control-spine": "node scripts/batch-a/run-w1a-crm-control-spine.mjs",
+    "test:w1a-crm-control-spine:write": "node scripts/batch-a/run-w1a-crm-control-spine.mjs --write",
     "test:w06-shape": "node scripts/batch-a/run-w06-shape.mjs",
     "test:w06-shape:write": "node scripts/batch-a/run-w06-shape.mjs --write",
     "test:w06-finalize": "node scripts/batch-a/run-w06-finalize.mjs",

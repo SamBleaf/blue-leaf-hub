@@ -37,6 +37,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
+import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
@@ -292,6 +293,10 @@ export function registerMarketingIntelligenceRoutes(app) {
 
     if (!name || !email) return err(res, 400, "name and email are required");
 
+    // CRM Control Spine (migration 127) — every lead needs a lead_source_category. The public
+    // enquiry form is (almost) always 'website' unless the utm_source signals a specific channel.
+    const leadSourceCategory = normalizeLeadSourceCategory(utm_source) || "website";
+
     // Create the lead
     const { data: lead, error: leadErr } = await sb.from("leads").insert({
       name,
@@ -301,6 +306,7 @@ export function registerMarketingIntelligenceRoutes(app) {
       suburb:              suburb || null,
       project_description: project_description || null,
       lead_source:         utm_source || "website",
+      lead_source_category: leadSourceCategory,
       utm_campaign:        utm_campaign || null,
     }).select().single();
 
