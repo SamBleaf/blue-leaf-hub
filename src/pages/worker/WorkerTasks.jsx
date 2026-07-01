@@ -363,6 +363,15 @@ export default function WorkerTasks() {
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push(t);
   }
+  // Done tasks grouped by category too, so a fully-completed category still shows (with its rows,
+  // so a mis-tick can be undone right there) instead of silently vanishing. Active cats first.
+  const doneByCategory = {};
+  for (const t of doneTasks) {
+    const cat = t.category || "general";
+    if (!doneByCategory[cat]) doneByCategory[cat] = [];
+    doneByCategory[cat].push(t);
+  }
+  const categoryOrder = [...new Set([...Object.keys(byCategory), ...Object.keys(doneByCategory)])];
 
   function categoryProgress(cat) {
     const all = tasks.filter(t => (t.category || "general") === cat && t.status !== "wont_do");
@@ -449,6 +458,13 @@ export default function WorkerTasks() {
           <p className="text-sm text-muted text-center mt-10">No tasks on this job yet.</p>
         ) : (
           <>
+            {/* Whole-list payoff — the achievement moment when everything's ticked off */}
+            {totalActive > 0 && totalDone === totalActive && (
+              <div className="mb-5 rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
+                <p className="text-sm font-bold text-emerald-700">All tasks done — great work today.</p>
+                <p className="text-xs text-emerald-600 mt-0.5">{totalDone} task{totalDone === 1 ? "" : "s"} smashed.</p>
+              </div>
+            )}
             {/* Hit List — urgent, ungrouped, top */}
             {urgentTasks.length > 0 && (
               <div className="mb-5">
@@ -461,22 +477,20 @@ export default function WorkerTasks() {
               </div>
             )}
 
-            {/* Per-category groups */}
-            {Object.keys(byCategory).map(cat => {
+            {/* Per-category groups (completed categories stay, showing the payoff + their rows) */}
+            {categoryOrder.map(cat => {
               const { done, total } = categoryProgress(cat);
               const allDone = done === total && total > 0;
+              const rows = allDone ? (doneByCategory[cat] || []) : (byCategory[cat] || []);
               return (
                 <div key={cat}>
                   <CategoryHeader label={categoryLabel(cat)} done={done} total={total} />
-                  {allDone ? (
-                    <p className="text-xs text-emerald-600 font-medium pb-2">{categoryLabel(cat)} tasks complete. Nice work.</p>
-                  ) : (
-                    <div className="space-y-2 mb-2">
-                      {byCategory[cat].map(t => (
-                        <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
-                      ))}
-                    </div>
-                  )}
+                  {allDone && <p className="text-xs text-emerald-600 font-medium mb-2">{categoryLabel(cat)} tasks complete. Nice work.</p>}
+                  <div className="space-y-2 mb-2">
+                    {rows.map(t => (
+                      <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+                    ))}
+                  </div>
                 </div>
               );
             })}
