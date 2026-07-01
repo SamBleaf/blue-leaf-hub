@@ -2240,6 +2240,27 @@ export function registerWorkforceRoutes(app) {
 
   // ── PATCH /api/worker/tasks/:id ─────────────────────────────────────────────
   // Worker-auth task update: toggle done/open, mark blocked, add notes/photo.
+  // Worker-auth: a leading hand (onsite supervisor) can add a work task to a carpentry job from the
+  // PWA — any worker can then tick it. Mirrors the worker PATCH auth. Not for QC template tasks.
+  app.post("/api/worker/tasks", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (req.workerPreview) return res.status(403).json({ ok: false, error: "Read-only preview — you can't add tasks as a worker." });
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
+    if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can add tasks onsite.");
+    const jobId = String(req.body?.jobId || "").trim();
+    const title = String(req.body?.title || "").trim();
+    if (!isUuid(jobId) || !title) return err(res, 400, "jobId and title are required.");
+    const category = String(req.body?.category || "general").trim() || "general";
+    const priority = ["urgent", "normal", "when_time_permits"].includes(req.body?.priority) ? req.body.priority : "normal";
+    const { data, error } = await sb.from("site_tasks").insert({
+      carpentry_job_id: jobId, title, category, priority, status: "open",
+      created_via: "manual", task_audience: "worker"
+    }).select("*").single();
+    if (error) return err(res, 500, translateDbError(error));
+    return ok(res, { task: rowToCamel(data) });
+  });
+
   // Workers can only update tasks assigned to them or unassigned.
   // Preview mode is blocked (read-only).
   app.patch("/api/worker/tasks/:id", workerAuth, async (req, res) => {

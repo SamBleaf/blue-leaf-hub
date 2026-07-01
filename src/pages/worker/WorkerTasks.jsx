@@ -331,12 +331,11 @@ export default function WorkerTasks() {
     if (!addTitle.trim() || !job?.id) return;
     setAddBusy(true);
     setAddError(null);
-    // Use admin carpentry tasks endpoint — supervisor/leading-hand has auth session.
-    // Workers without admin session won't see this button (isSupervisor check).
-    const res = await workerFetch(`/api/carpentry/jobs/${job.id}/tasks`, {
+    // Worker-token endpoint — a leading hand can add tasks onsite via magic link (no admin session).
+    const res = await workerFetch(`/api/worker/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: addTitle.trim(), category: addCategory, priority: addPriority }),
+      body: JSON.stringify({ jobId: job.id, title: addTitle.trim(), category: addCategory, priority: addPriority }),
     });
     const j = await res.json().catch(() => ({}));
     setAddBusy(false);
