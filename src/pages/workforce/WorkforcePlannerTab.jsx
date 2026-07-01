@@ -81,9 +81,10 @@ function DayCell({ empId, day, dayIdx, fillActive, nonWork, children }) {
   const filled = !!children;
   return (
     <td className="py-1 px-1 align-top">
-      <div ref={setNodeRef} data-cell data-empid={empId} data-dayidx={dayIdx} title={nonWork ? nonWork.label : undefined}
-        className={`min-h-[34px] rounded transition ${filled ? (nonWork ? "ring-1 ring-slate-300" : "") : nonWork ? "bg-slate-100 border border-slate-200" : "border border-dashed border-hairline"} ${isOver ? "ring-2 ring-primary" : ""} ${fillActive ? "ring-2 ring-primary/60" : ""} ${!filled ? "flex items-center justify-center text-[10px] hover:bg-slate-50" : ""}`}>
-        {filled ? children : (nonWork ? <span className="text-slate-400 leading-tight">{nonWork.kind === "holiday" ? "Hol" : "RDO"}</span> : <span className="text-muted text-sm">+</span>)}
+      <div ref={setNodeRef} data-cell data-empid={empId} data-dayidx={dayIdx}
+        title={filled && nonWork ? `${nonWork.label} conflicts with allocation` : nonWork ? nonWork.label : undefined}
+        className={`min-h-[34px] rounded transition ${filled ? (nonWork ? "ring-2 ring-amber-400" : "") : nonWork ? (nonWork.kind === "team" ? "bg-sky-100 border border-sky-200" : "bg-slate-100 border border-slate-200") : "border border-dashed border-hairline"} ${isOver ? "ring-2 ring-primary" : ""} ${fillActive ? "ring-2 ring-primary/60" : ""} ${!filled ? "flex items-center justify-center text-[10px] hover:bg-slate-50" : ""}`}>
+        {filled ? children : (nonWork ? <span className={`leading-tight ${nonWork.kind === "team" ? "text-sky-600 font-medium" : "text-slate-400"}`}>{nonWork.kind === "holiday" ? "Hol" : nonWork.kind === "team" ? "Team RDO" : "RDO"}</span> : <span className="text-muted text-sm">+</span>)}
       </div>
     </td>
   );
@@ -106,12 +107,13 @@ export default function WorkforcePlannerTab() {
   const [colorPop, setColorPop] = useState(null); // { jKey, x, y }
   const [fill, setFill] = useState(null); // { empId, jKey, anchorIdx, endIdx, prevRightIdx } — across days
   const [fillDown, setFillDown] = useState(null); // { day, dayIdx, jKey, anchorRow, endRow, prevBottomRow } — down workers
-  const [nonWorking, setNonWorking] = useState({ holidays: [], rdo: [] });
+  const [nonWorking, setNonWorking] = useState({ holidays: [], rdo: [], teamRdo: [] });
   const [daysOffOpen, setDaysOffOpen] = useState(false);
   const [dofEmp, setDofEmp] = useState("");
   const [holList, setHolList] = useState([]);   // public holidays with ids (panel)
   const [patList, setPatList] = useState([]);   // rdo patterns for the selected employee
-  const [dof, setDof] = useState({ holDate: "", holName: "", rdoDate: "", patWeekday: 1, patInterval: 2, patAnchor: "" });
+  const [teamRdoList, setTeamRdoList] = useState([]); // whole-crew RDO dates (panel)
+  const [dof, setDof] = useState({ holDate: "", holName: "", rdoDate: "", patWeekday: 1, patInterval: 2, patAnchor: "", teamDate: "" });
   const gridRef = useRef(null);
   const fillRef = useRef(null);
   fillRef.current = fill;
@@ -146,7 +148,7 @@ export default function WorkforcePlannerTab() {
 
   const loadNonWorking = useCallback(() => {
     authFetch(`/api/workforce/non-working-days?from=${weekFrom}&to=${weekTo}`).then(json)
-      .then((j) => { if (j.ok) setNonWorking({ holidays: j.holidays || [], rdo: j.rdo || [] }); }).catch(() => {});
+      .then((j) => { if (j.ok) setNonWorking({ holidays: j.holidays || [], rdo: j.rdo || [], teamRdo: j.teamRdo || [] }); }).catch(() => {});
   }, [weekFrom, weekTo]);
   useEffect(() => { loadNonWorking(); }, [loadNonWorking]);
 
@@ -174,7 +176,13 @@ export default function WorkforcePlannerTab() {
   const labelFor = useCallback((jKey) => jobs.find((j) => j.jKey === jKey)?.label || "Job", [jobs]);
   const holidayMap = useMemo(() => { const m = {}; for (const h of nonWorking.holidays) m[h.date] = h.name; return m; }, [nonWorking]);
   const rdoSet = useMemo(() => new Set(nonWorking.rdo.map((r) => `${r.employeeId}|${r.date}`)), [nonWorking]);
-  const nonWorkFor = useCallback((empId, day) => holidayMap[day] ? { kind: "holiday", label: holidayMap[day] } : rdoSet.has(`${empId}|${day}`) ? { kind: "rdo", label: "Rostered day off" } : null, [holidayMap, rdoSet]);
+  // Team RDOs apply to EVERY field worker on that date (whole-crew day off) → keyed by date only.
+  const teamRdoSet = useMemo(() => new Set((nonWorking.teamRdo || []).map((r) => r.date)), [nonWorking]);
+  const nonWorkFor = useCallback((empId, day) =>
+    holidayMap[day] ? { kind: "holiday", label: holidayMap[day] }
+    : teamRdoSet.has(day) ? { kind: "team", label: "Team RDO" }
+    : rdoSet.has(`${empId}|${day}`) ? { kind: "rdo", label: "Rostered day off" }
+    : null, [holidayMap, teamRdoSet, rdoSet]);
 
   const flash = (type, text) => setMsg({ type, text });
 
@@ -274,6 +282,7 @@ export default function WorkforcePlannerTab() {
   // ── W17-P5: days off (public holidays + RDO) management ────────────────────
   const loadManagement = useCallback(() => {
     authFetch("/api/workforce/public-holidays").then(json).then((j) => { if (j.ok) setHolList(j.holidays || []); }).catch(() => {});
+    authFetch("/api/workforce/team-rdo").then(json).then((j) => { if (j.ok) setTeamRdoList(j.teamRdo || []); }).catch(() => {});
     if (dofEmp) authFetch(`/api/workforce/rdo-patterns?employeeId=${dofEmp}`).then(json).then((j) => { if (j.ok) setPatList(j.patterns || []); }).catch(() => {});
     else setPatList([]);
   }, [dofEmp]);
@@ -297,6 +306,27 @@ export default function WorkforcePlannerTab() {
     const r = await authFetch("/api/workforce/employee-rdo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: dofEmp, rdoDate: dof.rdoDate }) }).then(json).catch(() => ({}));
     if (!r.ok) { dofErr(r); return; }
     setDof((s) => ({ ...s, rdoDate: "" })); loadNonWorking();
+  }
+  const teamErr = (r, verb) => flash("error", r.code === "MIGRATION_PENDING" ? `Apply migration 124 to ${verb} team RDOs.` : (r.error || "Could not save."));
+  async function addTeamRdo() {
+    if (!dof.teamDate) return;
+    const r = await authFetch("/api/workforce/team-rdo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: dof.teamDate }) }).then(json).catch(() => ({}));
+    if (!r.ok) { teamErr(r, "save"); return; }
+    setDof((s) => ({ ...s, teamDate: "" })); loadManagement(); loadNonWorking();
+  }
+  async function delTeamRdo(id) { await authFetch(`/api/workforce/team-rdo/${id}`, { method: "DELETE" }); loadManagement(); loadNonWorking(); }
+  async function moveTeamRdo(id, date) {
+    if (!date) return;
+    const r = await authFetch(`/api/workforce/team-rdo/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date }) }).then(json).catch(() => ({}));
+    if (!r.ok) { flash("error", r.error || "Could not move."); return; }
+    loadManagement(); loadNonWorking();
+  }
+  async function generateYearlyTeamRdo() {
+    const r = await authFetch("/api/workforce/team-rdo/generate-yearly", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ year: new Date().getFullYear() }) }).then(json).catch(() => ({}));
+    if (!r.ok) { teamErr(r, "generate"); return; }
+    const near = (r.dates || []).filter((d) => d.nearHoliday).length;
+    flash("success", `Generated ${r.generated} team RDOs${near ? ` — ${near} near a holiday, review below` : ""}`);
+    loadManagement(); loadNonWorking();
   }
   async function addPattern() {
     if (!dofEmp || !dof.patAnchor) return;
@@ -453,6 +483,29 @@ export default function WorkforcePlannerTab() {
         {daysOffOpen && (
           <div className="border border-hairline rounded-lg bg-white p-3 mb-3 max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-6 flex-wrap">
+              <div className="flex-1 min-w-[240px]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-ink">Team RDOs <span className="font-normal text-muted">(whole crew)</span></p>
+                  <button type="button" onClick={generateYearlyTeamRdo} className="text-[11px] text-primary underline">Generate {new Date().getFullYear()} · last Fri</button>
+                </div>
+                <div className="flex gap-1.5 mb-2">
+                  <input type="date" value={dof.teamDate} onChange={(e) => setDof((s) => ({ ...s, teamDate: e.target.value }))} className="border border-hairline rounded px-2 py-1 text-xs" />
+                  <button type="button" onClick={addTeamRdo} className="text-xs px-2 py-1 rounded bg-primary text-white">Add date</button>
+                </div>
+                <div className="max-h-32 overflow-y-auto text-xs divide-y divide-hairline">
+                  {teamRdoList.length === 0 ? <p className="text-muted py-1">No team RDOs — add one or generate the year.</p>
+                    : teamRdoList.map((t) => {
+                      const near = holList.find((h) => Math.abs((new Date(`${t.date}T12:00:00`) - new Date(`${h.date}T12:00:00`)) / 86400000) <= 3);
+                      return (
+                        <div key={t.id} className="flex items-center justify-between py-1 gap-2">
+                          <input type="date" value={t.date} onChange={(e) => moveTeamRdo(t.id, e.target.value)} className="border border-hairline rounded px-1.5 py-0.5 text-xs" title="Change the date to move this team RDO" />
+                          {near ? <span className="text-[10px] text-amber-600 shrink-0" title={`Near ${near.name}`}>near {near.name}</span> : null}
+                          <button type="button" onClick={() => delTeamRdo(t.id)} className="text-muted shrink-0">×</button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
               <div className="flex-1 min-w-[240px]">
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="text-xs font-semibold text-ink">Public holidays</p>

@@ -1557,6 +1557,63 @@ export function registerWorkforceRoutes(app) {
     ok(res);
   });
 
+  // ── Team RDOs (whole-crew days off) — the PRIMARY RDO model (advisory/display only) ──────
+  app.get("/api/workforce/team-rdo", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    let q = sb.from("workforce_team_rdo_dates").select("id, rdo_date, note").order("rdo_date", { ascending: true });
+    if (req.query.from) q = q.gte("rdo_date", req.query.from);
+    if (req.query.to) q = q.lte("rdo_date", req.query.to);
+    const { data, error } = await q;
+    if (error) { if (plannerTableMissing(error)) return ok(res, { teamRdo: [] }); return err(res, 500, translateDbError(error)); }
+    ok(res, { teamRdo: (data || []).map(r => ({ id: r.id, date: r.rdo_date, note: r.note })) });
+  });
+  app.post("/api/workforce/team-rdo", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const date = req.body.date;
+    if (!date) return err(res, 400, "date is required");
+    const { data, error } = await sb.from("workforce_team_rdo_dates").insert({ rdo_date: date, note: req.body.note || null, region: req.body.region || "SA", created_by: req.caller.id }).select("id").single();
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 124 applied", "MIGRATION_PENDING"); if (/duplicate|unique/i.test(error.message || "")) return err(res, 409, "That date already has a team RDO", "DUPLICATE"); return err(res, 500, translateDbError(error)); }
+    ok(res, { teamRdo: { id: data.id, date } });
+  });
+  app.patch("/api/workforce/team-rdo/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const upd = {};
+    if (req.body.date) upd.rdo_date = req.body.date;
+    if ("note" in req.body) upd.note = req.body.note || null;
+    if (!Object.keys(upd).length) return err(res, 400, "Nothing to update");
+    const { error } = await sb.from("workforce_team_rdo_dates").update(upd).eq("id", req.params.id);
+    if (error) { if (/duplicate|unique/i.test(error.message || "")) return err(res, 409, "That date already has a team RDO", "DUPLICATE"); return err(res, 500, translateDbError(error)); }
+    ok(res);
+  });
+  app.delete("/api/workforce/team-rdo/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { error } = await sb.from("workforce_team_rdo_dates").delete().eq("id", req.params.id);
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res);
+  });
+  // Generate a year of team RDOs = the last Friday of each month. Idempotent (skips existing dates).
+  // Flags each date that falls within 3 days of a public holiday so admin can review/move it.
+  app.post("/api/workforce/team-rdo/generate-yearly", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const year = Number(req.body.year) || new Date().getUTCFullYear();
+    const region = req.body.region || "SA";
+    const dates = [];
+    for (let m = 0; m < 12; m++) {
+      const last = new Date(Date.UTC(year, m + 1, 0));        // last day of month m
+      last.setUTCDate(last.getUTCDate() - ((last.getUTCDay() - 5 + 7) % 7)); // back up to Friday (5)
+      dates.push(ymdUTC(last));
+    }
+    const rows = dates.map(d => ({ rdo_date: d, region, note: "Team RDO (last Friday)", created_by: req.caller.id }));
+    const { error } = await sb.from("workforce_team_rdo_dates").upsert(rows, { onConflict: "rdo_date,region", ignoreDuplicates: true });
+    if (error) { if (plannerTableMissing(error)) return err(res, 503, "Needs migration 124 applied", "MIGRATION_PENDING"); return err(res, 500, translateDbError(error)); }
+    const { data: hols } = await sb.from("workforce_public_holidays").select("holiday_date, name").gte("holiday_date", `${year}-01-01`).lte("holiday_date", `${year}-12-31`);
+    const flagged = dates.map(d => {
+      const near = (hols || []).find(h => Math.abs((new Date(`${d}T12:00:00Z`) - new Date(`${h.holiday_date}T12:00:00Z`)) / 86400000) <= 3);
+      return { date: d, nearHoliday: near ? near.name : null };
+    });
+    ok(res, { generated: dates.length, dates: flagged });
+  });
+
   // Combined non-working days for a date range: public holidays + manual RDO + pattern-expanded RDO.
   app.get("/api/workforce/non-working-days", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
@@ -1575,7 +1632,9 @@ export function registerWorkforceRoutes(app) {
         if ((weekIndex(d) - anchorWeek) % p.interval_weeks === 0) rdo.push({ employeeId: p.employee_id, date: ymdUTC(d), source: "pattern" });
       }
     }
-    ok(res, { holidays: (holRes.data || []).map(h => ({ date: h.holiday_date, name: h.name })), rdo });
+    const teamRes = await sb.from("workforce_team_rdo_dates").select("id, rdo_date, note").gte("rdo_date", from).lte("rdo_date", to);
+    const teamRdo = teamRes.error ? [] : (teamRes.data || []).map(r => ({ id: r.id, date: r.rdo_date, note: r.note }));
+    ok(res, { holidays: (holRes.data || []).map(h => ({ date: h.holiday_date, name: h.name })), rdo, teamRdo });
   });
 
   // Generate (or rotate) a worker's magic-link token and return the shareable path. (W01)
