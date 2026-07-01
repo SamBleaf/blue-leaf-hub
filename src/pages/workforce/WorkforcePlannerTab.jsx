@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
+import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
 import { PLANNER_PALETTE, resolveJobColor } from "../../lib/plannerColors.js";
 
@@ -120,7 +120,12 @@ export default function WorkforcePlannerTab() {
   const fillDownRef = useRef(null);
   fillDownRef.current = fillDown;
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Mouse: 5px drag threshold (snappy on desktop). Touch: 180ms press-hold + 8px tolerance so a tap
+  // or scroll on a phone doesn't start a drag — you press-and-hold a chip to move/duplicate it.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } })
+  );
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => ymd(addDays(monday, i))), [monday]);
   const weekFrom = days[0], weekTo = days[6];
