@@ -1361,6 +1361,55 @@ export function registerCarpentryRoutes(app) {
   });
 
   // ── GET /api/carpentry/jobs/:id/budget ──────────────────────────────────────
+  // AU financial year (Jul–Jun) + quarter for a YYYY-MM-DD date. FY label e.g. "2025-26".
+  // Quarters within the FY: Q1 Jul–Sep, Q2 Oct–Dec, Q3 Jan–Mar, Q4 Apr–Jun.
+  function auFyQuarter(dateStr) {
+    const d = new Date(`${dateStr}T12:00:00Z`);
+    const m = d.getUTCMonth(), y = d.getUTCFullYear();
+    const fyStart = m >= 6 ? y : y - 1;
+    const fy = `${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}`;
+    const q = m >= 6 ? Math.floor((m - 6) / 3) + 1 : Math.floor((m + 6) / 3) + 1;
+    return { fy, q };
+  }
+
+  // FY/quarter labour-cost rollup for the two standing internal jobs (BL-INTERNAL, BL-CHARGEUP) —
+  // the cost of internal downtime / charge-up per period. Labour = approved-timesheet cost_amount,
+  // mirroring the per-job budget view. Advisory reporting; touches nothing else.
+  app.get("/api/carpentry/internal-cost-summary", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data: jobs } = await sb.from("carpentry_jobs").select("id, reference, address").in("reference", ["BL-INTERNAL", "BL-CHARGEUP"]);
+      const out = [];
+      for (const job of jobs || []) {
+        const { data: entries } = await sb
+          .from("timesheet_entries")
+          .select("cost_amount, hours, timesheets!inner(carpentry_job_id, status, date)")
+          .eq("timesheets.carpentry_job_id", job.id)
+          .eq("timesheets.status", "approved");
+        const byPeriod = {};
+        for (const e of entries || []) {
+          const d = e.timesheets?.date; if (!d) continue;
+          const { fy, q } = auFyQuarter(d);
+          const key = `${fy}|${q}`;
+          (byPeriod[key] ||= { fy, quarter: q, cost: 0, hours: 0 });
+          byPeriod[key].cost += Number(e.cost_amount || 0);
+          byPeriod[key].hours += Number(e.hours || 0);
+        }
+        const periods = Object.values(byPeriod).map(p => ({ ...p, cost: round2(p.cost), hours: round2(p.hours) }))
+          .sort((a, b) => a.fy.localeCompare(b.fy) || a.quarter - b.quarter);
+        const fyMap = {};
+        for (const p of periods) { (fyMap[p.fy] ||= { fy: p.fy, cost: 0, hours: 0 }); fyMap[p.fy].cost += p.cost; fyMap[p.fy].hours += p.hours; }
+        const fyTotals = Object.values(fyMap).map(x => ({ ...x, cost: round2(x.cost), hours: round2(x.hours) }));
+        out.push({ reference: job.reference, address: job.address, fyTotals, periods });
+      }
+      return ok(res, { jobs: out });
+    } catch (e) {
+      console.error("[carpentry/internal-cost-summary]", e);
+      return err(res, 500, translateDbError(e));
+    }
+  });
+
   // Per-category budget vs actual. Labour actuals come from approved timesheets
   // (by mapped task_category); material actuals from carpentry_job_costs (total).
   app.get("/api/carpentry/jobs/:id/budget", requireAuth, async (req, res) => {
