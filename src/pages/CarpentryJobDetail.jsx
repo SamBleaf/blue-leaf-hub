@@ -818,7 +818,8 @@ function TasksPanel({ jobId }) {
   }
 
   async function toggleDone(task) {
-    const newStatus = task.status === "done" ? "open" : "done";
+    // blocked → open, done → open, open/in_progress → done
+    const newStatus = task.status === "done" || task.status === "blocked" ? "open" : "done";
     setTogglingId(task.id);
     const { ok, data } = await apiPatch(`/api/carpentry/tasks/${task.id}`, { status: newStatus });
     setTogglingId(null);
@@ -831,11 +832,33 @@ function TasksPanel({ jobId }) {
     if (ok) setTasks((prev) => prev.filter((t) => t.id !== task.id));
   }
 
-  const openTasks = tasks.filter((t) => t.status !== "done");
-  const doneTasks = tasks.filter((t) => t.status === "done");
-  // D3: split worker tasks from supervisor/QC tasks (e.g. "order flashings", "book frame inspection").
-  const openWorker = openTasks.filter((t) => t.task_audience !== "supervisor");
-  const openSup = openTasks.filter((t) => t.task_audience === "supervisor");
+  const openTasks    = tasks.filter((t) => t.status !== "done" && t.status !== "wont_do");
+  const doneTasks    = tasks.filter((t) => t.status === "done");
+  const blockedTasks = tasks.filter((t) => t.status === "blocked");
+  // D3: split worker tasks from supervisor/QC tasks.
+  const openWorker = openTasks.filter((t) => t.task_audience !== "supervisor" && t.status !== "blocked");
+  const openSup    = openTasks.filter((t) => t.task_audience === "supervisor" && t.status !== "blocked");
+
+  // Group worker tasks by category for progress display.
+  const workerByCategory = {};
+  for (const t of openWorker) {
+    const cat = t.category || "general";
+    if (!workerByCategory[cat]) workerByCategory[cat] = [];
+    workerByCategory[cat].push(t);
+  }
+  function catProgress(cat) {
+    const all = tasks.filter((t) => (t.category || "general") === cat && t.status !== "wont_do");
+    return { done: all.filter((t) => t.status === "done").length, total: all.length };
+  }
+
+  const CATEGORY_LABEL_MAP = {
+    general: "General", defect: "Defect", safety: "Safety", materials: "Materials",
+    inspection: "Inspection", first_fix_framing: "Framing", cladding: "Cladding",
+    second_fix: "Second Fix", outdoor_works: "Outdoor Works",
+    formwork_slab_prep: "Formwork / Slab Prep", site_labouring: "Site Labouring",
+    site_cleanup: "Site Cleanup", supervision: "Supervision",
+  };
+
   const renderOpenRow = (task) => (
     <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-hairline bg-white">
       <button
@@ -847,6 +870,7 @@ function TasksPanel({ jobId }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm text-ink leading-snug">{task.title}</p>
         {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
+        {task.employees?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.employees.name}</p>}
       </div>
       <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
         {TASK_PRIORITY_LABEL[task.priority] || task.priority}
@@ -1068,17 +1092,56 @@ function TasksPanel({ jobId }) {
         <p className="text-sm text-muted">No tasks yet. Add tasks for your workers to tick off on-site.</p>
       ) : (
         <>
-          {openWorker.length > 0 && (
-            <div className="space-y-2 mb-3">{openWorker.map(renderOpenRow)}</div>
-          )}
+          {/* Worker tasks grouped by category with per-category progress */}
+          {Object.keys(workerByCategory).map((cat) => {
+            const { done, total } = catProgress(cat);
+            const label = CATEGORY_LABEL_MAP[cat] || cat;
+            return (
+              <div key={cat} className="mb-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wide flex-1">{label}</p>
+                  <span className="text-xs text-muted tabular-nums">{done}/{total}</span>
+                  {total > 0 && (
+                    <div className="w-12 h-1 bg-gray-200 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${done === total ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${Math.round((done / total) * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">{workerByCategory[cat].map(renderOpenRow)}</div>
+              </div>
+            );
+          })}
 
+          {/* Supervisor / QC tasks */}
           {openSup.length > 0 && (
             <div className="mb-3">
-              <h4 className="text-xs font-semibold text-muted mb-2">Tasks for supervisors (QC / order-ahead)</h4>
+              <h4 className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Supervisor / QC</h4>
               <div className="space-y-2">{openSup.map(renderOpenRow)}</div>
             </div>
           )}
 
+          {/* Blocked tasks surfaced */}
+          {blockedTasks.length > 0 && (
+            <div className="mb-3">
+              <h4 className="text-xs font-semibold text-amber-700 mb-2 uppercase tracking-wide">Blocked ({blockedTasks.length})</h4>
+              <div className="space-y-2">
+                {blockedTasks.map((task) => (
+                  <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                    <span className="mt-0.5 shrink-0 text-amber-500 font-bold text-sm">!</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-ink leading-snug">{task.title}</p>
+                      {task.completion_notes && <p className="text-xs text-amber-700 mt-0.5">{task.completion_notes}</p>}
+                      {task.employees?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.employees.name}</p>}
+                    </div>
+                    <button onClick={() => toggleDone(task)} disabled={togglingId === task.id} className="shrink-0 text-xs text-muted hover:text-ink transition-colors px-1" title="Mark open">↺</button>
+                    <button onClick={() => deleteTask(task)} className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1" title="Remove">✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Done tasks */}
           {doneTasks.length > 0 && (
             <div>
               <button
@@ -1102,17 +1165,18 @@ function TasksPanel({ jobId }) {
                       </button>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-muted line-through leading-snug">{task.title}</p>
-                        {task.completed_at && (
+                        {task.completedAt && (
                           <p className="text-xs text-muted mt-0.5">
-                            Done {new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                            Done {new Date(task.completedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                            {task.completedByEmployee?.name ? ` by ${task.completedByEmployee.name}` : ""}
                           </p>
                         )}
-                        {task.completion_notes && (
-                          <p className="text-xs text-muted mt-0.5">{task.completion_notes}</p>
+                        {task.completionNotes && (
+                          <p className="text-xs text-muted mt-0.5">{task.completionNotes}</p>
                         )}
-                        {task.completion_photo_signed_url && (
-                          <a href={task.completion_photo_signed_url} target="_blank" rel="noreferrer" className="inline-block mt-1">
-                            <img src={task.completion_photo_signed_url} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-emerald-200" />
+                        {task.completionPhotoSignedUrl && (
+                          <a href={task.completionPhotoSignedUrl} target="_blank" rel="noreferrer" className="inline-block mt-1">
+                            <img src={task.completionPhotoSignedUrl} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-emerald-200" />
                           </a>
                         )}
                       </div>

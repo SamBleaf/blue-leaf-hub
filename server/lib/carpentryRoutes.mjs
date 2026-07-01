@@ -318,13 +318,9 @@ export function registerCarpentryRoutes(app) {
         if (me) console.warn("[carpentry/jobs POST] milestone seed error:", me.message);
       }
 
-      // Seed the default per-stage site-task checklist so a new job opens with a
-      // base set the leading hand can tick off. Non-fatal.
-      const seedTaskRows = buildDefaultTaskRows(job, req.caller.id, now);
-      if (seedTaskRows.length) {
-        const { error: ste } = await sb.from("site_tasks").insert(seedTaskRows);
-        if (ste) console.warn("[carpentry/jobs POST] site-task seed error:", ste.message);
-      }
+      // Site-task auto-seed removed. New jobs start with zero tasks so the leading hand
+      // can build the task list from scratch (voice transcript, manual, or on-demand QC
+      // template via POST /api/carpentry/jobs/:id/tasks/apply-qc-template).
 
       // NOTE: the budget is NOT auto-seeded from the Buildexact API. The v3 estimate API
       // returns a flat, cost-only line-item list (no per-category markup), so it cannot
@@ -993,14 +989,14 @@ export function registerCarpentryRoutes(app) {
     try {
       const { data, error } = await sb
         .from("site_tasks")
-        .select("*, employees!assigned_to(id, name)")
+        .select("*, employees!assigned_to(id, name), employees!completed_by(id, name)")
         .eq("carpentry_job_id", req.params.id)
         .neq("status", "wont_do")
         .order("sort_order")
         .order("created_at");
       if (error) throw error;
       await signSiteTaskPhotos(sb, data || []);
-      return ok(res, { tasks: data || [] });
+      return ok(res, { tasks: rowsToCamel(data || []) });
     } catch (e) {
       console.error("[carpentry/tasks GET]", e);
       return err(res, 502, translateDbError(e));
@@ -1091,6 +1087,35 @@ export function registerCarpentryRoutes(app) {
     }
   });
 
+  // ── POST /api/carpentry/jobs/:id/tasks/apply-qc-template ───────────────────
+  // On-demand: seed the default per-stage checklist onto a job. Idempotent — skips
+  // any default task whose title is already present on the job. Admin/supervisor only.
+  app.post("/api/carpentry/jobs/:id/tasks/apply-qc-template", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+      const { data: job, error: je } = await sb
+        .from("carpentry_jobs").select("id, project_type").eq("id", req.params.id).maybeSingle();
+      if (je) throw je;
+      if (!job) return err(res, 404, "Job not found.", "NOT_FOUND");
+
+      const { data: existing } = await sb.from("site_tasks").select("title").eq("carpentry_job_id", job.id);
+      const have = new Set((existing || []).map((t) => (t.title || "").trim().toLowerCase()));
+      const now = new Date().toISOString();
+      const rows = buildDefaultTaskRows(job, req.caller.id, now)
+        .filter((r) => !have.has(r.title.trim().toLowerCase()));
+      if (!rows.length) return ok(res, { added: 0, tasks: [] });
+
+      const { data, error } = await sb.from("site_tasks").insert(rows).select("*, employees!assigned_to(id, name)");
+      if (error) throw error;
+      return ok(res, { added: (data || []).length, tasks: data || [] });
+    } catch (e) {
+      console.error("[carpentry/tasks apply-qc-template]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
   // ── POST /api/carpentry/jobs/:id/tasks/from-transcript ──────────────────────
   // Voice-to-tasks: paste a site walk-through transcript (Plaud, or in-app
   // recording → /api/transcribe) and get back a DRAFT task list for review.
@@ -1135,31 +1160,59 @@ export function registerCarpentryRoutes(app) {
   });
 
   // ── PATCH /api/carpentry/tasks/:id ──────────────────────────────────────────
+  // Supports: status toggle (done / un-done / blocked), completionNotes, completionPhotoUrl,
+  // priority, category. On →done: stamps completed_at + completed_by (caller's employee).
+  // On →open/blocked: clears completed_at and completed_by.
 
   app.patch("/api/carpentry/tasks/:id", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { status, completionNotes } = req.body || {};
+      const { status, completionNotes, completionPhotoUrl, priority, category } = req.body || {};
       const patch = { updated_at: new Date().toISOString() };
+
       if (status !== undefined) {
-        const VALID = ["open", "in_progress", "done", "wont_do"];
+        const VALID = ["open", "in_progress", "done", "wont_do", "blocked"];
         if (!VALID.includes(status)) return err(res, 400, "Invalid status.");
         patch.status = status;
         if (status === "done") {
           patch.completed_at = new Date().toISOString();
+          // Resolve caller's employee record for the audit trail.
+          const { data: callerEmp } = await sb.from("employees").select("id").eq("user_id", req.caller.id).maybeSingle();
+          if (callerEmp?.id) patch.completed_by = callerEmp.id;
+        } else if (status === "open" || status === "blocked") {
+          // Un-done or blocked → clear completion stamp.
+          patch.completed_at = null;
+          patch.completed_by = null;
         }
       }
+
       if (completionNotes !== undefined) patch.completion_notes = completionNotes || null;
+      if (completionPhotoUrl !== undefined) patch.completion_photo_url = completionPhotoUrl || null;
+      if (priority !== undefined) {
+        const VALID_P = ["urgent", "normal", "when_time_permits"];
+        if (!VALID_P.includes(priority)) return err(res, 400, "Invalid priority.");
+        patch.priority = priority;
+      }
+      if (category !== undefined) {
+        const VALID_CAT = [
+          "general", "defect", "safety", "materials", "inspection",
+          "first_fix_framing", "cladding", "second_fix", "outdoor_works",
+          "formwork_slab_prep", "site_labouring", "site_cleanup", "supervision",
+        ];
+        if (!VALID_CAT.includes(category)) return err(res, 400, "Invalid category.");
+        patch.category = category;
+      }
+
       const { data: task, error } = await sb
         .from("site_tasks")
         .update(patch)
         .eq("id", req.params.id)
-        .select("*, employees!assigned_to(id, name)")
+        .select("*, employees!assigned_to(id, name), employees!completed_by(id, name)")
         .single();
       if (error) throw error;
       if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
-      return ok(res, { task });
+      return ok(res, { task: rowToCamel(task) });
     } catch (e) {
       console.error("[carpentry/tasks/:id PATCH]", e);
       return err(res, 502, translateDbError(e));

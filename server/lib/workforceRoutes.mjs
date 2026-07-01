@@ -2238,6 +2238,58 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true, task: data });
   });
 
+  // ── PATCH /api/worker/tasks/:id ─────────────────────────────────────────────
+  // Worker-auth task update: toggle done/open, mark blocked, add notes/photo.
+  // Workers can only update tasks assigned to them or unassigned.
+  // Preview mode is blocked (read-only).
+  app.patch("/api/worker/tasks/:id", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (req.workerPreview) return res.status(403).json({ ok: false, error: "Read-only preview — you can't update tasks as a worker." });
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
+
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid task id.");
+
+    const { status, completionNotes, completionPhotoUrl } = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+
+    if (status !== undefined) {
+      const VALID = ["open", "in_progress", "done", "blocked"];
+      if (!VALID.includes(status)) return err(res, 400, "Invalid status.");
+      // QC tasks: only a leading hand may complete them.
+      if (status === "done" && !emp.is_leading_hand) {
+        const { data: tk } = await sb.from("site_tasks").select("task_audience").eq("id", req.params.id).maybeSingle();
+        if (tk?.task_audience === "supervisor") return err(res, 403, "QC tasks can only be completed by a leading hand.");
+      }
+      update.status = status;
+      if (status === "done") {
+        update.completed_at = new Date().toISOString();
+        update.completed_by = emp.id;
+      } else if (status === "open" || status === "blocked") {
+        // Un-done or blocked → clear completion stamp.
+        update.completed_at = null;
+        update.completed_by = null;
+      }
+    }
+
+    if (completionNotes !== undefined) update.completion_notes = completionNotes || null;
+    if (completionPhotoUrl !== undefined) {
+      const p = String(completionPhotoUrl || "").trim();
+      if (p && !isValidPhotoKey(p)) return err(res, 400, "Upload the photo before saving.");
+      update.completion_photo_url = p || null;
+    }
+
+    // Scope: worker may only update tasks assigned to them or unassigned.
+    const { data, error } = await sb.from("site_tasks").update(update)
+      .eq("id", req.params.id)
+      .or(`assigned_to.is.null,assigned_to.eq.${emp.id}`)
+      .select("*, employees!assigned_to(id, name)")
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return err(res, 403, "You can only update tasks assigned to you or unassigned tasks.");
+    return res.json({ ok: true, task: data });
+  });
+
   // ── Worker allocations (W16-A1) ─────────────────────────────────────────────
 
   app.get("/api/worker/allocations/today", workerAuth, async (req, res) => {
