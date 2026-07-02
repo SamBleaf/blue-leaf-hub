@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -90,31 +90,38 @@ Status changes on the Board persist immediately and re-risk the item. Calendar a
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P2) |
+[insert screenshot: Board tab with six lanes (To start, Quoting, Blocked, Approve, Ordered, Delivered) and item cards]
+[insert screenshot: Calendar tab with order-by (blue) and delivery (green) events grouped by week]
+[insert screenshot: Long-Lead tab showing cross-job list with job address, lead time, and risk pill]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Board with lanes
-- [ ] Calendar weeks
-- [ ] Long-Lead list
+- **Board status change:** Card status dropdown fires `PATCH /api/procurement/items/:id` — same as the Register inline edit; persists immediately.
+- **Calendar and Long-Lead:** Read-only views; no writes. Data sourced from `GET /api/procurement/jobs/:jobId/items` (Board/Calendar per job) and `GET /api/procurement/long-lead` (cross-job).
+- Long-lead threshold: items with `lead_time_days ≥ 28` and `status` before `delivered`.
+- No email or notification triggered by any of these views.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-Different people prefer different lenses — a PM lives in the Board, a scheduler in the Calendar, a director scans Long-Lead. They're all the same truth (the register), so nothing can disagree between them.
+- Board and Calendar require a job to be selected — the view is blank until a job is picked from the dropdown.
+- Long-Lead is cross-job; no job selection needed.
+- If Long-Lead returns empty, it means no in-flight items have lead time ≥ 28 days — correct (not a bug).
+- Board, Calendar, and Long-Lead all reflect the same register data; they can never disagree (single source of truth in `procurement_items`).
+- Employee role returns 403 on all procurement endpoints including `long-lead`.
+- Calendar items with no delivery date only show the order-by event (blue); delivery event (green) only shows when a delivery date is set.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 

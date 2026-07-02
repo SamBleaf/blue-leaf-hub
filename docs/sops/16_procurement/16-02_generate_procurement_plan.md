@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -101,31 +101,37 @@ The register populates. Order-by dates compute for items with an on-site date. I
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Lock job button in the Financial Command Centre]
+[insert screenshot: Register tab showing the Regenerate button and confirmation prompt]
+[insert screenshot: Populated register after generation with Template/Estimate/Schedule source badges]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Lock job button in Financial Command Centre
-- [ ] Register Regenerate confirm banner
-- [ ] Populated register after generation
+- **Auto-generate on lock:** When `PATCH /api/finance/jobs/:jobId/financials` sets `financial_locked: true`, the server calls `generateProcurementPlan(jobId)` in the background. Non-fatal — the lock response returns `{ ok: true }` even if generation fails.
+- **Manual Regenerate:** `POST /api/procurement/jobs/:jobId/generate` — UPSERT semantics: adds new items, refreshes dates/allowances, never overwrites `user_modified` fields, never resurrects deleted items.
+- Record created/updated in table: `procurement_items` (source badge: Template / Estimate / Schedule / Manual).
+- No email or notification is triggered by generation.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-Generation is idempotent. The "anti-clobber" contract is the whole point: a builder can hand-tune the register and still safely press Regenerate. The template is the floor of "what we must never forget to order"; the estimate refines it.
+- **No template + no estimate:** Generation succeeds but creates zero items. Apply migration 091 (template seed) or link a Buildxact estimate.
+- **Renovation filter:** Items tagged `applicable_build_types` that don't include `renovation` are excluded for renovation jobs (e.g. slab, trusses). This is correct behaviour.
+- **Edit preservation:** Items where `user_modified = true` are never overwritten on Regenerate — changed lead time, supplier, or on-site date are safe.
+- **Deleted item resurrection:** Items with `required = false` (soft-deleted) are permanently excluded from future generates.
+- **Double generate:** Safe — UPSERT; no duplicates created.
+
+---
+
+## 13. Owner of the process
+
+Admin / Director  
+Next review date: 2027-01-02
 
 ---
 

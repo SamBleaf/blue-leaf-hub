@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -93,31 +93,35 @@ From the dashboard you can create new jobs, filter by status, and navigate to an
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft |
+[insert screenshot: Sidebar showing Carpentry nav item highlighted]
+[insert screenshot: Carpentry dashboard — stats banner (Active Jobs, Total Quoted Value, Average Budget Margin, Total Jobs) and jobs table]
+[insert screenshot: Status filter bar with "Active" selected]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Sidebar showing Carpentry nav item
-- [ ] Carpentry dashboard with stats banner and jobs table
-- [ ] Status filter bar
+- No automated actions on navigation — the dashboard is read-only until a job is created or clicked.
+- Stats banner values are computed server-side on each page load from `carpentry_jobs` aggregates.
+- Status filter sends `GET /api/carpentry/jobs?status=<value>` and re-renders the table.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The Carpentry module is a separate subsidiary stream. It does not interact with the main Operations/Projects module. Jobs are created from accepted Buildexact quotes using the same master estimate template.
+- If the user's role is Employee (not Admin or Supervisor), the Carpentry sidebar item does not appear — there is no 403; the route simply does not render.
+- The "All Jobs" filter returns every status including Cancelled. There is no separate Archived state.
+- Stats banner shows counts and totals across all returned jobs for the selected filter (not just "Active").
+- If the database migration 065 has not been applied, all `/api/carpentry/*` endpoints return 502 (table does not exist).
+
+---
+
+## 13. Owner of the process
+
+Admin / Company Director  
+Next review date: 2027-01-02
 
 ---
 

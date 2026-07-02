@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -52,8 +52,12 @@ The Contacts tab is a list of every person in the CRM with their status, next ac
    - **Contact type** — Prospect / Referrer / Architect / Designer / Agent / Past Client / etc.
    - **Status** — default is `New`
    - **Suburb, budget range, interest timeline** — fill what you know
-4. If the contact has consented to receive marketing emails: tick **Consent to marketing emails** and select the consent source (how they gave consent — required by Spam Act)
-5. Click **Create Contact**
+   - **Referred by** — optional; search for an existing contact who referred this person
+4. Click **Create Contact**
+
+> 💡 **Tip:** Consent to marketing emails is recorded when you add a contact to a mailing list (not at contact creation). The **Add to List** button in the contact drawer is where consent is captured. See SOP 17-04 for Spam Act requirements.
+
+**Smart list auto-membership:** Based on the contact's type and status, the form shows which smart lists this contact will automatically join (e.g. a contact with status = "active" auto-joins Active Prospects; contact_type = "referrer" auto-joins Referrers & Partners). No manual action needed — smart list membership is live and automatic.
 
 The system auto-sets: next action = Call, due tomorrow.
 
@@ -71,9 +75,11 @@ The system auto-sets: next action = Call, due tomorrow.
 **Converting a contact to a lead:**
 1. Open the contact drawer
 2. Click **Convert to Lead →**
-3. The system creates a new Lead in the Sales pipeline, pre-filled from the contact's details
-4. The contact's record links to the new lead — visible in the drawer as "View Lead →"
-5. If you then log an outbound interaction for this contact, it automatically sets `first_replied_at` on the lead (speed-to-lead metric)
+3. The system creates a new Lead in the Sales pipeline, pre-filled from the contact's details. A `lead_source_category` is automatically set (if the contact was referred by another contact, it is set to `referral`; otherwise derived from the contact's `lead_source`).
+4. All prior CRM interactions for this contact are back-stamped with the new lead's ID so the unified timeline in Lead Detail shows the full pre-lead history.
+5. The contact's record links to the new lead — visible in the drawer as "View Lead →"
+6. Once converted, the Contact Drawer shows a **Full history** section — a unified timeline of lead activities, notes, conversations, CRM interactions and email events all in one stream.
+7. If you then log an outbound interaction for this contact, it automatically sets `first_replied_at` on the lead (speed-to-lead metric)
 
 **Contact detail fields explained:**
 
@@ -120,7 +126,9 @@ The system auto-sets: next action = Call, due tomorrow.
 - Next action auto-set on create: `call`, due = tomorrow (`now() + 1 day`)
 - `last_contact_date` updated when interaction logged (`POST /api/crm/contacts/:id/interact`)
 - `relationship_score` recomputed after every interaction
+- On convert (`POST /api/crm/contacts/:id/convert`): `lead_source_category` auto-set; existing `crm_interactions` rows for this contact are back-stamped with the new `lead_id` (idempotent — only fills rows where `lead_id IS NULL`)
 - `first_replied_at` on lead set on first outbound interaction if `converted_lead_id` is set
+- Smart list membership is computed live — no rows are written for smart lists; a contact's type/status fields determine auto-membership
 
 ## 12. Edge cases and limits
 - Archived contacts (`is_archived = true`) do not appear in any list or filter — they are hidden, not deleted
@@ -178,10 +186,13 @@ Next review: 2026-11-29
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Consent required for mailing list membership**
-1. Create a contact WITHOUT ticking consent
-2. Try to add them to a manual mailing list via Add to List in the drawer
-3. Expected: consent source dropdown is shown and required — cannot add without selecting one
-4. Expected DB: `mailing_list_members.consent_source` is NOT NULL
+1. Create a contact (consent is NOT collected at creation — that is correct behaviour)
+2. Open the contact drawer → click **Add to List**
+3. In the Add to Mailing List modal, note only manual lists are shown (smart lists are excluded — they auto-populate)
+4. Select a manual list, select a consent source (e.g. `in_person`), click **Add to List**
+5. Expected result: contact added to list
+6. Expected DB: `mailing_list_members` row with `consent_source = 'in_person'`, `consent_at = now()`, `unsubscribed_at IS NULL`
+7. Now try to add the same contact to the same list again — Expected: "Contact is already on this list" (409 error)
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

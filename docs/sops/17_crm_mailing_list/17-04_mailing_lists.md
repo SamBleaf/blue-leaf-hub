@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin
@@ -87,8 +87,9 @@ The system then:
 **Adding a contact to a manual list:**
 1. Open the contact drawer (Sales → Contacts → click contact)
 2. Click **Add to List**
-3. Select the list, select the consent source, add consent notes if needed
-4. Click Add
+3. The modal shows **manual lists only** — smart lists are excluded because membership is automatic based on the contact's type/status (you don't manually add people to smart lists)
+4. Select the manual list, select the consent source, add consent notes if needed
+5. Click **Add to List**
 
 Or from Marketing → Lists → [list name] → member table (Add member button).
 
@@ -149,6 +150,8 @@ Or from Marketing → Lists → [list name] → member table (Add member button)
 - Smart lists may return different counts at draft time vs send time (members' statuses can change)
 - Scheduled sends are stored as `status = 'scheduled'` but the Hub does not yet auto-trigger them — this requires a cron job (Stage 12, not yet built). Current workaround: send manually at the scheduled time.
 - `email_unsubscribes` rows are never deleted (Spam Act audit trail)
+- **Global suppression:** before every send, the server cross-checks all recipient emails against the `email_unsubscribes` table. Anyone who has ever unsubscribed (via link, manual removal, hard bounce, or spam complaint) is silently excluded from the send — even if they are still an active member of a smart list. This protects against re-emailing a globally unsubscribed address via smart lists.
+- Hard bounces and spam complaints auto-unsubscribe the contact from ALL lists, not just the one the email was sent from.
 
 ## 13. Owner of the process
 Admin  

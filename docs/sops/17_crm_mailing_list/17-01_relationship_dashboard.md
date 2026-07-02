@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin / Staff

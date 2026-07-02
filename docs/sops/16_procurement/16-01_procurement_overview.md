@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -100,32 +100,36 @@ From the Command Centre you triage; from the Register you edit items, generate/r
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Operations sidebar with Procurement nav item highlighted]
+[insert screenshot: Procurement Command Centre with all seven attention sections visible]
+[insert screenshot: Register tab with a job selected and items loaded]
+[insert screenshot: Selections tab showing selection blockers]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Operations sidebar showing Procurement nav item
-- [ ] Command Centre with attention sections
-- [ ] Register tab with job selected
-- [ ] Selections tab
+- No automated actions on navigation — read-only views.
+- Clicking a Command Centre row switches to the Register tab with that job pre-selected (client-side navigation only, no network call).
+- Risk buckets recompute on every load of the Command Centre (no caching).
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The register is the source of truth — the schedule renders order-by dates *from* it, not the other way round. The old `schedule_tasks.procurement_*` fields are frozen (kept only for provenance). Order-by is computed and cannot be hand-typed; to change it, change the on-site date, the lead time, or the buffers.
+- If no jobs have a linked job record, the Register dropdown is empty; Command Centre loads but shows no items.
+- If migrations 085 + 091 are not applied, the `/api/procurement/command-centre` endpoint returns 500 — apply both migrations first.
+- Employee role receives 403 on all procurement API endpoints; the Procurement nav item is hidden for that role.
+- A job locked in the Financial Command Centre auto-generates its register; if generation fails (e.g. missing template), the lock still succeeds and the error is logged only — check the register afterwards.
+
+---
+
+## 13. Owner of the process
+
+Admin / Director  
+Next review date: 2027-01-02
 
 ---
 

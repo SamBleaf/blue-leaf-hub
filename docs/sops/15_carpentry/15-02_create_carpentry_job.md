@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -30,7 +30,7 @@ When a Buildexact quote is accepted and you need to create a corresponding carpe
 
 ## 3. What this does
 
-Creates a new carpentry job record with a unique reference number (CJB-001, CJB-002, etc.). The job stores client details, site address, project type (frame/fit-off/lockup/full package), quoted value, and planned dates. Default milestones are automatically seeded based on the project type selected. If the job came from Buildexact, you can optionally import the client name, address, and quoted value automatically.
+Creates a new carpentry job record with a unique reference number (CJB-001, CJB-002, etc.). The job stores client details, site address, project type (frame/fit-off/lockup/full package), quoted value, and planned dates. Default milestones are automatically seeded based on the project type selected. The worker task checklist is NOT auto-seeded — you apply it manually when ready (Diary tab → "Base checklist" button). If the job came from Buildexact, you can optionally import the client name, address, and quoted value automatically.
 
 ---
 
@@ -78,7 +78,7 @@ Creates a new carpentry job record with a unique reference number (CJB-001, CJB-
 11. Click **Create Job**
 12. You will be redirected to the new job's detail page
 
-> 💡 **Tip:** Setting the project type correctly matters — it determines which default milestones are seeded. "Frame + Fit-Off" gets 7 milestones (Frame Start through Final Inspection). "Frame Only" gets 4. "Fit-Off Only" gets 4.
+> 💡 **Tip:** Setting the project type correctly matters — it determines which default milestones are seeded. "Full Package" gets 14 milestones (Site measure through Practical completion). "Frame Only" gets 10. "Fit-Off Only" gets 7. "Lock-Up Only" gets 8.
 
 [insert screenshot: New Job modal with Buildexact import field and form fields]
 
@@ -86,9 +86,10 @@ Creates a new carpentry job record with a unique reference number (CJB-001, CJB-
 
 ## 6. What happens next
 
-- A unique reference number is generated (CJB-NNN, sequential)
+- A unique reference number is generated (CJB-NNN, sequential — or the Buildexact job number if linked)
 - Default milestones are automatically created on the Schedule tab based on project type
 - The job appears in the Carpentry dashboard with "Active" status
+- Worker tasks are NOT auto-added — go to the Diary tab and click "Base checklist" to seed the standard per-stage checklist when you are ready
 - You can immediately start adding diary entries, costs, and updating milestone dates
 
 ---
@@ -121,31 +122,39 @@ Creates a new carpentry job record with a unique reference number (CJB-001, CJB-
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft |
+[insert screenshot: New Job modal — empty state with Buildexact import field at top]
+[insert screenshot: New Job modal — after Buildexact fetch, showing green confirmation and pre-filled fields]
+[insert screenshot: Job detail page immediately after creation — Schedule tab showing pre-seeded milestones, Diary tab showing empty task list with "Base checklist" button visible]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] New Job modal — empty state
-- [ ] New Job modal — after Buildexact import (green confirmation message)
-- [ ] Job detail page immediately after creation (milestones pre-seeded)
+- Reference number: generated server-side via `alloc_carpentry_sequence()` Supabase RPC → `CJB-NNN` format (or the Buildexact job number if linked).
+- Default milestones: inserted into `carpentry_job_milestones` immediately on job creation — no user action required.
+- Worker task checklist: NOT auto-seeded. Must be applied manually via `POST /api/carpentry/jobs/:id/tasks/apply-template` (Diary tab → "Base checklist" button). This is idempotent — safe to run multiple times.
+- No email or notification is sent on job creation.
+- Status is set to `active` automatically.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The job reference number is generated server-side using a sequential database counter. It cannot be changed once created. If a test job is created and deleted, the reference counter does NOT reset — the next job will skip the deleted number (e.g. CJB-001 created, deleted, next is CJB-002).
+- If a Buildexact job number is entered but Buildexact is not configured, the system returns HTTP 503 — the form can still be completed manually.
+- If the same Buildexact job ID is used to create two Hub jobs, both are created (no duplicate guard). Avoid this.
+- The reference counter does not reset after a job is deleted — deleted CJB-001 means the next job is CJB-002.
+- Quoted value and budgeted cost are optional at creation. The margin calculation shows "—" until both are set.
+- Project type can be changed after creation via the Edit button, but existing milestones are not re-seeded — they must be managed manually.
+- Worker tasks are created with zero tasks by default; the "Base checklist" button adds the standard per-stage set.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 
@@ -223,3 +232,12 @@ The job reference number is generated server-side using a sequential database co
 - Job detail page shows correct client name and reference number
 
 **Pass criteria:** No error shown, redirect occurs, job detail loads.
+
+---
+
+### TC-09 — Worker task checklist NOT auto-seeded on creation
+
+**Action:** After TC-01 or TC-08, GET `/api/carpentry/jobs/:id/tasks` immediately after job creation.  
+**Expected:** `{ ok: true, tasks: [] }` — empty array. No tasks pre-created.  
+**Verification:** Navigate to the Diary tab in the browser — task list is empty; "Base checklist" button is visible.  
+**Pass criteria:** Zero tasks on a freshly created job.

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -110,30 +110,37 @@ Completed milestones show a green row with strikethrough text. Pending milestone
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft |
+[insert screenshot: Schedule tab with "Auto-lay out dates" panel collapsed, showing a mix of pending (white) and complete (green) milestone rows]
+[insert screenshot: A complete milestone row with tick, strikethrough text, Target and Actual date pickers visible]
+[insert screenshot: Add milestone input field at the bottom of the list]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Schedule tab with mix of pending and complete milestones
-- [ ] Add milestone input at bottom
+- When a milestone is toggled to complete, the API automatically sets `actual_date` to today's date (UTC). The user can override this date in the Actual date picker after marking complete.
+- When toggled back to pending, `actual_date` is cleared.
+- The Auto-lay out dates panel sends `POST /api/carpentry/jobs/:id/milestones/auto-layout` — first as a preview (no write), then with `apply: true` to commit. Dates are computed from crew-scaled build durations and procurement lead-times.
+- No email or notification is sent when milestones change.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-When a milestone is marked complete, the actual_date is automatically set to today. The supervisor can override this by changing the actual date in the date picker after marking complete.
+- Deleting a milestone is immediate with no undo. A confirmation prompt appears first.
+- Custom milestones are appended at the end (sort_order = max + 10). There is no drag-to-reorder for milestones — delete and re-add if order matters.
+- Auto-layout only sets `target_date` — it never overwrites `actual_date` or status.
+- If a job has no milestones (e.g. "other" project type with defaults deleted), the Schedule tab shows "No milestones yet" and the auto-layout tool returns a 400 error.
+- The `sortOrder` field can be manually patched via API to reorder milestones programmatically.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 

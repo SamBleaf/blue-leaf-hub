@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -96,31 +96,39 @@ Changes save immediately and the item's risk recomputes. Items with a sent PO an
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Register table with inline editors for Supply, On-site, Lead, Supplier, Status, and risk pill]
+[insert screenshot: "Add item" modal with name field]
+[insert screenshot: Admin view showing Allowance and Approved cost columns vs Supervisor view without them]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Register table with inline editors
-- [ ] Add item flow
-- [ ] Admin cost columns vs Supervisor view
+- **Inline edit:** Every field change fires `PATCH /api/procurement/items/:id`. The server sets `user_modified = true` on any edited field. No confirmation dialog — saves on blur/change.
+- **Order-by recomputation:** Triggered server-side on every PATCH that touches `on_site_date`, `lead_time_days`, or buffer fields. The computed value is returned in the response and rendered read-only.
+- **Add item:** `POST /api/procurement/items` — sets `source = "manual"`, `user_modified = true`.
+- **Remove item:** `DELETE /api/procurement/items/:id` — soft-deletes (`required = false`); excluded from future Regenerates.
+- **Cost columns (Admin only):** `allowance_ex_gst` and `approved_amount_ex_gst` are gated server-side — Supervisor PATCH with cost fields returns 403.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The register is the source of truth. Editing here, not in the schedule. The schedule shows order-by dates that come *from* here. The computed order-by is the discipline: it forces you to keep the on-site date and lead time honest.
+- Order-by date is **read-only in the UI** — cannot be hand-typed. Change on-site date, lead time, or buffers to shift it.
+- Cost columns are not visible to Supervisor role (admin-only by design — not a bug).
+- Supplier dropdown is populated from `procurement_suppliers`; if empty, add suppliers first (SOP 16-07).
+- An item with `status = "delivered"` still shows in the Register but its risk is always "On track".
+- Removing an item and then pressing Regenerate does not restore it (soft-delete is permanent per the anti-clobber contract).
+- Maximum no formal limit on items per job; in practice the template seeds ~62 items.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor (day-to-day editing) — Admin (cost columns)  
+Next review date: 2027-01-02
 
 ---
 

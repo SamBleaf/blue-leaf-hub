@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -91,31 +91,37 @@ Confirming a selection removes the blocker. If the item was only held by the sel
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP. Sending a client reminder is a manual, human-confirmed action.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Selections tab showing list of blockers with item, linked decision, order-by date, and risk pill]
+[insert screenshot: Draft reminder modal with copyable text and "never auto-sends" notice]
+[insert screenshot: Mark confirmed action and the item disappearing from the list]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Selections tab list
-- [ ] Draft reminder dialog
-- [ ] Mark confirmed action
+- **Draft reminder:** `POST /api/procurement/items/:id/ai/selection-reminder` — returns draft text only; **no email is sent**.
+- **Mark confirmed:** `PATCH /api/procurement/items/:id` with `selection_status: "confirmed"` — the item's risk recomputes immediately; it leaves the Selections list on reload.
+- No notifications are auto-sent to the client. The draft is for your manual use.
+- If `ANTHROPIC_API_KEY` is not configured, a deterministic template reminder is returned instead of an AI draft.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-This is the module's biggest differentiator: most builder software never connects "the client hasn't picked a tile" to "the tiling order is about to be late". Reuse of the existing portal decisions means there's no second selections database to keep in sync.
+- An item only appears in Selections if `selection_required = true` AND `selection_status != "confirmed"`.
+- If no portal decision is linked (`selection_decision_id` is null), the row shows "No portal decision linked" — the blocker can still be manually confirmed.
+- Marking confirmed when the client hasn't actually decided is a user error — the system does not validate the decision's actual status.
+- A blocker within 14 days of its order-by date shows the **Blocked** (red) risk pill in both Selections and the Command Centre.
+- Filtering by job sends `?jobId=` to `GET /api/procurement/selections/blockers`; the default (no filter) shows all jobs.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 

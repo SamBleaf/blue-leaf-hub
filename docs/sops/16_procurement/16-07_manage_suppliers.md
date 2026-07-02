@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -88,30 +88,37 @@ Preferred suppliers and good performers rank first in backup-supplier suggestion
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P2/P3) |
+[insert screenshot: Suppliers tab showing table with On-time %, Lead var, Learned, and Orders performance columns]
+[insert screenshot: Add/Edit supplier modal with all fields and Preferred toggle]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Suppliers table + performance
-- [ ] Add/edit supplier modal
+- **Add supplier:** `POST /api/procurement/suppliers` — creates a `procurement_suppliers` row.
+- **Edit supplier:** `PATCH /api/procurement/suppliers/:id`.
+- **Performance refresh:** `POST /api/procurement/suppliers/:id/refresh-performance` — reads from `supplier_lead_observations` ledger and recomputes on-time rate, lead variance, and learned lead time; updates the supplier row.
+- **Learning ledger:** When an item is marked `delivered` (and has an `ordered_date`), a `supplier_lead_observations` row is written automatically (actual lead = delivered_date − ordered_date).
+- No emails or notifications triggered by supplier management.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The learning loop is the payoff: the more you record real deliveries, the more the Hub's lead-time estimates reflect *your* suppliers, not generic guesses. Performance is derived from an immutable observation ledger — it can be recomputed any time and never drifts.
+- Performance columns show "—" until at least one delivery with a recorded ordered date exists for that supplier.
+- On-time rate is computed from `supplier_lead_observations` — it is never editable directly.
+- Duplicate suppliers can occur if the same vendor is added manually and seeded from invoices — merge by editing one and removing the other.
+- Migration 092 is required for the performance columns; without it, the Suppliers tab returns 500.
+- Employee role returns 403 on all `/api/procurement/suppliers` endpoints.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 

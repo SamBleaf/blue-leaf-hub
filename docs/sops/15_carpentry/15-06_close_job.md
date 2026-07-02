@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -33,8 +33,8 @@ When a carpentry job reaches practical completion and all costs and timesheets h
 The Close Job action:
 1. Sets the job status to **Complete**
 2. Records today as the **Actual End** date (if not already set)
-3. Writes a **Closeout Performance** snapshot — final margin %, variance vs budget, total cost, and duration in days — to the job record for future reference in the Historical Performance view (Sprint 4)
-4. **Locks editing** — the Edit button and Change Status dropdown are hidden once a job is closed. Contact an admin to reopen a job if a correction is needed.
+3. Writes a **Closeout Performance** snapshot — final margin %, variance vs budget, total cost, duration days, labour hours, and cost/m² — to the `carpentry_job_performance` table for historical reporting
+4. **Shows a warning banner** on the Overview tab ("edits are allowed but will not change the performance snapshot") — the Edit button and Change Status dropdown remain available, but the snapshot is frozen at close time
 
 ---
 
@@ -56,12 +56,13 @@ The Close Job action:
    - Total Actual Cost (labour + materials to date)
    - Forecast Margin %
    - Variance vs budget
+   - A "Lessons learned" text field (optional — record what went well or what you'd do differently)
 5. Review the numbers. If they look wrong, click **Cancel** and fix the costs or timesheets first.
 6. Click **Confirm — Close Job**
-7. The job status changes to **Complete** and the blue **✓ Job Closed** badge replaces the action buttons
-8. A **Closeout Performance** section appears at the bottom of the Overview tab with the locked snapshot
+7. The job status changes to **Complete** and a blue **"✓ Job closed"** banner appears at the top of the Overview tab (editing remains available but the performance snapshot is now frozen)
+8. A **Closeout Performance** card appears at the bottom of the Overview tab showing Final Margin, vs Budget, Total Cost, Duration, Labour hours, and Cost/m²
 
-> ⚠️ **There is no undo button.** A closed job can only be reopened by an admin via a support request or direct database change.
+> ⚠️ **The performance snapshot is frozen at close time.** Edits to the job after closing are allowed, but the Closeout Performance card will not update. To regenerate the snapshot (e.g. after adding a missed timesheet), an admin must reopen the job via a direct DB update (`UPDATE carpentry_jobs SET status = 'active' WHERE id = '...'`), then re-close it.
 
 [insert screenshot: Close Job modal showing Revenue / Total Actual / Forecast Margin / Variance]
 
@@ -89,9 +90,9 @@ The Close Job action:
 
 | Problem | Most likely cause | Fix |
 |---------|------------------|-----|
-| "Close Job" button not visible | Job is already complete or cancelled | Check the status badge. If cancelled, a support request is needed to reopen it. |
+| "Close Job" button not visible | Job is already complete or cancelled | Check the status badge. If complete, the job is already closed — the performance snapshot is at the bottom of the Overview tab. If cancelled, use the "Change Status" dropdown to revert to Active. |
 | "Could not close job" error | Network or server error | Refresh the page and try again. If it persists, check the browser console and contact the developer. |
-| Closeout Performance section not showing after close | Job's closeout_data is null (pre-migration data) | Only jobs closed after migration 065 runs have this snapshot. |
+| Closeout Performance section not showing after close | Performance row not written (server error at close time) | Check server logs for a 502 at `POST /api/carpentry/jobs/:id/closeout`. Re-opening and re-closing the job will regenerate the snapshot. |
 
 ---
 
@@ -104,33 +105,41 @@ The Close Job action:
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required — any admin or supervisor can close a job.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft — Sprint 3 closeout feature |
+[insert screenshot: Overview tab showing "Close Job" button (teal, top-right) on an active job]
+[insert screenshot: Closeout confirmation modal — Revenue, Total Actual Cost, Forecast Margin, vs Budget displayed; Lessons learned text field]
+[insert screenshot: Overview tab after close — "✓ Job closed" banner, Closeout Performance card with Final Margin / vs Budget / Total Cost / Duration / Labour hours / Cost per m²]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Overview tab showing "Close Job" button (active job)
-- [ ] Closeout confirmation modal with summary stats
-- [ ] Overview tab after close showing "✓ Job Closed" badge and Closeout Performance card
+- `POST /api/carpentry/jobs/:id/closeout` computes final actuals server-side (labour from approved timesheets × employee hourly_rate; materials from `carpentry_job_costs`).
+- A row is upserted into `carpentry_job_performance` (conflict on `job_id`) — contains `final_revenue`, `final_labour_cost`, `final_material_cost`, `final_total_cost`, `labour_hours`, `final_margin_pct`, `budget_margin_pct`, `variance_pct`, `floor_area_m2`, `hours_per_m2`, `cost_per_m2`, `duration_days`, `timesheet_count`, `cost_entry_count`, `lessons_learned`, `closed_at`, `closed_by`.
+- The `carpentry_jobs.status` is updated to `complete` and `actual_end` is set to today.
+- Response: `{ ok: true, job: { ... }, performance: { ... } }`.
+- No email or notification is sent on close.
+- The performance snapshot is frozen at close time. Edits to timesheets or costs after close do NOT update it.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The Close Job flow calls `POST /api/carpentry/jobs/:id/closeout` which computes the final summary server-side from live data (timesheets + costs) and writes it to `carpentry_jobs.closeout_data` (JSONB). This snapshot is permanent — it will not update if timesheets are added or changed after close. This is intentional: the snapshot represents the state at time of close.
+- Closing an already-complete job returns HTTP 400 "Job is already closed."
+- Closing a cancelled job returns HTTP 400 "Cannot close a cancelled job." Use "Change Status" to revert to Active first if needed.
+- If `quoted_value` is null, `finalMarginPct` and `variancePct` are null (no division-by-zero).
+- If `actual_start` and `start_date` are both null, `durationDays` is null.
+- Edit and Change Status remain available after close — a "edits allowed but snapshot is frozen" banner is shown. This is intentional so minor corrections (e.g. a typo in the client name) don't require re-closing.
+- To regenerate the snapshot after a post-close correction: DB update `status = 'active'`, then re-close via the UI.
+- Any admin or supervisor can close a job — no additional approval required.
 
-If a mistake is made (e.g., a timesheet is added after close), an admin can unapprove the timesheet, reopen the job via a direct DB update (`UPDATE carpentry_jobs SET status = 'active' WHERE id = '...'`), then re-close it to regenerate the snapshot.
+---
+
+## 13. Owner of the process
+
+Admin / Company Director  
+Next review date: 2027-01-02
 
 ---
 
@@ -139,8 +148,8 @@ If a mistake is made (e.g., a timesheet is added after close), an admin can unap
 ### TC-01 — Close an active job
 
 **Action:** POST `/api/carpentry/jobs/:id/closeout` with `{}` body on an active job with `quoted_value: 50000`, one cost of $10000, and an approved timesheet totalling $5000 labour.  
-**Expected:** `{ ok: true, job: { status: "complete", actualEnd: "<today>" }, closeout: { revenue: 50000, totalActual: 15000, forecastMarginPct: 70.0 } }`.  
-**Pass criteria:** `ok: true`, `status === "complete"`, `totalActual === 15000`, `forecastMarginPct === 70.0`.
+**Expected:** `{ ok: true, job: { status: "complete", actualEnd: "<today>" }, performance: { finalRevenue: 50000, finalTotalCost: 15000, finalMarginPct: 70.0, variancePct: <number or null> } }`.  
+**Pass criteria:** `ok: true`, `job.status === "complete"`, `performance.finalTotalCost === 15000`, `performance.finalMarginPct === 70.0`.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -94,30 +94,37 @@ Committed cost rises by the approved amount once the item is at "PO sent" or bey
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Cost/PO actions are Admin-only. Raising the actual PO follows the existing purchase-order SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Register row status dropdown showing all workflow steps]
+[insert screenshot: Financial Command Centre Committed KPI reflecting an item at PO sent]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Status dropdown showing the workflow steps
-- [ ] Committed KPI on the Financial Command Centre
+- **Request quote:** `POST /api/procurement/items/:id/request-quote` — sets `status = "quote_requested"`, `supplier_quote_status = "pending"`, `user_modified = true`.
+- **Status changes:** All status transitions go through `PATCH /api/procurement/items/:id`. Risk and committed cost recompute on each save.
+- **Committed cost:** Items with `status IN (po_sent, order_confirmed, delivery_booked, delivered)` AND an `approved_amount_ex_gst` are counted in `GET /api/procurement/jobs/:jobId/committed-cost` and surfaced as the FCC Committed KPI.
+- **No emails are auto-sent** at any status transition. Supplier comms are manual (see SOP 16-09 for AI draft).
+- **Draft PO** (`POST /api/procurement/items/:id/draft-po`) creates a `purchase_orders` record with status `draft` — sets item status to `po_drafted`. Issuing remains a manual step in the Purchase Orders flow.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-Status drives two things at once: the risk pill (is this on track?) and committed cost (what have we committed to spend?). Keeping status honest is what makes both the Command Centre and the Finance margin trustworthy.
+- Committed cost only moves once both `status ≥ po_sent` AND `approved_amount_ex_gst > 0` — entering only one of these is not enough.
+- A delivered item is always "On track" in the risk system — it exits all risk buckets.
+- The status enum is: `not_started → quote_requested → quote_received → approved → po_drafted → po_sent → order_confirmed → delivery_booked → delivered → closed`. Skipping steps is allowed but may break risk logic.
+- Supervisor can advance status through all stages but cannot enter cost (approved amount) — that is Admin-only.
+- Auto-PO draft (`draft-po` action on a non-builder-supplied item) returns 400.
+
+---
+
+## 13. Owner of the process
+
+Admin (cost/PO steps) / Supervisor (status steps)  
+Next review date: 2027-01-02
 
 ---
 

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -117,31 +117,39 @@ As costs are added, the Forecast Margin updates in real time. A negative Forecas
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft |
+[insert screenshot: Costs tab — Budget vs Actual summary card showing Revenue, Total Actual Cost, Forecast Margin, Budget Margin, and Variance]
+[insert screenshot: "+ Add Cost" form expanded — Type, Amount, Description, Date fields]
+[insert screenshot: Cost entries table with Type, Description, Amount columns and Delete button on each row]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Costs tab with Budget vs Actual summary card
-- [ ] Add Cost form expanded
-- [ ] Cost entries table with delete button
+- Labour costs are NOT entered here — they are computed from `timesheets` rows where `carpentry_job_id` matches and `status = 'approved'`. The Costs tab shows this as a read-only line.
+- `GET /api/carpentry/jobs/:id/summary` calculates `labourActual` (from timesheets), `otherActual` (from `carpentry_job_costs`), `totalActual`, and `forecastMarginPct` server-side on each request.
+- Forecast Margin = (revenue − totalActual) / revenue × 100. Returns `null` if `quoted_value` is null.
+- No email or notification is sent on cost entry.
+- Cost entries are stored in `carpentry_job_costs` table.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-Labour costs are read-only in the Costs tab — they are computed from the Workforce module's approved timesheets. Material and subcontract costs are entered manually here until Xero integration is built (Sprint 3). The Xero integration will automatically pull approved bills tagged to a carpentry job.
+- Labour costs from timesheets are read-only on this tab — they must be corrected via the Workforce module.
+- If `quoted_value` is null on the job, Forecast Margin shows "—" (no division-by-zero error).
+- There is no limit on the number of cost entries per job.
+- Cost entries cannot be edited after creation — delete and re-enter if an amount is wrong.
+- All amounts must be entered ex-GST. Entering an inc-GST amount will overstate the cost and understate the margin.
+- Negative amounts are rejected (HTTP 400).
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 

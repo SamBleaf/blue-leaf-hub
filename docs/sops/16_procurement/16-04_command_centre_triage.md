@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -97,30 +97,35 @@ As you order items and update statuses, rows drop off the Command Centre automat
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Not required for this SOP.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P1 build) |
+[insert screenshot: Command Centre with all seven attention sections populated (Overdue, Due Soon, Selection Blockers, Awaiting Quotes, Delivery Risks, Long-Lead Criticals, Needs a Date)]
+[insert screenshot: Clicking a row to switch to the Register tab with the item highlighted]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Command Centre with populated sections
-- [ ] A row click jumping to the Register
+- Risk buckets are computed live on every `GET /api/procurement/command-centre` call — no background job, no cache.
+- Clicking a row performs a client-side tab switch to "register" with the matching job pre-selected; no additional network call.
+- No emails or notifications are triggered by the Command Centre view.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-Risk is recomputed on every load because "today" moves. An item that was "watch" last week can be "critical" today without anyone touching it. That's the safety net — the Command Centre is alive.
+- An item with no on-site date always lands in **Needs a date** — never in Overdue or Due Soon, regardless of its status.
+- Items at status `delivered` or `closed` are excluded from all risk buckets.
+- If all jobs have empty registers, the Command Centre shows "Nothing at risk this week" in every section — this is correct (not a bug).
+- Risk is computed from "today" at the time of the API call — an item can move from "watch" to "critical" overnight with no user action.
+- **Overdue** means: `order_by_date < today` AND status is still before `po_sent`.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor (daily triage)  
+Next review date: 2027-01-02
 
 ---
 

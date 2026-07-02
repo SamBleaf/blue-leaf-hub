@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -89,30 +89,37 @@ The item shows as linked to the PO. Committed cost (admin view) reflects it once
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Issuing the PO is a separate, deliberate step in the Purchase Orders flow. The draft is never sent automatically.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P2) |
+[insert screenshot: Register row with PO action button on a builder-supplied item]
+[insert screenshot: Linked draft PO record in the Purchase Orders flow showing status "draft"]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Register PO action
-- [ ] Linked draft PO in the PO flow
+- **Draft PO:** `POST /api/procurement/items/:id/draft-po` — creates a `purchase_orders` row with `status = "draft"`, pre-filled with supplier, item as a line item, and amount (approved → quoted → allowance). Sets `purchase_order_id` on the procurement item. Sets item status to `po_drafted`.
+- Amount priority: `approved_amount_ex_gst` → `quoted_amount_ex_gst` → `allowance_ex_gst`. If none set, the PO amount is $0.
+- No email is sent. No PO is issued. The draft is for review in the Purchase Orders flow.
+- **Committed cost** is triggered by advancing the item to `po_sent` (not `po_drafted`) with an approved amount — draft alone does not count toward committed cost.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The draft-PO is the bridge between "planned" and "committed". It reuses the existing purchase_orders table (no second PO system) and never issues anything — the commitment is always a human decision.
+- Only **builder-supplied** items can generate a draft PO. Subbie/client/PC-supplied items return 400 "Only builder-supplied items are ordered by us".
+- Admin-only action — Supervisor returns 403.
+- Clicking PO twice creates a second draft PO. The item links only the latest `purchase_order_id`. Void any extras in the Purchase Orders flow.
+- `po_number` is system-generated and unique — no two draft POs will have the same number.
+- The draft PO must be reviewed and issued in the Purchase Orders flow before any supplier commitment is made.
+- Status `po_drafted` is an intermediate state — risk remains at its prior level until the item reaches `po_sent`.
+
+---
+
+## 13. Owner of the process
+
+Admin (PO drafting and cost entry)  
+Next review date: 2027-01-02
 
 ---
 

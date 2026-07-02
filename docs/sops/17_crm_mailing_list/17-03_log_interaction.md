@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -26,6 +26,8 @@ Every time you have any contact with a CRM contact — call, email, DM, meeting.
 
 ## 3. What this does
 Creates an interaction record on the contact's timeline. Updates `last_contact_date`. Recalculates the relationship score. If the contact has been converted to a lead and this is your first outbound interaction, sets `first_replied_at` on the lead (APB speed-to-lead metric).
+
+For converted contacts, the interaction is also indexed against the lead (via `lead_id`) so it appears in the unified **Full history** timeline in both the Contact Drawer and the Lead Detail page.
 
 Optionally sets the next action on the contact — what to do after this interaction.
 
@@ -81,8 +83,9 @@ If you don't set a next action, the contact's existing next action stays in plac
 ## 6. What happens next
 - Interaction appears at top of the contact's timeline
 - `last_contact_date` updated to today
-- Relationship score recomputed (personal interactions = +3 each, capped at 15)
+- Relationship score recomputed. **Score components:** calls/meetings/site visits = +3 each (capped at 15); email campaign opens = +1 each (capped at 10); recent contact (any interaction in last 30 days) = +5; referrals = +15 each (capped at 45); no contact >90 days = −10. Note: email, SMS, DM, and follow-up log types do NOT add to the "+3 personal" bucket — only call, meeting, and site visit do.
 - If outbound + contact has `converted_lead_id` + lead has no `first_replied_at` → `first_replied_at` set now (speed-to-lead captured)
+- For converted contacts: interaction row is back-linked to the lead (`crm_interactions.lead_id` set) so it appears in the lead's unified timeline
 - Next action updates if you set one
 
 ## 7. Common mistakes
@@ -108,8 +111,9 @@ If you don't set a next action, the contact's existing next action stays in plac
 
 ## 11. Automation notes
 - `POST /api/crm/contacts/:id/interact` handles all interaction logging
-- After insert: updates `crm_contacts.last_contact_date = today`; recomputes relationship score from all interactions
+- After insert: updates `crm_contacts.last_contact_date = today`; recomputes relationship score from all interactions using `scoreContact()` (calls/meetings/site_visits = +3 each capped at 15; email_campaign opens = +1 capped at 10; recent contact bonus = +5; referrals = +15 capped at 45; >90d no contact = −10)
 - `first_replied_at` check: only fires if `direction = 'outbound'`, `contact.converted_lead_id IS NOT NULL`, and `lead.first_replied_at IS NULL`
+- `crm_interactions.lead_id`: set on new interactions for converted contacts; historical rows already back-filled at convert time
 
 ## 12. Edge cases and limits
 - Interaction type `email_campaign` is auto-logged by the mailing list system when a bulk email is sent — staff should not manually log these
@@ -156,9 +160,10 @@ Next review: 2026-11-29
 
 **TC-04 — Relationship score recalculates after personal interaction**
 1. Note the contact's current relationship score
-2. Log a Call (personal interaction type)
-3. Expected result: relationship score increases (by up to +3 for the call, unless already capped at 15)
+2. Log a Call (type = `call`, counts as a "personal" interaction worth +3)
+3. Expected result: relationship score increases by up to +3 (unless the personal-interaction cap of 15 has already been reached via prior calls/meetings/site visits)
 4. Expected DB: `crm_contacts.relationship_score` updated, `relationship_score_updated_at = now()`
+5. Confirm: logging an Email or SMS type does NOT add to the +3 bucket (email/sms/dm/follow_up/content_sent are not personal for scoring purposes)
 - [ ] Pass  [ ] Fail
 
 **TC-05 — Speed to lead set on first outbound interaction**

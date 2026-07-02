@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-16
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -94,30 +94,38 @@ Nothing is sent automatically. You copy the draft and send it yourself, keeping 
 
 ---
 
-## 10. Approval and sign-off
+## 10. Screenshot placeholders
 
-Sending any draft is a manual, human action. The Hub never sends or orders on your behalf.
-
----
-
-## 11. Version history
-
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-06-16 | Claude | Initial draft (BQ-10 P2, §L) |
+[insert screenshot: Order email draft modal showing subject, body, Copy button, and "never auto-sends" notice]
+[insert screenshot: Selection reminder draft modal with client-safe reminder text and Copy button]
 
 ---
 
-## 12. Screenshots required
+## 11. Automation notes
 
-- [ ] Order email draft modal
-- [ ] Selection reminder draft modal
+- **Supplier email draft:** `POST /api/procurement/ai/supplier-email` — returns `{ draft: { subject, body, sent: false } }`. No email is sent; no order is placed.
+- **Selection reminder draft:** `POST /api/procurement/items/:id/ai/selection-reminder` — returns draft text. No email sent.
+- **Reply summary:** `POST /api/procurement/ai/summarise-reply` — returns `{ result: { summary, priceExGst, leadDays } }`. No writes.
+- **Weekly digest:** `GET /api/procurement/ai/weekly-digest` — returns a text summary of overdue/due/blocked items. No writes or sends.
+- **Graceful degradation:** If `ANTHROPIC_API_KEY` is not set, the service returns a deterministic template draft with `aiConfigured: false`.
+- No emails, no POs, no DB writes to any procurement table from any AI endpoint.
 
 ---
 
-## 13. Notes for trainers
+## 12. Edge cases and limits
 
-The single most important rule: **the Hub drafts, you send.** This protects the client and supplier relationships — no AI ever commits Blue Leaf to anything. The draft-only notice is shown on every modal for exactly this reason.
+- The ✉ (order email) icon only appears on builder-supplied items with a supplier set. Subbie/client/PC-supplied items are not ordered by Blue Leaf.
+- If `ANTHROPIC_API_KEY` is misconfigured, the AI call may timeout — the server catches this and returns the fallback draft.
+- Reply summary cannot guarantee extraction of price/lead time from all supplier formats — always verify the extracted values.
+- Weekly digest only covers jobs with generated registers; jobs without registers are silently excluded.
+- Employee role returns 403 on all `/api/procurement/ai/*` endpoints.
+
+---
+
+## 13. Owner of the process
+
+Admin / Supervisor  
+Next review date: 2027-01-02
 
 ---
 
