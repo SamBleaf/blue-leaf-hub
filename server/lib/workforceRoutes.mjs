@@ -1705,7 +1705,11 @@ export function registerWorkforceRoutes(app) {
       if (!isUuid(previewId)) {
         return res.status(400).json({ ok: false, error: "Invalid employee id." });
       }
-      if (req.method !== "GET") {
+      // Preview is read-only for everything EXCEPT reordering the task list: a low-risk,
+      // sort_order-only change, and preview is already admin-gated above — so an admin can
+      // curate the on-site task order from their phone. Every other write stays blocked.
+      const isReorder = req.method === "PUT" && req.path === "/api/worker/tasks/reorder";
+      if (req.method !== "GET" && !isReorder) {
         return res.status(403).json({ ok: false, error: "Read-only preview — you can't submit or complete work as a worker." });
       }
       const sb = getServiceSupabase();
@@ -2309,6 +2313,49 @@ export function registerWorkforceRoutes(app) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return err(res, 403, "You can only update tasks assigned to you or unassigned tasks.");
     return res.json({ ok: true, task: data });
+  });
+
+  // ── PUT /api/worker/tasks/reorder ───────────────────────────────────────────
+  // A leading hand (worker token) or an admin (preview) drags to set the on-site task
+  // order; every worker then sees tasks in this sort_order. Only sort_order changes.
+  // Scoped to the job, so an id from another job is simply not matched (can't be moved).
+  app.put("/api/worker/tasks/reorder", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    // Token path must be a leading hand. Admin preview is already admin-gated in workerAuth.
+    if (!req.workerPreview && !emp.is_leading_hand) {
+      return err(res, 403, "Only a leading hand can reorder tasks.");
+    }
+    const jobId = String(req.body?.jobId || "").trim();
+    const jobType = String(req.body?.jobType || "").trim();
+    const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.", "BAD_JOB_ID");
+    if (jobType && !WORKER_JOB_TYPES.includes(jobType)) return err(res, 400, "Invalid job type.", "BAD_JOB_TYPE");
+    if (!orderedIds || !orderedIds.length) return err(res, 400, "orderedIds is required.");
+    if (!orderedIds.every(isUuid)) return err(res, 400, "orderedIds must all be task ids.");
+    if (orderedIds.length > 500) return err(res, 413, "Too many tasks in one reorder.");
+
+    // Same job-visibility gate as GET (admin preview sees every job).
+    if (!req.workerPreview) {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "You don't have access to this job.", "JOB_FORBIDDEN");
+    }
+
+    // sort_order = position in the submitted order. jobId is a validated UUID, so the
+    // .or() interpolation is injection-safe (matches the GET pattern above).
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (let i = 0; i < orderedIds.length; i++) {
+      let q = sb.from("site_tasks").update({ sort_order: i, updated_at: now }).eq("id", orderedIds[i]);
+      if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
+      else if (jobType === "project") q = q.eq("project_id", jobId);
+      else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
+      const { data, error } = await q.select("id");
+      if (error) return err(res, 500, translateDbError(error));
+      updated += (data?.length || 0);
+    }
+    return ok(res, { updated });
   });
 
   // ── Worker allocations (W16-A1) ─────────────────────────────────────────────

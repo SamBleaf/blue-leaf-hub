@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
 import { uploadWorkerPhoto } from "../../lib/workerPhoto.js";
@@ -146,6 +149,45 @@ function BlockedRow({ task, onTap }) {
         {task.completion_notes && <p className="text-xs text-amber-700 mt-0.5">{task.completion_notes}</p>}
       </div>
     </button>
+  );
+}
+
+// Wraps a row with drag-to-reorder for supervisors/admins. The listeners live on a
+// dedicated grip handle (touch-action:none on the handle only) so the list still scrolls
+// and taps/ticks still work — press-and-drag the ⠿ handle to move a task.
+function SortableTaskRow({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 20 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-stretch gap-1">
+      <div className="flex-1 min-w-0">{children}</div>
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+        style={{ touchAction: "none" }}
+        className="shrink-0 px-2 flex items-center justify-center text-slate-300 hover:text-primary active:text-primary cursor-grab touch-none rounded-lg"
+      >
+        <span className="text-lg leading-none select-none">⠿</span>
+      </button>
+    </div>
+  );
+}
+
+// Wraps the task area in a DndContext only when the viewer can reorder — regular workers
+// get the plain list with zero drag overhead.
+function DragArea({ canReorder, sensors, onDragEnd, children }) {
+  if (!canReorder) return <>{children}</>;
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      {children}
+    </DndContext>
   );
 }
 
@@ -381,6 +423,65 @@ export default function WorkerTasks() {
   const totalActive = tasks.filter(t => t.status !== "wont_do").length;
   const totalDone   = doneTasks.length;
 
+  // ── Drag-to-reorder (supervisors / admins) ─────────────────────────────────────
+  // A leading hand on their worker link, or an admin previewing, can hold-drag the ⠿
+  // handle to reorder tasks within a group. The new order persists and every worker sees it.
+  const canReorder = !!(isSupervisor || preview);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } })
+  );
+
+  async function persistOrder(nextTasks, prevTasks) {
+    if (!job?.id) return;
+    try {
+      const res = await workerFetch("/api/worker/tasks/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id, jobType: job.type || "", orderedIds: nextTasks.map(t => t.id) }),
+      });
+      if (!res.ok) throw new Error("reorder failed");
+    } catch {
+      setTasks(prevTasks); // revert to the last known-good order
+      alert("Couldn't save the new order — please try again.");
+    }
+  }
+
+  function onDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    // Reorder only within the same visible group (Hit List, or one category).
+    const groups = [urgentTasks.map(t => t.id), ...categoryOrder.map(cat => (byCategory[cat] || []).map(t => t.id))];
+    const group = groups.find(g => g.includes(active.id));
+    if (!group || !group.includes(over.id)) return;
+    const oldIndex = tasks.findIndex(t => t.id === active.id);
+    const newIndex = tasks.findIndex(t => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const prev = tasks;
+    const next = arrayMove(tasks, oldIndex, newIndex);
+    setTasks(next);
+    vibrate(10);
+    persistOrder(next, prev);
+  }
+
+  // Render a task list either as a sortable group (supervisors/admins) or plain rows.
+  function renderTaskRows(list) {
+    if (!canReorder) {
+      return list.map(t => (
+        <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+      ));
+    }
+    return (
+      <SortableContext items={list.map(t => t.id)} strategy={verticalListSortingStrategy}>
+        {list.map(t => (
+          <SortableTaskRow key={t.id} id={t.id}>
+            <TaskRow task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+          </SortableTaskRow>
+        ))}
+      </SortableContext>
+    );
+  }
+
   // ── Loading / error ───────────────────────────────────────────────────────────
 
   if (loading) {
@@ -457,7 +558,7 @@ export default function WorkerTasks() {
         ) : totalActive === 0 && totalDone === 0 ? (
           <p className="text-sm text-muted text-center mt-10">No tasks on this job yet.</p>
         ) : (
-          <>
+          <DragArea canReorder={canReorder} sensors={sensors} onDragEnd={onDragEnd}>
             {/* Whole-list payoff — the achievement moment when everything's ticked off */}
             {totalActive > 0 && totalDone === totalActive && (
               <div className="mb-5 rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
@@ -465,14 +566,17 @@ export default function WorkerTasks() {
                 <p className="text-xs text-emerald-600 mt-0.5">{totalDone} task{totalDone === 1 ? "" : "s"} smashed.</p>
               </div>
             )}
+            {canReorder && totalActive > totalDone && (
+              <p className="text-[11px] text-muted mb-3 flex items-center gap-1">
+                <span className="text-slate-400">⠿</span> Hold and drag the handle to set the order workers see.
+              </p>
+            )}
             {/* Hit List — urgent, ungrouped, top */}
             {urgentTasks.length > 0 && (
               <div className="mb-5">
                 <p className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">Hit List</p>
                 <div className="space-y-2">
-                  {urgentTasks.map(t => (
-                    <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
-                  ))}
+                  {renderTaskRows(urgentTasks)}
                 </div>
               </div>
             )}
@@ -487,9 +591,11 @@ export default function WorkerTasks() {
                   <CategoryHeader label={categoryLabel(cat)} done={done} total={total} />
                   {allDone && <p className="text-xs text-emerald-600 font-medium mb-2">{categoryLabel(cat)} tasks complete. Nice work.</p>}
                   <div className="space-y-2 mb-2">
-                    {rows.map(t => (
-                      <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
-                    ))}
+                    {allDone
+                      ? rows.map(t => (
+                          <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+                        ))
+                      : renderTaskRows(rows)}
                   </div>
                 </div>
               );
@@ -527,7 +633,7 @@ export default function WorkerTasks() {
                 )}
               </div>
             )}
-          </>
+          </DragArea>
         )}
       </div>
 
