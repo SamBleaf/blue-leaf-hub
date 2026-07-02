@@ -1,7 +1,7 @@
 ---
 loop_enabled: true
-next_agent: cursor
-current_wave: SOP-DOCS-WAVE-04
+next_agent: sam
+current_wave: E2E-REVERIFY-01
 current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
