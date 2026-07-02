@@ -53,6 +53,8 @@
     "test:w1a-crm-control-spine:write": "node scripts/batch-a/run-w1a-crm-control-spine.mjs --write",
     "test:w1b-timeline-signals": "node scripts/batch-a/run-w1b-timeline-signals.mjs",
     "test:w1b-timeline-signals:write": "node scripts/batch-a/run-w1b-timeline-signals.mjs --write",
+    "test:w1c-attribution-roi": "node scripts/batch-a/run-w1c-attribution-roi.mjs",
+    "test:w1c-attribution-roi:write": "node scripts/batch-a/run-w1c-attribution-roi.mjs --write",
     "test:w06-shape": "node scripts/batch-a/run-w06-shape.mjs",
     "test:w06-shape:write": "node scripts/batch-a/run-w06-shape.mjs --write",
     "test:w06-finalize": "node scripts/batch-a/run-w06-finalize.mjs",

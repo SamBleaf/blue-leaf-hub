@@ -735,6 +735,22 @@ export function registerSalesRoutes(app) {
     }
     const { data, error } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
+    // Batch 1C — on win, snapshot the realised value onto enquiry_attribution so the ROI
+    // view has a durable won_value (independent of later job/proposal edits). Best-effort:
+    // silently skipped if migration 130's columns aren't applied yet.
+    if (updates.won_at && data?.stage === "won") {
+      try {
+        let wonValue = data.estimated_value != null ? Number(data.estimated_value) : null;
+        if (data.job_id) {
+          const { data: job } = await sb.from("jobs").select("contract_value").eq("id", data.job_id).maybeSingle();
+          if (job?.contract_value != null) wonValue = Number(job.contract_value);
+        }
+        await sb.from("enquiry_attribution").upsert(
+          { lead_id: req.params.id, won_value: wonValue, won_at: updates.won_at, stage_at_report: "won" },
+          { onConflict: "lead_id" }
+        );
+      } catch { /* migration 130 not applied — non-fatal */ }
+    }
     // Auto-retry: a signed PTSA blocked only by a missing site address should now create the job +
     // Dropbox folder once the address is filled in — so the "job not created" warning clears itself.
     let leadOut = data;

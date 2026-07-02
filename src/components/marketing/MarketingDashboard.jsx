@@ -28,20 +28,87 @@ function SectionHead({ title }) {
   return <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{title}</h2>;
 }
 
+// Batch 1C — compact AUD, no cents (e.g. $825k, $1.2m).
+function money(n) {
+  const v = Number(n || 0);
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}m`;
+  if (v >= 1_000) return `$${Math.round(v / 1_000)}k`;
+  return `$${Math.round(v)}`;
+}
+
+// Batch 1C — source → fit → proposal → won ROI, from v_lead_attribution_roi.
+function AttributionRoiTable({ roi }) {
+  const rows = roi?.groups || [];
+  const t = roi?.totals;
+  return (
+    <section className="space-y-2">
+      <SectionHead title="Attribution ROI — source → fit → won" />
+      <div className="overflow-x-auto rounded-card border border-hairline bg-surface">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-hairline text-left text-xs text-muted">
+              <th className="px-3 py-2 font-medium">Source</th>
+              <th className="px-3 py-2 font-medium text-right">Leads</th>
+              <th className="px-3 py-2 font-medium text-right">Good fit</th>
+              <th className="px-3 py-2 font-medium text-right">Proposals</th>
+              <th className="px-3 py-2 font-medium text-right">Won</th>
+              <th className="px-3 py-2 font-medium text-right">Won value</th>
+              <th className="px-3 py-2 font-medium text-right">Pipeline</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={7} className="px-3 py-4 text-center text-muted">No attributed leads yet.</td></tr>
+            ) : rows.map((g) => (
+              <tr key={g.source} className="border-b border-hairline/60 last:border-0">
+                <td className="px-3 py-2 capitalize text-ink">{(g.source || "unattributed").replace(/_/g, " ")}</td>
+                <td className="px-3 py-2 text-right text-ink">{g.leads}</td>
+                <td className="px-3 py-2 text-right text-ink">{g.good_fit}</td>
+                <td className="px-3 py-2 text-right text-ink">{g.proposals}</td>
+                <td className="px-3 py-2 text-right text-ink">{g.won}</td>
+                <td className="px-3 py-2 text-right font-medium text-ink">{money(g.won_value)}</td>
+                <td className="px-3 py-2 text-right text-muted">{money(g.pipeline_value)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {t && rows.length > 0 && (
+            <tfoot>
+              <tr className="border-t border-hairline bg-page text-xs font-semibold text-ink">
+                <td className="px-3 py-2">Total</td>
+                <td className="px-3 py-2 text-right">{t.leads}</td>
+                <td className="px-3 py-2 text-right">{t.good_fit}</td>
+                <td className="px-3 py-2 text-right">{t.proposals}</td>
+                <td className="px-3 py-2 text-right">{t.won}</td>
+                <td className="px-3 py-2 text-right">{money(t.won_value)}</td>
+                <td className="px-3 py-2 text-right">{money(t.pipeline_value)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default function MarketingDashboard() {
   const [data, setData] = useState(null);
+  const [roi, setRoi] = useState(null); // Batch 1C attribution ROI (source → fit → won)
   const [loading, setLoading] = useState(true);
   const [usingDemo, setUsingDemo] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { ok, data: d } = await apiFetch("/api/marketing/intelligence");
-    if (ok && d) {
-      setData(d);
-      setUsingDemo(!!d.demo);
+    const [main, roiRes] = await Promise.all([
+      apiFetch("/api/marketing/intelligence"),
+      apiFetch("/api/intelligence/attribution-roi").catch(() => ({ ok: false })),
+    ]);
+    if (main.ok && main.data) {
+      setData(main.data);
+      setUsingDemo(!!main.data.demo);
     } else {
       setUsingDemo(true);
     }
+    setRoi(roiRes.ok && roiRes.data?.available ? roiRes.data : null);
     setLoading(false);
   }, []);
 
@@ -93,6 +160,8 @@ export default function MarketingDashboard() {
           </div>
         </section>
       )}
+
+      {roi && <AttributionRoiTable roi={roi} />}
 
       <section className="space-y-2">
         <SectionHead title="Content pipeline" />

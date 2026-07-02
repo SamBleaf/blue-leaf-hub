@@ -482,12 +482,28 @@ export function registerMarketingIntelligenceRoutes(app) {
     const mktLeads  = allLeads.filter(l =>
       l.first_touch_source && l.first_touch_source !== "direct"
     );
+    // Batch 1C — realised won value + open pipeline for this month's marketing leads,
+    // sourced from v_lead_attribution_roi (leads ⋈ jobs ⋈ fee_proposals). Soft-fails to
+    // null if migration 130 isn't applied yet, so the dashboard never errors pre-paste.
+    let wonValue = null, pipelineValue = null;
+    try {
+      const { data: roiRows, error: roiErr } = await sb
+        .from("v_lead_attribution_roi")
+        .select("won_value, pipeline_value")
+        .gte("lead_created_at", monthStart);
+      if (!roiErr && roiRows) {
+        wonValue = roiRows.reduce((s, r) => s + Number(r.won_value || 0), 0);
+        pipelineValue = roiRows.reduce((s, r) => s + Number(r.pipeline_value || 0), 0);
+      }
+    } catch { /* view missing — leave null */ }
+
     const kpis = {
       enquiries:      mktLeads.length,
       qualified:      mktLeads.filter(l => ["qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(l.stage)).length,
       tenders:        mktLeads.filter(l => ["tender","won"].includes(l.stage)).length,
       signed:         mktLeads.filter(l => l.stage === "won").length,
-      pipeline_value: null, // requires budget data from jobs — set to null until joined
+      won_value:      wonValue,
+      pipeline_value: pipelineValue,
     };
 
     // ── Section 2: What's Working / What's Not ────────────────────────────────
@@ -603,6 +619,50 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
         ai_summary:         aiSummary,
       },
     });
+  });
+
+  // ── GET /api/intelligence/attribution-roi — Batch 1C ────────────────────────
+  // Source → fit → proposal → won ROI, grouped from v_lead_attribution_roi. Answers
+  // "which marketing produces good leads, and what did it return?". Soft-returns
+  // { available:false } if migration 130 isn't applied yet.
+  app.get("/api/intelligence/attribution-roi", requireAuth, async (req, res) => {
+    const sb = sbClient();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    const groupBy = req.query.groupBy === "category" ? "lead_source_category" : "first_touch_source";
+    const { data: rows, error } = await sb.from("v_lead_attribution_roi").select("*");
+    if (error) {
+      if (error.code === "42P01") return ok(res, { available: false, groups: [], totals: null });
+      return err(res, 500, translateDbError(error));
+    }
+
+    const buckets = new Map();
+    const strongFits = new Set(["strong", "possible"]);
+    for (const r of rows || []) {
+      const key = (r[groupBy] || r.lead_source || "unattributed");
+      if (!buckets.has(key)) buckets.set(key, {
+        source: key, leads: 0, good_fit: 0, proposals: 0, won: 0,
+        won_value: 0, pipeline_value: 0, cost: 0,
+      });
+      const b = buckets.get(key);
+      b.leads += 1;
+      if (strongFits.has(r.fit_quality)) b.good_fit += 1;
+      if (Number(r.proposal_count || 0) > 0) b.proposals += 1;
+      if (r.is_won) b.won += 1;
+      b.won_value += Number(r.won_value || 0);
+      b.pipeline_value += Number(r.pipeline_value || 0);
+      b.cost += Number(r.lead_cost || 0);
+    }
+    const groups = [...buckets.values()]
+      .map(b => ({ ...b, roi: b.cost > 0 ? Number(((b.won_value - b.cost) / b.cost).toFixed(2)) : null }))
+      .sort((a, b) => b.won_value - a.won_value);
+    const totals = groups.reduce((t, g) => ({
+      leads: t.leads + g.leads, good_fit: t.good_fit + g.good_fit, proposals: t.proposals + g.proposals,
+      won: t.won + g.won, won_value: t.won_value + g.won_value, pipeline_value: t.pipeline_value + g.pipeline_value,
+      cost: t.cost + g.cost,
+    }), { leads: 0, good_fit: 0, proposals: 0, won: 0, won_value: 0, pipeline_value: 0, cost: 0 });
+
+    ok(res, { available: true, groupBy, groups, totals });
   });
 
   // ── POST /api/intelligence/sync/meta — pull Meta Insights ───────────────────
