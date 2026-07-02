@@ -67,7 +67,7 @@
 | **SOP** | 02-07 |
 | **Summary** | Clicking saved conversation opens new-transcript flow; no read-only history view. |
 | **blocks-deployability** | no |
-| **Status** | open — Fix Agent |
+| **Status** | fixed 2026-07-02 — read-only ConversationViewPanel added to LeadDetail (fix batch B1) |
 
 ### SOP-BUG-05-05 — Global Gantt task click navigation missing
 
@@ -79,7 +79,7 @@
 | **SOP** | 05-05 (SOP updated to remove promise) |
 | **Summary** | `GlobalGanttPanel` does not navigate to project schedule on task click. |
 | **blocks-deployability** | no |
-| **Status** | open — Fix Agent or accepted descope |
+| **Status** | accepted descope 2026-07-02 — SOP already corrected; no nav-on-click planned (Sam) |
 
 ### SOP-BUG-07-03 — Site diary edit and date filter missing
 
@@ -91,7 +91,7 @@
 | **SOP** | 07-03 |
 | **Summary** | SOP promises date range filter + Edit→Save; `DiaryRow` read-only; no PATCH route. |
 | **blocks-deployability** | no |
-| **Status** | open — Fix Agent |
+| **Status** | fixed 2026-07-02 — PATCH /api/diary/:id + inline Edit form + ?from/?to date filter (fix batch C1) |
 
 ### SOP-BUG-09-JOBVIEW — Finance Job View tab unreachable
 
@@ -103,7 +103,7 @@
 | **SOP** | 09-07 |
 | **Summary** | FinanceManager Job View tab → `/finance/jobs` renders JobDashboardSelector; legacy JobFinancials panel unreachable. |
 | **blocks-deployability** | no |
-| **Status** | open — Fix Agent |
+| **Status** | fixed 2026-07-02 — dead inline JobFinancials removed; Job View tab = /finance/jobs JobDashboardSelector (fix batch B2) |
 
 ### SOP-BUG-11-12 — Portal v2 admin access gaps
 
@@ -115,7 +115,7 @@
 | **SOP** | 11-10, 11-12 |
 | **Summary** | No link from v1 PortalAdmin to v2 console; `PortalV2Admin` admin-only (SOP lists supervisor). |
 | **blocks-deployability** | no |
-| **Status** | open — Fix Agent |
+| **Status** | fixed 2026-07-02 — "Open v2 console" button + legacy-v1 label added to PortalAdmin (fix batch B3) |
 
 ### SOP-GAP-PORTAL-STACK — Legacy v1 vs v2 portal coexistence (candidate)
 

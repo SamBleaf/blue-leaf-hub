@@ -32,6 +32,9 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [showVerified, setShowVerified] = useState(() => searchParams.get("verified") === "1");
+  const [resetSent, setResetSent] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState("");
 
   useEffect(() => {
     const migrated = migrateAuthHashToQuery();
@@ -47,6 +50,33 @@ export default function Login() {
     if (!supabaseConfigured || authLoading || !session) return;
     navigate("/", { replace: true });
   }, [session, authLoading, navigate]);
+
+  async function sendReset(e) {
+    e.preventDefault();
+    setResetError("");
+    if (!supabaseConfigured) {
+      setResetError("Supabase is not configured.");
+      return;
+    }
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setResetError("Enter your email address above first.");
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const sb = getSupabase();
+      if (!sb) throw new Error("Could not initialise client.");
+      await sb.auth.resetPasswordForEmail(trimmed, {
+        redirectTo: window.location.origin + "/reset-password",
+      });
+      setResetSent(true);
+    } catch {
+      setResetError("Something went wrong. Please try again.");
+    } finally {
+      setResetBusy(false);
+    }
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -165,6 +195,29 @@ export default function Login() {
               Sign in
             </button>
           </form>
+
+          {resetSent ? (
+            <p
+              role="status"
+              className="mt-4 rounded-lg border border-accent/40 bg-accent/10 px-4 py-3 text-center text-sm text-ink"
+            >
+              If that email exists, a reset link has been sent.
+            </p>
+          ) : (
+            <div className="mt-4 text-center">
+              {resetError ? (
+                <p className="mb-1 text-xs font-medium text-danger">{resetError}</p>
+              ) : null}
+              <button
+                type="button"
+                disabled={resetBusy}
+                onClick={sendReset}
+                className="text-sm text-primary hover:underline disabled:opacity-60"
+              >
+                {resetBusy ? "Sending…" : "Forgot password?"}
+              </button>
+            </div>
+          )}
 
           <p className="mt-6 text-center text-sm text-muted">
             Access is by invitation only.{" "}

@@ -9,6 +9,7 @@ import { BlueprintProvider } from "./lib/BlueprintContext.jsx";
 import { ProjectProvider } from "./lib/ProjectContext.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
@@ -153,6 +154,7 @@ export default function App() {
               />
             )}
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/accept-invite/:token" element={<AcceptInvite />} />
             <Route path="/" element={<RootRedirect />} />

@@ -18,6 +18,9 @@ export default function SiteDiary() {
   const [structureBusy, setStructureBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
 
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [weather, setWeather] = useState("");
   const [tradesOnsite, setTradesOnsite] = useState([]);
@@ -40,11 +43,15 @@ export default function SiteDiary() {
   }, [projectId]);
 
   const loadEntries = useCallback(async () => {
-    const res = await authFetch(`/api/diary/${projectId}`);
+    const params = new URLSearchParams();
+    if (filterFrom) params.set("from", filterFrom);
+    if (filterTo) params.set("to", filterTo);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const res = await authFetch(`/api/diary/${projectId}${qs}`);
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "Load failed");
     setEntries(j.entries || []);
-  }, [projectId]);
+  }, [projectId, filterFrom, filterTo]);
 
   useEffect(() => {
     loadProject();
@@ -310,10 +317,39 @@ export default function SiteDiary() {
 
         <div className="rounded-card border border-hairline bg-surface p-4 shadow-sm lg:max-h-[80vh] lg:overflow-y-auto">
           <h2 className="text-sm font-bold uppercase text-muted">Past entries</h2>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="block text-xs font-semibold text-muted">
+              From
+              <input
+                type="date"
+                value={filterFrom}
+                onChange={(e) => setFilterFrom(e.target.value)}
+                className="mt-1 block rounded-lg border border-hairline bg-page px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block text-xs font-semibold text-muted">
+              To
+              <input
+                type="date"
+                value={filterTo}
+                onChange={(e) => setFilterTo(e.target.value)}
+                className="mt-1 block rounded-lg border border-hairline bg-page px-3 py-2 text-sm"
+              />
+            </label>
+            {(filterFrom || filterTo) ? (
+              <button
+                type="button"
+                onClick={() => { setFilterFrom(""); setFilterTo(""); }}
+                className="rounded-lg border border-hairline px-3 py-2 text-xs text-muted"
+              >
+                Clear filter
+              </button>
+            ) : null}
+          </div>
           {loading ? <p className="mt-4 text-sm text-muted">Loading…</p> : null}
           <ul className="mt-4 space-y-4">
             {entries.map((en) => (
-              <DiaryRow key={en.id} en={en} />
+              <DiaryRow key={en.id} en={en} project={project} onSaved={loadEntries} />
             ))}
           </ul>
         </div>
@@ -322,14 +358,175 @@ export default function SiteDiary() {
   );
 }
 
-function DiaryRow({ en }) {
+function DiaryRow({ en, project, onSaved }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  // Edit form state — initialised from entry when edit opens
+  const [editDate, setEditDate] = useState(en.entry_date || "");
+  const [editWeather, setEditWeather] = useState(en.weather || "");
+  const [editTrades, setEditTrades] = useState(en.trades_onsite || []);
+  const [editTradeInput, setEditTradeInput] = useState("");
+  const [editWork, setEditWork] = useState(en.work_completed || "");
+  const [editIssues, setEditIssues] = useState(en.issues || "");
+  const [editInstructions, setEditInstructions] = useState(en.instructions_given || "");
+  const [editVisitors, setEditVisitors] = useState(en.visitors || "");
+  const [editSupervisor, setEditSupervisor] = useState(en.supervisor || "");
+
+  function openEdit() {
+    setEditDate(en.entry_date || "");
+    setEditWeather(en.weather || "");
+    setEditTrades(en.trades_onsite || []);
+    setEditTradeInput("");
+    setEditWork(en.work_completed || "");
+    setEditIssues(en.issues || "");
+    setEditInstructions(en.instructions_given || "");
+    setEditVisitors(en.visitors || "");
+    setEditSupervisor(en.supervisor || "");
+    setEditError("");
+    setEditing(true);
+  }
+
+  function toggleEditTrade(t) {
+    setEditTrades((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  }
+
+  function addEditTrade() {
+    const t = editTradeInput.trim();
+    if (!t) return;
+    if (!editTrades.includes(t)) setEditTrades((p) => [...p, t]);
+    setEditTradeInput("");
+  }
+
+  async function saveEdit() {
+    setSaveBusy(true);
+    setEditError("");
+    try {
+      const res = await authFetch(`/api/diary/${en.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entry_date: editDate,
+          weather: editWeather,
+          trades_onsite: editTrades,
+          work_completed: editWork,
+          issues: editIssues,
+          instructions_given: editInstructions,
+          visitors: editVisitors,
+          supervisor: editSupervisor,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Save failed");
+      setEditing(false);
+      if (onSaved) await onSaved();
+    } catch (e) {
+      setEditError(e?.message || String(e));
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
   const trades = en.trades_onsite || [];
   const preview = String(en.work_completed || "").slice(0, 120);
   const rest = String(en.work_completed || "").length > 120;
+  const accepted = Array.isArray(project?.accepted_trades) ? project.accepted_trades : [];
+
+  if (editing) {
+    return (
+      <li className="rounded-lg border border-accent/40 bg-accent/5 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase text-accent">Editing entry</span>
+          <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted underline">
+            Cancel
+          </button>
+        </div>
+        {editError ? <p className="text-xs text-danger">{editError}</p> : null}
+        <label className="block text-xs font-semibold text-muted">
+          Date
+          <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <label className="block text-xs font-semibold text-muted">
+          Weather
+          <input value={editWeather} onChange={(e) => setEditWeather(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <div>
+          <span className="text-xs font-semibold text-muted">Trades on site</span>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {accepted.map((t, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => toggleEditTrade(t.trade)}
+                className={`rounded-full border px-3 py-1 text-xs ${editTrades.includes(t.trade) ? "border-accent bg-accent/15 text-accent" : "border-hairline bg-page"}`}
+              >
+                {t.trade}
+              </button>
+            ))}
+            {editTrades.filter((t) => !accepted.some((a) => a.trade === t)).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleEditTrade(t)}
+                className="rounded-full border border-accent bg-accent/15 px-3 py-1 text-xs text-accent"
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <input value={editTradeInput} onChange={(e) => setEditTradeInput(e.target.value)} placeholder="Add trade" className="flex-1 rounded-lg border border-hairline p-2 text-sm" />
+            <button type="button" onClick={addEditTrade} className="rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-white">
+              Add
+            </button>
+          </div>
+        </div>
+        <label className="block text-xs font-semibold text-muted">
+          Work completed
+          <textarea value={editWork} onChange={(e) => setEditWork(e.target.value)} rows={4} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <label className="block text-xs font-semibold text-muted">
+          Issues
+          <textarea value={editIssues} onChange={(e) => setEditIssues(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <label className="block text-xs font-semibold text-muted">
+          Instructions given
+          <textarea value={editInstructions} onChange={(e) => setEditInstructions(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <label className="block text-xs font-semibold text-muted">
+          Visitors
+          <input value={editVisitors} onChange={(e) => setEditVisitors(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <label className="block text-xs font-semibold text-muted">
+          Supervisor
+          <input value={editSupervisor} onChange={(e) => setEditSupervisor(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline p-2 text-sm" />
+        </label>
+        <button
+          type="button"
+          disabled={saveBusy}
+          onClick={saveEdit}
+          className="w-full min-h-[40px] rounded-lg bg-accent py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {saveBusy ? "Saving…" : "Save changes"}
+        </button>
+      </li>
+    );
+  }
+
   return (
     <li className="border-b border-hairline pb-3">
-      <div className="font-bold text-ink">{en.entry_date}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-bold text-ink">{en.entry_date}</div>
+        <button
+          type="button"
+          onClick={openEdit}
+          className="shrink-0 rounded border border-hairline px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-accent"
+        >
+          Edit
+        </button>
+      </div>
       <div className="text-xs text-muted">{en.weather || "—"}</div>
       <div className="mt-1 flex flex-wrap gap-1">
         {trades.map((t) => (

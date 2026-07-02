@@ -140,13 +140,56 @@ ${transcript}`;
     try {
       const projectId = String(req.params.projectId || "").trim();
       const limit = req.query.limit ? Math.min(100, Math.max(1, Number(req.query.limit))) : null;
-      let q = sb.from("site_diary").select("*").eq("project_id", projectId).order("created_at", { ascending: false });
+      const from = req.query.from ? String(req.query.from).trim() : null;
+      const to = req.query.to ? String(req.query.to).trim() : null;
+      let q = sb.from("site_diary").select("*").eq("project_id", projectId).order("entry_date", { ascending: false });
+      if (from) q = q.gte("entry_date", from);
+      if (to) q = q.lte("entry_date", to);
       if (limit) q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
       return res.json({ ok: true, entries: data || [] });
     } catch (e) {
       console.error("[diary/get]", e);
+      return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.patch("/api/diary/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase service role not configured." });
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ ok: false, error: "Entry id required." });
+
+      // Only allow editing the content fields — never project_id or created_at
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const patch = {};
+      if (body.entry_date !== undefined)      patch.entry_date = body.entry_date;
+      if (body.weather !== undefined)         patch.weather = body.weather;
+      if (body.trades_onsite !== undefined)   patch.trades_onsite = Array.isArray(body.trades_onsite) ? body.trades_onsite : [];
+      if (body.work_completed !== undefined)  patch.work_completed = body.work_completed;
+      if (body.issues !== undefined)          patch.issues = body.issues;
+      if (body.instructions_given !== undefined) patch.instructions_given = body.instructions_given;
+      if (body.visitors !== undefined)        patch.visitors = body.visitors;
+      if (body.supervisor !== undefined)      patch.supervisor = body.supervisor;
+
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ ok: false, error: "No editable fields provided." });
+      }
+
+      const { data: updated, error: ue } = await sb
+        .from("site_diary")
+        .update(patch)
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (ue) throw ue;
+      if (!updated) return res.status(404).json({ ok: false, error: "Diary entry not found." });
+
+      return res.json({ ok: true, entry: updated });
+    } catch (e) {
+      console.error("[diary/patch]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
     }
   });
