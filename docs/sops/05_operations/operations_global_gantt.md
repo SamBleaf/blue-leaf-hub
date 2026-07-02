@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: placeholders_only
 owner: Admin
@@ -122,11 +122,18 @@ Next review: 2026-11-30
 2. Expected: rejected (401/redirect)
 - [ ] Pass  [ ] Fail
 
+**TC-06 — Project colour coding and conflict badge**
+1. With 3+ projects loaded, inspect bars on the global Gantt
+2. Expected: each project's tasks share a distinct colour, allowing visual separation by site
+3. If any trade conflicts exist, expected: a conflict badge is visible linking to the trade-conflict banner (SOP 05-06)
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Global Gantt aggregates all projects
 - [ ] Ordering correct
 - [ ] Deleted tasks excluded
 - [ ] Trade filter works
 - [ ] Auth required
+- [ ] Colour coding distinguishes projects
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md

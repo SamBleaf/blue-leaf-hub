@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -82,14 +82,14 @@ Creates a progress claim PDF (Blue Leaf branded, SA-compliant), emails it to the
    - Sets the due date timer
 5. The Claims Issued KPI in the KPI bar increases by this claim amount
 
-## 6. After sending
+## 6. What happens next
 
 - The claim status shows as "issued" in the accordion
 - If the due date passes without payment recorded, status changes to "overdue" automatically
-- When payment is received, record it (see Record Payment section below)
+- When payment is received, record it (see Record Payment steps below)
 - Overdue claims appear in Requires Action in the Job Command Centre
 
-## 7. Record a payment against a claim
+### Record a payment against a claim
 
 1. Open the Progress Claims accordion
 2. Find the claim (status "issued" or "overdue")
@@ -103,7 +103,7 @@ Creates a progress claim PDF (Blue Leaf branded, SA-compliant), emails it to the
 6. Status updates to "partially_paid" (if partial) or "paid" (if full)
 7. Claims Paid $ KPI updates in the KPI bar
 
-## 8. Void a claim
+### Void a claim
 
 If a claim was sent in error or needs to be cancelled:
 1. Open the claim in the Progress Claims accordion
@@ -113,7 +113,7 @@ If a claim was sent in error or needs to be cancelled:
 5. Status → "void"
 6. The voided claim is excluded from Claims Issued calculations
 
-## 9. Overdue claim chase
+### Overdue claim chase
 
 When a claim becomes overdue (past the due date with no payment):
 1. The claim appears in Requires Action with a "Chase payment →" prompt
@@ -121,7 +121,7 @@ When a claim becomes overdue (past the due date with no payment):
 3. Use Gmail to follow up with the client (outside the Hub — the Hub records the claim, not the correspondence)
 4. Record payment when received
 
-## 10. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -130,7 +130,7 @@ When a claim becomes overdue (past the due date with no payment):
 | Claim sent to wrong email | Client email not updated | Verify the client email on the job record before sending |
 | Forgetting to record payment | Payment comes in but dashboard shows overdue | Record payment on the day it arrives or the day you see it in the bank account |
 
-## 11. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -139,11 +139,17 @@ When a claim becomes overdue (past the due date with no payment):
 | Claim shows wrong cumulative amount | Previous claims may not all be counted — check all prior claims have correct statuses |
 | Gmail send fails | Check Gmail credentials are still valid in Railway env vars |
 
-## 12. Related SOPs
+## 9. Related modules
 - [Job Command Centre — overview](finance_job_dashboard.md)
 - [WIPAA review](finance_wipaa_review.md)
 
-## 13. Automation notes
+## 10. Screenshot placeholders
+- [ ] Progress Claims accordion — showing a draft claim before sending
+- [ ] Confirmation dialog (PDF preview + recipient email)
+- [ ] Claim list with mixed statuses (issued, partially_paid, overdue, void)
+- [ ] Record Payment form with partial payment example
+
+## 11. Automation notes
 - API: `POST /api/finance/jobs/:id/claims` → create draft
 - API: `PUT /api/finance/jobs/:id/claims/:cid` → update draft fields
 - API: `POST /api/finance/jobs/:id/claims/:cid/send` → generate PDF + Gmail send + status → issued
@@ -154,13 +160,20 @@ When a claim becomes overdue (past the due date with no payment):
 - Claims Issued KPI: `SUM(amount_inc_gst WHERE status NOT IN ('draft','void'))`
 - Claims Paid KPI: `SUM(progress_claim_payments.payment_amount WHERE claim job_id = :jobId)`
 
-## 14. Owner
+## 12. Edge cases and limits
+- Custom stage claims do not increment the standard stage counter — use Custom only for partial or non-standard claims
+- A voided claim is permanently excluded from KPIs; voiding cannot be undone via the UI
+- Partial payments can be recorded multiple times until total payments equal the claim amount, at which point status auto-transitions to 'paid'
+- If the Gmail send fails, the claim remains as draft and must be re-sent manually
+- Cumulative claimed amount includes all non-void, non-draft claims regardless of payment status
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 15. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A job with at least one approved invoice and a seeded budget exists

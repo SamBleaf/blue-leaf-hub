@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -35,7 +35,9 @@ Creates a variation document priced from Buildxact recipe line items. Generates 
 - You know what the variation covers (title and description)
 - The relevant Buildxact estimate items exist in the job's estimate (for recipe pricing)
 
-## 5. Steps — Create a variation
+## 5. Step-by-step process
+
+### Create a variation
 
 1. Open the Job Command Centre for the job
 2. Click **+ New Variation** in the Variations section
@@ -66,7 +68,7 @@ If Buildxact recipes don't cover this variation:
 2. Enter the **Amount ex-GST** directly
 3. GST and total are calculated automatically
 
-## 6. Steps — Send variation to client
+### Send variation to client
 
 1. With the variation in "draft" status, review all fields
 2. Click **Send to Client**
@@ -81,7 +83,9 @@ If Buildxact recipes don't cover this variation:
    - Changes status to "sent_to_client"
    - Records `sent_date`
 
-## 7. Variation sign-off
+## 6. What happens next
+
+### Variation sign-off
 
 When the client signs the variation:
 - The client clicks the link in the email and signs electronically
@@ -97,7 +101,7 @@ If the client rejects:
 - Contract value does NOT change
 - The variation remains visible for reference
 
-## 8. Important rules about variations
+### Important rules about variations
 
 | Rule | Why |
 |------|-----|
@@ -106,7 +110,7 @@ If the client rejects:
 | Each variation gets its own number | Auto-incremented. Do not re-use variation numbers. |
 | Signed variations update contract value immediately | No delay — the Job Command Centre KPI updates on signing |
 
-## 9. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -115,7 +119,7 @@ If the client rejects:
 | No EOT days entered for time-impacting variations | Easy to forget | Consider EOT before sending — agreed time extensions should be in the variation, not argued later |
 | Margin too low on variation | Missed a cost item in recipe | Always review "Margin %" before sending to client |
 
-## 10. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -124,20 +128,32 @@ If the client rejects:
 | Client says they never received the sign-off email | Check the client email on file is correct; resend from the variation detail |
 | Variation marked signed but contract value hasn't updated | Refresh the Job Command Centre page — contract value should update immediately on signing |
 
-## 11. Related SOPs
+## 9. Related modules
 - [Job Command Centre — overview](finance_job_dashboard.md) — SOP 09-07
 
-## 12. Automation notes
+## 10. Screenshot placeholders
+- [ ] Variation creation form with trade category and EOT days filled
+- [ ] Recipe line items panel showing cost, charge, and margin %
+- [ ] Variation in "sent_to_client" status with "UNSIGNED — no P&L impact" badge
+- [ ] Variation in "signed" status showing updated contract value in KPI bar
+
+## 11. Automation notes
 - API: `POST /api/finance/jobs/:id/variations` → create draft
 - API: `GET /api/finance/jobs/:id/variations/recipes` → Buildxact line items for pricing
 - API: `PUT /api/finance/jobs/:id/variations/:vid` → update draft fields
 - API: `POST /api/finance/jobs/:id/variations/:vid/send` → generate PDF + email + status → sent_to_client
 - API: `POST /api/finance/jobs/:id/variations/:vid/sign` → status → signed + updates contract_value
 - API: `POST /api/finance/jobs/:id/variations/:vid/reject` → status → rejected
-- Contract value on sign: `UPDATE jobs SET original_contract_value = original_contract_value + variation_amount WHERE id = :jobId`
-- Wait — contract_value is computed: `original_contract_value + SUM(job_variations.amount_ex_gst WHERE status = 'signed')`
+- Contract value is computed: `original_contract_value + SUM(job_variations.amount_ex_gst WHERE status = 'signed')`
 - GST on variations: `amount_ex_gst * 0.1` (generated column)
 - Unsigned variations excluded from all P&L queries by default
+
+## 12. Edge cases and limits
+- A rejected variation cannot be re-sent without recreating it — if the client changes their mind, create a new variation
+- Variation numbers are auto-incremented and cannot be reused — even voided or rejected variations retain their number in sequence
+- EOT days entered on the variation are for reference only — they do not automatically update the project schedule in the Operations module
+- If Buildxact is not connected, recipe pricing is unavailable and the variation must be priced manually; this does not block variation creation or sending
+- Signed variations that need to be reversed require direct database intervention — there is no "unsign" feature in the UI
 
 ## 13. Owner
 Admin  

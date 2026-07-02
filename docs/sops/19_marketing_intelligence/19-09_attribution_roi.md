@@ -1,5 +1,5 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-07-02
 app_version: 1.0 — built (Batch 1C, migrations 129 + 130)
 screenshot_status: pending
@@ -25,19 +25,21 @@ When you want to answer: **which marketing sources produce good leads, and what 
 ## 3. What this does
 Closes the marketing→revenue loop. A per-lead read model (`v_lead_attribution_roi`) joins each lead to its attribution source, its fit quality, its fee proposals and its won/pipeline value. The marketing dashboard groups this into a **source → fit → proposal → won** table and fills the previously-null pipeline value KPI.
 
+**Won value** on a won lead: `enquiry_attribution.won_value` (snapshotted at win), else the job's contract value, else the summed fee-proposal value, else the lead's estimated value.
+
+**Proposal value:** summed `fee_proposals.total_inc_gst` for the lead (joined via `fee_proposals.lead_id`, derived from the job by a DB trigger).
+
+**Cost:** `leads.lead_source_cost`.
+
 ## 4. Before you start
 - Migrations 129 (`fee_proposals.lead_id`) and 130 (ROI view + revenue columns) must be applied
 - Leads should have a source category (SOP 02-08) and fit (SOP 02-08) set for the table to be meaningful
 
-## 5. Step-by-step
+## 5. Step-by-step process
 
 1. Open **Marketing → Intelligence**
 2. Find the **Attribution ROI — source → fit → won** table
-3. Each row is a source, showing: Leads, Good fit, Proposals, Won, Won value, Pipeline
-4. The Total row sums each column
-5. Use it to compare sources: e.g. "referral" with 3 leads, 3 good-fit, 2 won, $1.5m beats "advertising" with 20 leads, 1 good-fit, 0 won
-
-## 6. Reading the columns
+3. Each row is a source, showing:
 
 | Column | Meaning |
 |--------|---------|
@@ -49,55 +51,60 @@ Closes the marketing→revenue loop. A per-lead read model (`v_lead_attribution_
 | Pipeline | Open value still in flight (not won, not lost) |
 | ROI | (won value − acquisition cost) / cost, when `lead_source_cost` is recorded |
 
-Grouping defaults to first-touch source; the endpoint also supports grouping by source category (`?groupBy=category`).
+4. The Total row sums each column
+5. Use it to compare sources: e.g. "referral" with 3 leads, 3 good-fit, 2 won, $1.5m beats "advertising" with 20 leads, 1 good-fit, 0 won
+6. Grouping defaults to first-touch source; the endpoint also supports grouping by source category (`?groupBy=category`)
 
-## 7. Where the numbers come from
+[insert screenshot: Attribution ROI table on the Marketing Intelligence dashboard]
 
-- **Won value** on a won lead: `enquiry_attribution.won_value` (snapshotted at win), else the job's contract value, else the summed fee-proposal value, else the lead's estimated value.
-- **Proposal value:** summed `fee_proposals.total_inc_gst` for the lead (joined via `fee_proposals.lead_id`, derived from the job by a DB trigger).
-- **Cost:** `leads.lead_source_cost`.
+## 6. What happens next
+- The table is read-only — no data is modified by viewing it
+- Use findings to shift budget toward sources with the best good-fit ratio and won value
+- Compare alongside the Attribution dashboard (SOP 19-05) to understand the full journey
 
-## 8. Won-value writeback
-
-When a lead is moved to **won**, the system snapshots its value onto `enquiry_attribution.won_value` + `won_at`. This makes the ROI stable even if the job or proposals are edited later. It is best-effort — if migration 130 isn't applied, the win still succeeds and the view falls back to the job/proposal/estimate value.
-
-## 9. Common mistakes
-
+## 7. Common mistakes
 | Mistake | How to avoid it |
 |---------|-----------------|
 | Treating pipeline value as revenue | Pipeline = open, not yet won. Won value = realised. |
 | Comparing sources by lead count alone | A source with fewer, better-fit, higher-won leads is better. Read the whole row. |
 | Expecting ROI without cost | ROI is blank unless `lead_source_cost` is recorded on the leads. |
 
-## 10. Troubleshooting
-
+## 8. Troubleshooting
 | Problem | Solution |
 |---------|----------|
 | ROI table not shown | Migration 130 not applied — endpoint returns `available:false` and the section hides. Apply 130. |
 | Won value is 0 for a won lead | No contract/proposal/estimate value on the lead or its job — set an estimated value or link a job/proposal |
 | Pipeline value KPI still null | Migration 130 not applied, or no in-flight leads this month |
 
-## 11. Related SOPs
+## 9. Related modules
 - [Classify fit & work the action queue](../02_sales/02-08_classify_fit_and_action_queue.md) — SOP 02-08
 - [Attribution dashboard](19-05_attribution_dashboard.md) — SOP 19-05
+- [Intelligence dashboard](19-01_intelligence_dashboard.md) — SOP 19-01
 
-## 12. Screenshot placeholders
+## 10. Screenshot placeholders
 [insert screenshot: Attribution ROI table on the Marketing Intelligence dashboard]
+[insert screenshot: Dashboard KPI strip showing won_value and pipeline_value populated]
 
-## 13. Automation notes
+## 11. Automation notes
 - View: `v_lead_attribution_roi` (per-lead grain) — leads ⋈ enquiry_attribution ⋈ jobs ⋈ (fee_proposals grouped by lead_id).
 - Endpoint: `GET /api/intelligence/attribution-roi[?groupBy=category]` → `{ available, groupBy, groups[], totals }`; returns `{ available:false }` if the view is missing.
 - Dashboard KPI: `GET /api/intelligence/dashboard` now returns `won_value` + `pipeline_value` from the view (null only if 130 unapplied).
-- Writeback: `PATCH /api/sales/leads/:id { stage:"won" }` upserts `enquiry_attribution` won_value/won_at (best-effort).
+- Writeback: when a lead is moved to **won** (`PATCH /api/sales/leads/:id { stage:"won" }`), the system snapshots its value onto `enquiry_attribution.won_value` + `won_at`. This makes the ROI stable even if the job or proposals are edited later. It is best-effort — if migration 130 is not applied, the win still succeeds and the view falls back to the job/proposal/estimate value.
 - `fee_proposals.lead_id`: trigger `fee_proposals_set_lead_id` derives it from `jobs.lead_id` on insert/update of job_id.
 
-## 14. Owner of the process
+## 12. Edge cases and limits
+- ROI is only computed when `leads.lead_source_cost` is populated — it is blank for leads with no recorded cost
+- The view falls back through four value sources (won_value snapshot → contract value → fee proposal sum → estimated value) — if none are set the row shows 0
+- Grouping by category (`?groupBy=category`) aggregates sources that share the same normalised source category (e.g. "instagram" + "facebook" → "social")
+- Won-value writeback is best-effort per migration availability; if migration 130 is not yet applied, the dashboard KPI returns null but the lead stage update still succeeds
+
+## 13. Owner of the process
 Admin / Marketing
 Next review: 2026-12-02
 
 ---
 
-## 15. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 Automated: `npm run test:w1c-attribution-roi:write` (requires migrations 129+130 + server). Gap-documents if migrations not applied.
 
@@ -133,7 +140,16 @@ Automated: `npm run test:w1c-attribution-roi:write` (requires migrations 129+130
 2. Expected: 200 `{ available:false }`, dashboard KPIs null — NOT 500
 - [ ] Pass  [ ] Fail
 
+**TC-06 — groupBy=category aggregates correctly**
+1. Create leads with first_touch_source = "instagram" and first_touch_source = "facebook"
+2. Call `GET /api/intelligence/attribution-roi?groupBy=category`
+3. Expected: both sources are aggregated under a single "social" category row
+4. Expected: `totals.leads` count matches the sum of individual source counts
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Trigger, view, endpoint and KPI all behave as specified
+- [ ] Soft-degrade returns 200 not 500 when view is missing
+- [ ] groupBy=category aggregation correct
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md

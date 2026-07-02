@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -44,22 +44,21 @@ Marks the invoice as "on_hold" with a mandatory reason and an optional follow-up
 5. Status changes to "on_hold"
 6. The invoice appears in the Approval Queue with a 🔴 hold badge and the follow-up date
 
-## 6. What happens after placing a hold
+## 6. What happens next
 
 - The invoice stays in the Approval Queue — it does not disappear
 - The hold reason and follow-up date are stored on the document
 - The Job Command Centre Requires Action section shows held invoices with their follow-up dates
 - No costs are recorded against the job until the invoice is approved
-- To resolve: open the invoice, update the fields if needed, then Approve or Reject
 
-## 7. Resolving a held invoice
+### Resolving a held invoice
 
 Once you have the information you need:
 1. Open the held invoice in Finance → Approvals
 2. Update any fields that were wrong (amount, job, trade category)
 3. Click **Approve** (SOP 09-04) or **Reject** (SOP 09-06)
 
-## 8. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -67,7 +66,7 @@ Once you have the information you need:
 | No follow-up date | Seems optional | Set a date — without it, held invoices can sit unresolved for weeks |
 | Forgetting to resolve after getting the answer | Out of sight after placing hold | Check the Requires Action section in the Job Command Centre daily |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -75,10 +74,15 @@ Once you have the information you need:
 | Hold reason is blank | It's a required field — the system won't accept an empty reason |
 | Follow-up date has passed with no action | The Requires Action section in the Job Command Centre will flag this — resolve or extend the date |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Approve an invoice](finance_approve_invoice.md)
 - [Reject an invoice](finance_reject_invoice.md)
 - [Job Command Centre — overview](finance_job_dashboard.md)
+
+## 10. Screenshot placeholders
+- [ ] Hold reason dialog with example reason and follow-up date filled
+- [ ] Approval Queue showing held invoice with red hold badge and follow-up date
+- [ ] Requires Action section in Job Command Centre showing a held invoice
 
 ## 11. Automation notes
 - API: `POST /api/finance/documents/:id/hold` with `{ hold_reason: string, follow_up_date?: date }`
@@ -87,13 +91,20 @@ Once you have the information you need:
 - `financial_documents.dispute_follow_up_date` stores the follow-up date
 - Requires Action in Job Command Centre queries: `WHERE status = 'on_hold' AND job_id = :jobId`
 
-## 12. Owner
+## 12. Edge cases and limits
+- A held invoice can be approved or rejected directly — it does not need to return to `pending_approval` first
+- Hold reason is required (system validation); follow-up date is optional but strongly recommended
+- There is no time limit on how long an invoice can remain on hold
+- If the follow-up date passes with no action, the Requires Action section will continue showing the invoice but no automatic escalation occurs
+- An invoice can only hold one active hold reason at a time — updating the reason replaces the previous one
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 13. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] At least one invoice in `pending_approval` status

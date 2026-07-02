@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.1 — updated 2026-05-30
 screenshot_status: not_applicable
 owner: Admin / Director
@@ -43,7 +43,7 @@ All depth is behind drill-downs. The dashboard itself is a summary only.
 - At minimum, some content must have been published and recorded (SOP 19-02) before performance data appears
 - Follow-up signals require CRM contacts with email/website interactions logged
 
-## 5. The five dashboard sections
+## 5. Step-by-step process
 
 **Section 1 — This Month (top strip)**
 

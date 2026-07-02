@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -31,7 +31,9 @@ Shows all active jobs in a single ranked table ordered by margin risk. Identifie
 2. Click the **Jobs** tab (or navigate to `/finance/jobs` without a project selected)
 3. The Job Dashboard Selector loads — a portfolio view of all active jobs
 
-## 5. Reading the portfolio view
+## 5. Step-by-step process
+
+### Reading the portfolio view
 
 ### Sort options
 - **Risk** (default) — highest risk jobs at top (calculated priority score)
@@ -68,7 +70,7 @@ Each job row may show warning badges:
 - Claims issued / claims paid
 - Underclaim amount (if applicable)
 
-## 6. Steps — Weekly margin review
+### Steps — Weekly margin review
 
 1. Navigate to Finance → Jobs (no project selected)
 2. Ensure sort order is "Risk" (default)
@@ -81,7 +83,10 @@ Each job row may show warning badges:
 5. Check for WIPAA overdue badges — complete those reviews (SOP 09-11)
 6. Check for underclaim badges — draft the missing claims (SOP 09-08)
 
-## 7. What to escalate to the Director
+## 6. What happens next
+After the weekly review, action any red or critical jobs immediately. Log Director escalation items. Return to the portfolio view next week to verify improvements.
+
+### What to escalate to the Director
 
 Escalate immediately if:
 - Any job is below the 33% margin floor (critical badge)
@@ -89,7 +94,7 @@ Escalate immediately if:
 - A progress claim has been overdue for more than 14 days with no payment
 - WIPAA review has not been completed for more than 60 days on a high-value job
 
-## 8. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -97,7 +102,7 @@ Escalate immediately if:
 | Reading working margin without approving pending invoices first | Pending invoices not yet counted in actuals | Approve pending invoices before doing a portfolio review |
 | Not updating forecast_total_cost | Using default value of 0 or old value | WIPAA review prompts for forecast update — keep it current |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -106,10 +111,15 @@ Escalate immediately if:
 | Sort order not persisting | Sort is session-based — re-select on each visit |
 | WIPAA overdue badge not clearing after review | WIPAA review must be submitted through the WIPAA section (SOP 09-11) to update `last_wipaa_review_date` |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Job Command Centre — overview](finance_job_dashboard.md) — SOP 09-07
 - [Create a progress claim](finance_create_progress_claim.md) — SOP 09-08
 - [WIPAA review](finance_wipaa_review.md) — SOP 09-11
+
+## 10. Screenshot placeholders
+- [ ] Portfolio view — list of active jobs with margin badges (green/amber/red)
+- [ ] WIPAA overdue and underclaim warning badges on a job row
+- [ ] Sort control showing "Risk" selected
 
 ## 11. Automation notes
 - Route: `GET /api/finance/jobs/portfolio` (or derived from the Jobs tab state)
@@ -118,13 +128,19 @@ Escalate immediately if:
 - Margin risk severity: 0 (green) / 10 (amber) / 20 (red) / 30 (critical)
 - Portfolio aggregation uses the same `command-centre` endpoint per job, batched
 
-## 12. Owner
+## 12. Edge cases and limits
+- Only 'active' jobs appear in the portfolio — won, lost, and archived jobs are excluded
+- The priority score is computed client-side; refreshing may reorder jobs if data has changed on the server
+- Sort order is session-based and does not persist across page reloads
+- A job with no approved invoices and no contract value will still appear in the list but with empty margin badges
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 13. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] At least 3 active jobs with varying margin health (one green, one amber or red, one with overdue WIPAA or underclaim)

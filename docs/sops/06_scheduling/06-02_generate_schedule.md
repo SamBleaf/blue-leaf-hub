@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -35,44 +35,40 @@ Returns a set of tasks grouped by construction phase with start dates, durations
 
 ## 4. Before you start
 - The project must exist in the system
-- Know the desired construction start date (slab/site prep start, not contract signed date)
+- Know the desired construction start date (slab/site prep start, not the contract signed date)
 - Check whether the project has accepted trades from the RFQ — the AI uses these to refine the task list
+- If the baseline is currently locked, unlock it first (SOP 06-04) before regenerating
 
 ## 5. Step-by-step process
 
 1. Navigate to Operations → Schedule for the project
 2. If no schedule exists yet, a **Generate Schedule** prompt or button will be visible
-3. If a schedule exists and you want to regenerate: click **Regenerate** or **New schedule** (confirm you want to replace)
+3. If a schedule exists and you want to regenerate: click **Regenerate** or **New schedule** — confirm you want to replace when prompted
 4. Fill in:
    - **Start date** — the construction start date (YYYY-MM-DD or DD/MM/YYYY both accepted)
 5. Click **Generate**
-6. The AI processes the request (5–20 seconds)
+6. The AI processes the request (5–20 seconds typical)
 7. The new schedule appears in the Gantt view
 8. Review the tasks — check phases, durations, and the practical completion date look reasonable
 9. Adjust individual tasks as needed (SOP 06-03)
+10. Once satisfied, lock the baseline (SOP 06-04)
 
-## 6. What a generated schedule includes
-
-Typical output for a new build:
-- 30–60 tasks grouped across pre-construction, site prep, slab, frame, roofing, lock-up, rough-in, insulation, wall lining, painting, fitout, floor coverings, and completion phases
+## 6. What happens next
+After generation:
+- 30–60 tasks appear grouped across pre-construction, site prep, slab, frame, roofing, lock-up, rough-in, insulation, wall lining, painting, fitout, floor coverings, and completion phases
 - Each task has a phase, start date, end date, duration in days, and dependencies (e.g. Lock-up depends on Roofing)
 - Practical completion date is calculated automatically from the start date and total build duration
+- The previous schedule's tasks are soft-deleted (`deleted_at` set); they are not permanently removed
 
-## 7. After generating
-
-- Review the generated schedule top-to-bottom — check the phases make sense for the project type
-- Adjust individual task dates, durations, or phases (SOP 06-03) as needed
-- Once satisfied, lock the baseline (SOP 06-04)
-
-## 8. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
-| Using the contract date instead of the build start date | Confusion | The start date for schedule generation is the date groundworks or site prep begins — not when the contract is signed |
+| Using the contract date instead of the build start date | Confusion about dates | The start date for schedule generation is the date groundworks or site prep begins — not when the contract is signed |
 | Regenerating after baseline is locked | Wanting to try again | If the baseline is locked, unlock it first (SOP 06-04) or use the edit tools (SOP 06-03) to adjust specific tasks |
-| Not reviewing the output | Trusting AI too much | The AI is a starting point. Always review — check that the PC date is realistic, durations are reasonable for your trades. |
+| Not reviewing the output | Trusting AI too much | The AI is a starting point. Always review — check that the PC date is realistic and durations are reasonable for your trades |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -81,20 +77,37 @@ Typical output for a new build:
 | Generated schedule has generic tasks (not trade-specific) | The project may not have accepted trades linked. Check the RFQ and ensure trades are accepted before regenerating. |
 | Practical completion date seems too short or too long | The default template durations are estimates. Adjust task durations in the Sheet view (SOP 06-03) |
 
-## 10. Automation notes
+## 9. Related modules
+- [Schedule Manager overview](06-01_schedule_overview.md) — SOP 06-01
+- [Edit a schedule](06-03_edit_schedule.md) — SOP 06-03
+- [Lock a baseline](06-04_baseline_lock.md) — SOP 06-04
+
+## 10. Screenshot placeholders
+- [ ] Generate Schedule button / panel (before generation)
+- [ ] Start date input field
+- [ ] Gantt view immediately after a successful generation
+- [ ] Example of a generated task list in Sheet view
+
+## 11. Automation notes
 - API: `POST /api/schedule/generate` with `{ projectId, startDate, overrides? }`
 - Soft-deletes existing tasks: sets `schedule_tasks.deleted_at = now()`
 - Sources (in priority order): 1) Buildexact schedule hints if job is linked, 2) accepted trades from `projects.accepted_trades`, 3) default schedule template, 4) hardcoded legacy template
 - `schedule_version` increments on every generation (allows history if needed)
 - AI generation via `scheduleClaudePlan.mjs` — uses `claude-sonnet-4-6` model
 
-## 11. Owner of the process
+## 12. Edge cases and limits
+- The `startDate` field is required — submitting without it returns a 400 validation error
+- If the project has no accepted trades and no Buildexact link, the AI falls back to a generic new-build template
+- Regeneration while the baseline is locked is allowed by the server but will overwrite baseline dates — always unlock baseline before regenerating
+- Very short start dates (e.g. in the past by more than 1 year) may produce unexpected PC dates — always validate the output
+
+## 13. Owner of the process
 Admin  
-Next review: 2026-11-29
+Next review: 2026-12-02
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A project exists (does not need a schedule yet)
@@ -105,11 +118,11 @@ Next review: 2026-11-29
 **TC-01 — Generate schedule (happy path)**
 1. Navigate to Operations → Schedule for a project
 2. Click Generate Schedule
-3. Enter start date = two weeks from today
+3. Enter start date = two weeks from today (YYYY-MM-DD format)
 4. Click Generate
-5. Expected result: schedule appears in Gantt within 20 seconds
+5. Expected: schedule appears in Gantt within 20 seconds
 6. Expected: at minimum 10 tasks visible, grouped across phases
-7. Expected DB: `schedule_tasks` rows with `project_id` = this project's ID, `deleted_at IS NULL`
+7. Expected DB: `schedule_tasks` rows with `project_id` = this project's ID and `deleted_at IS NULL`
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Start date required**
@@ -121,7 +134,7 @@ Next review: 2026-11-29
 
 **TC-03 — Schedule version increments on regenerate**
 1. Note the current `schedule_version` in DB before the test
-2. Regenerate the schedule (confirm overwrite)
+2. Regenerate the schedule (confirm overwrite when prompted)
 3. Expected DB: old tasks have `deleted_at` set; new tasks have `schedule_version = old_version + 1`
 4. Expected: old tasks are NOT permanently deleted — they have a `deleted_at` timestamp
 - [ ] Pass  [ ] Fail
@@ -132,9 +145,16 @@ Next review: 2026-11-29
 - [ ] Pass  [ ] Fail
 
 **TC-05 — Practical completion date is logical**
-1. Generate a schedule with start_date = today
-2. Expected: PC (last task end date) is at least 6 months in the future for a new build
+1. Generate a schedule with `start_date = today`
+2. Expected: PC (last task `end_date`) is at least 6 months in the future for a new build
 3. Expected: PC is not before start date
+- [ ] Pass  [ ] Fail
+
+**Feature case — Regenerate replaces tasks, does not duplicate**
+1. Generate a schedule (note the task count)
+2. Regenerate with a different start date
+3. Expected: the Gantt shows a fresh set of tasks only — no duplicates from the first generation
+4. Expected DB: first-generation tasks have `deleted_at` set; new tasks have `deleted_at IS NULL`
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
@@ -142,5 +162,6 @@ Next review: 2026-11-29
 - [ ] Correct number of tasks and phases
 - [ ] Old tasks soft-deleted (not hard-deleted)
 - [ ] All task fields populated
+- [ ] PC date is logical relative to start date
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md

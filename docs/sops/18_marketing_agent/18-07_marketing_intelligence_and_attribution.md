@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -82,11 +82,12 @@ The "Data capture recommendations" section tells you exactly what to fix (e.g. "
 **Step 5 — Review recent enquiries**
 See the last 5 leads with their source and pipeline stage. For full lead detail, follow the link to the Sales Pipeline.
 
-## 7. Screenshot placeholders
-[insert screenshot: Intelligence dashboard — pipeline tiles + next actions]
-[insert screenshot: Intelligence — platform mix + media stats]
-[insert screenshot: Attribution — source breakdown bar chart]
-[insert screenshot: Attribution — recent enquiries list]
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
+|---|---|---|
+| Acting on demo data | No staging DB configured | Check for the demo banner at the top of each dashboard before taking any action. If shown, set up the staging DB before reviewing data. |
+| Ignoring the "unknown" attribution bucket | Assuming the data is wrong | A high "unknown" count means UTM links are missing from your social bio, email signatures, or Google Business Profile. Fix the source, not the report. |
+| Using Intelligence to track live Meta performance | It shows pipeline health, not reach | Intelligence tracks content status (draft/approved/published counts). For post reach and engagement, use the full Marketing Intelligence module at `/marketing/intelligence` (legacy tab). |
 
 ## 8. Troubleshooting
 | Problem | Solution |
@@ -97,22 +98,28 @@ See the last 5 leads with their source and pipeline stage. For full lead detail,
 | Pipeline all in "Drafting" | Josh is creating but not submitting packages — check Content Studio |
 | Media "With analysis" far below total | Some assets not yet analysed — check AI credentials in `.env` |
 
-## 9. Related SOPs
+## 9. Related modules
 - [Weekly Marketing Planning](18-02_weekly_marketing_planning.md)
 - [Content package review](18-04_content_package_review_and_approval.md)
 - [Calendar and publishing](18-05_calendar_scheduling_and_manual_publishing.md)
 
-## 10. Automation notes
+## 10. Screenshot placeholders
+[insert screenshot: Intelligence dashboard — pipeline tiles + next actions]
+[insert screenshot: Intelligence — platform mix + media stats]
+[insert screenshot: Attribution — source breakdown bar chart]
+[insert screenshot: Attribution — recent enquiries list]
+
+## 11. Automation notes
 - Both Intelligence and Attribution are read-only; no writes happen on these pages.
 - Attribution data is more complete when `first_touch_source` is populated on leads (requires the website attribution script firing `POST /api/public/attribution` before the enquiry submission).
 - The existing full Marketing Intelligence dashboard (SEO, content performance, keyword tracking) is at `/marketing/intelligence` in the legacy tab — this is the advanced SEO-focused module, distinct from the content pipeline health view at `/marketing/intelligence` (new route).
 
-## 11. Edge cases and limits
+## 12. Edge cases and limits
 - The Intelligence dashboard falls back to demo data on any API error — it never crashes.
 - The Attribution `?days=` parameter accepts 30, 90, or 180 only (enforced by the UI — not validated server-side).
 - Attribution does not pull data from paid ads APIs (Google Ads, Meta Ads).
 
-## 12. Owner of the process
+## 13. Owner of the process
 Admin / Director
 Next review: after staging runtime verification
 

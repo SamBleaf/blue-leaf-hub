@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -36,7 +36,9 @@ This is a forward-looking view based on what's already scheduled, not an AI pred
 2. Scroll to the **Cashflow Forecast** accordion
 3. Click to expand
 
-## 5. Reading the cashflow forecast
+## 5. Step-by-step process
+
+### Reading the cashflow forecast
 
 The forecast shows a month-by-month view for the next 3 months:
 
@@ -49,8 +51,8 @@ The forecast shows a month-by-month view for the next 3 months:
 | Cumulative | Running cash position across all 3 months |
 
 ### Colour coding
-- 🟢 Green net/cumulative — positive cash position expected
-- 🔴 Red net/cumulative — cash out expected to exceed cash in (may need overdraft or bring forward a claim)
+- Green net/cumulative — positive cash position expected
+- Red net/cumulative — cash out expected to exceed cash in (may need overdraft or bring forward a claim)
 
 ### What is and isn't included
 
@@ -67,7 +69,7 @@ The forecast shows a month-by-month view for the next 3 months:
 - Variations not yet signed
 - Preliminary costs not yet invoiced
 
-## 6. Using the forecast for decision-making
+### Using the forecast for decision-making
 
 **Positive upcoming net months:** Good. Cash in exceeds cash out. Consider whether you should be pulling forward any supplier payments to build relationships.
 
@@ -78,6 +80,9 @@ The forecast shows a month-by-month view for the next 3 months:
 
 **Large positive WIPAA but negative cashflow forecast:** You have earned revenue but not claimed it. Issue a progress claim immediately (SOP 09-08).
 
+## 6. What happens next
+After reviewing the forecast, act on any negative months before they become a cash problem. Record payments as they arrive so the forecast stays current.
+
 ## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
@@ -86,13 +91,7 @@ The forecast shows a month-by-month view for the next 3 months:
 | Ignoring a negative month | "It'll sort itself out" | A negative cash month needs an active plan — draft a claim now |
 | Forecast shows nothing | No claims issued or invoices approved | The forecast is empty if there is nothing scheduled — use it only when data exists |
 
-## 8. Limitations
-
-- The forecast is only as good as the claim and invoice data entered in the Hub
-- It does not include overhead or company-level cashflow — it is job-specific only
-- It cannot account for client payment disputes or delayed payments
-
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -100,10 +99,16 @@ The forecast shows a month-by-month view for the next 3 months:
 | Inflows show 0 despite claims issued | Check claim status — only "issued" and "overdue" claims are counted. Draft claims are not. |
 | Forecast shows claims from months ago | Old unpaid claims are still counted until marked paid — record any received payments (SOP 09-08) |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Create and send a progress claim](finance_create_progress_claim.md) — SOP 09-08
 - [WIPAA review](finance_wipaa_review.md) — SOP 09-11
 - [Job Command Centre — overview](finance_job_dashboard.md) — SOP 09-07
+
+## 10. Screenshot placeholders
+- [ ] Cashflow Forecast accordion — expanded with 3 months of data visible
+- [ ] Red month (outflows exceed inflows) showing red net and cumulative
+- [ ] Green month (inflows exceed outflows) showing green net and cumulative
+- [ ] Empty state (no claims or approved invoices)
 
 ## 11. Automation notes
 - API: `GET /api/finance/jobs/:id/cashflow` → returns 3-month cashflow projection
@@ -113,13 +118,22 @@ The forecast shows a month-by-month view for the next 3 months:
 - No AI — purely deterministic calculation
 - Cashflow accordion in `JobCommandCentre.jsx` fetches from `/cashflow` endpoint on expand
 
-## 12. Owner
+## 12. Edge cases and limits
+- Forecast covers exactly 3 calendar months from today — months beyond this are not shown
+- Claims with future due dates outside the 3-month window are excluded
+- Draft claims are excluded from inflows regardless of due date
+- Partial payments reduce the inflow amount shown for that claim
+- The forecast does not auto-refresh when new invoices are approved — reload or re-expand the accordion
+- The forecast is job-specific only — it does not include overhead or company-level cashflow
+- Client payment disputes or delayed payments cannot be reflected in the forecast automatically
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 13. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A job with at least one issued progress claim (due date in next 3 months)

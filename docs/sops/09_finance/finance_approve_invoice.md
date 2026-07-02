@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -34,7 +34,9 @@ Moves the invoice from "pending_approval" to "approved" status. Records the appr
 - Job is correctly assigned (SOP 09-03)
 - **Trade category is assigned** — this is required. The system will not allow approval without a trade category.
 
-## 5. Steps — Standard approval
+## 5. Step-by-step process
+
+### Standard approval
 
 1. Open the invoice in Finance → Approvals
 2. Confirm all fields are correct:
@@ -49,7 +51,7 @@ Moves the invoice from "pending_approval" to "approved" status. Records the appr
 7. Status changes to "approved"
 8. The invoice is automatically filed to the Dropbox folder for the assigned job
 
-## 6. Trade category — why it is required
+### Trade category — why it is required
 
 Trade categories link invoice costs to budget lines. Without a trade category:
 - The cost cannot be compared against the budget for that trade
@@ -64,7 +66,7 @@ Trade categories link invoice costs to budget lines. Without a trade category:
 **Trade category auto-learning:**
 After 3 invoices from the same ABN are confirmed with the same trade category, the system automatically sets `auto_tag = true`. Future invoices from that supplier are pre-tagged without manual selection.
 
-## 7. Partial approval
+### Partial approval
 
 If part of an invoice is disputed or incorrect:
 
@@ -73,7 +75,7 @@ If part of an invoice is disputed or incorrect:
 3. The difference between invoice total and approved amount is noted internally
 4. Add a note explaining why a partial amount was approved (this is stored on the document)
 
-## 8. What happens after approval
+## 6. What happens next
 
 - `financial_documents.status` → "approved"
 - `financial_documents.approved_amount` → set to approved amount
@@ -81,7 +83,7 @@ If part of an invoice is disputed or incorrect:
 - Invoice is filed to Dropbox at the job's folder path
 - If this supplier has reached 3 confirmed invoices with the same trade: `supplier_trade_defaults.auto_tag` → true
 
-## 9. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -90,7 +92,7 @@ If part of an invoice is disputed or incorrect:
 | Approving to wrong job | Job was not re-checked after extraction | Verify the job address shown matches the invoice before approving |
 | Using total inc-GST as approved amount | Misread the field labels | The approved amount should be the ex-GST amount for accounting — unless the invoice has no GST |
 
-## 10. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -99,19 +101,31 @@ If part of an invoice is disputed or incorrect:
 | Dropbox filing fails after approval | Dropbox may be offline or the folder path may not exist — the invoice is still approved, file manually to Dropbox |
 | Need to unapprove an invoice | Approved invoices cannot be unapproved through the UI — contact Admin who can update the status directly in the database |
 
-## 11. Related SOPs
+## 9. Related modules
 - [Review AI invoice extraction](finance_review_ai_extraction.md)
 - [Match an invoice to a job](finance_match_invoice_to_job.md)
 - [Put an invoice on hold](finance_put_invoice_on_hold.md)
 - [Reject an invoice](finance_reject_invoice.md)
 - [Job Command Centre — overview](finance_job_dashboard.md)
 
-## 12. Automation notes
-- API: `POST /api/finance/approve/:id` with `{ trade_category_id, approved_amount }`
+## 10. Screenshot placeholders
+- [ ] Invoice detail panel showing all fields completed with green trade category tag
+- [ ] Approve button enabled state vs disabled state ("Trade category required")
+- [ ] "Auto-tagged" green badge on the trade category field for a known supplier
+- [ ] Approved invoice in Finance → Approvals with "approved" status badge
+
+## 11. Automation notes
+- API: `POST /api/finance/documents/:id/approve` with `{ trade_category_id, approved_amount }`
 - Returns 400 if `trade_category_id` is null
 - On approval: triggers `updateJobBudgetActuals(jobId, tradeCategoryId, approvedAmount)`
 - Dropbox auto-file: uses `DROPBOX_JOB_FOLDER_TEMPLATE` env var to construct path
 - Supplier learning: increments `supplier_trade_defaults.confirmed_count`, sets `auto_tag = true` at count ≥ 3
+
+## 12. Edge cases and limits
+- Once approved, an invoice cannot be unapproved via the standard UI — Admin must update the database directly
+- Dropbox filing failure does not block or reverse the approval — the invoice is approved regardless; file manually if Dropbox fails
+- The approved amount can be less than the invoice total (partial approval) but cannot exceed it — the approved amount is what gets recorded as a job cost
+- If a supplier reaches `confirmed_count = 3` but is later found to be mis-tagged, `auto_tag` must be reset manually in the database
 
 ## 13. Owner
 Admin  

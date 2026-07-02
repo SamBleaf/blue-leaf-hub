@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -27,7 +27,12 @@ When a WIPAA review is overdue (more than 30 days since the last review), the WI
 ## 3. What this does
 Records a WIPAA snapshot for the job: contract value, cost to date, forecast total cost, percentage complete, WIPAA value, and projected margin. Stores the review in history so margin trends are traceable over time. Resets the overdue timer.
 
-## 4. Key WIPAA concepts
+## 4. Before you start
+- You have access to current site progress information (ask the site manager if unsure)
+- At least one approved invoice exists for the job (so Cost to Date is non-zero)
+- The job has `original_contract_value` set
+
+### Key WIPAA concepts
 
 | Term | Definition |
 |------|-----------|
@@ -36,7 +41,7 @@ Records a WIPAA snapshot for the job: contract value, cost to date, forecast tot
 | **WIPAA Value** | Contract value × percentage complete − total billed to date. Represents earned but unbilled revenue. |
 | **Projected Margin %** | (Contract Value − Forecast Total Cost) ÷ Contract Value × 100 |
 
-## 5. Steps
+## 5. Step-by-step process
 
 ### Monthly WIPAA review
 
@@ -72,7 +77,9 @@ To view all past WIPAA reviews for a job:
 2. A table shows all past reviews with: date, reviewer, forecast cost, projected margin, and notes
 3. This lets you track whether the forecast has been trending up or down over the life of the job
 
-## 6. Reading the WIPAA value
+## 6. What happens next
+
+### Reading the WIPAA value
 
 **Positive WIPAA value**: You have earned more than you have billed. This is an asset — unbilled work in progress. A positive WIPAA means you are ahead of claims relative to completion — you should issue a progress claim.
 
@@ -80,14 +87,15 @@ To view all past WIPAA reviews for a job:
 
 **WIPAA ≈ 0**: Billing is in line with completion. Ideal state.
 
-## 7. When to flag for the Director
+### When to flag for the Director
 
+Escalate to the Director immediately if:
 - Projected margin drops below target by more than 5% from the previous review
 - Forecast Total Cost has increased significantly (>10% from last review) without a corresponding signed variation
 - WIPAA value is large and positive but no claim is imminent (cash flow risk)
 - The job has been at the same "percentage complete" for more than 2 reviews (stalled job)
 
-## 8. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -96,7 +104,7 @@ To view all past WIPAA reviews for a job:
 | Skipping months | Busy site | The Hub sends reminders — WIPAA accordion opens red after 30 days |
 | Optimistic forecast to avoid a bad-looking margin | Pressure to look good | An inaccurate forecast is useless — the margin will catch up to reality eventually |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -105,10 +113,15 @@ To view all past WIPAA reviews for a job:
 | WIPAA accordion still shows red after submitting | Refresh the page — `last_wipaa_review_date` should now be today |
 | Review history is empty | First review for this job — the history starts with this submission |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Job Command Centre — overview](finance_job_dashboard.md) — SOP 09-07
 - [Review margin risk across all jobs](finance_review_margin_risk.md) — SOP 09-09
 - [Cashflow forecast](finance_cashflow_forecast.md) — SOP 09-12
+
+## 10. Screenshot placeholders
+- [ ] WIPAA accordion open with red overdue border and warning message
+- [ ] WIPAA calculation panel showing Forecast Total Cost, Cost to Date, WIPAA Value, Projected Margin %
+- [ ] Review history table showing past reviews with dates and margin trends
 
 ## 11. Automation notes
 - API: `GET /api/finance/jobs/:id/wipaa/current` → current WIPAA calculation
@@ -120,13 +133,20 @@ To view all past WIPAA reviews for a job:
 - `wipaa_reviews` table: one row per submitted review, stores full WIPAA snapshot
 - `jobs.last_wipaa_review_date` updated on each `POST .../wipaa/review`
 
-## 12. Owner
+## 12. Edge cases and limits
+- The WIPAA calculation uses signed variations only — unsigned (draft/sent) variations are excluded from Contract Value
+- If no WIPAA review has ever been submitted, `last_wipaa_review_date` is null — the accordion opens red immediately for new jobs
+- Forecast Total Cost cannot be zero for meaningful projections; the system will accept 0 but the Projected Margin will show 100% (misleading)
+- A review note is optional but highly recommended for audit trail purposes
+- First-Friday reminders are middleware-based and only fire when `/api/finance` is called — if the API is not accessed on the first Friday, no reminders are sent that month
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 13. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A job with at least one approved invoice (so Cost to Date is non-zero)

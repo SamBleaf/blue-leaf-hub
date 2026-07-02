@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -32,7 +32,9 @@ Assigns an invoice to a specific job so that costs are tracked in the correct jo
 - Invoice has status "pending_approval"
 - You are viewing the invoice in Finance → Approvals or Finance → Inbox
 
-## 5. How the AI matches jobs
+## 5. Step-by-step process
+
+### How the AI matches jobs
 
 The system uses a 5-tier matching algorithm (deterministic first, AI last):
 
@@ -46,14 +48,14 @@ The system uses a 5-tier matching algorithm (deterministic first, AI last):
 
 The job match confidence score is shown as a percentage (e.g. "Job match: 87%"). This appears after AI extraction.
 
-## 6. Steps — Verify an AI-matched job
+### Verify an AI-matched job
 
 1. Open the invoice in Finance → Approvals
 2. On the right side, look for the **Job** field — it shows the matched job address and confidence score
 3. Check: does the job address match the site mentioned on the invoice? Does the supplier work on that site?
 4. If the match looks correct, proceed to SOP 09-04 (approve) or SOP 09-05 (hold)
 
-## 7. Steps — Rematch to a different job
+### Rematch to a different job
 
 If the AI has matched to the wrong job:
 
@@ -65,7 +67,7 @@ If the AI has matched to the wrong job:
 6. The confidence score updates to 100% (manual match)
 7. Proceed to SOP 09-04 to approve
 
-## 8. Steps — Assign a job manually (no match found)
+### Assign a job manually (no match found)
 
 If the AI could not match any job:
 
@@ -75,14 +77,14 @@ If the AI could not match any job:
 4. Select the correct job
 5. Proceed to approval
 
-## 9. What happens after correct job assignment
+## 6. What happens next
 
 Once an invoice is approved with a job assigned:
 - The invoice amount is added to that job's **Actual Costs** in the Job Command Centre
 - The trade category's budget vs actual comparison updates automatically
 - The job's working margin recalculates
 
-## 10. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -90,7 +92,7 @@ Once an invoice is approved with a job assigned:
 | Assigning to a wrong job that has the same supplier | Supplier works on multiple Blue Leaf jobs simultaneously | Check the invoice date against the expected billing period for each job |
 | No job assigned at approval | Skipped the job field | The system requires a job to be assigned — it will not allow approval without one |
 
-## 11. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -98,24 +100,35 @@ Once an invoice is approved with a job assigned:
 | Job search returns no results | The job may not exist yet — check Finance → Jobs or ask Admin to create it |
 | Job field greyed out | Invoice may be in a non-editable status — check the status badge |
 
-## 12. Related SOPs
+## 9. Related modules
 - [Review AI invoice extraction](finance_review_ai_extraction.md) — step before this
 - [Approve an invoice](finance_approve_invoice.md) — step after this
 - [Put an invoice on hold](finance_put_invoice_on_hold.md)
 
-## 13. Automation notes
+## 10. Screenshot placeholders
+- [ ] Invoice detail panel showing AI-matched job with confidence score badge
+- [ ] "Wrong job?" link and the job search dropdown
+- [ ] "No job matched" empty state with Assign job button
+
+## 11. Automation notes
 - 5-tier matching runs on every new document
 - `ai_job_match_confidence` stored on `financial_documents.ai_job_match_confidence`
-- Manual reassignment: `PUT /api/financial-documents/:id` with `{ job_id: "<uuid>" }`
+- Manual reassignment: `PATCH /api/finance/documents/:id` with `{ job_id: "<uuid>" }`
 - Job match confidence displayed in Requires Action section of Job Command Centre
 
-## 14. Owner
+## 12. Edge cases and limits
+- Only jobs with status 'active' appear in the job search — archived or cancelled jobs are excluded
+- A manual reassignment resets `ai_job_match_confidence` to null (the confidence score is no longer meaningful after human override)
+- If the invoice is approved and later re-assigned to a different job, the cost is moved to the new job's actuals — there is no automatic notification of this change
+- Tier 5 (Claude AI inference) only runs if the previous 4 tiers all fail to find a match
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 15. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] At least one invoice in `pending_approval` status, AI-matched to a job (any confidence level)
@@ -162,6 +175,14 @@ Next review: 2026-11-29
 2. Expected: matching jobs appear in the dropdown
 3. Type a non-existent address
 4. Expected: "No results" or empty state shown
+- [ ] Pass  [ ] Fail
+
+**TC-06 — Job actuals update after correct job assignment and approval**
+1. Note the current Actual Costs $ in the Job Command Centre for the target job
+2. Assign and approve an invoice for that job
+3. Reload the Job Command Centre
+4. Expected: Actual Costs $ increases by the approved amount of the invoice
+5. Check DB: `SELECT SUM(approved_amount) FROM financial_documents WHERE job_id = '<id>' AND status = 'approved'`
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

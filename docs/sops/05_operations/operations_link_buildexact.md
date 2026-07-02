@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: placeholders_only
 owner: Admin
@@ -32,7 +32,7 @@ Associates a Blue Leaf project with its matching Buildexact job. Once linked, th
 - The project exists in the Hub
 - You know the Buildexact job ID (or the project was created from a Buildexact source)
 
-## 5. How a project gets linked
+## 5. Step-by-step process
 
 Linking happens in one of three ways:
 
@@ -40,7 +40,7 @@ Linking happens in one of three ways:
 2. **Via webhook** — when Buildexact fires an Estimate Accepted or Lead webhook, the Hub links the project with `buildexact_link_source = 'webhook'`
 3. **Verifying the link** — use the Buildexact job lookup to confirm the link resolves to the correct Buildexact job
 
-## 6. Step-by-step process (verify a link)
+To verify a link manually:
 
 1. Open the project in Operations
 2. The project shows its `buildexact_job_id` and `buildexact_link_source` (pending / webhook)
@@ -48,14 +48,14 @@ Linking happens in one of three ways:
 4. If it returns the expected job, the link is good
 5. Pull the estimate to seed budgets and category data
 
-## 7. What happens next
+## 6. What happens next
 
 - The operations project list surfaces `buildexact_job_id` and `buildexact_link_source`
 - The Buildexact job lookup (`GET /api/buildexact/job/:id`) logs in and fetches the job
 - The estimate pull (`GET /api/buildexact/job/:buildexactJobId/estimate`) returns categories + line items
 - Issued POs sync to Buildexact when `buildexactJobId` is present (SOP 05-03)
 
-## 8. Common mistakes
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -63,7 +63,7 @@ Linking happens in one of three ways:
 | Wrong Buildexact job ID | Manual entry error | Verify the lookup returns the correct job before relying on it |
 | Assuming budgets seed without an estimate | No estimate pulled | Budgets seed from the estimate — pull it after linking |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -71,6 +71,10 @@ Linking happens in one of three ways:
 | "id required" (400) | The lookup was called without a Buildexact job ID |
 | Lookup returns 502 | Buildexact API error — check the subscription approval and key validity |
 | POs not syncing | The project's `buildexact_job_id` is empty — confirm the link |
+
+## 9. Related modules
+- [Open a project in operations](operations_open_project.md) — SOP 05-02
+- [Issue a purchase order to a trade](operations_issue_purchase_order.md) — SOP 05-03
 
 ## 10. Screenshot placeholders
 [insert screenshot: project showing Buildexact link source]
@@ -130,10 +134,18 @@ Next review: 2026-11-30
 3. (SKIP if not configured)
 - [ ] Pass  [ ] Fail
 
+**TC-06 — PO sync to Buildexact after link**
+1. With a linked project (`buildexact_job_id` set), issue a PO (SOP 05-03) passing that `buildexactJobId`
+2. Expected: PO created locally AND a corresponding PO created in Buildexact
+3. Expected DB: `purchase_orders` row has `status = 'issued'` and the Buildexact PO ID logged
+4. (SKIP if Buildexact not configured)
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Lookup works with valid id (or correctly 503s when unconfigured)
 - [ ] Missing id rejected
 - [ ] Link source visible on project list
 - [ ] Estimate pull returns categories
+- [ ] PO sync fires when buildexactJobId present
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md

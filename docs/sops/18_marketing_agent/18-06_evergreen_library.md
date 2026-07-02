@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin / Marketing Operator
@@ -55,17 +55,18 @@ From any content item in the Library (`/marketing/library`):
 
 You can also update the evergreen score (e.g. promote a 5 to an 8 if a reshare performed well).
 
-## 6. Evergreen score guide
-| Score | Meaning |
-|---|---|
-| 9–10 | Best of Blue Leaf — reshare quarterly |
-| 7–8 | Strong performer — reshare every 6 months |
-| 5–6 | Good content — reshare annually or when relevant |
-| 1–4 | Low evergreen value — appears in library but deprioritise |
+## 6. What happens next
+After marking an item as evergreen:
+- The item appears in the Evergreen Library sorted by score descending.
+- When planning a week with no new media, open the Evergreen Library and pick a high-scoring item to reshare via the Calendar.
+- Update the score over time: if a reshared piece performs well, increase its score.
 
-## 7. Screenshot placeholders
-[insert screenshot: Evergreen Library card grid]
-[insert screenshot: Individual card with evergreen score badge and Josh labels]
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
+|---|---|---|
+| Giving every item score 10 | Marking content evergreen without scoring critically | Reserve 9–10 for genuinely exceptional content. Most items that are "good enough to reshare" score 5–7. |
+| Marking draft items as evergreen | Enthusiasm after generating | Only mark approved or published items as evergreen — drafts have not passed quality review |
+| Never updating scores | Set and forget | After a reshare, revisit the score: increase it if performance was strong, lower it if the reshare underperformed |
 
 ## 8. Troubleshooting
 | Problem | Solution |
@@ -74,21 +75,25 @@ You can also update the evergreen score (e.g. promote a 5 to an 8 if a reshare p
 | No items in the Evergreen Library | No items have been marked as evergreen yet — mark items via the Library |
 | Evergreen score did not update | API error on `POST /api/marketing/content/:id/evergreen` — check console |
 
-## 9. Related SOPs
+## 9. Related modules
 - [Content Studio overview](18-01_content_studio_overview.md)
 - [Calendar and publishing](18-05_calendar_scheduling_and_manual_publishing.md)
 
-## 10. Automation notes
+## 10. Screenshot placeholders
+[insert screenshot: Evergreen Library card grid]
+[insert screenshot: Individual card with evergreen score badge and Josh labels]
+
+## 11. Automation notes
 - The Evergreen Library is a read-only view. Evergreen scoring is done via `POST /api/marketing/content/:id/evergreen`.
 - Evergreen items are not scheduled automatically. You decide when to reshare.
 - The score filter (`evergreen_score > 0`) is applied server-side.
 
-## 11. Edge cases and limits
+## 12. Edge cases and limits
 - Items with `evergreen_score = 0` (or null) do not appear in the Evergreen Library — they remain in the main Library.
 - A published item can be marked evergreen at any time.
 - There is no current maximum evergreen score — the endpoint accepts any positive integer; convention is 1–10.
 
-## 12. Owner of the process
+## 13. Owner of the process
 Admin / Marketing Operator
 Next review: after staging runtime verification
 

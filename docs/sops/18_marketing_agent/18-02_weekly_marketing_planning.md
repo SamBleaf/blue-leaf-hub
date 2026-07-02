@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin / Marketing Operator
@@ -39,7 +39,19 @@ Marketing → **Weekly Planner** (`/marketing/planner`).
 Use **← Prev** and **Next →** buttons at the top to move to the week you want to plan. The week label shows "Mon DD MMM → Sun DD MMM".
 
 **Step 3 — Choose a campaign template**
-Click **Start from a template**. The template picker slides out showing the 7 Blue Leaf campaign templates (e.g. "How We Build", "Client Results", "Why Blue Leaf"). Pick the one that fits your content direction for the week.
+Click **Start from a template**. The template picker slides out showing the 7 Blue Leaf campaign templates:
+
+| Template key | Cadence | Best for |
+|---|---|---|
+| `how_we_build` | 3 posts/wk | Educational — process and craft |
+| `client_results` | 2 posts/wk | Social proof — completed builds |
+| `why_blue_leaf` | 2 posts/wk | Brand — values and differentiators |
+| `blue_leaf_life` | 3 posts/wk | Culture — team and behind the scenes |
+| `project_deep_dive` | 2 posts/wk | Long-form — one project per week |
+| `suburb_focus` | 2 posts/wk | Local — suburb-specific content |
+| `renovation_season` | 3 posts/wk | Seasonal — renovation-ready messaging |
+
+Pick the one that fits your content direction for the week.
 
 **Step 4 — Apply the template**
 Click **Use this template**. This creates a campaign record and the week's empty posting slots (e.g. 3 slots: Mon IG, Wed FB, Fri IG).
@@ -56,29 +68,19 @@ Click **Create from media** on a slot to open the Content Studio (`/marketing/st
 **Step 7 — Repeat for remaining slots**
 Return to the Planner and fill the next slot. The plan is complete when all slots have content.
 
-## 6. Template descriptions
+## 6. What happens next
+- Content creation → Media Vault (SOP 18-03) then Content Studio (SOP 18-01)
+- Review created packages → Approval Queue (SOP 18-04)
+- Schedule and publish → Calendar (SOP 18-05)
 
-| Template key | Cadence | Best for |
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
 |---|---|---|
-| `how_we_build` | 3 posts/wk | Educational — process and craft |
-| `client_results` | 2 posts/wk | Social proof — completed builds |
-| `why_blue_leaf` | 2 posts/wk | Brand — values and differentiators |
-| `blue_leaf_life` | 3 posts/wk | Culture — team and behind the scenes |
-| `project_deep_dive` | 2 posts/wk | Long-form — one project per week |
-| `suburb_focus` | 2 posts/wk | Local — suburb-specific content |
-| `renovation_season` | 3 posts/wk | Seasonal — renovation-ready messaging |
+| Applying two templates to the same week | Indecision between themes | Choose one template per week. Applying a second creates a second campaign and its own slots — the Planner does not prevent this. |
+| Leaving slots empty by end of week | Created the plan but did not fill all slots | Treat empty slots as a to-do. If a slot cannot be filled with new content, pull a high-scoring item from the Evergreen Library instead. |
+| Opening Content Studio without selecting a slot CTA | Going directly to `/marketing/studio` | Always click **Create from media** on the slot so the campaign and week are pre-filled. A direct Studio visit will not link content to the plan. |
 
-## 7. After planning
-- Content creation → SOP 18-03 (Media Vault) then Content Studio (see SOP 18-01)
-- Review created packages → SOP 18-04 (Approval Queue)
-- Schedule and publish → SOP 18-05 (Calendar)
-
-## 8. Screenshot placeholders
-[insert screenshot: Weekly Planner header with week navigation]
-[insert screenshot: Template picker modal with 7 templates]
-[insert screenshot: Slot grid after template applied — empty slots with Create from media buttons]
-
-## 9. Troubleshooting
+## 8. Troubleshooting
 | Problem | Solution |
 |---|---|
 | Template picker empty | Migration 122 not applied — apply in Supabase SQL editor |
@@ -86,10 +88,15 @@ Return to the Planner and fill the next slot. The plan is complete when all slot
 | Slots not appearing after template applied | Reload the page; if still missing, check DB for the new campaign record |
 | Wrong week showing | Use ← / → navigation — the Planner defaults to the current week |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Content Studio overview](18-01_content_studio_overview.md)
 - [Media capture and upload](18-03_media_capture_and_upload.md)
 - [Content package review](18-04_content_package_review_and_approval.md)
+
+## 10. Screenshot placeholders
+[insert screenshot: Weekly Planner header with week navigation]
+[insert screenshot: Template picker modal with 7 templates]
+[insert screenshot: Slot grid after template applied — empty slots with Create from media buttons]
 
 ## 11. Automation notes
 - Templates create slots automatically when applied. No manual slot creation needed.

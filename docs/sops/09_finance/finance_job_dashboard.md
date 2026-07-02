@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -38,7 +38,9 @@ Navigate to `/finance/jobs/{jobId}`
 **Option C — From JobDashboardSelector:**
 Navigate to Finance → Jobs (no project selected) — shows a portfolio of all jobs ranked by margin risk. Click any job to open its command centre.
 
-## 5. Reading the Command Centre
+## 5. Step-by-step process
+
+### Reading the Command Centre
 
 ### Job header
 Shows: job address, current contract value (includes signed variations), forecast margin %, and margin health colour.
@@ -89,7 +91,7 @@ Lists all claims with status, issue date, due date, and payment status. Overdue 
 ### Cashflow Forecast accordion
 3-month rolling cashflow based on upcoming claims and known costs. See SOP 09-12.
 
-## 6. What to look for in a weekly review
+### What to look for in a weekly review
 
 1. Check Working Margin vs Target — is it trending in the right direction?
 2. Check Forecast Margin — does your cost forecast reflect reality?
@@ -98,14 +100,17 @@ Lists all claims with status, issue date, due date, and payment status. Overdue 
 5. Check WIPAA — is it up to date? (open if red)
 6. Check Underclaim Alert — are you behind on issuing claims?
 
-## 7. Editing the target margin
+### Editing the target margin
 
 1. Click **Edit target margin** in the job header
 2. Enter the new target % (must be above the floor of 33%)
 3. If setting below 33%, Director confirmation is required — enter reason
 4. Save
 
-## 8. Common mistakes
+## 6. What happens next
+After reviewing the Command Centre, take action on any items in Requires Action, then close the page. The Command Centre reflects live data — it updates as invoices are approved, claims are sent, and WIPAA reviews are submitted.
+
+## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
@@ -113,7 +118,7 @@ Lists all claims with status, issue date, due date, and payment status. Overdue 
 | Underclaim alert firing despite claims sent | Claim is in "draft" status — drafts don't count | Send the claim to the client (SOP 09-08) to move it out of draft |
 | Budget vs Actual shows 0 for a trade | Budget not seeded from Buildxact | Use "Seed from Buildxact" in the Budget vs Actual section |
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -122,12 +127,19 @@ Lists all claims with status, issue date, due date, and payment status. Overdue 
 | WIPAA opens but calculation looks wrong | Check that `forecast_total_cost` is set — it defaults to 0 if never entered |
 | Budget vs Actual categories missing | Budget has not been seeded — click "Seed from Buildxact" or enter budgets manually |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Create a progress claim](finance_create_progress_claim.md) — SOP 09-08
 - [Review margin risk across all jobs](finance_review_margin_risk.md) — SOP 09-09
 - [Create a variation](finance_create_variation.md) — SOP 09-10
 - [WIPAA review](finance_wipaa_review.md) — SOP 09-11
 - [Cashflow forecast](finance_cashflow_forecast.md) — SOP 09-12
+
+## 10. Screenshot placeholders
+- [ ] KPI bar showing all 6 KPIs with sample values
+- [ ] Budget vs Actual table — on-track, approaching, and over-budget rows visible
+- [ ] Underclaim alert banner with percentage and dollar amount
+- [ ] WIPAA accordion open with red overdue border
+- [ ] Requires Action section with pending invoices listed
 
 ## 11. Automation notes
 - All data fetched via `GET /api/finance/jobs/:id/command-centre` — single aggregate endpoint
@@ -137,13 +149,20 @@ Lists all claims with status, issue date, due date, and payment status. Overdue 
 - Margin health computed: `working_margin - target_margin_pct` → green/amber/red/critical
 - `POST /api/finance/jobs/:id/wipaa/review` — logs WIPAA review and resets overdue timer
 
-## 12. Owner
+## 12. Edge cases and limits
+- Target margin below 33% (the floor) requires Director confirmation and a documented reason before the edit is saved
+- Working margin is calculated from approved invoices only — pending invoices are excluded until approved
+- If `forecast_total_cost` is 0 or null, Forecast Margin % will show as 100% (misleading) — always set a realistic forecast after budget seeding
+- The command centre does not auto-refresh — reload the page to see changes made by another user
+- Jobs with no Buildxact `job_id` linked will show empty Budget vs Actual (no seed possible)
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 13. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] At least one job with approved invoices, a budget seeded, and a progress claim issued

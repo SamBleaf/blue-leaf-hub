@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -48,7 +48,7 @@ Marks the invoice as "rejected" with a mandatory reason. The invoice is permanen
 6. The invoice is removed from the active Approval Queue
 7. It remains searchable in Finance → Inbox with "rejected" filter
 
-## 6. What happens after rejection
+## 6. What happens next
 
 - `financial_documents.status` → 'rejected'
 - The invoice is excluded from all job cost calculations permanently
@@ -72,24 +72,35 @@ Marks the invoice as "rejected" with a mandatory reason. The invoice is permanen
 | Can't find a rejected invoice | In Finance → Inbox, filter by "Rejected" status |
 | Rejection reason field blank | It is required — the system will not accept an empty reason |
 
-## 9. Related SOPs
+## 9. Related modules
 - [Put an invoice on hold](finance_put_invoice_on_hold.md) — use instead when unsure
 - [Approve an invoice](finance_approve_invoice.md)
 
-## 10. Automation notes
-- API: `PUT /api/financial-documents/:id` with `{ status: 'rejected', rejection_reason: string }`
+## 10. Screenshot placeholders
+- [ ] Rejection reason dialog with example reason
+- [ ] Finance → Inbox filtered by "Rejected" showing rejected invoice
+- [ ] Invoice detail panel showing "rejected" status badge and rejection reason
+
+## 11. Automation notes
+- API: `POST /api/finance/documents/:id/reject` with `{ rejection_reason: string }`
 - `financial_documents.status` → 'rejected'
 - Rejected documents are excluded from all job budget queries by default
 - No Dropbox filing occurs for rejected invoices
 - Rejected invoices do not trigger trade-learning (confirmed_count not incremented)
 
-## 11. Owner
+## 12. Edge cases and limits
+- Rejection is permanent via the standard UI — a rejected invoice cannot be re-approved without direct database intervention by Admin
+- A rejected invoice is visible in Finance → Inbox only when filtering by "Rejected" status — it is hidden from the default Approval Queue view
+- Both `pending_approval` and `on_hold` invoices can be rejected — no need to un-hold first
+- The rejection reason is stored in `dispute_reason` (shared column with hold reason) — the last written value overwrites any previous hold reason
+
+## 13. Owner
 Admin  
 Next review: 2026-11-29
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] At least one invoice in `pending_approval` status that can be used as a test rejection
@@ -136,6 +147,17 @@ Next review: 2026-11-29
 1. Find a rejected invoice
 2. Expected: Approve button is disabled or not shown
 3. Expected: status cannot be changed back to pending_approval through the UI
+- [ ] Pass  [ ] Fail
+
+**TC-06 — Reject from on_hold status**
+1. Place an invoice on hold (SOP 09-05)
+2. Confirm the invoice is in 'on_hold' status
+3. Open the held invoice and click Reject
+4. Enter reason: "Test — rejected directly from on_hold status"
+5. Confirm
+6. Expected: status → 'rejected' (no need to return to pending_approval first)
+7. Check DB: `SELECT status, dispute_reason FROM financial_documents WHERE id = '<id>'`
+   - status = 'rejected'
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

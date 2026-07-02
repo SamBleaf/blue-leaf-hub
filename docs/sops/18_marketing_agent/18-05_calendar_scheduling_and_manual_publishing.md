@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin / Marketing Operator
@@ -66,10 +66,12 @@ The item moves to the "Published" section. A green tick appears on the card.
 | Campaign slots | Empty or filled slots from the Weekly Planner |
 | Published | Items logged as posted this week |
 
-## 7. Screenshot placeholders
-[insert screenshot: Calendar week view with scheduled cards]
-[insert screenshot: "Mark as posted" button on a scheduled card]
-[insert screenshot: Published item with green tick]
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
+|---|---|---|
+| Forgetting to log a post in the Hub after posting externally | Posting on IG then moving on | Return to the Calendar immediately after posting and click "Mark as posted" — the log is how the Hub knows it was published |
+| Scheduling an item that is still in draft | Not checking status | Only approved items should be scheduled. Check the item's status in the Library before assigning a `scheduled_at` date. |
+| Logging a split post as one entry | Convenience | If a piece of content was posted on both IG and FB on different days, log each separately in the Calendar |
 
 ## 8. Troubleshooting
 | Problem | Solution |
@@ -79,21 +81,26 @@ The item moves to the "Published" section. A green tick appears on the card.
 | Published log not updating | API error — check console; retry |
 | Item not appearing on the correct day | Check `scheduled_at` — it may be in a different week |
 
-## 9. Related SOPs
+## 9. Related modules
 - [Content package review](18-04_content_package_review_and_approval.md)
 - [Evergreen Library](18-06_evergreen_library.md)
 
-## 10. Automation notes
+## 10. Screenshot placeholders
+[insert screenshot: Calendar week view with scheduled cards]
+[insert screenshot: "Mark as posted" button on a scheduled card]
+[insert screenshot: Published item with green tick]
+
+## 11. Automation notes
 - The Hub does **not** auto-post to Instagram or Facebook. All posting is manual.
 - `publish_mode = manual` is always set when using the Calendar's Mark as posted button.
 - `social_post_publishes` stores the log entry. `marketing_content_items.status = published` is updated atomically.
 
-## 11. Edge cases and limits
+## 12. Edge cases and limits
 - An item can only be marked as posted once per channel. Re-clicking does a duplicate check.
 - If you post on IG but not FB (a split post), log them separately.
 - The Calendar does not pull live engagement data — that comes from the Meta sync in Marketing Intelligence.
 
-## 12. Owner of the process
+## 13. Owner of the process
 Admin / Marketing Operator
 Next review: after staging runtime verification
 

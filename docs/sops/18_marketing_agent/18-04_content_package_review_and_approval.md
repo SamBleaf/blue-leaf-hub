@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin
@@ -45,18 +45,8 @@ Each card shows:
 **Step 3 — Read the Josh labels**
 Each draft shows labels like "Ready for Josh review", "Needs photo", "Check language". These are automated quality signals from the Creator. If a label says "Needs photo", the post was created without a media asset and should not go live without one.
 
-**Step 4 — Make a decision**
+**Step 4 — Check risk level**
 
-| Decision | When to use | What it does |
-|---|---|---|
-| **Approve** | Package is good to go | Status → `approved`; child items become schedule-ready |
-| **Request changes** | Needs a tweak before posting | Status → `changes_requested`; Josh re-opens in Creator |
-| **Reject** | Wrong direction or quality | Status → `rejected`; package archived |
-
-**Step 5 — After approving**
-Approved packages appear in the Calendar (`/marketing/calendar`) ready to be scheduled and posted. No further action is needed here.
-
-## 6. Understanding risk levels
 | Risk | Meaning |
 |---|---|
 | **Low** | Clean copy, good photo, no red flags |
@@ -65,10 +55,25 @@ Approved packages appear in the Calendar (`/marketing/calendar`) ready to be sch
 
 Always review **High** risk packages carefully before approving.
 
-## 7. Screenshot placeholders
-[insert screenshot: Approval Queue with a package card]
-[insert screenshot: Package card with Josh labels and risk badge]
-[insert screenshot: Approve / Request changes / Reject buttons]
+**Step 5 — Make a decision**
+
+| Decision | When to use | What it does |
+|---|---|---|
+| **Approve** | Package is good to go | Status → `approved`; child items become schedule-ready |
+| **Request changes** | Needs a tweak before posting | Status → `changes_requested`; Josh re-opens in Creator |
+| **Reject** | Wrong direction or quality | Status → `rejected`; package archived |
+
+## 6. What happens next
+- Approved packages appear in the Calendar (`/marketing/calendar`) ready to be scheduled and posted.
+- `request_changes` packages return to Josh — send a message manually to explain what needs to change.
+- Rejected packages are archived; they do not appear in the queue again.
+
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
+|---|---|---|
+| Approving a "Needs photo" package | Risk badge is Medium not High | Check every Josh label before approving — if any item says "Needs photo", source the photo first |
+| Requesting changes without explaining why | No message sent to Josh | After setting "Request changes", message Josh directly with the specific changes needed |
+| Rejecting instead of requesting changes | Package is almost right | Use "Request changes" for minor issues; "Reject" only for content that is wrong in direction or quality |
 
 ## 8. Troubleshooting
 | Problem | Solution |
@@ -78,21 +83,26 @@ Always review **High** risk packages carefully before approving.
 | Package does not appear after Josh submitted it | Check that Josh clicked "Send package to Approval Queue" in the Creator; verify `marketing_content_packages` table has the row with `status = in_review` |
 | Status did not update after Approve | API error — check console; retry |
 
-## 9. Related SOPs
+## 9. Related modules
 - [Calendar and publishing](18-05_calendar_scheduling_and_manual_publishing.md)
 - [Marketing Intelligence](18-07_marketing_intelligence_and_attribution.md)
 
-## 10. Automation notes
+## 10. Screenshot placeholders
+[insert screenshot: Approval Queue with a package card]
+[insert screenshot: Package card with Josh labels and risk badge]
+[insert screenshot: Approve / Request changes / Reject buttons]
+
+## 11. Automation notes
 - Approval cascades: approving a package updates all child `marketing_content_items` to `approved` status.
 - `request_changes` sets the package status but does not automatically notify Josh — send a message manually.
 - No external publishing happens from the Approval Queue. Posts go through the Calendar.
 
-## 11. Edge cases and limits
+## 12. Edge cases and limits
 - Packages with `status = approved/rejected/changes_requested` do not appear in the queue (filter is `in_review` only).
 - Each package can only be in one status at a time.
 - Approving a package with a "Needs photo" item will make those items schedule-ready but they still cannot be published without media.
 
-## 12. Owner of the process
+## 13. Owner of the process
 Admin (Sam)
 Next review: after staging runtime verification
 

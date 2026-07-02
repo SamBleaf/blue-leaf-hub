@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: not_required
 owner: Admin / Developer
@@ -130,10 +130,7 @@ All checklist items must be green. If any item fails:
 1. Note the exact failure in a comment on this SOP or in the merge PR
 2. Create a bug fix and re-run the failing section before merging
 
-## 8. Screenshot placeholders
-Not required for this checklist SOP.
-
-## 9. Troubleshooting
+## 8. Troubleshooting
 | Problem | Solution |
 |---|---|
 | "DB not configured" on all APIs | Check `.env` — `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must point to staging, not production |
@@ -141,8 +138,11 @@ Not required for this checklist SOP.
 | Auth failing on admin routes | Staging Supabase project may not have the user seeded; create an admin user via the Auth dashboard |
 | Creator angle cards empty | Check the media asset has `analysis.content_opportunities` in the DB — may need a re-analysis |
 
-## 10. Related SOPs
+## 9. Related modules
 All 18-01 through 18-07 SOPs describe individual workflows. This SOP links them into an end-to-end verification run.
+
+## 10. Screenshot placeholders
+Not required for this checklist SOP.
 
 ## 11. Automation notes
 There is no automated test suite for the marketing module. Verification is manual using this checklist. An integration/smoke harness (automated) is a Batch 4 candidate.

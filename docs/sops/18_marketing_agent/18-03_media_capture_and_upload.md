@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-28
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: marketing-run-a
 screenshot_status: placeholders_only
 owner: Admin / Marketing Operator
@@ -61,20 +61,21 @@ Currently upload is via Marketing → **Media** (`/marketing/media`). Drag and d
 
 After upload, the asset appears in the Vault once the page is refreshed.
 
-## 7. What AI analysis provides
-When a photo is analysed, the Content Studio can read:
+## 7. Common mistakes
+| Mistake | Why it happens | How to avoid it |
+|---|---|---|
+| Creating content before analysis completes | Impatient after uploading | Wait for the analysis block to appear on the asset card before clicking "Create from this →". Content generated before analysis has no photo grounding. |
+| Not refreshing after upload | Uploading and expecting the Vault to update live | The Vault loads on mount — refresh the page after uploading to see the new asset |
+| Using the Vault for videos without thumbnails | Assuming the video is not uploaded | Videos may take 30–60 seconds to generate a thumbnail. Wait and refresh before assuming the upload failed. |
+
+The Vault also provides AI analysis information for each photo. When a photo is analysed, the Content Studio can read:
 - `content_opportunities` — themes and angles to write about
 - `lighting_quality`, `composition_score` — image quality indicators
 - `stage` — construction stage detected from the image
 
 Without analysis, the Creator still works but angle suggestions will be empty — you will need to pick an angle manually.
 
-## 8. Screenshot placeholders
-[insert screenshot: Media Vault with filter chips and asset grid]
-[insert screenshot: Asset card with "Create from this →" button]
-[insert screenshot: Media tab upload drop zone]
-
-## 9. Troubleshooting
+## 8. Troubleshooting
 | Problem | Solution |
 |---|---|
 | Vault shows "Demo assets" banner | API unreachable or no staging DB — see SOP 18-08 |
@@ -83,9 +84,14 @@ Without analysis, the Creator still works but angle suggestions will be empty �
 | Analysis never completes | Analysis pipeline requires AI credentials configured in `.env`; check `ANTHROPIC_API_KEY` |
 | Drone footage not detected | D-Log M detection runs on upload; check that the file extension is `.mp4` or `.mov` |
 
-## 10. Related SOPs
+## 9. Related modules
 - [Weekly Marketing Planning](18-02_weekly_marketing_planning.md)
 - [Content package review](18-04_content_package_review_and_approval.md)
+
+## 10. Screenshot placeholders
+[insert screenshot: Media Vault with filter chips and asset grid]
+[insert screenshot: Asset card with "Create from this →" button]
+[insert screenshot: Media tab upload drop zone]
 
 ## 11. Automation notes
 - AI analysis is triggered on upload (background). No manual trigger needed.
