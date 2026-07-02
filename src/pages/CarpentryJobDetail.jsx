@@ -954,9 +954,45 @@ function TasksPanel({ jobId }) {
                           className="w-full border border-hairline rounded px-2 py-1 text-xs text-muted focus-ring mt-1 resize-none"
                         />
                       )}
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.category}</span>
-                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.priority.replace(/_/g, " ")}</span>
+                      {/* Category + priority are editable before adding — the AI's guess is a
+                          starting point (e.g. reassign a "materials"/"defect" draft to the
+                          Cladding/Soffit work stream). Mirrors the manual add-task selects. */}
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        <select
+                          value={d.category}
+                          onChange={(e) => setDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, category: e.target.value } : x))}
+                          aria-label="Category"
+                          className="border border-hairline rounded px-1.5 py-1 text-xs focus-ring bg-white"
+                        >
+                          {/* Preserve an AI category that doesn't match any known option (never silently lost). */}
+                          {![...labourCats.map((c) => c.workforceTaskCategory), "general", "defect", "safety", "materials", "inspection"].includes(d.category) && (
+                            <option value={d.category}>{d.category}</option>
+                          )}
+                          {labourCats.length > 0 && (
+                            <optgroup label="Work stream (labour)">
+                              {labourCats.map((c) => (
+                                <option key={c.id} value={c.workforceTaskCategory}>{c.categoryName}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label="Other">
+                            <option value="general">General</option>
+                            <option value="defect">Defect</option>
+                            <option value="safety">Safety</option>
+                            <option value="materials">Materials</option>
+                            <option value="inspection">Inspection</option>
+                          </optgroup>
+                        </select>
+                        <select
+                          value={d.priority}
+                          onChange={(e) => setDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, priority: e.target.value } : x))}
+                          aria-label="Priority"
+                          className="border border-hairline rounded px-1.5 py-1 text-xs focus-ring bg-white"
+                        >
+                          <option value="urgent">Urgent</option>
+                          <option value="normal">Normal</option>
+                          <option value="when_time_permits">When time permits</option>
+                        </select>
                       </div>
                     </div>
                   </div>

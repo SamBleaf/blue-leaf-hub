@@ -1127,7 +1127,21 @@ export function registerCarpentryRoutes(app) {
       if (!transcript) return err(res, 400, "transcript is required.");
       if (transcript.length > 20000) return err(res, 413, "Transcript too long — split it into shorter sessions.");
       const jobLabel = String(req.body?.jobLabel || "").trim();
-      const tasks = await splitTranscriptToTasks(transcript, { jobLabel });
+      // Feed the job's labour work streams to the extractor so drafts land in the right
+      // stream (e.g. Cladding, Soffit linings) instead of always the generic category set.
+      const sb = getServiceSupabase();
+      let workStreams = [];
+      if (sb) {
+        const { data: budgets } = await sb
+          .from("carpentry_job_budgets")
+          .select("category_name, cost_type, workforce_task_category")
+          .eq("job_id", req.params.id)
+          .eq("cost_type", "labour");
+        workStreams = (budgets || [])
+          .filter((b) => b.workforce_task_category)
+          .map((b) => ({ value: b.workforce_task_category, label: b.category_name }));
+      }
+      const tasks = await splitTranscriptToTasks(transcript, { jobLabel, workStreams });
       return ok(res, { tasks, draft: true });
     } catch (e) {
       console.error("[carpentry/tasks from-transcript]", e);
