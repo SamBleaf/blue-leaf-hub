@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -70,10 +70,14 @@ The **Timesheets** module (sidebar label; route `/workforce`) has these manager 
 3. Click any row to view the full timesheet detail
 
 ### Worker logs hours (Worker PWA)
-1. Worker opens the link `/worker` on their phone
-2. Selects their name and project
+1. Worker opens their personal link `/worker?token=…` on their phone (sent by Admin from Workforce → Team)
+2. Selects the project they are working on (identity comes from the magic-link token, not a name picker)
 3. Enters start time, finish time, and break — system calculates hours
 4. Submits — timesheet appears in the Approvals queue for the manager
+
+**Leading-hand / supervisor extras (when `is_leading_hand = true` on the employee record):**
+- A **+ Add task** button appears in Site Tasks so the leading hand can create new tasks on site without going through the office.
+- A drag handle (⠿) appears on each task — hold and drag to reorder tasks within a group. The new order is persisted and all workers on that site see it.
 
 ## 6. What happens after
 - Approved timesheets feed into payroll reporting
@@ -120,22 +124,36 @@ The **Timesheets** module (sidebar label; route `/workforce`) has these manager 
 - API: `PATCH /api/workforce/timesheets/:id/carpentry-job` — attribute a timesheet to a carpentry job (`{ carpentryJobId: "uuid" | null }`) — admin/supervisor only; timesheet must not be approved
 - DB effects: writes to `timesheets` table with `employee_id`, `project_id`, `date`, `hours`, `status`, `submitted_at`, `approved_at`, `approved_by`, `carpentry_job_id`
 
-## 10a. Version history
+_Version history: 1.0 — Initial draft (2026-05-30); 1.1 — Added carpentry job attribution (2026-05-30); 1.2 — §14 compliance: added Screenshots/Edge cases, fixed Worker PWA steps, noted leading-hand extras (2026-07-02)._
 
-| Version | Date | Author | Change |
-|---------|------|--------|--------|
-| 1.0 | 2026-05-30 | Claude | Initial draft |
-| 1.1 | 2026-05-30 | Claude | Added carpentry job attribution — Approvals expanded row dropdown + PATCH endpoint docs |
+## 11. Screenshots
+
+[insert screenshot: Workforce → Approvals tab with a pending timesheet expanded, showing the Carpentry Job dropdown]
+[insert screenshot: Workforce → Mass Fill grid — project + week selector + hours grid]
+[insert screenshot: Worker PWA home screen — project selector and Log Hours entry]
+[insert screenshot: Worker PWA Site Tasks — leading-hand ⠿ drag handle and + Add task button]
+
+## 12. Edge cases
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Worker opens `/worker` without a token | App shows "This worker link is no longer valid" — no timesheet form is displayed |
+| Worker submits on a day already submitted | The existing timesheet is pre-filled; re-submission overwrites entries for that day |
+| Mass Fill submitted with no hours entered for any worker | Submission is blocked — at least one employee + day must have hours |
+| Carpentry job attribution attempted on an approved timesheet | Returns an error — unapprove first, then attribute, then re-approve |
+| `buildexact_sync_mode = manual` and timesheet is approved | Buildexact push is NOT triggered automatically — use **Sync pending** action or `POST /api/workforce/timesheets/sync-pending` |
+| Leading hand opens Site Tasks via their worker link | + Add task button and ⠿ drag handles are shown; regular workers see neither |
+| Worker token is rotated (new link issued) | Old token is invalidated immediately; worker must use the new link and re-add to home screen |
 
 ---
 
-## 11. Owner of the process
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin
@@ -212,6 +230,20 @@ Next review: 2026-11-30
 4. Expected: timesheets with a regular project_id still show the project address.
 - [ ] Pass  [ ] Fail
 
+**TC-10 — Leading-hand site tasks: add task + drag reorder**
+
+Prerequisite: a worker token for an employee with `is_leading_hand = true`.
+
+1. Open `/worker?token=<leading-hand-token>` → tap **Site tasks**.
+2. Expected: **+ Add task** button is visible; each task row shows the ⠿ drag handle.
+3. Tap **+ Add task** → enter title "LH test task" → tap **Add task**.
+4. Expected: new task appears in the active list for that site; `POST /api/worker/tasks` returns `{ ok: true }`.
+5. Press-and-hold the ⠿ handle on any task and drag it above or below another task.
+6. Expected: order updates on screen; `POST /api/worker/tasks/reorder` is called with the new `display_order` array; reload the page — order is preserved.
+7. Open `/worker?token=<regular-worker-token>` for the same site.
+8. Expected: **+ Add task** button is NOT shown; drag handles are NOT shown.
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Approvals queue shows pending timesheets
 - [ ] Approve and reject both work and persist to DB
@@ -221,5 +253,6 @@ Next review: 2026-11-30
 - [ ] Carpentry job attribution dropdown visible in expanded row (TC-08)
 - [ ] Attribution PATCH saves and appears in carpentry job Costs tab (TC-08)
 - [ ] History shows carpentry ref in project column (TC-09)
+- [ ] Leading-hand can add task and drag-reorder; regular worker cannot (TC-10)
 - [ ] Update `test_status` in frontmatter
 - [ ] Add entry to SOP_CHANGELOG.md
