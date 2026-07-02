@@ -136,8 +136,19 @@ export default function PortalAdmin() {
       <button type="button" onClick={() => navigate("/portal-admin")} className="text-sm text-primary mb-4">
         ← All projects
       </button>
-      <h1 className="text-2xl font-bold text-ink mb-1">{proj.address || "Project"}</h1>
-      <p className="text-sm text-muted mb-6">Portal administration</p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-ink mb-1">{proj.address || "Project"}</h1>
+          <p className="text-sm text-muted">Portal administration <span className="text-muted">· legacy v1 (token portal)</span></p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate(`/portal-admin/${projectId}/v2`)}
+          className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+        >
+          Open v2 console →
+        </button>
+      </div>
 
       {(!proj.contractValue || proj.contractValue === 0) && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 mb-4">

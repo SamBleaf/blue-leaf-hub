@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import FinancialInbox from "../components/finance/FinancialInbox.jsx";
 import ApprovalQueue from "../components/finance/ApprovalQueue.jsx";
-import JobFinancials from "../components/finance/JobFinancials.jsx";
 import FinanceKpiStrip from "../components/finance/FinanceKpiStrip.jsx";
 
 const TABS = [
@@ -117,7 +116,8 @@ export default function FinanceManager() {
 
       {tab === "inbox" && <FinancialInbox onUploaded={loadStats} />}
       {tab === "approvals" && <ApprovalQueue onAction={loadStats} />}
-      {tab === "jobs" && <JobFinancials />}
+      {/* "Job View" tab navigates to /finance/jobs (JobDashboardSelector — Director Portfolio);
+          the legacy inline JobFinancials render was unreachable dead code (removed). */}
       {tab === "settings" && <XeroSettings xeroStatus={xeroStatus} />}
     </div>
   );

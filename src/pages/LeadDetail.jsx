@@ -229,6 +229,112 @@ function SuggestionSection({ title, children }) {
   );
 }
 
+// Read-only view of a saved conversation transcript
+function ConversationViewPanel({ leadId, open, conv, onClose }) {
+  const [full, setFull] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [loadErr, setLoadErr] = useState("");
+
+  useEffect(() => {
+    if (!open || !conv) return;
+    setFull(null); setLoadErr("");
+    setLoading(true);
+    authFetch(`/api/sales/leads/${leadId}/conversations/${conv.id}`)
+      .then(r => r.json())
+      .then(j => {
+        if (!j.ok) throw new Error(j.error || "Failed to load");
+        setFull(j.conversation);
+      })
+      .catch(e => setLoadErr(e.message))
+      .finally(() => setLoading(false));
+  }, [open, conv, leadId]);
+
+  if (!open || !conv) return null;
+
+  const displayConv = full || conv;
+  const summary = displayConv.bp_suggestions?.summary;
+  const appliedAt = displayConv.applied_at;
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="w-full max-w-lg bg-surface shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline flex-shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-ink truncate">
+              {displayConv.title || "Meeting Transcript"}
+            </h2>
+            <p className="text-xs text-muted mt-0.5">
+              {displayConv.created_at ? new Date(displayConv.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" }) : ""}
+              {appliedAt && <span className="ml-2 text-green-600 font-medium">✓ Applied</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-ink text-2xl leading-none ml-4">×</button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {loading && (
+            <div className="flex items-center justify-center py-10">
+              <div className="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+            </div>
+          )}
+          {loadErr && <p className="text-sm text-red-600">{loadErr}</p>}
+
+          {!loading && !loadErr && (
+            <>
+              {summary && (
+                <div className="rounded-lg bg-primary/[0.05] border border-primary/20 px-4 py-3">
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1">Blueprint Summary</p>
+                  <p className="text-sm text-ink">{summary}</p>
+                </div>
+              )}
+
+              {displayConv.transcript_text ? (
+                <div>
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Transcript</p>
+                  <pre className="whitespace-pre-wrap text-sm text-ink font-sans leading-relaxed bg-page rounded-lg border border-hairline px-4 py-3">
+                    {displayConv.transcript_text}
+                  </pre>
+                </div>
+              ) : !full ? (
+                <p className="text-xs text-muted italic">Loading transcript…</p>
+              ) : (
+                <p className="text-xs text-muted italic">No transcript text stored.</p>
+              )}
+
+              {displayConv.bp_suggestions && Object.keys(displayConv.bp_suggestions).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Applied Suggestions</p>
+                  <div className="rounded-lg border border-hairline bg-page px-4 py-3 space-y-1">
+                    {Object.entries(displayConv.bp_suggestions)
+                      .filter(([k, v]) => k !== "summary" && v != null && typeof v !== "object")
+                      .map(([k, v]) => (
+                        <div key={k} className="flex gap-2 text-xs">
+                          <span className="text-muted w-36 flex-shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
+                          <span className="text-ink">{String(v)}</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex-shrink-0 border-t border-hairline px-6 py-4">
+          <button type="button" onClick={onClose} className="w-full rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConversationPanel({ leadId, lead, open, onClose, onSaved, conversations, onViewConv }) {
   const [step, setStep] = useState("input");
   const [title, setTitle] = useState("");
@@ -1114,6 +1220,8 @@ export default function LeadDetail() {
   const [bpLoading, setBpLoading] = useState(false);
   const [convOpen, setConvOpen] = useState(false);
   const [conversations, setConversations] = useState([]);
+  const [viewConvOpen, setViewConvOpen] = useState(false);
+  const [viewConv, setViewConv] = useState(null);
   const [generatingPTSA, setGeneratingPTSA] = useState(false);
   const [ptsaError, setPtsaError] = useState("");
   const [refProjects, setRefProjects] = useState([]);
@@ -1535,7 +1643,7 @@ export default function LeadDetail() {
                   {conversations.slice(0, 3).map(c => (
                     <button
                       key={c.id}
-                      onClick={() => setConvOpen(true)}
+                      onClick={() => { setViewConv(c); setViewConvOpen(true); }}
                       className="w-full text-left rounded-lg border border-hairline bg-surface px-3 py-2 hover:bg-page text-sm"
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -2305,6 +2413,12 @@ export default function LeadDetail() {
         <SafeBottomSpacer height={44} />
       </div>
 
+      <ConversationViewPanel
+        leadId={leadId}
+        open={viewConvOpen}
+        conv={viewConv}
+        onClose={() => { setViewConvOpen(false); setViewConv(null); }}
+      />
       <ConversationPanel
         leadId={leadId}
         lead={lead}
@@ -2312,7 +2426,7 @@ export default function LeadDetail() {
         onClose={() => setConvOpen(false)}
         onSaved={() => { setConvOpen(false); load(); }}
         conversations={conversations}
-        onViewConv={() => {}}
+        onViewConv={c => { setConvOpen(false); setViewConv(c); setViewConvOpen(true); }}
       />
     </div>
   );
