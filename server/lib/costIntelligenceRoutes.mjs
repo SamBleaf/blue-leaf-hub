@@ -681,22 +681,29 @@ Definitions:
       const confidence_pct = estimate_ranges.length
         ? Math.min(95, Math.round((estimate_ranges.reduce((s, r) => s + r.sample_count, 0) / estimate_ranges.length) * 8))
         : 0;
-      const { data: saved } = await db.from("pretender_estimates").insert({
-        job_id: job_id || null,
-        floor_area_m2: floorArea || null,
-        project_type: project_type || null,
-        storeys: storeys ? Number(storeys) : null,
-        site_slope: site_slope || null,
-        has_raked_ceilings: has_raked_ceilings ?? null,
-        has_suspended_slab: has_suspended_slab ?? null,
-        wet_areas: wet_areas ? Number(wet_areas) : null,
-        estimate_ranges,
-        suggested_total_low: totalLow,
-        suggested_total_high: totalHigh,
-        confidence_pct,
-        created_by: req.user?.id || null,
-      }).select("id").maybeSingle();
-      res.json({ ok: true, id: saved?.id || null, estimate_ranges, suggested_total_low: totalLow, suggested_total_high: totalHigh, confidence_pct, trade_count: estimate_ranges.length });
+      // Only persist an estimate tied to a job — a scratch calc with no job_id is a throwaway
+      // (returned but not saved), so re-running the calculator no longer spams pretender_estimates
+      // with duplicate anonymous rows.
+      let savedId = null;
+      if (job_id) {
+        const { data: saved } = await db.from("pretender_estimates").insert({
+          job_id,
+          floor_area_m2: floorArea || null,
+          project_type: project_type || null,
+          storeys: storeys ? Number(storeys) : null,
+          site_slope: site_slope || null,
+          has_raked_ceilings: has_raked_ceilings ?? null,
+          has_suspended_slab: has_suspended_slab ?? null,
+          wet_areas: wet_areas ? Number(wet_areas) : null,
+          estimate_ranges,
+          suggested_total_low: totalLow,
+          suggested_total_high: totalHigh,
+          confidence_pct,
+          created_by: req.user?.id || null,
+        }).select("id").maybeSingle();
+        savedId = saved?.id || null;
+      }
+      res.json({ ok: true, id: savedId, saved: !!savedId, estimate_ranges, suggested_total_low: totalLow, suggested_total_high: totalHigh, confidence_pct, trade_count: estimate_ranges.length });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
