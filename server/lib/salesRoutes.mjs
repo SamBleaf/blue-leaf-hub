@@ -550,6 +550,92 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, lead, activities: activities || [] });
   });
 
+  // ── Batch 1B: unified timeline (read-only v_lead_timeline) ─────────────────
+  // One stream across activities, notes, conversations, CRM interactions and email
+  // opens/clicks. Degrades softly to an empty stream if migration 128 isn't applied
+  // yet, so the Lead Detail page never hard-fails in production before the paste.
+  app.get("/api/sales/leads/:id/timeline", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const { data, error } = await sb
+      .from("v_lead_timeline")
+      .select("*")
+      .eq("lead_id", req.params.id)
+      .order("occurred_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      // 42P01 = undefined_table/view — migration 128 not applied yet.
+      if (error.code === "42P01") return ok(res, { timeline: [], viewMissing: true });
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { timeline: (data || []).map(rowToCamel) });
+  });
+
+  // ── Batch 1B: lead_signals (objections / fears / priorities) ───────────────
+  const SIGNAL_KINDS = ["objection", "fear", "priority"];
+  const SIGNAL_STATUSES = ["open", "addressed"];
+
+  app.get("/api/sales/leads/:id/signals", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { data, error } = await sb
+      .from("lead_signals")
+      .select("*")
+      .eq("lead_id", req.params.id)
+      .order("created_at", { ascending: true });
+    if (error) {
+      if (error.code === "42P01") return ok(res, { signals: [], tableMissing: true });
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { signals: (data || []).map(rowToCamel) });
+  });
+
+  app.post("/api/sales/leads/:id/signals", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { kind, label, detail } = req.body || {};
+    if (!SIGNAL_KINDS.includes(kind)) return err(res, 400, "kind must be objection, fear or priority.");
+    if (!label || !String(label).trim()) return err(res, 400, "label is required.");
+    const row = { lead_id: req.params.id, kind, label: String(label).trim(), detail: detail || null };
+    const { data, error } = await sb.from("lead_signals").insert(row).select().single();
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res, { signal: rowToCamel(data) });
+  });
+
+  app.patch("/api/sales/leads/:id/signals/:signalId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const patch = { updated_at: new Date().toISOString() };
+    if (req.body?.status !== undefined) {
+      if (!SIGNAL_STATUSES.includes(req.body.status)) return err(res, 400, "status must be open or addressed.");
+      patch.status = req.body.status;
+    }
+    if (req.body?.label !== undefined) patch.label = String(req.body.label).trim();
+    if (req.body?.detail !== undefined) patch.detail = req.body.detail || null;
+    const { data, error } = await sb
+      .from("lead_signals")
+      .update(patch)
+      .eq("id", req.params.signalId)
+      .eq("lead_id", req.params.id)
+      .select()
+      .single();
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res, { signal: rowToCamel(data) });
+  });
+
+  app.delete("/api/sales/leads/:id/signals/:signalId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
+    const { error } = await sb
+      .from("lead_signals")
+      .delete()
+      .eq("id", req.params.signalId)
+      .eq("lead_id", req.params.id);
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res);
+  });
+
   app.post("/api/sales/leads", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });

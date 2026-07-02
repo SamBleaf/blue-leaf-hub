@@ -15,7 +15,7 @@ import LeadStageStepper from "../components/sales/lead-detail/LeadStageStepper.j
 import LeadNextActionCard from "../components/sales/lead-detail/LeadNextActionCard.jsx";
 import LeadMobileTabs from "../components/sales/lead-detail/LeadMobileTabs.jsx";
 import LeadSummaryPanel from "../components/sales/lead-detail/LeadSummaryPanel.jsx";
-import LeadActivityTimeline from "../components/sales/lead-detail/LeadActivityTimeline.jsx";
+import LeadUnifiedTimeline from "../components/sales/lead-detail/LeadUnifiedTimeline.jsx";
 import LeadStageSection from "../components/sales/lead-detail/LeadStageSection.jsx";
 import LeadAccordion from "../components/sales/lead-detail/LeadAccordion.jsx";
 
@@ -687,6 +687,133 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Batch 1B — trust-context rail: acquisition touch (first/last) + a structured
+// objections / fears / priorities list (lead_signals) with add + resolve inline.
+const SIGNAL_META = {
+  objection: { label: "Objection", icon: "🚧" },
+  fear:      { label: "Fear",      icon: "😟" },
+  priority:  { label: "Priority",  icon: "⭐" },
+};
+function LeadTrustRail({ leadId, lead }) {
+  const [signals, setSignals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [newKind, setNewKind] = useState("objection");
+  const [newLabel, setNewLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const loadSignals = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/signals`).then(r => r.json());
+      setSignals(r.signals || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [leadId]);
+  useEffect(() => { loadSignals(); }, [loadSignals]);
+
+  async function addSignal(e) {
+    e.preventDefault();
+    if (!newLabel.trim()) return;
+    setSaving(true);
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}/signals`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: newKind, label: newLabel.trim() }),
+      }).then(r => r.json());
+      if (r.ok) { setNewLabel(""); setAdding(false); await loadSignals(); }
+    } finally { setSaving(false); }
+  }
+  async function toggleSignal(sig) {
+    const next = sig.status === "open" ? "addressed" : "open";
+    await authFetch(`/api/sales/leads/${leadId}/signals/${sig.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next }),
+    });
+    await loadSignals();
+  }
+  async function removeSignal(sig) {
+    await authFetch(`/api/sales/leads/${leadId}/signals/${sig.id}`, { method: "DELETE" });
+    await loadSignals();
+  }
+
+  const firstTouch = lead?.first_touch_source
+    ? `${lead.first_touch_source}${lead.first_touch_medium ? ` / ${lead.first_touch_medium}` : ""}`
+    : (lead?.lead_source || "—");
+  const lastTouch = lead?.last_touch_source
+    ? `${lead.last_touch_source}${lead.last_touch_medium ? ` / ${lead.last_touch_medium}` : ""}`
+    : "—";
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Trust &amp; context</h3>
+
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <p className="text-muted">First touch</p>
+          <p className="mt-0.5 font-medium capitalize text-ink">{firstTouch}</p>
+        </div>
+        <div>
+          <p className="text-muted">Last touch</p>
+          <p className="mt-0.5 font-medium capitalize text-ink">{lastTouch}</p>
+        </div>
+        {lead?.lead_source_category && (
+          <div>
+            <p className="text-muted">Source category</p>
+            <p className="mt-0.5 font-medium capitalize text-ink">{lead.lead_source_category.replace(/_/g, " ")}</p>
+          </div>
+        )}
+        {(lead?.utm_campaign || lead?.first_touch_utm_campaign) && (
+          <div>
+            <p className="text-muted">Campaign</p>
+            <p className="mt-0.5 font-medium text-ink">{lead.utm_campaign || lead.first_touch_utm_campaign}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 border-t border-hairline pt-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium text-ink">Objections · Fears · Priorities</p>
+          <button type="button" onClick={() => setAdding(a => !a)} className="text-xs text-primary hover:underline">
+            {adding ? "Cancel" : "+ Add"}
+          </button>
+        </div>
+
+        {adding && (
+          <form onSubmit={addSignal} className="mt-2 space-y-2">
+            <select value={newKind} onChange={(e) => setNewKind(e.target.value)} className="w-full rounded border border-hairline px-2 py-1 text-xs">
+              {Object.entries(SIGNAL_META).map(([k, m]) => <option key={k} value={k}>{m.icon} {m.label}</option>)}
+            </select>
+            <input autoFocus value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="e.g. Worried about budget blowout" className="w-full rounded border border-hairline px-2 py-1 text-xs" />
+            <button type="submit" disabled={saving || !newLabel.trim()} className="rounded bg-primary px-3 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
+          </form>
+        )}
+
+        {loading ? (
+          <p className="mt-2 text-xs italic text-muted">Loading…</p>
+        ) : signals.length === 0 ? (
+          <p className="mt-2 text-xs italic text-muted">None logged yet.</p>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {signals.map((sig) => {
+              const meta = SIGNAL_META[sig.kind] || { icon: "•", label: sig.kind };
+              const done = sig.status === "addressed";
+              return (
+                <li key={sig.id} className="flex items-start gap-2 text-xs">
+                  <span className="select-none">{meta.icon}</span>
+                  <span className={`min-w-0 flex-1 ${done ? "text-muted line-through" : "text-ink"}`}>{sig.label}</span>
+                  <button type="button" onClick={() => toggleSignal(sig)} title={done ? "Reopen" : "Mark addressed"} className="flex-shrink-0 text-muted hover:text-accent">{done ? "↺" : "✓"}</button>
+                  <button type="button" onClick={() => removeSignal(sig)} title="Remove" className="flex-shrink-0 text-muted hover:text-red-500">×</button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LeadNotesPanel({ leadId }) {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -971,6 +1098,8 @@ export default function LeadDetail() {
 
   const [lead, setLead] = useState(null);
   const [activities, setActivities] = useState([]);
+  const [timeline, setTimeline] = useState(null);        // Batch 1B unified timeline (null until loaded / view missing)
+  const [timelineViewMissing, setTimelineViewMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -998,14 +1127,17 @@ export default function LeadDetail() {
 
   const load = useCallback(async () => {
     try {
-      const [lr, cr] = await Promise.all([
+      const [lr, cr, tr] = await Promise.all([
         authFetch(`/api/sales/leads/${leadId}`).then(r => r.json()),
-        authFetch(`/api/sales/leads/${leadId}/conversations`).then(r => r.json()).catch(() => ({ ok: true, conversations: [] }))
+        authFetch(`/api/sales/leads/${leadId}/conversations`).then(r => r.json()).catch(() => ({ ok: true, conversations: [] })),
+        authFetch(`/api/sales/leads/${leadId}/timeline`).then(r => r.json()).catch(() => ({ ok: true, timeline: [], viewMissing: true }))
       ]);
       if (!lr.ok) throw new Error(lr.error);
       setLead(lr.lead);
       setActivities(lr.activities || []);
       setConversations(cr.conversations || []);
+      setTimeline(tr.ok ? (tr.timeline || []) : []);
+      setTimelineViewMissing(!!tr.viewMissing);
       setScreenContext?.({ page: "lead_detail", leadId, stage: lr.lead.stage, name: displayLeadName(lr.lead) });
     } catch (e) {
       setErr(e.message);
@@ -1450,7 +1582,8 @@ export default function LeadDetail() {
             </div>
   );
 
-  const timelineBlock = <LeadActivityTimeline activities={activities} />;
+  const timelineBlock = <LeadUnifiedTimeline timeline={timeline} activities={activities} viewMissing={timelineViewMissing} />;
+  const trustRailBlock = <LeadTrustRail leadId={leadId} lead={lead} />;
 
   const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
@@ -2134,6 +2267,7 @@ export default function LeadDetail() {
         rightRail={<>
           {nextActionEl}
           <LeadSummaryPanel lead={lead} />
+          {trustRailBlock}
           {blueprintBlock}
           {notesBlock}
           {documentsBlock}
@@ -2145,7 +2279,7 @@ export default function LeadDetail() {
       <div className="lg:hidden">
         <div className="mt-4"><LeadMobileTabs tabs={MOBILE_TABS} value={mobileTab} onChange={setMobileTab} /></div>
         <div className="mt-4 space-y-5">
-          {mobileTab === "summary" && <><LeadSummaryPanel lead={lead} />{detailsGroup}{stageWorkDeep}{nurtureBlock}</>}
+          {mobileTab === "summary" && <><LeadSummaryPanel lead={lead} />{trustRailBlock}{detailsGroup}{stageWorkDeep}{nurtureBlock}</>}
           {mobileTab === "action" && (
             <div className="space-y-5">
               {focusEl}

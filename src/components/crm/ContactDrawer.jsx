@@ -55,6 +55,12 @@ function RelationshipBar({ score }) {
   );
 }
 
+// Batch 1B — v_lead_timeline kinds → icon (mirrors LeadUnifiedTimeline).
+const TIMELINE_KIND_ICONS = {
+  activity: "📝", note: "🗒️", conversation: "💬", interaction: "🤝",
+  email_open: "📧", email_click: "🔗",
+};
+
 function InteractionIcon({ type }) {
   const icons = {
     call: "📞", email: "📧", sms: "💬", dm: "💬", meeting: "📅",
@@ -420,6 +426,7 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [loading, setLoading] = useState(true);
   const [logOpen, setLogOpen] = useState(false);
   const [addListOpen, setAddListOpen] = useState(false);
+  const [leadTimeline, setLeadTimeline] = useState(null); // Batch 1B: unified history for a converted contact
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState("");
   const navigate = useNavigate();
@@ -440,6 +447,19 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
   }, [contactId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Batch 1B — for a converted contact, pull the lead's unified timeline so the drawer
+  // shows the same full history (activities + notes + conversations + CRM + email) as
+  // Lead Detail. Soft-fails to null (drawer just shows CRM interactions) if unavailable.
+  useEffect(() => {
+    const leadId = contact?.convertedLeadId;
+    if (!leadId) { setLeadTimeline(null); return; }
+    let cancelled = false;
+    apiFetch(`/api/sales/leads/${leadId}/timeline`)
+      .then(({ ok, data }) => { if (!cancelled && ok) setLeadTimeline(data.timeline || []); })
+      .catch(() => { if (!cancelled) setLeadTimeline(null); });
+    return () => { cancelled = true; };
+  }, [contact?.convertedLeadId]);
 
   async function convertToLead() {
     if (!contact) return;
@@ -651,6 +671,32 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
               </div>
             )}
           </div>
+
+          {/* Batch 1B — unified lead history (converted contacts): one stream across
+              lead activities, notes, conversations, CRM interactions and email events. */}
+          {leadTimeline && leadTimeline.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
+                Full history ({leadTimeline.length})
+              </p>
+              <div className="space-y-2">
+                {leadTimeline.map((ev) => (
+                  <div key={`${ev.kind}-${ev.refId}`} className="flex gap-2.5 text-sm">
+                    <div className="w-5 flex-shrink-0 mt-0.5 text-center">{TIMELINE_KIND_ICONS[ev.kind] || "•"}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-ink capitalize">{(ev.kind || "").replace(/_/g, " ")}</span>
+                        <span className="text-xs text-muted ml-auto">
+                          {ev.occurredAt && new Date(ev.occurredAt).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "2-digit" })}
+                        </span>
+                      </div>
+                      <p className="text-muted text-xs mt-0.5 truncate">{ev.summary}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Mailing lists — smart (auto) + manual memberships */}
           <div>

@@ -611,6 +611,14 @@ export function registerCrmRoutes(app) {
 
     await insertLeadCreatedActivity(sb(), lead.id);
 
+    // Batch 1B — stamp this contact's history onto the new lead so the unified timeline
+    // (v_lead_timeline) and post-convert email credit resolve directly by lead_id rather
+    // than only via converted_lead_id. Idempotent: only fills rows still missing a lead_id.
+    await sb().from("crm_interactions")
+      .update({ lead_id: lead.id })
+      .eq("contact_id", id)
+      .is("lead_id", null);
+
     // Update contact
     await sb().from("crm_contacts").update({
       converted_lead_id: lead.id,
