@@ -86,6 +86,7 @@ export async function runW04P0A4(run) {
       first_name: "Extract",
       last_name: `Link${ts}`,
       email: `extract-${ts}@example.test`,
+      lead_source: "referral", // mig 127: lead_source_category required on create
       site_address: `${ts} Extraction Ave, Adelaide SA 5000`,
       stage: "accepted",
     },

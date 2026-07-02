@@ -179,6 +179,7 @@ export async function runW05WinFinalize(run) {
         first_name: "Win",
         last_name: "Finalize",
         stage: "tender",
+        lead_source: "referral", // mig 127: lead_source_category required on create
         site_address: `${MARK} W05 Lead ${ts}, Adelaide SA 5000`,
       },
       token

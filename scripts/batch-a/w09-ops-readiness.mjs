@@ -181,6 +181,7 @@ export async function runW09OpsReadiness(run) {
         first_name: "Ops",
         last_name: "Test",
         stage: "tender",
+        lead_source: "referral", // CRM control spine (mig 127): every lead needs a classifiable source
         site_address: `${MARK} W09 Ops Lead ${ts}, Adelaide SA 5000`,
       },
       token

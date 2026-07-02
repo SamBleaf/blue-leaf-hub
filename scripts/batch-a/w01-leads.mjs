@@ -163,6 +163,7 @@ export async function runW01(run) {
         last_name: `Convert${ts}`,
         email: `convert-${ts}@example.test`,
         suburb: "Adelaide",
+        lead_source: "referral", // mig 127: lead_source_category required on create
       },
       token
     );

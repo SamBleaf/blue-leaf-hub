@@ -11,6 +11,7 @@ async function createLead(token, ts, suffix = "") {
       first_name: "Outcome",
       last_name: `Stamp${suffix}${ts}`,
       email: `outcome-${suffix}${ts}@example.test`,
+      lead_source: "referral", // mig 127: lead_source_category required on create
       stage: "enquiry",
     },
     token

@@ -36,6 +36,7 @@ export async function runW03(run) {
       first_name: "PTSA",
       last_name: `WithAddr${ts}`,
       email: `ptsa-a-${ts}@example.test`,
+      lead_source: "referral", // mig 127: lead_source_category required on create
       site_address: `${ts} Test Street, Adelaide SA 5000`,
       stage: "accepted",
     },
@@ -68,6 +69,7 @@ export async function runW03(run) {
       first_name: "PTSA",
       last_name: `NoAddr${ts}`,
       email: `ptsa-b-${ts}@example.test`,
+      lead_source: "referral", // mig 127: lead_source_category required on create
       stage: "accepted",
     },
     token
@@ -107,6 +109,7 @@ export async function runW03(run) {
       first_name: "FeeLink",
       last_name: `Test${fpTs}`,
       email: `feelink-${fpTs}@example.test`,
+      lead_source: "referral", // mig 127: lead_source_category required on create
       site_address: siteAddress,
       stage: "fee_proposal",
     },
@@ -186,7 +189,7 @@ export async function runW03(run) {
   const fnAddr = `${fnTs} Finance Link St, Adelaide SA 5000`;
   const { body: leadFn } = await post(
     "/api/sales/leads",
-    { first_name: "FinanceLink", last_name: `Test${fnTs}`, email: `financelink-${fnTs}@example.test`, site_address: fnAddr, stage: "fee_proposal" },
+    { first_name: "FinanceLink", last_name: `Test${fnTs}`, email: `financelink-${fnTs}@example.test`, lead_source: "referral", site_address: fnAddr, stage: "fee_proposal" },
     token
   );
   const leadFnId = leadFn?.lead?.id;
