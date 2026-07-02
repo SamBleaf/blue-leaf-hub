@@ -120,11 +120,11 @@ export default function WorkforcePlannerTab() {
   const fillDownRef = useRef(null);
   fillDownRef.current = fillDown;
 
-  // Mouse: 5px drag threshold (snappy on desktop). Touch: 180ms press-hold + 8px tolerance so a tap
-  // or scroll on a phone doesn't start a drag — you press-and-hold a chip to move/duplicate it.
+  // Mouse: 5px drag threshold (snappy on desktop). Touch: 400ms press-hold + 15px tolerance — a
+  // horizontal swipe to scroll will travel >15px before 400ms elapses, cancelling drag activation.
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } })
+    useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 15 } })
   );
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => ymd(addDays(monday, i))), [monday]);
@@ -577,14 +577,14 @@ export default function WorkforcePlannerTab() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="text-left text-muted">
-                  <th className="py-2 pr-3 font-medium">Employee</th>
-                  {days.map((d, i) => <th key={d} className="py-2 px-1 font-medium text-center whitespace-nowrap">{DOW[i]} {new Date(`${d}T12:00:00`).getDate()}</th>)}
+                  <th className="py-2 pr-1 sm:pr-3 font-medium">Employee</th>
+                  {days.map((d, i) => <th key={d} className="py-2 px-1 font-medium text-center whitespace-nowrap"><span className="sm:hidden">{DOW[i][0]} {new Date(`${d}T12:00:00`).getDate()}</span><span className="hidden sm:inline">{DOW[i]} {new Date(`${d}T12:00:00`).getDate()}</span></th>)}
                 </tr>
               </thead>
               <tbody>
                 {employees.map((emp) => (
                   <tr key={emp.id} className="border-t border-hairline">
-                    <td className="py-2 pr-3 text-ink whitespace-nowrap">{emp.name}{emp.is_leading_hand && <span className="ml-1 text-amber-500" title="Leading hand">⭐</span>}</td>
+                    <td className="py-2 pr-1 sm:pr-3 text-ink max-w-[72px] sm:max-w-none truncate" title={emp.name}>{emp.name}{emp.is_leading_hand && <span className="ml-1 text-amber-500" title="Leading hand">⭐</span>}</td>
                     {days.map((d, i) => {
                       const a = allocMap[`${emp.id}|${d}`];
                       const jKey = a && allocJobKey(a);
