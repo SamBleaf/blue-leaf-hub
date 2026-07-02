@@ -175,6 +175,11 @@ const BANNED_PHRASES = [
   { pattern: /\bbespoke\b/gi,               label: '"bespoke" — overused agency word' },
   { pattern: /\bcurated\b/gi,               label: '"curated" — vague, not specific' },
   { pattern: /\belevated\b/gi,              label: '"elevated" — vague lifestyle language' },
+  { pattern: /cutting.?edge/gi,             label: '"cutting-edge" — empty tech-signalling' },
+  { pattern: /state.?of.?the.?art/gi,       label: '"state-of-the-art" — cliché superlative' },
+  { pattern: /\bexquisite\b/gi,             label: '"exquisite" — vague superlative' },
+  { pattern: /\bunparalleled\b/gi,          label: '"unparalleled" — unprovable claim' },
+  { pattern: /\bmeticulous(ly)?\b/gi,       label: '"meticulous" — telling not showing' },
 ];
 
 const OVERPROMISE_PATTERNS = [

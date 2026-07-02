@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { buildPurchaseOrderPdfBuffer, defaultStandardConditions } from "./poPdfKit.mjs";
 import { DEFAULT_PO_TERMS } from "./poDefaultTerms.mjs";
+import { gstAmount } from "./constants.mjs";
 import {
   buildexactConfigured,
   buildexactLogin,
@@ -37,9 +38,6 @@ import {
 import { resolveRfqQuotePdfForPo } from "./poQuoteAttachment.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
-
-const GST_RATE = 0.10; // Never hardcode 0.1 inline — use this constant
-const gstAmount = (exGstAmt) => Math.round(Number(exGstAmt) * GST_RATE * 100) / 100;
 
 function safeFilePart(s, max = 48) {
   return (

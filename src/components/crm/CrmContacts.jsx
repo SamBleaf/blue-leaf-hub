@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { apiFetch, apiPost } from "../../lib/apiFetch.js";
 import {
   CRM_STATUS, CRM_STATUS_LABELS, CRM_CONTACT_TYPES,
-  CRM_CONSENT_SOURCES
 } from "../../lib/constants.js";
 import ContactDrawer from "./ContactDrawer.jsx";
 import StatusBadge from "../ui/StatusBadge.jsx";
@@ -40,7 +39,7 @@ function NewContactModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", phone: "", contactType: "prospect",
     suburb: "", status: "new", budgetRange: "", interestTimeline: "",
-    consentToEmail: false, consentSource: "in_person", notes: "",
+    notes: "",
     referredByContactId: "",
   });
   const [smartListDefs, setSmartListDefs] = useState([]);
@@ -239,29 +238,10 @@ function NewContactModal({ onClose, onCreated }) {
             />
           </div>
 
-          <div className="border-t border-hairline pt-3">
-            <div className="flex items-center gap-2 mb-2">
-              <input
-                type="checkbox"
-                id="consent"
-                checked={form.consentToEmail}
-                onChange={e => f("consentToEmail", e.target.checked)}
-                className="w-4 h-4"
-              />
-              <label htmlFor="consent" className="text-sm text-ink">Consent to marketing emails</label>
-            </div>
-            {form.consentToEmail && (
-              <div>
-                <label className="block text-xs font-medium text-muted mb-1">Consent source *</label>
-                <select className="input w-full" value={form.consentSource} onChange={e => f("consentSource", e.target.value)}>
-                  {Object.entries(CRM_CONSENT_SOURCES).map(([k, v]) => (
-                    <option key={k} value={v}>{v.replace(/_/g, " ")}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted mt-1">Required by Australian Spam Act 2003</p>
-              </div>
-            )}
-          </div>
+          <p className="border-t border-hairline pt-3 text-xs text-muted">
+            Marketing-email consent (Spam Act 2003) is captured when you add this contact to a mailing
+            list — not at contact creation.
+          </p>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">

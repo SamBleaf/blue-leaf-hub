@@ -1,4 +1,3 @@
-import { authFetch } from "../lib/authFetch.js";
 import { apiPost } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -59,13 +58,8 @@ export default function TenderBoard() {
     setDeleteBusy(true);
     setError("");
     try {
-      const res = await authFetch("/api/tender/job-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: deleteModal.id })
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok) throw new Error(j.error || "Delete failed");
+      const { ok, error } = await apiPost("/api/tender/job-delete", { jobId: deleteModal.id });
+      if (!ok) throw new Error(error || "Delete failed");
       setDeleteModal(null);
       await load();
     } catch (e) {
