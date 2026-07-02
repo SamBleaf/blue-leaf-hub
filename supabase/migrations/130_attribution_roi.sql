@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS lead_touch_events (
 );
 CREATE INDEX IF NOT EXISTS idx_lead_touch_events_lead ON lead_touch_events(lead_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_lead_touch_events_channel ON lead_touch_events(channel);
+-- RLS on (consistent with attribution_events / enquiry_attribution). No policy = server
+-- service-role access only, which is all this table needs (never read via the anon client).
+ALTER TABLE lead_touch_events ENABLE ROW LEVEL SECURITY;
 
 -- ── 2. enquiry_attribution revenue writeback columns ────────────────────────
 ALTER TABLE enquiry_attribution

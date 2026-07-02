@@ -1,6 +1,7 @@
 import { authFetch } from "../lib/authFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
 import { apiPost } from "../lib/apiFetch.js";
+import { LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS } from "../lib/constants.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -1136,8 +1137,11 @@ export default function LeadDetail() {
       setLead(lr.lead);
       setActivities(lr.activities || []);
       setConversations(cr.conversations || []);
-      setTimeline(tr.ok ? (tr.timeline || []) : []);
-      setTimelineViewMissing(!!tr.viewMissing);
+      // On a hard timeline error (non-42P01, so no viewMissing flag), pass timeline=null so
+      // LeadUnifiedTimeline degrades to the already-loaded activities list rather than showing
+      // an empty "No history yet." Only a clean ok response yields a real (possibly empty) stream.
+      setTimeline(tr.ok ? (tr.timeline || []) : null);
+      setTimelineViewMissing(tr.ok ? !!tr.viewMissing : true);
       setScreenContext?.({ page: "lead_detail", leadId, stage: lr.lead.stage, name: displayLeadName(lr.lead) });
     } catch (e) {
       setErr(e.message);
@@ -1431,11 +1435,7 @@ export default function LeadDetail() {
                     onChange={e => patch({ fit_quality: e.target.value || null })}
                   >
                     <option value="">Not set</option>
-                    <option value="strong">Strong fit</option>
-                    <option value="possible">Possible fit</option>
-                    <option value="nurture">Nurture</option>
-                    <option value="poor">Poor fit</option>
-                    <option value="price_shopper">Price shopper</option>
+                    {Object.entries(LEAD_FIT_QUALITY_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1446,9 +1446,7 @@ export default function LeadDetail() {
                     onChange={e => patch({ readiness: e.target.value || null })}
                   >
                     <option value="">Not set</option>
-                    <option value="early_research">Early research</option>
-                    <option value="not_ready_yet">Not ready yet</option>
-                    <option value="ready_for_consult">Ready for consult</option>
+                    {Object.entries(LEAD_READINESS_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                   </select>
                 </div>
               </div>
