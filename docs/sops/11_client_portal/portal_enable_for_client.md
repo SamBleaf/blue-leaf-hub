@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: placeholders_only
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-01: Enable the Client Portal for a Project
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. This SOP applies only to the legacy `/portal/:token` stack (no login, shareable link). Do not use it to onboard new projects.
 
 **Module:** Portal Admin  
 **SOP ID:** 11-01  

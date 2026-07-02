@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-04: Upload Progress Photos to the Portal
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. Note: photos in the v2 Journey tab currently use the legacy media endpoint and have a known rendering gap (see SOP 11-13 §7). This SOP covers photo upload for the v1 `/portal/:token` stack only.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-04  
@@ -87,13 +89,27 @@ Uploads one or more photos to the project's portal. The photos appear in the cli
 - DB effects: inserts row into portal photos table with `project_id`, `storage_path` (Dropbox path), `public_url` (served via `/api/portal/media/:photoId`), `caption`, `update_id`, `taken_at`
 - Note: there is no `file_url` column — use `storage_path` (Dropbox) and `public_url` (served endpoint)
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Photos tab with + Upload Photos button]
+[insert screenshot: Client portal timeline showing an uploaded photo card with caption]
+
+## 12. Edge cases and limits
+- The API accepts JSON body only — not multipart/form-data; the photo must be base64-encoded in `contentBase64`
+- Each photo requires a separate API call — there is no batch upload in a single request
+- Storage backend is Dropbox, not Supabase Storage; `storage_path` holds the Dropbox path and `public_url` is the served endpoint
+- There is no `file_url` column — always use `storage_path` (backend) and `public_url` (client-accessible served URL)
+- Photos are linked to a weekly update via `updateId` (optional); without it, photos appear in the general timeline only
+- There is no enforced per-file size limit on the server — the Dropbox upload may fail for very large files; aim for under 10 MB per photo
+- Photo order is by upload date; `sortOrder` can be set but is not enforced by the client view
+- Deleting a photo is not supported through the admin UI — contact a developer to remove a photo from the DB and Dropbox
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin

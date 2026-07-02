@@ -45,7 +45,7 @@ Lets the builder configure and feed the client's portal without touching the dat
 6. Open the **Milestones** section
 7. Add or edit a milestone: **key** (e.g. `frame`), **label** (e.g. "Frame complete"), **ETA**, and the **stage preview** ("what to expect")
 8. Mark the current milestone — setting one as current clears the flag on the others
-9. Set the milestone **confidence** (`on_track` / `at_risk` / `delayed`) and a **confidence note** so the client's build-health reads honestly
+9. Set the milestone **confidence** (`on_track` / `watch` / `delayed`) and a **confidence note** so the client's build-health reads honestly
 10. Save
 
 ### Selections
@@ -179,7 +179,7 @@ Next review date: 2026-12-21
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Milestone is_current is exclusive + confidence (feature-specific)**
-1. Add two milestones, mark the first as **current** with confidence `at_risk` and a confidence note
+1. Add two milestones, mark the first as **current** with confidence `watch` and a confidence note
 2. Then mark the second as current
 3. Expected result: only the second is `is_current = true`; the first cleared
 4. Expected DB: exactly one `portal_milestones` row with `is_current = true`; the confidence note persisted on its row

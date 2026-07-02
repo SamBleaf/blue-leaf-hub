@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-07-02 (CRM/Sales Control System Batches 1A–1C — SOPs 02-08, 02-09, 19-09 added)
-> Total SOPs: 125  
+> Last updated: 2026-07-02 (SOP-DOCS-WAVE-02B — portal v2-canonical + matrix, site-diary §14/view-only; then CRM Batches 1A–1C)
+> Total SOPs: 125 (+ 1 reference: portal stack matrix)  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -62,7 +62,7 @@
 | 06-08 | Ripple cascade — propagate date changes to dependent tasks | [06-08_ripple_cascade.md](06_scheduling/06-08_ripple_cascade.md) | Scheduling | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 07-01 | Write a site diary entry | [diary_write_entry.md](07_site_diary/diary_write_entry.md) | Site Diary | Supervisor | Draft | untested | Yes | High |
 | 07-02 | Use voice capture for a diary entry | [diary_voice_capture.md](07_site_diary/diary_voice_capture.md) | Site Diary | Supervisor | Draft | untested | Yes | Medium |
-| 07-03 | View and edit past diary entries | [diary_view_entries.md](07_site_diary/diary_view_entries.md) | Site Diary | Admin, Supervisor | Draft | untested | Yes | Medium |
+| 07-03 | View past diary entries (view-only) | [diary_view_entries.md](07_site_diary/diary_view_entries.md) | Site Diary | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 08-01 | Upload a subcontractor compliance document | [whs_upload_compliance.md](08_whs/whs_upload_compliance.md) | WHS | Admin, Supervisor | Draft | untested | Yes | High |
 | 08-02 | Check compliance status for a project | [whs_check_compliance_status.md](08_whs/whs_check_compliance_status.md) | WHS | Admin, Supervisor | Draft | untested | Yes | High |
 | 08-03 | Set up a site induction QR code | [whs_site_induction_setup.md](08_whs/whs_site_induction_setup.md) | WHS | Admin, Supervisor | Draft | untested | Yes | Medium |
@@ -85,7 +85,8 @@
 | 10-01 | Workforce overview | [workforce_overview.md](10_workforce/workforce_overview.md) | Workforce | Admin, Supervisor | Draft | untested | No | Low |
 | 10-02 | Install the Worker app on iPhone home screen | [worker_pwa_ios_install.md](10_workforce/worker_pwa_ios_install.md) | Workforce | Field worker, Admin | Draft | untested | Yes | Medium |
 | 10-03 | Add a photo when completing a site task | [add_completion_photo.md](10_workforce/add_completion_photo.md) | Workforce | Field worker, Admin, Supervisor | Draft | untested | Yes | Medium |
-| 11-01 | Enable the client portal for a project | [portal_enable_for_client.md](11_client_portal/portal_enable_for_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
+| 11-00 | Portal stack matrix (v1↔v2, v2 canonical) | [00_PORTAL_STACK_MATRIX.md](11_client_portal/00_PORTAL_STACK_MATRIX.md) | Client Portal | Admin | Reference | n/a | No | High |
+| 11-01 | Enable the client portal for a project (legacy v1) | [portal_enable_for_client.md](11_client_portal/portal_enable_for_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
 | 11-02 | View the portal as the client | [portal_view_as_client.md](11_client_portal/portal_view_as_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
 | 11-03 | Add a weekly update | [portal_add_weekly_update.md](11_client_portal/portal_add_weekly_update.md) | Client Portal | Admin, Supervisor | Draft | untested | Yes | High |
 | 11-04 | Upload progress photos | [portal_upload_photos.md](11_client_portal/portal_upload_photos.md) | Client Portal | Admin, Supervisor | Draft | untested | Yes | High |

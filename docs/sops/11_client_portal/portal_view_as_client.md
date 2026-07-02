@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-02: View the Portal as the Client (Admin Preview)
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. To preview the v2 portal as a client, log in with the client test account at `/client-portal`. This SOP covers admin preview for the legacy `/portal/:token` stack only.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-02  
@@ -72,13 +74,24 @@ No data is changed by viewing the portal. Previewing is read-only.
 - The preview URL is the client portal URL: `https://[domain]/portal/[token]`
 - No separate admin preview endpoint — the token is the access mechanism
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin project page with Preview as Client button]
+[insert screenshot: Client portal home page as seen through the token link]
+
+## 12. Edge cases and limits
+- The preview URL is the actual client URL — there is no separate admin preview mode; do not share the URL accidentally
+- If the token is regenerated after sharing, the old preview URL stops working (it returns 404); use the new token URL to preview
+- Admin session cookies do not affect token-based access — the portal uses only the token for access, not the admin session
+- Previewing as admin is read-only; no writes are triggered by viewing
+- The preview does not restrict what the admin can see — an admin can see all tabs including Decisions and Budget, same as the client
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A project with a portal token exists

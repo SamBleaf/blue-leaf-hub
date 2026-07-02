@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-08: Update Portal Milestones
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. In v2, milestones are managed from the Admin Console (SOP 11-12, Milestones section) and include a build-health confidence field. This SOP applies only to the legacy `/portal/:token` stack.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-08  
@@ -96,13 +98,26 @@ Creates and updates the milestone progress bar shown in the client's portal. Mil
 - Client views milestones via `GET /api/portal/:token/timeline`
 - Admin summary via `GET /api/portal/admin/:projectId/summary`
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Milestones tab with + Add Milestone form]
+[insert screenshot: Client portal Timeline tab showing complete / upcoming milestones]
+
+## 12. Edge cases and limits
+- `key` must be unique per project — re-using the same key performs an upsert (updates the existing milestone)
+- Use `achievedAt` (ISO timestamp) to mark a milestone complete — there is no boolean `completed` field; the DB column is `achieved_at`
+- DB column names are `key`, `label`, `eta`, `achieved_at` — do not use `name`, `target_date`, `completed`, or `completed_at`
+- Client views milestones via `GET /api/portal/:token/timeline` (not the admin summary endpoint)
+- Milestone dates are not automatically synced from the Operations schedule — update them manually when the schedule changes
+- There is no enforced limit on the number of milestones per project
+- Setting `achievedAt` to null effectively un-marks a milestone as complete (via the upsert)
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin

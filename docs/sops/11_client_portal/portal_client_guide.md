@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-30
+sop_version: 1.1
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Client
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-09: Client Guide — Using Your Portal
+
+> **LEGACY — v1 token portal (fallback only).** This guide is for clients using the original no-login share-link portal (`/portal/:token`). If your builder has invited you by email to set a password and log in, you are on the new v2 portal — refer to the v2 client onboarding (SOP 11-10) instead. See [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) for a full comparison.
 
 **Module:** Client Portal — Client-facing guide  
 **SOP ID:** 11-09  
@@ -97,7 +99,45 @@ Your portal link is unique to your project. Only people you share the link with 
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 8. Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Portal link does not open | The link may have expired or the portal may not be enabled yet — contact your builder |
+| Page looks broken on mobile | Try refreshing; if still broken, try Chrome or Safari |
+| I accidentally approved something | Contact the builder immediately by phone or message — they can note the correction |
+| I cannot see the Decisions tab | The builder may not have added any decisions yet — check back after your next update |
+| Photos are not loading | Photos are added after each site visit — check again after the next weekly update |
+
+## 9. Related SOPs
+- [Enable the client portal for a project](portal_enable_for_client.md) — SOP 11-01 (admin)
+- [View the portal as the client](portal_view_as_client.md) — SOP 11-02 (admin)
+- [Add a weekly update](portal_add_weekly_update.md) — SOP 11-03 (admin)
+
+## 10. Automation notes
+- Client portal resolves by token: `GET /api/portal/:token/home`
+- Tabs: `GET /api/portal/:token/timeline`, `/decisions`, `/budget`, `/conversations`
+- The portal token is embedded in the link the builder sends — no separate login is required
+- An invalid or revoked token returns a friendly error page
+
+## 11. Screenshot placeholders
+[insert screenshot: Client portal home page showing updates, milestones and decisions alert]
+[insert screenshot: Decisions tab with a pending decision and Approve / Reject buttons]
+
+## 12. Edge cases and limits
+- The link is the only access control — anyone who has it can view the portal
+- If the builder regenerates the token, the old link stops working; ask the builder for the new link
+- Clients cannot edit or delete their own decisions after responding; contact the builder to resolve errors
+- The portal is read-mostly; the only client writes are responding to decisions and sending messages
+- There is no account, no password, and no login recovery — the link is the sole credential
+
+## 13. Owner of the process
+Client (document maintained by Admin)  
+Next review: 2026-11-30
+
+---
+
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] A client portal token exists for a test project

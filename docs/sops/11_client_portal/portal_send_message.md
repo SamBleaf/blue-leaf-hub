@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-07: Send a Message to the Client
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. In v2, the Messages tab uses a different API namespace (`/api/portal/app/:projectId/messages`). This SOP applies only to the legacy `/portal/:token` messaging stack.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-07  
@@ -81,13 +83,26 @@ Sends a message from the builder to the client through the portal messaging syst
 - DB effects: inserts message row with `project_id`, `sender` ('builder' or 'client'), `body`, `sent_at`
 - Note: DB column is `sender` (not `sender_type`)
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Messages tab with compose box and thread]
+[insert screenshot: Client portal Conversations tab showing builder message and reply box]
+
+## 12. Edge cases and limits
+- Message text goes in `body` — not `message`, not `text`; the wrong field name returns HTTP 400
+- Maximum message length is 2000 characters; longer text is rejected
+- The DB column for the sender is `sender` (values `'builder'` or `'client'`) — not `sender_type`
+- No notification is sent to the client when a builder message is sent; contact the client by other means to alert them
+- Messages cannot be edited or deleted once sent — add a follow-up message to correct an error
+- Messages are project-scoped via the token; a token for Project A cannot read or write messages for Project B
+- There is no read-receipt or delivered confirmation
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin

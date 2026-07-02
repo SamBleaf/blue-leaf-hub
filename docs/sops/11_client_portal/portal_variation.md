@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-06: Add a Variation in the Portal
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. In v2, variations are issued from the finance/admin layer and the client approves or declines them on the My Actions tab (SOP 11-11), which archives an approved PDF automatically. This SOP applies only to the legacy `/portal/:token` stack.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-06  
@@ -86,13 +88,26 @@ Creates a variation/claim record in the client's portal. The client can see the 
 - Client views variations via `GET /api/portal/:token/budget` — variations come from `portal_decisions WHERE type = 'variation'`
 - Admin reads via `GET /api/portal/admin/:projectId/summary`
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Decisions tab with + Add Decision set to type variation]
+[insert screenshot: Client portal Budget tab showing the pending variation with cost inc-GST]
+
+## 12. Edge cases and limits
+- Scope variations use `portal_decisions` (type `"variation"`) — never `portal_claims`; `portal_claims` is for the progress payment schedule only (Deposit/Slab/Frame/Lockup/Handover)
+- `costDelta` is stored and displayed ex-GST; the portal adds GST for the client view — always enter the ex-GST figure
+- `scheduleDelta` is a signed integer (days); positive = delay, negative = saving
+- A declined variation cannot be re-opened; create a new decision with type `"variation"` to re-raise
+- There is no audit log for v1 variation responses; only the DB status change is recorded
+- Variations only appear in the client Budget tab when `type = "variation"` — other decision types do not flow into budget
+- `costDelta` may be `null` for non-cost variations; the budget total excludes null `costDelta` rows
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin

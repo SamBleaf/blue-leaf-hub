@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-03: Add a Weekly Update
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. In v2, weekly updates are published via the Admin Console (SOP 11-12, Updates section) and include a builder reasoning field. This SOP applies only to the legacy `/portal/:token` stack.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-03  
@@ -80,13 +82,26 @@ Creates a weekly update post that appears on the client's portal home page and i
 - DB effects: inserts/updates row in portal updates table with columns `project_id`, `week_of`, `headline`, `body`, `author_name`, `published`, `video_url`
 - Note: there is no `title` or `summary` field — the headline is the title and body is the content
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Updates tab with + New Update form]
+[insert screenshot: Client portal home showing the weekly update card]
+
+## 12. Edge cases and limits
+- `weekOf` must be provided as an ISO date string (e.g. `"2026-05-26"`) — free-text values or missing values return HTTP 400
+- The `body` field has no max-length enforced in the API, but keep updates concise for readability on mobile
+- There is no draft state — the update is published immediately on save; if it needs review before the client sees it, draft offline and publish when ready
+- Publishing an update does not send a notification to the client; contact the client separately to let them know
+- There is no `title` or `summary` field — the `headline` is the title and `body` is the content; do not reference these field names incorrectly
+- Editing (`PATCH`) an update does not re-notify the client
+- Multiple updates for the same project stack chronologically; there is no enforced limit
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin

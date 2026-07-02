@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-05-30
+sop_version: 1.2
+last_reviewed: 2026-07-02
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -8,6 +8,8 @@ test_status: static_pass
 ---
 
 # SOP 11-05: Add a Client Decision Item
+
+> **LEGACY — v1 token portal (fallback only).** For new jobs use the v2 client portal — see [00_PORTAL_STACK_MATRIX.md](00_PORTAL_STACK_MATRIX.md) and SOPs 11-10..11-13. In v2, decisions are managed via the Admin Console (SOP 11-12) and the client responds on the My Actions tab (SOP 11-11). This SOP applies only to the legacy `/portal/:token` stack.
 
 **Module:** Client Portal — Admin  
 **SOP ID:** 11-05  
@@ -88,13 +90,26 @@ Creates a decision item in the client's portal. The client sees the question, an
 - Admin reads decisions via: `GET /api/portal/admin/:projectId/summary` (decisions included in summary)
 - Client reads decisions via: `GET /api/portal/:token/decisions`
 
-## 11. Owner of the process
+## 11. Screenshot placeholders
+[insert screenshot: Portal Admin Decisions tab with + Add Decision form open]
+[insert screenshot: Client portal Decisions tab showing a pending decision]
+
+## 12. Edge cases and limits
+- The `type` field must be one of `"selection"` / `"approval"` / `"variation"` / `"info"` — any other value returns 400
+- `options` is an optional JSON array for selection-type decisions; not used for `approval` or `variation`
+- `costDelta` and `scheduleDelta` are only meaningful for `type = "variation"` — they are stored but not displayed for other types
+- A declined decision cannot be re-opened; create a new decision to re-raise
+- There is no draft/preview step — the decision is immediately visible to the client once saved
+- Multiple decisions can be open simultaneously; no enforced limit per project
+- `urgency` is a UI flag only; no system enforcement or notification fires based on urgency
+
+## 13. Owner of the process
 Admin  
 Next review: 2026-11-30
 
 ---
 
-## 12. Troubleshoot Agent Test Script
+## 14. Troubleshoot Agent Test Script
 
 ### Pre-test setup
 - [ ] Logged in as Admin
