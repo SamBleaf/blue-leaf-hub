@@ -1,7 +1,7 @@
 ---
 loop_enabled: true
 next_agent: cursor
-current_wave: SOP-DOCS-WAVE-03
+current_wave: SOP-DOCS-WAVE-04
 current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
@@ -18,18 +18,18 @@ expected_branch: portal-v2
 
 | Field | Value |
 |---|---|
-| **Loop number** | 7 (SOP Wave 02A + 02B done → 03) |
-| **Current wave** | `SOP-DOCS-WAVE-03` — no-code SOP compliance, folders 12–17 |
-| **Wave 02B delivered** | portal v2-canonical (+matrix, SEC14-11) · site-diary §14/view-only (SEC14-07) · sales Pass 3A (02-SALES) · RFQ nav · workforce §14 — all §14-normalised. Commits `14b681b`, `d6e49da` |
-| **03 scope** | 12_admin_settings · 13_subcontractors · 14_cost_intelligence · 15_carpentry · 16_procurement · 17_crm_mailing_list — §14 compliance + accuracy vs real components |
-| **Deferred (logged)** | SOP-BUG-02-07 · -05-05 · -07-03 · -09-JOBVIEW · -11-12 (no Fix Agent). New from 02B (product, logged): dead `QuoteTracker.jsx`; no conversation read-view; Blueprint extended-chat pointer |
+| **Loop number** | 8 (Waves 02B + 03 done → 04) |
+| **Current wave** | `SOP-DOCS-WAVE-04` — no-code SOP §14 sweep, remaining folders (NEXT SESSION) |
+| **Wave 03 delivered** | folders 12–17 (31 SOPs) to the 14-section template + accuracy. Commits `9fcf0ff`, `099580c` |
+| **04 scope** | 00_getting_started · 01_global_navigation · 03_tendering · 05_operations · 06_scheduling · 09_finance (+ residual 08_whs). Marketing 18/19 PAUSED |
+| **Deferred (logged)** | Original: SOP-BUG-02-07 · -05-05 · -07-03 · -09-JOBVIEW · -11-12. New from 02B/03 (product, Sam-gated): consent fields ignored on contact create; dead `QuoteTracker.jsx`; no conversation read-view; Blueprint extended-chat; pretender_estimates dup-insert (no idempotency); benchmarks-tab naming; mig 092 not in CLAUDE.md table |
 | **Fix mode allowed?** | No |
-| **Sam approval required?** | No (no-code wave); Yes to escalate any deferred bug to Fix Agent |
+| **Sam approval required?** | No (no-code wave). Yes to: unpause Marketing 18/19, or escalate any deferred bug to a Fix-Agent batch |
 
 **Guards:** product code OFF · live integrations OFF · deploy OFF · Marketing (18/19) paused · watcher
-dry-run/run-once only. **Executed via Sonnet background agents under Claude (loop controller) review**
-(no Cursor/Claude CLI needed). **Iteration budget:** 3 — Wave 02B consumed 1; 2 remain this session.
+dry-run/run-once only. **Executed via Sonnet background agents under Claude (loop controller) review.**
+**Iteration budget: 3 — SPENT this session** (02B, 03-i, 03-ii). Resume Wave 04 next session.
 
-**Note (2026-07-02):** an entangled off-wave product-code WIP (RFQ add-recipient / backlog / reply /
-select-all revert + IMAP matcher tests) was found uncommitted and **quarantined to `git stash@{0}`**
-(would have regressed 4 live features). Awaiting Sam: drop / salvage matcher tests / restore.
+**SOP §14-compliance coverage:** folders 02, 04, 07, 08(07), 10, 11, 12, 13, 14, 15, 16, 17 are now
+14-section compliant (test script §14). Remaining for Wave 04: 00, 01, 03, 05, 06, 09 (+ residual 08).
+Marketing 18/19 paused. The deploy-gate "SOP drift fixed or accepted" is **substantially met**.

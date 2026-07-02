@@ -1,7 +1,7 @@
 ---
 loop_enabled: true
 next_agent: cursor
-current_wave: SOP-DOCS-WAVE-03
+current_wave: SOP-DOCS-WAVE-04
 current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
@@ -19,19 +19,20 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `SOP-DOCS-WAVE-03` (no-code SOP compliance — folders 12–17) |
-| **Last completed agent** | Claude (loop controller) — reviewed + shipped **Wave 02B** (Sonnet execution agents) |
-| **Current gate** | None — 03 is no-code (same SOP-docs family; Marketing 18/19 stays PAUSED) |
-| **Open blockers** | None. Deploy-gate SOP drift (`SEC14-11`, `SEC14-07`, `02-SALES`) CLOSED by 02B |
-| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-03`) |
-| **Approval required?** | No (no-code). **Yes** if a deferred app bug is escalated to Fix Agent |
+| **Phase / wave** | `SOP-DOCS-WAVE-04` (no-code SOP §14 sweep — remaining folders) |
+| **Last completed agent** | Claude (loop controller) — reviewed + shipped **Wave 03** (folders 12–17) via Sonnet agents |
+| **Current gate** | None — 04 is no-code. **Session budget (3) SPENT** — do not auto-run; resume next session |
+| **Open blockers** | None. SOP deploy-gate drift CLOSED. Product bugs surfaced during 02B/03 logged (deferred) |
+| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-04`) |
+| **Approval required?** | No (no-code). Marketing (18/19) unpause + any Fix-Agent batch = Sam-gated |
 | **Product-code changes allowed?** | **No** |
 
-**Wave 02B (DONE, 2026-07-02):** portal v2-canonical + stack matrix (`SEC14-11` HIGH closed) · site-diary
-§14 + 07-03 view-only (`SEC14-07` closed) · sales 02-01..07 rewritten to Pass 3A (`02-SALES` closed) ·
-RFQ 04-02..09 Engine-vs-QuoteTracker nav · workforce 10-01 §14. All test scripts normalised to §14.
-Committed `14b681b` (02B-i) + `d6e49da` (02B-ii). Docs-only; guard verified; product WIP quarantined in stash.
+**Waves 02B + 03 (DONE, 2026-07-02):** deploy-gate SOP drift closed (`SEC14-11`, `SEC14-07`, `02-SALES`);
+folders **02, 04, 07, 08(07), 10, 11** (02B) + **12, 13, 14, 15, 16, 17** (03) brought to the 14-section
+template (test script §14) + accuracy vs real components. Commits `14b681b`, `d6e49da`, `b8758f1`,
+`9fcf0ff`, `099580c`. Docs-only throughout; guard verified; product WIP quarantined + dropped.
 
-**Wave 03 scope:** SOP §14 compliance + accuracy sweep for folders **12_admin_settings · 13_subcontractors ·
-14_cost_intelligence · 15_carpentry · 16_procurement · 17_crm_mailing_list**. Marketing (18/19) PAUSED.
-Watcher dry-run/run-once only. 5 app bugs still deferred (no Fix Agent).
+**Wave 04 scope (next session):** §14 + accuracy sweep for the SOP folders NOT yet in a 02B/03 wave —
+**00_getting_started · 01_global_navigation · 03_tendering · 05_operations · 06_scheduling ·
+09_finance** (+ any residual 08_whs SOPs beyond 08-07). Marketing **18/19 stays PAUSED** (Sam-gated).
+Watcher dry-run/run-once only. 5 original app bugs + new product bugs (see BUG_REGISTER / changelog) deferred.
