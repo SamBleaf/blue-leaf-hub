@@ -55,6 +55,8 @@
     "test:w1b-timeline-signals:write": "node scripts/batch-a/run-w1b-timeline-signals.mjs --write",
     "test:w1c-attribution-roi": "node scripts/batch-a/run-w1c-attribution-roi.mjs",
     "test:w1c-attribution-roi:write": "node scripts/batch-a/run-w1c-attribution-roi.mjs --write",
+    "test:w1d-integration-contracts": "node scripts/batch-a/run-w1d-integration-contracts.mjs",
+    "test:w1d-integration-contracts:write": "node scripts/batch-a/run-w1d-integration-contracts.mjs --write",
     "test:w06-shape": "node scripts/batch-a/run-w06-shape.mjs",
     "test:w06-shape:write": "node scripts/batch-a/run-w06-shape.mjs --write",
     "test:w06-finalize": "node scripts/batch-a/run-w06-finalize.mjs",
