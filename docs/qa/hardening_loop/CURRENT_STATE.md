@@ -1,7 +1,7 @@
 ---
 loop_enabled: true
 next_agent: cursor
-current_wave: SOP-DOCS-WAVE-02B
+current_wave: SOP-DOCS-WAVE-03
 current_task_file: docs/qa/hardening_loop/NEXT_CURSOR_TASK.md
 fix_mode_allowed: false
 product_code_changes_allowed: false
@@ -19,15 +19,19 @@ expected_branch: portal-v2
 | Field | Value |
 |---|---|
 | **Branch** | `portal-v2` |
-| **Phase / wave** | `SOP-DOCS-WAVE-02B` (no-code SOP rewrite — continuation; 02A done) |
-| **Last completed agent** | Cursor — Wave 02A: wrote SOP 08-07 (WHS Setup); split wave for size |
-| **Current gate** | None — 02B is no-code (same Sam-approved wave family) |
-| **Open blockers** | None (deploy-gate SOP/training drift being cleared by Wave 02B) |
-| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-02B`) |
+| **Phase / wave** | `SOP-DOCS-WAVE-03` (no-code SOP compliance — folders 12–17) |
+| **Last completed agent** | Claude (loop controller) — reviewed + shipped **Wave 02B** (Sonnet execution agents) |
+| **Current gate** | None — 03 is no-code (same SOP-docs family; Marketing 18/19 stays PAUSED) |
+| **Open blockers** | None. Deploy-gate SOP drift (`SEC14-11`, `SEC14-07`, `02-SALES`) CLOSED by 02B |
+| **Next required agent** | **Cursor** → [NEXT_CURSOR_TASK.md](./NEXT_CURSOR_TASK.md) (`SOP-DOCS-WAVE-03`) |
 | **Approval required?** | No (no-code). **Yes** if a deferred app bug is escalated to Fix Agent |
 | **Product-code changes allowed?** | **No** |
 
-**Wave 02A:** SOP **08-07** (WHS Setup) created — `SAM-SOP-002` closed. Sharper diagnosis:
-`SOP-DRIFT-SEC14-07` is a §12→§14 renumber + 07-03 content drift (not missing). **Wave 02B priority:**
-portal v2-canonical rewrite (**High `SOP-DRIFT-SEC14-11`**) → site-diary §14 + 07-03 → sales Pass 3A →
-RFQ nav → workforce §14. Marketing `PAUSED`. Watcher dry-run/run-once only. 5 app bugs deferred.
+**Wave 02B (DONE, 2026-07-02):** portal v2-canonical + stack matrix (`SEC14-11` HIGH closed) · site-diary
+§14 + 07-03 view-only (`SEC14-07` closed) · sales 02-01..07 rewritten to Pass 3A (`02-SALES` closed) ·
+RFQ 04-02..09 Engine-vs-QuoteTracker nav · workforce 10-01 §14. All test scripts normalised to §14.
+Committed `14b681b` (02B-i) + `d6e49da` (02B-ii). Docs-only; guard verified; product WIP quarantined in stash.
+
+**Wave 03 scope:** SOP §14 compliance + accuracy sweep for folders **12_admin_settings · 13_subcontractors ·
+14_cost_intelligence · 15_carpentry · 16_procurement · 17_crm_mailing_list**. Marketing (18/19) PAUSED.
+Watcher dry-run/run-once only. 5 app bugs still deferred (no Fix Agent).

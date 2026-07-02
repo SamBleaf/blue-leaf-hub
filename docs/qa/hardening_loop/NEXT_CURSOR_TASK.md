@@ -1,62 +1,52 @@
 # NEXT CURSOR TASK — ACTIVE
 
-**Task ID:** `SOP-DOCS-WAVE-02B` · **Mode:** no-code SOP rewrite + §14 compliance (docs only)
-**Date:** 2026-06-29 · **Issued by:** Cursor (Wave 02A) → continuation of the Sam-approved `SOP-DOCS-WAVE-02`
+**Task ID:** `SOP-DOCS-WAVE-03` · **Mode:** no-code SOP §14 compliance + accuracy (docs only)
+**Date:** 2026-07-02 · **Issued by:** Claude (loop controller) → after Wave 02B review
 
-> Continuation of the **already-approved** no-code SOP wave (split for size). No new approval needed
-> (docs-only). Sam decisions in force: **v2 portal canonical** (`SAM-SOP-001`); WHS 08-07 done
-> (`SAM-SOP-002`). 5 app bugs **deferred — do not fix product code.**
+> No new approval needed — same no-code SOP-docs family as the Sam-greenlit `SOP-DOCS-WAVE-02`.
+> Wave 02B closed the deploy-gate SOP drift (`SEC14-11`, `SEC14-07`, `02-SALES`). Wave 03 sweeps the
+> remaining back-office folders for the SAME compliance bar. **Marketing (18/19) stays PAUSED.**
+> **5 app bugs remain deferred — do not fix product code.**
 
 ## Objective
-Finish the SOP rewrite + §14 compliance for the lead→handover journey. **Docs only.** Address the
-deploy-gate SOP/training drift, biggest blocker first.
+Bring folders **12–17** to the SOP standard: every SOP follows the exact 14-section template with the
+Troubleshoot Agent Test Script at **§14** (TC-01..TC-05 + ≥1 feature case), and every step matches the
+real app. **Docs only.**
 
-## Priority order
-1. **11_client_portal (HIGH — closes `SOP-DRIFT-SEC14-11`, deploy-blocking):** make **v2 canonical**.
-   - New-job portal SOPs point to `/client-portal` + v2 admin (`PortalV2Admin`); the v1 token
-     portal (`/portal/:token` + `PortalAdmin`) is **legacy/fallback and must be labelled** in every
-     legacy SOP (`portal_*.md`).
-   - Add a **v1↔v2 matrix** (which stack, which routes, when each applies) and clear
-     canonical-vs-legacy wording.
-   - Backfill/normalise **§14** to the correct section number across the legacy `portal_*` set.
-2. **07_site_diary (`SOP-DRIFT-SEC14-07`):** renumber the existing test script **§12 → §14**, add the
-   missing **§12 Edge cases** + **§13 Owner** sections (template compliance). **07-03 content fix:**
-   describe the **view-only** reality — remove/relabel the **Edit** + **date-range filter** steps as
-   *not yet available* and link the deferred **SOP-BUG-07-03** (do **not** fix the app).
-3. **02_sales 02-02..02-07 (`SOP-DRIFT-02-SALES`, P0):** rewrite to the Pass 3A **Lead command-centre**
-   + mobile tabs + **BlueprintAgent FAB** (read `src/pages/LeadDetail.jsx` for the real UX first).
-4. **04_rfq_engine 04-02..04-09:** correct entry/nav — post-send work is the **Quote Tracker**
-   (`/tender-manager/rfq-packages/:id`), not the Engine wizard.
-5. **10_workforce:** verify the test-script section number/compliance for the 3 SOPs; backfill §14
-   only where genuinely missing.
+## Priority order (one folder per sub-step; split if large — 03-i, 03-ii, …)
+1. **17_crm_mailing_list** — highest churn recently (CRM control spine 1A–1C just shipped: SOPs 02-08/02-09/19-09 exist). Verify CRM/mailing SOPs match `crmRoutes.mjs` + `CrmContacts.jsx`/`ContactDrawer.jsx`; §14 compliance.
+2. **16_procurement** (16-01..16-10) — verify vs `procurementRoutes.mjs`/`Procurement.jsx`; §14.
+3. **15_carpentry** (15-01..15-06) — verify vs `carpentryRoutes.mjs`/`CarpentryJobDetail.jsx` (note: worker tasks now have hold-drag reorder + transcript category edit); §14.
+4. **14_cost_intelligence** — §14 + accuracy.
+5. **13_subcontractors** — §14 + accuracy vs `Subcontractors.jsx`.
+6. **12_admin_settings** — §14 + accuracy.
 
 ## Method (per SOP)
-Read the real component/route first (read-only `src/**`/`server/**`), then rewrite so steps match
-the app; keep the full 14-section template; ensure **§14 = TC-01..TC-05 + ≥1 feature case**; bump
-`sop_version` + `last_reviewed`; update `SOP_INDEX.md` `test_status`/rows + `SOP_CHANGELOG.md`.
+Read the real component/route first (read-only `src/**`/`server/**`), rewrite so steps match; keep the
+full **14-section** template (canonical list in `docs/sops/SOP_MAINTENANCE.md`); test script is **§14**
+and the LAST section; bump `sop_version` + `last_reviewed: 2026-07-02`; note SOP_INDEX row + SOP_CHANGELOG
+deltas (the loop controller consolidates the shared index/changelog to avoid concurrent-edit conflicts).
 
 ## Allowed files
 `docs/sops/**`, `docs/qa/**`. **Read-only** on `src/**` / `server/**`.
 
 ## Forbidden
-- **No product code.** Do not fix the 5 deferred app bugs. No live integrations / email / RFQ / PO /
-  deploy. **No Marketing SOPs** (18/19 paused).
+- **No product code.** No live integrations / email / RFQ / PO / deploy. **No Marketing SOPs (18/19).**
+- Do not touch `SOP_INDEX.md` / `SOP_CHANGELOG.md` from a parallel execution agent — return the deltas.
 
 ## Stop conditions
-- A change needs product code → log, don't fix.
-- A deferred bug turns out deploy-blocking → log + flag for a Fix-Agent packet (Sam-gated).
-- Too large again → split further (e.g. portal as 02B-i, sales as 02B-ii) and log it.
+- Change needs product code → log, don't fix.
+- A deferred bug turns out deploy-blocking → log + flag a Fix-Agent packet (Sam-gated).
+- Too large → split (03-i, 03-ii, …) and log it.
 - Any forbidden task class → stop + `SAM_APPROVAL_REQUIRED.md`.
 
 ## Expected outputs
-- Rewritten SOPs; §14 normalised; `SOP_INDEX.md` + `SOP_CHANGELOG.md` updated.
-- `docs/qa/SOP_DOCS_WAVE_02_RESULT.md` appended with the 02B section (SOP-DRIFT IDs closed; still-blocked).
-- BUG_REGISTER status updates for closed `SOP-DRIFT-*`.
-- Update `CURRENT_STATE.md` + `AUTONOMOUS_LOOP_STATUS.md` → `next_agent: claude`; append
-  `AGENT_HANDOFF_LOG.md`; write `NEXT_CLAUDE_REVIEW.md`.
+- Compliant/accurate SOPs (folders 12–17); §14 normalised; SOP_INDEX + SOP_CHANGELOG updated (by controller).
+- `docs/qa/SOP_DOCS_WAVE_03_RESULT.md` with drift IDs closed + still-open.
+- Update `CURRENT_STATE.md` + `AUTONOMOUS_LOOP_STATUS.md` → `next_agent: claude`; append `AGENT_HANDOFF_LOG.md`.
 
-## Commit rule
-Docs only: `docs(sops,qa): SOP wave 02B — portal v2 canonical + §14 compliance + sales/RFQ nav`.
-
-## Final report format
-`task done · SOPs rewritten · §14 normalised count · SOP-DRIFT IDs closed · still-blocked · next agent claude · approval required (y/n)`.
+## Carried-over items (from Wave 02B review — not this wave's job unless trivial docs)
+- **Sam decision pending (non-blocking):** stashed off-wave product WIP (`git stash@{0}`) — RFQ add-recipient/
+  backlog/reply/select-all revert + IMAP matcher tests. Options: drop / salvage matcher tests / restore.
+- **Product-code follow-ups (deferred, Sam-gated):** dead `QuoteTracker.jsx` (redirect → `RfqPackageDetail.jsx`);
+  no conversation read-view (02-07); Blueprint extended-chat pointer (02-05).
