@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-06-29 (SOP Module Audit Wave 01 — folders 02–11 reviewed; see `docs/qa/SOP_MODULE_AUDIT_WAVE_01_RESULT.md`)
-> Total SOPs: 122  
+> Last updated: 2026-07-02 (CRM/Sales Control System Batches 1A–1C — SOPs 02-08, 02-09, 19-09 added)
+> Total SOPs: 125  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -31,6 +31,8 @@
 | 02-05 | Use Blueprint Insight (AI sales coaching) | [02-05_blueprint_insight.md](02_sales/02-05_blueprint_insight.md) | Sales | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 02-06 | Analyse a meeting transcript | [02-06_transcript_analysis.md](02_sales/02-06_transcript_analysis.md) | Sales | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 02-07 | View and manage conversation history | [02-07_conversations.md](02_sales/02-07_conversations.md) | Sales | Admin, Supervisor | Draft | untested | No | Medium |
+| 02-08 | Classify lead fit & work the action queue | [02-08_classify_fit_and_action_queue.md](02_sales/02-08_classify_fit_and_action_queue.md) | Sales | Admin, Staff | Draft | untested | No | High |
+| 02-09 | Lead trust rail & unified timeline | [02-09_trust_rail_and_timeline.md](02_sales/02-09_trust_rail_and_timeline.md) | Sales | Admin, Staff | Draft | untested | No | Medium |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
@@ -127,6 +129,7 @@
 | 19-06 | Generate an SEO content brief | [19-06_generate_seo_brief.md](19_marketing_intelligence/19-06_generate_seo_brief.md) | Marketing Intelligence | Admin, Director | Draft | untested | Yes | Medium |
 | 19-07 | Use the Question Engine (Create Next) | [19-07_question_engine.md](19_marketing_intelligence/19-07_question_engine.md) | Marketing Intelligence | Admin, Staff | Draft | untested | Yes | Medium |
 | 19-08 | Manage the website page inventory | [19-08_website_page_inventory.md](19_marketing_intelligence/19-08_website_page_inventory.md) | Marketing Intelligence | Admin, Director | Draft | untested | Yes | Medium |
+| 19-09 | Attribution ROI — source → fit → won | [19-09_attribution_roi.md](19_marketing_intelligence/19-09_attribution_roi.md) | Marketing Intelligence | Admin, Marketing | Draft | untested | No | Medium |
 
 ---
 
