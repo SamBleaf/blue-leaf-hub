@@ -69,6 +69,7 @@ import { registerMarketingCampaignRoutes } from "./lib/marketingCampaignRoutes.m
 import { registerMarketingPackageRoutes } from "./lib/marketingPackageRoutes.mjs";
 import { registerMarketingScheduleRoutes } from "./lib/marketingScheduleRoutes.mjs";
 import { registerMarketingLibraryRoutes } from "./lib/marketingLibraryRoutes.mjs";
+import { registerMarketingLibraryBackfillRoutes } from "./lib/marketingLibraryBackfillRoutes.mjs";
 import { registerMarketingBatch3Routes } from "./lib/marketingBatch3Routes.mjs";
 import { registerAdminRoutes } from "./lib/adminRoutes.mjs";
 import { registerWorkforceRoutes } from "./lib/workforceRoutes.mjs";
@@ -953,6 +954,7 @@ registerMarketingCommandRoutes(app);
 registerMarketingPackageRoutes(app);
 registerMarketingScheduleRoutes(app);
 registerMarketingLibraryRoutes(app);
+registerMarketingLibraryBackfillRoutes(app);
 registerMarketingBatch3Routes(app);
 registerAdminRoutes(app);
 registerWorkforceRoutes(app);

@@ -10,6 +10,7 @@ import MediaVault from "./MediaVault.jsx";
 import EvergreenLibrary from "./EvergreenLibrary.jsx";
 import MarketingDashboard from "./MarketingDashboard.jsx";
 import MarketingAttribution from "./MarketingAttribution.jsx";
+import MarketingLibrary from "./MarketingLibrary.jsx";
 
 // Marketing internal router (Run A + Batch 3). Mounted at /marketing/* in App.jsx (admin-gated).
 // Supports the two-segment /marketing/studio/legacy route that the old /marketing/:tab
@@ -22,6 +23,7 @@ export default function MarketingRouter() {
       <Route path="approval" element={<ApprovalQueue />} />
       <Route path="calendar" element={<MarketingCalendar />} />
       <Route path="vault" element={<MediaVault />} />
+      <Route path="library" element={<MarketingLibrary />} />
       <Route path="evergreen" element={<EvergreenLibrary />} />
       <Route path="intelligence" element={<MarketingDashboard />} />
       <Route path="attribution" element={<MarketingAttribution />} />

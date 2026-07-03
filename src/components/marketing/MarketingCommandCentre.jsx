@@ -12,6 +12,7 @@ const WORKFLOW = [
   { to: "/marketing/calendar", label: "Post & log" },
   { to: "/marketing/intelligence", label: "Measure" },
   { to: "/marketing/evergreen", label: "Reuse" },
+  { to: "/marketing/library",  label: "Asset Library" },
 ];
 
 // Marketing Command Centre (Run A) — Josh's weekly home screen.
