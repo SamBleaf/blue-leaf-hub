@@ -26,12 +26,15 @@ function DueBadge({ due }) {
   return <StatusBadge variant={DUE_VARIANT[due.status] || "neutral"}>{due.label}</StatusBadge>;
 }
 
-function QuickActions({ lead, onMoveStage, onQuickNote, onOpen, onSnooze }) {
+function QuickActions({ lead, onMoveStage, onQuickNote, onOpen, onSnooze, onMarkDone }) {
   const [moveOpen, setMoveOpen] = useState(false);
   return (
     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
       <button onClick={() => onOpen(lead.id)} className="rounded border border-hairline bg-primary px-2 py-0.5 text-[11px] font-semibold text-white hover:opacity-90">Open</button>
       <button onClick={() => onQuickNote(lead)} className="rounded border border-hairline bg-page px-2 py-0.5 text-[11px] font-medium text-ink hover:bg-surface">Note</button>
+      {onMarkDone && lead.action_type && (
+        <button onClick={() => onMarkDone(lead)} className="rounded border border-hairline bg-accent px-2 py-0.5 text-[11px] font-semibold text-white hover:opacity-90" title="Mark action done">Done</button>
+      )}
       {onSnooze && (
         <button onClick={() => onSnooze(lead)} className="rounded border border-hairline bg-page px-2 py-0.5 text-[11px] font-medium text-ink hover:bg-surface" title="Snooze 7 days">Snooze</button>
       )}
@@ -53,7 +56,7 @@ function QuickActions({ lead, onMoveStage, onQuickNote, onOpen, onSnooze }) {
   );
 }
 
-export default function SalesActionQueue({ leads = [], loading, onMoveStage, onQuickNote, onOpen, onSnooze, mode = "urgency" }) {
+export default function SalesActionQueue({ leads = [], loading, onMoveStage, onQuickNote, onOpen, onSnooze, onMarkDone, mode = "urgency" }) {
   if (loading) {
     return <div className="mt-2 space-y-2">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-surface" />)}</div>;
   }
@@ -128,7 +131,7 @@ export default function SalesActionQueue({ leads = [], loading, onMoveStage, onQ
                     <div className="mt-0.5"><DueBadge due={due} /></div>
                   </td>
                   <td className="px-3 py-2.5 text-xs text-muted">{daysSinceActivity(lead)}d</td>
-                  <td className="px-3 py-2.5 text-right"><QuickActions lead={lead} onMoveStage={onMoveStage} onQuickNote={onQuickNote} onOpen={onOpen} onSnooze={onSnooze} /></td>
+                  <td className="px-3 py-2.5 text-right"><QuickActions lead={lead} onMoveStage={onMoveStage} onQuickNote={onQuickNote} onOpen={onOpen} onSnooze={onSnooze} onMarkDone={onMarkDone} /></td>
                 </tr>
               ))}
             </tbody>
@@ -164,7 +167,7 @@ export default function SalesActionQueue({ leads = [], loading, onMoveStage, onQ
                     {[lead.suburb, lead.project_type && projectTypeLabel(lead.project_type), formatValue(lead.estimated_value), `${daysSinceActivity(lead)}d idle`, daysInStage(lead) + "d in stage"].filter(Boolean).join(" · ")}
                   </div>
                   {(lead.owner_name || lead.owner) && <div className="mt-0.5 text-[11px] text-muted">Owner: {lead.owner_name || lead.owner}</div>}
-                  <div className="mt-2"><QuickActions lead={lead} onMoveStage={onMoveStage} onQuickNote={onQuickNote} onOpen={onOpen} onSnooze={onSnooze} /></div>
+                  <div className="mt-2"><QuickActions lead={lead} onMoveStage={onMoveStage} onQuickNote={onQuickNote} onOpen={onOpen} onSnooze={onSnooze} onMarkDone={onMarkDone} /></div>
                 </div>
               ))}
             </div>

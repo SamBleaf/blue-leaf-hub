@@ -1,7 +1,11 @@
 import { authFetch } from "../lib/authFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
-import { apiPost } from "../lib/apiFetch.js";
-import { LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS } from "../lib/constants.js";
+import { apiFetch, apiPost } from "../lib/apiFetch.js";
+import {
+  LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS,
+  LEAD_ACTION_TYPE_LABELS,
+  LEAD_SOURCE_CATEGORY_LABELS,
+} from "../lib/constants.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -867,7 +871,7 @@ function LeadTrustRail({ leadId, lead }) {
         {lead?.lead_source_category && (
           <div>
             <p className="text-muted">Source category</p>
-            <p className="mt-0.5 font-medium capitalize text-ink">{lead.lead_source_category.replace(/_/g, " ")}</p>
+            <p className="mt-0.5 font-medium text-ink">{LEAD_SOURCE_CATEGORY_LABELS[lead.lead_source_category] || lead.lead_source_category}</p>
           </div>
         )}
         {(lead?.utm_campaign || lead?.first_touch_utm_campaign) && (
@@ -1231,8 +1235,24 @@ export default function LeadDetail() {
   const [signedDownloadUrl, setSignedDownloadUrl] = useState(null);
   const [ptsaSiteAddressWarning, setPtsaSiteAddressWarning] = useState(false);
   const [mobileTab, setMobileTab] = useState("action"); // "summary" | "action" | "activity" | "files" | "notes"
+  const [ownerOptions, setOwnerOptions] = useState([]); // [{ value: userId, label: name }]
 
   const bpFetchedFor = useRef(null);
+
+  // Load active staff for the Owner dropdown (runs once on mount).
+  useEffect(() => {
+    apiFetch("/api/workforce/employees")
+      .then(({ ok: success, data }) => {
+        if (!success) return;
+        const employees = data?.employees || [];
+        setOwnerOptions(
+          employees
+            .filter(e => e.userId) // only staff with a linked auth user
+            .map(e => ({ value: e.userId, label: e.name }))
+        );
+      })
+      .catch(() => {}); // non-fatal — Owner field degrades to UUID display
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -1510,6 +1530,13 @@ export default function LeadDetail() {
       <InlineField label="Last name" value={lead.last_name} onSave={v => patch({ last_name: v })} />
       <InlineField label="Email" value={lead.email} type="email" onSave={v => patch({ email: v })} />
       <InlineField label="Phone" value={lead.phone} type="tel" onSave={v => patch({ phone: v })} />
+      <InlineField
+        label="Owner"
+        value={lead.assigned_to || ""}
+        options={ownerOptions.length ? ownerOptions : undefined}
+        onSave={v => patch({ assigned_to: v || null })}
+        placeholder="Unassigned"
+      />
     </div>
   );
 
@@ -1562,6 +1589,61 @@ export default function LeadDetail() {
                 <p className="mt-2 text-xs text-muted">Last set {new Date(lead.fit_set_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</p>
               )}
             </div>
+  );
+
+  // CRM Control Spine — action queue card (action_type + action_due_at, human-set).
+  // "Mark done" clears both fields; "Snooze" sets snoozed_until 7 days from now.
+  const actionQueueBlock = (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Next Action</h3>
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Action type</label>
+          <select
+            className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink"
+            value={lead.action_type || ""}
+            onChange={e => patch({ action_type: e.target.value || null })}
+          >
+            <option value="">Not set</option>
+            {Object.entries(LEAD_ACTION_TYPE_LABELS).map(([v, label]) => (
+              <option key={v} value={v}>{label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Due date</label>
+          <input
+            type="date"
+            className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink"
+            value={lead.action_due_at ? lead.action_due_at.slice(0, 10) : ""}
+            onChange={e => patch({ action_due_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
+          />
+        </div>
+        {lead.snoozed_until && new Date(lead.snoozed_until) > new Date() && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            Snoozed until {new Date(lead.snoozed_until).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+          </p>
+        )}
+        {lead.action_type && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => patch({ action_type: null, action_due_at: null, snoozed_until: null })}
+              className="flex-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              Mark done
+            </button>
+            <button
+              type="button"
+              onClick={() => { const d = new Date(); d.setDate(d.getDate() + 7); patch({ snoozed_until: d.toISOString() }); }}
+              className="rounded-lg border border-hairline bg-page px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface"
+            >
+              Snooze 7d
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 
   // Unanswered qualifying gates — surfaced so it's clear what's blocking advance (S1).
@@ -2334,7 +2416,7 @@ export default function LeadDetail() {
   const detailsGroup = (
     <div>
       <p className="section-label mb-2">Lead details</p>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}{fitBlock}</div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}{fitBlock}{actionQueueBlock}</div>
     </div>
   );
 
