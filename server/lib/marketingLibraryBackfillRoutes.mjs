@@ -289,6 +289,7 @@ export function registerMarketingLibraryBackfillRoutes(app) {
           needsReview,
           targetDropboxPath,
           title,
+          jobId:             asset.job_id || null,
         };
       });
 
@@ -365,7 +366,7 @@ export function registerMarketingLibraryBackfillRoutes(app) {
           const insertRow = {
             category:            item.category,
             asset_type:          item.mediaType || null,
-            project_id:          null,   // media assets don't carry project_id in scope here
+            project_id:          item.jobId || null,
             title:               item.title,
             original_filename:   item.originalFilename || null,
             dropbox_path:        uploadedPath,

@@ -117,7 +117,7 @@ export function registerMarketingLibraryRoutes(app) {
 
       let query = db
         .from("marketing_library")
-        .select("*", { count: "exact" })
+        .select("*, job:jobs(id, address)", { count: "exact" })
         .order("created_at", { ascending: false });
 
       // ── Search ──────────────────────────────────────────────────────────────
@@ -159,7 +159,40 @@ export function registerMarketingLibraryRoutes(app) {
       const { data, error: dbErr, count } = await paginate(query, req.query);
       if (dbErr) return err(res, 500, translateDbError(dbErr));
 
-      return ok(res, { assets: rowsToCamel(data || []), total: count ?? 0 });
+      const assets = rowsToCamel(data || []).map((row) => ({
+        ...row,
+        jobName: row.job?.address || null,
+        job: undefined,
+      }));
+
+      return ok(res, { assets, total: count ?? 0 });
+    }
+  );
+
+  // ── GET /api/marketing/library/jobs ──────────────────────────────────────
+  // Returns a lightweight list of all jobs for the job picker in the upload form
+  // and the Job facet filter.
+  //
+  // Response: { ok: true, jobs: [{ id, address }] }
+
+  app.get(
+    "/api/marketing/library/jobs",
+    requireAuth,
+    requireRole("admin"),
+    async (req, res) => {
+      const db = sb();
+      if (!db) return err(res, 503, "Database not configured");
+
+      const { data, error: dbErr } = await db
+        .from("jobs")
+        .select("id, address")
+        .not("address", "is", null)
+        .order("address", { ascending: true });
+
+      if (dbErr) return err(res, 500, translateDbError(dbErr));
+
+      const jobs = (data || []).map((j) => rowToCamel(j));
+      return ok(res, { jobs });
     }
   );
 

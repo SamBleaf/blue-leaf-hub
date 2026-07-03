@@ -135,7 +135,7 @@ function fileToBase64(file) {
 
 // ─── Upload Form ──────────────────────────────────────────────────────────────
 
-function UploadForm({ onSuccess, onClose }) {
+function UploadForm({ onSuccess, onClose, jobs }) {
   const [form, setForm] = useState({
     category: "",
     title: "",
@@ -318,6 +318,21 @@ function UploadForm({ onSuccess, onClose }) {
             />
           </div>
 
+          {/* Job */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">Job</label>
+            <select
+              value={form.projectId}
+              onChange={(e) => set("projectId", e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm focus-ring"
+            >
+              <option value="">No job / company-wide</option>
+              {(jobs || []).map((j) => (
+                <option key={j.id} value={j.id}>{j.address}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Evergreen */}
           <label className="flex items-center gap-2 text-sm text-ink">
             <input
@@ -376,6 +391,9 @@ export default function MarketingLibrary() {
   const [showUpload,  setShowUpload]  = useState(false);
   const [page,        setPage]        = useState(0);
 
+  // Jobs list for filter + upload picker
+  const [jobs,        setJobs]        = useState([]);
+
   // Facet filters
   const [search,      setSearch]      = useState("");
   const [filterCat,   setFilterCat]   = useState("");
@@ -384,6 +402,7 @@ export default function MarketingLibrary() {
   const [filterChan,  setFilterChan]  = useState("");
   const [filterEg,    setFilterEg]    = useState("");
   const [filterTag,   setFilterTag]   = useState("");
+  const [filterJob,   setFilterJob]   = useState("");
 
   // Sort
   const [sheetSort, setSheetSort] = useState({ key: "createdAt", direction: "desc" });
@@ -398,10 +417,17 @@ export default function MarketingLibrary() {
     return () => clearTimeout(searchTimerRef.current);
   }, [search]);
 
+  // ── Load jobs list (once on mount) ───────────────────────────────────────
+  useEffect(() => {
+    apiFetch("/api/marketing/library/jobs").then(({ ok: didOk, data }) => {
+      if (didOk) setJobs(data?.jobs || []);
+    });
+  }, []);
+
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, filterCat, filterPillar, filterStage, filterChan, filterEg, filterTag]);
+  }, [debouncedSearch, filterCat, filterPillar, filterStage, filterChan, filterEg, filterTag, filterJob]);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -418,6 +444,7 @@ export default function MarketingLibrary() {
     if (filterChan)      params.set("channel",    filterChan);
     if (filterEg)        params.set("evergreen",  filterEg);
     if (filterTag)       params.set("tag",        filterTag);
+    if (filterJob)       params.set("projectId",  filterJob);
 
     const { ok: didOk, data, error: e } = await apiFetch(`/api/marketing/library?${params}`);
     if (didOk) {
@@ -427,7 +454,7 @@ export default function MarketingLibrary() {
       setError(e || "Could not load the asset library.");
     }
     setLoading(false);
-  }, [page, debouncedSearch, filterCat, filterPillar, filterStage, filterChan, filterEg, filterTag]);
+  }, [page, debouncedSearch, filterCat, filterPillar, filterStage, filterChan, filterEg, filterTag, filterJob]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -544,12 +571,23 @@ export default function MarketingLibrary() {
             className="rounded-lg border border-hairline px-2 py-1.5 text-xs focus-ring bg-surface w-36"
           />
 
-          {(filterCat || filterPillar || filterStage || filterChan || filterEg || filterTag || search) && (
+          <select
+            value={filterJob}
+            onChange={(e) => setFilterJob(e.target.value)}
+            className="rounded-lg border border-hairline px-2 py-1.5 text-xs focus-ring bg-surface"
+          >
+            <option value="">All jobs</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>{j.address}</option>
+            ))}
+          </select>
+
+          {(filterCat || filterPillar || filterStage || filterChan || filterEg || filterTag || filterJob || search) && (
             <button
               type="button"
               onClick={() => {
                 setSearch(""); setFilterCat(""); setFilterPillar(""); setFilterStage("");
-                setFilterChan(""); setFilterEg(""); setFilterTag("");
+                setFilterChan(""); setFilterEg(""); setFilterTag(""); setFilterJob("");
               }}
               className="rounded-lg border border-hairline px-2 py-1.5 text-xs text-muted hover:text-ink"
             >
@@ -583,6 +621,7 @@ export default function MarketingLibrary() {
                 <SortableTableHead label="Title"     sortKey="title"     activeSort={sheetSort} onSort={handleSort} />
                 <SortableTableHead label="Category"  sortKey="category"  activeSort={sheetSort} onSort={handleSort} />
                 <SortableTableHead label="Type"      sortKey="assetType" activeSort={sheetSort} onSort={handleSort} />
+                <SortableTableHead label="Job"       sortKey="jobName"   activeSort={sheetSort} onSort={handleSort} />
                 <SortableTableHead label="Pillar"    sortKey="pillar"    activeSort={sheetSort} onSort={handleSort} />
                 <SortableTableHead label="Stage"     sortKey="stage"     activeSort={sheetSort} onSort={handleSort} />
                 <SortableTableHead label="Channel"   sortKey="channel"   activeSort={sheetSort} onSort={handleSort} />
@@ -618,6 +657,10 @@ export default function MarketingLibrary() {
                   <td className="px-2.5 py-2 text-muted text-xs whitespace-nowrap">{asset.category || "—"}</td>
                   {/* Type */}
                   <td className="px-2.5 py-2 text-muted text-xs">{asset.assetType || "—"}</td>
+                  {/* Job */}
+                  <td className="px-2.5 py-2 text-muted text-xs max-w-[160px] truncate" title={asset.jobName || ""}>
+                    {asset.jobName || "—"}
+                  </td>
                   {/* Pillar */}
                   <td className="px-2.5 py-2 text-muted text-xs">
                     {PILLARS.find((p) => p.value === asset.pillar)?.label || asset.pillar || "—"}
@@ -688,6 +731,7 @@ export default function MarketingLibrary() {
         <UploadForm
           onSuccess={load}
           onClose={() => setShowUpload(false)}
+          jobs={jobs}
         />
       )}
     </div>
