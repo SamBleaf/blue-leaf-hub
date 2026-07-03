@@ -83,6 +83,11 @@ function formatDate(d) {
   return `${day}/${m}/${y.slice(2)}`;
 }
 
+function formatMoney(n) {
+  if (n == null || n === "" || isNaN(Number(n))) return "—";
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(Number(n));
+}
+
 function dueDateClass(d) {
   if (!d) return "text-muted";
   const today = new Date().toISOString().split("T")[0];
@@ -134,7 +139,7 @@ function sheetSortValue(person, key) {
     case "source":      return person.source || "";
     case "suburb":      return person.suburb || "";
     case "projectType": return person.projectType || "";
-    case "budget":      return person.budget || "";
+    case "budget":      return person.budget == null || person.budget === "" ? -Infinity : Number(person.budget);
     case "fit":         return person.fit || "";
     case "readiness":   return person.readiness || "";
     case "nextStep":    return person.nextStep || "";
@@ -404,7 +409,7 @@ export default function CrmPeople() {
                       <td className="px-3 py-2.5 text-muted">{person.source || "—"}</td>
                       <td className="px-3 py-2.5 text-muted">{person.suburb || "—"}</td>
                       <td className="px-3 py-2.5 text-muted">{person.projectType || "—"}</td>
-                      <td className="px-3 py-2.5 text-muted">{person.budget || "—"}</td>
+                      <td className="px-3 py-2.5 text-muted">{formatMoney(person.budget)}</td>
                       <td className="px-3 py-2.5">
                         <FitBadge value={person.fit} />
                       </td>

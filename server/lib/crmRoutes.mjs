@@ -1279,7 +1279,7 @@ export function registerCrmRoutes(app) {
 
   // ─── List sends (optionally filtered by content_item_id) ─────────────────
 
-  app.get("/api/crm/sends", requireAuth, async (req, res) => {
+  app.get("/api/crm/sends", requireAuth, requireRole("admin"), async (req, res) => {
     const { contentItemId, limit = 20, offset = 0 } = req.query;
     let q = sb()
       .from("email_sends")
