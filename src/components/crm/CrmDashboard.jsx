@@ -81,7 +81,7 @@ export default function CrmDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">CRM</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-primary">Relationship Dashboard</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-primary">CRM</h1>
           <p className="mt-1 text-sm text-muted">Your action list — who to contact today.</p>
         </div>
         <button

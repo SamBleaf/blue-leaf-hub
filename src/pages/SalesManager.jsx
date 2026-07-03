@@ -15,10 +15,11 @@ import { useNavigate, useLocation } from "react-router-dom";
 import SalesPipeline from "./SalesPipeline.jsx";
 import CrmDashboard from "../components/crm/CrmDashboard.jsx";
 import CrmContacts from "../components/crm/CrmContacts.jsx";
+import CrmPeople from "../components/crm/CrmPeople.jsx";
 
 const TABS = [
   { id: "pipeline",   label: "Pipeline" },
-  { id: "dashboard",  label: "Relationships" },
+  { id: "dashboard",  label: "CRM" },
   { id: "contacts",   label: "Contacts" },
 ];
 
@@ -52,7 +53,14 @@ export default function SalesManager() {
   return (
     <div className="space-y-6 pb-24">
       <SalesTabBar activeTab={activeTab} goTab={goTab} />
-      {activeTab === "dashboard" && <CrmDashboard />}
+      {activeTab === "dashboard" && (
+        <div className="space-y-6">
+          <CrmPeople />
+          <div className="border-t border-hairline pt-6">
+            <CrmDashboard />
+          </div>
+        </div>
+      )}
       {activeTab === "contacts"  && <CrmContacts />}
     </div>
   );

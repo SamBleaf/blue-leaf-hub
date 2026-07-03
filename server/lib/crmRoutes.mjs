@@ -356,6 +356,66 @@ export function registerCrmRoutes(app) {
     });
   });
 
+  // ─── Unified people list (v_crm_people) ──────────────────────────────────
+  //
+  // Reads the read-only view created in migration 131.
+  // Supports ?limit&offset (paginate), ?search (name/suburb ilike), and
+  // ?view for saved-view shortcuts that map to common filter combinations.
+  //
+  // Saved view → filter mapping:
+  //   new_enquiries        → kind=lead  & status=enquiry
+  //   ready_for_review     → readiness=ready_for_consult
+  //   today                → due_date <= today (ISO date)
+  //   nurture              → status IN (nurture) OR readiness IN (not_ready_yet,early_research)
+  //   architects_referrers → type IN (referrer,architect,designer,agent)
+  //   past_clients         → status=past_client
+
+  app.get("/api/crm/people", requireAuth, async (req, res) => {
+    const { search, view, limit: rawLimit, offset: rawOffset } = req.query;
+
+    let query = sb()
+      .from("v_crm_people")
+      .select("*", { count: "exact" });
+
+    // ── Saved-view shortcuts ──────────────────────────────────────────────
+    if (view === "new_enquiries") {
+      query = query.eq("kind", "lead").eq("status", "enquiry");
+    } else if (view === "ready_for_review") {
+      query = query.eq("readiness", "ready_for_consult");
+    } else if (view === "today") {
+      const todayStr = new Date().toISOString().split("T")[0];
+      query = query.lte("due_date", todayStr + "T23:59:59Z").not("due_date", "is", null);
+    } else if (view === "nurture") {
+      query = query.or(
+        "status.eq.nurture,readiness.eq.not_ready_yet,readiness.eq.early_research"
+      );
+    } else if (view === "architects_referrers") {
+      query = query.in("type", ["referrer", "architect", "designer", "agent"]);
+    } else if (view === "past_clients") {
+      query = query.eq("status", "past_client");
+    }
+
+    // ── Optional free-text search ──────────────────────────────────────────
+    if (search && search.trim()) {
+      // Double-quote the ilike values so commas/parens/apostrophes in the term
+      // are treated as literals, not PostgREST or() grammar (strip only the quote).
+      const term = search.trim().replace(/"/g, "");
+      query = query.or(`name.ilike."%${term}%",suburb.ilike."%${term}%"`);
+    }
+
+    // ── Pagination ─────────────────────────────────────────────────────────
+    const limit = Math.min(Number(rawLimit) || 50, 200);
+    const offset = Number(rawOffset) || 0;
+    query = query
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .range(offset, offset + limit - 1);
+
+    const { data, count, error } = await query;
+    if (error) return err(res, 500, "Failed to load people");
+
+    ok(res, { people: rowsToCamel(data || []), total: count || 0 });
+  });
+
   // ─── Contacts list ────────────────────────────────────────────────────────
 
   app.get("/api/crm/contacts", requireAuth, async (req, res) => {
@@ -376,7 +436,8 @@ export function registerCrmRoutes(app) {
         .neq("next_action_type", "waiting");
     }
     if (q) {
-      query = query.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`);
+      const safeQ = String(q).replace(/"/g, "");
+      query = query.or(`first_name.ilike."%${safeQ}%",last_name.ilike."%${safeQ}%",email.ilike."%${safeQ}%"`);
     }
 
     const { data, count, error } = await query;
@@ -1009,7 +1070,7 @@ export function registerCrmRoutes(app) {
   // ─── Create email send draft ──────────────────────────────────────────────
 
   app.post("/api/crm/sends", requireAuth, requireRole("admin"), async (req, res) => {
-    const { mailingListId, subject, previewText, htmlBody, contentItemId, scheduledAt } = req.body;
+    const { mailingListId, subject, previewText, htmlBody, contentItemId, campaignId, scheduledAt } = req.body;
     if (!mailingListId) return err(res, 400, "mailingListId is required");
     if (!subject) return err(res, 400, "subject is required");
 
@@ -1019,6 +1080,7 @@ export function registerCrmRoutes(app) {
       preview_text: previewText || null,
       html_body: htmlBody || null,
       content_item_id: contentItemId || null,
+      campaign_id: campaignId || null,
       scheduled_at: scheduledAt || null,
       status: scheduledAt ? "scheduled" : "draft",
       created_by: req.user?.id || null,
@@ -1213,6 +1275,23 @@ export function registerCrmRoutes(app) {
 
     if (error || !data) return err(res, 404, "Scheduled send not found");
     ok(res);
+  });
+
+  // ─── List sends (optionally filtered by content_item_id) ─────────────────
+
+  app.get("/api/crm/sends", requireAuth, async (req, res) => {
+    const { contentItemId, limit = 20, offset = 0 } = req.query;
+    let q = sb()
+      .from("email_sends")
+      .select("id, subject, status, mailing_list_id, content_item_id, campaign_id, scheduled_at, sent_at, total_recipients, opened_count, clicked_count, created_at", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+    if (contentItemId) q = q.eq("content_item_id", contentItemId);
+
+    const { data, error, count } = await q;
+    if (error) return err(res, 500, "Failed to load sends");
+    ok(res, { sends: rowsToCamel(data || []), total: count ?? 0 });
   });
 
   // ─── Per-recipient delivery table ─────────────────────────────────────────

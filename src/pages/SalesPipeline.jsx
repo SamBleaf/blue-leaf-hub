@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { authFetch } from "../lib/authFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
+import { LEAD_STAGES } from "../lib/constants.js";
 import {
   STAGES, PROJECT_TYPES, LEAD_SOURCES,
   formatValue, projectTypeLabel, relativeTime, weightedValue, matchesFilter,
@@ -18,6 +19,9 @@ import KpiCard from "../components/ui/KpiCard.jsx";
 import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
 
 const STAGE_IDS = new Set(STAGES.map((s) => s.id));
+
+// localStorage key for the qualified-only pipeline toggle (CRM Batch 01A)
+const QUALIFIED_ONLY_KEY = "blhub_pipeline_qualified_only";
 
 /* ─────────────────────────── Add Lead drawer (unchanged) ─────────────────────────── */
 function AddLeadDrawer({ open, onClose, onCreated }) {
@@ -393,6 +397,26 @@ export default function SalesPipeline() {
   const [filter, setFilter] = useState("all");
   const [queueMode, setQueueMode] = useState("urgency"); // "urgency" | "actionType" — CRM Control Spine (127)
 
+  // Qualified-only toggle: default ON (hides enquiry-stage leads from the board).
+  // Persisted in localStorage so the user's choice survives navigation.
+  const [qualifiedOnly, setQualifiedOnly] = useState(() => {
+    try {
+      const stored = localStorage.getItem(QUALIFIED_ONLY_KEY);
+      // Default ON (null means not set yet → true)
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  function toggleQualifiedOnly() {
+    setQualifiedOnly(prev => {
+      const next = !prev;
+      try { localStorage.setItem(QUALIFIED_ONLY_KEY, String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
   useEffect(() => {
     setScreenContext?.({ page: "sales_pipeline", description: "Sales pipeline board — all active leads by stage" });
     return () => setScreenContext?.(null);
@@ -440,6 +464,15 @@ export default function SalesPipeline() {
     load();
   }
 
+  async function markActionDone(lead) {
+    await authFetch(`/api/sales/leads/${lead.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_type: null, action_due_at: null, snoozed_until: null }),
+    });
+    load();
+  }
+
   function openLead(id) { nav(`/sales/${id}`); }
 
   // Active pipeline excludes won (a job now) + nurture/lost — matches the server scorecard.
@@ -447,7 +480,12 @@ export default function SalesPipeline() {
   const wonLeads = leads.filter((l) => l.stage === "won");
   const nurtureLeads = leads.filter((l) => l.stage === "nurture");
   const lostLeads = leads.filter((l) => l.stage === "lost");
-  const boardLeads = leads.filter((l) => STAGE_IDS.has(l.stage)); // active + won (8 board columns)
+  // boardLeads: all leads with a valid stage. When qualifiedOnly=true, exclude enquiry-stage
+  // leads (they live in the CRM spreadsheet until promoted). Already-qualified leads are unaffected.
+  const allBoardLeads = leads.filter((l) => STAGE_IDS.has(l.stage)); // active + won (8 board columns)
+  const boardLeads = qualifiedOnly
+    ? allBoardLeads.filter((l) => l.stage !== LEAD_STAGES.ENQUIRY)
+    : allBoardLeads;
   const totalValue = activeLeads.reduce((s, l) => s + (Number(l.estimated_value) || 0), 0);
   const weighted = weightedValue(activeLeads);
   const needsActionCount = activeLeads.filter((l) => matchesFilter(l, "needs")).length;
@@ -481,6 +519,32 @@ export default function SalesPipeline() {
           </div>
 
           <PipelineFilterBar className="mt-3" leads={boardLeads} value={filter} onChange={setFilter} />
+
+          {/* Qualified-only toggle — CRM Batch 01A */}
+          <div className="mt-2 flex items-center gap-2">
+            <div className="flex rounded-lg border border-hairline overflow-hidden text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => { if (!qualifiedOnly) toggleQualifiedOnly(); }}
+                className={`px-3 py-1.5 transition ${qualifiedOnly ? "bg-primary text-white" : "bg-surface text-muted hover:bg-page"}`}
+              >
+                Qualified only
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (qualifiedOnly) toggleQualifiedOnly(); }}
+                className={`px-3 py-1.5 transition border-l border-hairline ${!qualifiedOnly ? "bg-primary text-white" : "bg-surface text-muted hover:bg-page"}`}
+              >
+                Show all leads
+              </button>
+            </div>
+            {qualifiedOnly && (
+              <span className="text-xs text-muted">
+                Enquiry-stage leads live in{" "}
+                <a href="/sales/dashboard" className="text-primary hover:underline">CRM</a>.
+              </span>
+            )}
+          </div>
         </>
       )}
 
@@ -525,6 +589,7 @@ export default function SalesPipeline() {
             onQuickNote={setQuickNoteLead}
             onOpen={openLead}
             onSnooze={queueMode === "actionType" ? snoozeLead : undefined}
+            onMarkDone={queueMode === "actionType" ? markActionDone : undefined}
             mode={queueMode}
           />
         </div>
