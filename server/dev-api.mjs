@@ -71,6 +71,7 @@ import { registerMarketingScheduleRoutes } from "./lib/marketingScheduleRoutes.m
 import { registerMarketingLibraryRoutes } from "./lib/marketingLibraryRoutes.mjs";
 import { registerMarketingLibraryBackfillRoutes } from "./lib/marketingLibraryBackfillRoutes.mjs";
 import { registerMarketingBatch3Routes } from "./lib/marketingBatch3Routes.mjs";
+import { registerMarketingLibraryInboxRoutes } from "./lib/marketingLibraryInboxRoutes.mjs";
 import { registerAdminRoutes } from "./lib/adminRoutes.mjs";
 import { registerWorkforceRoutes } from "./lib/workforceRoutes.mjs";
 import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligenceRoutes.mjs";
@@ -956,6 +957,7 @@ registerMarketingScheduleRoutes(app);
 registerMarketingLibraryRoutes(app);
 registerMarketingLibraryBackfillRoutes(app);
 registerMarketingBatch3Routes(app);
+registerMarketingLibraryInboxRoutes(app);
 registerAdminRoutes(app);
 registerWorkforceRoutes(app);
 registerMarketingIntelligenceRoutes(app);

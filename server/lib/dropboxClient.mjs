@@ -1041,6 +1041,35 @@ export async function copyDropboxFile(accessToken, fromPath, toPath) {
 }
 
 /**
+ * Move a file within Dropbox (team namespace). Autonames on conflict so a
+ * stale destination never blocks triage operations.
+ *
+ * Used by the marketing library inbox/triage routes (INBOX-BATCH-A):
+ *   INBOX → category folder when filing an asset
+ *   INBOX → _REJECTED/ when culling an asset
+ *
+ * Never call with Promise.all — honour the sequential Dropbox read rule.
+ *
+ * @param {string} accessToken — from getDropboxAccessToken()
+ * @param {string} fromPath    — current Dropbox path of the file
+ * @param {string} toPath      — destination Dropbox path (file name included)
+ * @returns {Promise<object>}  — Dropbox metadata for the moved file
+ */
+export async function dropboxMoveFile(accessToken, fromPath, toPath) {
+  return rpc(
+    "files/move_v2",
+    {
+      from_path: fromPath,
+      to_path: toPath,
+      autorename: true,
+      allow_shared_folder: false,
+      allow_ownership_transfer: false
+    },
+    accessToken
+  );
+}
+
+/**
  * Save win/lose/notification email copy under …/INTERNAL/RFQ/ (unique filename).
  */
 export async function saveOutcomeEmailTxtToRfqFolder(opts) {

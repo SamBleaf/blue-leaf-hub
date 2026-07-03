@@ -59,6 +59,12 @@ export const LIBRARY_CATEGORIES = [
 /** Dropbox base path for the company-wide marketing library. */
 export const DROPBOX_LIBRARY_BASE = "/BLUE LEAF BUILDING/MARKETING/LIBRARY";
 
+/** Inbox drop-zone folder (bulk photo dump before triage). */
+export const LIBRARY_INBOX_FOLDER = "00 INBOX";
+
+/** Rejected/culled assets folder — files are moved here, never hard-deleted. */
+export const LIBRARY_REJECTED_FOLDER = "_REJECTED";
+
 /** Map category label → Dropbox folder path. */
 export function libraryFolderPath(category) {
   return `${DROPBOX_LIBRARY_BASE}/${category}`;
@@ -336,14 +342,19 @@ export function registerMarketingLibraryRoutes(app) {
         return err(res, 502, `Dropbox auth failed: ${tokenErr?.message || "unknown"}`);
       }
 
-      // Ensure the MARKETING/LIBRARY parent first, then each category subfolder.
+      // Ensure the MARKETING/LIBRARY parent first, then each category subfolder,
+      // then the special inbox/rejected folders.
       // Sequential — never Promise.all (CLAUDE.md Dropbox sequential reads rule).
       const parentFolders = [
         "/BLUE LEAF BUILDING/MARKETING",
         DROPBOX_LIBRARY_BASE,
       ];
       const categoryFolders = LIBRARY_CATEGORIES.map(libraryFolderPath);
-      const allFolders      = [...parentFolders, ...categoryFolders];
+      const specialFolders  = [
+        `${DROPBOX_LIBRARY_BASE}/${LIBRARY_INBOX_FOLDER}`,
+        `${DROPBOX_LIBRARY_BASE}/${LIBRARY_REJECTED_FOLDER}`,
+      ];
+      const allFolders = [...parentFolders, ...categoryFolders, ...specialFolders];
 
       const seeded  = [];
       const failed  = [];
