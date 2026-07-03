@@ -3,6 +3,7 @@ import { authFetch } from "../../lib/authFetch.js";
 import { apiPost } from "../../lib/apiFetch.js";
 import { getSupabase } from "../../lib/supabaseClient.js";
 import { MARKETING_PLATFORMS } from "../../lib/constants.js";
+import ContentEmailBridgeModal, { ContentItemSendsHistory } from "./ContentEmailBridge.jsx";
 
 const STATUS_COLOURS = {
   draft:     "bg-slate-100 text-slate-600",
@@ -440,6 +441,8 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
   const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [showEmailBridge, setShowEmailBridge] = useState(false);
+  const [emailDraftCount, setEmailDraftCount] = useState(0);
 
   useEffect(() => {
     setForm({
@@ -449,6 +452,8 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
       hashtags: (item.hashtags || []).join(", "),
     });
     setEditing(false);
+    setShowEmailBridge(false);
+    setEmailDraftCount(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when switching items
   }, [item.id]);
 
@@ -516,6 +521,16 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
             <button type="button" onClick={() => setEditing(true)} className="text-xs text-primary hover:underline">Edit</button>
           ) : (
             <button type="button" onClick={() => { setEditing(false); setSaveError(""); }} className="text-xs text-muted hover:text-ink">Cancel</button>
+          )}
+          {!editing && (
+            <button
+              type="button"
+              onClick={() => setShowEmailBridge(true)}
+              className="text-xs px-2.5 py-1 rounded-lg border border-primary/40 text-primary hover:bg-primary/10 font-medium transition-colors"
+              title="Create an email send from this content item"
+            >
+              Send as email
+            </button>
           )}
           <button type="button" onClick={onClose} className="text-muted hover:text-ink transition-colors">
             <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -655,6 +670,22 @@ function ItemDetail({ item, onStatusChange, onSaved, updating, onClose }) {
           onCancel={() => setShowPublishModal(false)}
         />
       )}
+
+      {showEmailBridge && (
+        <ContentEmailBridgeModal
+          item={item}
+          onClose={() => setShowEmailBridge(false)}
+          onDraftSaved={() => setEmailDraftCount((n) => n + 1)}
+        />
+      )}
+
+      {/* Analytics loopback — email sends linked to this content item */}
+      <div className="border-t border-hairline pt-3 space-y-2">
+        <p className="text-xs text-muted font-medium">
+          Email sends{emailDraftCount > 0 ? ` · ${emailDraftCount} new draft${emailDraftCount !== 1 ? "s" : ""} this session` : ""}
+        </p>
+        <ContentItemSendsHistory contentItemId={item.id} key={emailDraftCount} />
+      </div>
     </div>
   );
 }
