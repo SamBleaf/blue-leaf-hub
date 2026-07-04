@@ -127,6 +127,8 @@
     "test:w18-portal-ui01": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/portal/portal-v2-admin-overview.spec.js --project=chromium-desktop",
     "test:qa-sec-baseline": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/security/unauthenticated-routes.spec.js --project=api-security",
     "test:w22-crm-security": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test e2e/tests/security/crm-send-role.spec.js --project=api-security",
+    "test:carpentry-tasks": "node scripts/batch-a/run-wf1-carpentry-tasks.mjs",
+    "test:carpentry-tasks:write": "node scripts/batch-a/run-wf1-carpentry-tasks.mjs --write",
     "hardening:watch": "node scripts/hardening-watch.mjs",
     "hardening:watch:once": "node scripts/hardening-watch.mjs --run-once",
     "hardening:watch:interval": "node scripts/hardening-watch.mjs --interval=30"

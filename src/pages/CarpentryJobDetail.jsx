@@ -719,6 +719,13 @@ function TasksPanel({ jobId }) {
   const [drafts, setDrafts] = useState([]); // { title, priority, category, description, _keep }
   const [addingDrafts, setAddingDrafts] = useState(false);
   const [voiceError, setVoiceError] = useState(null);
+  // Edit sheet state
+  const [editTask, setEditTask]       = useState(null);  // task being edited
+  const [editTitle, setEditTitle]     = useState("");
+  const [editCategory, setEditCategory] = useState("general");
+  const [editPriority, setEditPriority] = useState("normal");
+  const [savingEdit, setSavingEdit]   = useState(false);
+  const [editError, setEditError]     = useState(null);
 
   const loadTasks = useCallback(async () => {
     setLoadingT(true);
@@ -832,6 +839,32 @@ function TasksPanel({ jobId }) {
     if (ok) setTasks((prev) => prev.filter((t) => t.id !== task.id));
   }
 
+  function openEdit(task) {
+    setEditTask(task);
+    setEditTitle(task.title || "");
+    setEditCategory(task.category || "general");
+    setEditPriority(task.priority || "normal");
+    setEditError(null);
+  }
+  function closeEdit() {
+    setEditTask(null);
+    setEditError(null);
+  }
+  async function saveEdit() {
+    if (!editTitle.trim()) { setEditError("Title is required."); return; }
+    setSavingEdit(true);
+    setEditError(null);
+    const { ok, data, error } = await apiPatch(`/api/carpentry/tasks/${editTask.id}`, {
+      title: editTitle.trim(),
+      category: editCategory,
+      priority: editPriority,
+    });
+    setSavingEdit(false);
+    if (!ok) { setEditError(error || "Could not save task."); return; }
+    setTasks((prev) => prev.map((t) => t.id === editTask.id ? data.task : t));
+    closeEdit();
+  }
+
   const openTasks    = tasks.filter((t) => t.status !== "done" && t.status !== "wont_do");
   const doneTasks    = tasks.filter((t) => t.status === "done");
   const blockedTasks = tasks.filter((t) => t.status === "blocked");
@@ -870,17 +903,94 @@ function TasksPanel({ jobId }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm text-ink leading-snug">{task.title}</p>
         {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
-        {task.employees?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.employees.name}</p>}
+        {task.assigned?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.assigned.name}</p>}
       </div>
       <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
         {TASK_PRIORITY_LABEL[task.priority] || task.priority}
       </span>
+      <button
+        onClick={() => openEdit(task)}
+        className="shrink-0 text-muted hover:text-primary text-xs transition-colors px-1"
+        title="Edit task"
+        aria-label="Edit task"
+      >✎</button>
       <button onClick={() => deleteTask(task)} className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1" title="Remove task">✕</button>
     </div>
   );
 
   return (
     <div className="mb-8">
+      {/* ── Edit Task Sheet ──────────────────────────────────────────────────── */}
+      {editTask && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={closeEdit} />
+          <div className="relative bg-white rounded-t-xl sm:rounded-xl p-5 w-full max-w-md mx-0 sm:mx-4 shadow-xl space-y-4">
+            <h3 className="text-sm font-semibold text-ink">Edit Task</h3>
+            {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{editError}</p>}
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Title *</label>
+              <input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring"
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Priority</label>
+                <select
+                  value={editPriority}
+                  onChange={(e) => setEditPriority(e.target.value)}
+                  className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
+                >
+                  <option value="urgent">Urgent</option>
+                  <option value="normal">Normal</option>
+                  <option value="when_time_permits">When time permits</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Category</label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white"
+                >
+                  {labourCats.length > 0 && (
+                    <optgroup label="Work stream (labour)">
+                      {labourCats.map((c) => (
+                        <option key={c.id} value={c.workforceTaskCategory}>{c.categoryName}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Other">
+                    <option value="general">General</option>
+                    <option value="defect">Defect</option>
+                    <option value="safety">Safety</option>
+                    <option value="materials">Materials</option>
+                    <option value="inspection">Inspection</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={saveEdit}
+                disabled={savingEdit || !editTitle.trim()}
+                className="flex-1 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+              >
+                {savingEdit ? "Saving…" : "Save"}
+              </button>
+              <button
+                onClick={closeEdit}
+                className="px-4 py-2 rounded-lg border border-hairline text-ink text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-ink">Tasks for workers</h3>
         <div className="flex items-center gap-2">
@@ -1167,7 +1277,7 @@ function TasksPanel({ jobId }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-ink leading-snug">{task.title}</p>
                       {task.completion_notes && <p className="text-xs text-amber-700 mt-0.5">{task.completion_notes}</p>}
-                      {task.employees?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.employees.name}</p>}
+                      {task.assigned?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.assigned.name}</p>}
                     </div>
                     <button onClick={() => toggleDone(task)} disabled={togglingId === task.id} className="shrink-0 text-xs text-muted hover:text-ink transition-colors px-1" title="Mark open">↺</button>
                     <button onClick={() => deleteTask(task)} className="shrink-0 text-muted hover:text-red-500 text-xs transition-colors px-1" title="Remove">✕</button>
@@ -1204,7 +1314,7 @@ function TasksPanel({ jobId }) {
                         {task.completedAt && (
                           <p className="text-xs text-muted mt-0.5">
                             Done {new Date(task.completedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-                            {task.completedByEmployee?.name ? ` by ${task.completedByEmployee.name}` : ""}
+                            {task.completer?.name ? ` by ${task.completer.name}` : ""}
                           </p>
                         )}
                         {task.completionNotes && (

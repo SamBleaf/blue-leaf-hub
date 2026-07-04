@@ -989,7 +989,7 @@ export function registerCarpentryRoutes(app) {
     try {
       const { data, error } = await sb
         .from("site_tasks")
-        .select("*, employees!assigned_to(id, name), employees!completed_by(id, name)")
+        .select("*, assigned:employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
         .eq("carpentry_job_id", req.params.id)
         .neq("status", "wont_do")
         .order("sort_order")
@@ -1182,8 +1182,21 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { status, completionNotes, completionPhotoUrl, priority, category } = req.body || {};
+      const { status, completionNotes, completionPhotoUrl, priority, category, title, description, sortOrder, sort_order, assignedTo, assigned_to } = req.body || {};
       const patch = { updated_at: new Date().toISOString() };
+
+      if (title !== undefined) {
+        if (!title?.trim()) return err(res, 400, "title must not be empty.");
+        patch.title = title.trim();
+      }
+      if (description !== undefined) patch.description = description?.trim() || null;
+      const resolvedSortOrder = sortOrder !== undefined ? sortOrder : sort_order;
+      if (resolvedSortOrder !== undefined) patch.sort_order = resolvedSortOrder;
+      const resolvedAssignedTo = assignedTo !== undefined ? assignedTo : assigned_to;
+      if (resolvedAssignedTo !== undefined) {
+        if (resolvedAssignedTo !== null && !isUuid(resolvedAssignedTo)) return err(res, 400, "Invalid assignee.");
+        patch.assigned_to = resolvedAssignedTo || null;
+      }
 
       if (status !== undefined) {
         const VALID = ["open", "in_progress", "done", "wont_do", "blocked"];
@@ -1222,7 +1235,7 @@ export function registerCarpentryRoutes(app) {
         .from("site_tasks")
         .update(patch)
         .eq("id", req.params.id)
-        .select("*, employees!assigned_to(id, name), employees!completed_by(id, name)")
+        .select("*, assigned:employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
         .single();
       if (error) throw error;
       if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
