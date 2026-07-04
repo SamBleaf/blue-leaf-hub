@@ -1,5 +1,8 @@
 /**
- * MarketingInbox.jsx — Triage UI for the marketing library inbox (INBOX-BATCH-B).
+ * MarketingInbox.jsx — Triage UI for the marketing library inbox.
+ *
+ * INBOX-BATCH-B: photo grid with multi-select, keyboard cull, bulk ops.
+ * INBOX-BATCH-C: "Auto-sort" button (quality/pHash/category/job-hint) + "Use AI" checkbox.
  *
  * Shows all marketing_library rows with status='inbox' as a photo grid.
  * Supports click-to-select multi-select, keyboard cull shortcuts, bulk operations,
@@ -8,6 +11,7 @@
  * Reads:   GET  /api/marketing/library?status=inbox
  * Jobs:    GET  /api/marketing/library/jobs
  * Scan:    POST /api/marketing/library/inbox/scan
+ * Sort:    POST /api/marketing/library/inbox/sort    body { limit, useAI }
  * File:    POST /api/marketing/library/:id/file      body { category, projectId }
  * Reject:  POST /api/marketing/library/:id/reject
  * Bulk:    POST /api/marketing/library/bulk-file     body { ids, category, projectId }
@@ -286,6 +290,10 @@ export default function MarketingInbox() {
   // Scanning
   const [scanning,    setScanning]    = useState(false);
 
+  // Auto-sort (INBOX-BATCH-C)
+  const [sorting,     setSorting]     = useState(false);
+  const [useAI,       setUseAI]       = useState(false);
+
   // Toast
   const [toast,       setToast]       = useState(null); // { message, type }
 
@@ -335,6 +343,26 @@ export default function MarketingInbox() {
       await load();
     } else {
       flash(e || "Scan failed", "error");
+    }
+  };
+
+  // ── Auto-sort inbox (INBOX-BATCH-C) ─────────────────────────────────────────
+  const handleSort = async () => {
+    setSorting(true);
+    const { ok: didOk, data, error: e } = await apiPost(
+      "/api/marketing/library/inbox/sort",
+      { limit: 100, useAI }
+    );
+    setSorting(false);
+    if (didOk) {
+      const { processed = 0, dupGroups = 0, aiUsed = false } = data || {};
+      const aiNote = aiUsed ? " (AI categories applied)" : "";
+      flash(
+        `Sorted ${processed} asset${processed === 1 ? "" : "s"} — ${dupGroups} dup group${dupGroups === 1 ? "" : "s"} found.${aiNote}`
+      );
+      await load();
+    } else {
+      flash(e || "Auto-sort failed", "error");
     }
   };
 
@@ -484,11 +512,32 @@ export default function MarketingInbox() {
             )}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {/* Use AI checkbox — shown alongside Auto-sort */}
+          <label className="flex items-center gap-1.5 text-xs text-muted select-none cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useAI}
+              onChange={(e) => setUseAI(e.target.checked)}
+              className="rounded border-hairline focus-ring"
+            />
+            Use AI for categories
+          </label>
+
+          <button
+            type="button"
+            onClick={handleSort}
+            disabled={sorting || scanning}
+            className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+            title="Score quality, detect duplicates, and suggest categories for all unsorted inbox assets"
+          >
+            {sorting ? "Sorting…" : "Auto-sort"}
+          </button>
+
           <button
             type="button"
             onClick={handleScan}
-            disabled={scanning}
+            disabled={scanning || sorting}
             className="rounded-lg border border-hairline px-4 py-2.5 text-sm font-semibold text-ink hover:bg-page disabled:opacity-50"
           >
             {scanning ? "Scanning…" : "Scan inbox"}

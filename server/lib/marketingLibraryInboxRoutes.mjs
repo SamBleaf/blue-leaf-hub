@@ -1,5 +1,8 @@
 /**
- * marketingLibraryInboxRoutes.mjs — Marketing Library Inbox / Triage (INBOX-BATCH-A)
+ * marketingLibraryInboxRoutes.mjs — Marketing Library Inbox / Triage
+ *
+ * INBOX-BATCH-A: scan/ingest + file/reject (single + bulk).
+ * INBOX-BATCH-C: auto-sort pass (quality_score, pHash dedup, category suggestion, job hint).
  *
  * Provides a front door for bulk photo imports. Dump hundreds of images into
  * /BLUE LEAF BUILDING/MARKETING/LIBRARY/00 INBOX/ then cull/file them here.
@@ -12,6 +15,13 @@
  *     — lists the INBOX Dropbox folder, inserts marketing_library rows for
  *       unseen files (status='inbox', category null/'00 INBOX').  Idempotent.
  *     Response: { ok, scanned, added }
+ *
+ *   POST /api/marketing/library/inbox/sort           ← INBOX-BATCH-C
+ *     body: { limit?: number, useAI?: boolean }
+ *     — runs the free sorters (quality_score, pHash, category heuristic) over
+ *       inbox rows, then clusters pHashes into dup_group ids.
+ *       useAI=true additionally calls Haiku vision to pick a category.
+ *     Response: { ok, processed, dupGroups, aiUsed }
  *
  *   POST /api/marketing/library/:id/file
  *     — validate category; move file INBOX→category folder; update row:
@@ -49,6 +59,7 @@ import {
   getDropboxAccessToken,
   listFolderAllEntries,
   dropboxMoveFile,
+  dropboxDownloadBuffer,
   ensurePublicSharedLink,
   createFolderIfNotExists,
 } from "./dropboxClient.mjs";
@@ -59,6 +70,10 @@ import {
   LIBRARY_INBOX_FOLDER,
   LIBRARY_REJECTED_FOLDER,
 } from "./marketingLibraryRoutes.mjs";
+import { mapAssetToCategory } from "./marketingLibraryBackfillRoutes.mjs";
+import Anthropic from "@anthropic-ai/sdk";
+import { callAI } from "./aiGateway.mjs";
+import { config as dotenvConfig } from "dotenv";
 
 // ─── Folder path constants ────────────────────────────────────────────────────
 
@@ -72,6 +87,332 @@ const REJECTED_PATH  = `${DROPBOX_LIBRARY_BASE}/${LIBRARY_REJECTED_FOLDER}`;
 
 function db() {
   return getServiceSupabase();
+}
+
+// ─── INBOX-BATCH-C: Auto-sort helpers ────────────────────────────────────────
+
+/**
+ * Load dotenv key for the optional Haiku AI pass.
+ * Mirrors the pattern in marketingAgent.mjs: won't override an existing env var.
+ */
+const { parsed: _env = {} } = dotenvConfig();
+const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
+
+/** Haiku model id — vision-capable, cheapest Anthropic tier. */
+const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+
+/**
+ * Attempt to dynamically require sharp.
+ * Returns the sharp function if available, otherwise null.
+ * We use a dynamic import so the server starts even if sharp is absent.
+ */
+let _sharp = null;
+async function getSharp() {
+  if (_sharp !== undefined) return _sharp;
+  try {
+    const mod = await import("sharp");
+    _sharp = mod.default || mod;
+    return _sharp;
+  } catch {
+    _sharp = null;
+    return null;
+  }
+}
+
+/**
+ * Compute a perceptual hash (average hash) from an image buffer using sharp.
+ *
+ * Algorithm:
+ *   1. Resize to 9×8 (need 9 wide for 8 column-diffs)
+ *   2. Convert to greyscale
+ *   3. For each row, compute the 8 horizontal differences (col[i+1] > col[i])
+ *   4. Pack the resulting 64 bits into a 16-char hex string
+ *
+ * Returns a 16-char hex string, or null on failure.
+ *
+ * @param {Buffer} buffer — raw image bytes
+ * @returns {Promise<string|null>}
+ */
+async function computePHash(buffer) {
+  const sharp = await getSharp();
+  if (!sharp) return null;
+  try {
+    const { data } = await sharp(buffer)
+      .resize(9, 8, { fit: "fill" })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // data is a Buffer of 9*8 = 72 bytes, row-major
+    let bits = BigInt(0);
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const idx = row * 9 + col;
+        const bit = data[idx + 1] > data[idx] ? 1n : 0n;
+        bits = (bits << 1n) | bit;
+      }
+    }
+    return bits.toString(16).padStart(16, "0");
+  } catch (e) {
+    console.warn("[inbox/sort] pHash error:", e?.message);
+    return null;
+  }
+}
+
+/**
+ * Compute quality_score (0–1) from image buffer.
+ *
+ * Signals (weighted blend):
+ *   - resolution (megapixels, normalised — 4MP=0.6, 12MP=1.0 ceiling)    weight 0.35
+ *   - sharpness proxy (std-dev of greyscale pixels in 64×64 crop)         weight 0.40
+ *   - exposure sanity (mean brightness not clipped — ideal 80–180/255)    weight 0.25
+ *
+ * Falls back to resolution-only when sharp is unavailable.
+ *
+ * @param {Buffer} buffer
+ * @param {{ width?: number, height?: number }} [meta] — from sharp metadata if pre-fetched
+ * @returns {Promise<number>} 0–1
+ */
+async function computeQualityScore(buffer, meta = {}) {
+  const sharp = await getSharp();
+  if (!sharp) {
+    // No sharp: use known dimensions if provided, else 0.5 fallback
+    const w = meta?.width || 0;
+    const h = meta?.height || 0;
+    if (!w || !h) return 0.5;
+    const mp = (w * h) / 1_000_000;
+    return Math.min(1, mp / 12);
+  }
+
+  try {
+    // Get metadata (width/height) if not already known
+    const imgMeta = await sharp(buffer).metadata();
+    const w = imgMeta.width  || meta?.width  || 0;
+    const h = imgMeta.height || meta?.height || 0;
+
+    // ── Signal 1: resolution ──────────────────────────────────────────────────
+    // Normalise: 12 MP → 1.0, 4 MP → 0.5, <1 MP → low score
+    const mp = (w * h) / 1_000_000;
+    const resScore = Math.min(1, mp / 12);
+
+    // ── Signal 2: sharpness (std-dev of greyscale 64×64 crop) ────────────────
+    // Higher std-dev = more texture = sharper. Clip at ~70 std-dev = 1.0.
+    const { data: rawPix } = await sharp(buffer)
+      .resize(64, 64, { fit: "cover" })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const n = rawPix.length;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += rawPix[i];
+    const mean = sum / n;
+    let variance = 0;
+    for (let i = 0; i < n; i++) {
+      const d = rawPix[i] - mean;
+      variance += d * d;
+    }
+    const stdDev = Math.sqrt(variance / n);
+    // Empirically, well-focused photos score 30–70+ std-dev; blurry ones <15
+    const sharpScore = Math.min(1, stdDev / 70);
+
+    // ── Signal 3: exposure sanity ─────────────────────────────────────────────
+    // Perfect exposure: mean brightness 80–180 (of 255).  Clip = near 0 or 255.
+    const expScore = (() => {
+      if (mean >= 80 && mean <= 180) return 1.0;
+      if (mean < 80)  return mean / 80;        // underexposed penalty
+      return (255 - mean) / 75;               // overexposed penalty
+    })();
+
+    const score = 0.35 * resScore + 0.40 * sharpScore + 0.25 * Math.max(0, expScore);
+    return Math.max(0, Math.min(1, score));
+
+  } catch (e) {
+    console.warn("[inbox/sort] quality score error:", e?.message);
+    return 0.5; // safe fallback
+  }
+}
+
+/**
+ * Hamming distance between two hex hash strings.
+ * Returns Infinity when either hash is null/falsy.
+ *
+ * @param {string|null} a
+ * @param {string|null} b
+ * @returns {number}
+ */
+function hammingDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let dist = 0;
+  for (let i = 0; i < a.length; i++) {
+    const xor = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    dist += xor.toString(2).split("").filter((c) => c === "1").length;
+  }
+  return dist;
+}
+
+/**
+ * Cluster pHashes into dup groups using a single-link greedy approach.
+ * Any two hashes with Hamming distance ≤ threshold are in the same group.
+ * Returns a Map<id, groupId>.
+ *
+ * @param {Array<{ id: string, phash: string|null }>} items
+ * @param {number} [threshold=8]  — max Hamming bits to be "near-duplicate"
+ * @returns {Map<string, string>}  id → dup_group string (or null if no cluster)
+ */
+function clusterPHashes(items, threshold = 8) {
+  // Union-Find
+  const parent = new Map(items.map((it) => [it.id, it.id]));
+
+  function find(x) {
+    if (parent.get(x) !== x) parent.set(x, find(parent.get(x)));
+    return parent.get(x);
+  }
+  function union(x, y) {
+    const px = find(x), py = find(y);
+    if (px !== py) parent.set(px, py);
+  }
+
+  // O(n²) — fine for ≤200 images per sort run
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      if (hammingDistance(items[i].phash, items[j].phash) <= threshold) {
+        union(items[i].id, items[j].id);
+      }
+    }
+  }
+
+  // Assign group ids — only items with ≥1 near-duplicate get a dup_group label.
+  const groupSize = new Map();
+  for (const it of items) {
+    const root = find(it.id);
+    groupSize.set(root, (groupSize.get(root) || 0) + 1);
+  }
+
+  const result = new Map();
+  const groupLabel = new Map(); // root → "dup-<shortHash>"
+  for (const it of items) {
+    const root = find(it.id);
+    if ((groupSize.get(root) || 0) < 2) {
+      result.set(it.id, null); // singleton — not a duplicate
+    } else {
+      if (!groupLabel.has(root)) {
+        groupLabel.set(root, `dup-${root.slice(0, 8)}`);
+      }
+      result.set(it.id, groupLabel.get(root));
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Best-effort job hint (NO GPS).
+ *
+ * Strategy (cheap, no geocoding):
+ *   1. Source folder name contains job address substring
+ *      e.g. dropbox_path="/…/00 INBOX/stirling-reno-2026/img.jpg" → match "stirling"
+ *   2. Filename contains a job address substring (lowercased)
+ *   3. Otherwise null
+ *
+ * @param {object} row     — marketing_library row (dropbox_path, original_filename)
+ * @param {Array<{id:string,address:string}>} jobs
+ * @returns {string|null}  project_id UUID or null
+ */
+function guessJobFromFilename(row, jobs) {
+  const haystack = [
+    (row.dropbox_path    || "").toLowerCase(),
+    (row.original_filename || "").toLowerCase(),
+  ].join(" ");
+
+  for (const job of jobs) {
+    if (!job.address) continue;
+    // Try matching any word ≥4 chars from the address against the haystack
+    const words = job.address.toLowerCase().split(/\W+/).filter((w) => w.length >= 4);
+    if (words.length && words.every((w) => haystack.includes(w))) {
+      return job.id;
+    }
+    // Single meaningful word match (suburb name) — weaker but useful
+    if (words.some((w) => w.length >= 6 && haystack.includes(w))) {
+      return job.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * Haiku vision call — returns one of the 7 LIBRARY_CATEGORIES strings.
+ * Wraps in try/catch so caller falls back to heuristic on failure.
+ *
+ * @param {Buffer} buffer — image bytes
+ * @param {string} mediaType — MIME type (e.g. "image/jpeg")
+ * @returns {Promise<string>}
+ */
+async function classifyWithHaiku(buffer, mediaType) {
+  if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+  const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+  const base64 = buffer.toString("base64");
+  const categoryList = LIBRARY_CATEGORIES.join("\n");
+
+  const response = await callAI(
+    client,
+    {
+      model: HAIKU_MODEL,
+      max_tokens: 64,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType || "image/jpeg", data: base64 },
+            },
+            {
+              type: "text",
+              text: `You are classifying a construction marketing photo for Blue Leaf Building.\n\nCategories:\n${categoryList}\n\nReply with ONLY the exact category string from the list above that best fits this image. No explanation.`,
+            },
+          ],
+        },
+      ],
+    },
+    { module: "marketingInboxSort" }
+  );
+
+  const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+  // Validate — must exactly match one of the 7 categories
+  const match = LIBRARY_CATEGORIES.find((c) => raw.includes(c));
+  if (!match) throw new Error(`Haiku returned unrecognised category: ${raw}`);
+  return match;
+}
+
+/**
+ * Guess media_type from filename extension (matches marketing_media_assets media_type values).
+ * @param {string} filename
+ * @returns {string}
+ */
+function guessMediaType(filename) {
+  const ext = (filename || "").split(".").pop().toLowerCase();
+  const videoExts = ["mp4", "mov", "avi", "mkv", "webm", "mts", "m4v"];
+  const photoExts = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tiff", "tif", "bmp", "raw", "dng"];
+  if (videoExts.includes(ext)) return "video";
+  if (photoExts.includes(ext)) return "photo";
+  return "photo"; // safe default for inbox assets
+}
+
+/**
+ * Guess MIME type from file extension.
+ * @param {string} filename
+ * @returns {string}
+ */
+function guessMimeType(filename) {
+  const ext = (filename || "").split(".").pop().toLowerCase();
+  const map = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    gif: "image/gif",  webp: "image/webp", heic: "image/heic",
+    heif: "image/heif", tiff: "image/tiff", tif: "image/tiff",
+    bmp: "image/bmp",
+  };
+  return map[ext] || "image/jpeg";
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -216,6 +557,183 @@ async function rejectAsset(id) {
 // ─── Route registration ───────────────────────────────────────────────────────
 
 export function registerMarketingLibraryInboxRoutes(app) {
+
+  // ── POST /api/marketing/library/inbox/sort ────────────────────────────────
+  // INBOX-BATCH-C: auto-sort pass over inbox rows.
+  //
+  // For each inbox row missing quality_score (idempotent — already-scored rows
+  // are skipped unless re-scoring, but we choose to skip for simplicity):
+  //   1. Download the Dropbox file buffer (sequential — never Promise.all)
+  //   2. Compute quality_score (0–1) + pHash
+  //   3. Suggest category from heuristic (mapAssetToCategory)
+  //   4. If useAI=true, call Haiku vision for category (fallback to heuristic on error)
+  //   5. Guess project_id from filename/path (best-effort, no GPS)
+  //   6. Update the DB row
+  // After all rows processed: cluster pHashes → assign dup_group.
+  //
+  // Returns: { ok, processed, dupGroups, aiUsed }
+
+  app.post(
+    "/api/marketing/library/inbox/sort",
+    requireAuth,
+    requireRole("admin"),
+    async (req, res) => {
+      const supabase = db();
+      if (!supabase) return err(res, 503, "Database not configured");
+      if (!dropboxConfigured()) {
+        return err(res, 503, "Dropbox is not configured — set DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REFRESH_TOKEN");
+      }
+
+      const rawLimit  = Number(req.body?.limit  ?? 100);
+      const limit     = Math.min(Math.max(1, rawLimit || 100), 500);
+      const useAI     = req.body?.useAI === true || req.body?.useAI === "true";
+
+      // ── Fetch inbox rows not yet quality-scored ──────────────────────────────
+      const { data: rows, error: fetchErr } = await supabase
+        .from("marketing_library")
+        .select("id, dropbox_path, original_filename, status, quality_score, dup_group, category, notes, project_id")
+        .eq("status", "inbox")
+        .is("quality_score", null)   // skip already-scored rows (idempotent)
+        .order("created_at", { ascending: true })
+        .limit(limit);
+
+      if (fetchErr) return err(res, 500, translateDbError(fetchErr));
+
+      const pending = rows || [];
+
+      if (!pending.length) {
+        return ok(res, { processed: 0, dupGroups: 0, aiUsed: false });
+      }
+
+      // ── Load jobs for job-hint matching ──────────────────────────────────────
+      const { data: jobRows } = await supabase
+        .from("jobs")
+        .select("id, address")
+        .not("address", "is", null);
+      const jobs = jobRows || [];
+
+      // ── Get Dropbox token once ────────────────────────────────────────────────
+      let token;
+      try {
+        token = await getDropboxAccessToken();
+      } catch (tokenErr) {
+        return err(res, 502, `Dropbox auth failed: ${tokenErr?.message || "unknown"}`);
+      }
+
+      // ── Per-row processing (sequential — Dropbox sequential reads rule) ──────
+      let processed = 0;
+      let aiUsed    = false;
+
+      // Collect (id, phash) pairs for clustering after the loop
+      const phashItems = [];
+
+      for (const row of pending) {
+        try {
+          if (!row.dropbox_path) continue;
+
+          // 1. Download buffer
+          const buffer = await dropboxDownloadBuffer(token, row.dropbox_path);
+          if (!buffer || !buffer.length) continue;
+
+          // 2. Compute quality_score + pHash
+          const qualityScore = await computeQualityScore(buffer);
+          const phash        = await computePHash(buffer);
+
+          // 3. Category heuristic (reuse existing logic from backfill)
+          const { category: heuristicCat, needsReview } = mapAssetToCategory({
+            media_type:       guessMediaType(row.original_filename),
+            stage_detected:   null,
+            analysis:         null,
+            is_dji_dlog_m:    false,
+            original_filename: row.original_filename,
+          });
+
+          // 4. AI category (optional, Haiku, per-item try/catch)
+          let suggestedCategory = heuristicCat;
+          if (useAI) {
+            try {
+              const mimeType = guessMimeType(row.original_filename || row.dropbox_path || "");
+              suggestedCategory = await classifyWithHaiku(buffer, mimeType);
+              aiUsed = true;
+            } catch (aiErr) {
+              console.warn(`[inbox/sort] Haiku failed for ${row.id}: ${aiErr?.message} — using heuristic`);
+              suggestedCategory = heuristicCat;
+            }
+          }
+
+          // 5. Job hint (best-effort, no GPS)
+          const suggestedProjectId = row.project_id || guessJobFromFilename(row, jobs);
+
+          // 6. Update DB row
+          const patch = {
+            quality_score: qualityScore,
+            // Store phash in notes temporarily until we add a dedicated column —
+            // actually we store it in dup_group after clustering (set to null here, updated below).
+            // We track phash in memory only for the clustering pass.
+          };
+
+          // Update category only if still '00 INBOX' (i.e. not yet user-set)
+          if (!row.category || row.category === "00 INBOX") {
+            patch.category    = suggestedCategory;
+            patch.notes       = needsReview && !useAI
+              ? (row.notes || null)
+              : row.notes || null;
+          }
+
+          // Set suggested project_id only if not already set
+          if (!row.project_id && suggestedProjectId) {
+            patch.project_id = suggestedProjectId;
+          }
+
+          const { error: updateErr } = await supabase
+            .from("marketing_library")
+            .update(patch)
+            .eq("id", row.id);
+
+          if (updateErr) {
+            console.error(`[inbox/sort] DB update failed for ${row.id}:`, updateErr?.message);
+            continue;
+          }
+
+          phashItems.push({ id: row.id, phash });
+          processed += 1;
+
+        } catch (rowErr) {
+          // Per-item failure: log and continue — never abort the batch
+          console.error(`[inbox/sort] row ${row.id} failed:`, rowErr?.message || rowErr);
+        }
+      }
+
+      // ── Cluster pHashes → assign dup_group ───────────────────────────────────
+      // Only cluster items that got a valid phash
+      const hashable = phashItems.filter((it) => it.phash !== null);
+      const groupMap  = clusterPHashes(hashable);
+      let dupGroups   = 0;
+
+      // Count distinct non-null group ids
+      const distinctGroups = new Set();
+      for (const [, gid] of groupMap) {
+        if (gid) distinctGroups.add(gid);
+      }
+      dupGroups = distinctGroups.size;
+
+      // Write dup_group back to DB (sequential)
+      for (const it of hashable) {
+        const gid = groupMap.get(it.id) || null;
+        // Only update if group changed (skip if already null and no group)
+        const { error: dupErr } = await supabase
+          .from("marketing_library")
+          .update({ dup_group: gid })
+          .eq("id", it.id);
+
+        if (dupErr) {
+          console.warn(`[inbox/sort] dup_group update failed for ${it.id}:`, dupErr?.message);
+        }
+      }
+
+      return ok(res, { processed, dupGroups, aiUsed });
+    }
+  );
 
   // ── POST /api/marketing/library/inbox/scan ────────────────────────────────
   // Lists the INBOX Dropbox folder and inserts a marketing_library row for
