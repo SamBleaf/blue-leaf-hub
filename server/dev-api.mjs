@@ -75,6 +75,7 @@ import { registerMarketingLibraryInboxRoutes } from "./lib/marketingLibraryInbox
 import { registerAdminRoutes } from "./lib/adminRoutes.mjs";
 import { registerWorkforceRoutes } from "./lib/workforceRoutes.mjs";
 import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligenceRoutes.mjs";
+import { registerMarketingAreaPerformanceRoutes } from "./lib/marketingAreaPerformanceRoutes.mjs";
 import { registerCrmRoutes } from "./lib/crmRoutes.mjs";
 import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
@@ -962,6 +963,7 @@ registerMarketingLibraryInboxRoutes(app);
 registerAdminRoutes(app);
 registerWorkforceRoutes(app);
 registerMarketingIntelligenceRoutes(app);
+registerMarketingAreaPerformanceRoutes(app);
 registerCrmRoutes(app);
 registerWhsEngineRoutes(app);
 registerCarpentryRoutes(app);

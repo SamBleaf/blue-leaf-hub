@@ -12,6 +12,7 @@ import MarketingDashboard from "./MarketingDashboard.jsx";
 import MarketingAttribution from "./MarketingAttribution.jsx";
 import MarketingLibrary from "./MarketingLibrary.jsx";
 import MarketingInbox from "./MarketingInbox.jsx";
+import AreaPerformance from "./AreaPerformance.jsx";
 
 // Marketing internal router (Run A + Batch 3). Mounted at /marketing/* in App.jsx (admin-gated).
 // Supports the two-segment /marketing/studio/legacy route that the old /marketing/:tab
@@ -29,6 +30,7 @@ export default function MarketingRouter() {
       <Route path="evergreen" element={<EvergreenLibrary />} />
       <Route path="intelligence" element={<MarketingDashboard />} />
       <Route path="attribution" element={<MarketingAttribution />} />
+      <Route path="area-performance" element={<AreaPerformance />} />
       <Route path="studio" element={<ContentCreator />} />
       <Route path="studio/legacy" element={<LegacyStudio />} />
       {/* Legacy redirect: old Create tab → new Studio */}
