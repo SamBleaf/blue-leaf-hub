@@ -16,11 +16,17 @@ import { recomputeReferralRollup } from "./crmRoutes.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
+import { geocodeToFacts } from "./geocodeService.mjs";
 import {
   dropboxConfigured,
   ensureJobFolderStructure,
   backfillLeadDataToJobFolder,
 } from "./dropboxClient.mjs";
+
+// Stages at qualify or beyond where a lead justifies a full address geocode.
+const _GEO_QUALIFY_PLUS = new Set([
+  "qualify", "discovery", "winning_offer", "fee_proposal", "accepted", "tender", "won",
+]);
 
 // W01-DRIFT-003 (SAM-W02-002): stage gates are ADVISORY during hardening — never
 // hard-blocked server-side, but a bypass is logged + surfaced (non-breaking) so it is
@@ -661,6 +667,13 @@ export function registerSalesRoutes(app) {
     const { data, error } = await sb.from("leads").insert(insert).select().single();
     if (error) return res.status(400).json({ ok: false, error: error.message });
     await insertLeadCreatedActivity(sb, data.id);
+    // G0-B: geocode at suburb precision on lead create (cost control — early leads only need
+    // map-bubble placement; full address deferred until qualify+). Non-blocking, fail-soft.
+    const _createSuburb = String(data.suburb || "").trim();
+    const _createAddr   = String(data.site_address || "").trim();
+    if (_createSuburb || _createAddr) {
+      geocodeToFacts("leads", data.id, _createSuburb || _createAddr, "suburb").catch(() => {});
+    }
     res.json({ ok: true, lead: data });
   });
 
@@ -700,7 +713,7 @@ export function registerSalesRoutes(app) {
     }
     const { data: current } = await sb
       .from("leads")
-      .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, job_id")
+      .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, suburb, job_id, geo_geocoded_at, geo_precision")
       .eq("id", req.params.id)
       .single();
     let gateWarnings = [];
@@ -763,6 +776,23 @@ export function registerSalesRoutes(app) {
       }
     }
     res.json({ ok: true, lead: leadOut, gateWarnings, provisioning });
+
+    // G0-B: geocode-on-save for stage progression to qualify+ (non-blocking, after response).
+    // Only fires when:
+    //   (a) stage changed to qualify or beyond, AND
+    //   (b) the lead is not already geocoded at address precision.
+    // This prevents re-geocoding on every unrelated PATCH.
+    try {
+      const newStage = updates.stage;
+      if (newStage && _GEO_QUALIFY_PLUS.has(newStage) && leadOut?.geo_precision !== "address") {
+        const rawAddr = String(leadOut?.site_address || current?.site_address || "").trim();
+        const rawSub  = String(leadOut?.suburb       || current?.suburb       || "").trim();
+        const geoQuery = rawAddr || rawSub;
+        if (geoQuery) {
+          geocodeToFacts("leads", req.params.id, geoQuery, "address").catch(() => {});
+        }
+      }
+    } catch { /* never block the response */ }
   });
 
   // ── Lead → Job conversion (Phase 2: non-lossy, server-side, provenance-stamped) ──

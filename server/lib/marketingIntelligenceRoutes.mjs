@@ -38,6 +38,7 @@ import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
+import { geocodeToFacts } from "./geocodeService.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
@@ -348,6 +349,13 @@ export function registerMarketingIntelligenceRoutes(app) {
 
         attrRow = inserted;
       }
+    }
+
+    // G0-B: geocode at suburb precision on public enquiry (cost control — early-funnel leads
+    // only need map-bubble placement). Non-blocking fire-and-forget.
+    const _enquirySuburb = String(suburb || "").trim();
+    if (_enquirySuburb) {
+      geocodeToFacts("leads", lead.id, _enquirySuburb, "suburb").catch(() => {});
     }
 
     return ok(res, { lead: rowToCamel(lead), attribution: attrRow ? rowToCamel(attrRow) : null });

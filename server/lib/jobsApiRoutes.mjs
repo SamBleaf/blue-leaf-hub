@@ -1,6 +1,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, translateDbError } from "./apiResponse.mjs";
+import { geocodeToFacts } from "./geocodeService.mjs";
 // Job status constants (mirrors migration 001 CHECK constraint)
 const JOB_STATUSES_VALID = ["tendering", "won", "lost", "archived"];
 import {
@@ -144,6 +145,11 @@ export function registerJobsApiRoutes(app) {
           console.warn("[jobs POST] Dropbox folder provisioning skipped:", e?.message || e);
         }
       }
+      // G0-B: geocode at full address precision on job create (jobs always justify full geocode).
+      // Non-blocking fire-and-forget — never delays or breaks the response.
+      if (!isPlaceholder && address?.trim()) {
+        geocodeToFacts("jobs", data.id, address.trim(), "address").catch(() => {});
+      }
       return res.json({ ok: true, job });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message });
@@ -182,6 +188,13 @@ export function registerJobsApiRoutes(app) {
         return err(res, 400, translateDbError(error));
       }
       if (!data) return err(res, 404, "Job not found", "NOT_FOUND");
+      // G0-B: re-geocode when address was explicitly changed in this PATCH.
+      // The guard `typeof updates.address === "string"` ensures this only fires
+      // when the address field was part of the request body — unrelated PATCH
+      // calls (project_type, client_name, etc.) never trigger a geocode.
+      if (typeof updates.address === "string" && updates.address.trim()) {
+        geocodeToFacts("jobs", id, updates.address.trim(), "address").catch(() => {});
+      }
       return ok(res, { job: data });
     } catch (e) {
       console.error("[jobs PATCH]", e);
