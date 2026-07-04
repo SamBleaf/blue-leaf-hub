@@ -17,6 +17,7 @@
 
 export const FAMILIES = [
   "identity", "facts", "relationships", "metrics", "risks", "business_intelligence", "site_intelligence",
+  "location",
 ];
 
 /** @type {Array<{key:string,label:string,family:string,spine:string,type:string,tier:string,store:{table:string,column:string}|null,compute?:string,sourceDocs?:string[],consumers?:string[]}>} */
@@ -133,6 +134,31 @@ export const FACT_REGISTRY = [
   // ── Business intelligence ───────────────────────────────────────────────────
   { key: "target_margin_pct", label: "Target margin %", family: "business_intelligence", spine: "job", type: "versioned", tier: "consequential",
     store: { table: "jobs", column: "target_margin_pct" }, consumers: ["finance", "pretender"] },
+
+  // ── Location (derived from address via Mapbox geocoding) ────────────────────
+  // All geo facts are `generated` (derived from the `address` fact) and `internal`
+  // tier (spatial coordinates have no direct financial/compliance consequence on
+  // their own — wrong coords are correctable without harm). They are stored on jobs
+  // so they can be read by any module without re-geocoding.
+  // `compute:"geocode"` signals that geocodeService.mjs produces these values.
+  { key: "geo_lat", label: "Latitude", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_lat" }, compute: "geocode",
+    consumers: ["marketing", "ops", "sales", "workforce", "scheduling"] },
+  { key: "geo_lng", label: "Longitude", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_lng" }, compute: "geocode",
+    consumers: ["marketing", "ops", "sales", "workforce", "scheduling"] },
+  { key: "geo_confidence", label: "Geocode confidence", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_confidence" }, compute: "geocode",
+    consumers: ["marketing", "ops", "sales"] },
+  { key: "geo_geocoded_at", label: "Geocoded at", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_geocoded_at" }, compute: "geocode",
+    consumers: ["ops"] },
+  { key: "geo_place_id", label: "Mapbox place ID", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_place_id" }, compute: "geocode",
+    consumers: ["ops", "site_intelligence"] },
+  { key: "geo_precision", label: "Geocode precision grain", family: "location", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "geo_precision" }, compute: "geocode",
+    consumers: ["marketing", "ops", "sales"] },
 ];
 
 // Remove any accidental duplicate-key entries (keep first).
