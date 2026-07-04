@@ -77,6 +77,20 @@ function DupBadge({ dupGroup }) {
   );
 }
 
+// ─── GPS suggestion badge ─────────────────────────────────────────────────────
+
+function GpsBadge({ suggestedProjectId }) {
+  if (!suggestedProjectId) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700"
+      title="Job suggested from photo GPS"
+    >
+      📍 GPS
+    </span>
+  );
+}
+
 // ─── Individual tile ──────────────────────────────────────────────────────────
 
 function InboxTile({ asset, selected, onSelect, onFile, onReject, onKeyAction }) {
@@ -171,6 +185,7 @@ function InboxTile({ asset, selected, onSelect, onFile, onReject, onKeyAction })
         <div className="flex items-center gap-1 pt-0.5 flex-wrap">
           <QualityBadge score={asset.qualityScore} />
           <DupBadge dupGroup={asset.dupGroup} />
+          <GpsBadge suggestedProjectId={asset.suggestedProjectId} />
         </div>
       </div>
 
@@ -199,9 +214,10 @@ function InboxTile({ asset, selected, onSelect, onFile, onReject, onKeyAction })
 
 // ─── File single modal ────────────────────────────────────────────────────────
 
-function FileModal({ assetId, jobs, onDone, onClose }) {
+function FileModal({ assetId, suggestedProjectId, jobs, onDone, onClose }) {
   const [category,  setCategory]  = useState("");
-  const [projectId, setProjectId] = useState("");
+  // Default the job picker to the GPS suggestion if present
+  const [projectId, setProjectId] = useState(suggestedProjectId || "");
   const [saving,    setSaving]    = useState(false);
   const [modalErr,  setModalErr]  = useState(null);
 
@@ -248,7 +264,14 @@ function FileModal({ assetId, jobs, onDone, onClose }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">Job</label>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1">
+              Job
+              {suggestedProjectId && (
+                <span className="ml-2 inline-flex items-center gap-0.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-sky-700">
+                  📍 suggested from photo GPS
+                </span>
+              )}
+            </label>
             <select
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
@@ -392,6 +415,19 @@ export default function MarketingInbox() {
   const selectAll   = () => setSelected(new Set(assets.map((a) => a.id)));
   const deselectAll = () => { setSelected(new Set()); lastClickIdx.current = -1; };
 
+  // ── Auto-fill bulkJob from GPS suggestion when exactly one item is selected ──
+  // When the selection changes to a single item that has a suggestedProjectId,
+  // pre-fill the bulk bar job picker so the user just has to confirm.
+  // Clears bulkJob when selection grows beyond one or the asset has no suggestion.
+  useEffect(() => {
+    if (selected.size !== 1) return;
+    const [onlyId] = selected;
+    const onlyAsset = assets.find((a) => a.id === onlyId);
+    if (onlyAsset?.suggestedProjectId) {
+      setBulkJob((prev) => prev || onlyAsset.suggestedProjectId);
+    }
+  }, [selected, assets]);
+
   // ── Remove tiles after file/reject ──────────────────────────────────────────
   const removeIds = useCallback((ids) => {
     const s = new Set(ids);
@@ -405,7 +441,9 @@ export default function MarketingInbox() {
 
   // ── Single file (via quick-action button or keyboard F) ─────────────────────
   const handleSingleFile = (id) => {
-    setFileModal(id);
+    // Pass the asset along so the modal can default the job picker to the GPS suggestion
+    const asset = assets.find((a) => a.id === id);
+    setFileModal({ id, suggestedProjectId: asset?.suggestedProjectId || null });
   };
 
   const handleFileModalDone = (id) => {
@@ -413,6 +451,10 @@ export default function MarketingInbox() {
     removeIds([id]);
     flash("Filed successfully.");
   };
+
+  // Derive the asset id from the fileModal state (now an object)
+  const fileModalId              = fileModal?.id   || null;
+  const fileModalSuggestedJob    = fileModal?.suggestedProjectId || null;
 
   // ── Single reject (via quick-action button or keyboard X) ───────────────────
   const handleSingleReject = async (id) => {
@@ -586,14 +628,24 @@ export default function MarketingInbox() {
             {LIBRARY_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
 
-          <select
-            value={bulkJob}
-            onChange={(e) => setBulkJob(e.target.value)}
-            className="rounded-lg border border-hairline bg-surface px-2 py-1.5 text-xs focus-ring"
-          >
-            <option value="">No job / company-wide</option>
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.address}</option>)}
-          </select>
+          {/* Job picker — when a single GPS-suggested item is selected, show the hint */}
+          <div className="flex flex-col gap-0.5">
+            {selCount === 1 && (() => {
+              const onlyId  = Array.from(selected)[0];
+              const onlyAsset = assets.find((a) => a.id === onlyId);
+              return onlyAsset?.suggestedProjectId && !bulkJob ? (
+                <span className="text-[10px] text-sky-600 font-semibold">📍 GPS suggestion available</span>
+              ) : null;
+            })()}
+            <select
+              value={bulkJob}
+              onChange={(e) => setBulkJob(e.target.value)}
+              className="rounded-lg border border-hairline bg-surface px-2 py-1.5 text-xs focus-ring"
+            >
+              <option value="">No job / company-wide</option>
+              {jobs.map((j) => <option key={j.id} value={j.id}>{j.address}</option>)}
+            </select>
+          </div>
 
           <button
             type="button"
@@ -652,9 +704,10 @@ export default function MarketingInbox() {
       )}
 
       {/* Single-file modal */}
-      {fileModal && (
+      {fileModalId && (
         <FileModal
-          assetId={fileModal}
+          assetId={fileModalId}
+          suggestedProjectId={fileModalSuggestedJob}
           jobs={jobs}
           onDone={handleFileModalDone}
           onClose={() => setFileModal(null)}

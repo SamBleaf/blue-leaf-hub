@@ -71,6 +71,7 @@ import {
   LIBRARY_REJECTED_FOLDER,
 } from "./marketingLibraryRoutes.mjs";
 import { mapAssetToCategory } from "./marketingLibraryBackfillRoutes.mjs";
+import { haversineMeters }     from "./geoDistance.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { config as dotenvConfig } from "dotenv";
@@ -340,6 +341,60 @@ function guessJobFromFilename(row, jobs) {
   return null;
 }
 
+// ─── INBOX-BATCH-C / G2-A: GPS → nearest-job suggestion ─────────────────────
+
+/**
+ * Maximum radius (metres) within which a geocoded job is considered a match
+ * for a photo's EXIF GPS coordinates.  2 km is generous for a construction
+ * site — covers the job site itself plus any photos taken nearby on the day.
+ * Adjust upward if jobs are in rural areas with sparse geocoding coverage.
+ */
+const NEAREST_JOB_RADIUS_M = 2000;
+
+/**
+ * Attempt to extract GPS coordinates from an image buffer using exifr.
+ *
+ * exifr handles JPEG, HEIC, and most RAW formats.  Returns
+ * `{ latitude, longitude }` when GPS tags are present, or `undefined` when
+ * the image has no GPS data (most studio shots, screen-captures, etc.).
+ *
+ * Always wrapped in try/catch by the caller — many images legitimately have
+ * no GPS; that is not an error.
+ *
+ * @param {Buffer} buffer — raw image bytes
+ * @returns {Promise<{ latitude: number, longitude: number } | undefined>}
+ */
+async function extractExifGps(buffer) {
+  // Dynamic import so the server starts even if exifr ever fails to load
+  const exifr = await import("exifr").then((m) => m.default || m);
+  return exifr.gps(buffer);
+}
+
+/**
+ * Find the nearest geocoded job to a GPS coordinate, within NEAREST_JOB_RADIUS_M.
+ *
+ * @param {number} lat  — photo latitude
+ * @param {number} lng  — photo longitude
+ * @param {Array<{ id: string, geoLat: number, geoLng: number }>} geocodedJobs
+ *   — jobs that have both geo_lat and geo_lng set (loaded once per sort run)
+ * @returns {string|null}  job id UUID or null if nothing within radius
+ */
+function findNearestJob(lat, lng, geocodedJobs) {
+  let bestId   = null;
+  let bestDist = Infinity;
+
+  for (const job of geocodedJobs) {
+    const dist = haversineMeters(lat, lng, job.geoLat, job.geoLng);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestId   = job.id;
+    }
+  }
+
+  if (bestId && bestDist <= NEAREST_JOB_RADIUS_M) return bestId;
+  return null;
+}
+
 /**
  * Haiku vision call — returns one of the 7 LIBRARY_CATEGORIES strings.
  * Wraps in try/catch so caller falls back to heuristic on failure.
@@ -567,8 +622,9 @@ export function registerMarketingLibraryInboxRoutes(app) {
   //   2. Compute quality_score (0–1) + pHash
   //   3. Suggest category from heuristic (mapAssetToCategory)
   //   4. If useAI=true, call Haiku vision for category (fallback to heuristic on error)
-  //   5. Guess project_id from filename/path (best-effort, no GPS)
-  //   6. Update the DB row
+  //   5a. Extract EXIF GPS → find nearest geocoded job → set suggested_project_id (G2-A)
+  //   5b. Filename/path heuristic fallback for suggested_project_id (no GPS → batch-C)
+  //   6. Update the DB row (suggested_project_id only; project_id = user-confirmed at file-time)
   // After all rows processed: cluster pHashes → assign dup_group.
   //
   // Returns: { ok, processed, dupGroups, aiUsed }
@@ -605,7 +661,28 @@ export function registerMarketingLibraryInboxRoutes(app) {
         return ok(res, { processed: 0, dupGroups: 0, aiUsed: false });
       }
 
-      // ── Load jobs for job-hint matching ──────────────────────────────────────
+      // ── Load jobs for job-hint matching (once per sort run) ─────────────────
+      //
+      // Two separate queries:
+      //   1. geocodedJobs — jobs with lat/lng for EXIF GPS matching (G2-A primary signal)
+      //   2. allJobs     — all jobs with addresses for filename fallback (batch-C legacy)
+      //
+      // The geocoded-job list is fetched in a single query and reused across all
+      // images in this sort run — never one query per image.
+
+      const { data: geocodedJobRows } = await supabase
+        .from("jobs")
+        .select("id, geo_lat, geo_lng")
+        .not("geo_lat", "is", null)
+        .not("geo_lng",  "is", null);
+
+      // Normalise to camelCase here for use with haversineMeters
+      const geocodedJobs = (geocodedJobRows || []).map((r) => ({
+        id:     r.id,
+        geoLat: Number(r.geo_lat),
+        geoLng: Number(r.geo_lng),
+      }));
+
       const { data: jobRows } = await supabase
         .from("jobs")
         .select("id, address")
@@ -661,15 +738,43 @@ export function registerMarketingLibraryInboxRoutes(app) {
             }
           }
 
-          // 5. Job hint (best-effort, no GPS)
-          const suggestedProjectId = row.project_id || guessJobFromFilename(row, jobs);
+          // 5a. GPS-based job suggestion (G2-A — primary signal)
+          //
+          // Try to extract EXIF GPS from the buffer.  Many images have no GPS
+          // (screenshots, studio shots, imports from non-GPS cameras) — this is
+          // normal and we silently skip.  exifr.gps() returns
+          // { latitude, longitude } or undefined.
+          //
+          // If GPS is found AND there are geocoded jobs within NEAREST_JOB_RADIUS_M,
+          // record the nearest job id as `suggested_project_id`.
+          // This is separate from the user-confirmed `project_id` — it only
+          // pre-populates the picker; a human must confirm at file-time.
+
+          let suggestedProjectId = null;
+
+          try {
+            const gps = await extractExifGps(buffer);
+            if (gps?.latitude != null && gps?.longitude != null && geocodedJobs.length > 0) {
+              suggestedProjectId = findNearestJob(gps.latitude, gps.longitude, geocodedJobs);
+            }
+          } catch (gpsErr) {
+            // No GPS, unsupported format, or exifr not available — normal, skip silently
+            console.debug(`[inbox/sort] GPS extraction skipped for ${row.id}: ${gpsErr?.message}`);
+          }
+
+          // 5b. Filename-based fallback (batch-C legacy heuristic)
+          //
+          // Only used for the filename hint — GPS takes precedence.
+          // The filename hint still writes to suggested_project_id (not project_id),
+          // so the user can confirm or override it.
+          if (!suggestedProjectId) {
+            suggestedProjectId = guessJobFromFilename(row, jobs) || null;
+          }
 
           // 6. Update DB row
           const patch = {
             quality_score: qualityScore,
-            // Store phash in notes temporarily until we add a dedicated column —
-            // actually we store it in dup_group after clustering (set to null here, updated below).
-            // We track phash in memory only for the clustering pass.
+            // Track phash in memory only for the clustering pass (written to dup_group below).
           };
 
           // Update category only if still '00 INBOX' (i.e. not yet user-set)
@@ -680,9 +785,11 @@ export function registerMarketingLibraryInboxRoutes(app) {
               : row.notes || null;
           }
 
-          // Set suggested project_id only if not already set
-          if (!row.project_id && suggestedProjectId) {
-            patch.project_id = suggestedProjectId;
+          // Write suggested_project_id (GPS-derived or filename fallback).
+          // Never overwrite an already-confirmed project_id — that is authoritative.
+          // suggested_project_id is always safe to refresh with the latest signal.
+          if (suggestedProjectId) {
+            patch.suggested_project_id = suggestedProjectId;
           }
 
           const { error: updateErr } = await supabase
