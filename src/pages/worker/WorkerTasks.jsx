@@ -256,6 +256,14 @@ export default function WorkerTasks() {
   const [crewLoading, setCrewLoading] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
 
+  // From-transcript sheet (leading hand only)
+  const [showTranscriptSheet, setShowTranscriptSheet] = useState(false);
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptBusy, setTranscriptBusy] = useState(false);
+  const [transcriptError, setTranscriptError] = useState(null);
+  const [draftTasks, setDraftTasks] = useState([]);       // [{ title, category, priority, description, kept }]
+  const [bulkAdding, setBulkAdding] = useState(false);
+
   const photoInputRef = useRef(null);
 
   const myId = me?.employee?.id;
@@ -468,6 +476,62 @@ export default function WorkerTasks() {
     }
   }
 
+  // ── From-transcript (leading hand only) ──────────────────────────────────────
+
+  async function extractTasks() {
+    if (!transcriptText.trim() || !job?.id) return;
+    setTranscriptBusy(true);
+    setTranscriptError(null);
+    setDraftTasks([]);
+    try {
+      const res = await workerFetch("/api/worker/tasks/from-transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: transcriptText.trim(), jobId: job.id, jobType: job.type || "" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.ok && Array.isArray(j.tasks)) {
+        setDraftTasks(j.tasks.map(t => ({ ...t, kept: true })));
+      } else {
+        setTranscriptError(j.error || "Could not extract tasks.");
+      }
+    } catch {
+      setTranscriptError("Couldn't reach the server — check your connection.");
+    } finally {
+      setTranscriptBusy(false);
+    }
+  }
+
+  async function bulkAddDrafts() {
+    const toAdd = draftTasks.filter(t => t.kept);
+    if (!toAdd.length || !job?.id) return;
+    setBulkAdding(true);
+    let added = 0;
+    for (const draft of toAdd) {
+      try {
+        const res = await workerFetch("/api/worker/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId: job.id, title: draft.title, category: draft.category || "general", priority: draft.priority || "normal" }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (j.ok && j.task) {
+          setTasks(prev => [j.task, ...prev]);
+          added++;
+        }
+      } catch { /* continue adding remaining */ }
+    }
+    setBulkAdding(false);
+    setShowTranscriptSheet(false);
+    setDraftTasks([]);
+    setTranscriptText("");
+    if (added > 0) {
+      // Simple toast via alert — matches the rest of the PWA's feedback pattern
+      // (no toast library; the PWA uses alert for non-blocking confirmations too).
+      alert(`Added ${added} task${added === 1 ? "" : "s"}`);
+    }
+  }
+
   // ── Data slices ───────────────────────────────────────────────────────────────
 
   const urgentTasks    = tasks.filter(t => t.status !== "done" && t.status !== "wont_do" && t.status !== "blocked" && t.priority === "urgent");
@@ -613,15 +677,24 @@ export default function WorkerTasks() {
           <span className="text-primary text-sm font-semibold shrink-0">Change ▾</span>
         </button>
 
-        {/* Supervisor add task button */}
+        {/* Supervisor add task buttons */}
         {job && isSupervisor && (
-          <button
-            type="button"
-            onClick={() => setShowAddSheet(true)}
-            className="w-full mb-4 py-2.5 rounded-lg border border-dashed border-primary text-primary text-sm font-semibold text-center hover:bg-primary/5 transition-colors"
-          >
-            + Add task
-          </button>
+          <div className="flex gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => setShowAddSheet(true)}
+              className="flex-1 py-2.5 rounded-lg border border-dashed border-primary text-primary text-sm font-semibold text-center hover:bg-primary/5 transition-colors"
+            >
+              + Add task
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowTranscriptSheet(true); setDraftTasks([]); setTranscriptText(""); setTranscriptError(null); }}
+              className="flex-1 py-2.5 rounded-lg border border-dashed border-slate-400 text-slate-600 text-sm font-semibold text-center hover:bg-slate-50 transition-colors"
+            >
+              From transcript
+            </button>
+          </div>
         )}
 
         {!job ? (
@@ -945,6 +1018,106 @@ export default function WorkerTasks() {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+      {/* ── From-transcript sheet (leading hand only) ─────────────────────── */}
+      {showTranscriptSheet && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowTranscriptSheet(false)} />
+          <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-ink mb-1">From transcript</h3>
+            <p className="text-xs text-muted mb-3">Paste or dictate your site walk-through — the AI will extract a draft task list for you to review.</p>
+            {preview && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                Read-only preview — extraction works in the leading-hand app, not in preview.
+              </p>
+            )}
+
+            {/* Step 1: transcript input + extract */}
+            {draftTasks.length === 0 && (
+              <>
+                <textarea
+                  value={transcriptText}
+                  onChange={e => setTranscriptText(e.target.value)}
+                  placeholder="Paste or dictate your site walk-through…"
+                  rows={6}
+                  disabled={transcriptBusy || preview}
+                  className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 mb-3 disabled:opacity-50"
+                />
+                {transcriptError && <p className="text-sm text-red-600 mb-3">{transcriptError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={extractTasks}
+                    disabled={transcriptBusy || preview || !transcriptText.trim()}
+                    className="flex-1 py-3 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50"
+                  >
+                    {preview ? "Read-only preview" : transcriptBusy ? "Extracting…" : "Extract tasks"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTranscriptSheet(false)}
+                    className="px-5 py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2: draft checklist */}
+            {draftTasks.length > 0 && (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium text-ink">
+                    {draftTasks.filter(t => t.kept).length} of {draftTasks.length} tasks selected
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setDraftTasks([])}
+                    className="text-xs text-muted underline"
+                  >
+                    Back
+                  </button>
+                </div>
+                <div className="space-y-2 mb-4">
+                  {draftTasks.map((t, i) => (
+                    <div key={i} className="flex items-start gap-3 bg-white border border-hairline rounded-lg px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        checked={t.kept}
+                        onChange={() => setDraftTasks(prev => prev.map((d, j) => j === i ? { ...d, kept: !d.kept } : d))}
+                        className="mt-0.5 shrink-0 w-4 h-4 accent-primary"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm leading-snug ${t.kept ? "text-ink" : "text-muted line-through"}`}>{t.title}</p>
+                        {t.category && t.category !== "general" && (
+                          <p className="text-xs text-muted mt-0.5">{categoryLabel(t.category)}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={bulkAddDrafts}
+                    disabled={bulkAdding || preview || draftTasks.filter(t => t.kept).length === 0}
+                    className="flex-1 py-3 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50"
+                  >
+                    {preview ? "Read-only preview" : bulkAdding ? "Adding…" : `Add ${draftTasks.filter(t => t.kept).length} task${draftTasks.filter(t => t.kept).length === 1 ? "" : "s"}`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTranscriptSheet(false)}
+                    className="px-5 py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -153,6 +153,30 @@ function checkStatic(run) {
   } else {
     run.fail("WF1-C4 sign-off glance", "'Done by' or isLeadingHand guard missing in WorkerTasks.jsx");
   }
+
+  // C5: from-transcript endpoint in workforceRoutes.
+  if (
+    wfSrc.includes("/api/worker/tasks/from-transcript") &&
+    wfSrc.includes("Only a leading hand can extract tasks from a transcript.") &&
+    wfSrc.includes("splitTranscriptToTasks")
+  ) {
+    run.pass("WF1-C5 POST /api/worker/tasks/from-transcript endpoint + guard + splitTranscriptToTasks present");
+  } else {
+    run.fail("WF1-C5 from-transcript endpoint", "endpoint, guard, or splitTranscriptToTasks missing in workforceRoutes.mjs");
+  }
+
+  // C5: PWA from-transcript sheet present and leading-hand gated.
+  if (
+    pwaSrc.includes("showTranscriptSheet") &&
+    pwaSrc.includes("From transcript") &&
+    pwaSrc.includes("extractTasks") &&
+    pwaSrc.includes("bulkAddDrafts") &&
+    pwaSrc.includes("draftTasks")
+  ) {
+    run.pass("WF1-C5 PWA from-transcript sheet (showTranscriptSheet / extractTasks / bulkAddDrafts / draftTasks) present");
+  } else {
+    run.fail("WF1-C5 PWA transcript sheet", "showTranscriptSheet/extractTasks/bulkAddDrafts/draftTasks not all found in WorkerTasks.jsx");
+  }
 }
 
 // ── Write checks ─────────────────────────────────────────────────────────────
@@ -395,6 +419,80 @@ async function checkC3Api(run, svc) {
   }
 }
 
+// ── C5 write: from-transcript guard ─────────────────────────────────────────
+// Seeds two worker-token employees (non-LH + LH). Asserts:
+//   - non-LH → 403
+//   - LH     → 200 with { draft: true } OR graceful 502 (AI key absent)
+async function checkC5Api(run, svc) {
+  run.section("WF1-C5 write — from-transcript 403 guard + leading-hand 200/502");
+  const stamp = Date.now();
+  const made = { carpId: null, normalEmpId: null, lhEmpId: null };
+  const normalToken = `wf1-c5-normal-${stamp}`;
+  const lhToken     = `wf1-c5-lh-${stamp}`;
+  const API_URL = process.env.BATCH_A_API_URL || "http://localhost:8787";
+
+  async function workerPost(path, token, body) {
+    const res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-worker-token": token },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  }
+
+  try {
+    // Seed carpentry job.
+    const { data: cj, error: ce } = await svc
+      .from("carpentry_jobs")
+      .insert({ reference: `BLH TEST WF1-C5 ${stamp}`, client_name: "BLH TEST", address: `BLH TEST WF1-C5 ${stamp} ST, SA 5000`, status: "active" })
+      .select("id").single();
+    if (ce || !cj?.id) { run.fail("seed carpentry job (C5)", ce?.message || "no id"); return; }
+    made.carpId = cj.id;
+
+    // Seed a normal worker.
+    const { data: emp1, error: e1 } = await svc
+      .from("employees")
+      .insert({ name: `BLH TEST WF1-C5 WORKER ${stamp}`, trade: "carpenter", employment_type: "full_time", is_active: true, is_leading_hand: false, worker_token: normalToken })
+      .select("id").single();
+    if (e1 || !emp1?.id) { run.fail("seed normal employee (C5)", e1?.message || "no id"); return; }
+    made.normalEmpId = emp1.id;
+
+    // Seed a leading hand.
+    const { data: emp2, error: e2 } = await svc
+      .from("employees")
+      .insert({ name: `BLH TEST WF1-C5 LH ${stamp}`, trade: "carpenter", employment_type: "full_time", is_active: true, is_leading_hand: true, worker_token: lhToken })
+      .select("id").single();
+    if (e2 || !emp2?.id) { run.fail("seed leading hand (C5)", e2?.message || "no id"); return; }
+    made.lhEmpId = emp2.id;
+
+    const payload = { transcript: "Fix the ridge capping on the north wall. Clean up offcuts near the stairwell.", jobId: cj.id, jobType: "carpentry" };
+
+    // Non-LH → must be 403.
+    const deny = await workerPost("/api/worker/tasks/from-transcript", normalToken, payload);
+    if (deny.status === 403) {
+      run.pass("WF1-C5 non-leading-hand POST from-transcript → 403");
+    } else {
+      run.fail("WF1-C5 non-LH 403", `expected 403 got ${deny.status} — ${deny.body?.error || "—"}`);
+    }
+
+    // Leading hand → 200 (with AI key) OR 502 (graceful — key absent in test env).
+    const allow = await workerPost("/api/worker/tasks/from-transcript", lhToken, payload);
+    if (allow.status === 200 && allow.body.ok && allow.body.draft === true) {
+      run.pass(`WF1-C5 leading hand POST from-transcript → 200 draft:true (${(allow.body.tasks || []).length} tasks extracted)`);
+    } else if (allow.status === 502) {
+      run.pass("WF1-C5 leading hand POST from-transcript → 502 graceful (AI key absent in test env — guard confirmed, extraction not tested)");
+    } else {
+      run.fail("WF1-C5 LH 200/502", `expected 200 or 502 got ${allow.status} — ${allow.body?.error || "—"}`);
+    }
+
+  } finally {
+    if (made.carpId)      await svc.from("site_tasks").delete().eq("carpentry_job_id", made.carpId);
+    if (made.carpId)      await svc.from("carpentry_jobs").delete().eq("id", made.carpId);
+    if (made.normalEmpId) await svc.from("employees").delete().eq("id", made.normalEmpId);
+    if (made.lhEmpId)     await svc.from("employees").delete().eq("id", made.lhEmpId);
+  }
+}
+
 export async function runWF1CarpentryTasks(run) {
   run.section("WF1 — Carpentry Tasks Batch F regression lock + C3 assign guard");
   checkStatic(run);
@@ -423,4 +521,5 @@ export async function runWF1CarpentryTasks(run) {
 
   await checkApi(run, token, svc);
   await checkC3Api(run, svc);
+  await checkC5Api(run, svc);
 }

@@ -2265,6 +2265,48 @@ export function registerWorkforceRoutes(app) {
     return ok(res, { task: rowToCamel(data) });
   });
 
+  // ── POST /api/worker/tasks/from-transcript ──────────────────────────────────
+  // Leading-hand only: paste a site walk-through transcript → AI extracts a DRAFT
+  // task list. Creates NOTHING — the PWA shows the drafts, the user ticks which to
+  // keep, then bulk-creates via POST /api/worker/tasks.
+  app.post("/api/worker/tasks/from-transcript", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can extract tasks from a transcript.");
+
+    const transcript = String(req.body?.transcript || "").trim();
+    if (!transcript) return err(res, 400, "transcript is required.");
+    if (transcript.length > 20000) return err(res, 413, "Transcript too long — split it into shorter sessions.");
+
+    const jobId = String(req.body?.jobId || "").trim();
+    if (!isUuid(jobId)) return err(res, 400, "jobId must be a valid UUID.");
+    const jobLabel = String(req.body?.jobLabel || "").trim();
+    const jobType  = String(req.body?.jobType  || "").trim();
+
+    // Feed labour work streams for carpentry jobs so draft tasks land in the right
+    // budget stream (mirrors the carpentry endpoint logic).
+    let workStreams = [];
+    if (sb && jobType === "carpentry") {
+      const { data: budgets } = await sb
+        .from("carpentry_job_budgets")
+        .select("category_name, cost_type, workforce_task_category")
+        .eq("job_id", jobId)
+        .eq("cost_type", "labour");
+      workStreams = (budgets || [])
+        .filter((b) => b.workforce_task_category)
+        .map((b) => ({ value: b.workforce_task_category, label: b.category_name }));
+    }
+
+    try {
+      const tasks = await splitTranscriptToTasks(transcript, { jobLabel, workStreams });
+      return ok(res, { tasks, draft: true });
+    } catch (e) {
+      console.error("[worker/tasks from-transcript]", e);
+      return err(res, 502, e.message || "Could not extract tasks from the transcript.");
+    }
+  });
+
   // Workers can only update tasks assigned to them or unassigned.
   // Preview mode is blocked (read-only).
   app.patch("/api/worker/tasks/:id", workerAuth, async (req, res) => {
