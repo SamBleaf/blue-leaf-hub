@@ -253,7 +253,12 @@ export function registerMarketingLibraryInboxRoutes(app) {
       try {
         entries = await listFolderAllEntries(token, INBOX_PATH);
       } catch (listErr) {
-        return err(res, 502, `Dropbox list failed: ${listErr?.message || "unknown"}`);
+        // INBOX folder not created yet → treat as an empty inbox, not an error.
+        if (String(listErr?.message || "").includes("not_found")) {
+          entries = [];
+        } else {
+          return err(res, 502, `Dropbox list failed: ${listErr?.message || "unknown"}`);
+        }
       }
 
       // Only files — skip sub-folders.

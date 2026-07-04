@@ -151,6 +151,9 @@ export function registerMarketingLibraryRoutes(app) {
       if (req.query.projectId) {
         query = query.eq("project_id", req.query.projectId);
       }
+      if (req.query.status) {
+        query = query.eq("status", req.query.status);
+      }
       if (req.query.evergreen === "true") {
         query = query.eq("evergreen", true);
       } else if (req.query.evergreen === "false") {
