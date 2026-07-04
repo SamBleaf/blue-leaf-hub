@@ -1202,6 +1202,165 @@ function LeadDocumentsPanel({ leadId }) {
   );
 }
 
+// ── Site Intelligence Panel (G1-C) ────────────────────────────────────────────
+// Read-only. Signals are advisory — never authoritative compliance determinations.
+function SiteIntelPanel({ lead, onEnriched }) {
+  const [enriching, setEnriching] = useState(false);
+  const [enrichErr, setEnrichErr] = useState("");
+
+  const {
+    siteCouncil,
+    siteBushfireProne,
+    siteBushfireDetail,
+    siteZone,
+    siteSlopeBand,
+    siteSlopeDeg,
+    siteComplexity,
+    siteEnrichedAt,
+  } = lead;
+
+  const hasAnyData = siteEnrichedAt != null;
+
+  async function handleEnrichNow() {
+    setEnriching(true);
+    setEnrichErr("");
+    const { ok: success, error } = await apiPost(`/api/geo/enrich/leads/${lead.id}`, {});
+    if (success) {
+      onEnriched?.();
+    } else {
+      setEnrichErr(error || "Enrichment failed — try again.");
+    }
+    setEnriching(false);
+  }
+
+  // Empty state when no enrichment has run and no data present
+  if (!hasAnyData) {
+    return (
+      <div className="rounded-card border border-hairline bg-surface p-4">
+        <h3 className="section-label mb-2">Site intelligence</h3>
+        <p className="text-xs text-muted italic">
+          Site intelligence will appear once this lead is qualified.
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          Enrichment runs automatically when a lead advances to Qualify or later.
+        </p>
+      </div>
+    );
+  }
+
+  // Bushfire three-state
+  let bushfireEl;
+  if (siteBushfireProne === true) {
+    bushfireEl = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+        &#9888; Bushfire overlay — confirm BAL
+      </span>
+    );
+  } else if (siteBushfireProne === false) {
+    bushfireEl = <span className="text-sm text-ink">No bushfire overlay found</span>;
+  } else {
+    // null / undefined — UNKNOWN state: do NOT imply safe
+    bushfireEl = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+        Bushfire: unknown — verify
+      </span>
+    );
+  }
+
+  // Complexity badge
+  const complexityColors = {
+    low:    "bg-green-100 text-green-700",
+    medium: "bg-amber-100 text-amber-700",
+    high:   "bg-red-100 text-red-700",
+  };
+  const complexityEl = siteComplexity ? (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${complexityColors[siteComplexity] || "bg-slate-100 text-slate-600"}`}>
+      {siteComplexity}
+    </span>
+  ) : <span className="text-sm text-ink">—</span>;
+
+  // Slope display
+  let slopeText = "—";
+  if (siteSlopeBand) {
+    const bandLabel = { flat: "Flat", gentle: "Gentle", moderate: "Moderate", steep: "Steep" }[siteSlopeBand] || siteSlopeBand;
+    slopeText = siteSlopeDeg != null ? `${bandLabel} (${siteSlopeDeg}°)` : bandLabel;
+  }
+
+  // Enriched-at footer
+  const enrichedFooter = siteEnrichedAt ? (
+    <p className="text-[10px] text-muted">
+      Enriched {new Date(siteEnrichedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+    </p>
+  ) : (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="text-[10px] text-muted">Not yet enriched — runs when the lead is qualified.</p>
+      <button
+        type="button"
+        onClick={handleEnrichNow}
+        disabled={enriching}
+        className="rounded border border-hairline bg-page px-2 py-0.5 text-[10px] font-medium text-ink hover:bg-surface disabled:opacity-50"
+      >
+        {enriching ? "Enriching…" : "Enrich now"}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-3">Site intelligence</h3>
+
+      <div className="space-y-0">
+        {/* Council */}
+        <div className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline">
+          <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">Council</span>
+          <span className="flex-1 text-sm text-ink">{siteCouncil || "—"}</span>
+        </div>
+
+        {/* Bushfire */}
+        <div className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline">
+          <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">Bushfire</span>
+          <span className="flex-1">{bushfireEl}</span>
+        </div>
+        {siteBushfireDetail && (
+          <div className="flex items-start justify-between gap-2 py-1 border-b border-hairline">
+            <span className="text-xs text-muted w-36 flex-shrink-0" />
+            <span className="flex-1 text-xs text-muted">{siteBushfireDetail}</span>
+          </div>
+        )}
+
+        {/* Zone (indicative) */}
+        <div className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline">
+          <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">Zone <span className="italic">(indicative)</span></span>
+          <span className="flex-1 text-sm text-ink">{siteZone || "—"}</span>
+        </div>
+
+        {/* Slope */}
+        <div className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline">
+          <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">Slope</span>
+          <span className="flex-1 text-sm text-ink">{slopeText}</span>
+        </div>
+
+        {/* Site complexity */}
+        <div className="flex items-start justify-between gap-2 py-1.5">
+          <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">Site complexity</span>
+          <span className="flex-1">{complexityEl}</span>
+        </div>
+      </div>
+
+      {/* Advisory disclaimer */}
+      <p className="mt-3 text-[10px] text-muted leading-relaxed border-t border-hairline pt-2">
+        Indicative signals from public mapping — verify before relying on them.
+      </p>
+
+      {/* Footer: enriched timestamp or enrich-now button */}
+      <div className="mt-1.5">
+        {enrichedFooter}
+        {enrichErr && <p className="mt-1 text-xs text-red-600">{enrichErr}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
@@ -2413,10 +2572,14 @@ export default function LeadDetail() {
     </div>
   ) : null;
 
+  const siteIntelBlock = (
+    <SiteIntelPanel lead={lead} onEnriched={load} />
+  );
+
   const detailsGroup = (
     <div>
       <p className="section-label mb-2">Lead details</p>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}{fitBlock}{actionQueueBlock}</div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">{contactBlock}{projectBlock}{marginBlock}{fitBlock}{actionQueueBlock}{siteIntelBlock}</div>
     </div>
   );
 

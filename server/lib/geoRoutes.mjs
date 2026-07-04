@@ -261,4 +261,29 @@ export function registerGeoRoutes(app) {
       return err(res, 500, "Enrich backfill failed: " + (e?.message ?? String(e)));
     }
   });
+
+  /**
+   * POST /api/geo/enrich/:table/:id  (admin-only)
+   *
+   * Runs site enrichment for a single row. Thin wrapper around enrichSite().
+   * Used by the "Enrich now" button on Lead Detail.
+   *
+   * Returns: { ok:true, enriched: true } on success, or { ok:false, error } on failure.
+   */
+  app.post("/api/geo/enrich/:table/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    const { table, id } = req.params;
+    if (!["leads", "jobs"].includes(table)) {
+      return err(res, 400, "table must be 'leads' or 'jobs'");
+    }
+    try {
+      const result = await enrichSite(table, id);
+      if (!result.ok) {
+        return err(res, 422, result.reason || "Enrichment failed");
+      }
+      return ok(res, { enriched: true });
+    } catch (e) {
+      console.error("[geo/enrich/:table/:id]", e);
+      return err(res, 500, "Enrichment failed: " + (e?.message ?? String(e)));
+    }
+  });
 }
