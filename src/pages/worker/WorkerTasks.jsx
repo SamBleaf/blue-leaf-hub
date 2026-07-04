@@ -901,7 +901,8 @@ export default function WorkerTasks() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setAssignTask(null)} />
           <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[75vh] overflow-y-auto">
             <h3 className="text-base font-bold text-ink mb-1">Assign task</h3>
-            <p className="text-sm text-muted mb-4 truncate">{assignTask.title}</p>
+            <p className="text-sm text-muted mb-1 truncate">{assignTask.title}</p>
+            {preview && <p className="text-xs text-amber-600 mb-3">Read-only preview — assigning works in the leading-hand app, not in preview.</p>}
             {crewLoading ? (
               <p className="text-sm text-muted text-center py-6">Loading crew…</p>
             ) : crew.length === 0 ? (
@@ -911,7 +912,7 @@ export default function WorkerTasks() {
                 {/* Unassign option */}
                 <button
                   type="button"
-                  disabled={assignBusy}
+                  disabled={assignBusy || preview}
                   onClick={() => doAssign(null)}
                   className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
                 >
@@ -924,7 +925,7 @@ export default function WorkerTasks() {
                   <button
                     key={c.id}
                     type="button"
-                    disabled={assignBusy}
+                    disabled={assignBusy || preview}
                     onClick={() => doAssign(c.id)}
                     className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
                   >

@@ -2338,24 +2338,12 @@ export function registerWorkforceRoutes(app) {
     if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can view the crew list.");
     if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
 
-    const jobType = String(req.query.jobType || "").trim();
-    const since = addDaysYmd(todayYmd(), -90);
-
-    let q = sb.from("timesheets").select("employee_id").gte("date", since).not("employee_id", "is", null);
-    if (jobType === "carpentry") q = q.eq("carpentry_job_id", req.params.id);
-    else if (jobType === "project") q = q.eq("project_id", req.params.id);
-    else q = q.or(`project_id.eq.${req.params.id},carpentry_job_id.eq.${req.params.id}`);
-
-    const { data: tsRows, error: tsErr } = await q;
-    if (tsErr) return err(res, 500, translateDbError(tsErr));
-
-    const empIds = [...new Set((tsRows || []).map(r => r.employee_id))];
-    if (!empIds.length) return ok(res, { crew: [] });
-
+    // Assignable crew = ALL active workers. (Previously limited to employees with a
+    // timesheet on this job in the last 90 days, which showed only whoever had clocked
+    // on — often just 1 person. A leading hand needs to assign to anyone on the crew.)
     const { data: crew, error: empErr } = await sb
       .from("employees")
       .select("id, name, trade, is_leading_hand")
-      .in("id", empIds)
       .eq("is_active", true)
       .order("name", { ascending: true });
     if (empErr) return err(res, 500, translateDbError(empErr));
