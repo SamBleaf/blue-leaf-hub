@@ -17,6 +17,7 @@ import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
+import { enrichSite } from "./siteEnrichmentService.mjs";
 import {
   dropboxConfigured,
   ensureJobFolderStructure,
@@ -791,6 +792,10 @@ export function registerSalesRoutes(app) {
         if (geoQuery) {
           geocodeToFacts("leads", req.params.id, geoQuery, "address").catch(() => {});
         }
+      }
+      // G1-B: site enrichment — fire after geocode on qualify+, non-blocking.
+      if (newStage && _GEO_QUALIFY_PLUS.has(newStage) && !leadOut?.site_enriched_at) {
+        enrichSite("leads", req.params.id).catch(() => {});
       }
     } catch { /* never block the response */ }
   });

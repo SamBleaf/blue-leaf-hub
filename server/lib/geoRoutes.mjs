@@ -22,6 +22,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { ok, err } from "./apiResponse.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
+import { enrichSite } from "./siteEnrichmentService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 
@@ -158,6 +159,106 @@ export function registerGeoRoutes(app) {
     } catch (e) {
       console.error("[geo/backfill]", e);
       return err(res, 500, "Backfill failed: " + (e?.message ?? String(e)));
+    }
+  });
+
+  /**
+   * POST /api/geo/enrich-backfill  (admin-only)
+   *
+   * Runs site enrichment (G1-B) over rows that have coordinates but are missing
+   * site_enriched_at. Targets qualify+ leads and all jobs (same tier rule as geocode
+   * backfill).
+   *
+   * body: {
+   *   dryRun?:  boolean (default true)  — zero writes on true; returns plan only
+   *   scope?:   "all" | "jobs" | "leads"  (default "all")
+   *   limit?:   number (default 100, max 500)
+   * }
+   *
+   * Dry-run returns: { dryRun:true, wouldEnrich:N, plan:[{table,id}] }
+   * Live run returns: { processed, failed, errors:[] }
+   *
+   * Sequential loop with per-row try/catch — one row failing never stops the rest.
+   * Will NOT hit live external APIs in dry-run mode.
+   */
+  app.post("/api/geo/enrich-backfill", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "DB not configured");
+
+    const body    = req.body || {};
+    const dryRun  = body.dryRun !== false; // default true
+    const scope   = ["all", "jobs", "leads"].includes(body.scope) ? body.scope : "all";
+    const limit   = Math.min(Math.max(Number(body.limit) || 100, 1), 500);
+
+    try {
+      const candidates = []; // [{ table, id }]
+
+      // Jobs — all jobs with coords but not yet enriched
+      if (scope === "all" || scope === "jobs") {
+        const { data: jobs, error: jErr } = await sb
+          .from("jobs")
+          .select("id")
+          .not("geo_lat", "is", null)
+          .is("site_enriched_at", null)
+          .limit(limit);
+        if (jErr) return err(res, 500, "Failed to query jobs: " + jErr.message);
+        for (const job of jobs || []) {
+          candidates.push({ table: "jobs", id: job.id });
+        }
+      }
+
+      // Leads — qualify+ only (same tiering as geocode backfill)
+      if (scope === "all" || scope === "leads") {
+        const leadsLimit = scope === "all"
+          ? Math.max(limit - candidates.length, 1)
+          : limit;
+        const { data: leads, error: lErr } = await sb
+          .from("leads")
+          .select("id, stage")
+          .not("geo_lat", "is", null)
+          .is("site_enriched_at", null)
+          .in("stage", [...QUALIFY_PLUS_STAGES])
+          .limit(leadsLimit);
+        if (lErr) return err(res, 500, "Failed to query leads: " + lErr.message);
+        for (const lead of leads || []) {
+          candidates.push({ table: "leads", id: lead.id });
+        }
+      }
+
+      // Dry-run: no writes, no external API calls
+      if (dryRun) {
+        return ok(res, {
+          dryRun: true,
+          wouldEnrich: candidates.length,
+          plan: candidates,
+        });
+      }
+
+      // Live run: sequential + per-row fail-soft
+      let processed = 0;
+      let failed    = 0;
+      const errors  = [];
+
+      for (const row of candidates) {
+        try {
+          const result = await enrichSite(row.table, row.id);
+          if (result.ok) {
+            processed++;
+          } else {
+            failed++;
+            errors.push({ table: row.table, id: row.id, reason: result.reason });
+          }
+        } catch (rowErr) {
+          failed++;
+          errors.push({ table: row.table, id: row.id, reason: rowErr?.message ?? String(rowErr) });
+        }
+      }
+
+      return ok(res, { processed, failed, errors });
+
+    } catch (e) {
+      console.error("[geo/enrich-backfill]", e);
+      return err(res, 500, "Enrich backfill failed: " + (e?.message ?? String(e)));
     }
   });
 }

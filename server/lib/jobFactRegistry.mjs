@@ -17,7 +17,7 @@
 
 export const FAMILIES = [
   "identity", "facts", "relationships", "metrics", "risks", "business_intelligence", "site_intelligence",
-  "location",
+  "location", "site",
 ];
 
 /** @type {Array<{key:string,label:string,family:string,spine:string,type:string,tier:string,store:{table:string,column:string}|null,compute?:string,sourceDocs?:string[],consumers?:string[]}>} */
@@ -159,6 +159,27 @@ export const FACT_REGISTRY = [
   { key: "geo_precision", label: "Geocode precision grain", family: "location", spine: "job", type: "generated", tier: "internal",
     store: { table: "jobs", column: "geo_precision" }, compute: "geocode",
     consumers: ["marketing", "ops", "sales"] },
+
+  // ── Site intelligence (derived from coordinates via free government + Mapbox layers) ──
+  // All site facts are `generated` (derived from geo_lat/geo_lng via siteEnrichmentService.mjs)
+  // and `internal` tier — they are advisory signals for a human, never authoritative
+  // compliance/planning determinations. `compute:"enrich"` signals the producer.
+  // Columns added by mig 135 to both jobs + leads.
+  { key: "site_council", label: "Council / LGA", family: "site", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "site_council" }, compute: "enrich",
+    consumers: ["sales", "estimating"] },
+  { key: "site_bushfire_prone", label: "Bushfire-prone overlay (y/n)", family: "site", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "site_bushfire_prone" }, compute: "enrich",
+    consumers: ["sales", "estimating"] },
+  { key: "site_zone", label: "P&D Code zone", family: "site", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "site_zone" }, compute: "enrich",
+    consumers: ["sales", "estimating"] },
+  { key: "site_slope_band", label: "Slope band", family: "site", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "site_slope_band" }, compute: "enrich",
+    consumers: ["sales", "estimating"] },
+  { key: "site_complexity", label: "Site complexity (derived)", family: "site", spine: "job", type: "generated", tier: "internal",
+    store: { table: "jobs", column: "site_complexity" }, compute: "enrich",
+    consumers: ["sales", "estimating"] },
 ];
 
 // Remove any accidental duplicate-key entries (keep first).

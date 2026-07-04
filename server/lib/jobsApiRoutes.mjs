@@ -2,6 +2,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, translateDbError } from "./apiResponse.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
+import { enrichSite } from "./siteEnrichmentService.mjs";
 // Job status constants (mirrors migration 001 CHECK constraint)
 const JOB_STATUSES_VALID = ["tendering", "won", "lost", "archived"];
 import {
@@ -150,6 +151,10 @@ export function registerJobsApiRoutes(app) {
       if (!isPlaceholder && address?.trim()) {
         geocodeToFacts("jobs", data.id, address.trim(), "address").catch(() => {});
       }
+      // G1-B: site enrichment — fire-and-forget after geocode on job create.
+      if (!isPlaceholder && data.id) {
+        enrichSite("jobs", data.id).catch(() => {});
+      }
       return res.json({ ok: true, job });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message });
@@ -194,6 +199,8 @@ export function registerJobsApiRoutes(app) {
       // calls (project_type, client_name, etc.) never trigger a geocode.
       if (typeof updates.address === "string" && updates.address.trim()) {
         geocodeToFacts("jobs", id, updates.address.trim(), "address").catch(() => {});
+        // G1-B: re-enrich when address changes (clears stale enrichment).
+        enrichSite("jobs", id).catch(() => {});
       }
       return ok(res, { job: data });
     } catch (e) {
