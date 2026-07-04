@@ -29,6 +29,14 @@ function splitJobKey(k) { const i = k.indexOf(":"); return { type: k.slice(0, i)
 function jobBodyFromKey(k) { const { type, id } = splitJobKey(k); return type === "project" ? { projectId: id, carpentryJobId: null } : { carpentryJobId: id, projectId: null }; }
 function allocJobKey(a) { return a?.projectId ? `project:${a.projectId}` : a?.carpentryJobId ? `carpentry:${a.carpentryJobId}` : null; }
 
+// Phone-view abbreviation: first 4 letters of the street/name, skipping leading
+// house/unit numbers. "54 Gladstone Rd" → "Glad", "25 Nilpinna St" → "Nilp", "5A Gibson St" → "Gibs".
+function abbrevLabel(label) {
+  if (!label) return "";
+  const word = String(label).split(/[\s,—–-]+/).filter(Boolean).find((w) => /^[A-Za-z]/.test(w));
+  return (word || String(label)).slice(0, 4);
+}
+
 const json = (r) => r.json().catch(() => ({}));
 
 // ── Draggable legend job-chip (drag source for "assign") ─────────────────────
@@ -59,7 +67,7 @@ function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart 
       style={{ touchAction: "none", background: color.bg }}
       title={`${label}${alloc.notes ? ` · ${alloc.notes}` : ""} — click to edit, drag to move`}>
       <span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: color.dot }} />
-      <span className="text-[11px] leading-tight truncate" style={{ color: color.text }}>{label}</span>
+      <span className="text-[11px] leading-tight truncate" style={{ color: color.text }}><span className="sm:hidden">{abbrevLabel(label)}</span><span className="hidden sm:inline">{label}</span></span>
       {alloc.notes ? <span className="w-1 h-1 rounded-full bg-black/30 shrink-0" title={alloc.notes} /> : null}
       <span onPointerDown={(e) => { e.stopPropagation(); onFillStart(alloc, e); }}
         className="absolute right-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover:opacity-100"
@@ -76,11 +84,11 @@ function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart 
 }
 
 // ── Droppable day cell ────────────────────────────────────────────────────────
-function DayCell({ empId, day, dayIdx, fillActive, nonWork, children }) {
+function DayCell({ empId, day, dayIdx, fillActive, nonWork, children, className = "" }) {
   const { setNodeRef, isOver } = useDroppable({ id: `cell:${empId}:${day}`, data: { kind: "cell", empId, day, dayIdx } });
   const filled = !!children;
   return (
-    <td className="py-1 px-1 align-top">
+    <td className={`py-1 px-1 align-top ${className}`}>
       <div ref={setNodeRef} data-cell data-empid={empId} data-dayidx={dayIdx}
         title={filled && nonWork ? `${nonWork.label} conflicts with allocation` : nonWork ? nonWork.label : undefined}
         className={`min-h-[34px] rounded transition ${filled ? (nonWork ? "ring-2 ring-amber-400" : "") : nonWork ? (nonWork.kind === "team" ? "bg-sky-100 border border-sky-200" : "bg-slate-100 border border-slate-200") : "border border-dashed border-hairline"} ${isOver ? "ring-2 ring-primary" : ""} ${fillActive ? "ring-2 ring-primary/60" : ""} ${!filled ? "flex items-center justify-center text-[10px] hover:bg-slate-50" : ""}`}>
@@ -578,7 +586,7 @@ export default function WorkforcePlannerTab() {
               <thead>
                 <tr className="text-left text-muted">
                   <th className="py-2 pr-1 sm:pr-3 font-medium">Employee</th>
-                  {days.map((d, i) => <th key={d} className="py-2 px-1 font-medium text-center whitespace-nowrap"><span className="sm:hidden">{DOW[i][0]} {new Date(`${d}T12:00:00`).getDate()}</span><span className="hidden sm:inline">{DOW[i]} {new Date(`${d}T12:00:00`).getDate()}</span></th>)}
+                  {days.map((d, i) => <th key={d} className={`py-2 px-1 font-medium text-center whitespace-nowrap ${i >= 5 ? "hidden sm:table-cell" : ""}`}><span className="sm:hidden">{DOW[i][0]} {new Date(`${d}T12:00:00`).getDate()}</span><span className="hidden sm:inline">{DOW[i]} {new Date(`${d}T12:00:00`).getDate()}</span></th>)}
                 </tr>
               </thead>
               <tbody>
@@ -589,7 +597,7 @@ export default function WorkforcePlannerTab() {
                       const a = allocMap[`${emp.id}|${d}`];
                       const jKey = a && allocJobKey(a);
                       return (
-                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)}>
+                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
                               <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={openNotes} onFillStart={startFill} onFillDownStart={startFillDown} />

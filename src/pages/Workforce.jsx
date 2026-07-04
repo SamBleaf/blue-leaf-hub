@@ -1004,14 +1004,14 @@ export default function Workforce() {
 
       {role === "admin" && <BuildexactSyncControl />}
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-hairline mb-6">
+      {/* Tabs — wrap to 2 rows on phone so all tabs (incl. Planner) fit without horizontal scroll */}
+      <div className="flex flex-wrap gap-x-1 gap-y-1 sm:border-b border-hairline mb-6">
         {tabs.map(t => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${shownTab === t ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink"}`}
+            className={`px-2.5 sm:px-4 py-2 sm:py-2.5 text-sm font-medium border-b-2 -mb-px transition ${shownTab === t ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink"}`}
           >
             {t}
           </button>
