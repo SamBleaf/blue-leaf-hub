@@ -103,31 +103,56 @@ function CategoryHeader({ label, done, total }) {
   );
 }
 
-function TaskRow({ task, myId, toggling, onToggle, onTap }) {
+function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssign }) {
   const isDone = task.status === "done";
   return (
     <div className="flex items-center gap-3 bg-white border border-hairline rounded-lg px-3 py-3">
       <Tick checked={isDone} onToggle={onToggle} disabled={toggling} />
       <button type="button" onClick={onTap} className="flex-1 min-w-0 text-left">
         <p className={`text-sm leading-snug ${isDone ? "line-through text-muted" : "text-ink"}`}>{task.title}</p>
-        {task.employees?.name && (
-          <p className="text-xs text-muted mt-0.5">{task.assigned_to === myId ? "Your task" : task.employees.name}</p>
+        {/* C4: leading hand sees who the task is assigned to; regular workers just see "Your task" */}
+        {isLeadingHand ? (
+          task.employees?.name
+            ? <p className="text-xs text-muted mt-0.5">{task.assigned_to === myId ? "You" : task.employees.name}</p>
+            : <p className="text-xs text-slate-300 mt-0.5">Unassigned</p>
+        ) : (
+          task.employees?.name && task.assigned_to === myId && (
+            <p className="text-xs text-muted mt-0.5">Your task</p>
+          )
         )}
       </button>
+      {/* C3: assign affordance — leading hand only */}
+      {isLeadingHand && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onAssign(); }}
+          aria-label="Assign task"
+          className="shrink-0 px-2 py-1 rounded-md border border-slate-200 text-xs text-muted hover:text-primary hover:border-primary transition-colors"
+        >
+          {task.employees?.name ? "Re-assign" : "Assign"}
+        </button>
+      )}
     </div>
   );
 }
 
-function DoneRow({ task, myId, toggling, onToggle, onTap }) {
+function DoneRow({ task, isLeadingHand, toggling, onToggle, onTap }) {
+  // C4: leading hand sees who completed the task + when; regular workers see plain "Done" date.
+  const completedDate = task.completed_at
+    ? new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })
+    : null;
+  // Prefer completed_by name embed (completer); fall back to assigned_to embed (employees).
+  const completedByName = task.completer?.name || null;
   return (
     <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-3">
       <Tick checked onToggle={onToggle} disabled={toggling} />
       <button type="button" onClick={onTap} className="flex-1 min-w-0 text-left">
         <p className="text-sm text-muted line-through leading-snug">{task.title}</p>
-        {task.completed_at && (
+        {completedDate && (
           <p className="text-xs text-muted mt-0.5">
-            Done {new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-            {task.employees?.name && task.assigned_to !== myId ? ` · ${task.employees.name}` : ""}
+            {isLeadingHand && completedByName
+              ? `Done by ${completedByName} · ${completedDate}`
+              : `Done ${completedDate}`}
           </p>
         )}
         {task.completion_notes && <p className="text-xs text-muted mt-0.5 italic">{task.completion_notes}</p>}
@@ -224,6 +249,12 @@ export default function WorkerTasks() {
   const [addError, setAddError] = useState(null);
 
   const [showDone, setShowDone] = useState(false);
+
+  // C3: assign-task sheet (leading hand only)
+  const [assignTask, setAssignTask] = useState(null);   // task being assigned
+  const [crew, setCrew] = useState([]);
+  const [crewLoading, setCrewLoading] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
 
   const photoInputRef = useRef(null);
 
@@ -392,6 +423,51 @@ export default function WorkerTasks() {
     }
   }
 
+  // ── C3: assign task (leading hand only) ──────────────────────────────────────
+
+  async function openAssignSheet(task) {
+    setAssignTask(task);
+    setCrew([]);
+    setCrewLoading(true);
+    try {
+      const res = await workerFetch(
+        `/api/worker/jobs/${encodeURIComponent(job.id)}/crew?jobType=${encodeURIComponent(job.type || "")}`
+      );
+      const j = await res.json().catch(() => ({}));
+      if (j.ok) setCrew(j.crew || []);
+    } catch { /* non-fatal — picker shows empty */ }
+    finally { setCrewLoading(false); }
+  }
+
+  async function doAssign(empId) {
+    if (!assignTask || preview) return;
+    setAssignBusy(true);
+    try {
+      const res = await workerFetch(`/api/worker/tasks/${assignTask.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_to: empId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.ok) {
+        const updated = j.task;
+        setTasks(prev => prev.map(t => t.id === assignTask.id
+          ? { ...t, assigned_to: updated?.assigned_to ?? empId, employees: updated?.employees ?? (empId ? crew.find(c => c.id === empId) : null) }
+          : t
+        ));
+        setAssignTask(null);
+      } else {
+        alert(res.status === 403
+          ? (j.error || "Only a leading hand can assign tasks.")
+          : (j.error || "Could not assign task."));
+      }
+    } catch {
+      alert("Couldn't assign — check your connection.");
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
   // ── Data slices ───────────────────────────────────────────────────────────────
 
   const urgentTasks    = tasks.filter(t => t.status !== "done" && t.status !== "wont_do" && t.status !== "blocked" && t.priority === "urgent");
@@ -468,14 +544,14 @@ export default function WorkerTasks() {
   function renderTaskRows(list) {
     if (!canReorder) {
       return list.map(t => (
-        <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+        <TaskRow key={t.id} task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} />
       ));
     }
     return (
       <SortableContext items={list.map(t => t.id)} strategy={verticalListSortingStrategy}>
         {list.map(t => (
           <SortableTaskRow key={t.id} id={t.id}>
-            <TaskRow task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+            <TaskRow task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} />
           </SortableTaskRow>
         ))}
       </SortableContext>
@@ -627,7 +703,7 @@ export default function WorkerTasks() {
                 {showDone && (
                   <div className="mt-2 space-y-2">
                     {doneTasks.map(t => (
-                      <DoneRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+                      <DoneRow key={t.id} task={t} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
                     ))}
                   </div>
                 )}
@@ -815,6 +891,59 @@ export default function WorkerTasks() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── C3: Assign task sheet (leading hand only) ───────────────────────── */}
+      {assignTask && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setAssignTask(null)} />
+          <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[75vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-ink mb-1">Assign task</h3>
+            <p className="text-sm text-muted mb-4 truncate">{assignTask.title}</p>
+            {crewLoading ? (
+              <p className="text-sm text-muted text-center py-6">Loading crew…</p>
+            ) : crew.length === 0 ? (
+              <p className="text-sm text-muted text-center py-6">No crew found for this job yet.</p>
+            ) : (
+              <div className="divide-y divide-hairline">
+                {/* Unassign option */}
+                <button
+                  type="button"
+                  disabled={assignBusy}
+                  onClick={() => doAssign(null)}
+                  className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-sm ${assignTask.assigned_to === null ? "font-semibold text-primary" : "text-muted"}`}>Unassigned</span>
+                  </span>
+                  {assignTask.assigned_to === null && <span className="text-primary shrink-0 text-sm">✓</span>}
+                </button>
+                {crew.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    disabled={assignBusy}
+                    onClick={() => doAssign(c.id)}
+                    className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className={`block text-sm truncate ${assignTask.assigned_to === c.id ? "font-semibold text-primary" : "text-ink"}`}>{c.name}</span>
+                      {c.trade && <span className="block text-xs text-muted capitalize">{c.trade.replace(/_/g, " ")}{c.isLeadingHand ? " · Leading hand" : ""}</span>}
+                    </span>
+                    {assignTask.assigned_to === c.id && <span className="text-primary shrink-0 text-sm">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setAssignTask(null)}
+              className="mt-4 w-full py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

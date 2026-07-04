@@ -14,14 +14,15 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { WRITE, get, patch, serviceClient, getAuthToken } from "./_helpers.mjs";
+import { createClient } from "@supabase/supabase-js";
+import { WRITE, get, patch, serviceClient, SB_URL, SB_ANON } from "./_helpers.mjs";
 
 function root() { return join(dirname(fileURLToPath(import.meta.url)), "..", ".."); }
 function readRootFile(relPath) { return readFileSync(join(root(), relPath), "utf8"); }
 
 // ── Static checks ────────────────────────────────────────────────────────────
 function checkStatic(run) {
-  run.section("WF1 static — carpentry task embed aliases + PATCH allow-list");
+  run.section("WF1 static — carpentry task embed aliases + PATCH allow-list + C3 guard");
 
   const src = readRootFile("server/lib/carpentryRoutes.mjs");
 
@@ -77,6 +78,80 @@ function checkStatic(run) {
     run.pass("WF1-F2 edit sheet (openEdit/saveEdit/editTask) present in CarpentryJobDetail.jsx");
   } else {
     run.fail("WF1-F2 edit sheet", "openEdit/saveEdit/editTask not all found in CarpentryJobDetail.jsx");
+  }
+
+  // C1: dnd-kit imports present.
+  if (
+    client.includes("@dnd-kit/core") &&
+    client.includes("@dnd-kit/sortable") &&
+    client.includes("SortableContext") &&
+    client.includes("DndContext") &&
+    client.includes("arrayMove") &&
+    client.includes("handleDragEnd")
+  ) {
+    run.pass("WF1-C1 @dnd-kit imports + DndContext/SortableContext wiring present in CarpentryJobDetail.jsx");
+  } else {
+    run.fail("WF1-C1 dnd-kit", "@dnd-kit imports or DndContext/SortableContext/handleDragEnd missing");
+  }
+
+  // C1: sortOrder PATCH on drag end.
+  if (client.includes("sortOrder") && client.includes("handleDragEnd")) {
+    run.pass("WF1-C1 sortOrder PATCH + handleDragEnd present");
+  } else {
+    run.fail("WF1-C1 sortOrder PATCH", "sortOrder or handleDragEnd not found in CarpentryJobDetail.jsx");
+  }
+
+  // C2: sign-off review section renders completer, completedAt, completionPhotoSignedUrl.
+  if (
+    client.includes("task.completer?.name") &&
+    client.includes("task.completedAt") &&
+    client.includes("task.completionPhotoSignedUrl") &&
+    client.includes("Sign-off Review")
+  ) {
+    run.pass("WF1-C2 sign-off review section present (completer, completedAt, photo, label)");
+  } else {
+    run.fail("WF1-C2 sign-off review", "completer/completedAt/completionPhotoSignedUrl/Sign-off Review not all found");
+  }
+
+  // C2: server already signs photos — verify signSiteTaskPhotos is called in GET handler.
+  const serverSrc = readRootFile("server/lib/carpentryRoutes.mjs");
+  if (serverSrc.includes("signSiteTaskPhotos") && serverSrc.includes("/api/carpentry/jobs/:id/tasks")) {
+    run.pass("WF1-C2 signSiteTaskPhotos called in GET /api/carpentry/jobs/:id/tasks handler");
+  } else {
+    run.fail("WF1-C2 photo signing", "signSiteTaskPhotos not found in carpentryRoutes.mjs GET tasks handler");
+  }
+
+  // C3: leading-hand assign guard in PATCH /api/worker/tasks/:id.
+  const wfSrc = readRootFile("server/lib/workforceRoutes.mjs");
+  if (
+    wfSrc.includes("Only a leading hand can assign tasks to crew members.") &&
+    wfSrc.includes("req.body?.assigned_to !== undefined && !emp.is_leading_hand")
+  ) {
+    run.pass("WF1-C3 leading-hand guard for assigned_to present in workforceRoutes.mjs");
+  } else {
+    run.fail("WF1-C3 assign guard", "is_leading_hand guard for assigned_to missing in workforceRoutes.mjs PATCH worker tasks");
+  }
+
+  // C3: crew endpoint exists.
+  if (wfSrc.includes("/api/worker/jobs/:id/crew")) {
+    run.pass("WF1-C3 GET /api/worker/jobs/:id/crew endpoint present");
+  } else {
+    run.fail("WF1-C3 crew endpoint", "GET /api/worker/jobs/:id/crew not found in workforceRoutes.mjs");
+  }
+
+  // C3 + C4: PWA assign affordance is leading-hand gated.
+  const pwaSrc = readRootFile("src/pages/worker/WorkerTasks.jsx");
+  if (pwaSrc.includes("isLeadingHand") && pwaSrc.includes("openAssignSheet") && pwaSrc.includes("doAssign")) {
+    run.pass("WF1-C3 PWA assign affordance present (isLeadingHand / openAssignSheet / doAssign)");
+  } else {
+    run.fail("WF1-C3 PWA assign", "isLeadingHand/openAssignSheet/doAssign not all found in WorkerTasks.jsx");
+  }
+
+  // C4: sign-off glance (Done by <name>) is leading-hand gated.
+  if (pwaSrc.includes("Done by") && pwaSrc.includes("isLeadingHand && completedByName")) {
+    run.pass("WF1-C4 sign-off glance 'Done by' present and leading-hand gated in WorkerTasks.jsx");
+  } else {
+    run.fail("WF1-C4 sign-off glance", "'Done by' or isLeadingHand guard missing in WorkerTasks.jsx");
   }
 }
 
@@ -204,6 +279,27 @@ async function checkApi(run, token, svc) {
       run.fail("WF1-F2 empty title validation", `expected 400 got ${emptyRes.status}`);
     }
 
+    // ── C2: completed task in GET response has completer + completed_at ────────
+    // (completion_photo_signed_url can't be asserted without a real storage object,
+    //  but the shape fields that drive the UI must be present on a done task.)
+    const taskAInList = (listRes.body.tasks || []).find((t) => t.id === tA.id);
+    if (taskAInList && taskAInList.completedAt) {
+      run.pass("WF1-C2 completed task has completedAt in GET response");
+    } else {
+      run.fail("WF1-C2 completedAt field", `taskA.completedAt=${taskAInList?.completedAt}`);
+    }
+    if (taskAInList && taskAInList.completer?.id === emp.id) {
+      run.pass("WF1-C2 completed task has completer embed in GET response");
+    } else {
+      run.fail("WF1-C2 completer embed", `taskA.completer=${JSON.stringify(taskAInList?.completer)}`);
+    }
+    // completionPhotoUrl is null on the seed task (no storage object) — field must exist (not undefined).
+    if (taskAInList && "completionPhotoUrl" in taskAInList) {
+      run.pass("WF1-C2 completionPhotoUrl key present in GET response (null when no photo)");
+    } else {
+      run.fail("WF1-C2 completionPhotoUrl key", "completionPhotoUrl key missing from GET response task");
+    }
+
   } finally {
     if (made.taskIds.length) await svc.from("site_tasks").delete().in("id", made.taskIds);
     if (made.carpId)         await svc.from("site_tasks").delete().eq("carpentry_job_id", made.carpId);
@@ -212,8 +308,95 @@ async function checkApi(run, token, svc) {
   }
 }
 
+// ── C3 write: worker-token assign guard ──────────────────────────────────────
+// Seeds two employees with worker_token fields (no auth account needed — worker
+// auth resolves by token column). Asserts 403 for the normal worker and 200 for
+// the leading hand.
+async function checkC3Api(run, svc) {
+  run.section("WF1-C3 write — worker PATCH assigned_to guard");
+  const stamp = Date.now();
+  const made = { taskId: null, carpId: null, normalEmpId: null, lhEmpId: null };
+  const normalToken = `wf1-test-normal-${stamp}`;
+  const lhToken    = `wf1-test-lh-${stamp}`;
+
+  const API_URL = process.env.BATCH_A_API_URL || "http://localhost:8787";
+
+  async function workerPatch(taskId, token, body) {
+    const res = await fetch(`${API_URL}/api/worker/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-worker-token": token },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  }
+
+  try {
+    // Seed carpentry job.
+    const { data: cj, error: ce } = await svc
+      .from("carpentry_jobs")
+      .insert({ reference: `BLH TEST WF1-C3 ${stamp}`, client_name: "BLH TEST", address: `BLH TEST WF1-C3 ${stamp} ST, SA 5000`, status: "active" })
+      .select("id").single();
+    if (ce || !cj?.id) { run.fail("seed carpentry job (C3)", ce?.message || "no id"); return; }
+    made.carpId = cj.id;
+
+    // Seed a normal (non-leading-hand) worker.
+    const { data: emp1, error: e1 } = await svc
+      .from("employees")
+      .insert({ name: `BLH TEST WF1-C3 WORKER ${stamp}`, trade: "carpenter", employment_type: "full_time", is_active: true, is_leading_hand: false, worker_token: normalToken })
+      .select("id").single();
+    if (e1 || !emp1?.id) { run.fail("seed normal employee (C3)", e1?.message || "no id"); return; }
+    made.normalEmpId = emp1.id;
+
+    // Seed a leading hand worker.
+    const { data: emp2, error: e2 } = await svc
+      .from("employees")
+      .insert({ name: `BLH TEST WF1-C3 LH ${stamp}`, trade: "carpenter", employment_type: "full_time", is_active: true, is_leading_hand: true, worker_token: lhToken })
+      .select("id").single();
+    if (e2 || !emp2?.id) { run.fail("seed leading hand employee (C3)", e2?.message || "no id"); return; }
+    made.lhEmpId = emp2.id;
+
+    // Seed an unassigned task on the carpentry job.
+    const { data: task, error: te } = await svc
+      .from("site_tasks")
+      .insert({ carpentry_job_id: cj.id, title: `BLH TEST WF1-C3 task ${stamp}`, category: "general", priority: "normal", status: "open", task_audience: "worker" })
+      .select("id").single();
+    if (te || !task?.id) { run.fail("seed task (C3)", te?.message || "no id"); return; }
+    made.taskId = task.id;
+
+    // Normal worker tries to set assigned_to → must be 403.
+    const deny = await workerPatch(task.id, normalToken, { assigned_to: emp1.id });
+    if (deny.status === 403) {
+      run.pass("WF1-C3 normal worker PATCH assigned_to → 403");
+    } else {
+      run.fail("WF1-C3 normal worker 403", `expected 403 got ${deny.status} — ${deny.body?.error || "—"}`);
+    }
+
+    // Leading hand sets assigned_to to the normal worker → must be 200.
+    const allow = await workerPatch(task.id, lhToken, { assigned_to: emp1.id });
+    if (allow.status === 200 && allow.body.ok) {
+      run.pass("WF1-C3 leading hand PATCH assigned_to → 200");
+    } else {
+      run.fail("WF1-C3 leading hand 200", `expected 200 got ${allow.status} — ${allow.body?.error || "—"}`);
+    }
+
+    // Verify the assign persisted in the returned task.
+    if (allow.body.task?.assigned_to === emp1.id) {
+      run.pass("WF1-C3 assigned_to persisted in returned task");
+    } else {
+      run.fail("WF1-C3 assigned_to persists", `got ${allow.body.task?.assigned_to}`);
+    }
+
+  } finally {
+    if (made.taskId)      await svc.from("site_tasks").delete().eq("id", made.taskId);
+    if (made.carpId)      await svc.from("site_tasks").delete().eq("carpentry_job_id", made.carpId);
+    if (made.carpId)      await svc.from("carpentry_jobs").delete().eq("id", made.carpId);
+    if (made.normalEmpId) await svc.from("employees").delete().eq("id", made.normalEmpId);
+    if (made.lhEmpId)     await svc.from("employees").delete().eq("id", made.lhEmpId);
+  }
+}
+
 export async function runWF1CarpentryTasks(run) {
-  run.section("WF1 — Carpentry Tasks Batch F regression lock");
+  run.section("WF1 — Carpentry Tasks Batch F regression lock + C3 assign guard");
   checkStatic(run);
 
   if (!WRITE) {
@@ -226,11 +409,18 @@ export async function runWF1CarpentryTasks(run) {
 
   let token;
   try {
-    token = await getAuthToken();
+    // Carpentry endpoints require an ACTIVE staff account. The shared getAuthToken
+    // signs in as ai-test-director, whose employee record is inactive → "Account inactive".
+    // Use the canonical active admin (e2e-admin), matching the real app's requirement.
+    const sb = createClient(SB_URL, SB_ANON, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { data, error } = await sb.auth.signInWithPassword({ email: "e2e-admin@blueleafbuilding.test", password: "BlueLeaf-E2E-2026!" });
+    if (error || !data?.session?.access_token) throw new Error(error?.message || "e2e-admin sign-in failed — run: node scripts/create-e2e-users.mjs");
+    token = data.session.access_token;
   } catch (e) {
     run.fail("WF1 auth token", e.message);
     return;
   }
 
   await checkApi(run, token, svc);
+  await checkC3Api(run, svc);
 }

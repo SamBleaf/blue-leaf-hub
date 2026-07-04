@@ -2275,7 +2275,12 @@ export function registerWorkforceRoutes(app) {
 
     if (!isUuid(req.params.id)) return err(res, 400, "Invalid task id.");
 
-    const { status, completionNotes, completionPhotoUrl } = req.body || {};
+    // C3 guard: only a leading hand may set assigned_to.
+    if (req.body?.assigned_to !== undefined && !emp.is_leading_hand) {
+      return err(res, 403, "Only a leading hand can assign tasks to crew members.");
+    }
+
+    const { status, completionNotes, completionPhotoUrl, assigned_to } = req.body || {};
     const update = { updated_at: new Date().toISOString() };
 
     if (status !== undefined) {
@@ -2304,15 +2309,58 @@ export function registerWorkforceRoutes(app) {
       update.completion_photo_url = p || null;
     }
 
-    // Scope: worker may only update tasks assigned to them or unassigned.
-    const { data, error } = await sb.from("site_tasks").update(update)
-      .eq("id", req.params.id)
-      .or(`assigned_to.is.null,assigned_to.eq.${emp.id}`)
-      .select("*, employees!assigned_to(id, name)")
-      .maybeSingle();
+    // C3: leading hand may assign a task to a crew member (null = unassign).
+    if (assigned_to !== undefined) {
+      const val = assigned_to === null ? null : String(assigned_to).trim();
+      if (val !== null && !isUuid(val)) return err(res, 400, "Invalid assigned_to value.");
+      update.assigned_to = val;
+    }
+
+    // Scope: a leading hand may update any task on the job; a regular worker may only
+    // update tasks assigned to them or unassigned.
+    let q = sb.from("site_tasks").update(update).eq("id", req.params.id);
+    if (!emp.is_leading_hand) {
+      q = q.or(`assigned_to.is.null,assigned_to.eq.${emp.id}`);
+    }
+    const { data, error } = await q.select("*, employees!assigned_to(id, name)").maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return err(res, 403, "You can only update tasks assigned to you or unassigned tasks.");
     return res.json({ ok: true, task: data });
+  });
+
+  // ── GET /api/worker/jobs/:id/crew ────────────────────────────────────────────
+  // Returns employees who have recently clocked on to this job (based on timesheets
+  // within the last 90 days). Used by the leading-hand crew picker to assign tasks.
+  app.get("/api/worker/jobs/:id/crew", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can view the crew list.");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+
+    const jobType = String(req.query.jobType || "").trim();
+    const since = addDaysYmd(todayYmd(), -90);
+
+    let q = sb.from("timesheets").select("employee_id").gte("date", since).not("employee_id", "is", null);
+    if (jobType === "carpentry") q = q.eq("carpentry_job_id", req.params.id);
+    else if (jobType === "project") q = q.eq("project_id", req.params.id);
+    else q = q.or(`project_id.eq.${req.params.id},carpentry_job_id.eq.${req.params.id}`);
+
+    const { data: tsRows, error: tsErr } = await q;
+    if (tsErr) return err(res, 500, translateDbError(tsErr));
+
+    const empIds = [...new Set((tsRows || []).map(r => r.employee_id))];
+    if (!empIds.length) return ok(res, { crew: [] });
+
+    const { data: crew, error: empErr } = await sb
+      .from("employees")
+      .select("id, name, trade, is_leading_hand")
+      .in("id", empIds)
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+    if (empErr) return err(res, 500, translateDbError(empErr));
+
+    ok(res, { crew: (crew || []).map(e => ({ id: e.id, name: e.name, trade: e.trade, isLeadingHand: e.is_leading_hand })) });
   });
 
   // ── PUT /api/worker/tasks/reorder ───────────────────────────────────────────

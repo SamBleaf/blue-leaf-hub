@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { apiFetch, apiPatch, apiPost, apiDelete } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
@@ -694,6 +697,33 @@ const TASK_PRIORITY_BADGE = {
   when_time_permits: "bg-slate-50 text-slate-500",
 };
 
+// ── C1: Sortable task row wrapper (drag handle on right, mirrors WorkerTasks.jsx) ──
+
+function SortableTaskRow({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 20 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-stretch gap-1">
+      <div className="flex-1 min-w-0">{children}</div>
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+        style={{ touchAction: "none" }}
+        className="shrink-0 px-2 flex items-center justify-center text-slate-300 hover:text-primary active:text-primary cursor-grab touch-none rounded-lg"
+      >
+        <span className="text-lg leading-none select-none">⠿</span>
+      </button>
+    </div>
+  );
+}
+
 function TasksPanel({ jobId }) {
   const [tasks, setTasks]         = useState([]);
   const [loadingT, setLoadingT]   = useState(true);
@@ -863,6 +893,26 @@ function TasksPanel({ jobId }) {
     if (!ok) { setEditError(error || "Could not save task."); return; }
     setTasks((prev) => prev.map((t) => t.id === editTask.id ? data.task : t));
     closeEdit();
+  }
+
+  // ── C1: DnD sensors for diary drag-reorder ──────────────────────────────────
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } })
+  );
+
+  async function handleDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = tasks.findIndex((t) => t.id === active.id);
+    const newIndex = tasks.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const prev = tasks;
+    const next = arrayMove(tasks, oldIndex, newIndex);
+    setTasks(next);
+    // Persist the new sort_order for the moved row (index as sort_order value)
+    const { ok } = await apiPatch(`/api/carpentry/tasks/${active.id}`, { sortOrder: newIndex });
+    if (!ok) setTasks(prev); // roll back on error
   }
 
   const openTasks    = tasks.filter((t) => t.status !== "done" && t.status !== "wont_do");
@@ -1238,27 +1288,40 @@ function TasksPanel({ jobId }) {
         <p className="text-sm text-muted">No tasks yet. Add tasks for your workers to tick off on-site.</p>
       ) : (
         <>
-          {/* Worker tasks grouped by category with per-category progress */}
-          {Object.keys(workerByCategory).map((cat) => {
-            const { done, total } = catProgress(cat);
-            const label = CATEGORY_LABEL_MAP[cat] || cat;
-            return (
-              <div key={cat} className="mb-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide flex-1">{label}</p>
-                  <span className="text-xs text-muted tabular-nums">{done}/{total}</span>
-                  {total > 0 && (
-                    <div className="w-12 h-1 bg-gray-200 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${done === total ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${Math.round((done / total) * 100)}%` }} />
+          {/* ── C1: Worker tasks grouped by category, wrapped in DndContext for drag-reorder ── */}
+          {Object.keys(workerByCategory).length > 0 && (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              {Object.keys(workerByCategory).map((cat) => {
+                const { done, total } = catProgress(cat);
+                const label = CATEGORY_LABEL_MAP[cat] || cat;
+                const catTasks = workerByCategory[cat];
+                return (
+                  <div key={cat} className="mb-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <p className="text-xs font-semibold text-muted uppercase tracking-wide flex-1">{label}</p>
+                      <span className="text-xs text-muted tabular-nums">{done}/{total}</span>
+                      {total > 0 && (
+                        <div className="w-12 h-1 bg-gray-200 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${done === total ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${Math.round((done / total) * 100)}%` }} />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="space-y-2">{workerByCategory[cat].map(renderOpenRow)}</div>
-              </div>
-            );
-          })}
+                    <SortableContext items={catTasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+                      <div className="space-y-2">
+                        {catTasks.map((task) => (
+                          <SortableTaskRow key={task.id} id={task.id}>
+                            {renderOpenRow(task)}
+                          </SortableTaskRow>
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </div>
+                );
+              })}
+            </DndContext>
+          )}
 
-          {/* Supervisor / QC tasks */}
+          {/* Supervisor / QC tasks (no reorder — small set, office-only) */}
           {openSup.length > 0 && (
             <div className="mb-3">
               <h4 className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Supervisor / QC</h4>
@@ -1276,7 +1339,7 @@ function TasksPanel({ jobId }) {
                     <span className="mt-0.5 shrink-0 text-amber-500 font-bold text-sm">!</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-ink leading-snug">{task.title}</p>
-                      {task.completion_notes && <p className="text-xs text-amber-700 mt-0.5">{task.completion_notes}</p>}
+                      {task.completionNotes && <p className="text-xs text-amber-700 mt-0.5">{task.completionNotes}</p>}
                       {task.assigned?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.assigned.name}</p>}
                     </div>
                     <button onClick={() => toggleDone(task)} disabled={togglingId === task.id} className="shrink-0 text-xs text-muted hover:text-ink transition-colors px-1" title="Mark open">↺</button>
@@ -1287,44 +1350,74 @@ function TasksPanel({ jobId }) {
             </div>
           )}
 
-          {/* Done tasks */}
+          {/* ── C2: Sign-off review — completed tasks with worker name, time, photo, notes ── */}
           {doneTasks.length > 0 && (
-            <div>
+            <div className="mt-5">
               <button
                 type="button"
                 onClick={() => setShowDone((v) => !v)}
-                className="text-xs text-muted font-medium mb-2 flex items-center gap-1"
+                className="text-xs text-muted font-medium mb-3 flex items-center gap-1.5"
               >
-                <span className="text-emerald-600">✓</span> Done ({doneTasks.length}) {showDone ? "▲" : "▼"}
+                <span className="text-emerald-600 font-bold">✓</span>
+                Sign-off Review ({doneTasks.length} completed) {showDone ? "▲" : "▼"}
               </button>
               {showDone && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {doneTasks.map((task) => (
-                    <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50">
-                      <button
-                        onClick={() => toggleDone(task)}
-                        disabled={togglingId === task.id}
-                        className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center transition-colors disabled:opacity-40"
-                        aria-label="Mark undone"
-                      >
-                        <span className="text-white text-xs leading-none">✓</span>
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-muted line-through leading-snug">{task.title}</p>
-                        {task.completedAt && (
+                    <div key={task.id} className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                      <div className="flex items-start gap-3">
+                        {/* Undo-done button */}
+                        <button
+                          onClick={() => toggleDone(task)}
+                          disabled={togglingId === task.id}
+                          className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center transition-colors disabled:opacity-40"
+                          aria-label="Mark undone"
+                        >
+                          <span className="text-white text-xs leading-none">✓</span>
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-ink leading-snug">{task.title}</p>
+                          {/* Completer + timestamp */}
                           <p className="text-xs text-muted mt-0.5">
-                            Done {new Date(task.completedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-                            {task.completer?.name ? ` by ${task.completer.name}` : ""}
+                            {task.completer?.name ? (
+                              <span className="font-medium text-emerald-700">{task.completer.name}</span>
+                            ) : (
+                              <span>Worker</span>
+                            )}
+                            {task.completedAt && (
+                              <>
+                                {" — "}
+                                {new Date(task.completedAt).toLocaleDateString("en-AU", {
+                                  day: "numeric", month: "short", year: "numeric",
+                                })}
+                                {" "}
+                                {new Date(task.completedAt).toLocaleTimeString("en-AU", {
+                                  hour: "2-digit", minute: "2-digit",
+                                })}
+                              </>
+                            )}
                           </p>
-                        )}
-                        {task.completionNotes && (
-                          <p className="text-xs text-muted mt-0.5">{task.completionNotes}</p>
-                        )}
-                        {task.completionPhotoSignedUrl && (
-                          <a href={task.completionPhotoSignedUrl} target="_blank" rel="noreferrer" className="inline-block mt-1">
-                            <img src={task.completionPhotoSignedUrl} alt="Completion photo" className="w-16 h-16 rounded object-cover border border-emerald-200" />
-                          </a>
-                        )}
+                          {/* Completion note */}
+                          {task.completionNotes && (
+                            <p className="text-xs text-muted mt-1 italic">{task.completionNotes}</p>
+                          )}
+                          {/* Completion photo thumbnail → click for full view */}
+                          {task.completionPhotoSignedUrl && (
+                            <a
+                              href={task.completionPhotoSignedUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-block mt-2"
+                              title="View full photo"
+                            >
+                              <img
+                                src={task.completionPhotoSignedUrl}
+                                alt="Completion photo"
+                                className="w-20 h-20 rounded-lg object-cover border border-emerald-200 hover:opacity-80 transition-opacity"
+                              />
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
