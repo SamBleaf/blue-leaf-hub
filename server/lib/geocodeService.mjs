@@ -92,6 +92,10 @@ function _buildUrl(queryStr, precision, token) {
     limit:        "1",
     access_token: token,
   });
+  // Bias ambiguous matches toward Adelaide/SA (BLH's operating region) so a
+  // "Stirling SA 5152" query resolves locally instead of to a same-named
+  // street interstate. Soft bias (proximity), not a hard bbox exclusion.
+  params.set("proximity", process.env.GEOCODE_PROXIMITY?.trim() || "138.60,-34.93");
   if (precision === "suburb") {
     params.set("types", "locality,place");
   } else {

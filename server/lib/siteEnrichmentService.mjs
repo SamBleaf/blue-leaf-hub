@@ -93,26 +93,33 @@ export function arcgisPointQueryUrl(endpoint, lat, lng) {
  * @returns {Promise<Record<string,unknown>|null>}
  */
 export async function arcgisPointQuery(endpoint, lat, lng) {
-  try {
-    const url = arcgisPointQueryUrl(endpoint, lat, lng);
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) {
-      console.warn(`[siteEnrichment] ArcGIS ${res.status} for ${endpoint}`);
+  const url = arcgisPointQueryUrl(endpoint, lat, lng);
+  // The SA gov ArcGIS servers are intermittently slow/5xx (see G1-A spike), so
+  // retry once on timeout/network/5xx with a longer timeout before giving up.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) {
+        if (res.status >= 500 && attempt < 2) continue;
+        console.warn(`[siteEnrichment] ArcGIS ${res.status} for ${endpoint}`);
+        return null;
+      }
+      const json = await res.json();
+      // ArcGIS may return an `error` property even on HTTP 200.
+      if (json?.error) {
+        console.warn(`[siteEnrichment] ArcGIS error from ${endpoint}:`, json.error);
+        return null;
+      }
+      const features = json?.features;
+      if (!Array.isArray(features) || features.length === 0) return null;
+      return features[0]?.attributes ?? null;
+    } catch (e) {
+      if (attempt < 2) continue; // timeout/network — one retry, then fail-soft
+      console.warn(`[siteEnrichment] arcgisPointQuery fetch error (${endpoint}):`, e?.message ?? e);
       return null;
     }
-    const json = await res.json();
-    // ArcGIS may return an `error` property even on HTTP 200.
-    if (json?.error) {
-      console.warn(`[siteEnrichment] ArcGIS error from ${endpoint}:`, json.error);
-      return null;
-    }
-    const features = json?.features;
-    if (!Array.isArray(features) || features.length === 0) return null;
-    return features[0]?.attributes ?? null;
-  } catch (e) {
-    console.warn(`[siteEnrichment] arcgisPointQuery fetch error (${endpoint}):`, e?.message ?? e);
-    return null;
   }
+  return null;
 }
 
 /**

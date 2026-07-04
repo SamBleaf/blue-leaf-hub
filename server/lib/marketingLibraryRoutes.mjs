@@ -123,7 +123,9 @@ export function registerMarketingLibraryRoutes(app) {
 
       let query = db
         .from("marketing_library")
-        .select("*, job:jobs(id, address)", { count: "exact" })
+        // Disambiguate the embed: marketing_library has TWO FKs to jobs
+        // (project_id + suggested_project_id from mig 136), so name the FK column.
+        .select("*, job:jobs!project_id(id, address)", { count: "exact" })
         .order("created_at", { ascending: false });
 
       // ── Search ──────────────────────────────────────────────────────────────
