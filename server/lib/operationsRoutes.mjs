@@ -4,6 +4,7 @@ import { emailAvailabilityConflict } from "./tradeCommitment.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { computeOpsReadiness } from "./opsReadiness.mjs";
+import { ok, err, rowsToCamel } from "./apiResponse.mjs";
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,70 @@ export function registerOperationsRoutes(app) {
       return res.json({ ok: true, projects: projects || [], tasks: tasks || [] });
     } catch (e) {
       return res.status(502).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ── Ops Job Map (G3-C) ──────────────────────────────────────────────────────
+  // Active projects plotted at their linked job's geocoded coordinates.
+  // projects.job_id → jobs.id → jobs.geo_lat/geo_lng (migration 134). Only rows
+  // WITH coords are returned — the map plots real pins, not guesses.
+  // Colour = schedule health (green/amber/red), the same overdue-derived signal
+  // already used by /api/operations/projects + OpsProjectCard — there is no
+  // reliable per-project "construction phase" column to key PHASE_COLOR_MAP off,
+  // so health is the meaningful, already-established colour dimension here.
+
+  app.get("/api/operations/jobs-map", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured.");
+    try {
+      const { data: projects, error: pe } = await sb
+        .from("projects")
+        .select("id, job_id, address, status, jobs(id, geo_lat, geo_lng, geo_confidence)")
+        .eq("status", "active")
+        .not("address", "ilike", "%_DELETED");
+      if (pe) throw pe;
+
+      // Keep only rows whose linked job has usable coords.
+      const withCoords = (projects || []).filter(
+        (p) => p.jobs && Number.isFinite(Number(p.jobs.geo_lat)) && Number.isFinite(Number(p.jobs.geo_lng))
+      );
+
+      const projectIds = withCoords.map((p) => p.id);
+      let tasksByProject = {};
+      if (projectIds.length) {
+        const { data: tasks } = await sb
+          .from("schedule_tasks")
+          .select("project_id, end_date, percent_complete")
+          .in("project_id", projectIds)
+          .is("deleted_at", null);
+        const today = new Date().toISOString().slice(0, 10);
+        for (const t of tasks || []) {
+          if (!tasksByProject[t.project_id]) tasksByProject[t.project_id] = { overdue: 0 };
+          const pct = Number(t.percent_complete) || 0;
+          if (pct < 100 && t.end_date && t.end_date < today) tasksByProject[t.project_id].overdue += 1;
+        }
+      }
+
+      const jobsMap = withCoords.map((p) => {
+        const overdue = tasksByProject[p.id]?.overdue || 0;
+        const health = overdue >= 4 ? "red" : overdue >= 1 ? "amber" : "green";
+        return rowsToCamel([{
+          id: p.id,
+          job_id: p.job_id,
+          address: p.address,
+          status: p.status,
+          geo_lat: Number(p.jobs.geo_lat),
+          geo_lng: Number(p.jobs.geo_lng),
+          geo_confidence: p.jobs.geo_confidence,
+          health,
+          overdue,
+        }])[0];
+      });
+
+      return ok(res, { jobsMap });
+    } catch (e) {
+      console.error("[operations/jobs-map]", e);
+      return err(res, 502, e?.message || String(e));
     }
   });
 

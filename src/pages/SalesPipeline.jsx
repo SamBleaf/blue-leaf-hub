@@ -15,6 +15,7 @@ import PipelineFilterBar from "../components/sales/PipelineFilterBar.jsx";
 import SalesKanbanBoard from "../components/sales/SalesKanbanBoard.jsx";
 import SalesMobileLeadList from "../components/sales/SalesMobileLeadList.jsx";
 import SalesActionQueue from "../components/sales/SalesActionQueue.jsx";
+import SalesIntelMap from "../components/sales/SalesIntelMap.jsx";
 import KpiCard from "../components/ui/KpiCard.jsx";
 import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
 
@@ -507,6 +508,8 @@ export default function SalesPipeline() {
       />
 
       {err && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">{err}</div>}
+
+      <div className="mt-4"><SalesIntelMap /></div>
 
       {(view === "board" || view === "actions") && (
         <>

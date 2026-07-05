@@ -84,6 +84,7 @@ import { registerProcurementRoutes } from "./lib/procurementRoutes.mjs";
 import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
 import { registerGeoRoutes } from "./lib/geoRoutes.mjs";
+import { registerSalesLeadsMapRoutes } from "./lib/salesLeadsMapRoutes.mjs";
 import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 import { requireAuth, requireRole, requireCronSecretOrAdmin } from "./lib/requireAuth.mjs";
@@ -972,6 +973,7 @@ registerProcurementRoutes(app);
 registerFactsRoutes(app);
 registerControlTowerRoutes(app);
 registerGeoRoutes(app);
+registerSalesLeadsMapRoutes(app);
 
 app.get("/api/health",(_req, res) => {
   res.json({ ok: true, model: MODEL, time: new Date().toISOString() });

@@ -9,6 +9,7 @@ import OpsProjectCard from "../components/operations/OpsProjectCard.jsx";
 import OpsProjectTable from "../components/operations/OpsProjectTable.jsx";
 import OpsConflictBanner from "../components/operations/OpsConflictBanner.jsx";
 import GlobalGanttPanel from "../components/operations/GlobalGanttPanel.jsx";
+import OpsJobsMap from "../components/operations/OpsJobsMap.jsx";
 import { computeOpsKpis, buildOpsActionQueue, groupProjectsByRisk } from "../lib/operationsDashboard.js";
 
 function RiskGroup({ group, colorIndexById, layout }) {
@@ -149,6 +150,8 @@ export default function OperationsList() {
       ) : (
         <>
           <OpsKpiStrip kpis={kpis} />
+
+          <OpsJobsMap />
 
           <FilterChips options={views} value={view} onChange={setView} />
 
