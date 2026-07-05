@@ -66,7 +66,10 @@ export default function WorkerWeek() {
     return { key, d, isToday: key === todayStr, isFuture: key > todayStr, isWeekend: i >= 5, alloc: allocByDate[key], ts: tsByDate[key] };
   }), [monday, allocByDate, tsByDate, todayStr]);
 
-  const missing = rows.filter((r) => tsStatus(r.ts, { isFuture: r.isFuture, isWeekend: r.isWeekend, hasShift: !!r.alloc }).tone === "red").length;
+  const dayTones = rows.map((r) => tsStatus(r.ts, { isFuture: r.isFuture, isWeekend: r.isWeekend, hasShift: !!r.alloc }).tone);
+  const missing = dayTones.filter((t) => t === "red").length;
+  const logged = dayTones.filter((t) => t === "green").length;   // days actually submitted/approved
+  const allFuture = rows.every((r) => r.isFuture);               // whole week is in the future
 
   return (
     <WorkerLayout>
@@ -89,8 +92,11 @@ export default function WorkerWeek() {
         {!loadError && !loading && missing > 0 && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm mb-3 text-amber-800"><span className="font-semibold">{missing}</span> day{missing > 1 ? "s" : ""} not logged this week — tap to fix.</div>
         )}
-        {!loadError && !loading && missing === 0 && (
+        {!loadError && !loading && missing === 0 && logged > 0 && (
           <div className="rounded-lg bg-green-50 border border-green-200 p-2.5 text-sm mb-3 text-green-700 font-medium">✓ This week&apos;s all logged — nice one.</div>
+        )}
+        {!loadError && !loading && missing === 0 && logged === 0 && (
+          <div className="rounded-lg bg-slate-50 border border-hairline p-2.5 text-sm mb-3 text-muted">{allFuture ? "This week hasn’t started yet." : "Nothing logged yet this week."}</div>
         )}
 
         {/* Day rows */}
