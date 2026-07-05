@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authFetch } from "../lib/authFetch.js";
+import { apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
@@ -47,6 +48,11 @@ function ApprovalsTab({ role }) {
   const [rejectModal, setRejectModal] = useState(null);
   const [rejectNotes, setRejectNotes] = useState("");
   const [toast, setToast] = useState(null);
+  // Inline entry edit (Approvals) — editingEntryId is the timesheet_entries.id currently
+  // in edit mode; entryDraft holds its in-progress form values until Saved or Cancelled.
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  const [entryDraft, setEntryDraft] = useState({ hours: "", taskCategory: "", overtimeHours: "" });
+  const [entrySaving, setEntrySaving] = useState(false);
   // Carpentry job attribution
   const [carpentryJobs, setCarpentryJobs] = useState([]);
   const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
@@ -120,6 +126,73 @@ function ApprovalsTab({ role }) {
       showToast("Connection error — please try again", "error");
     } finally {
       setAttribBusy(prev => { const n = new Set(prev); n.delete(timesheetId); return n; });
+    }
+  }
+
+  function startEditEntry(entry) {
+    setEditingEntryId(entry.id);
+    setEntryDraft({
+      hours: String(Number(entry.hours)),
+      taskCategory: entry.task_category,
+      overtimeHours: String(Number(entry.overtime_hours) || 0),
+    });
+  }
+
+  function cancelEditEntry() {
+    setEditingEntryId(null);
+    setEntryDraft({ hours: "", taskCategory: "", overtimeHours: "" });
+  }
+
+  async function saveEditEntry(timesheetId, entryId) {
+    const hours = Number(entryDraft.hours);
+    const overtimeHours = Number(entryDraft.overtimeHours);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+      showToast("Hours must be greater than 0 and no more than 24", "error");
+      return;
+    }
+    if (!Number.isFinite(overtimeHours) || overtimeHours < 0) {
+      showToast("Overtime hours must be 0 or greater", "error");
+      return;
+    }
+    setEntrySaving(true);
+    try {
+      const { ok, data, error } = await apiPatch(`/api/workforce/timesheet-entries/${entryId}`, {
+        hours,
+        taskCategory: entryDraft.taskCategory,
+        overtimeHours,
+      });
+      if (ok) {
+        // Server returns camelCase (apiResponse.mjs law); this page reads the pending-timesheets
+        // list as raw snake_case rows (e.task_category, e.overtime_hours, e.cost_amount — see the
+        // render below), so map the patched fields back to match before merging into local state.
+        const patched = {
+          task_category: data.entry.taskCategory,
+          hours: data.entry.hours,
+          overtime_hours: data.entry.overtimeHours,
+          cost_amount: data.entry.costAmount,
+          notes: data.entry.notes,
+        };
+        // Patch the entry in place inside its parent timesheet so the row's hours/OT/cost
+        // and the timesheet's derived totals (reduced from timesheet_entries) update at once —
+        // no need to re-fetch the whole pending list.
+        setTimesheets(prev => prev.map(ts => {
+          if (ts.id !== timesheetId) return ts;
+          return {
+            ...ts,
+            timesheet_entries: (ts.timesheet_entries || []).map(e =>
+              e.id === entryId ? { ...e, ...patched } : e
+            ),
+          };
+        }));
+        showToast("Entry updated ✓");
+        cancelEditEntry();
+      } else {
+        showToast(`Could not save: ${error || "Unknown error"}`, "error");
+      }
+    } catch {
+      showToast("Connection error — please try again", "error");
+    } finally {
+      setEntrySaving(false);
     }
   }
 
@@ -306,13 +379,73 @@ function ApprovalsTab({ role }) {
                         {/* Task entries */}
                         <div className="space-y-1">
                           {(ts.timesheet_entries || []).map(e => (
-                            <div key={e.id} className="flex items-center gap-3 text-xs text-muted">
-                              <span className="font-medium text-ink">{TASK_LABELS[e.task_category] || e.task_category}</span>
-                              <span>{Number(e.hours)}h</span>
-                              {e.overtime_hours > 0 && <span className="text-amber-600">+{Number(e.overtime_hours)}h OT</span>}
-                              {isDirector && e.cost_amount != null && <span className="text-green-700">${Number(e.cost_amount).toFixed(2)}</span>}
-                              {e.notes && <span className="italic">{e.notes}</span>}
-                            </div>
+                            editingEntryId === e.id ? (
+                              <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs bg-white border border-primary/30 rounded-lg px-2 py-1.5">
+                                <select
+                                  value={entryDraft.taskCategory}
+                                  onChange={ev => setEntryDraft(prev => ({ ...prev, taskCategory: ev.target.value }))}
+                                  className="border border-hairline rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white"
+                                >
+                                  {TASK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                </select>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  max="24"
+                                  value={entryDraft.hours}
+                                  onChange={ev => setEntryDraft(prev => ({ ...prev, hours: ev.target.value }))}
+                                  className="w-16 border border-hairline rounded px-1.5 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                />
+                                <span className="text-muted">h</span>
+                                <span className="text-muted">OT</span>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  value={entryDraft.overtimeHours}
+                                  onChange={ev => setEntryDraft(prev => ({ ...prev, overtimeHours: ev.target.value }))}
+                                  className="w-16 border border-hairline rounded px-1.5 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                />
+                                <span className="text-muted">h</span>
+                                <div className="flex gap-1 ml-auto">
+                                  <button
+                                    type="button"
+                                    disabled={entrySaving}
+                                    onClick={() => saveEditEntry(ts.id, e.id)}
+                                    className="text-xs font-semibold px-2 py-1 rounded bg-green-600 text-white disabled:opacity-50"
+                                  >
+                                    {entrySaving ? "Saving…" : "Save"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={entrySaving}
+                                    onClick={cancelEditEntry}
+                                    className="text-xs font-medium px-2 py-1 rounded border border-hairline text-ink disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div key={e.id} className="flex items-center gap-3 text-xs text-muted">
+                                <span className="font-medium text-ink">{TASK_LABELS[e.task_category] || e.task_category}</span>
+                                <span>{Number(e.hours)}h</span>
+                                {e.overtime_hours > 0 && <span className="text-amber-600">+{Number(e.overtime_hours)}h OT</span>}
+                                {isDirector && e.cost_amount != null && <span className="text-green-700">${Number(e.cost_amount).toFixed(2)}</span>}
+                                {e.notes && <span className="italic">{e.notes}</span>}
+                                {canReject && (
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditEntry(e)}
+                                    title="Edit hours / category"
+                                    className="ml-auto text-primary hover:text-primary/70 px-1"
+                                  >
+                                    ✎
+                                  </button>
+                                )}
+                              </div>
+                            )
                           ))}
                         </div>
                       </td>

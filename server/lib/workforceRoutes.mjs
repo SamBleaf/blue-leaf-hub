@@ -1006,6 +1006,81 @@ export function registerWorkforceRoutes(app) {
     res.json({ ok: true });
   });
 
+  // Edit a single timesheet entry from Approvals — lets an admin/supervisor correct an
+  // over-claimed hour or wrong task category inline instead of rejecting the whole timesheet.
+  // Only allowed while the parent timesheet is "submitted" (pending approval): once approved,
+  // cost_amount may already be synced to Buildexact, so edits are blocked (unapprove reopens it).
+  app.patch("/api/workforce/timesheet-entries/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { hours, taskCategory, overtimeHours, notes } = req.body;
+
+    const { data: entry, error: entryErr } = await sb
+      .from("timesheet_entries")
+      .select("*, timesheets!inner(id, status, employee_id, employees(*))")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (entryErr) return err(res, 500, translateDbError(entryErr));
+    if (!entry) return err(res, 404, "Timesheet entry not found", "NOT_FOUND");
+
+    const ts = entry.timesheets;
+    if (ts.status === "approved") {
+      return err(res, 409, "Approved timesheets can't be edited — reject to reopen.", "ALREADY_APPROVED");
+    }
+    if (ts.status !== "submitted") {
+      return err(res, 409, "Only submitted (pending approval) timesheets can be edited here.", "NOT_SUBMITTED");
+    }
+
+    // Validate inputs — same bounds as the worker edit path / DB check constraints.
+    // NB: timesheet_entries has no updated_at column — do not set it (would 500).
+    const update = {};
+    if (hours !== undefined) {
+      const h = Number(hours);
+      if (!Number.isFinite(h) || h <= 0 || h > MAX_ENTRY_HOURS) {
+        return err(res, 400, `Hours must be greater than 0 and no more than ${MAX_ENTRY_HOURS}.`, "BAD_HOURS");
+      }
+      update.hours = h;
+    }
+    if (taskCategory !== undefined) {
+      if (!TASK_CATEGORIES.includes(taskCategory)) {
+        return err(res, 400, "Invalid task category.", "BAD_CATEGORY");
+      }
+      update.task_category = taskCategory;
+      update.phase = TASK_PHASE_MAP[taskCategory] || "general";
+    }
+    if (overtimeHours !== undefined) {
+      const ot = Number(overtimeHours);
+      if (!Number.isFinite(ot) || ot < 0) {
+        return err(res, 400, "Overtime hours must be 0 or greater.", "BAD_OT_HOURS");
+      }
+      update.overtime_hours = ot;
+    }
+    if (notes !== undefined) update.notes = notes || null;
+
+    // Recompute cost_amount with the same formula used at approval time (splitOvertimeHours +
+    // computeCost), keyed off the possibly-just-edited hours so the figure the approver sees
+    // (and later syncs to Buildexact) always reflects the corrected entry.
+    const effectiveHours = update.hours !== undefined ? update.hours : Number(entry.hours);
+    const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
+    const cm = await getCostModel(sb);
+    const bands = splitOvertimeHours(effectiveHours, settings || { overtime_threshold: 8, double_time_threshold: 10 });
+    update.cost_amount = computeCost(bands, ts.employees, loadedRate(cm, ts.employee_id));
+    // overtime_hours mirrors the approval flow's convention (all premium hours) unless the
+    // caller explicitly supplied their own overtimeHours override above.
+    if (overtimeHours === undefined) {
+      update.overtime_hours = bands.overtime + bands.doubletime;
+    }
+
+    const { data: updated, error: updateErr } = await sb
+      .from("timesheet_entries")
+      .update(update)
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (updateErr) return err(res, 500, translateDbError(updateErr));
+
+    ok(res, { entry: rowToCamel(updated) });
+  });
+
   // ── Labour dashboard ──────────────────────────────────────────────────────
 
   app.get("/api/projects/:id/labour", requireAuth, async (req, res) => {
