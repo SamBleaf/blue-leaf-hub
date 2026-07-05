@@ -6,7 +6,10 @@
  * extend this component instead.
  *
  * Props:
- *   points        — [{ id, lat, lng, label, color, meta? }] (required; [] renders an empty map)
+ *   points        — [{ id, lat, lng, label, color, shape?: "circle"|"square", meta? }]
+ *                   (required; [] renders an empty map. shape defaults to "circle";
+ *                   "square" is used to distinguish a second layer, e.g. carpentry
+ *                   sites vs builder projects on the Ops map.)
  *   onPointClick  — (id) => void — called when a marker or its popup is clicked
  *   center        — [lng, lat] — initial centre. Default = Adelaide.
  *   fitToPoints   — boolean (default true) — fit bounds to all points once loaded
@@ -104,7 +107,9 @@ export default function HubMap({
       const el = document.createElement("div");
       el.style.width = "16px";
       el.style.height = "16px";
-      el.style.borderRadius = "50%";
+      // Square markers distinguish a second layer (e.g. carpentry vs builder jobs);
+      // circle is the default. Slight rounding on the square keeps it from looking harsh.
+      el.style.borderRadius = p.shape === "square" ? "3px" : "50%";
       el.style.border = "2px solid #FFFFFF";
       el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.35)";
       el.style.backgroundColor = p.color || "#006c9b";

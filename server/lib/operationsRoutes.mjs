@@ -147,7 +147,39 @@ export function registerOperationsRoutes(app) {
         }])[0];
       });
 
-      return ok(res, { jobsMap });
+      // ── Carpentry layer (mig 138) — standalone/island sites plotted alongside ──
+      // builder projects. Live statuses only (active/on_hold/defects); complete +
+      // cancelled drop off. No schedule-health signal exists for carpentry (it uses
+      // milestones, not schedule_tasks), so the client renders these as a distinct
+      // flat-colour square marker rather than a health colour. Fail-soft: if the geo
+      // columns aren't present yet (mig 138 not applied), skip this layer — the
+      // builder map must never break because carpentry geo isn't backfilled.
+      let carpentryMap = [];
+      try {
+        const { data: carpRows, error: ce } = await sb
+          .from("carpentry_jobs")
+          .select("id, reference, address, status, client_name, geo_lat, geo_lng, geo_confidence")
+          .in("status", ["active", "on_hold", "defects"])
+          .not("geo_lat", "is", null);
+        if (ce) throw ce;
+        carpentryMap = (carpRows || [])
+          .filter((c) => Number.isFinite(Number(c.geo_lat)) && Number.isFinite(Number(c.geo_lng)))
+          .map((c) => rowsToCamel([{
+            id: c.id,
+            reference: c.reference,
+            address: c.address,
+            status: c.status,
+            client_name: c.client_name,
+            geo_lat: Number(c.geo_lat),
+            geo_lng: Number(c.geo_lng),
+            geo_confidence: c.geo_confidence,
+            kind: "carpentry",
+          }])[0]);
+      } catch (carpErr) {
+        console.warn("[operations/jobs-map] carpentry layer skipped:", carpErr?.message || carpErr);
+      }
+
+      return ok(res, { jobsMap, carpentryMap });
     } catch (e) {
       console.error("[operations/jobs-map]", e);
       return err(res, 502, e?.message || String(e));

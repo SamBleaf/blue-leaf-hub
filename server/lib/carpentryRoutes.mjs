@@ -38,6 +38,7 @@ import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesB
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { autoLayoutMilestones } from "./carpentryScheduleUtils.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
+import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -330,6 +331,13 @@ export function registerCarpentryRoutes(app) {
       // budget via POST /budget/seed (mapping workforce_task_category for the labour push).
       // The API fetch still supplies the job code + client contact at /buildexact/fetch.
 
+      // Geocode the carpentry site (fire-and-forget) so it can plot on the Ops map (mig 138).
+      // Carpentry is often standalone external-builder work with no parent job, so this is
+      // the only place its coordinates come from. Full address precision, like builder jobs.
+      if (job.address) {
+        geocodeToFacts("carpentry_jobs", job.id, String(job.address).trim(), "address").catch(() => {});
+      }
+
       return ok(res, { job: rowToCamel(job) });
     } catch (e) {
       console.error("[carpentry/jobs POST]", e);
@@ -435,6 +443,12 @@ export function registerCarpentryRoutes(app) {
         .single();
       if (error) throw error;
       if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
+
+      // Re-geocode when the site address changed in this PATCH (fire-and-forget).
+      if ("address" in patch && patch.address) {
+        geocodeToFacts("carpentry_jobs", job.id, String(patch.address).trim(), "address").catch(() => {});
+      }
+
       return ok(res, { job: rowToCamel(job) });
     } catch (e) {
       console.error("[carpentry/jobs/:id PATCH]", e);

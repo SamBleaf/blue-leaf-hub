@@ -3,10 +3,11 @@
  *
  * Route:
  *   POST /api/geo/backfill
- *     body: { dryRun?: boolean (default true), scope?: "all"|"jobs"|"leads", limit?: number (default 100) }
+ *     body: { dryRun?: boolean (default true), scope?: "all"|"jobs"|"leads"|"carpentry", limit?: number (default 100) }
  *
- * Tiered rule (matches on-save hooks in salesRoutes + jobsApiRoutes):
+ * Tiered rule (matches on-save hooks in salesRoutes + jobsApiRoutes + carpentryRoutes):
  *   - Jobs                          → full address precision
+ *   - Carpentry jobs                → full address precision (standalone island sites)
  *   - Leads at qualify or later     → full address precision
  *   - Leads at enquiry/nurture/lost → suburb precision
  *
@@ -76,7 +77,7 @@ export function registerGeoRoutes(app) {
 
     const body = req.body || {};
     const dryRun = body.dryRun !== false; // default true
-    const scope  = ["all", "jobs", "leads"].includes(body.scope) ? body.scope : "all";
+    const scope  = ["all", "jobs", "leads", "carpentry"].includes(body.scope) ? body.scope : "all";
     const limit  = Math.min(Math.max(Number(body.limit) || 100, 1), 500);
 
     try {
@@ -116,6 +117,26 @@ export function registerGeoRoutes(app) {
           const query = leadQuery(lead, precision);
           if (!query) continue; // no usable location data
           candidates.push({ table: "leads", id: lead.id, precision, query });
+        }
+      }
+
+      // Carpentry jobs — standalone island sites; always full address precision (like jobs).
+      // No status filter: geocode every carpentry job missing coords (matches the jobs rule);
+      // the Ops map filters to live statuses at read time.
+      if (scope === "all" || scope === "carpentry") {
+        const carpLimit = scope === "all"
+          ? Math.max(limit - candidates.length, 1)
+          : limit;
+        const { data: carp, error: cErr } = await sb
+          .from("carpentry_jobs")
+          .select("id, address")
+          .is("geo_geocoded_at", null)
+          .limit(carpLimit);
+        if (cErr) return err(res, 500, "Failed to query carpentry jobs: " + cErr.message);
+        for (const c of carp || []) {
+          const rawAddr = String(c.address || "").trim();
+          if (!rawAddr) continue; // no address to geocode
+          candidates.push({ table: "carpentry_jobs", id: c.id, precision: "address", query: rawAddr });
         }
       }
 
