@@ -28,6 +28,7 @@ export function buildSplitPrompt(transcript, jobLabel, workStreams = []) {
 
 Rules:
 - Output ONLY a JSON array, no prose, no markdown fences.
+- Emit STRICT valid JSON: double-quoted keys and strings, NO trailing commas. If a measurement needs an inch/foot mark, write it in words or mm (e.g. "2600mm") — never put a bare " inside a string.
 - Each element: { "title": string (short, imperative, e.g. "Install LVL ridge beam"), "priority": "urgent"|"normal"|"when_time_permits", "category": ${categoryChoices}, "description": string (optional extra context, or "") }.
 - One task per discrete action. Merge duplicates. Drop chit-chat and anything that isn't an actionable task.
 - Infer priority from wording (e.g. "make safe", "trip hazard" → urgent; default "normal").
@@ -51,19 +52,64 @@ export function normalizeTask(raw, allowedCategories = []) {
   return { title: title.slice(0, 300), priority, category, description: description.slice(0, 1000) };
 }
 
-// Parse the model's text output into normalised tasks. Strict: throws if no JSON
-// array can be found (never falls back to dumping raw text as a single task).
+// Strip trailing commas before a } or ] — the single most common way a model dirties
+// otherwise-valid JSON (e.g. `...,]` or `"description":"",}`), and exactly the kind of
+// slip that throws "Expected double-quoted property name in JSON at position N".
+function stripTrailingCommas(s) {
+  return s.replace(/,(\s*[}\]])/g, "$1");
+}
+
+// Best-effort repair for the SALVAGE path only (after strict parses have failed):
+// promote unquoted keys and single-quoted keys/strings. Naive by design — any chunk it
+// still can't rescue is skipped, never crashing the whole list.
+function repairLooseObject(s) {
+  return s
+    .replace(/'/g, '"')
+    .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
+}
+
+// Recover as many task objects as possible from malformed output by parsing each flat
+// {...} block on its own and skipping the unparseable ones. Task objects have no nested
+// braces, so a brace-free match cleanly isolates each. This salvages the good tasks even
+// when ONE object is broken (an unescaped inch-mark quote, a stray char) or the array was
+// truncated mid-stream — the drafts are human-reviewed anyway, so partial beats nothing.
+function salvageTaskObjects(s) {
+  const chunks = s.match(/\{[^{}]*\}/g) || [];
+  const out = [];
+  for (const chunk of chunks) {
+    const cleaned = stripTrailingCommas(chunk);
+    try { out.push(JSON.parse(cleaned)); continue; } catch { /* try a loose repair */ }
+    try { out.push(JSON.parse(repairLooseObject(cleaned))); } catch { /* skip this one */ }
+  }
+  return out;
+}
+
+// Parse the model's text output into normalised tasks. Resilient to the common ways a
+// model dirties JSON (markdown fences, a prose wrapper, trailing commas, one bad object,
+// a truncated tail). Only throws — with a plain-English message — when NOTHING usable
+// can be recovered, so a single bad character never discards a whole walk-through.
 export function parseTasksFromModelText(text, allowedCategories = []) {
   let cleaned = String(text || "").trim().replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
   // Tolerate the model wrapping the array in prose by extracting the first [...] block.
   if (!cleaned.startsWith("[")) {
     const m = cleaned.match(/\[[\s\S]*\]/);
-    if (!m) throw new Error("Could not parse tasks from the transcript.");
-    cleaned = m[0];
+    if (m) cleaned = m[0];
   }
-  const arr = JSON.parse(cleaned);
-  if (!Array.isArray(arr)) throw new Error("Expected a list of tasks.");
-  return arr.map((r) => normalizeTask(r, allowedCategories)).filter(Boolean);
+
+  // 1) strict parse, then 2) strict parse with trailing commas stripped.
+  for (const candidate of [cleaned, stripTrailingCommas(cleaned)]) {
+    try {
+      const arr = JSON.parse(candidate);
+      if (Array.isArray(arr)) return arr.map((r) => normalizeTask(r, allowedCategories)).filter(Boolean);
+    } catch { /* fall through to salvage */ }
+  }
+
+  // 3) salvage each object independently — recovers the good tasks from a partly-broken
+  //    or truncated array instead of failing the whole extraction.
+  const salvaged = salvageTaskObjects(cleaned).map((r) => normalizeTask(r, allowedCategories)).filter(Boolean);
+  if (salvaged.length) return salvaged;
+
+  throw new Error("Couldn't read a task list from that transcript. Please try again, or shorten it.");
 }
 
 /**
