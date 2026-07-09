@@ -2180,7 +2180,7 @@ export function registerWorkforceRoutes(app) {
 
     let q = sb
       .from("site_tasks")
-      .select("*, employees!assigned_to(id, name)")
+      .select("*, employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
       .neq("status", "wont_do");
     // jobId is validated as a UUID above, so the .or() interpolation is injection-safe.
     if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
@@ -2203,6 +2203,12 @@ export function registerWorkforceRoutes(app) {
     );
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
+    // Who-signed-off (completer name) is supervisor/admin-only info in the field app: strip it
+    // for regular workers. Leading hands and admin preview keep it. Mirrors the C4 UI gate + the
+    // D3 audience-leak fix — don't just hide it in the UI, don't send it down the wire.
+    if (!emp.is_leading_hand && !req.workerPreview) {
+      for (const t of sorted) { if (t) delete t.completer; }
+    }
     res.json({ ok: true, tasks: sorted, jobId, jobType: jobType || null });
   });
 

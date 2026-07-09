@@ -854,12 +854,18 @@ export default function WorkerTasks() {
               <div className="flex-1 min-w-0 mr-3">
                 <h3 className="text-base font-bold text-ink leading-snug">{sheet.title}</h3>
                 {sheet.description && <p className="text-sm text-muted mt-1">{sheet.description}</p>}
-                {sheet.status === "done" && (
+                {sheet.status === "done" && ((isSupervisor || preview) ? (
+                  // Supervisors / admin: full sign-off detail — who + date & time (matches the Hub).
                   <p className="text-xs text-emerald-700 mt-1">
                     Done by {sheet.completer?.name || "worker"}
-                    {sheet.completed_at && ` · ${new Date(sheet.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`}
+                    {sheet.completed_at && ` · ${new Date(sheet.completed_at).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`}
                   </p>
-                )}
+                ) : (
+                  // Regular workers don't see who/when detail — just that it's done.
+                  sheet.completed_at && (
+                    <p className="text-xs text-emerald-700 mt-1">Done {new Date(sheet.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</p>
+                  )
+                ))}
                 {sheet.completion_notes && !sheetBlockMode && (
                   <p className="text-xs text-muted mt-1 italic">{sheet.completion_notes}</p>
                 )}
