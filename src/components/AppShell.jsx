@@ -510,65 +510,8 @@ export default function AppShell() {
 
         {/* Footer: settings + user */}
         <div className="border-t border-white/10 py-2">
-          {role === "admin" ? (
-            <NavLink
-              to="/settings/users"
-              title={!showFull ? "Users" : undefined}
-              className={({ isActive }) =>
-                `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
-                  isActive ? "text-white" : "text-white/50 hover:text-white"
-                }`
-              }
-            >
-              <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg group-hover:bg-white/10">
-                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-                </svg>
-              </span>
-              {showFull && <span className="text-[13px] font-semibold">Users</span>}
-            </NavLink>
-          ) : null}
-          {role === "admin" ? (
-            <NavLink
-              to="/documents-templates"
-              title={!showFull ? "Templates" : undefined}
-              className={({ isActive }) =>
-                `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
-                  isActive ? "text-white" : "text-white/50 hover:text-white"
-                }`
-              }
-            >
-              <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg group-hover:bg-white/10">
-                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <path d="M14 2v6h6M9 13h6M9 17h6" />
-                </svg>
-              </span>
-              {showFull && <span className="text-[13px] font-semibold">Templates</span>}
-            </NavLink>
-          ) : null}
-          {role === "admin" ? (
-            <NavLink
-              to="/field"
-              title={!showFull ? "Field app" : undefined}
-              className={({ isActive }) =>
-                `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${
-                  isActive ? "text-white" : "text-white/50 hover:text-white"
-                }`
-              }
-            >
-              <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg group-hover:bg-white/10">
-                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 18h.01M8 21h8a1 1 0 001-1V4a1 1 0 00-1-1H8a1 1 0 00-1 1v16a1 1 0 001 1z" />
-                </svg>
-              </span>
-              {showFull && <span className="text-[13px] font-semibold">Field app</span>}
-            </NavLink>
-          ) : null}
           <NavLink
-            to="/tender-manager/settings"
+            to="/settings"
             title={!showFull ? "Settings" : undefined}
             className={({ isActive }) =>
               `group flex items-center transition ${showFull ? "gap-3 px-3 py-2.5" : "justify-center px-0 py-3"} ${

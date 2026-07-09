@@ -18,7 +18,8 @@ async function syncUserSetting(key, value) {
   await sb.from("user_settings").upsert(payload, { onConflict: "key" });
 }
 
-export default function Settings() {
+export default function Settings({ section } = {}) {
+  const show = (k) => !section || section === k;
   const [sigOpen, setSigOpen] = useState(false);
   const [status, setStatus] = useState(null);
   const [prefs, setPrefs] = useState(() => loadNotificationPrefs());
@@ -119,160 +120,174 @@ export default function Settings() {
 
   return (
     <div className="space-y-10">
-      <header className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Global</p>
-        <h1 className="text-3xl font-semibold text-primary tracking-tight">Settings</h1>
-        <p className="max-w-2xl text-sm text-muted">
-          Email signature, mail & Dropbox connection status, and notification defaults. OAuth tokens stay in{" "}
-          <code className="rounded bg-page px-1 py-0.5 text-xs">.env</code> on the machine running the API — use the auth
-          scripts from a terminal.
-        </p>
-        <Link
-          to="/tender-manager/rfq-engine"
-          className="inline-block text-sm font-semibold text-accent underline-offset-2 hover:underline"
-        >
-          ← Back to RFQ Engine
-        </Link>
-      </header>
+      {!section ? (
+        <header className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Global</p>
+          <h1 className="text-3xl font-semibold text-primary tracking-tight">Settings</h1>
+          <p className="max-w-2xl text-sm text-muted">
+            Email signature, mail & Dropbox connection status, and notification defaults. OAuth tokens stay in{" "}
+            <code className="rounded bg-page px-1 py-0.5 text-xs">.env</code> on the machine running the API — use the auth
+            scripts from a terminal.
+          </p>
+          <Link
+            to="/tender-manager/rfq-engine"
+            className="inline-block text-sm font-semibold text-accent underline-offset-2 hover:underline"
+          >
+            ← Back to RFQ Engine
+          </Link>
+        </header>
+      ) : null}
 
-      {/* Admin-only — Anthropic API spend by module/model (self-hides for non-admins) */}
-      <AICostWidget />
+      {/* Legacy full-page only — these have their own routed panes (/settings/ai-usage and
+          /settings/cost-model render <AICostWidget/> and <CompanyCostModel/> directly), so they
+          must NOT also appear on the Company (general) pane. */}
+      {!section ? <AICostWidget /> : null}
 
-      {/* Admin-only — company cost model synced from Google Sheets (self-hides for non-admins) */}
-      <CompanyCostModel />
+      {!section ? <CompanyCostModel /> : null}
 
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-primary">Data Cleanup</h2>
-        <p className="mt-1 text-sm text-muted">
-          Remove test-marked records (BLH TEST / __BATCH_A__ / __E2E / __DRYRUN / __DEMO…) left over from building.
-          Admin only; deletes test data only.
-        </p>
-        <Link
-          to="/settings/data-cleanup"
-          className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
-        >
-          Open Data Cleanup →
-        </Link>
-      </section>
+      {!section ? (
+        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-primary">Data Cleanup</h2>
+          <p className="mt-1 text-sm text-muted">
+            Remove test-marked records (BLH TEST / __BATCH_A__ / __E2E / __DRYRUN / __DEMO…) left over from building.
+            Admin only; deletes test data only.
+          </p>
+          <Link
+            to="/settings/data-cleanup"
+            className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
+          >
+            Open Data Cleanup →
+          </Link>
+        </section>
+      ) : null}
 
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-primary">Email signature</h2>
-        <p className="mt-1 text-sm text-muted">Used for RFQ emails and reminders. Stored in the browser; export to Supabase below when online.</p>
-        <button
-          type="button"
-          onClick={() => setSigOpen(true)}
-          className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
-        >
-          Edit signature
-        </button>
-      </section>
+      {show("email-signature") ? (
+        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-primary">Email signature</h2>
+          <p className="mt-1 text-sm text-muted">Used for RFQ emails and reminders. Stored in the browser; export to Supabase below when online.</p>
+          <button
+            type="button"
+            onClick={() => setSigOpen(true)}
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
+          >
+            Edit signature
+          </button>
+        </section>
+      ) : null}
 
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-primary">Gmail (API)</h2>
-        <p className="mt-2 text-sm text-muted">
-          Status from the dev API. Sending prefers Gmail when <code className="text-xs">GMAIL_REFRESH_TOKEN</code> is set,
-          otherwise SMTP.
-        </p>
-        <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 text-sm">
-          {status ? (
-            <ul className="space-y-1 text-ink">
-              <li>
-                <span className="font-semibold">Configured:</span> {status.gmail?.configured ? "Yes" : "No"}
-              </li>
-              {status.gmail?.sender ? (
+      {show("mail") ? (
+        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-primary">Gmail (API)</h2>
+          <p className="mt-2 text-sm text-muted">
+            Status from the dev API. Sending prefers Gmail when <code className="text-xs">GMAIL_REFRESH_TOKEN</code> is set,
+            otherwise SMTP.
+          </p>
+          <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 text-sm">
+            {status ? (
+              <ul className="space-y-1 text-ink">
                 <li>
-                  <span className="font-semibold">Sender:</span> {status.gmail.sender}
+                  <span className="font-semibold">Configured:</span> {status.gmail?.configured ? "Yes" : "No"}
                 </li>
-              ) : null}
-              <li>
-                <span className="font-semibold">SMTP fallback:</span> {status.smtp?.configured ? "Yes" : "No"}
-              </li>
-            </ul>
-          ) : (
-            <p className="text-muted">Could not reach /api/integrations/status — is the API running?</p>
-          )}
-        </div>
-        <p className="mt-4 text-xs text-muted">
-          <strong>Connect:</strong> add <code className="text-xs">GMAIL_CLIENT_ID</code> and{" "}
-          <code className="text-xs">GMAIL_CLIENT_SECRET</code> to <code className="text-xs">.env</code>, then run{" "}
-          <code className="text-xs">npm run auth:gmail</code>, paste the refresh token into{" "}
-          <code className="text-xs">GMAIL_REFRESH_TOKEN</code>, set <code className="text-xs">GMAIL_SENDER_EMAIL</code>, restart{" "}
-          <code className="text-xs">npm run dev</code>.
-        </p>
-        <p className="mt-2 text-xs text-muted">
-          <strong>Google Cloud Console:</strong> enable Gmail API, create OAuth client, add redirect URI matching{" "}
-          <code className="text-xs">GMAIL_REDIRECT_URI</code> (default <code className="text-xs">http://localhost:8787/auth/gmail/callback</code>
-          ).
-        </p>
-      </section>
+                {status.gmail?.sender ? (
+                  <li>
+                    <span className="font-semibold">Sender:</span> {status.gmail.sender}
+                  </li>
+                ) : null}
+                <li>
+                  <span className="font-semibold">SMTP fallback:</span> {status.smtp?.configured ? "Yes" : "No"}
+                </li>
+              </ul>
+            ) : (
+              <p className="text-muted">Could not reach /api/integrations/status — is the API running?</p>
+            )}
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            <strong>Connect:</strong> add <code className="text-xs">GMAIL_CLIENT_ID</code> and{" "}
+            <code className="text-xs">GMAIL_CLIENT_SECRET</code> to <code className="text-xs">.env</code>, then run{" "}
+            <code className="text-xs">npm run auth:gmail</code>, paste the refresh token into{" "}
+            <code className="text-xs">GMAIL_REFRESH_TOKEN</code>, set <code className="text-xs">GMAIL_SENDER_EMAIL</code>, restart{" "}
+            <code className="text-xs">npm run dev</code>.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            <strong>Google Cloud Console:</strong> enable Gmail API, create OAuth client, add redirect URI matching{" "}
+            <code className="text-xs">GMAIL_REDIRECT_URI</code> (default <code className="text-xs">http://localhost:8787/auth/gmail/callback</code>
+            ).
+          </p>
+        </section>
+      ) : null}
 
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-primary">Dropbox</h2>
-        <p className="mt-2 text-sm text-muted">Used to create job folders and (later) upload quotes.</p>
-        <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 text-sm">
-          {status ? (
-            <p className="text-ink">
-              <span className="font-semibold">Configured:</span> {status.dropbox?.configured ? "Yes" : "No"}
-            </p>
-          ) : null}
-        </div>
-        <p className="mt-4 text-xs text-muted">
-          <strong>Connect:</strong> create a Dropbox app with the scopes in <code className="text-xs">scripts/dropbox-auth.mjs</code>, add{" "}
-          <code className="text-xs">DROPBOX_APP_KEY</code> / <code className="text-xs">DROPBOX_APP_SECRET</code>, run{" "}
-          <code className="text-xs">npm run auth:dropbox</code>, then add <code className="text-xs">DROPBOX_REFRESH_TOKEN</code> and restart the API.
-        </p>
-        <p className="mt-2 text-xs text-muted">
-          <strong>Folder layout:</strong> shared tender files live under{" "}
-          <code className="text-xs">BLUE LEAF BUILDING/PROJECTS/BLUE LEAF BUILDING/[JOB]/</code>; private RFQs, quotes, and presale
-          docs under <code className="text-xs">BLUE LEAF BUILDING/INTERNAL/[JOB]/</code>. RFQ emails only include a link to the shared
-          folder.
-        </p>
-        <p className="mt-2 text-xs text-muted">
-          <strong>Private INTERNAL privacy:</strong> set <code className="text-xs">DROPBOX_INTERNAL_VIEWER_EMAILS</code> in{" "}
-          <code className="text-xs">.env</code> to comma-separated Dropbox login emails. After the private job folder is created, the
-          API shares that path with those viewers and attempts <code className="text-xs">no_inherit</code> on Dropbox Business team
-          folders. The OAuth account always retains access.
-        </p>
-      </section>
+      {show("dropbox") ? (
+        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-primary">Dropbox</h2>
+          <p className="mt-2 text-sm text-muted">Used to create job folders and (later) upload quotes.</p>
+          <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 text-sm">
+            {status ? (
+              <p className="text-ink">
+                <span className="font-semibold">Configured:</span> {status.dropbox?.configured ? "Yes" : "No"}
+              </p>
+            ) : null}
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            <strong>Connect:</strong> create a Dropbox app with the scopes in <code className="text-xs">scripts/dropbox-auth.mjs</code>, add{" "}
+            <code className="text-xs">DROPBOX_APP_KEY</code> / <code className="text-xs">DROPBOX_APP_SECRET</code>, run{" "}
+            <code className="text-xs">npm run auth:dropbox</code>, then add <code className="text-xs">DROPBOX_REFRESH_TOKEN</code> and restart the API.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            <strong>Folder layout:</strong> shared tender files live under{" "}
+            <code className="text-xs">BLUE LEAF BUILDING/PROJECTS/BLUE LEAF BUILDING/[JOB]/</code>; private RFQs, quotes, and presale
+            docs under <code className="text-xs">BLUE LEAF BUILDING/INTERNAL/[JOB]/</code>. RFQ emails only include a link to the shared
+            folder.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            <strong>Private INTERNAL privacy:</strong> set <code className="text-xs">DROPBOX_INTERNAL_VIEWER_EMAILS</code> in{" "}
+            <code className="text-xs">.env</code> to comma-separated Dropbox login emails. After the private job folder is created, the
+            API shares that path with those viewers and attempts <code className="text-xs">no_inherit</code> on Dropbox Business team
+            folders. The OAuth account always retains access.
+          </p>
+        </section>
+      ) : null}
 
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-primary">Notifications</h2>
-        <p className="mt-1 text-sm text-muted">Stored in localStorage; synced to Supabase table user_settings when configured.</p>
-        <div className="mt-4 space-y-4">
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={prefs.reminderAuto}
-              onChange={(e) => savePrefs({ reminderAuto: e.target.checked })}
-              className="h-4 w-4 rounded border-hairline"
-            />
-            Send reminder emails automatically (server must set REMINDER_CRON_ENABLED=true)
-          </label>
-          <label className="block text-sm">
-            <span className="font-semibold text-ink">Reminder timing (days before deadline)</span>
-            <select
-              className="mt-1 w-full max-w-xs rounded-lg border border-hairline bg-page px-3 py-2"
-              value={String(prefs.reminderDaysBefore)}
-              onChange={(e) => savePrefs({ reminderDaysBefore: Number(e.target.value) })}
-            >
-              <option value="1">1 day</option>
-              <option value="2">2 days</option>
-              <option value="3">3 days</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={prefs.emailOnQuoteReceived}
-              onChange={(e) => savePrefs({ emailOnQuoteReceived: e.target.checked })}
-              className="h-4 w-4 rounded border-hairline"
-            />
-            Email me when a quote is received (planned — requires inbox automation)
-          </label>
-        </div>
-        {syncNote ? <p className="mt-3 text-xs text-muted">{syncNote}</p> : null}
-      </section>
+      {show("notifications") ? (
+        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-primary">Notifications</h2>
+          <p className="mt-1 text-sm text-muted">Stored in localStorage; synced to Supabase table user_settings when configured.</p>
+          <div className="mt-4 space-y-4">
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={prefs.reminderAuto}
+                onChange={(e) => savePrefs({ reminderAuto: e.target.checked })}
+                className="h-4 w-4 rounded border-hairline"
+              />
+              Send reminder emails automatically (server must set REMINDER_CRON_ENABLED=true)
+            </label>
+            <label className="block text-sm">
+              <span className="font-semibold text-ink">Reminder timing (days before deadline)</span>
+              <select
+                className="mt-1 w-full max-w-xs rounded-lg border border-hairline bg-page px-3 py-2"
+                value={String(prefs.reminderDaysBefore)}
+                onChange={(e) => savePrefs({ reminderDaysBefore: Number(e.target.value) })}
+              >
+                <option value="1">1 day</option>
+                <option value="2">2 days</option>
+                <option value="3">3 days</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={prefs.emailOnQuoteReceived}
+                onChange={(e) => savePrefs({ emailOnQuoteReceived: e.target.checked })}
+                className="h-4 w-4 rounded border-hairline"
+              />
+              Email me when a quote is received (planned — requires inbox automation)
+            </label>
+          </div>
+          {syncNote ? <p className="mt-3 text-xs text-muted">{syncNote}</p> : null}
+        </section>
+      ) : null}
 
+      {show("company") ? (
       <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Company details</h2>
         <p className="mt-1 text-sm text-muted">Used on Purchase Order PDFs. Stored in this browser.</p>
@@ -366,7 +381,9 @@ export default function Settings() {
           Save company details
         </button>
       </section>
+      ) : null}
 
+      {show("buildexact") ? (
       <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Buildexact</h2>
         <p className="mt-1 text-sm text-muted">
@@ -519,7 +536,9 @@ export default function Settings() {
           </div>
         )}
       </section>
+      ) : null}
 
+      {show("purchase-orders") ? (
       <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Purchase orders</h2>
         <p className="mt-1 text-sm text-muted">Prefix and default terms for PDF page 2.</p>
@@ -553,8 +572,9 @@ export default function Settings() {
           Save PO settings
         </button>
       </section>
+      ) : null}
 
-      {sigOpen ? (
+      {show("email-signature") && sigOpen ? (
         <RfqSettingsModal
           onClose={() => setSigOpen(false)}
           onApplied={() => {
@@ -564,17 +584,19 @@ export default function Settings() {
       ) : null}
 
       {/* Google (Drive + Marketing Intelligence) */}
-      <GoogleIntegrationSection status={status} />
+      {show("google") ? <GoogleIntegrationSection status={status} /> : null}
 
       {/* Meta (Instagram + Facebook Insights) */}
-      <MetaIntegrationSection status={status} />
+      {show("meta") ? <MetaIntegrationSection status={status} /> : null}
 
       {/* Resend (mailing list + CRM email) */}
-      <ResendIntegrationSection status={status} />
+      {show("resend") ? <ResendIntegrationSection status={status} /> : null}
 
-      <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
+      {show("workforce-rules") ? (
+        <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
+      ) : null}
 
-      <RolePreviewConsole />
+      {show("role-preview") ? <RolePreviewConsole /> : null}
     </div>
   );
 }
