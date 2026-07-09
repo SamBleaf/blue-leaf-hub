@@ -108,7 +108,9 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    // z above the Blueprint FAB (9999) + the "+" quick-add FAB (z-50) so the bottom sheet and its
+    // backdrop sit over them — otherwise those floating widgets cover the lower rows + action bar.
+    <div className="fixed inset-0 z-[10000] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-t-xl sm:rounded-card w-full max-w-lg mx-0 sm:mx-4 shadow-xl max-h-[88vh] overflow-y-auto">
         {loading ? (
@@ -218,7 +220,7 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
             )}
 
             {/* Actions */}
-            <div className="sticky bottom-0 bg-white border-t border-hairline px-5 py-3">
+            <div className="sticky bottom-0 bg-white border-t border-hairline px-5 py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
               {declining ? (
                 <div className="space-y-2">
                   <textarea
