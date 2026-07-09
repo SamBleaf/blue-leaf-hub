@@ -756,6 +756,7 @@ function TasksPanel({ jobId }) {
   const [editPriority, setEditPriority] = useState("normal");
   const [savingEdit, setSavingEdit]   = useState(false);
   const [editError, setEditError]     = useState(null);
+  const [detailTask, setDetailTask]   = useState(null);  // sign-off task open in the detail modal
 
   const loadTasks = useCallback(async () => {
     setLoadingT(true);
@@ -970,6 +971,65 @@ function TasksPanel({ jobId }) {
 
   return (
     <div className="mb-8">
+      {/* ── Sign-off Detail ──────────────────────────────────────────────────── */}
+      {detailTask && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setDetailTask(null)} />
+          <div className="relative bg-white rounded-t-xl sm:rounded-xl p-5 w-full max-w-md mx-0 sm:mx-4 shadow-xl space-y-3 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-semibold text-ink leading-snug">{detailTask.title}</h3>
+              <button onClick={() => setDetailTask(null)} className="shrink-0 text-muted hover:text-ink text-lg leading-none" aria-label="Close">✕</button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {detailTask.category && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-ink capitalize">{String(detailTask.category).replace(/_/g, " ")}</span>
+              )}
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[detailTask.priority] || ""}`}>
+                {TASK_PRIORITY_LABEL[detailTask.priority] || detailTask.priority}
+              </span>
+            </div>
+
+            <p className="text-xs text-muted">
+              Signed off by{" "}
+              <span className="font-medium text-emerald-700">{detailTask.completer?.name || "worker"}</span>
+              {detailTask.completedAt && (
+                <> — {new Date(detailTask.completedAt).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</>
+              )}
+            </p>
+
+            {detailTask.description && (
+              <div>
+                <p className="text-xs font-medium text-ink mb-0.5">Task detail</p>
+                <p className="text-sm text-muted whitespace-pre-wrap">{detailTask.description}</p>
+              </div>
+            )}
+
+            {detailTask.completionNotes && (
+              <div>
+                <p className="text-xs font-medium text-ink mb-0.5">Sign-off note</p>
+                <p className="text-sm text-muted whitespace-pre-wrap">{detailTask.completionNotes}</p>
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-medium text-ink mb-1">Completion photo</p>
+              {detailTask.completionPhotoSignedUrl ? (
+                <a href={detailTask.completionPhotoSignedUrl} target="_blank" rel="noreferrer" title="Open full photo">
+                  <img
+                    src={detailTask.completionPhotoSignedUrl}
+                    alt="Completion photo"
+                    className="w-full max-h-80 object-contain rounded-lg border border-hairline bg-gray-50"
+                  />
+                </a>
+              ) : (
+                <p className="text-sm text-muted italic">No photo uploaded for this sign-off.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Edit Task Sheet ──────────────────────────────────────────────────── */}
       {editTask && (
         <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
@@ -1364,11 +1424,16 @@ function TasksPanel({ jobId }) {
               {showDone && (
                 <div className="space-y-3">
                   {doneTasks.map((task) => (
-                    <div key={task.id} className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <div
+                      key={task.id}
+                      onClick={() => setDetailTask(task)}
+                      className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 cursor-pointer hover:bg-emerald-100/70 transition-colors"
+                      title="View sign-off detail"
+                    >
                       <div className="flex items-start gap-3">
                         {/* Undo-done button */}
                         <button
-                          onClick={() => toggleDone(task)}
+                          onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
                           disabled={togglingId === task.id}
                           className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center transition-colors disabled:opacity-40"
                           aria-label="Mark undone"
@@ -1407,6 +1472,7 @@ function TasksPanel({ jobId }) {
                               href={task.completionPhotoSignedUrl}
                               target="_blank"
                               rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
                               className="inline-block mt-2"
                               title="View full photo"
                             >

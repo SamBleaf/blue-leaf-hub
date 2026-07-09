@@ -345,11 +345,38 @@ export default function WorkerTasks() {
   }
 
   function closeSheet() {
+    // Persist any note edit before closing so notes stick even without a status-button tap.
+    if (sheet && !preview && sheetNotes.trim() !== (sheet.completion_notes || "").trim()) {
+      persistSheetDetail(sheet.id, { completionNotes: sheetNotes.trim() || null });
+    }
     setSheet(null);
     setSheetNotes("");
     setSheetPhotoPath(null);
     setSheetPhotoPreview(null);
     setSheetBlockMode(false);
+  }
+
+  // Persist a photo/note change to the task straight away, WITHOUT changing status, and reflect it
+  // in the local list. This is the core fix for orphaned sign-off photos: previously the completion
+  // photo/note only saved via the status buttons, so a worker who added a photo and closed the sheet
+  // (or ticked the task with the circle) uploaded the file to storage but never linked it to the task.
+  async function persistSheetDetail(taskId, patch) {
+    if (!taskId || preview) return;
+    try {
+      const res = await workerFetch(`/api/worker/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.ok) {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? {
+          ...t,
+          ...(patch.completionPhotoUrl !== undefined ? { completion_photo_url: patch.completionPhotoUrl } : {}),
+          ...(patch.completionNotes  !== undefined ? { completion_notes:  patch.completionNotes  } : {}),
+        } : t));
+      }
+    } catch { /* best-effort — saveSheet still sends these on a status change */ }
   }
 
   async function handleSheetPhoto(e) {
@@ -361,6 +388,8 @@ export default function WorkerTasks() {
       const path = await uploadWorkerPhoto(file, { entityType: "site_task", entityId: sheet.id });
       setSheetPhotoPath(path);
       setSheetPhotoPreview(URL.createObjectURL(file));
+      // Link the photo to the task immediately — don't wait for a status-button tap.
+      await persistSheetDetail(sheet.id, { completionPhotoUrl: path });
     } catch (err) {
       alert(err?.message || "Could not upload the photo");
     } finally {
@@ -825,6 +854,12 @@ export default function WorkerTasks() {
               <div className="flex-1 min-w-0 mr-3">
                 <h3 className="text-base font-bold text-ink leading-snug">{sheet.title}</h3>
                 {sheet.description && <p className="text-sm text-muted mt-1">{sheet.description}</p>}
+                {sheet.status === "done" && (
+                  <p className="text-xs text-emerald-700 mt-1">
+                    Done by {sheet.completer?.name || "worker"}
+                    {sheet.completed_at && ` · ${new Date(sheet.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`}
+                  </p>
+                )}
                 {sheet.completion_notes && !sheetBlockMode && (
                   <p className="text-xs text-muted mt-1 italic">{sheet.completion_notes}</p>
                 )}
@@ -848,7 +883,9 @@ export default function WorkerTasks() {
                   className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 mb-3"
                 />
                 {sheetPhotoPreview && (
-                  <img src={sheetPhotoPreview} alt="Completion photo" className="w-full max-h-48 object-cover rounded-lg border border-hairline mb-3" />
+                  <a href={sheetPhotoPreview} target="_blank" rel="noreferrer" className="block mb-3" title="Open full photo">
+                    <img src={sheetPhotoPreview} alt="Completion photo" className="w-full max-h-64 object-contain rounded-lg border border-hairline bg-gray-50" />
+                  </a>
                 )}
                 <div className="flex gap-2 flex-wrap">
                   {sheet.status !== "done" && (
