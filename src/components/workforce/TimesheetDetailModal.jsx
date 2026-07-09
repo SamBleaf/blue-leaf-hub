@@ -42,6 +42,10 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState({});          // { [entryId]: { hours, taskCategory } }
   const [savingEntry, setSavingEntry] = useState(null);
+  const [adding, setAdding] = useState(false);       // add-a-category row open
+  const [newCat, setNewCat] = useState(TASK_OPTIONS[0].value);
+  const [newHours, setNewHours] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [declineNotes, setDeclineNotes] = useState("");
 
@@ -104,6 +108,26 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
       timesheet_entries: (prev.timesheet_entries || []).map((x) =>
         x.id === entry.id ? { ...x, hours: data.entry.hours, task_category: data.entry.taskCategory, cost_amount: data.entry.costAmount } : x),
     }));
+    onChanged?.();
+  }
+
+  async function addEntry() {
+    const hours = Number(newHours);
+    if (!(hours > 0 && hours <= 24)) { setError("Hours must be a number between 0 and 24."); return; }
+    setAddBusy(true); setError("");
+    const { ok, data, error: e } = await apiPost(`/api/workforce/timesheets/${timesheetId}/entries`, {
+      taskCategory: newCat, hours,
+    });
+    setAddBusy(false);
+    if (!ok) { setError(e || "Could not add the category."); return; }
+    setTs((prev) => ({
+      ...prev,
+      timesheet_entries: [...(prev.timesheet_entries || []), {
+        id: data.entry.id, task_category: data.entry.taskCategory, hours: data.entry.hours,
+        overtime_hours: data.entry.overtimeHours, cost_amount: data.entry.costAmount, notes: data.entry.notes,
+      }],
+    }));
+    setNewHours(""); setNewCat(TASK_OPTIONS[0].value); setAdding(false);
     onChanged?.();
   }
 
@@ -192,6 +216,37 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                   })}
                 </div>
               )}
+
+              {editing && (
+                <div className="mt-2">
+                  {adding ? (
+                    <div className="rounded-lg border border-dashed border-primary/40 p-3 flex items-center gap-2">
+                      <select
+                        value={newCat}
+                        onChange={(ev) => setNewCat(ev.target.value)}
+                        className="flex-1 border border-hairline rounded-lg px-2 py-1.5 text-sm bg-white focus-ring"
+                      >
+                        {TASK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      <input
+                        type="number" step="0.5" min="0" max="24" value={newHours}
+                        onChange={(ev) => setNewHours(ev.target.value)}
+                        placeholder="0"
+                        className="w-16 border border-hairline rounded-lg px-2 py-1.5 text-sm text-right focus-ring"
+                      />
+                      <span className="text-xs text-muted">h</span>
+                      <button onClick={addEntry} disabled={addBusy} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-accent text-white disabled:opacity-50">
+                        {addBusy ? "…" : "Add"}
+                      </button>
+                      <button onClick={() => { setAdding(false); setNewHours(""); setError(""); }} className="text-muted hover:text-ink text-sm leading-none px-1" aria-label="Cancel">✕</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setAdding(true)} className="w-full rounded-lg border border-dashed border-hairline py-2 text-sm font-medium text-primary hover:bg-primary/5 transition-colors">
+                      + Add category
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Tasks completed that shift */}
@@ -238,7 +293,7 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
               ) : (
                 <div className="flex flex-wrap gap-2 justify-end">
                   {canModerate && isSubmitted && (
-                    <button onClick={() => (editing ? setEditing(false) : startEdit())} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium text-ink">
+                    <button onClick={() => { if (editing) { setEditing(false); setAdding(false); } else { startEdit(); } }} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium text-ink">
                       {editing ? "Done editing" : "Edit"}
                     </button>
                   )}

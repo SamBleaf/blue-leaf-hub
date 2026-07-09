@@ -1138,6 +1138,55 @@ export function registerWorkforceRoutes(app) {
     ok(res, { entry: rowToCamel(updated) });
   });
 
+  // Add an extra entry (task category + hours) to a submitted timesheet from the detail modal.
+  // Same guards + cost formula as the entry edit above.
+  app.post("/api/workforce/timesheets/:id/entries", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { hours, taskCategory, notes } = req.body || {};
+
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid timesheet id.");
+    const { data: ts, error: tsErr } = await sb
+      .from("timesheets")
+      .select("id, status, employee_id, employees(*)")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (tsErr) return err(res, 500, translateDbError(tsErr));
+    if (!ts) return err(res, 404, "Timesheet not found.", "NOT_FOUND");
+    if (ts.status === "approved") return err(res, 409, "Approved timesheets can't be edited — reject to reopen.", "ALREADY_APPROVED");
+    if (ts.status !== "submitted") return err(res, 409, "Only submitted (pending approval) timesheets can be edited here.", "NOT_SUBMITTED");
+
+    const h = Number(hours);
+    if (!Number.isFinite(h) || h <= 0 || h > MAX_ENTRY_HOURS) {
+      return err(res, 400, `Hours must be greater than 0 and no more than ${MAX_ENTRY_HOURS}.`, "BAD_HOURS");
+    }
+    if (!TASK_CATEGORIES.includes(taskCategory)) {
+      return err(res, 400, "Invalid task category.", "BAD_CATEGORY");
+    }
+
+    const { data: settings } = await sb.from("workforce_settings").select("*").limit(1).single();
+    const cm = await getCostModel(sb);
+    const bands = splitOvertimeHours(h, settings || { overtime_threshold: 8, double_time_threshold: 10 });
+    const cost = computeCost(bands, ts.employees, loadedRate(cm, ts.employee_id));
+
+    const { data: created, error: insErr } = await sb
+      .from("timesheet_entries")
+      .insert({
+        timesheet_id:   ts.id,
+        employee_id:    ts.employee_id,
+        task_category:  taskCategory,
+        phase:          TASK_PHASE_MAP[taskCategory] || "general",
+        hours:          h,
+        overtime_hours: bands.overtime + bands.doubletime,
+        cost_amount:    cost,
+        notes:          notes || null,
+      })
+      .select()
+      .single();
+    if (insErr) return err(res, 500, translateDbError(insErr));
+
+    ok(res, { entry: rowToCamel(created) });
+  });
+
   // ── Labour dashboard ──────────────────────────────────────────────────────
 
   app.get("/api/projects/:id/labour", requireAuth, async (req, res) => {
