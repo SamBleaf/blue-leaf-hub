@@ -7,7 +7,7 @@ import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
-import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey } from "./siteMedia.mjs";
+import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey, isStoragePath } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
@@ -670,10 +670,12 @@ export function registerWorkforceRoutes(app) {
       .select("id, employee_id, date, status")
       .gte("date", week_start).lte("date", week_end);
     const statusByKey = {};
+    const idByKey = {};
     const tsIdToKey = {};
     for (const t of ts || []) {
       const k = `${t.employee_id}|${t.date}`;
       statusByKey[k] = t.status;
+      idByKey[k] = t.id;
       tsIdToKey[t.id] = k;
     }
     // W17-P2: hours per employee/day = sum of that day's timesheet_entries.hours (read-only).
@@ -709,7 +711,7 @@ export function registerWorkforceRoutes(app) {
         else if (st === "rejected") { state = "rejected"; if (expectsAllDays) missing++; }
         else if (st) { state = "missing"; if (expectsAllDays) missing++; }
         else { state = expectsAllDays ? "missing" : "na"; if (expectsAllDays) missing++; }
-        days[d] = { state, status: st, hours };
+        days[d] = { state, status: st, hours, id: idByKey[k] || null };
       }
       return { id: e.id, name: e.name, employment_type: e.employment_type, expects_all_days: expectsAllDays, days, done, missing };
     });
@@ -806,6 +808,61 @@ export function registerWorkforceRoutes(app) {
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, timesheets: data });
+  });
+
+  // Full detail for one timesheet — powers the Snapshot + Approvals "banner" modal.
+  // Returns the timesheet with its entries (completion photos signed) + the tasks the employee
+  // marked done on that shift. Snake_case, mirroring the sibling /pending + /timesheets endpoints.
+  app.get("/api/workforce/timesheets/:id/detail", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid timesheet id.");
+    const isDirector = req.caller.role === "admin";
+    const { data: ts, error } = await sb
+      .from("timesheets")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (error) return err(res, 500, translateDbError(error));
+    if (!ts) return err(res, 404, "Timesheet not found.", "NOT_FOUND");
+
+    // Sign entry completion photos that are storage paths (legacy inline data: URLs pass through).
+    for (const en of ts.timesheet_entries || []) {
+      if (en && isStoragePath(en.completion_photo_url)) {
+        try {
+          const { data: s } = await sb.storage.from(SITE_MEDIA_BUCKET).createSignedUrl(en.completion_photo_url, 3600);
+          if (s?.signedUrl) en.completion_photo_signed_url = s.signedUrl;
+        } catch { /* best-effort */ }
+      }
+    }
+
+    // Tasks completed on this shift. completed_at is UTC; match it to the timesheet's LOCAL
+    // (Adelaide) calendar date so a morning task (stored on the previous UTC day) still counts —
+    // fetch a ±1-day window, then filter by Adelaide-local date. Bonus data: never fail on it.
+    let tasksCompleted = [];
+    try {
+      const { data: cand } = await sb
+        .from("site_tasks")
+        .select("id, title, category, completed_at, completion_photo_url")
+        .eq("completed_by", ts.employee_id)
+        .eq("status", "done")
+        .gte("completed_at", `${addDaysYmd(ts.date, -1)}T00:00:00`)
+        .lte("completed_at", `${addDaysYmd(ts.date, 1)}T23:59:59.999`)
+        .order("completed_at", { ascending: true });
+      tasksCompleted = (cand || []).filter((t) =>
+        t.completed_at &&
+        new Date(t.completed_at).toLocaleDateString("en-CA", { timeZone: "Australia/Adelaide" }) === ts.date
+      );
+      for (const t of tasksCompleted) {
+        if (isStoragePath(t.completion_photo_url)) {
+          try {
+            const { data: s } = await sb.storage.from(SITE_MEDIA_BUCKET).createSignedUrl(t.completion_photo_url, 3600);
+            if (s?.signedUrl) t.completion_photo_signed_url = s.signedUrl;
+          } catch { /* best-effort */ }
+        }
+      }
+    } catch { /* tasks-that-shift is a bonus — never fail the detail on it */ }
+
+    return res.json({ ok: true, timesheet: ts, tasksCompleted });
   });
 
   app.post("/api/workforce/timesheets/mass-fill", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {

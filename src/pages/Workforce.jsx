@@ -4,23 +4,11 @@ import { authFetch } from "../lib/authFetch.js";
 import { apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
+import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
 import WorkforceKpiStrip from "../components/workforce/WorkforceKpiStrip.jsx";
-
-const TASK_LABELS = {
-  first_fix_framing:    "First fix / framing",
-  cladding:             "Cladding",
-  second_fix:           "Second fix",
-  outdoor_works:        "Outdoor works",
-  formwork_slab_prep:   "Formwork / slab prep",
-  site_labouring:       "Site labouring",
-  site_cleanup:         "Site cleanup",
-  supervision:          "Supervision",
-  other:                "Other",
-};
-
-const TASK_OPTIONS = Object.entries(TASK_LABELS).map(([value, label]) => ({ value, label }));
+import TimesheetDetailModal from "../components/workforce/TimesheetDetailModal.jsx";
 
 const STATUS_BADGE = {
   submitted: "bg-blue-100 text-blue-700",
@@ -57,6 +45,7 @@ function ApprovalsTab({ role }) {
   const [carpentryJobs, setCarpentryJobs] = useState([]);
   const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
   const [attribBusy, setAttribBusy] = useState(new Set());
+  const [detailId, setDetailId] = useState(null);   // timesheet open in the banner detail modal
 
   const load = useCallback(() => {
     setLoading(true);
@@ -348,6 +337,7 @@ function ApprovalsTab({ role }) {
                     </td>
                     <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
+                        <button type="button" onClick={() => setDetailId(ts.id)} className="text-xs px-2 py-1 rounded bg-gray-100 text-ink font-medium hover:bg-gray-200" title="View full timesheet detail">View</button>
                         {canApprove && (
                           <button type="button" disabled={isBusy} onClick={() => approveOne(ts.id)} className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50">✓</button>
                         )}
@@ -561,6 +551,14 @@ function ApprovalsTab({ role }) {
             </div>
           </div>
         </div>
+      )}
+      {detailId && (
+        <TimesheetDetailModal
+          timesheetId={detailId}
+          role={role}
+          onClose={() => setDetailId(null)}
+          onChanged={load}
+        />
       )}
     </div>
   );
@@ -959,10 +957,12 @@ function BuildexactSyncControl() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 // ── Completion Snapshot tab ───────────────────────────────────────────────────
-function SnapshotTab() {
+function SnapshotTab({ role }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [nonWork, setNonWork] = useState({ holidays: [], rdo: [] }); // W17-P5b overlay
+  const [detailId, setDetailId] = useState(null);   // timesheet open in the detail modal
+  const [reloadKey, setReloadKey] = useState(0);     // bump to refetch after approve/decline/edit
   // W17-P2: default to the PREVIOUS week on Mon/Tue/Wed (office reviews last week early-week);
   // current week Thu–Sun. "" = current week (server default). Manual nav still overrides.
   const [weekStart, setWeekStart] = useState(() => {
@@ -981,7 +981,7 @@ function SnapshotTab() {
       .then(j => { if (j.ok) setData(j); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [weekStart]);
+  }, [weekStart, reloadKey]);
 
   // W17-P5b: overlay RDO + public holidays so they aren't read as "missing".
   useEffect(() => {
@@ -1062,9 +1062,13 @@ function SnapshotTab() {
                 <td className="py-2 pr-3 text-ink">{e.name}{e.employment_type === "casual" && <span className="ml-1 text-[10px] text-muted">(casual)</span>}</td>
                 {data.dates.map(d => {
                   const nw = nonWorkAt(e.id, d);
+                  const dayVal = e.days[d];
+                  const tsId = (dayVal && typeof dayVal === "object") ? dayVal.id : null;
                   return <td key={d} className="py-2 px-2 text-center">{nw
                     ? <span className="inline-block w-5 h-5 rounded-full text-[9px] leading-5 text-center bg-slate-100 text-slate-400" title={nw === "Hol" ? "Public holiday" : "Rostered day off"}>{nw}</span>
-                    : cell(e.days[d])}</td>;
+                    : tsId
+                      ? <button type="button" onClick={() => setDetailId(tsId)} className="hover:opacity-70 transition-opacity" title="View timesheet">{cell(dayVal)}</button>
+                      : cell(dayVal)}</td>;
                 })}
                 <td className="py-2 pl-3 text-center">{adjustedMissing(e) > 0 ? <span className="font-semibold text-red-600">{adjustedMissing(e)}</span> : <span className="text-green-600">0</span>}</td>
               </tr>
@@ -1073,6 +1077,14 @@ function SnapshotTab() {
         </table>
       </div>
       {data.employees.length === 0 && <p className="text-sm text-muted mt-4">No active employees.</p>}
+      {detailId && (
+        <TimesheetDetailModal
+          timesheetId={detailId}
+          role={role}
+          onClose={() => setDetailId(null)}
+          onChanged={() => setReloadKey(k => k + 1)}
+        />
+      )}
     </div>
   );
 }
@@ -1152,7 +1164,7 @@ export default function Workforce() {
       </div>
 
       {shownTab === "Approvals" && <ApprovalsTab role={role} />}
-      {shownTab === "Snapshot" && <SnapshotTab />}
+      {shownTab === "Snapshot" && <SnapshotTab role={role} />}
       {shownTab === "Mass Fill" && <MassFillTab />}
       {shownTab === "History" && <HistoryTab role={role} />}
       {shownTab === "Team" && <WorkforceTeam embedded />}
