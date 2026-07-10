@@ -37,6 +37,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
+import { sendEnquiryAck } from "./leadReminders.mjs";
 import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import Anthropic from "@anthropic-ai/sdk";
@@ -314,6 +315,13 @@ export function registerMarketingIntelligenceRoutes(app) {
     if (leadErr) return err(res, 500, translateDbError(leadErr));
 
     await insertLeadCreatedActivity(sb, lead.id);
+
+    // 1B — one safe client-facing acknowledgement (CRM Phase 1). Gated OFF until the template +
+    // sending are reviewed (ENQUIRY_AUTOACK_ENABLED). Fire-and-forget + fail-soft: it must never
+    // block or fail the enquiry. No pitch, no promise beyond "we'll review within 1 business day".
+    if (process.env.ENQUIRY_AUTOACK_ENABLED === "true") {
+      sendEnquiryAck(sb, lead, {}).catch(() => {});
+    }
 
     // Compute attribution from session events
     let attrRow = null;

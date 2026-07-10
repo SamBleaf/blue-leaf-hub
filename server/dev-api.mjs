@@ -24,6 +24,7 @@ import { appendRfqRefToBody, rfqRefHeaders } from "./lib/rfqSendRef.mjs";
 import { randomUUID } from "crypto";
 import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
+import { runLeadActionDigest } from "./lib/leadReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
@@ -1673,6 +1674,32 @@ app.post("/api/cron/rfq-reminders", requireCronSecretOrAdmin, async (_req, res) 
   }
 });
 
+// CRM Phase 1 (Batch 1) — daily internal action digest to Sam/Josh. LIVE run: sends only if
+// recipients are configured AND something is due; also persists the 3/6/12mo reactivation flags.
+// Same cron-secret/admin guard as the other reminders; rides the REMINDER_CRON daily tick.
+app.post("/api/cron/lead-actions", requireCronSecretOrAdmin, async (_req, res) => {
+  try {
+    const result = await runLeadActionDigest({ dryRun: false });
+    return res.json(result);
+  } catch (err) {
+    console.error("[cron/lead-actions]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Admin DRY-RUN preview of the action digest — never sends, never writes. Returns the fully
+// rendered email (recipients, subject, text, html) + itemised buckets (who / why / group / link)
+// so the digest can be reviewed before go-live.
+app.post("/api/sales/action-digest/preview", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const result = await runLeadActionDigest({ dryRun: true });
+    return res.json(result);
+  } catch (err) {
+    console.error("[sales/action-digest/preview]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 app.post("/api/cron/lead-time-notifications", requireCronSecretOrAdmin, async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
@@ -2529,6 +2556,22 @@ if (envBool(process.env.REMINDER_CRON_ENABLED, false)) {
   setInterval(tick, dayMs);
   setTimeout(tick, 45_000);
   console.log("[blue-leaf-api] REMINDER_CRON_ENABLED: daily deadline reminders (~2 days before).");
+}
+
+// CRM Phase 1 — daily internal lead action digest on its OWN timer, gated by LEAD_DIGEST_ENABLED
+// (default OFF). Decoupled from REMINDER_CRON so it can be enabled independently and stays dormant
+// on deploy until Sam reviews it. Emails LEAD_DIGEST_RECIPIENTS only, only when something is due;
+// also runs the 3/6/12-month reactivation sweep. Nothing here is client-facing.
+if (envBool(process.env.LEAD_DIGEST_ENABLED, false)) {
+  const digestDayMs = 24 * 60 * 60 * 1000;
+  const digestTick = () => {
+    runLeadActionDigest({ dryRun: false })
+      .then((r) => console.log("[lead-action-digest]", r))
+      .catch((e) => console.error("[lead-action-digest]", e));
+  };
+  setInterval(digestTick, digestDayMs);
+  setTimeout(digestTick, 90_000);
+  console.log("[blue-leaf-api] LEAD_DIGEST_ENABLED: daily internal lead action digest.");
 }
 
 // Portal nightly sync on its OWN daily timer, DECOUPLED from REMINDER_CRON — so the
