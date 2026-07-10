@@ -13,9 +13,6 @@ import ResetPassword from "./pages/ResetPassword.jsx";
 import RfqEngine from "./pages/RfqEngine.jsx";
 import Signup from "./pages/Signup.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
-import UserManagement from "./pages/UserManagement.jsx";
-import DataCleanup from "./pages/DataCleanup.jsx";
-import DocumentsTemplates from "./pages/DocumentsTemplates.jsx";
 import FieldLayout from "./pages/field/FieldLayout.jsx";
 import FieldHome from "./pages/field/FieldHome.jsx";
 import FieldJobs from "./pages/field/FieldJobs.jsx";
@@ -23,15 +20,8 @@ import FieldTasks from "./pages/field/FieldTasks.jsx";
 import FieldWHS from "./pages/field/FieldWHS.jsx";
 import FieldDiary from "./pages/field/FieldDiary.jsx";
 import MyPortal from "./pages/MyPortal.jsx";
-import Settings from "./pages/Settings.jsx";
 import SettingsLayout from "./pages/settings/SettingsLayout.jsx";
-import FieldAppPane from "./pages/settings/FieldAppPane.jsx";
-import ProfilePane from "./pages/settings/ProfilePane.jsx";
-import XeroPane from "./pages/settings/XeroPane.jsx";
-import WorkforceTeam from "./pages/WorkforceTeam.jsx";
-import CompanyCostModel from "./components/settings/CompanyCostModel.jsx";
-import AICostWidget from "./components/settings/AICostWidget.jsx";
-import MusicLibrarySettings from "./components/marketing/MusicLibrarySettings.jsx";
+import SettingsCategory from "./pages/settings/SettingsCategory.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
 import TenderBoard from "./pages/TenderBoard.jsx";
 import TenderDetail from "./pages/TenderDetail.jsx";
@@ -265,91 +255,27 @@ export default function App() {
                   <Route index element={<Navigate to="general" replace />} />
                   <Route
                     path="general"
-                    element={<RoleRoute element={<Settings section="company" />} allowed={["admin"]} redirectTo="/home" />}
+                    element={<RoleRoute element={<SettingsCategory cat="general" />} allowed={["admin"]} redirectTo="/home" />}
                   />
                   <Route
-                    path="purchase-orders"
-                    element={<RoleRoute element={<Settings section="purchase-orders" />} allowed={["admin"]} redirectTo="/home" />}
+                    path="team"
+                    element={<RoleRoute element={<SettingsCategory cat="team" />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                   />
                   <Route
-                    path="email-signature"
-                    element={<RoleRoute element={<Settings section="email-signature" />} allowed={["admin"]} redirectTo="/home" />}
+                    path="integrations"
+                    element={<RoleRoute element={<SettingsCategory cat="integrations" />} allowed={["admin"]} redirectTo="/home" />}
                   />
                   <Route
-                    path="notifications"
-                    element={<RoleRoute element={<Settings section="notifications" />} allowed={["admin"]} redirectTo="/home" />}
+                    path="modules"
+                    element={<RoleRoute element={<SettingsCategory cat="modules" />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                   />
                   <Route
-                    path="users"
-                    element={<RoleRoute element={<UserManagement />} allowed={["admin"]} redirectTo="/home" />}
+                    path="usage"
+                    element={<RoleRoute element={<SettingsCategory cat="usage" />} allowed={["admin"]} redirectTo="/home" />}
                   />
                   <Route
-                    path="employees"
-                    element={<RoleRoute element={<WorkforceTeam embedded />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="workforce-rules"
-                    element={<RoleRoute element={<Settings section="workforce-rules" />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="mail"
-                    element={<RoleRoute element={<Settings section="mail" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="dropbox"
-                    element={<RoleRoute element={<Settings section="dropbox" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="buildexact"
-                    element={<RoleRoute element={<Settings section="buildexact" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="google"
-                    element={<RoleRoute element={<Settings section="google" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="meta"
-                    element={<RoleRoute element={<Settings section="meta" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="resend"
-                    element={<RoleRoute element={<Settings section="resend" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="xero"
-                    element={<RoleRoute element={<XeroPane />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="templates"
-                    element={<RoleRoute element={<DocumentsTemplates />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="cost-model"
-                    element={<RoleRoute element={<CompanyCostModel />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="marketing"
-                    element={<RoleRoute element={<MusicLibrarySettings />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="field-app"
-                    element={<RoleRoute element={<FieldAppPane />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="ai-usage"
-                    element={<RoleRoute element={<AICostWidget />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="data-cleanup"
-                    element={<RoleRoute element={<DataCleanup />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="role-preview"
-                    element={<RoleRoute element={<Settings section="role-preview" />} allowed={["admin"]} redirectTo="/home" />}
-                  />
-                  <Route
-                    path="profile"
-                    element={<RoleRoute element={<ProfilePane />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                    path="account"
+                    element={<RoleRoute element={<SettingsCategory cat="account" />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                   />
                 </Route>
 
@@ -483,9 +409,14 @@ export default function App() {
                 <Route path="/subcontractors" element={<Navigate to="/tender-manager/subcontractors" replace />} />
                 <Route path="/quote-tracker" element={<Navigate to="/tender-manager/quote-tracker" replace />} />
                 <Route path="/cost-intelligence" element={<Navigate to="/tender-manager/cost-intelligence" replace />} />
-                {/* Old bookmark: standalone templates page (now /settings/templates). The
-                    /tender-manager/settings redirect lives inside the /tender-manager block above. */}
-                <Route path="/documents-templates" element={<Navigate to="/settings/templates" replace />} />
+                {/* Old bookmark: standalone templates page (now the Templates sub-section of
+                    /settings/modules). The /tender-manager/settings redirect lives inside the
+                    /tender-manager block above. */}
+                <Route path="/documents-templates" element={<Navigate to="/settings/modules" replace />} />
+                {/* Old bookmarks: these sub-panes used to be their own routes; now they're
+                    sub-sections within a category page. */}
+                <Route path="/settings/users" element={<Navigate to="/settings/team" replace />} />
+                <Route path="/settings/data-cleanup" element={<Navigate to="/settings/usage" replace />} />
               </Route>
             </Route>
 

@@ -18,8 +18,9 @@ async function syncUserSetting(key, value) {
   await sb.from("user_settings").upsert(payload, { onConflict: "key" });
 }
 
-export default function Settings({ section } = {}) {
-  const show = (k) => !section || section === k;
+export default function Settings({ section, sections } = {}) {
+  const active = sections || (section != null ? [section] : null);
+  const show = (k) => !active || active.includes(k);
   const [sigOpen, setSigOpen] = useState(false);
   const [status, setStatus] = useState(null);
   const [prefs, setPrefs] = useState(() => loadNotificationPrefs());
@@ -120,7 +121,7 @@ export default function Settings({ section } = {}) {
 
   return (
     <div className="space-y-10">
-      {!section ? (
+      {!active ? (
         <header className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Global</p>
           <h1 className="text-3xl font-semibold text-primary tracking-tight">Settings</h1>
@@ -141,11 +142,11 @@ export default function Settings({ section } = {}) {
       {/* Legacy full-page only — these have their own routed panes (/settings/ai-usage and
           /settings/cost-model render <AICostWidget/> and <CompanyCostModel/> directly), so they
           must NOT also appear on the Company (general) pane. */}
-      {!section ? <AICostWidget /> : null}
+      {!active ? <AICostWidget /> : null}
 
-      {!section ? <CompanyCostModel /> : null}
+      {!active ? <CompanyCostModel /> : null}
 
-      {!section ? (
+      {!active ? (
         <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Data Cleanup</h2>
           <p className="mt-1 text-sm text-muted">
@@ -162,7 +163,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("email-signature") ? (
-        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <section id="email-signature" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Email signature</h2>
           <p className="mt-1 text-sm text-muted">Used for RFQ emails and reminders. Stored in the browser; export to Supabase below when online.</p>
           <button
@@ -176,7 +177,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("mail") ? (
-        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <section id="mail" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Gmail (API)</h2>
           <p className="mt-2 text-sm text-muted">
             Status from the dev API. Sending prefers Gmail when <code className="text-xs">GMAIL_REFRESH_TOKEN</code> is set,
@@ -217,7 +218,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("dropbox") ? (
-        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <section id="dropbox" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Dropbox</h2>
           <p className="mt-2 text-sm text-muted">Used to create job folders and (later) upload quotes.</p>
           <div className="mt-4 rounded-lg border border-hairline bg-page px-4 py-3 text-sm">
@@ -248,7 +249,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("notifications") ? (
-        <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <section id="notifications" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Notifications</h2>
           <p className="mt-1 text-sm text-muted">Stored in localStorage; synced to Supabase table user_settings when configured.</p>
           <div className="mt-4 space-y-4">
@@ -288,7 +289,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("company") ? (
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <section id="company" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Company details</h2>
         <p className="mt-1 text-sm text-muted">Used on Purchase Order PDFs. Stored in this browser.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -384,7 +385,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("buildexact") ? (
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <section id="buildexact" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Buildexact</h2>
         <p className="mt-1 text-sm text-muted">
           API v3 uses your Buildxact login email and API key (same value in <code className="text-xs">Ocp-Apim-Subscription-Key</code> and login
@@ -539,7 +540,7 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {show("purchase-orders") ? (
-      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+      <section id="purchase-orders" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-primary">Purchase orders</h2>
         <p className="mt-1 text-sm text-muted">Prefix and default terms for PDF page 2.</p>
         <label className="mt-3 block text-sm">
@@ -584,19 +585,37 @@ export default function Settings({ section } = {}) {
       ) : null}
 
       {/* Google (Drive + Marketing Intelligence) */}
-      {show("google") ? <GoogleIntegrationSection status={status} /> : null}
-
-      {/* Meta (Instagram + Facebook Insights) */}
-      {show("meta") ? <MetaIntegrationSection status={status} /> : null}
-
-      {/* Resend (mailing list + CRM email) */}
-      {show("resend") ? <ResendIntegrationSection status={status} /> : null}
-
-      {show("workforce-rules") ? (
-        <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
+      {show("google") ? (
+        <div id="google" className="scroll-mt-24">
+          <GoogleIntegrationSection status={status} />
+        </div>
       ) : null}
 
-      {show("role-preview") ? <RolePreviewConsole /> : null}
+      {/* Meta (Instagram + Facebook Insights) */}
+      {show("meta") ? (
+        <div id="meta" className="scroll-mt-24">
+          <MetaIntegrationSection status={status} />
+        </div>
+      ) : null}
+
+      {/* Resend (mailing list + CRM email) */}
+      {show("resend") ? (
+        <div id="resend" className="scroll-mt-24">
+          <ResendIntegrationSection status={status} />
+        </div>
+      ) : null}
+
+      {show("workforce-rules") ? (
+        <div id="workforce-rules" className="scroll-mt-24">
+          <WorkforceSettingsSection onSaved={() => setSyncNote("Workforce settings saved.")} />
+        </div>
+      ) : null}
+
+      {show("role-preview") ? (
+        <div id="role-preview" className="scroll-mt-24">
+          <RolePreviewConsole />
+        </div>
+      ) : null}
     </div>
   );
 }
