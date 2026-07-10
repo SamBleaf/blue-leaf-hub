@@ -26,7 +26,8 @@ const REACTIVATION_MONTHS = [3, 6, 12];     // idle tiers, longest-first matched
 const MAX_PER_BUCKET = 25;                  // keep the digest short enough to be useful
 
 function digestRecipients() {
-  const raw = String(process.env.LEAD_DIGEST_RECIPIENTS || "sam@blueleafbuilding.com.au");
+  // Defaults to both directors; LEAD_DIGEST_RECIPIENTS (comma-separated) overrides.
+  const raw = String(process.env.LEAD_DIGEST_RECIPIENTS || "sam@blueleafbuilding.com.au,josh@blueleafbuilding.com.au");
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
