@@ -11,6 +11,7 @@ import FieldAppPane from "./FieldAppPane.jsx";
 import AICostWidget from "../../components/settings/AICostWidget.jsx";
 import DataCleanup from "../DataCleanup.jsx";
 import ProfilePane from "./ProfilePane.jsx";
+import EnquiryAckSettings from "../../components/settings/EnquiryAckSettings.jsx";
 
 // Maps a "component" kind sub.id → the element it renders. Kept here (rather than
 // in settingsNav.js) so the nav config stays plain data with no JSX/import weight.
@@ -25,6 +26,7 @@ const COMPONENT_MAP = {
   "ai-usage": () => <AICostWidget />,
   "data-cleanup": () => <DataCleanup />,
   profile: () => <ProfilePane />,
+  "enquiry-ack": () => <EnquiryAckSettings />,
 };
 
 // Renders one Settings-hub category: all of its role-permitted sub-sections,

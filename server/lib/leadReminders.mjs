@@ -290,30 +290,52 @@ export async function runLeadActionDigest({ dryRun = false, now = new Date() } =
 }
 
 // ── 1B — new-enquiry acknowledgement ──────────────────────────────────────────
-const ENQUIRY_ACK_SUBJECT = "We've received your enquiry — Blue Leaf Building";
-
-/** The one safe client-facing email. Copy is fixed; no pitch, no promises beyond the review. */
-export function buildEnquiryAck(lead) {
-  const to = String(lead.email || "").trim();
-  const first = String(lead.name || lead.first_name || "").trim().split(/\s+/)[0];
-  const greeting = first ? `Hi ${first},` : "Hi,";
-  const text = [
-    greeting,
+// The one safe client-facing email. Admin-editable in Settings (stored in user_settings under
+// crm_enquiry_ack); falls back to this approved default so it can never end up blank. {name} is
+// the only placeholder (→ the lead's first name, or "there").
+export const ENQUIRY_ACK_TEMPLATE_KEY = "crm_enquiry_ack";
+export const ENQUIRY_ACK_DEFAULTS = {
+  subject: "We've received your enquiry — Blue Leaf Building",
+  body: [
+    "Hi {name},",
     "",
     "Thanks, we've received your enquiry.",
     "",
     "Sam or Josh will review it and be in touch within one business day.",
     "",
     "Blue Leaf Building",
-  ].join("\n");
-  const html = `
-    <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17313d;font-size:15px;line-height:1.6;">
-      <p>${greeting}</p>
-      <p>Thanks, we've received your enquiry.</p>
-      <p>Sam or Josh will review it and be in touch within one business day.</p>
-      <p style="margin-top:18px;font-weight:600;color:#2E6B4F;">Blue Leaf Building</p>
-    </div>`;
-  return { to, subject: ENQUIRY_ACK_SUBJECT, text, html };
+  ].join("\n"),
+};
+
+/** Read the admin-editable ack template from user_settings; null → use ENQUIRY_ACK_DEFAULTS. */
+export async function loadEnquiryAckTemplate(sb) {
+  if (!sb) return null;
+  try {
+    const { data } = await sb.from("user_settings").select("value").eq("key", ENQUIRY_ACK_TEMPLATE_KEY).maybeSingle();
+    if (!data?.value) return null;
+    const t = JSON.parse(data.value);
+    if (t && typeof t === "object") return { subject: t.subject || "", body: t.body || "" };
+  } catch { /* malformed → fall through to defaults */ }
+  return null;
+}
+
+function ackTextToHtml(text) {
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const paras = String(text)
+    .split(/\n{2,}/)
+    .map((p) => `<p style="margin:0 0 12px;">${esc(p).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17313d;font-size:15px;line-height:1.6;">${paras}</div>`;
+}
+
+/** Build the ack from the (optional) saved template, else the default. Substitutes {name}. */
+export function buildEnquiryAck(lead, template = null) {
+  const to = String(lead.email || "").trim();
+  const first = String(lead.name || lead.first_name || "").trim().split(/\s+/)[0] || "there";
+  const subject = String(template?.subject || "").trim() || ENQUIRY_ACK_DEFAULTS.subject;
+  const bodyTpl = String(template?.body || "").trim() || ENQUIRY_ACK_DEFAULTS.body;
+  const text = bodyTpl.replace(/\{name\}/g, first);
+  return { to, subject, text, html: ackTextToHtml(text) };
 }
 
 /**
@@ -322,7 +344,8 @@ export function buildEnquiryAck(lead) {
  * Gated by ENQUIRY_AUTOACK_ENABLED at the call site — this just does the work.
  */
 export async function sendEnquiryAck(sb, lead, { dryRun = false } = {}) {
-  const ack = buildEnquiryAck(lead);
+  const template = await loadEnquiryAckTemplate(sb);
+  const ack = buildEnquiryAck(lead, template);
   if (!ack.to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ack.to)) {
     return { ok: false, skipped: true, reason: "no valid email" };
   }

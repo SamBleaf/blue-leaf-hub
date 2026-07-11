@@ -24,7 +24,7 @@ import { appendRfqRefToBody, rfqRefHeaders } from "./lib/rfqSendRef.mjs";
 import { randomUUID } from "crypto";
 import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
-import { runLeadActionDigest } from "./lib/leadReminders.mjs";
+import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQUIRY_ACK_TEMPLATE_KEY } from "./lib/leadReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
@@ -1696,6 +1696,46 @@ app.post("/api/sales/action-digest/preview", requireAuth, requireRole("admin"), 
     return res.json(result);
   } catch (err) {
     console.error("[sales/action-digest/preview]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// CRM Phase 1 — read/save the admin-editable enquiry acknowledgement template (user_settings).
+// GET returns the saved template (or the approved defaults) + the defaults + placeholders.
+app.get("/api/sales/enquiry-ack-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const saved = sb ? await loadEnquiryAckTemplate(sb) : null;
+    return res.json({
+      ok: true,
+      template: saved || ENQUIRY_ACK_DEFAULTS,
+      isDefault: !saved,
+      defaults: ENQUIRY_ACK_DEFAULTS,
+      placeholders: ["{name}"],
+    });
+  } catch (err) {
+    console.error("[sales/enquiry-ack-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// POST saves { subject, body }. Both required (a blank template would fall back to defaults, but we
+// reject blanks so "save" is never a silent no-op). Send an empty body via reset in the UI instead.
+app.post("/api/sales/enquiry-ack-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const subject = String(req.body?.subject || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!subject || !body) return res.status(400).json({ ok: false, error: "Subject and message are both required." });
+    const { error } = await sb.from("user_settings").upsert(
+      { key: ENQUIRY_ACK_TEMPLATE_KEY, value: JSON.stringify({ subject, body }), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/enquiry-ack-template POST]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
