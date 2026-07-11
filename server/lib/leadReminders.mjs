@@ -280,7 +280,9 @@ export async function runLeadActionDigest({ dryRun = false, now = new Date() } =
   }
 
   try {
-    const r = await sendPlainMail({ to: recipients.join(", "), subject, text, html });
+    // Pass the recipients ARRAY (not a comma-joined string) — Resend rejects a multi-address
+    // string; an array is the correct multi-recipient shape (nodemailer/SMTP also accept it).
+    const r = await sendPlainMail({ to: recipients, subject, text, html });
     return { ok: true, sent: true, transport: r?.transport, recipients, reactivated, total };
   } catch (e) {
     return { ok: false, sent: false, error: e?.message || String(e), reactivated, total };
