@@ -226,16 +226,47 @@ function renderHtml(d) {
   </div>`;
 }
 
+// A stable fingerprint of the actionable set (who + why + bucket + due day). The daily digest only
+// sends when this CHANGES from the last one sent — no point emailing the same list every morning.
+const DIGEST_SIG_KEY = "crm_digest_last_signature";
+
+function digestSignature(dg) {
+  const items = [];
+  const push = (tag, arr) => {
+    for (const l of arr) items.push(`${tag}:${l.id}:${l.action_type || ""}:${String(l.action_due_at || l.last_activity_at || "").slice(0, 10)}`);
+  };
+  push("u", dg.urgent); push("o", dg.overdue); push("d", dg.dueToday); push("r", dg.reactivation);
+  items.sort();
+  const s = items.join("|");
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${items.length}:${h.toString(16)}`;
+}
+
+async function loadLastDigestSignature(sb) {
+  try {
+    const { data } = await sb.from("user_settings").select("value").eq("key", DIGEST_SIG_KEY).maybeSingle();
+    return data?.value || "";
+  } catch { return ""; }
+}
+async function saveDigestSignature(sb, sig) {
+  try {
+    await sb.from("user_settings").upsert({ key: DIGEST_SIG_KEY, value: sig, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  } catch { /* best-effort */ }
+}
+
 /**
  * Build (and, unless dryRun, send + persist) the daily internal action digest.
- * @param {{ dryRun?: boolean, now?: Date }} opts
+ * Sends only when the actionable set changed since the last send (or force:true).
+ * @param {{ dryRun?: boolean, now?: Date, force?: boolean }} opts
  * @returns rendered digest + itemised buckets (always), plus send/write result when live.
  */
-export async function runLeadActionDigest({ dryRun = false, now = new Date() } = {}) {
+export async function runLeadActionDigest({ dryRun = false, now = new Date(), force = false } = {}) {
   const sb = getServiceSupabase();
   if (!sb) return { ok: false, skipped: true, reason: "Supabase not configured." };
 
   const d = await gatherDigest(sb, now);
+  const signature = digestSignature(d);
   const recipients = digestRecipients();
   const subject = `Leads today — ${summaryLine(d)}`;
   const text = renderText(d);
@@ -258,7 +289,7 @@ export async function runLeadActionDigest({ dryRun = false, now = new Date() } =
   const preview = { summary: summaryLine(d), recipients, subject, buckets };
 
   if (dryRun) {
-    return { ok: true, dryRun: true, total, ...preview, text, html };
+    return { ok: true, dryRun: true, total, signature, ...preview, text, html };
   }
 
   // ── live ─────────────────────────────────────────────────────────────────
@@ -273,19 +304,27 @@ export async function runLeadActionDigest({ dryRun = false, now = new Date() } =
   }
 
   if (total === 0) {
-    return { ok: true, sent: false, reason: "nothing due", reactivated, total };
+    // Nothing due — no email. Clear the stored fingerprint so the next real item always sends.
+    await saveDigestSignature(sb, "");
+    return { ok: true, sent: false, reason: "nothing due", reactivated, total, signature };
+  }
+  // Skip when the actionable set is unchanged since the last send — no daily-identical emails.
+  // `force` (manual trigger) overrides so a test send always goes.
+  if (!force && signature === (await loadLastDigestSignature(sb))) {
+    return { ok: true, sent: false, reason: "unchanged since last digest", reactivated, total, signature };
   }
   if (!recipients.length) {
-    return { ok: true, sent: false, reason: "no recipients configured", reactivated, total };
+    return { ok: true, sent: false, reason: "no recipients configured", reactivated, total, signature };
   }
 
   try {
     // Pass the recipients ARRAY (not a comma-joined string) — Resend rejects a multi-address
     // string; an array is the correct multi-recipient shape (nodemailer/SMTP also accept it).
     const r = await sendPlainMail({ to: recipients, subject, text, html });
-    return { ok: true, sent: true, transport: r?.transport, recipients, reactivated, total };
+    await saveDigestSignature(sb, signature);   // remember what we sent so we don't repeat it
+    return { ok: true, sent: true, transport: r?.transport, recipients, reactivated, total, signature };
   } catch (e) {
-    return { ok: false, sent: false, error: e?.message || String(e), reactivated, total };
+    return { ok: false, sent: false, error: e?.message || String(e), reactivated, total, signature };
   }
 }
 

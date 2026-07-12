@@ -1677,9 +1677,10 @@ app.post("/api/cron/rfq-reminders", requireCronSecretOrAdmin, async (_req, res) 
 // CRM Phase 1 (Batch 1) — daily internal action digest to Sam/Josh. LIVE run: sends only if
 // recipients are configured AND something is due; also persists the 3/6/12mo reactivation flags.
 // Same cron-secret/admin guard as the other reminders; rides the REMINDER_CRON daily tick.
-app.post("/api/cron/lead-actions", requireCronSecretOrAdmin, async (_req, res) => {
+app.post("/api/cron/lead-actions", requireCronSecretOrAdmin, async (req, res) => {
   try {
-    const result = await runLeadActionDigest({ dryRun: false });
+    // body { force:true } bypasses the unchanged-since-last-send skip (for a manual test send).
+    const result = await runLeadActionDigest({ dryRun: false, force: req.body?.force === true });
     return res.json(result);
   } catch (err) {
     console.error("[cron/lead-actions]", err);
