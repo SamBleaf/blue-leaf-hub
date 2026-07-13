@@ -53,6 +53,7 @@ const MarketingRouter = React.lazy(() => import("./components/marketing/Marketin
 import Workforce from "./pages/Workforce.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
 import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
+import WorkerRequestDayOff from "./pages/worker/WorkerRequestDayOff.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
 import WorkerWeek from "./pages/worker/WorkerWeek.jsx";
 import CarpentryDashboard from "./pages/CarpentryDashboard.jsx";
@@ -109,6 +110,7 @@ export default function App() {
             />
             <Route path="/worker" element={<WorkerHome />} />
             <Route path="/worker/timesheet/log" element={<WorkerLogHours />} />
+            <Route path="/worker/day-off" element={<WorkerRequestDayOff />} />
             <Route path="/worker/tasks" element={<WorkerTasks />} />
             <Route path="/worker/week" element={<WorkerWeek />} />
             {UiReviewIndex && (

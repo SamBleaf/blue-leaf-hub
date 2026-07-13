@@ -7,6 +7,7 @@ import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
+import TimeOffApprovalsTab from "./workforce/TimeOffApprovalsTab.jsx";
 import WorkforceKpiStrip from "../components/workforce/WorkforceKpiStrip.jsx";
 import TimesheetDetailModal from "../components/workforce/TimesheetDetailModal.jsx";
 
@@ -1089,7 +1090,7 @@ function SnapshotTab({ role }) {
   );
 }
 
-const TABS = ["Approvals", "Snapshot", "Mass Fill", "History", "Team"];
+const TABS = ["Approvals", "Time off", "Snapshot", "Mass Fill", "History", "Team"];
 
 export default function Workforce() {
   const { role } = useAuth();
@@ -1164,6 +1165,7 @@ export default function Workforce() {
       </div>
 
       {shownTab === "Approvals" && <ApprovalsTab role={role} />}
+      {shownTab === "Time off" && <TimeOffApprovalsTab role={role} />}
       {shownTab === "Snapshot" && <SnapshotTab role={role} />}
       {shownTab === "Mass Fill" && <MassFillTab />}
       {shownTab === "History" && <HistoryTab role={role} />}

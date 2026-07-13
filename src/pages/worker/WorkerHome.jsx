@@ -256,6 +256,22 @@ export default function WorkerHome() {
           )}
         </div>
 
+        {/* Time off */}
+        <button
+          type="button"
+          onClick={() => navigate("/worker/day-off")}
+          className="w-full rounded-card bg-white shadow-sm border border-hairline p-4 mb-3 flex items-center justify-between text-left"
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-primary shrink-0">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            Request time off
+          </span>
+          <span className="text-primary text-sm font-medium">→</span>
+        </button>
+
         {/* Weekly hours — tasks live on the Today card + the Tasks tab now */}
         <p className="text-center text-sm text-muted mt-4">
           This week: <span className="font-semibold text-ink">{weekly_hours} hrs</span>

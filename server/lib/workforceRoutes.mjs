@@ -5,7 +5,7 @@ import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, build
 import { getCostModel, loadedRate } from "./costModelService.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
-import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey, isStoragePath } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
@@ -2707,6 +2707,196 @@ export function registerWorkforceRoutes(app) {
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", 'attachment; filename="timesheets-export.csv"');
     res.send(csv);
+  });
+
+  // ── Day-off requests (worker + admin) — mig 139 ─────────────────────────────
+  // Worker submits a DATE RANGE (date_from…date_to inclusive; single day = both
+  // equal) → lands 'submitted' → Workforce Approvals "Time off" tab reviews it.
+  // On approve, each day in the range becomes a workforce_employee_rdo_dates row
+  // (mig 119) — reuses the existing RDO look, zero planner-code change. The
+  // created row ids are tracked on the request (applied_rdo_ids) so a later
+  // reject can delete exactly those rows and clear the trail.
+  const MAX_DAY_OFF_RANGE_DAYS = 60;
+
+  function isValidYmd(v) {
+    if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const [y, m, d] = v.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() + 1 === m && dt.getUTCDate() === d;
+  }
+
+  // Inclusive list of YYYY-MM-DD dates from dateFrom to dateTo. Local (noon-anchored)
+  // date math via addDaysYmd — no UTC/TZ drift. guard caps runaway loops defensively;
+  // callers validate the range size (MAX_DAY_OFF_RANGE_DAYS) before this ever runs.
+  function enumerateDateRange(dateFrom, dateTo) {
+    const out = [];
+    let cur = dateFrom;
+    let guard = 0;
+    while (cur <= dateTo && guard < 400) {
+      out.push(cur);
+      cur = addDaysYmd(cur, 1);
+      guard++;
+    }
+    return out;
+  }
+
+  // Shared by worker create + admin edit. Returns an error message, or null if valid.
+  function validateDayOffRange(dateFrom, dateTo) {
+    if (!isValidYmd(dateFrom) || !isValidYmd(dateTo)) return "dateFrom and dateTo must be valid dates (YYYY-MM-DD).";
+    if (dateTo < dateFrom) return "dateTo must be on or after dateFrom.";
+    if (enumerateDateRange(dateFrom, dateTo).length > MAX_DAY_OFF_RANGE_DAYS) return `Requests cannot span more than ${MAX_DAY_OFF_RANGE_DAYS} days.`;
+    return null;
+  }
+
+  // Worker: submit a request. Employee is ALWAYS resolved server-side from the
+  // caller's token/session — never trust an employee_id in the body.
+  app.post("/api/worker/day-off-requests", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+
+    const dateFrom = String(req.body.dateFrom || "").trim();
+    const dateTo = String(req.body.dateTo || "").trim();
+    const rangeError = validateDayOffRange(dateFrom, dateTo);
+    if (rangeError) return err(res, 400, rangeError);
+    const reason = req.body.reason ? String(req.body.reason).trim() : null;
+
+    const { data, error } = await sb.from("workforce_day_off_requests").insert({
+      employee_id: emp.id,
+      date_from: dateFrom,
+      date_to: dateTo,
+      reason: reason || null,
+      status: "submitted",
+    }).select().single();
+    if (error) {
+      if (plannerTableMissing(error)) return err(res, 503, "Time-off requests need migration 139 applied", "MIGRATION_PENDING");
+      return err(res, 500, translateDbError(error));
+    }
+    ok(res, { request: rowToCamel(data) });
+  });
+
+  // Worker: own requests ONLY — never another employee's.
+  app.get("/api/worker/day-off-requests", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+
+    const { data, error } = await sb.from("workforce_day_off_requests")
+      .select("*")
+      .eq("employee_id", emp.id)
+      .order("submitted_at", { ascending: false });
+    if (error) {
+      if (plannerTableMissing(error)) return ok(res, { requests: [] });
+      return err(res, 500, translateDbError(error));
+    }
+    ok(res, { requests: rowsToCamel(data) });
+  });
+
+  // Admin/supervisor: list requests (defaults to pending) with the employee name joined.
+  app.get("/api/workforce/day-off-requests", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    let q = sb.from("workforce_day_off_requests").select("*, employees!employee_id(id, name)");
+    q = req.query.status ? q.eq("status", req.query.status) : q.eq("status", "submitted");
+    const { data, error } = await q.order("submitted_at", { ascending: true });
+    if (error) {
+      if (plannerTableMissing(error)) return ok(res, { requests: [] });
+      return err(res, 500, translateDbError(error));
+    }
+    ok(res, { requests: rowsToCamel(data) });
+  });
+
+  // Admin only: approve — writes one RDO row per day in the range (skips a date that
+  // already has an RDO for this employee rather than failing the whole approval).
+  app.post("/api/workforce/day-off-requests/:id/approve", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid request id.");
+    const { data: reqRow, error: loadErr } = await sb.from("workforce_day_off_requests").select("*").eq("id", req.params.id).maybeSingle();
+    if (loadErr) {
+      if (plannerTableMissing(loadErr)) return err(res, 503, "Time-off requests need migration 139 applied", "MIGRATION_PENDING");
+      return err(res, 500, translateDbError(loadErr));
+    }
+    if (!reqRow) return err(res, 404, "Time-off request not found.", "NOT_FOUND");
+    if (reqRow.status !== "submitted") return err(res, 409, "Only pending requests can be approved.", "NOT_SUBMITTED");
+
+    const dates = enumerateDateRange(reqRow.date_from, reqRow.date_to);
+    const appliedIds = [];
+    for (const rdoDate of dates) {
+      const { data: rdoRow, error: rdoErr } = await sb.from("workforce_employee_rdo_dates").insert({
+        employee_id: reqRow.employee_id,
+        rdo_date: rdoDate,
+        note: "Approved leave",
+        created_by: req.caller.id,
+      }).select("id").single();
+      if (rdoErr) {
+        if (rdoErr.code === "23505") continue; // that date is already an RDO for this employee — skip, don't fail
+        if (plannerTableMissing(rdoErr)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING");
+        return err(res, 500, translateDbError(rdoErr));
+      }
+      if (rdoRow?.id) appliedIds.push(rdoRow.id);
+    }
+
+    const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update({
+      status: "approved",
+      applied_rdo_ids: appliedIds,
+      reviewed_by: req.caller.id,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (updErr) return err(res, 500, translateDbError(updErr));
+    ok(res, { request: rowToCamel(updated) });
+  });
+
+  // Admin/supervisor: reject — if it was approved, delete the RDO rows it created first.
+  app.post("/api/workforce/day-off-requests/:id/reject", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid request id.");
+    const { data: reqRow, error: loadErr } = await sb.from("workforce_day_off_requests").select("*").eq("id", req.params.id).maybeSingle();
+    if (loadErr) {
+      if (plannerTableMissing(loadErr)) return err(res, 503, "Time-off requests need migration 139 applied", "MIGRATION_PENDING");
+      return err(res, 500, translateDbError(loadErr));
+    }
+    if (!reqRow) return err(res, 404, "Time-off request not found.", "NOT_FOUND");
+
+    if (reqRow.status === "approved" && Array.isArray(reqRow.applied_rdo_ids) && reqRow.applied_rdo_ids.length) {
+      const { error: delErr } = await sb.from("workforce_employee_rdo_dates").delete().in("id", reqRow.applied_rdo_ids);
+      if (delErr) return err(res, 500, translateDbError(delErr));
+    }
+
+    const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update({
+      status: "rejected",
+      rejection_notes: req.body.notes || null,
+      applied_rdo_ids: [],
+      reviewed_by: req.caller.id,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (updErr) return err(res, 500, translateDbError(updErr));
+    ok(res, { request: rowToCamel(updated) });
+  });
+
+  // Admin/supervisor: edit dates/reason — only while still pending.
+  app.patch("/api/workforce/day-off-requests/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid request id.");
+    const { data: reqRow, error: loadErr } = await sb.from("workforce_day_off_requests").select("*").eq("id", req.params.id).maybeSingle();
+    if (loadErr) {
+      if (plannerTableMissing(loadErr)) return err(res, 503, "Time-off requests need migration 139 applied", "MIGRATION_PENDING");
+      return err(res, 500, translateDbError(loadErr));
+    }
+    if (!reqRow) return err(res, 404, "Time-off request not found.", "NOT_FOUND");
+    if (reqRow.status !== "submitted") return err(res, 409, "Only pending requests can be edited.", "NOT_SUBMITTED");
+
+    const dateFrom = req.body.dateFrom !== undefined ? String(req.body.dateFrom || "").trim() : reqRow.date_from;
+    const dateTo = req.body.dateTo !== undefined ? String(req.body.dateTo || "").trim() : reqRow.date_to;
+    const rangeError = validateDayOffRange(dateFrom, dateTo);
+    if (rangeError) return err(res, 400, rangeError);
+
+    const update = { date_from: dateFrom, date_to: dateTo, updated_at: new Date().toISOString() };
+    if ("reason" in req.body) update.reason = req.body.reason ? String(req.body.reason).trim() : null;
+
+    const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update(update).eq("id", req.params.id).select().single();
+    if (updErr) return err(res, 500, translateDbError(updErr));
+    ok(res, { request: rowToCamel(updated) });
   });
 
   console.log("[workforce] routes registered");

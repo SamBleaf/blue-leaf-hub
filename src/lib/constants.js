@@ -264,6 +264,18 @@ export const TIMESHEET_STATUSES = {
   REJECTED:  "rejected",
 };
 
+export const DAY_OFF_REQUEST_STATUSES = {
+  SUBMITTED: "submitted",
+  APPROVED:  "approved",
+  REJECTED:  "rejected",
+};
+
+export const DAY_OFF_REQUEST_STATUS_LABELS = {
+  submitted: "Pending",
+  approved:  "Approved",
+  rejected:  "Rejected",
+};
+
 export const EMPLOYMENT_TYPES = {
   FULL_TIME: "full_time",
   PART_TIME: "part_time",
