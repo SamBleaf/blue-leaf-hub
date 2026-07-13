@@ -1922,6 +1922,103 @@ function CostsTab({ jobId }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+// ── Margin gauge (labour 25% / material 20%) ───────────────────────────────────
+// Margin-first view. The bar is what we CHARGE (sell ex-GST); the fill is what the
+// work is really costing (real timesheets + real invoices — never the stale estimate
+// line cost). The green tail is the margin we keep; the dashed line is where cost
+// would start eating it. Targets: 25% labour, 20% material. Projected final margin
+// (needs task-level % complete) is the next build — this shows spend-vs-allowable now.
+const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
+const GAUGE_COLOR = { labour: "#006c9b", material: "#D4A24C", margin: "#2E6B4F", over: "#DC2626" };
+const clampPct = (n) => Math.max(0, Math.min(100, n));
+
+function MarginThermometer({ label, sell, actual, target, color }) {
+  const s = Number(sell) || 0;
+  const a = Number(actual) || 0;
+  const allowable = s * (1 - target);
+  const marginTarget = s * target;
+  const boundary = (1 - target) * 100;                 // where cost starts eating margin
+  const costPct = clampPct(s > 0 ? (a / s) * 100 : 0);
+  const onBudget = Math.min(costPct, boundary);
+  const headroom = Math.max(0, boundary - costPct);
+  const marginEaten = clampPct(Math.max(0, costPct - boundary));
+  const marginLeft = Math.max(0, 100 - Math.max(costPct, boundary));
+  const consumed = allowable > 0 ? a / allowable : 0;
+  const state = a === 0 ? "idle" : consumed >= 1 ? "over" : consumed >= 0.9 ? "warn" : "ok";
+  const badge = {
+    idle: { cls: "bg-page text-muted",       t: "Not started" },
+    ok:   { cls: "bg-accent/10 text-accent", t: "Margin intact" },
+    warn: { cls: "bg-warning/10 text-warning", t: "Approaching limit" },
+    over: { cls: "bg-red-50 text-red-600",   t: "Eating margin" },
+  }[state];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />
+          <span className="text-sm font-semibold text-ink">{label}</span>
+          <span className="text-xs text-muted">· target {Math.round(target * 100)}%</span>
+        </div>
+        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.t}</span>
+      </div>
+      <div className="relative h-8 rounded-lg overflow-hidden border border-hairline flex">
+        <div style={{ width: `${onBudget}%`, background: color }} />
+        <div style={{ width: `${headroom}%`, background: `${color}22` }} />
+        <div style={{ width: `${marginEaten}%`, background: GAUGE_COLOR.over }} />
+        <div className="flex items-center justify-center" style={{ width: `${marginLeft}%`, background: `${GAUGE_COLOR.margin}33` }}>
+          {marginLeft > 12 && <span className="text-[10px] font-bold" style={{ color: GAUGE_COLOR.margin }}>{Math.round(target * 100)}% margin</span>}
+        </div>
+        <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-ink/40" style={{ left: `${boundary}%` }} />
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-[11px] text-muted">
+        <span><span className="font-semibold text-ink">{fmt$(a)}</span> spent{allowable > 0 ? ` · ${Math.round((a / allowable) * 100)}% of allowable` : ""}</span>
+        <span>Allowable cost <span className="font-semibold text-ink">{fmt$(allowable)}</span></span>
+        <span>Charging <span className="font-semibold text-ink">{fmt$(s)}</span></span>
+        <span>Margin <span className="font-semibold" style={{ color: GAUGE_COLOR.margin }}>{fmt$(marginTarget)}</span></span>
+      </div>
+    </div>
+  );
+}
+
+function MarginGauge({ totals }) {
+  const labourSell = Number(totals.labourBudget) || 0;
+  const materialSell = Number(totals.materialBudget) || 0;
+  const totalSell = labourSell + materialSell;
+  const targetProfit = labourSell * MARGIN_TARGET.labour + materialSell * MARGIN_TARGET.material;
+  const blendedPct = totalSell > 0 ? (targetProfit / totalSell) * 100 : null;
+  const allowableTot = totalSell - targetProfit;
+  const actualTot = Number(totals.totalActual) || 0;
+  const over = actualTot > allowableTot;
+
+  return (
+    <div className="rounded-lg border border-hairline bg-surface p-4 space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs text-muted">Target margin (blended)</p>
+          <p className="text-2xl font-bold text-ink leading-tight">{fmtPct(blendedPct)}</p>
+          <p className="text-xs text-muted">{fmt$(targetProfit)} profit on {fmt$(totalSell)} charged</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted">Cost so far</p>
+          <p className="text-lg font-bold text-ink">{fmt$(actualTot)}</p>
+          <p className="text-xs text-muted">of {fmt$(allowableTot)} allowable</p>
+        </div>
+        <div>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${over ? "bg-red-50 text-red-600" : "bg-accent/10 text-accent"}`}>
+            {over ? "Over allowable — margin at risk" : "On target — margin protected"}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-4">
+        <MarginThermometer label="Labour" sell={labourSell} actual={Number(totals.labourActual) || 0} target={MARGIN_TARGET.labour} color={GAUGE_COLOR.labour} />
+        <MarginThermometer label="Material" sell={materialSell} actual={Number(totals.materialActual) || 0} target={MARGIN_TARGET.material} color={GAUGE_COLOR.material} />
+      </div>
+      <p className="text-[11px] text-muted">Bar = what we charge · fill = real cost so far (timesheets + invoices, not the estimate) · green = margin kept · dashed line = where cost starts eating margin.</p>
+    </div>
+  );
+}
+
 // ── Budget Tab ────────────────────────────────────────────────────────────────
 
 function BudgetTab({ jobId }) {
@@ -1996,19 +2093,7 @@ function BudgetTab({ jobId }) {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          ["Labour budget", t.labourBudget],
-          ["Labour actual", t.labourActual],
-          ["Material budget", t.materialBudget],
-          ["Material actual", t.materialActual],
-        ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-hairline p-3">
-            <p className="text-xs text-muted">{label}</p>
-            <p className="text-lg font-bold text-ink">{fmt$(val)}</p>
-          </div>
-        ))}
-      </div>
+      <MarginGauge totals={t} />
 
       {data.burn?.available ? (
         <div className="rounded-lg border border-hairline bg-page p-4">
