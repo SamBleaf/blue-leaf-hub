@@ -294,6 +294,7 @@ function ApprovalsTab({ role }) {
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Employee</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Project</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Task</th>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Date</th>
                 <th className="px-3 py-2 text-right text-xs font-semibold text-muted">Hours</th>
                 {isDirector && <th className="px-3 py-2 text-right text-xs font-semibold text-muted">Cost</th>}
@@ -321,6 +322,18 @@ function ApprovalsTab({ role }) {
                       <p className="text-xs text-muted">{ts.employees?.trade}</p>
                     </td>
                     <td className="px-3 py-3 text-muted">{ts.carpentry_jobs ? <span>{ts.carpentry_jobs.address || ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.reference})</span></span> : (ts.projects?.address || "—")}</td>
+                    <td className="px-3 py-3">
+                      {(ts.timesheet_entries || []).length === 0 ? <span className="text-muted">—</span> : (
+                        <div className="space-y-0.5">
+                          {(ts.timesheet_entries || []).map(e => (
+                            <div key={e.id} className="text-xs text-ink whitespace-nowrap">
+                              {e.taskLabel || TASK_LABELS[e.task_category] || e.task_category}
+                              {(ts.timesheet_entries.length > 1) && <span className="text-muted"> · {e.hours}h</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-muted">{fmtDate(ts.date)}</td>
                     <td className="px-3 py-3 text-right">{totalHrs}h</td>
                     {isDirector && (
@@ -350,7 +363,7 @@ function ApprovalsTab({ role }) {
                   </tr>,
                   expanded2 && (
                     <tr key={ts.id + "-detail"}>
-                      <td colSpan={isDirector ? 8 : 7} className="px-6 py-4 bg-gray-50 border-t border-hairline">
+                      <td colSpan={isDirector ? 9 : 8} className="px-6 py-4 bg-gray-50 border-t border-hairline">
                         {/* Carpentry job attribution */}
                         <div className="flex items-center gap-3 mb-3 pb-3 border-b border-hairline">
                           <label className="text-xs font-semibold text-muted whitespace-nowrap">Carpentry Job</label>

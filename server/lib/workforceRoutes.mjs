@@ -39,6 +39,21 @@ export const TASK_LABELS = {
 
 const TASK_CATEGORIES = Object.keys(TASK_LABELS);
 
+// Display label for a timesheet entry: the chosen sub-task (e.g. "Wall framing") when one was picked,
+// else the main category. Lets the Approvals table show tasks inline without expanding each row.
+function taskLabelForEntry(e) {
+  const li = e?.carpentry_budget_line_items;
+  if (e?.budget_line_item_id && li?.canonical_key) {
+    const opt = catalogueFor({ parentTaskCategory: e.task_category, costType: "labour" }).find((o) => o.key === li.canonical_key);
+    return opt?.label || li.description || li.canonical_key;
+  }
+  return TASK_LABELS[e?.task_category] || e?.task_category || "—";
+}
+function attachTaskLabels(timesheets) {
+  for (const ts of timesheets || []) for (const e of ts.timesheet_entries || []) e.taskLabel = taskLabelForEntry(e);
+  return timesheets;
+}
+
 // ── Per-entry hours validation (deployment hardening) ─────────────────────────
 // The client clamps hours to 0.5–24, but the server is the system of record and
 // must enforce it independently. Rejects NaN/Infinity/null/undefined/non-numeric
@@ -787,11 +802,11 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description))")
       .eq("status", "submitted")
       .order("submitted_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    res.json({ ok: true, timesheets: data });
+    res.json({ ok: true, timesheets: attachTaskLabels(data) });
   });
 
   app.get("/api/workforce/timesheets", requireAuth, async (req, res) => {
