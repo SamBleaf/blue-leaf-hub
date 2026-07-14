@@ -3,6 +3,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, buildexactCompleteOrdersEnabled, isPurchaseOrderComplete, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
 import { getCostModel, loadedRate } from "./costModelService.mjs";
+import { catalogueFor } from "./carpentrySubtaskDictionary.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
@@ -2141,11 +2142,19 @@ export function registerWorkforceRoutes(app) {
       await sb.from("timesheet_entries").delete().eq("timesheet_id", timesheetId);
     }
 
+    // P3: sub-task allocation — only accept budget_line_item_id values that belong to THIS carpentry
+    // job (guards cross-job ids + FK errors). Any other value falls back to null (rolls to the category).
+    let validLineIds = null;
+    if (carpentry_job_id && entries.some(e => e.budget_line_item_id)) {
+      const { data: liRows } = await sb.from("carpentry_budget_line_items").select("id").eq("job_id", carpentry_job_id);
+      validLineIds = new Set((liRows || []).map(r => r.id));
+    }
     // Insert entries
     const entryRows = entries.map(e => ({
       timesheet_id: timesheetId,
       employee_id: emp.id,
       task_category: e.task_category,
+      budget_line_item_id: (validLineIds && e.budget_line_item_id && validLineIds.has(e.budget_line_item_id)) ? e.budget_line_item_id : null,
       phase: TASK_PHASE_MAP[e.task_category] || "general",
       hours: Number(e.hours),
       overtime_hours: 0,
@@ -2156,6 +2165,43 @@ export function registerWorkforceRoutes(app) {
     if (entryErr) return res.status(500).json({ ok: false, error: translateDbError(entryErr) });
 
     res.json({ ok: true, timesheet_id: timesheetId });
+  });
+
+  // Job's confirmed sub-tasks for the two-level PWA timesheet picker — grouped by the parent
+  // task_category. One option per canonical_key (distinct sub-task), with a representative line-item
+  // id for the worker's time to attach to. Labour only; fail-soft if migration 140 isn't applied.
+  app.get("/api/worker/jobs/:id/subtasks", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    const jobId = String(req.params.id || "");
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.");
+    try {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (!vis.error && !workerMaySeeJob(vis, jobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+      const { data: rows, error } = await sb
+        .from("carpentry_budget_line_items")
+        .select("id, task_category, canonical_key, description, sort_order")
+        .eq("job_id", jobId).eq("status", "confirmed")
+        .not("task_category", "is", null).not("canonical_key", "is", null)
+        .order("sort_order");
+      if (error) return ok(res, { subtasks: {} }); // table missing → no sub-tasks (fail-soft)
+      const byCat = {};
+      for (const r of rows || []) {
+        const m = (byCat[r.task_category] ||= new Map());
+        if (!m.has(r.canonical_key)) {
+          const opt = catalogueFor({ parentTaskCategory: r.task_category, costType: "labour" }).find((o) => o.key === r.canonical_key);
+          m.set(r.canonical_key, { key: r.canonical_key, label: opt?.label || r.description || r.canonical_key, budgetLineItemId: r.id });
+        }
+      }
+      const subtasks = {};
+      for (const [cat, m] of Object.entries(byCat)) subtasks[cat] = [...m.values()];
+      return ok(res, { subtasks });
+    } catch (e) {
+      console.error("[worker/jobs subtasks]", e);
+      return err(res, 502, translateDbError(e));
+    }
   });
 
   // Recent timesheets (for the worker's "My week" view — spot missing days).
@@ -2183,7 +2229,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    const { data } = await sb.from("timesheets").select("*, timesheet_entries(id, task_category, phase, hours, notes, completion_photo_url)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
+    const { data } = await sb.from("timesheets").select("*, timesheet_entries(id, task_category, budget_line_item_id, phase, hours, notes, completion_photo_url)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
     res.json({ ok: true, timesheet: data || null });
   });
 
