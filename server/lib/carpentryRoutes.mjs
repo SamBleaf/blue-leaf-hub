@@ -1422,11 +1422,13 @@ export function registerCarpentryRoutes(app) {
         };
       });
 
-      // Upsert by (cost_type, category_name) so existing lines KEEP their id on re-import — this
-      // preserves any carpentry_job_costs tagged to them (D5). Without this, a delete+insert would
-      // null every cost's carpentry_job_budget_id (ON DELETE SET NULL) and silently reset per-category
-      // material actuals. Lines no longer in the estimate are removed.
-      const keyOf = (r) => `${r.cost_type}:${String(r.category_name).trim().toLowerCase()}`;
+      // Upsert by category_name — matching the DB UNIQUE(job_id, category_name) — so existing lines
+      // KEEP their id on re-import, preserving any carpentry_job_costs tagged to them (D5). Keying on
+      // category_name ALONE (not cost_type:name) is deliberate: if classifyCostType flips a category
+      // between imports (e.g. a rename gains/loses "supply"), a composite key would miss the existing
+      // row, take the INSERT branch, and trip a 23505 on (job_id, category_name). Name-only → UPDATE in
+      // place (cost_type + workforce_task_category get corrected). Lines no longer in the estimate are removed.
+      const keyOf = (r) => String(r.category_name).trim().toLowerCase();
       const { data: existing } = await sb
         .from("carpentry_job_budgets").select("id, category_name, cost_type").eq("job_id", jobId);
       const existingByKey = new Map((existing || []).map((e) => [keyOf(e), e.id]));
@@ -1524,6 +1526,21 @@ export function registerCarpentryRoutes(app) {
         labourByTask[e.task_category] = (labourByTask[e.task_category] || 0) + Number(e.cost_amount || 0);
         hoursByTask[e.task_category] = (hoursByTask[e.task_category] || 0) + Number(e.hours || 0);
       }
+      // P1 (earned value): task-completion % per labour category — done/total of site_tasks for this
+      // job, grouped by category (the shared 8-key spine). Excludes 'wont_do' from the denominator so a
+      // parked task can't cap completion below 100% forever. This is the % complete that turns
+      // spend-so-far into a projected final margin. Labour only — material has no task signal.
+      const { data: siteTasks } = await sb
+        .from("site_tasks").select("category, status").eq("carpentry_job_id", jobId);
+      const taskDone = {}, taskTotal = {};
+      for (const t of siteTasks || []) {
+        if (t.status === "wont_do") continue;
+        taskTotal[t.category] = (taskTotal[t.category] || 0) + 1;
+        if (t.status === "done") taskDone[t.category] = (taskDone[t.category] || 0) + 1;
+      }
+      // Fraction 0..1, or null when the category has no counted tasks (can't project).
+      const pctCompleteFor = (cat) => (taskTotal[cat] > 0 ? taskDone[cat] / taskTotal[cat] : null);
+
       const cm = await getCostModel(sb); // company cost model (null until mig 090 + sync)
 
       const { data: costRows } = await sb.from("carpentry_job_costs").select("*").eq("job_id", jobId);
@@ -1541,6 +1558,12 @@ export function registerCarpentryRoutes(app) {
           ? round2(labourByTask[b.workforce_task_category] || 0)
           : round2(materialActualByLine[b.id] || 0); // D5: per-line material actuals from tagged costs
         const actualHours = isLabour ? (hoursByTask[b.workforce_task_category] || 0) : 0;
+        // P1: earned-value projection for this line — labour only (material has no completion signal).
+        // projectedCost = actual ÷ %complete; projectedMargin = (sell − projectedCost) / sell.
+        const pctComplete = isLabour ? pctCompleteFor(b.workforce_task_category) : null;
+        const projectedCost = pctComplete > 0 ? round2(actual / pctComplete) : null;
+        const projectedMarginPct = (pctComplete > 0 && budget > 0)
+          ? round2(((budget - projectedCost) / budget) * 100) : null;
         return {
           id: b.id,
           categoryName: b.category_name,
@@ -1551,6 +1574,10 @@ export function registerCarpentryRoutes(app) {
           variance: round2(budget - actual),
           // P3: profitable-days + live actuals per labour category (null until cost model synced)
           burn: isLabour ? burnForLine(budget, actual, actualHours, cm) : null,
+          // P1: null unless this is a labour line with counted tasks
+          pctComplete,          // fraction 0..1 or null
+          projectedCost,        // $ or null
+          projectedMarginPct,   // percent (e.g. 24.3) or null
         };
       });
 
@@ -1563,6 +1590,25 @@ export function registerCarpentryRoutes(app) {
         materialBudget, materialActual: materialActualTotal,
         totalBudget: round2(labourBudget + materialBudget),
         totalActual: round2(labourActual + materialActualTotal),
+      };
+      // P1: job-level LABOUR projection — aggregate % complete across DISTINCT labour task categories
+      // (shared categories not double-counted), then project final labour cost + margin. Material is
+      // excluded (guardrail #4 — no task signal; its thermometer stays spend-vs-allowable).
+      const labourCats = [...new Set((budgets || [])
+        .filter((b) => b.cost_type === "labour" && b.workforce_task_category)
+        .map((b) => b.workforce_task_category))];
+      let projDone = 0, projTotal = 0;
+      for (const cat of labourCats) { projDone += taskDone[cat] || 0; projTotal += taskTotal[cat] || 0; }
+      const labourPct = projTotal > 0 ? projDone / projTotal : null;
+      const labourProjectedCost = labourPct > 0 ? round2(labourActual / labourPct) : null;
+      totals.projection = {
+        available: labourPct != null,
+        labourPctComplete: labourPct,                    // fraction 0..1 or null
+        labourProjectedCost,                             // $ or null
+        labourProjectedMarginPct: (labourPct > 0 && labourBudget > 0)
+          ? round2(((labourBudget - labourProjectedCost) / labourBudget) * 100) : null,
+        labourTasksDone: projDone,
+        labourTasksTotal: projTotal,
       };
       // P3/P5: job-level burn-rate — how many full-team days the labour budget supports (the
       // schedule guardrail) + live labour margin. Null-safe when the cost model isn't synced.

@@ -1932,11 +1932,10 @@ const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
 const GAUGE_COLOR = { labour: "#006c9b", material: "#D4A24C", margin: "#2E6B4F", over: "#DC2626" };
 const clampPct = (n) => Math.max(0, Math.min(100, n));
 
-function MarginThermometer({ label, sell, actual, target, color }) {
+function MarginThermometer({ label, sell, actual, target, color, projectedCost = null, pctComplete = null }) {
   const s = Number(sell) || 0;
   const a = Number(actual) || 0;
   const allowable = s * (1 - target);
-  const marginTarget = s * target;
   const boundary = (1 - target) * 100;                 // where cost starts eating margin
   const costPct = clampPct(s > 0 ? (a / s) * 100 : 0);
   const onBudget = Math.min(costPct, boundary);
@@ -1945,12 +1944,22 @@ function MarginThermometer({ label, sell, actual, target, color }) {
   const marginLeft = Math.max(0, 100 - Math.max(costPct, boundary));
   const consumed = allowable > 0 ? a / allowable : 0;
   const state = a === 0 ? "idle" : consumed >= 1 ? "over" : consumed >= 0.9 ? "warn" : "ok";
-  const badge = {
+  const spendBadge = {
     idle: { cls: "bg-page text-muted",       t: "Not started" },
     ok:   { cls: "bg-accent/10 text-accent", t: "Margin intact" },
     warn: { cls: "bg-warning/10 text-warning", t: "Approaching limit" },
     over: { cls: "bg-red-50 text-red-600",   t: "Eating margin" },
   }[state];
+
+  // P1: projected final margin, from % work complete (projectedCost = actual ÷ %complete). Only when supplied.
+  const hasProj = projectedCost != null && s > 0;
+  const projPct = hasProj ? clampPct((projectedCost / s) * 100) : null;
+  const projMarginPct = hasProj ? ((s - projectedCost) / s) * 100 : null;
+  const projState = !hasProj ? null
+    : projMarginPct >= target * 100 ? "ok"
+    : projMarginPct >= target * 100 - 5 ? "warn" : "over";
+  const projBadgeCls = { ok: "bg-accent/10 text-accent", warn: "bg-warning/10 text-warning", over: "bg-red-50 text-red-600" }[projState];
+  const markerColor = hasProj && projPct > boundary ? GAUGE_COLOR.over : GAUGE_COLOR.margin;
 
   return (
     <div>
@@ -1960,7 +1969,14 @@ function MarginThermometer({ label, sell, actual, target, color }) {
           <span className="text-sm font-semibold text-ink">{label}</span>
           <span className="text-xs text-muted">· target {Math.round(target * 100)}%</span>
         </div>
-        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.t}</span>
+        <div className="flex items-center gap-1.5">
+          {hasProj && (
+            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${projBadgeCls}`} title="Projected final margin at current burn">
+              Proj. {fmtPct(projMarginPct)}
+            </span>
+          )}
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${spendBadge.cls}`}>{spendBadge.t}</span>
+        </div>
       </div>
       <div className="relative h-8 rounded-lg overflow-hidden border border-hairline flex">
         <div style={{ width: `${onBudget}%`, background: color }} />
@@ -1970,12 +1986,19 @@ function MarginThermometer({ label, sell, actual, target, color }) {
           {marginLeft > 12 && <span className="text-[10px] font-bold" style={{ color: GAUGE_COLOR.margin }}>{Math.round(target * 100)}% margin</span>}
         </div>
         <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-ink/40" style={{ left: `${boundary}%` }} />
+        {hasProj && (
+          <div className="absolute top-0 bottom-0" style={{ left: `${projPct}%` }} title={`Projected final cost ${fmt$(projectedCost)} → ${fmtPct(projMarginPct)} margin`}>
+            <div className="w-0.5 h-full -ml-px" style={{ background: markerColor }} />
+            <div className="absolute -top-1 -ml-1 w-2 h-2 rounded-full border border-white" style={{ background: markerColor, left: 0 }} />
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-[11px] text-muted">
         <span><span className="font-semibold text-ink">{fmt$(a)}</span> spent{allowable > 0 ? ` · ${Math.round((a / allowable) * 100)}% of allowable` : ""}</span>
-        <span>Allowable cost <span className="font-semibold text-ink">{fmt$(allowable)}</span></span>
+        {pctComplete != null && <span><span className="font-semibold text-ink">{Math.round(pctComplete * 100)}%</span> work done</span>}
+        {hasProj && <span>Projected final cost <span className="font-semibold" style={{ color: markerColor }}>{fmt$(projectedCost)}</span></span>}
+        <span>Allowable <span className="font-semibold text-ink">{fmt$(allowable)}</span></span>
         <span>Charging <span className="font-semibold text-ink">{fmt$(s)}</span></span>
-        <span>Margin <span className="font-semibold" style={{ color: GAUGE_COLOR.margin }}>{fmt$(marginTarget)}</span></span>
       </div>
     </div>
   );
@@ -1990,6 +2013,19 @@ function MarginGauge({ totals }) {
   const allowableTot = totalSell - targetProfit;
   const actualTot = Number(totals.totalActual) || 0;
   const over = actualTot > allowableTot;
+
+  // P1: labour projection — prefer the task-derived %, fall back to a manual % where there's no task signal.
+  const proj = totals.projection || {};
+  const labourActual = Number(totals.labourActual) || 0;
+  const [manualPct, setManualPct] = useState("");
+  const manualNum = parseFloat(manualPct);
+  const manualValid = manualNum > 0 && manualNum <= 100;
+  const derivedProjCost = proj.labourProjectedCost != null ? Number(proj.labourProjectedCost) : null;
+  const labourProjCost = derivedProjCost != null ? derivedProjCost
+    : (manualValid ? labourActual / (manualNum / 100) : null);
+  const labourPct = proj.labourPctComplete != null ? Number(proj.labourPctComplete)
+    : (manualValid ? manualNum / 100 : null);
+  const showManual = derivedProjCost == null;  // no task-derived projection yet
 
   return (
     <div className="rounded-lg border border-hairline bg-surface p-4 space-y-4">
@@ -2011,10 +2047,17 @@ function MarginGauge({ totals }) {
         </div>
       </div>
       <div className="space-y-4">
-        <MarginThermometer label="Labour" sell={labourSell} actual={Number(totals.labourActual) || 0} target={MARGIN_TARGET.labour} color={GAUGE_COLOR.labour} />
+        <MarginThermometer label="Labour" sell={labourSell} actual={labourActual} target={MARGIN_TARGET.labour} color={GAUGE_COLOR.labour} projectedCost={labourProjCost} pctComplete={labourPct} />
         <MarginThermometer label="Material" sell={materialSell} actual={Number(totals.materialActual) || 0} target={MARGIN_TARGET.material} color={GAUGE_COLOR.material} />
       </div>
-      <p className="text-[11px] text-muted">Bar = what we charge · fill = real cost so far (timesheets + invoices, not the estimate) · green = margin kept · dashed line = where cost starts eating margin.</p>
+      {showManual && (
+        <div className="flex items-center gap-2 text-[11px] text-muted">
+          <span>No task completion logged yet — enter labour&nbsp;% complete to project final margin:</span>
+          <input type="number" min="1" max="100" value={manualPct} onChange={(e) => setManualPct(e.target.value)}
+            className="w-16 border border-hairline rounded px-2 py-1 text-xs text-ink focus-ring" placeholder="%" />
+        </div>
+      )}
+      <p className="text-[11px] text-muted">Bar = what we charge · fill = real cost so far · <span style={{ color: GAUGE_COLOR.margin }}>●</span> projected final cost from % work done · dashed line = where cost starts eating margin.</p>
     </div>
   );
 }
@@ -2123,17 +2166,24 @@ function BudgetTab({ jobId }) {
             <th className="text-right py-2 px-3 font-medium">Budget</th>
             <th className="text-right py-2 px-3 font-medium">Actual</th>
             <th className="text-right py-2 px-3 font-medium">Variance</th>
+            <th className="text-right py-2 px-3 font-medium" title="Task completion for this category (done ÷ counted site tasks)">% done</th>
+            <th className="text-right py-2 px-3 font-medium" title="Projected final margin at current burn (actual ÷ % done, vs sell) — target 25%">Proj. margin</th>
             <th className="text-right py-2 pl-3 font-medium" title="Full-team days this category's budget supports at target margin">Days @ margin</th>
           </tr></thead>
           <tbody>
             {labour.map((l) => {
               const dot = l.burn?.status === "over" ? "text-red-600" : l.burn?.status === "warn" ? "text-amber-600" : "text-emerald-700";
+              const projCls = l.projectedMarginPct == null ? "text-muted"
+                : l.projectedMarginPct >= MARGIN_TARGET.labour * 100 ? "text-emerald-700"
+                : l.projectedMarginPct >= MARGIN_TARGET.labour * 100 - 5 ? "text-amber-600" : "text-red-600";
               return (
               <tr key={l.id} className="border-b border-hairline last:border-0">
                 <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
                 <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
                 <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
                 <td className={`py-2 px-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
+                <td className="py-2 px-3 text-right text-muted">{l.pctComplete != null ? `${Math.round(l.pctComplete * 100)}%` : "—"}</td>
+                <td className={`py-2 px-3 text-right font-semibold ${projCls}`}>{l.projectedMarginPct != null ? fmtPct(l.projectedMarginPct) : "—"}</td>
                 <td className={`py-2 pl-3 text-right font-semibold ${dot}`}>{l.burn?.atMarginDays != null ? `${l.burn.atMarginDays}d` : "—"}</td>
               </tr>
               );
