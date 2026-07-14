@@ -110,6 +110,9 @@
 | 13-03 | Search and manage the subcontractor directory | [subcontractors_manage.md](13_subcontractors/subcontractors_manage.md) | Subcontractors | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 14-01 | Run a pre-tender estimate | [cost_intel_pretender_estimate.md](14_cost_intelligence/cost_intel_pretender_estimate.md) | Cost Intelligence | Admin, Estimator | Draft | untested | Yes | High |
 | 14-02 | View cost benchmarks by trade | [cost_intel_view_benchmarks.md](14_cost_intelligence/cost_intel_view_benchmarks.md) | Cost Intelligence | Admin, Estimator | Draft | untested | Yes | Medium |
+| 14-03 | Carpentry budget, sub-task mapping & margin gauge | [cost_intel_carpentry_budget_margin.md](14_cost_intelligence/cost_intel_carpentry_budget_margin.md) | Cost Intelligence | Admin, Director | Draft | untested | Yes | High |
+| 14-04 | Log time against sub-tasks (Worker app) | [cost_intel_log_time_subtasks.md](14_cost_intelligence/cost_intel_log_time_subtasks.md) | Cost Intelligence | Worker, Leading Hand | Draft | untested | Yes | High |
+| 14-05 | Pricing intelligence & Approvals task view | [cost_intel_pricing_intelligence.md](14_cost_intelligence/cost_intel_pricing_intelligence.md) | Cost Intelligence | Admin, Director | Draft | untested | Yes | High |
 | 17-01 | Use the Relationship Dashboard | [17-01_relationship_dashboard.md](17_crm_mailing_list/17-01_relationship_dashboard.md) | CRM | Admin, Staff | Draft | untested | No | High |
 | 17-02 | Add and manage CRM contacts | [17-02_contacts.md](17_crm_mailing_list/17-02_contacts.md) | CRM | Admin, Staff | Draft | untested | No | High |
 | 17-03 | Log an interaction | [17-03_log_interaction.md](17_crm_mailing_list/17-03_log_interaction.md) | CRM | Admin, Staff | Draft | untested | No | High |

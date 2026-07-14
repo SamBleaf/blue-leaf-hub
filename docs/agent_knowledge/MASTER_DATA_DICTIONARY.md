@@ -538,6 +538,7 @@ Currently homeless: company identity (name, ABN, building licence, address, phon
 - **Compliance/Consent (🔴 class):** consent_source/at, unsubscribe — legally mandated, append-only.
 - **PTSA / Winning Offer (🔴 client-facing money):** `ptsa_*`, `wo_*`, preconstruction_fee, proposal token/views; the value-carry must include the PTSA fee.
 - **Carpentry parallel financial spine (Phase 7):** quoted_value, budgeted_cost, **`carpentry_job_budgets` (mig 067 — absent from the dictionary)**, milestones, closeout snapshot, its own client contact. Carpentry labour is job-level, not per-trade.
+- **Earned-value costing (2026-07-14, migs 140–142 — flagged for the facts sprint, not yet routed through the facts service):** `carpentry_budget_line_items` (estimate leaf → canonical sub-task mapping + per-line sell/cost; the mapping is a **🔴 money-tier, human-confirmed fact** via the `status` suggested→confirmed flag — Canonical Data Law pt 6); `timesheet_entries.budget_line_item_id` + `carpentry_job_costs.carpentry_budget_line_item_id` (sub-task actual-cost links); **projected margin & realised margin are Generated** (derived in the budget/pricing endpoints from sell + actual + % complete — never stored as editable columns, Law pt 3).
 
 ## 32. Expanded Document & Event enums
 
