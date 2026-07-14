@@ -2069,15 +2069,25 @@ function MarginGauge({ totals }) {
 // Move a leaf between sections, add / delete a section, confirm the mapping. Unmapped
 // leaves roll up to the parent category. Editing here is the human-confirmed mapping.
 function SubtaskSections({ line, jobId, onChanged }) {
-  const items = line.lineItems || [];
   const options = line.subtaskOptions || [];
   const labelByKey = Object.fromEntries(options.map((o) => [o.key, o.label]));
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newKey, setNewKey] = useState("");
+  // Local working copy — moves/adds/deletes are instant (no reload); persisted only on Confirm.
+  const [items, setItems] = useState(() => (line.lineItems || []).map((it) => ({ ...it, _key: it.id })));
+  const [deletedIds, setDeletedIds] = useState([]);
+  const [dirty, setDirty] = useState(false);
 
-  if (!items.length) {
+  // Re-sync when the server data changes (i.e. after a save + reload).
+  useEffect(() => {
+    setItems((line.lineItems || []).map((it) => ({ ...it, _key: it.id })));
+    setDeletedIds([]);
+    setDirty(false);
+  }, [line.lineItems]);
+
+  if (!items.length && !dirty) {
     return <div className="px-4 py-3 text-xs text-muted">No sub-tasks yet — re-import the estimate XLSX to split this category into sub-tasks.</div>;
   }
 
@@ -2088,20 +2098,47 @@ function SubtaskSections({ line, jobId, onChanged }) {
   const anySuggested = items.some((it) => it.status === "suggested");
   const secLabel = (k) => (k === "" ? "Unmapped — rolls up to this category" : (labelByKey[k] || k));
 
-  async function run(fn) { setBusy(true); try { await fn(); } finally { setBusy(false); onChanged(); } }
-  const move = (id, key) => run(() => apiPatch(`/api/carpentry/budget/line-items/${id}`, { canonicalKey: key || null }));
-  const dissolve = (k) => run(async () => {
-    for (const it of groups[k] || []) {
-      if (it.source === "manual") await apiDelete(`/api/carpentry/budget/line-items/${it.id}`);
-      else await apiPatch(`/api/carpentry/budget/line-items/${it.id}`, { canonicalKey: null });
-    }
-  });
-  const confirmAll = () => run(() => apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items/confirm`, {}));
-  const addSection = () => {
-    const desc = newName.trim(); if (!desc) return;
-    run(() => apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items`, { budgetLineId: line.id, description: desc, canonicalKey: newKey || null }));
-    setNewName(""); setNewKey(""); setAdding(false);
+  // ── Instant local edits (no network, no reload) ──
+  const moveLocal = (localKey, canonicalKey) => {
+    setItems((prev) => prev.map((it) => (it._key === localKey ? { ...it, canonicalKey: canonicalKey || null } : it)));
+    setDirty(true);
   };
+  const dissolveLocal = (k) => {
+    setItems((prev) => prev.flatMap((it) => {
+      if ((it.canonicalKey || "") !== k) return [it];
+      if (it._new || it.source === "manual") { if (it.id) setDeletedIds((d) => [...d, it.id]); return []; }
+      return [{ ...it, canonicalKey: null }]; // dissolve estimate leaves → unmapped (roll to parent)
+    }));
+    setDirty(true);
+  };
+  const addLocal = () => {
+    const desc = newName.trim(); if (!desc) return;
+    setItems((prev) => [...prev, { _key: crypto.randomUUID(), id: null, description: desc, canonicalKey: newKey || null, sellExGst: 0, costExGst: 0, status: "suggested", source: "manual", _new: true }]);
+    setDirty(true); setNewName(""); setNewKey(""); setAdding(false);
+  };
+
+  // ── Persist all pending edits, then lock (confirm) + reload once ──
+  async function saveAndConfirm() {
+    setBusy(true);
+    try {
+      const originalKey = {};
+      for (const it of (line.lineItems || [])) originalKey[it.id] = it.canonicalKey || "";
+      for (const id of deletedIds) await apiDelete(`/api/carpentry/budget/line-items/${id}`);
+      for (const it of items) {
+        if (it._new) {
+          await apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items`, { budgetLineId: line.id, description: it.description, canonicalKey: it.canonicalKey || null });
+        } else if ((it.canonicalKey || "") !== originalKey[it.id]) {
+          await apiPatch(`/api/carpentry/budget/line-items/${it.id}`, { canonicalKey: it.canonicalKey || null });
+        }
+      }
+      await apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items/confirm`, {});
+    } finally {
+      setBusy(false);
+      onChanged(); // single reload at the end — locks the confirmed mapping
+    }
+  }
+
+  const canConfirm = dirty || anySuggested;
 
   return (
     <div className="px-4 py-3 bg-page space-y-2">
@@ -2113,15 +2150,15 @@ function SubtaskSections({ line, jobId, onChanged }) {
               <span className="text-xs font-semibold text-ink">{secLabel(k)}<span className="text-muted font-normal"> · {rows.length} line{rows.length > 1 ? "s" : ""}</span></span>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-ink tabular-nums">{fmt$(sum(rows, (x) => x.sellExGst))}</span>
-                {k !== "" && <button type="button" disabled={busy} onClick={() => dissolve(k)} title="Delete section — its lines roll up to the parent" className="text-red-600 border border-hairline rounded w-5 h-5 leading-none text-sm disabled:opacity-40">×</button>}
+                {k !== "" && <button type="button" disabled={busy} onClick={() => dissolveLocal(k)} title="Delete section — its lines roll up to the parent" className="text-red-600 border border-hairline rounded w-5 h-5 leading-none text-sm disabled:opacity-40">×</button>}
               </div>
             </div>
             <div className="divide-y divide-hairline">
               {rows.map((it) => (
-                <div key={it.id} className="flex items-center gap-2 px-3 py-1.5">
+                <div key={it._key} className="flex items-center gap-2 px-3 py-1.5">
                   <span className="flex-1 min-w-0 text-xs text-muted truncate" title={it.description}>{it.description}</span>
                   <span className="text-xs text-ink tabular-nums whitespace-nowrap">{fmt$(it.sellExGst)}</span>
-                  <select disabled={busy} value={it.canonicalKey || ""} onChange={(e) => move(it.id, e.target.value)}
+                  <select disabled={busy} value={it.canonicalKey || ""} onChange={(e) => moveLocal(it._key, e.target.value)}
                     className="text-xs border border-hairline rounded px-1 py-0.5 bg-white text-ink max-w-[140px]">
                     <option value="">— unmapped —</option>
                     {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
@@ -2142,15 +2179,21 @@ function SubtaskSections({ line, jobId, onChanged }) {
               <option value="">custom (this job only)</option>
               {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
-            <button type="button" disabled={busy} onClick={addSection} className="text-xs font-semibold text-white bg-accent rounded px-2 py-1 disabled:opacity-40">Add</button>
+            <button type="button" onClick={addLocal} className="text-xs font-semibold text-white bg-accent rounded px-2 py-1">Add</button>
             <button type="button" onClick={() => { setAdding(false); setNewName(""); setNewKey(""); }} className="text-xs text-muted">Cancel</button>
           </div>
         ) : (
           <button type="button" onClick={() => setAdding(true)} className="text-xs font-medium text-accent border border-dashed border-accent rounded px-2 py-1">＋ Add sub-task</button>
         )}
-        {anySuggested && (
-          <button type="button" disabled={busy} onClick={confirmAll} title="Lock this mapping as confirmed" className="text-xs font-semibold text-white bg-primary rounded px-3 py-1 disabled:opacity-40">Confirm mapping ✓</button>
-        )}
+        <div className="flex items-center gap-2">
+          {dirty && <span className="text-[11px] text-amber-600">Unsaved</span>}
+          {canConfirm && (
+            <button type="button" disabled={busy} onClick={saveAndConfirm} title="Save changes and lock the mapping as confirmed"
+              className="text-xs font-semibold text-white bg-primary rounded px-3 py-1 disabled:opacity-40">
+              {busy ? "Saving…" : dirty ? "Save & confirm ✓" : "Confirm mapping ✓"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2164,10 +2207,9 @@ function BudgetTab({ jobId }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const toggleExpand = (id) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  // Background refresh — keeps the current view rendered (no "Loading…" blank, no scroll jump).
   function reload() {
-    setLoading(true);
     apiFetch(`/api/carpentry/jobs/${jobId}/budget`).then(({ ok, data: d }) => {
-      setLoading(false);
       if (ok) setData(d);
     });
   }
