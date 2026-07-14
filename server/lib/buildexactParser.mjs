@@ -456,6 +456,11 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
     // real sell price; dropping them would understate the total and lose PC/PS sums).
     if (!isMeta && (total == null || total <= 0) && (totalInc == null || totalInc <= 0)) continue;
     const allowRaw = cellStr(row[cAllow]).trim().toUpperCase();
+    const markup = parseMoney(row[cMarkup]);
+    const tax = parseMoney(row[cTax]);
+    // Per-line SELL ex-GST = cost + markup (mirrors category subtotal_sell_ex_gst). Load-bearing:
+    // earned value divides by sell. Falls back to cost alone when markup is absent (legacy rows).
+    const sellExGst = Math.round(((total ?? 0) + (markup ?? 0)) * 100) / 100;
     cat.active_items.push({
       code: cellStr(row[cDisp]) || cellStr(row[cCode]),
       description: desc,
@@ -465,15 +470,16 @@ function parseEstimateItemsWorkbook(wb, found, filenameHint = "") {
       uom: cellStr(row[cUom]),
       unit_cost: parseMoney(row[cUnitCost]) ?? null,
       total: total ?? 0,
+      markup: markup ?? 0,
+      tax: tax ?? null,
+      sell_ex_gst: sellExGst,
       total_inc_gst: totalInc ?? null
     });
     if (!isMeta) {
       if (total != null) cat.subtotal_ex_gst += total;
       if (totalInc != null) cat.subtotal_inc_gst += totalInc;
-      const mk = parseMoney(row[cMarkup]);
-      const tx = parseMoney(row[cTax]);
-      if (mk != null) cat.subtotal_markup += mk;
-      if (tx != null) cat.subtotal_tax += tx;
+      if (markup != null) cat.subtotal_markup += markup;
+      if (tax != null) cat.subtotal_tax += tax;
     }
   }
 

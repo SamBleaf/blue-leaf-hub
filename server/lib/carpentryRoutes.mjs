@@ -40,6 +40,7 @@ import { autoLayoutMilestones } from "./carpentryScheduleUtils.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
+import { mapLineItem, catalogueFor } from "./carpentrySubtaskDictionary.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -716,6 +717,15 @@ export function registerCarpentryRoutes(app) {
             costExGst: round2(c.subtotal_ex_gst),
             allowance: c.active_items?.some((it) => it.allowance) ? "PC/PS" : "",
             costType: classifyCostType(c.name),
+            // P3: leaf line items (only carried by the estimateitems XLSX path — the API-fetch
+            // path returns categories by name only, so this is [] there → line-item seed degrades to
+            // parent-only). Feeds the sub-task mapping in /budget/seed.
+            activeItems: (c.active_items || []).map((it) => ({
+              description: it.description,
+              costExGst: round2(it.total),
+              sellExGst: round2(it.sell_ex_gst ?? it.total),
+              allowance: it.allowance === "PC" || it.allowance === "PS" ? it.allowance : "",
+            })),
           })),
         },
       });
@@ -1451,6 +1461,49 @@ export function registerCarpentryRoutes(app) {
       }
       const removeIds = (existing || []).filter((e) => !keptIds.has(e.id)).map((e) => e.id);
       if (removeIds.length) await sb.from("carpentry_job_budgets").delete().in("id", removeIds);
+
+      // P3: seed sub-task line items from the estimate leaves — only for budget lines that have NONE
+      // yet, so re-import never clobbers a human-confirmed mapping. Unmatched leaves get
+      // canonical_key=null (roll up to the parent). Fail-soft: if migration 140 isn't applied yet the
+      // count query errors and we skip line-items entirely (budgets still seed).
+      try {
+        const catByName = new Map(categories.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
+        for (const bl of out) {
+          const cat = catByName.get(String(bl.category_name).trim().toLowerCase());
+          const items = Array.isArray(cat?.activeItems) ? cat.activeItems : [];
+          if (!items.length) continue;
+          const { count, error: cntErr } = await sb.from("carpentry_budget_line_items")
+            .select("id", { count: "exact", head: true }).eq("carpentry_job_budget_id", bl.id);
+          if (cntErr) { console.error("[budget/seed line-items] not ready:", cntErr.message || cntErr); break; }
+          if (count && count > 0) continue; // already seeded / confirmed — leave alone
+          const rows = items.map((it, i) => {
+            const m = mapLineItem({
+              parentTaskCategory: bl.workforce_task_category,
+              categoryName: bl.category_name,
+              costType: bl.cost_type,
+              description: it.description,
+            });
+            return {
+              job_id: jobId,
+              carpentry_job_budget_id: bl.id,
+              description: it.description,
+              task_category: bl.cost_type === "labour" ? bl.workforce_task_category : null,
+              canonical_key: m?.canonicalKey || null,
+              sell_ex_gst: round2(it.sellExGst ?? it.costExGst ?? 0),
+              cost_ex_gst: round2(it.costExGst ?? 0),
+              allowance: it.allowance === "PC" || it.allowance === "PS" ? it.allowance : "",
+              source: "estimateitems",
+              status: "suggested",
+              confidence: m?.confidence ?? null,
+              sort_order: i,
+            };
+          });
+          const { error: insErr } = await sb.from("carpentry_budget_line_items").insert(rows);
+          if (insErr) { console.error("[budget/seed line-items]", insErr.message || insErr); break; }
+        }
+      } catch (liErr) {
+        console.error("[budget/seed line-items]", liErr?.message || liErr);
+      }
       return ok(res, { budgets: rowsToCamel(out) });
     } catch (e) {
       console.error("[carpentry/budget/seed POST]", e);
