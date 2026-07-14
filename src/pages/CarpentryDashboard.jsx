@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch, apiPost } from "../lib/apiFetch.js";
+import { useAuth } from "../lib/useAuth.js";
+import { can } from "../lib/roles.js";
 import {
   CARPENTRY_JOB_STATUSES,
   CARPENTRY_JOB_STATUS_LABELS,
@@ -484,6 +486,120 @@ function StatsBanner({ jobs }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+// ── Pricing intelligence (Phase 2) ────────────────────────────────────────────
+// Cross-job realised margin by labour task type. Collapsible; loads on first open.
+// The board component is reused in Phase 4 with a sub-task grain toggle.
+function PricingIntelligence() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [scope, setScope] = useState("completed");
+  const [sort, setSort] = useState({ key: "realisedMarginPct", dir: "asc" });
+
+  async function fetchStreams(sc) {
+    setLoading(true); setError(null);
+    const { ok, data: d, error: e } = await apiFetch(`/api/carpentry/pricing/streams?scope=${sc}`);
+    setLoading(false);
+    if (!ok) { setError(e || "Could not load pricing data."); return; }
+    setData(d);
+  }
+  function toggle() { const next = !open; setOpen(next); if (next && !data) fetchStreams(scope); }
+  function changeScope(sc) { if (sc === scope) return; setScope(sc); fetchStreams(sc); }
+  function onSort(key) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  }
+
+  const streams = data?.streams || [];
+  const target = data?.targetPct ?? 25;
+  const sorted = [...streams].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "string") return sort.dir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sort.dir === "asc" ? av - bv : bv - av;
+  });
+  const marginCls = (m) => (m == null ? "text-muted" : m >= target ? "text-emerald-700" : m >= target - 5 ? "text-amber-600" : "text-red-600");
+  const sortTh = (label, k, right) => (
+    <th className={`px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide ${right ? "text-right" : "text-left"}`}>
+      <button type="button" onClick={() => onSort(k)} className="inline-flex items-center gap-1 hover:text-ink">
+        <span>{label}</span>
+        <span className="text-[9px]" aria-hidden="true">{sort.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="bg-white rounded-card border border-hairline overflow-hidden mb-4">
+      <button type="button" onClick={toggle} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+        <div>
+          <span className="text-sm font-semibold text-ink">Pricing intelligence</span>
+          <span className="text-xs text-muted ml-2">realised margin by task type, across all carpentry jobs</span>
+        </div>
+        <span className="text-muted text-xs" aria-hidden="true">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-hairline">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-hairline">
+            <div className="flex items-center gap-1">
+              {[["completed", "Completed jobs"], ["all", "All jobs"]].map(([v, l]) => (
+                <button key={v} type="button" onClick={() => changeScope(v)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium ${scope === v ? "bg-primary text-white" : "border border-hairline text-muted hover:text-ink"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {data && <span className="text-[11px] text-muted">{data.basis === "loaded" ? "overhead-loaded cost" : "base-rate cost"}</span>}
+          </div>
+          {loading ? (
+            <div className="p-6 text-center text-muted text-sm">Loading…</div>
+          ) : error ? (
+            <div className="p-6 text-center text-red-600 text-sm">{error}</div>
+          ) : sorted.length === 0 ? (
+            <div className="p-6 text-center text-muted text-sm">
+              {scope === "completed"
+                ? "No completed carpentry jobs with logged time yet — switch to All jobs to see work in progress."
+                : "No approved carpentry timesheets yet — nothing to compare."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-hairline bg-slate-50">
+                    {sortTh("Task type", "label")}
+                    {sortTh("Jobs", "jobCount", true)}
+                    {sortTh("Hours", "hours", true)}
+                    {sortTh("Charged (sell)", "sellTotal", true)}
+                    {sortTh("Actual cost", "actualCostTotal", true)}
+                    {sortTh("Realised margin", "realisedMarginPct", true)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {sorted.map((s) => (
+                    <tr key={s.stream} className="hover:bg-slate-50">
+                      <td className="px-4 py-2.5 font-medium text-ink">{s.label}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted">{s.jobCount}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted">{Math.round(s.hours)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted">{fmt$(s.sellTotal)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-ink">{s.actualCostTotal ? fmt$(s.actualCostTotal) : "—"}</td>
+                      <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${marginCls(s.realisedMarginPct)}`}>{s.realisedMarginPct != null ? fmtPct(s.realisedMarginPct) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="px-4 py-2.5 text-[11px] text-muted border-t border-hairline">
+                Realised margin = (charged − actual {data?.basis === "loaded" ? "overhead-loaded" : "base-rate"} cost) ÷ charged · target {target}% · worst first.
+                {scope === "all" ? " In-progress jobs read high until their hours land — Completed jobs is the true signal." : ""} Coarse by stream — sub-task splits (e.g. wall vs truss) arrive with the line-item build.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CarpentryDashboard() {
   const navigate = useNavigate();
   const [jobs, setJobs]         = useState([]);
@@ -491,6 +607,8 @@ export default function CarpentryDashboard() {
   const [error, setError]       = useState(null);
   const [showNew, setShowNew]   = useState(false);
   const [statusFilter, setStatusFilter] = useState("active");
+  const { role } = useAuth();
+  const showPricing = can.viewCostData(role);   // Director-only, like the Budget/Costs tabs
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -536,6 +654,9 @@ export default function CarpentryDashboard() {
 
       {/* Stats */}
       {!loading && !error && <StatsBanner jobs={jobs} />}
+
+      {/* Pricing intelligence — cross-job margin by task type (Director-only) */}
+      {showPricing && <PricingIntelligence />}
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-4">

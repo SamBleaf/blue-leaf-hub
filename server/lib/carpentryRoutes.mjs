@@ -1364,6 +1364,8 @@ export function registerCarpentryRoutes(app) {
 
   // ── Budget helpers ──────────────────────────────────────────────────────────
   const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  // Target labour margin (mirrors MARGIN_TARGET.labour in CarpentryJobDetail.jsx's gauge).
+  const MARGIN_TARGET_LABOUR = 0.25;
   const WORKFORCE_LABOUR_TASKS = [
     { key: "first_fix_framing", label: "First Fix Framing" },
     { key: "cladding", label: "Cladding" },
@@ -1502,6 +1504,91 @@ export function registerCarpentryRoutes(app) {
       return ok(res, { jobs: out });
     } catch (e) {
       console.error("[carpentry/internal-cost-summary]", e);
+      return err(res, 500, translateDbError(e));
+    }
+  });
+
+  // ── GET /api/carpentry/pricing/streams ──────────────────────────────────────
+  // Cross-job pricing intelligence: realised margin per labour stream (the 8-key
+  // taxonomy) across ALL carpentry jobs. Sell = Σ budget_ex_gst; actual cost = Σ approved
+  // timesheet_entries.cost_amount — overhead-LOADED at approval, the only basis where
+  // "do we actually make 25%?" is honest (closeout's un-loaded figure is a separate
+  // reconciliation, not used here). Answers which streams make or lose money → feeds
+  // quoting. Coarse (8 streams); sub-task grain arrives with the line-item spine. Admin/supervisor.
+  app.get("/api/carpentry/pricing/streams", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const labelFor = Object.fromEntries(WORKFORCE_LABOUR_TASKS.map((t) => [t.key, t.label]));
+      // Scope: 'completed' (default) = finished jobs only — the honest "how did our pricing actually
+      // do" signal (full sell vs full cost). 'all' = include in-progress jobs, which read high until
+      // their hours land. Restricting to completed sidesteps the partial-progress inflation.
+      const scope = req.query.scope === "all" ? "all" : "completed";
+      let completedIds = null;
+      if (scope === "completed") {
+        const { data: doneJobs } = await sb.from("carpentry_jobs").select("id").eq("status", "complete");
+        completedIds = (doneJobs || []).map((j) => j.id);
+      }
+      const byStream = {};
+      const ensure = (k) => (byStream[k] ||= {
+        stream: k, label: labelFor[k] || k, sellTotal: 0, costBudgetTotal: 0,
+        actualCostTotal: 0, hours: 0, jobs: new Set(),
+      });
+
+      // Sell + budgeted cost by stream (labour lines only).
+      let bq = sb.from("carpentry_job_budgets")
+        .select("workforce_task_category, budget_ex_gst, cost_ex_gst, job_id")
+        .eq("cost_type", "labour");
+      if (completedIds) bq = bq.in("job_id", completedIds);
+      const { data: budgets } = await bq;
+      for (const b of budgets || []) {
+        if (!b.workforce_task_category) continue;
+        const s = ensure(b.workforce_task_category);
+        s.sellTotal += Number(b.budget_ex_gst || 0);
+        s.costBudgetTotal += Number(b.cost_ex_gst || 0);
+        if (b.job_id) s.jobs.add(b.job_id);
+      }
+
+      // Actual LOADED cost + hours by stream, from approved carpentry timesheets only.
+      let eqy = sb.from("timesheet_entries")
+        .select("task_category, cost_amount, hours, timesheets!inner(carpentry_job_id, status)")
+        .eq("timesheets.status", "approved")
+        .not("timesheets.carpentry_job_id", "is", null);
+      if (completedIds) eqy = eqy.in("timesheets.carpentry_job_id", completedIds);
+      const { data: entries } = await eqy;
+      for (const e of entries || []) {
+        if (!e.task_category) continue;
+        const s = ensure(e.task_category);
+        s.actualCostTotal += Number(e.cost_amount || 0);
+        s.hours += Number(e.hours || 0);
+        if (e.timesheets?.carpentry_job_id) s.jobs.add(e.timesheets.carpentry_job_id);
+      }
+
+      const cm = await getCostModel(sb);
+      const streams = Object.values(byStream).map((s) => {
+        const sellTotal = round2(s.sellTotal);
+        const actualCostTotal = round2(s.actualCostTotal);
+        return {
+          stream: s.stream,
+          label: s.label,
+          sellTotal,
+          costBudgetTotal: round2(s.costBudgetTotal),
+          actualCostTotal,
+          // Only meaningful where cost has actually been logged — else it'd read as 100% margin.
+          realisedMarginPct: (sellTotal > 0 && actualCostTotal > 0) ? round2(((sellTotal - actualCostTotal) / sellTotal) * 100) : null,
+          hours: round2(s.hours),
+          jobCount: s.jobs.size,
+        };
+      });
+      // Worst realised margin first (nulls last) so the money-losers surface.
+      streams.sort((a, b) => {
+        if (a.realisedMarginPct == null) return 1;
+        if (b.realisedMarginPct == null) return -1;
+        return a.realisedMarginPct - b.realisedMarginPct;
+      });
+      return ok(res, { streams, scope, basis: cm ? "loaded" : "base", targetPct: Math.round(MARGIN_TARGET_LABOUR * 100) });
+    } catch (e) {
+      console.error("[carpentry/pricing/streams]", e);
       return err(res, 500, translateDbError(e));
     }
   });
