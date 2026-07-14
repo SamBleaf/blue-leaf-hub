@@ -1511,6 +1511,87 @@ export function registerCarpentryRoutes(app) {
     }
   });
 
+  // ── Sub-task line-item CRUD (Phase 3 — the human-confirmed mapping) ──────────
+  // The estimate→sub-task mapping drives pricing → money-tier fact (Canonical Data Law): writes are
+  // admin/supervisor, and rows stay 'suggested' until explicitly confirmed. Dissolving a section sets
+  // canonical_key=null (leaves roll to the parent, nothing lost); manual sub-tasks can be added/removed.
+
+  // PATCH one line item — move (canonicalKey), rename (description), re-value, or confirm (status).
+  app.patch("/api/carpentry/budget/line-items/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const b = req.body || {};
+    const patch = {};
+    if (b.canonicalKey !== undefined) patch.canonical_key = b.canonicalKey || null;
+    if (typeof b.description === "string" && b.description.trim()) patch.description = b.description.trim();
+    if (b.status === "suggested" || b.status === "confirmed") patch.status = b.status;
+    if (b.sellExGst !== undefined) patch.sell_ex_gst = round2(b.sellExGst);
+    if (b.costExGst !== undefined) patch.cost_ex_gst = round2(b.costExGst);
+    if (!Object.keys(patch).length) return err(res, 400, "Nothing to update.");
+    patch.updated_at = new Date().toISOString();
+    try {
+      const { data, error } = await sb.from("carpentry_budget_line_items").update(patch).eq("id", req.params.id).select("*").single();
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res, { lineItem: rowToCamel(data) });
+    } catch (e) { console.error("[carpentry/line-items PATCH]", e); return err(res, 502, translateDbError(e)); }
+  });
+
+  // POST a manual sub-task line item under a budget line (human-added → already confirmed).
+  app.post("/api/carpentry/jobs/:id/budget/line-items", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = req.params.id;
+    const b = req.body || {};
+    const budgetLineId = String(b.budgetLineId || "");
+    const description = String(b.description || "").trim();
+    if (!budgetLineId || !description) return err(res, 400, "budgetLineId and description are required.");
+    try {
+      const { data: bl } = await sb.from("carpentry_job_budgets")
+        .select("id, cost_type, workforce_task_category").eq("id", budgetLineId).eq("job_id", jobId).maybeSingle();
+      if (!bl) return err(res, 404, "Budget line not found.", "NOT_FOUND");
+      const row = {
+        job_id: jobId,
+        carpentry_job_budget_id: budgetLineId,
+        description,
+        task_category: bl.cost_type === "labour" ? bl.workforce_task_category : null,
+        canonical_key: b.canonicalKey || null,
+        sell_ex_gst: round2(b.sellExGst || 0),
+        cost_ex_gst: round2(b.costExGst || 0),
+        allowance: "",
+        source: "manual",
+        status: "confirmed",
+        sort_order: Number(b.sortOrder) || 999,
+      };
+      const { data, error } = await sb.from("carpentry_budget_line_items").insert(row).select("*").single();
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res, { lineItem: rowToCamel(data) });
+    } catch (e) { console.error("[carpentry/line-items POST]", e); return err(res, 502, translateDbError(e)); }
+  });
+
+  // DELETE a line item. Its logged time reverts to the parent category (ON DELETE SET NULL, mig 141).
+  app.delete("/api/carpentry/budget/line-items/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { error } = await sb.from("carpentry_budget_line_items").delete().eq("id", req.params.id);
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res);
+    } catch (e) { console.error("[carpentry/line-items DELETE]", e); return err(res, 502, translateDbError(e)); }
+  });
+
+  // POST confirm — mark the job's suggested sub-task mappings as confirmed (Canonical Data Law).
+  app.post("/api/carpentry/jobs/:id/budget/line-items/confirm", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data, error } = await sb.from("carpentry_budget_line_items")
+        .update({ status: "confirmed", updated_at: new Date().toISOString() })
+        .eq("job_id", req.params.id).eq("status", "suggested").select("id");
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res, { confirmed: (data || []).length });
+    } catch (e) { console.error("[carpentry/line-items confirm]", e); return err(res, 502, translateDbError(e)); }
+  });
+
   // ── GET /api/carpentry/jobs/:id/budget ──────────────────────────────────────
   // AU financial year (Jul–Jun) + quarter for a YYYY-MM-DD date. FY label e.g. "2025-26".
   // Quarters within the FY: Q1 Jul–Sep, Q2 Oct–Dec, Q3 Jan–Mar, Q4 Apr–Jun.
@@ -1691,6 +1772,29 @@ export function registerCarpentryRoutes(app) {
         if (c.carpentry_job_budget_id) materialActualByLine[c.carpentry_job_budget_id] = (materialActualByLine[c.carpentry_job_budget_id] || 0) + Number(c.amount || 0);
       }
 
+      // P3: sub-task line items (leaf mappings) + per-line-item labour actuals. Fail-soft — the table
+      // exists only after migration 140, and lines only populate after an estimate (re-)import.
+      const lineItemsByBudget = {};
+      const lineItemActual = {}, lineItemMaterialActual = {};
+      try {
+        const { data: liRows, error: liErr } = await sb
+          .from("carpentry_budget_line_items").select("*").eq("job_id", jobId).order("sort_order");
+        if (!liErr && liRows) {
+          for (const li of liRows) (lineItemsByBudget[li.carpentry_job_budget_id] ||= []).push(li);
+          const { data: liEntries } = await sb
+            .from("timesheet_entries")
+            .select("budget_line_item_id, cost_amount, timesheets!inner(carpentry_job_id, status)")
+            .eq("timesheets.carpentry_job_id", jobId)
+            .eq("timesheets.status", "approved")
+            .not("budget_line_item_id", "is", null);
+          for (const e of liEntries || []) lineItemActual[e.budget_line_item_id] = (lineItemActual[e.budget_line_item_id] || 0) + Number(e.cost_amount || 0);
+          // per-line-item material actuals — costs tagged to a line item (Costs tab extension)
+          for (const c of costRows || []) {
+            if (c.carpentry_budget_line_item_id) lineItemMaterialActual[c.carpentry_budget_line_item_id] = (lineItemMaterialActual[c.carpentry_budget_line_item_id] || 0) + Number(c.amount || 0);
+          }
+        }
+      } catch { /* migration 140 not applied — no sub-tasks yet */ }
+
       const lines = (budgets || []).map((b) => {
         const budget = round2(b.budget_ex_gst);
         const isLabour = b.cost_type === "labour";
@@ -1718,6 +1822,20 @@ export function registerCarpentryRoutes(app) {
           pctComplete,          // fraction 0..1 or null
           projectedCost,        // $ or null
           projectedMarginPct,   // percent (e.g. 24.3) or null
+          // P3: sub-task line items + the catalogue options for "add sub-task" (empty until mig 140 + import)
+          lineItems: (lineItemsByBudget[b.id] || []).map((li) => ({
+            id: li.id,
+            description: li.description,
+            canonicalKey: li.canonical_key,
+            sellExGst: round2(li.sell_ex_gst),
+            costExGst: round2(li.cost_ex_gst),
+            actual: round2((isLabour ? lineItemActual[li.id] : lineItemMaterialActual[li.id]) || 0),
+            status: li.status,
+            confidence: li.confidence,
+            allowance: li.allowance,
+            source: li.source,
+          })),
+          subtaskOptions: catalogueFor({ parentTaskCategory: b.workforce_task_category, categoryName: b.category_name, costType: b.cost_type }).map((o) => ({ key: o.key, label: o.label })),
         };
       });
 

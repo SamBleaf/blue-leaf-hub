@@ -2064,11 +2064,105 @@ function MarginGauge({ totals }) {
 
 // ── Budget Tab ────────────────────────────────────────────────────────────────
 
+// ── Sub-task sections (Phase 3 drill-down + confirm) ──────────────────────────
+// A budget line's estimate leaves grouped into sub-task sections (by canonical_key).
+// Move a leaf between sections, add / delete a section, confirm the mapping. Unmapped
+// leaves roll up to the parent category. Editing here is the human-confirmed mapping.
+function SubtaskSections({ line, jobId, onChanged }) {
+  const items = line.lineItems || [];
+  const options = line.subtaskOptions || [];
+  const labelByKey = Object.fromEntries(options.map((o) => [o.key, o.label]));
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newKey, setNewKey] = useState("");
+
+  if (!items.length) {
+    return <div className="px-4 py-3 text-xs text-muted">No sub-tasks yet — re-import the estimate XLSX to split this category into sub-tasks.</div>;
+  }
+
+  const groups = {};
+  for (const it of items) { const k = it.canonicalKey || ""; (groups[k] ||= []).push(it); }
+  const keys = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))); // unmapped last
+  const sum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
+  const anySuggested = items.some((it) => it.status === "suggested");
+  const secLabel = (k) => (k === "" ? "Unmapped — rolls up to this category" : (labelByKey[k] || k));
+
+  async function run(fn) { setBusy(true); try { await fn(); } finally { setBusy(false); onChanged(); } }
+  const move = (id, key) => run(() => apiPatch(`/api/carpentry/budget/line-items/${id}`, { canonicalKey: key || null }));
+  const dissolve = (k) => run(async () => {
+    for (const it of groups[k] || []) {
+      if (it.source === "manual") await apiDelete(`/api/carpentry/budget/line-items/${it.id}`);
+      else await apiPatch(`/api/carpentry/budget/line-items/${it.id}`, { canonicalKey: null });
+    }
+  });
+  const confirmAll = () => run(() => apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items/confirm`, {}));
+  const addSection = () => {
+    const desc = newName.trim(); if (!desc) return;
+    run(() => apiPost(`/api/carpentry/jobs/${jobId}/budget/line-items`, { budgetLineId: line.id, description: desc, canonicalKey: newKey || null }));
+    setNewName(""); setNewKey(""); setAdding(false);
+  };
+
+  return (
+    <div className="px-4 py-3 bg-page space-y-2">
+      {keys.map((k) => {
+        const rows = groups[k];
+        return (
+          <div key={k || "__unmapped"} className="rounded-lg border border-hairline bg-surface">
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
+              <span className="text-xs font-semibold text-ink">{secLabel(k)}<span className="text-muted font-normal"> · {rows.length} line{rows.length > 1 ? "s" : ""}</span></span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-ink tabular-nums">{fmt$(sum(rows, (x) => x.sellExGst))}</span>
+                {k !== "" && <button type="button" disabled={busy} onClick={() => dissolve(k)} title="Delete section — its lines roll up to the parent" className="text-red-600 border border-hairline rounded w-5 h-5 leading-none text-sm disabled:opacity-40">×</button>}
+              </div>
+            </div>
+            <div className="divide-y divide-hairline">
+              {rows.map((it) => (
+                <div key={it.id} className="flex items-center gap-2 px-3 py-1.5">
+                  <span className="flex-1 min-w-0 text-xs text-muted truncate" title={it.description}>{it.description}</span>
+                  <span className="text-xs text-ink tabular-nums whitespace-nowrap">{fmt$(it.sellExGst)}</span>
+                  <select disabled={busy} value={it.canonicalKey || ""} onChange={(e) => move(it.id, e.target.value)}
+                    className="text-xs border border-hairline rounded px-1 py-0.5 bg-white text-ink max-w-[140px]">
+                    <option value="">— unmapped —</option>
+                    {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    {it.canonicalKey && !labelByKey[it.canonicalKey] && <option value={it.canonicalKey}>{it.canonicalKey}</option>}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+        {adding ? (
+          <div className="flex items-center gap-2">
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Sub-task name" className="text-xs border border-hairline rounded px-2 py-1 text-ink" />
+            <select value={newKey} onChange={(e) => setNewKey(e.target.value)} className="text-xs border border-hairline rounded px-1 py-1 bg-white text-ink">
+              <option value="">custom (this job only)</option>
+              {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            <button type="button" disabled={busy} onClick={addSection} className="text-xs font-semibold text-white bg-accent rounded px-2 py-1 disabled:opacity-40">Add</button>
+            <button type="button" onClick={() => { setAdding(false); setNewName(""); setNewKey(""); }} className="text-xs text-muted">Cancel</button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setAdding(true)} className="text-xs font-medium text-accent border border-dashed border-accent rounded px-2 py-1">＋ Add sub-task</button>
+        )}
+        {anySuggested && (
+          <button type="button" disabled={busy} onClick={confirmAll} title="Lock this mapping as confirmed" className="text-xs font-semibold text-white bg-primary rounded px-3 py-1 disabled:opacity-40">Confirm mapping ✓</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BudgetTab({ jobId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [seedError, setSeedError] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpand = (id) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   function reload() {
     setLoading(true);
@@ -2136,6 +2230,14 @@ function BudgetTab({ jobId }) {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">{seedError && <span className="text-sm text-red-600">{seedError}</span>}</div>
+        <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer whitespace-nowrap ${seeding ? "bg-gray-100 text-muted" : "border border-hairline text-ink hover:bg-page"}`}
+          title="Re-import to refresh the budget and generate sub-tasks from the estimate leaf items">
+          {seeding ? "Importing…" : "Re-import estimate XLSX"}
+          <input type="file" accept=".xlsx" className="hidden" disabled={seeding} onChange={handleXlsx} />
+        </label>
+      </div>
       <MarginGauge totals={t} />
 
       {data.burn?.available ? (
@@ -2176,17 +2278,32 @@ function BudgetTab({ jobId }) {
               const projCls = l.projectedMarginPct == null ? "text-muted"
                 : l.projectedMarginPct >= MARGIN_TARGET.labour * 100 ? "text-emerald-700"
                 : l.projectedMarginPct >= MARGIN_TARGET.labour * 100 - 5 ? "text-amber-600" : "text-red-600";
-              return (
-              <tr key={l.id} className="border-b border-hairline last:border-0">
-                <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
-                <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
-                <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
-                <td className={`py-2 px-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
-                <td className="py-2 px-3 text-right text-muted">{l.pctComplete != null ? `${Math.round(l.pctComplete * 100)}%` : "—"}</td>
-                <td className={`py-2 px-3 text-right font-semibold ${projCls}`}>{l.projectedMarginPct != null ? fmtPct(l.projectedMarginPct) : "—"}</td>
-                <td className={`py-2 pl-3 text-right font-semibold ${dot}`}>{l.burn?.atMarginDays != null ? `${l.burn.atMarginDays}d` : "—"}</td>
-              </tr>
+              const canExpand = ((l.lineItems?.length || 0) + (l.subtaskOptions?.length || 0)) > 0;
+              const isOpen = expanded.has(l.id);
+              const needsReview = (l.lineItems || []).some((it) => it.status === "suggested");
+              const rows = [(
+                <tr key={l.id} className="border-b border-hairline last:border-0">
+                  <td className="py-2 pr-3 text-ink">
+                    {canExpand ? (
+                      <button type="button" onClick={() => toggleExpand(l.id)} className="inline-flex items-center gap-1.5 hover:text-primary text-left">
+                        <span className="text-[9px] text-muted w-2">{isOpen ? "▼" : "▶"}</span>
+                        <span>{l.categoryName}</span>
+                        {needsReview && <span className="text-[9px] font-semibold text-primary bg-primary/10 rounded px-1 py-0.5">review</span>}
+                      </button>
+                    ) : l.categoryName}
+                  </td>
+                  <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
+                  <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
+                  <td className={`py-2 px-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
+                  <td className="py-2 px-3 text-right text-muted">{l.pctComplete != null ? `${Math.round(l.pctComplete * 100)}%` : "—"}</td>
+                  <td className={`py-2 px-3 text-right font-semibold ${projCls}`}>{l.projectedMarginPct != null ? fmtPct(l.projectedMarginPct) : "—"}</td>
+                  <td className={`py-2 pl-3 text-right font-semibold ${dot}`}>{l.burn?.atMarginDays != null ? `${l.burn.atMarginDays}d` : "—"}</td>
+                </tr>
+              )];
+              if (canExpand && isOpen) rows.push(
+                <tr key={l.id + "-sub"}><td colSpan={7} className="p-0"><SubtaskSections line={l} jobId={jobId} onChanged={reload} /></td></tr>
               );
+              return rows;
             })}
           </tbody>
         </table>
@@ -2205,14 +2322,31 @@ function BudgetTab({ jobId }) {
             <th className="text-right py-2 pl-3 font-medium">Variance</th>
           </tr></thead>
           <tbody>
-            {material.map((l) => (
-              <tr key={l.id} className="border-b border-hairline last:border-0">
-                <td className="py-2 pr-3 text-ink">{l.categoryName}</td>
-                <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
-                <td className="py-2 px-3 text-right text-ink">{l.actual ? fmt$(l.actual) : "—"}</td>
-                <td className={`py-2 pl-3 text-right ${l.variance < 0 ? "text-red-600" : "text-muted"}`}>{fmt$(l.variance)}</td>
-              </tr>
-            ))}
+            {material.map((l) => {
+              const canExpand = ((l.lineItems?.length || 0) + (l.subtaskOptions?.length || 0)) > 0;
+              const isOpen = expanded.has(l.id);
+              const needsReview = (l.lineItems || []).some((it) => it.status === "suggested");
+              const rows = [(
+                <tr key={l.id} className="border-b border-hairline last:border-0">
+                  <td className="py-2 pr-3 text-ink">
+                    {canExpand ? (
+                      <button type="button" onClick={() => toggleExpand(l.id)} className="inline-flex items-center gap-1.5 hover:text-primary text-left">
+                        <span className="text-[9px] text-muted w-2">{isOpen ? "▼" : "▶"}</span>
+                        <span>{l.categoryName}</span>
+                        {needsReview && <span className="text-[9px] font-semibold text-primary bg-primary/10 rounded px-1 py-0.5">review</span>}
+                      </button>
+                    ) : l.categoryName}
+                  </td>
+                  <td className="py-2 px-3 text-right text-muted">{fmt$(l.budget)}</td>
+                  <td className="py-2 px-3 text-right text-ink">{l.actual ? fmt$(l.actual) : "—"}</td>
+                  <td className={`py-2 pl-3 text-right ${l.variance < 0 ? "text-red-600" : "text-muted"}`}>{fmt$(l.variance)}</td>
+                </tr>
+              )];
+              if (canExpand && isOpen) rows.push(
+                <tr key={l.id + "-sub"}><td colSpan={4} className="p-0"><SubtaskSections line={l} jobId={jobId} onChanged={reload} /></td></tr>
+              );
+              return rows;
+            })}
           </tbody>
         </table>
         <p className="text-xs text-muted mt-1">Per-category actuals come from cost entries tagged to a budget line (Costs tab → Budget line). Untagged costs still count in the material total ({fmt$(t.materialActual)}).</p>
