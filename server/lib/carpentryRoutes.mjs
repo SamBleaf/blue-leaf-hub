@@ -1313,7 +1313,7 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { costType, description, amount, costDate, source = "manual", sourceReference, carpentryJobBudgetId } = req.body || {};
+      const { costType, description, amount, costDate, source = "manual", sourceReference, carpentryJobBudgetId, carpentryBudgetLineItemId } = req.body || {};
 
       if (!costType) return err(res, 400, "costType is required.");
       if (!COST_TYPES.includes(costType)) {
@@ -1341,6 +1341,9 @@ export function registerCarpentryRoutes(app) {
           // D5: tag to a material budget line for per-category actuals (only when provided, so
           // this is safe before migration 113 adds the column).
           ...(carpentryJobBudgetId ? { carpentry_job_budget_id: carpentryJobBudgetId } : {}),
+          // Tag to a sub-task line item for per-sub-task material actuals (only when provided, so
+          // this stays safe before migration 142 adds the column).
+          ...(carpentryBudgetLineItemId ? { carpentry_budget_line_item_id: carpentryBudgetLineItemId } : {}),
           created_at:       now,
           updated_at:       now,
         })
@@ -1703,6 +1706,19 @@ export function registerCarpentryRoutes(app) {
           s.actualCostTotal += Number(e.cost_amount || 0);
           s.hours += Number(e.hours || 0);
           if (e.timesheets?.carpentry_job_id) s.jobs.add(e.timesheets.carpentry_job_id);
+        }
+        // Material sub-task actuals — cost entries (invoices) tagged to a line item.
+        let cq = sb.from("carpentry_job_costs")
+          .select("amount, job_id, carpentry_budget_line_items!inner(canonical_key, task_category)")
+          .not("carpentry_budget_line_item_id", "is", null);
+        if (completedIds) cq = cq.in("job_id", completedIds);
+        const { data: mcosts } = await cq;
+        for (const c of mcosts || []) {
+          const li = c.carpentry_budget_line_items;
+          if (!li?.canonical_key) continue;
+          const s = ensureSub(li.canonical_key, li.task_category);
+          s.actualCostTotal += Number(c.amount || 0);
+          if (c.job_id) s.jobs.add(c.job_id);
         }
       } else {
         // Sell + budgeted cost by stream (labour lines only).

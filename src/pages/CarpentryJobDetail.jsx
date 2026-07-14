@@ -1698,6 +1698,18 @@ function DiaryTab({ job }) {
 
 // ── Costs Tab ─────────────────────────────────────────────────────────────────
 
+// Distinct sub-task options for a material budget line (one per canonical_key, tagged to a
+// representative line item id) — for tagging a cost entry to a sub-task, not just the category.
+function matSubtaskOptions(line) {
+  if (!line) return [];
+  const labelByKey = Object.fromEntries((line.subtaskOptions || []).map((o) => [o.key, o.label]));
+  const byKey = new Map();
+  for (const li of line.lineItems || []) {
+    if (li.canonicalKey && !byKey.has(li.canonicalKey)) byKey.set(li.canonicalKey, li.id);
+  }
+  return [...byKey.entries()].map(([key, lineItemId]) => ({ key, label: labelByKey[key] || key, lineItemId }));
+}
+
 function CostsTab({ jobId }) {
   const [costs, setCosts]       = useState([]);
   const [summary, setSummary]   = useState(null);
@@ -1712,6 +1724,7 @@ function CostsTab({ jobId }) {
     amount: "",
     costDate: new Date().toISOString().slice(0, 10),
     budgetLineId: "",
+    budgetLineItemId: "",
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -1741,11 +1754,12 @@ function CostsTab({ jobId }) {
       amount: Number(form.amount),
       costDate: form.costDate,
       carpentryJobBudgetId: form.budgetLineId || undefined,
+      carpentryBudgetLineItemId: form.budgetLineItemId || undefined,
     });
     setSaving(false);
     if (!ok) { setError(e || "Failed to add cost."); return; }
     setCosts((cs) => [data.cost, ...cs]);
-    setForm({ costType: CARPENTRY_COST_TYPES.MATERIAL, description: "", amount: "", costDate: new Date().toISOString().slice(0, 10), budgetLineId: "" });
+    setForm({ costType: CARPENTRY_COST_TYPES.MATERIAL, description: "", amount: "", costDate: new Date().toISOString().slice(0, 10), budgetLineId: "", budgetLineItemId: "" });
     setShowForm(false);
     // Reload summary
     const { ok: sOk, data: sData } = await apiFetch(`/api/carpentry/jobs/${jobId}/summary`);
@@ -1860,12 +1874,27 @@ function CostsTab({ jobId }) {
             </div>
           </div>
           {materialLines.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-ink mb-1">Budget line (for per-category actuals)</label>
-              <select value={form.budgetLineId} onChange={(e) => set("budgetLineId", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
-                <option value="">Unassigned (counts in material total only)</option>
-                {materialLines.map((l) => <option key={l.id} value={l.id}>{l.categoryName}</option>)}
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Budget line (for per-category actuals)</label>
+                <select value={form.budgetLineId} onChange={(e) => setForm((f) => ({ ...f, budgetLineId: e.target.value, budgetLineItemId: "" }))} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
+                  <option value="">Unassigned (counts in material total only)</option>
+                  {materialLines.map((l) => <option key={l.id} value={l.id}>{l.categoryName}</option>)}
+                </select>
+              </div>
+              {(() => {
+                const opts = matSubtaskOptions(materialLines.find((l) => l.id === form.budgetLineId));
+                if (!opts.length) return null;
+                return (
+                  <div>
+                    <label className="block text-xs font-medium text-ink mb-1">Sub-task (optional)</label>
+                    <select value={form.budgetLineItemId} onChange={(e) => set("budgetLineItemId", e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring bg-white">
+                      <option value="">Whole category</option>
+                      {opts.map((o) => <option key={o.lineItemId} value={o.lineItemId}>{o.label}</option>)}
+                    </select>
+                  </div>
+                );
+              })()}
             </div>
           )}
           <div className="flex justify-end">
