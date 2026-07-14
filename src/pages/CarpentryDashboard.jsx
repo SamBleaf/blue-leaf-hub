@@ -495,17 +495,19 @@ function PricingIntelligence() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [scope, setScope] = useState("completed");
+  const [grain, setGrain] = useState("category");
   const [sort, setSort] = useState({ key: "realisedMarginPct", dir: "asc" });
 
-  async function fetchStreams(sc) {
+  async function fetchStreams(sc, gr) {
     setLoading(true); setError(null);
-    const { ok, data: d, error: e } = await apiFetch(`/api/carpentry/pricing/streams?scope=${sc}`);
+    const { ok, data: d, error: e } = await apiFetch(`/api/carpentry/pricing/streams?scope=${sc}&grain=${gr}`);
     setLoading(false);
     if (!ok) { setError(e || "Could not load pricing data."); return; }
     setData(d);
   }
-  function toggle() { const next = !open; setOpen(next); if (next && !data) fetchStreams(scope); }
-  function changeScope(sc) { if (sc === scope) return; setScope(sc); fetchStreams(sc); }
+  function toggle() { const next = !open; setOpen(next); if (next && !data) fetchStreams(scope, grain); }
+  function changeScope(sc) { if (sc === scope) return; setScope(sc); fetchStreams(sc, grain); }
+  function changeGrain(gr) { if (gr === grain) return; setGrain(gr); fetchStreams(scope, gr); }
   function onSort(key) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   }
@@ -541,14 +543,24 @@ function PricingIntelligence() {
       </button>
       {open && (
         <div className="border-t border-hairline">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-hairline">
-            <div className="flex items-center gap-1">
-              {[["completed", "Completed jobs"], ["all", "All jobs"]].map(([v, l]) => (
-                <button key={v} type="button" onClick={() => changeScope(v)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium ${scope === v ? "bg-primary text-white" : "border border-hairline text-muted hover:text-ink"}`}>
-                  {l}
-                </button>
-              ))}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-hairline gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1">
+                {[["completed", "Completed jobs"], ["all", "All jobs"]].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => changeScope(v)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium ${scope === v ? "bg-primary text-white" : "border border-hairline text-muted hover:text-ink"}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
+                {[["category", "Main categories"], ["subtask", "Sub-tasks"]].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => changeGrain(v)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium ${grain === v ? "bg-accent text-white" : "border border-hairline text-muted hover:text-ink"}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
             {data && <span className="text-[11px] text-muted">{data.basis === "loaded" ? "overhead-loaded cost" : "base-rate cost"}</span>}
           </div>
@@ -558,16 +570,18 @@ function PricingIntelligence() {
             <div className="p-6 text-center text-red-600 text-sm">{error}</div>
           ) : sorted.length === 0 ? (
             <div className="p-6 text-center text-muted text-sm">
-              {scope === "completed"
-                ? "No completed carpentry jobs with logged time yet — switch to All jobs to see work in progress."
-                : "No approved carpentry timesheets yet — nothing to compare."}
+              {grain === "subtask"
+                ? "No confirmed sub-tasks with logged time yet — the sub-task view fills in as jobs are tracked at sub-task level (e.g. Naldera)."
+                : scope === "completed"
+                  ? "No completed carpentry jobs with logged time yet — switch to All jobs to see work in progress."
+                  : "No approved carpentry timesheets yet — nothing to compare."}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-hairline bg-slate-50">
-                    {sortTh("Task type", "label")}
+                    {sortTh(grain === "subtask" ? "Sub-task" : "Task type", "label")}
                     {sortTh("Jobs", "jobCount", true)}
                     {sortTh("Hours", "hours", true)}
                     {sortTh("Charged (sell)", "sellTotal", true)}
@@ -590,7 +604,8 @@ function PricingIntelligence() {
               </table>
               <p className="px-4 py-2.5 text-[11px] text-muted border-t border-hairline">
                 Realised margin = (charged − actual {data?.basis === "loaded" ? "overhead-loaded" : "base-rate"} cost) ÷ charged · target {target}% · worst first.
-                {scope === "all" ? " In-progress jobs read high until their hours land — Completed jobs is the true signal." : ""} Coarse by stream — sub-task splits (e.g. wall vs truss) arrive with the line-item build.
+                {scope === "all" ? " In-progress jobs read high until their hours land — Completed jobs is the true signal." : ""}
+                {grain === "subtask" ? " Sub-task view — only jobs tracked at sub-task level appear (wall vs truss)." : " Main-category view — switch to Sub-tasks for the wall-vs-truss split."}
               </p>
             </div>
           )}

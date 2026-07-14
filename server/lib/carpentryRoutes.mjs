@@ -1663,39 +1663,75 @@ export function registerCarpentryRoutes(app) {
         const { data: doneJobs } = await sb.from("carpentry_jobs").select("id").eq("status", "complete");
         completedIds = (doneJobs || []).map((j) => j.id);
       }
+      // Grain: 'category' (default, the 8 main streams) or 'subtask' (canonical sub-tasks — the
+      // wall-vs-truss view; needs confirmed line items + timesheets logged against them, Phase 3).
+      const grain = req.query.grain === "subtask" ? "subtask" : "category";
       const byStream = {};
       const ensure = (k) => (byStream[k] ||= {
         stream: k, label: labelFor[k] || k, sellTotal: 0, costBudgetTotal: 0,
         actualCostTotal: 0, hours: 0, jobs: new Set(),
       });
+      const subLabel = (key, cat) => catalogueFor({ parentTaskCategory: cat, costType: "labour" }).find((o) => o.key === key)?.label || key;
+      const ensureSub = (k, cat) => (byStream[k] ||= {
+        stream: k, label: subLabel(k, cat), sellTotal: 0, costBudgetTotal: 0,
+        actualCostTotal: 0, hours: 0, jobs: new Set(),
+      });
 
-      // Sell + budgeted cost by stream (labour lines only).
-      let bq = sb.from("carpentry_job_budgets")
-        .select("workforce_task_category, budget_ex_gst, cost_ex_gst, job_id")
-        .eq("cost_type", "labour");
-      if (completedIds) bq = bq.in("job_id", completedIds);
-      const { data: budgets } = await bq;
-      for (const b of budgets || []) {
-        if (!b.workforce_task_category) continue;
-        const s = ensure(b.workforce_task_category);
-        s.sellTotal += Number(b.budget_ex_gst || 0);
-        s.costBudgetTotal += Number(b.cost_ex_gst || 0);
-        if (b.job_id) s.jobs.add(b.job_id);
-      }
-
-      // Actual LOADED cost + hours by stream, from approved carpentry timesheets only.
-      let eqy = sb.from("timesheet_entries")
-        .select("task_category, cost_amount, hours, timesheets!inner(carpentry_job_id, status)")
-        .eq("timesheets.status", "approved")
-        .not("timesheets.carpentry_job_id", "is", null);
-      if (completedIds) eqy = eqy.in("timesheets.carpentry_job_id", completedIds);
-      const { data: entries } = await eqy;
-      for (const e of entries || []) {
-        if (!e.task_category) continue;
-        const s = ensure(e.task_category);
-        s.actualCostTotal += Number(e.cost_amount || 0);
-        s.hours += Number(e.hours || 0);
-        if (e.timesheets?.carpentry_job_id) s.jobs.add(e.timesheets.carpentry_job_id);
+      if (grain === "subtask") {
+        // Sell + budgeted cost by canonical sub-task (confirmed line items only).
+        let liq = sb.from("carpentry_budget_line_items")
+          .select("canonical_key, task_category, sell_ex_gst, cost_ex_gst, job_id")
+          .eq("status", "confirmed").not("canonical_key", "is", null).not("task_category", "is", null);
+        if (completedIds) liq = liq.in("job_id", completedIds);
+        const { data: lis } = await liq;
+        for (const li of lis || []) {
+          const s = ensureSub(li.canonical_key, li.task_category);
+          s.sellTotal += Number(li.sell_ex_gst || 0);
+          s.costBudgetTotal += Number(li.cost_ex_gst || 0);
+          if (li.job_id) s.jobs.add(li.job_id);
+        }
+        // Actual LOADED cost + hours by sub-task, from approved timesheets tagged to a line item.
+        let seq = sb.from("timesheet_entries")
+          .select("cost_amount, hours, carpentry_budget_line_items!inner(canonical_key, task_category), timesheets!inner(carpentry_job_id, status)")
+          .eq("timesheets.status", "approved").not("timesheets.carpentry_job_id", "is", null).not("budget_line_item_id", "is", null);
+        if (completedIds) seq = seq.in("timesheets.carpentry_job_id", completedIds);
+        const { data: sents } = await seq;
+        for (const e of sents || []) {
+          const li = e.carpentry_budget_line_items;
+          if (!li?.canonical_key) continue;
+          const s = ensureSub(li.canonical_key, li.task_category);
+          s.actualCostTotal += Number(e.cost_amount || 0);
+          s.hours += Number(e.hours || 0);
+          if (e.timesheets?.carpentry_job_id) s.jobs.add(e.timesheets.carpentry_job_id);
+        }
+      } else {
+        // Sell + budgeted cost by stream (labour lines only).
+        let bq = sb.from("carpentry_job_budgets")
+          .select("workforce_task_category, budget_ex_gst, cost_ex_gst, job_id")
+          .eq("cost_type", "labour");
+        if (completedIds) bq = bq.in("job_id", completedIds);
+        const { data: budgets } = await bq;
+        for (const b of budgets || []) {
+          if (!b.workforce_task_category) continue;
+          const s = ensure(b.workforce_task_category);
+          s.sellTotal += Number(b.budget_ex_gst || 0);
+          s.costBudgetTotal += Number(b.cost_ex_gst || 0);
+          if (b.job_id) s.jobs.add(b.job_id);
+        }
+        // Actual LOADED cost + hours by stream, from approved carpentry timesheets only.
+        let eqy = sb.from("timesheet_entries")
+          .select("task_category, cost_amount, hours, timesheets!inner(carpentry_job_id, status)")
+          .eq("timesheets.status", "approved")
+          .not("timesheets.carpentry_job_id", "is", null);
+        if (completedIds) eqy = eqy.in("timesheets.carpentry_job_id", completedIds);
+        const { data: entries } = await eqy;
+        for (const e of entries || []) {
+          if (!e.task_category) continue;
+          const s = ensure(e.task_category);
+          s.actualCostTotal += Number(e.cost_amount || 0);
+          s.hours += Number(e.hours || 0);
+          if (e.timesheets?.carpentry_job_id) s.jobs.add(e.timesheets.carpentry_job_id);
+        }
       }
 
       const cm = await getCostModel(sb);
@@ -1720,7 +1756,7 @@ export function registerCarpentryRoutes(app) {
         if (b.realisedMarginPct == null) return -1;
         return a.realisedMarginPct - b.realisedMarginPct;
       });
-      return ok(res, { streams, scope, basis: cm ? "loaded" : "base", targetPct: Math.round(MARGIN_TARGET_LABOUR * 100) });
+      return ok(res, { streams, scope, grain, basis: cm ? "loaded" : "base", targetPct: Math.round(MARGIN_TARGET_LABOUR * 100) });
     } catch (e) {
       console.error("[carpentry/pricing/streams]", e);
       return err(res, 500, translateDbError(e));
