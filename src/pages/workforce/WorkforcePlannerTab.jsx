@@ -205,6 +205,19 @@ export default function WorkforcePlannerTab() {
   // chip move instantly; we only re-fetch silently to reconcile (or to revert on error).
   const reload = (m) => { if (m) setMsg(m); loadAllocations(true); };
 
+  // Apply the server's returned rows for the affected cells — no full-week refetch, no temp-id race
+  // (kills "chip vanishes / duplicates" + the broken swap). Drop any stale row at an affected cell or
+  // with an affected id, then add the returned truth.
+  const applyAllocations = useCallback((returned) => {
+    if (!Array.isArray(returned)) return;
+    const cells = new Set(returned.map((r) => `${r.employeeId}|${r.allocationDate}`));
+    const ids = new Set(returned.map((r) => r.id));
+    setAllocations((prev) => [
+      ...prev.filter((a) => !ids.has(a.id) && !cells.has(`${a.employeeId}|${a.allocationDate}`)),
+      ...returned,
+    ]);
+  }, []);
+
   const create = (empId, day, jKey) =>
     authFetch("/api/workforce/allocations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allocationDate: day, employeeId: empId, ...jobBodyFromKey(jKey) }) }).then(json);
   const del = (id) => authFetch(`/api/workforce/allocations/${id}`, { method: "DELETE" }).then(json);
@@ -216,34 +229,27 @@ export default function WorkforcePlannerTab() {
     const tmp = { id: `tmp-${empId}-${day}-${Date.now()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null };
     setAllocations((prev) => [...prev.filter((a) => !(a.employeeId === empId && a.allocationDate === day)), tmp]); // optimistic
     try {
-      if (existing) { const d = await del(existing.id); if (!d.ok) { setMsg({ type: "error", text: d.error || "Could not replace." }); loadAllocations(true); return; } }
-      const r = await create(empId, day, jKey);
-      if (!r.ok) { setMsg({ type: "error", text: r.error || "Could not assign." }); loadAllocations(true); return; }
-      loadAllocations(true); // reconcile temp id → real id
+      const r = await authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey) }) }).then(json);
+      if (r.ok) applyAllocations(r.allocations);              // atomic replace-or-insert → server truth
+      else { setMsg({ type: "error", text: r.error || "Could not assign." }); loadAllocations(true); }
     } catch { setMsg({ type: "error", text: "Network error." }); loadAllocations(true); } finally { setBusy(false); }
   }
 
+  // Move a chip; if the target cell is occupied the server swaps the two jobs atomically (mig 143).
   async function moveChip(alloc, empId, day) {
     if (alloc.employeeId === empId && alloc.allocationDate === day) return;
     const target = allocMap[`${empId}|${day}`];
-    if (target) { setBusy(true); setMsg(null); try { await swap(alloc, target); } finally { setBusy(false); } return; }
     setMsg(null); setBusy(true);
-    setAllocations((prev) => prev.map((a) => a.id === alloc.id ? { ...a, employeeId: empId, allocationDate: day } : a)); // optimistic instant move
+    setAllocations((prev) => prev.map((a) => {           // optimistic: move (and swap the two jobs if occupied)
+      if (a.id === alloc.id) return { ...a, employeeId: empId, allocationDate: day };
+      if (target && a.id === target.id) return { ...a, employeeId: alloc.employeeId, allocationDate: alloc.allocationDate };
+      return a;
+    }));
     try {
-      const r = await authFetch(`/api/workforce/allocations/${alloc.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allocationDate: day, employeeId: empId }) }).then(json);
-      if (!r.ok) { setMsg({ type: "error", text: r.error || "Could not move." }); loadAllocations(true); }
+      const r = await authFetch("/api/workforce/allocations/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: alloc.id, toEmployeeId: empId, toDate: day }) }).then(json);
+      if (r.ok) applyAllocations(r.allocations);
+      else { setMsg({ type: "error", text: r.error || "Could not move." }); loadAllocations(true); }
     } catch { setMsg({ type: "error", text: "Network error." }); loadAllocations(true); } finally { setBusy(false); }
-  }
-
-  // Swap two cells' jobs. Delete both, recreate both swapped. Any partial failure → reload + clear error.
-  async function swap(a, b) {
-    const aKey = allocJobKey(a), bKey = allocJobKey(b);
-    const da = await del(a.id); if (!da.ok) return reload({ type: "error", text: "Swap failed — nothing changed. Reloaded." });
-    const db = await del(b.id); if (!db.ok) return reload({ type: "error", text: "Swap partially failed — reloaded current state." });
-    const c1 = await create(b.employeeId, b.allocationDate, aKey); // a's job → b's cell
-    const c2 = await create(a.employeeId, a.allocationDate, bKey); // b's job → a's cell
-    if (!c1.ok || !c2.ok) return reload({ type: "error", text: "Swap partially failed — reloaded current state. Check the two cells." });
-    reload();
   }
 
   // Fill / deduct across a row: days anchor..end get the job; days end+1..prevRight (this job) are removed.

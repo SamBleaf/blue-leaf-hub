@@ -1611,6 +1611,85 @@ export function registerWorkforceRoutes(app) {
     ok(res);
   });
 
+  // ── Atomic assign / move / swap (fixes chip vanish/duplicate + broken swap-onto-occupied) ──
+  // One transaction via the migration-143 RPCs; falls back to ordered ops if the functions aren't
+  // applied yet. Both return the AFFECTED allocation rows so the client can apply server truth.
+  const rpcMissing = (e) =>
+    !!e && (e.code === "42883" || e.code === "PGRST202" || /function .* does not exist|could not find the function|schema cache/i.test(e.message || ""));
+  async function formatAllocIds(sb, ids) {
+    const out = [];
+    for (const id of ids) {
+      try { const full = await fetchAllocationById(sb, id); if (full) out.push(formatAllocation(full)); } catch { /* deleted mid-swap */ }
+    }
+    return out;
+  }
+
+  app.post("/api/workforce/allocations/assign", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const allocationDate = req.body.allocationDate ?? req.body.allocation_date ?? req.body.date;
+    const employeeId = req.body.employeeId ?? req.body.employee_id;
+    if (!allocationDate) return err(res, 400, "allocationDate is required");
+    if (!employeeId || !isUuid(employeeId)) return err(res, 400, "employeeId is required");
+    const spine = parseJobSpine(req.body);
+    if (spine.error) return err(res, 400, spine.error);
+    const notes = req.body.notes ?? null;
+    try {
+      const { data, error } = await sb.rpc("workforce_allocation_assign", {
+        p_employee: employeeId, p_date: allocationDate,
+        p_project: spine.projectId, p_carpentry: spine.carpentryJobId,
+        p_notes: notes, p_created_by: req.caller.id,
+      });
+      if (error && !rpcMissing(error)) return err(res, 500, translateDbError(error));
+      if (error) { // fallback (mig 143 not applied) — ordered ops, non-atomic
+        await sb.from("workforce_allocations").delete().eq("employee_id", employeeId).eq("allocation_date", allocationDate);
+        const ins = await sb.from("workforce_allocations").insert({
+          employee_id: employeeId, allocation_date: allocationDate,
+          project_id: spine.projectId, carpentry_job_id: spine.carpentryJobId,
+          notes, created_by: req.caller.id, updated_at: new Date().toISOString(),
+        }).select("id").single();
+        if (ins.error) return err(res, 500, translateDbError(ins.error));
+        return ok(res, { allocations: await formatAllocIds(sb, [ins.data.id]) });
+      }
+      return ok(res, { allocations: await formatAllocIds(sb, (data || []).map((r) => r.id)) });
+    } catch (e) { return err(res, 500, e.message); }
+  });
+
+  app.post("/api/workforce/allocations/move", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const id = req.body.id;
+    const toEmployee = req.body.toEmployeeId ?? req.body.to_employee ?? req.body.employeeId;
+    const toDate = req.body.toDate ?? req.body.to_date ?? req.body.allocationDate;
+    if (!id || !isUuid(id)) return err(res, 400, "id is required");
+    if (!toEmployee || !isUuid(toEmployee)) return err(res, 400, "toEmployeeId is required");
+    if (!toDate) return err(res, 400, "toDate is required");
+    try {
+      const { data, error } = await sb.rpc("workforce_allocation_move", { p_id: id, p_to_employee: toEmployee, p_to_date: toDate });
+      if (error && (error.code === "P0002" || /allocation_not_found/.test(error.message || ""))) return err(res, 404, "Allocation not found", "NOT_FOUND");
+      if (error && !rpcMissing(error)) return err(res, 500, translateDbError(error));
+      if (error) { // fallback (mig 143 not applied) — ordered ops mirroring the RPC
+        const { data: src } = await sb.from("workforce_allocations").select("*").eq("id", id).maybeSingle();
+        if (!src) return err(res, 404, "Allocation not found", "NOT_FOUND");
+        if (src.employee_id === toEmployee && src.allocation_date === toDate) return ok(res, { allocations: await formatAllocIds(sb, [id]) });
+        const { data: tgt } = await sb.from("workforce_allocations").select("*").eq("employee_id", toEmployee).eq("allocation_date", toDate).maybeSingle();
+        if (tgt) {
+          await sb.from("workforce_allocations").delete().eq("id", tgt.id);
+          await sb.from("workforce_allocations").update({ employee_id: toEmployee, allocation_date: toDate, updated_at: new Date().toISOString() }).eq("id", id);
+          await sb.from("workforce_allocations").insert({
+            employee_id: src.employee_id, allocation_date: src.allocation_date,
+            project_id: tgt.project_id, carpentry_job_id: tgt.carpentry_job_id,
+            notes: tgt.notes, created_by: tgt.created_by, updated_at: new Date().toISOString(),
+          });
+        } else {
+          await sb.from("workforce_allocations").update({ employee_id: toEmployee, allocation_date: toDate, updated_at: new Date().toISOString() }).eq("id", id);
+        }
+        const { data: rows } = await sb.from("workforce_allocations").select("id")
+          .or(`and(employee_id.eq.${toEmployee},allocation_date.eq.${toDate}),and(employee_id.eq.${src.employee_id},allocation_date.eq.${src.allocation_date})`);
+        return ok(res, { allocations: await formatAllocIds(sb, (rows || []).map((r) => r.id)) });
+      }
+      return ok(res, { allocations: await formatAllocIds(sb, (data || []).map((r) => r.id)) });
+    } catch (e) { return err(res, 500, e.message); }
+  });
+
   // ── W17-P4b/P4c: per-job Planner settings (colour + board membership) — advisory/UI only.
   // Degrades gracefully if migration 118 is not applied (table missing → empty / 503).
   // PostgREST reports a missing table via a schema-cache error, not the raw PG 42P01 code.
