@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
+import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
 import { PLANNER_PALETTE, resolveJobColor } from "../../lib/plannerColors.js";
 
@@ -38,6 +38,8 @@ function abbrevLabel(label) {
 }
 
 const json = (r) => r.json().catch(() => ({}));
+const vibrate = (ms) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
+const IS_TOUCH = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
 // ── Draggable legend job-chip (drag source for "assign") ─────────────────────
 function LegendChip({ jKey, label, color, pinned, onPickColor, onRemove }) {
@@ -60,40 +62,54 @@ function LegendChip({ jKey, label, color, pinned, onPickColor, onRemove }) {
 // ── Draggable allocation chip (drag source for "move"; click = notes) ─────────
 // memo'd: during a fill/drag the parent re-renders on each cell-crossing, but chip props
 // (alloc/label/color + stable ref-wrapped handlers) don't change, so every chip is skipped.
-const ShiftChip = memo(function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart }) {
+const ShiftChip = memo(function ShiftChip({ alloc, label, color, onClick, onLongPress, onFillStart, onFillDownStart }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `chip:${alloc.id}`, data: { kind: "chip", alloc } });
+  const lpTimer = useRef(null);
+  const lpFired = useRef(false);
+  const lpStart = (e) => {
+    lpFired.current = false;
+    const t = e.touches?.[0]; const x = t?.clientX ?? 0, y = t?.clientY ?? 0;
+    clearTimeout(lpTimer.current);
+    lpTimer.current = setTimeout(() => { lpFired.current = true; vibrate(12); onLongPress?.(alloc, x, y); }, 480);
+  };
+  const lpCancel = () => clearTimeout(lpTimer.current);
   return (
     <div ref={setNodeRef} {...attributes} {...listeners}
-      onClick={(e) => { e.stopPropagation(); onClick(alloc, e); }}
+      onClick={(e) => { e.stopPropagation(); if (lpFired.current) { lpFired.current = false; return; } onClick(alloc, e); }}
+      onTouchStart={lpStart} onTouchMove={lpCancel} onTouchEnd={lpCancel} onTouchCancel={lpCancel}
+      data-testid="planner-chip"
       className={`group relative w-full h-full rounded px-1.5 py-1 flex items-center gap-1 cursor-grab select-none ${isDragging ? "opacity-40" : ""}`}
-      style={{ touchAction: "none", background: color.bg }}
-      title={`${label}${alloc.notes ? ` · ${alloc.notes}` : ""} — click to edit, drag to move`}>
+      style={{ touchAction: "pan-x pan-y", background: color.bg }}
+      title={`${label}${alloc.notes ? ` · ${alloc.notes}` : ""} — click to edit, drag to move (long-press on touch for actions)`}>
       <span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: color.dot }} />
       <span className="text-[11px] leading-tight truncate" style={{ color: color.text }}><span className="sm:hidden">{abbrevLabel(label)}</span><span className="hidden sm:inline">{label}</span></span>
       {alloc.notes ? <span className="w-1 h-1 rounded-full bg-black/30 shrink-0" title={alloc.notes} /> : null}
-      <span onPointerDown={(e) => { e.stopPropagation(); onFillStart(alloc, e); }}
-        className="absolute right-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover:opacity-100"
-        style={{ touchAction: "none" }} title="Drag across days to fill / deduct" aria-hidden="true">
-        <span className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-3 rounded-sm" style={{ background: color.dot }} />
-      </span>
-      <span onPointerDown={(e) => { e.stopPropagation(); onFillDownStart(alloc, e); }}
-        className="absolute left-0 bottom-0 w-full h-2 cursor-ns-resize opacity-0 group-hover:opacity-100"
-        style={{ touchAction: "none" }} title="Drag down to duplicate to other workers / deduct" aria-hidden="true">
-        <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-3 rounded-sm" style={{ background: color.dot }} />
-      </span>
+      {!IS_TOUCH && (<>
+        <span onPointerDown={(e) => { e.stopPropagation(); onFillStart(alloc, e); }}
+          className="absolute right-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover:opacity-100"
+          style={{ touchAction: "none" }} title="Drag across days to fill / deduct" aria-hidden="true">
+          <span className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-3 rounded-sm" style={{ background: color.dot }} />
+        </span>
+        <span onPointerDown={(e) => { e.stopPropagation(); onFillDownStart(alloc, e); }}
+          className="absolute left-0 bottom-0 w-full h-2 cursor-ns-resize opacity-0 group-hover:opacity-100"
+          style={{ touchAction: "none" }} title="Drag down to duplicate to other workers / deduct" aria-hidden="true">
+          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-3 rounded-sm" style={{ background: color.dot }} />
+        </span>
+      </>)}
     </div>
   );
 });
 
 // ── Droppable day cell ────────────────────────────────────────────────────────
-function DayCell({ empId, day, dayIdx, fillActive, nonWork, children, className = "" }) {
+function DayCell({ empId, day, dayIdx, fillActive, nonWork, picking, onPick, children, className = "" }) {
   const { setNodeRef, isOver } = useDroppable({ id: `cell:${empId}:${day}`, data: { kind: "cell", empId, day, dayIdx } });
   const filled = !!children;
   return (
     <td className={`py-1 px-1 align-top ${className}`}>
       <div ref={setNodeRef} data-cell data-empid={empId} data-dayidx={dayIdx}
-        title={filled && nonWork ? `${nonWork.label} conflicts with allocation` : nonWork ? nonWork.label : undefined}
-        className={`min-h-[34px] rounded transition ${filled ? (nonWork ? "ring-2 ring-amber-400" : "") : nonWork ? (nonWork.kind === "team" ? "bg-sky-100 border border-sky-200" : "bg-slate-100 border border-slate-200") : "border border-dashed border-hairline"} ${isOver ? "ring-2 ring-primary" : ""} ${fillActive ? "ring-2 ring-primary/60" : ""} ${!filled ? "flex items-center justify-center text-[10px] hover:bg-slate-50" : ""}`}>
+        onClick={onPick ? (e) => { e.stopPropagation(); onPick(empId, day); } : undefined}
+        title={filled && nonWork ? `${nonWork.label} conflicts with allocation` : nonWork ? nonWork.label : picking ? "Tap to move here" : undefined}
+        className={`min-h-[44px] sm:min-h-[34px] rounded transition ${filled ? (nonWork ? "ring-2 ring-amber-400" : "") : nonWork ? (nonWork.kind === "team" ? "bg-sky-100 border border-sky-200" : "bg-slate-100 border border-slate-200") : "border border-dashed border-hairline"} ${isOver ? "ring-2 ring-primary" : ""} ${fillActive ? "ring-2 ring-primary/60" : ""} ${picking ? "ring-2 ring-accent/70 cursor-pointer" : ""} ${!filled ? "flex items-center justify-center text-[10px] hover:bg-slate-50 cursor-pointer" : ""}`}>
         {filled ? children : (nonWork ? <span className={`leading-tight ${nonWork.kind === "team" ? "text-sky-600 font-medium" : "text-slate-400"}`}>{nonWork.kind === "holiday" ? "Hol" : nonWork.kind === "team" ? "Team RDO" : "RDO"}</span> : <span className="text-muted text-sm">+</span>)}
       </div>
     </td>
@@ -115,6 +131,9 @@ export default function WorkforcePlannerTab() {
   const [activeDrag, setActiveDrag] = useState(null);
   const [notesPop, setNotesPop] = useState(null); // { alloc, x, y, value }
   const [colorPop, setColorPop] = useState(null); // { jKey, x, y }
+  const [chipMenu, setChipMenu] = useState(null); // { alloc, x, y } — touch long-press action menu
+  const [moveMode, setMoveMode] = useState(null); // { alloc } — "tap a cell to move here"
+  const [cellPicker, setCellPicker] = useState(null); // { empId, day } — tap-empty-cell job picker
   const [fill, setFill] = useState(null); // { empId, jKey, anchorIdx, endIdx, prevRightIdx } — across days
   const [fillDown, setFillDown] = useState(null); // { day, dayIdx, jKey, anchorRow, endRow, prevBottomRow } — down workers
   const [nonWorking, setNonWorking] = useState({ holidays: [], rdo: [], teamRdo: [] });
@@ -130,11 +149,11 @@ export default function WorkforcePlannerTab() {
   const fillDownRef = useRef(null);
   fillDownRef.current = fillDown;
 
-  // Mouse: 5px drag threshold (snappy on desktop). Touch: 400ms press-hold + 15px tolerance — a
-  // horizontal swipe to scroll will travel >15px before 400ms elapses, cancelling drag activation.
+  // Desktop = mouse drag (5px threshold). Touch has NO dnd-kit drag: on phone a chip is a tap
+  // (edit note) or a long-press (mini action menu), and adding is a tap on an empty cell — which
+  // removes the finger-hostile 400ms-hold-to-drag + the overloaded 8px micro-gestures.
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 15 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } })
   );
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => ymd(addDays(monday, i))), [monday]);
@@ -483,11 +502,36 @@ export default function WorkforcePlannerTab() {
     setColorPop({ jKey, x: r.left - (wrap?.left || 0), y: r.bottom - (wrap?.top || 0) + 4 });
   }
 
+  // ── Touch: mini action menu (long-press), move-mode (tap destination), tap-to-add ──────────
+  function openChipMenu(alloc, x, y) {
+    const wrap = gridRef.current?.getBoundingClientRect();
+    setNotesPop(null); setColorPop(null);
+    setChipMenu({ alloc, x: x - (wrap?.left || 0), y: y - (wrap?.top || 0) });
+  }
+  function chipClicked(alloc, e) {
+    if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (src.id !== alloc.id) moveChip(src, alloc.employeeId, alloc.allocationDate); return; }
+    openNotes(alloc, e);
+  }
+  function onCellPick(empId, day) {
+    if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (!(src.employeeId === empId && src.allocationDate === day)) moveChip(src, empId, day); return; }
+    if (!allocMap[`${empId}|${day}`]) { setChipMenu(null); setCellPicker({ empId, day }); }
+  }
+  function menuFillWeek(alloc) {  // fill this job from this day to Friday (weekdays)
+    const idx = days.indexOf(alloc.allocationDate);
+    setChipMenu(null); vibrate(8);
+    fillCommit(alloc.employeeId, allocJobKey(alloc), idx, idx <= 4 ? 4 : idx, idx);
+  }
+  function menuCopyDown(alloc) {  // copy this job to every crew member on this day (empty cells only)
+    setChipMenu(null); vibrate(8);
+    fillDownCommit(alloc.allocationDate, allocJobKey(alloc), 0, employees.length - 1, 0);
+  }
+
   // Stable handler identities for the memoized ShiftChip — the ref always points at the latest
   // closures, so these wrappers never change identity and never bust the memo mid-drag.
   const chipHandlersRef = useRef(null);
-  chipHandlersRef.current = { openNotes, startFill, startFillDown };
-  const onChipClick = useCallback((alloc, e) => chipHandlersRef.current.openNotes(alloc, e), []);
+  chipHandlersRef.current = { chipClicked, openChipMenu, startFill, startFillDown };
+  const onChipClick = useCallback((alloc, e) => chipHandlersRef.current.chipClicked(alloc, e), []);
+  const onChipLongPress = useCallback((alloc, x, y) => chipHandlersRef.current.openChipMenu(alloc, x, y), []);
   const onChipFillStart = useCallback((alloc, e) => chipHandlersRef.current.startFill(alloc, e), []);
   const onChipFillDownStart = useCallback((alloc, e) => chipHandlersRef.current.startFillDown(alloc, e), []);
 
@@ -501,7 +545,7 @@ export default function WorkforcePlannerTab() {
 
   return (
     <DndContext sensors={sensors} onDragStart={(e) => setActiveDrag(e.active.data.current)} onDragEnd={onDragEnd} onDragCancel={() => setActiveDrag(null)}>
-      <div ref={gridRef} className="relative" onClick={() => { setNotesPop(null); setColorPop(null); }}>
+      <div ref={gridRef} className="relative" onClick={() => { setNotesPop(null); setColorPop(null); setChipMenu(null); }}>
         <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-3 py-2 mb-3">
           Planner is advisory only. It does not create timesheets, approve hours, or sync anything to Buildexact.
         </div>
@@ -623,6 +667,13 @@ export default function WorkforcePlannerTab() {
 
         {msg && <p className={`text-xs mb-2 ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
 
+        {moveMode && (
+          <div className="sticky top-0 z-30 mb-2 flex items-center justify-between gap-2 rounded-lg bg-accent/10 border border-accent/30 px-3 py-2">
+            <span className="text-xs text-accent font-medium">Tap a cell to move <b>{labelFor(allocJobKey(moveMode.alloc))}</b> there</span>
+            <button type="button" onClick={() => setMoveMode(null)} className="text-xs text-muted underline shrink-0">Cancel</button>
+          </div>
+        )}
+
         {loading ? <p className="text-sm text-muted">Loading planner…</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -640,10 +691,10 @@ export default function WorkforcePlannerTab() {
                       const a = allocMap[`${emp.id}|${d}`];
                       const jKey = a && allocJobKey(a);
                       return (
-                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} className={i >= 5 ? "hidden sm:table-cell" : ""}>
+                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} picking={!!moveMode} onPick={onCellPick} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
-                              <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
+                              <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
                               <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeAlloc(a); }}
                                 className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-hairline text-muted text-[10px] leading-none opacity-0 hover:opacity-100 focus:opacity-100" title="Remove" aria-label="Remove allocation">×</button>
                             </div>
@@ -680,6 +731,51 @@ export default function WorkforcePlannerTab() {
               {PLANNER_PALETTE.map((p) => (
                 <button key={p.key} type="button" onClick={() => saveColor(colorPop.jKey, p.key)} className="w-6 h-6 rounded border border-black/10" style={{ background: p.dot }} title={p.label} aria-label={p.label} />
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Chip action menu (touch long-press) */}
+        {chipMenu && (() => {
+          const a = chipMenu.alloc;
+          const items = [
+            { label: "Move to…", fn: () => { setChipMenu(null); vibrate(8); setMoveMode({ alloc: a }); } },
+            { label: "Fill across week", fn: () => menuFillWeek(a) },
+            { label: "Copy down to crew", fn: () => menuCopyDown(a) },
+            { label: "Edit note", fn: () => { setChipMenu(null); setNotesPop({ alloc: a, value: a.notes || "", x: chipMenu.x, y: chipMenu.y }); } },
+            { label: "Remove", danger: true, fn: () => { setChipMenu(null); removeAlloc(a); } },
+          ];
+          return (
+            <div data-testid="planner-chip-menu" className="absolute z-30 bg-white border border-hairline rounded-xl shadow-xl overflow-hidden w-44"
+              style={{ left: Math.min(Math.max(0, chipMenu.x), (gridRef.current?.clientWidth || 320) - 180), top: chipMenu.y }} onClick={(e) => e.stopPropagation()}>
+              <p className="px-3 pt-2 pb-1 text-[11px] text-muted truncate border-b border-hairline">{labelFor(allocJobKey(a))}</p>
+              {items.map((it) => (
+                <button key={it.label} type="button" onClick={it.fn} className={`w-full text-left px-3 min-h-[44px] text-sm border-b border-hairline last:border-0 active:bg-page ${it.danger ? "text-red-600" : "text-ink"}`}>{it.label}</button>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Tap-empty-cell job picker (bottom sheet) */}
+        {cellPicker && (
+          <div className="fixed inset-0 z-50 flex items-end" onClick={() => setCellPicker(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative w-full bg-white rounded-t-2xl p-4 max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-ink">Add a job</p>
+                <button type="button" onClick={() => setCellPicker(null)} className="text-sm text-muted">Close</button>
+              </div>
+              {boardJobs.length === 0 ? <p className="text-xs text-muted py-4">No jobs on the board — add some from the Jobs row above.</p> : (
+                <div className="space-y-1.5">
+                  {boardJobs.map((j) => { const c = colorFor(j.jKey); return (
+                    <button key={j.jKey} type="button" onClick={() => { const { empId, day } = cellPicker; setCellPicker(null); vibrate(8); assignFromLegend(j.jKey, empId, day); }}
+                      className="w-full flex items-center gap-2 min-h-[48px] px-3 rounded-lg border border-hairline text-left" style={{ background: c.bg }}>
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: c.dot }} />
+                      <span className="text-sm truncate" style={{ color: c.text }}>{j.label}</span>
+                    </button>
+                  ); })}
+                </div>
+              )}
             </div>
           </div>
         )}
