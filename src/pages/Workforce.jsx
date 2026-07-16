@@ -586,7 +586,10 @@ function MassFillTab() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [carpJobs, setCarpJobs] = useState([]);
   const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>"
-  const [rows, setRows] = useState([{ employee_id: "", task_category: "", hours: "8", notes: "" }]);
+  const [rows, setRows] = useState(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return [{ employee_id: "", task_category: "", hours: "8", notes: "", date: today }];
+  });
   const [results, setResults] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -600,7 +603,7 @@ function MassFillTab() {
   }, []);
 
   function addRow() {
-    setRows(prev => [...prev, { employee_id: "", task_category: "", hours: "8", notes: "" }]);
+    setRows(prev => [...prev, { employee_id: "", task_category: "", hours: "8", notes: "", date }]);
   }
   function removeRow(i) { setRows(prev => prev.filter((_, idx) => idx !== i)); }
   function updateRow(i, field, val) { setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r)); }
@@ -615,6 +618,7 @@ function MassFillTab() {
         task_category: r.task_category,
         hours: parseFloat(r.hours),
         notes: r.notes || undefined,
+        date: r.date || date,   // per-row date (falls back to the default)
       }));
       if (!entries.length) { alert("No valid entries"); return; }
       const payload = { date, entries };
@@ -634,8 +638,9 @@ function MassFillTab() {
     <div>
       <div className="flex gap-3 mb-4 flex-wrap">
         <div>
-          <label className="text-xs text-muted block mb-1">Date</label>
+          <label className="text-xs text-muted block mb-1">Default date</label>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          <p className="text-[10px] text-muted mt-1">Seeds new rows — set each row&apos;s date below</p>
         </div>
         <div>
           <label className="text-xs text-muted block mb-1">Site / job</label>
@@ -659,6 +664,7 @@ function MassFillTab() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-hairline">
             <tr>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-muted w-40">Date</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Employee</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted">Task</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-muted w-20">Hours</th>
@@ -669,6 +675,9 @@ function MassFillTab() {
           <tbody className="divide-y divide-hairline">
             {rows.map((r, i) => (
               <tr key={i}>
+                <td className="px-2 py-2">
+                  <input type="date" value={r.date || ""} onChange={e => updateRow(i, "date", e.target.value)} className="w-full border border-hairline rounded px-2 py-1.5 text-sm" />
+                </td>
                 <td className="px-2 py-2">
                   <select value={r.employee_id} onChange={e => updateRow(i, "employee_id", e.target.value)} className="w-full border border-hairline rounded px-2 py-1.5 text-sm">
                     <option value="">Employee</option>
@@ -703,7 +712,7 @@ function MassFillTab() {
         <div className="mb-3 space-y-1">
           {results.map((r, i) => (
             <div key={i} className={`text-xs px-2 py-1 rounded ${r.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
-              {r.ok ? "✓" : "✗"} {employees.find(e => e.id === r.employee_id)?.name || r.employee_id} — {r.ok ? "submitted" : r.error}
+              {r.ok ? "✓" : "✗"} {employees.find(e => e.id === r.employee_id)?.name || r.employee_id}{r.date ? ` · ${r.date}` : ""} — {r.ok ? "submitted" : r.error}
             </div>
           ))}
         </div>

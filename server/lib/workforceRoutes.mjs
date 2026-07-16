@@ -891,15 +891,17 @@ export function registerWorkforceRoutes(app) {
     for (const e of entries) {
       try {
         const { employee_id, task_category, hours, notes } = e;
-        if (!employee_id || !task_category || !hours) {
+        // Per-row date wins (so one submit can cover a whole week); falls back to the batch date.
+        const rowDate = e.date || date;
+        if (!employee_id || !task_category || !hours || !rowDate) {
           results.push({ employee_id, ok: false, error: "Missing fields" });
           continue;
         }
         // Upsert timesheet for this employee+date
-        let { data: ts } = await sb.from("timesheets").select("id").eq("employee_id", employee_id).eq("date", date).maybeSingle();
+        let { data: ts } = await sb.from("timesheets").select("id").eq("employee_id", employee_id).eq("date", rowDate).maybeSingle();
         if (!ts) {
           const ins = await sb.from("timesheets").insert({
-            employee_id, date,
+            employee_id, date: rowDate,
             project_id: project_id || null,
             job_id: job_id || null,
             carpentry_job_id: carpentry_job_id || null,
@@ -919,7 +921,7 @@ export function registerWorkforceRoutes(app) {
           overtime_hours: 0,
           notes: notes || null,
         });
-        results.push({ employee_id, timesheet_id: ts.id, ok: !entryErr, error: entryErr?.message });
+        results.push({ employee_id, date: rowDate, timesheet_id: ts.id, ok: !entryErr, error: entryErr?.message });
       } catch (err) {
         results.push({ employee_id: e.employee_id, ok: false, error: err?.message });
       }
