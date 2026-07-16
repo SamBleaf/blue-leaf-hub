@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
 import { PLANNER_PALETTE, resolveJobColor } from "../../lib/plannerColors.js";
@@ -58,7 +58,9 @@ function LegendChip({ jKey, label, color, pinned, onPickColor, onRemove }) {
 }
 
 // ── Draggable allocation chip (drag source for "move"; click = notes) ─────────
-function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart }) {
+// memo'd: during a fill/drag the parent re-renders on each cell-crossing, but chip props
+// (alloc/label/color + stable ref-wrapped handlers) don't change, so every chip is skipped.
+const ShiftChip = memo(function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `chip:${alloc.id}`, data: { kind: "chip", alloc } });
   return (
     <div ref={setNodeRef} {...attributes} {...listeners}
@@ -81,7 +83,7 @@ function ShiftChip({ alloc, label, color, onClick, onFillStart, onFillDownStart 
       </span>
     </div>
   );
-}
+});
 
 // ── Droppable day cell ────────────────────────────────────────────────────────
 function DayCell({ empId, day, dayIdx, fillActive, nonWork, children, className = "" }) {
@@ -185,8 +187,12 @@ export default function WorkforcePlannerTab() {
   const boardJobs = useMemo(() => jobs.filter((j) => settings[j.jKey]?.onBoard || allocKeys.has(j.jKey)), [jobs, settings, allocKeys]);
   const orderedKeys = useMemo(() => boardJobs.map((j) => j.jKey), [boardJobs]);
   const colorMap = useMemo(() => { const m = {}; for (const k of Object.keys(settings)) if (settings[k]?.color) m[k] = settings[k].color; return m; }, [settings]);
-  const colorFor = useCallback((jKey) => resolveJobColor(jKey, orderedKeys, colorMap), [orderedKeys, colorMap]);
-  const labelFor = useCallback((jKey) => jobs.find((j) => j.jKey === jKey)?.label || "Job", [jobs]);
+  // Precompute each board job's resolved colour + label once → O(1) per-cell lookup (was an
+  // indexOf/find scan on every filled cell on every render, multiplied by the whole-board repaints).
+  const colorByKey = useMemo(() => { const m = {}; for (const k of orderedKeys) m[k] = resolveJobColor(k, orderedKeys, colorMap); return m; }, [orderedKeys, colorMap]);
+  const colorFor = useCallback((jKey) => colorByKey[jKey] || resolveJobColor(jKey, orderedKeys, colorMap), [colorByKey, orderedKeys, colorMap]);
+  const labelMap = useMemo(() => { const m = {}; for (const j of jobs) m[j.jKey] = j.label; return m; }, [jobs]);
+  const labelFor = useCallback((jKey) => labelMap[jKey] || "Job", [labelMap]);
   const holidayMap = useMemo(() => { const m = {}; for (const h of nonWorking.holidays) m[h.date] = h.name; return m; }, [nonWorking]);
   const rdoSet = useMemo(() => new Set(nonWorking.rdo.map((r) => `${r.employeeId}|${r.date}`)), [nonWorking]);
   // Team RDOs apply to EVERY field worker on that date (whole-crew day off) → keyed by date only.
@@ -376,15 +382,26 @@ export default function WorkforcePlannerTab() {
     while (prevRightIdx < 6 && allocJobKey(allocMap[`${empId}|${days[prevRightIdx + 1]}`]) === jKey) prevRightIdx++;
     setFill({ empId, jKey, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
     e.target.setPointerCapture?.(e.pointerId);
+    // Snapshot this row's cell rects ONCE, then hit-test with pure maths + rAF — no elementFromPoint
+    // per pointermove (that forced a sync layout every move = the "laggy control" stutter).
+    const rects = [];
+    document.querySelectorAll(`[data-cell][data-empid="${empId}"]`).forEach((el) => { rects[Number(el.getAttribute("data-dayidx"))] = el.getBoundingClientRect(); });
+    let raf = 0, lastX = 0;
     const onMove = (ev) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-cell]");
-      const f = fillRef.current; if (!f || !el) return;
-      if (el.getAttribute("data-empid") !== f.empId) return;
-      const idx = Number(el.getAttribute("data-dayidx"));
-      const endIdx = Math.max(f.anchorIdx, idx);
-      if (endIdx !== f.endIdx) setFill({ ...f, endIdx });
+      lastX = ev.clientX;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const f = fillRef.current; if (!f) return;
+        let idx = -1;
+        for (let i = 0; i < rects.length; i++) { const r = rects[i]; if (r && lastX >= r.left && lastX <= r.right) { idx = i; break; } }
+        if (idx < 0) return;
+        const endIdx = Math.max(f.anchorIdx, idx);
+        if (endIdx !== f.endIdx) setFill({ ...f, endIdx });
+      });
     };
     const onUp = () => {
+      if (raf) cancelAnimationFrame(raf);
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       const f = fillRef.current;
@@ -423,16 +440,28 @@ export default function WorkforcePlannerTab() {
     while (prevBottomRow < employees.length - 1 && allocJobKey(allocMap[`${employees[prevBottomRow + 1].id}|${day}`]) === jKey) prevBottomRow++;
     setFillDown({ day, dayIdx, jKey, anchorRow, endRow: prevBottomRow, prevBottomRow });
     e.target.setPointerCapture?.(e.pointerId);
-    const onMove = (ev) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-cell]");
-      const f = fillDownRef.current; if (!f || !el) return;
-      if (Number(el.getAttribute("data-dayidx")) !== f.dayIdx) return;
+    // Snapshot this day-column's cell rects ONCE (indexed by employee row) → maths hit-test + rAF.
+    const rects = [];
+    document.querySelectorAll(`[data-cell][data-dayidx="${dayIdx}"]`).forEach((el) => {
       const row = employees.findIndex((emp) => emp.id === el.getAttribute("data-empid"));
-      if (row < 0) return;
-      const endRow = Math.max(f.anchorRow, row);
-      if (endRow !== f.endRow) setFillDown({ ...f, endRow });
+      if (row >= 0) rects[row] = el.getBoundingClientRect();
+    });
+    let raf = 0, lastY = 0;
+    const onMove = (ev) => {
+      lastY = ev.clientY;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const f = fillDownRef.current; if (!f) return;
+        let row = -1;
+        for (let i = 0; i < rects.length; i++) { const r = rects[i]; if (r && lastY >= r.top && lastY <= r.bottom) { row = i; break; } }
+        if (row < 0) return;
+        const endRow = Math.max(f.anchorRow, row);
+        if (endRow !== f.endRow) setFillDown({ ...f, endRow });
+      });
     };
     const onUp = () => {
+      if (raf) cancelAnimationFrame(raf);
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       const f = fillDownRef.current;
@@ -453,6 +482,14 @@ export default function WorkforcePlannerTab() {
     const r = e.currentTarget.getBoundingClientRect();
     setColorPop({ jKey, x: r.left - (wrap?.left || 0), y: r.bottom - (wrap?.top || 0) + 4 });
   }
+
+  // Stable handler identities for the memoized ShiftChip — the ref always points at the latest
+  // closures, so these wrappers never change identity and never bust the memo mid-drag.
+  const chipHandlersRef = useRef(null);
+  chipHandlersRef.current = { openNotes, startFill, startFillDown };
+  const onChipClick = useCallback((alloc, e) => chipHandlersRef.current.openNotes(alloc, e), []);
+  const onChipFillStart = useCallback((alloc, e) => chipHandlersRef.current.startFill(alloc, e), []);
+  const onChipFillDownStart = useCallback((alloc, e) => chipHandlersRef.current.startFillDown(alloc, e), []);
 
   const weekLabel = `${new Date(`${weekFrom}T12:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" })} – ${new Date(`${weekTo}T12:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
   const fillCovers = (empId, idx) => fill && fill.empId === empId && idx >= fill.anchorIdx && idx <= fill.endIdx;
@@ -606,7 +643,7 @@ export default function WorkforcePlannerTab() {
                         <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
-                              <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={openNotes} onFillStart={startFill} onFillDownStart={startFillDown} />
+                              <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
                               <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeAlloc(a); }}
                                 className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-hairline text-muted text-[10px] leading-none opacity-0 hover:opacity-100 focus:opacity-100" title="Remove" aria-label="Remove allocation">×</button>
                             </div>
