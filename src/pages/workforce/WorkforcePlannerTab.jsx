@@ -243,8 +243,10 @@ export default function WorkforcePlannerTab() {
     ]);
   }, []);
 
-  const create = (empId, day, jKey) =>
-    authFetch("/api/workforce/allocations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allocationDate: day, employeeId: empId, ...jobBodyFromKey(jKey) }) }).then(json);
+  // Atomic assign (replace-or-insert for one cell) + delete. Fill/duplicate use assignReq so they never
+  // hit the old POST's 409 on an occupied cell, and apply the returned rows (no full-week refetch = no lag).
+  const assignReq = (empId, day, jKey) =>
+    authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey) }) }).then(json);
   const del = (id) => authFetch(`/api/workforce/allocations/${id}`, { method: "DELETE" }).then(json);
 
   async function assignFromLegend(jKey, empId, day) {
@@ -279,21 +281,20 @@ export default function WorkforcePlannerTab() {
 
   // Fill / deduct across a row: days anchor..end get the job; days end+1..prevRight (this job) are removed.
   async function fillCommit(empId, jKey, anchorIdx, endIdx, prevRightIdx) {
+    const creates = [], removes = [];
+    for (let i = anchorIdx; i <= endIdx; i++) { if (!allocMap[`${empId}|${days[i]}`]) creates.push(days[i]); }         // fill empties only
+    for (let i = endIdx + 1; i <= prevRightIdx; i++) { const c = allocMap[`${empId}|${days[i]}`]; if (c && allocJobKey(c) === jKey) removes.push(c); } // deduct the trailing run
+    if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
+    const removeIds = new Set(removes.map((r) => r.id));
+    const temps = creates.map((day) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null }));
+    setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const ops = [];
-      for (let i = anchorIdx; i <= endIdx; i++) {
-        const cell = allocMap[`${empId}|${days[i]}`];
-        if (!cell) ops.push(create(empId, days[i], jKey));
-      }
-      for (let i = endIdx + 1; i <= prevRightIdx; i++) {
-        const cell = allocMap[`${empId}|${days[i]}`];
-        if (cell && allocJobKey(cell) === jKey) ops.push(del(cell.id));
-      }
-      const results = await Promise.all(ops);
-      const failed = results.some((r) => !r.ok);
-      reload(failed ? { type: "error", text: "Some days could not be updated — reloaded." } : null);
-    } catch { reload({ type: "error", text: "Network error during fill." }); } finally { setBusy(false); }
+      const results = await Promise.all([...creates.map((day) => assignReq(empId, day, jKey)), ...removes.map((r) => del(r.id))]);
+      const returned = results.flatMap((r) => r.allocations || []);
+      if (returned.length) applyAllocations(returned);
+      if (results.some((r) => !r.ok)) loadAllocations(true);
+    } catch { loadAllocations(true); } finally { setBusy(false); }
   }
 
   async function removeAlloc(alloc) {
@@ -396,8 +397,10 @@ export default function WorkforcePlannerTab() {
     const jKey = allocJobKey(alloc);
     const empId = alloc.employeeId;
     const dIdx = days.indexOf(alloc.allocationDate);
-    let anchorIdx = dIdx, prevRightIdx = dIdx;
-    while (anchorIdx > 0 && allocJobKey(allocMap[`${empId}|${days[anchorIdx - 1]}`]) === jKey) anchorIdx--;
+    // Anchor stays at the GRABBED day (no upward auto-expand) so the shift you started from is
+    // never in the deduct range. prevRightIdx = current right extent for deduct-on-drag-back.
+    const anchorIdx = dIdx;
+    let prevRightIdx = dIdx;
     while (prevRightIdx < 6 && allocJobKey(allocMap[`${empId}|${days[prevRightIdx + 1]}`]) === jKey) prevRightIdx++;
     setFill({ empId, jKey, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
     e.target.setPointerCapture?.(e.pointerId);
@@ -433,29 +436,29 @@ export default function WorkforcePlannerTab() {
 
   // Duplicate downwards: copy a shift down the day-column to other workers (drag back up = deduct).
   async function fillDownCommit(day, jKey, anchorRow, endRow, prevBottomRow) {
+    const creates = [], removes = [];
+    for (let r = anchorRow; r <= endRow; r++) { const emp = employees[r]; if (emp && !allocMap[`${emp.id}|${day}`]) creates.push(emp.id); }
+    for (let r = endRow + 1; r <= prevBottomRow; r++) { const emp = employees[r]; if (!emp) continue; const c = allocMap[`${emp.id}|${day}`]; if (c && allocJobKey(c) === jKey) removes.push(c); }
+    if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
+    const removeIds = new Set(removes.map((r) => r.id));
+    const temps = creates.map((empId) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null }));
+    setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const ops = [];
-      for (let r = anchorRow; r <= endRow; r++) {
-        const emp = employees[r]; if (!emp) continue;
-        if (!allocMap[`${emp.id}|${day}`]) ops.push(create(emp.id, day, jKey));
-      }
-      for (let r = endRow + 1; r <= prevBottomRow; r++) {
-        const emp = employees[r]; if (!emp) continue;
-        const cell = allocMap[`${emp.id}|${day}`];
-        if (cell && allocJobKey(cell) === jKey) ops.push(del(cell.id));
-      }
-      const results = await Promise.all(ops);
-      reload(results.some((r) => !r.ok) ? { type: "error", text: "Some workers could not be updated — reloaded." } : null);
-    } catch { reload({ type: "error", text: "Network error during duplicate." }); } finally { setBusy(false); }
+      const results = await Promise.all([...creates.map((empId) => assignReq(empId, day, jKey)), ...removes.map((r) => del(r.id))]);
+      const returned = results.flatMap((r) => r.allocations || []);
+      if (returned.length) applyAllocations(returned);
+      if (results.some((r) => !r.ok)) loadAllocations(true);
+    } catch { loadAllocations(true); } finally { setBusy(false); }
   }
 
   function startFillDown(alloc, e) {
     const jKey = allocJobKey(alloc), day = alloc.allocationDate, dayIdx = days.indexOf(day);
-    let anchorRow = employees.findIndex((emp) => emp.id === alloc.employeeId);
+    // Anchor stays at the GRABBED worker (no upward auto-expand) so the shift you started from is
+    // never in the deduct range. prevBottomRow = current downward extent for deduct-on-drag-back.
+    const anchorRow = employees.findIndex((emp) => emp.id === alloc.employeeId);
     if (anchorRow < 0) return;
     let prevBottomRow = anchorRow;
-    while (anchorRow > 0 && allocJobKey(allocMap[`${employees[anchorRow - 1].id}|${day}`]) === jKey) anchorRow--;
     while (prevBottomRow < employees.length - 1 && allocJobKey(allocMap[`${employees[prevBottomRow + 1].id}|${day}`]) === jKey) prevBottomRow++;
     setFillDown({ day, dayIdx, jKey, anchorRow, endRow: prevBottomRow, prevBottomRow });
     e.target.setPointerCapture?.(e.pointerId);
@@ -524,6 +527,16 @@ export default function WorkforcePlannerTab() {
   function menuCopyDown(alloc) {  // copy this job to every crew member on this day (empty cells only)
     setChipMenu(null); vibrate(8);
     fillDownCommit(alloc.allocationDate, allocJobKey(alloc), 0, employees.length - 1, 0);
+  }
+  async function clearWeek() {
+    if (!allocations.length) return;
+    if (!window.confirm(`Clear all ${allocations.length} scheduled shift(s) for the week of ${weekLabel}? This cannot be undone.`)) return;
+    setBusy(true); setMsg(null);
+    setAllocations([]); // optimistic
+    try {
+      const r = await authFetch("/api/workforce/allocations/clear-week", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: weekFrom, to: weekTo }) }).then(json);
+      if (r.ok) flash("success", "Week cleared."); else { setMsg({ type: "error", text: r.error || "Could not clear." }); loadAllocations(true); }
+    } catch { setMsg({ type: "error", text: "Network error." }); loadAllocations(true); } finally { setBusy(false); }
   }
 
   // Stable handler identities for the memoized ShiftChip — the ref always points at the latest
@@ -662,7 +675,10 @@ export default function WorkforcePlannerTab() {
             <button type="button" onClick={() => setMonday(addDays(monday, 7))} className="px-2.5 py-1 rounded border border-hairline text-sm">→</button>
             <button type="button" onClick={() => setMonday(mondayOf(new Date()))} className="text-xs text-primary underline ml-1">This week</button>
           </div>
-          <span className="text-xs text-muted">{allocations.length} allocation(s){busy ? " · saving…" : ""}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted">{allocations.length} allocation(s){busy ? " · saving…" : ""}</span>
+            {allocations.length > 0 && <button type="button" onClick={clearWeek} className="text-xs text-red-600 border border-red-200 rounded px-2 py-1 hover:bg-red-50">Clear week</button>}
+          </div>
         </div>
 
         {msg && <p className={`text-xs mb-2 ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}

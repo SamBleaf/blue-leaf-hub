@@ -1690,6 +1690,16 @@ export function registerWorkforceRoutes(app) {
     } catch (e) { return err(res, 500, e.message); }
   });
 
+  // Clear every allocation in a date range (the "Clear week" button).
+  app.post("/api/workforce/allocations/clear-week", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const { from, to } = req.body;
+    if (!from || !to) return err(res, 400, "from and to are required");
+    const { error } = await sb.from("workforce_allocations").delete().gte("allocation_date", from).lte("allocation_date", to);
+    if (error) return err(res, 500, translateDbError(error));
+    ok(res);
+  });
+
   // ── W17-P4b/P4c: per-job Planner settings (colour + board membership) — advisory/UI only.
   // Degrades gracefully if migration 118 is not applied (table missing → empty / 503).
   // PostgREST reports a missing table via a schema-cache error, not the raw PG 42P01 code.
