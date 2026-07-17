@@ -7,6 +7,7 @@ import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
+import WorkforcePipelineTab from "./workforce/WorkforcePipelineTab.jsx";
 import TimeOffApprovalsTab from "./workforce/TimeOffApprovalsTab.jsx";
 import WorkforceKpiStrip from "../components/workforce/WorkforceKpiStrip.jsx";
 import TimesheetDetailModal from "../components/workforce/TimesheetDetailModal.jsx";
@@ -1118,13 +1119,13 @@ export default function Workforce() {
   const { role } = useAuth();
   const [searchParams] = useSearchParams();
   const tabFromUrl = searchParams.get("tab");
-  // W17-P4: Planner is admin/supervisor only (matches the allocation routes' requireRole).
+  // W17-P4: Planner + Pipeline are admin/supervisor only (match the allocation/pipeline routes' requireRole).
   const canPlan = role === "admin" || role === "supervisor";
-  const tabs = useMemo(() => (canPlan ? [...TABS, "Planner"] : TABS), [canPlan]);
+  const tabs = useMemo(() => (canPlan ? [...TABS, "Planner", "Pipeline"] : TABS), [canPlan]);
   const [tab, setTab] = useState(() => (TABS.includes(tabFromUrl) ? tabFromUrl : "Approvals"));
 
   useEffect(() => {
-    if (tabFromUrl && [...TABS, "Planner"].includes(tabFromUrl)) setTab(tabFromUrl);
+    if (tabFromUrl && [...TABS, "Planner", "Pipeline"].includes(tabFromUrl)) setTab(tabFromUrl);
   }, [tabFromUrl]);
 
   const shownTab = tabs.includes(tab) ? tab : "Approvals";
@@ -1193,6 +1194,7 @@ export default function Workforce() {
       {shownTab === "History" && <HistoryTab role={role} />}
       {shownTab === "Team" && <WorkforceTeam embedded />}
       {shownTab === "Planner" && canPlan && <WorkforcePlannerTab />}
+      {shownTab === "Pipeline" && canPlan && <WorkforcePipelineTab />}
     </div>
   );
 }

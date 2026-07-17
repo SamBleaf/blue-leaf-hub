@@ -5,6 +5,9 @@ import {
 } from "../../server/lib/workingCalendar.mjs";
 import { resolveStage, isProductionCategory, stageLabel, stageOrder } from "../../server/lib/carpentryStages.mjs";
 import { aggregateStages } from "../../server/lib/stageAggregation.mjs";
+import { breakEven, forecastDuration, collateHistorical } from "../../server/lib/scheduleIntelligence.mjs";
+import { computeCapacity } from "../../server/lib/workforceCapacity.mjs";
+import { burnForLine } from "../../server/lib/costModelService.mjs";
 
 let pass = 0, fail = 0;
 function eq(actual, expected, name) {
@@ -13,6 +16,7 @@ function eq(actual, expected, name) {
   else { fail++; console.error(`  ✗ ${name}\n      expected ${e}\n      got      ${a}`); }
 }
 function ok(cond, name) { if (cond) pass++; else { fail++; console.error(`  ✗ ${name}`); } }
+const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 
 // ── workingCalendar ── (2026-07-13 is a Monday)
 ok(isWeekend("2026-07-18"), "Sat is weekend");
@@ -67,6 +71,115 @@ eq(agg.excluded.byReason.unmatched_no_stage, 5, "5 unmatched hours excluded");
 eq(agg.totalHours, 24, "24 production hours total");
 eq(agg.totalCrewDays, 3, "3 crew-days total");
 eq(agg.distinctEmployees, 1, "1 distinct production employee");
+
+// ── scheduleIntelligence: break-even ── (real cost-model shape; headcount 7)
+const cm = { teamChargeUpPerDay: 3937, teamBreakEvenPerDay: 3281, headcount: 7, hoursPerDay: 8, marginPct: 0.2 };
+const labourSell = 101044;
+const be = breakEven({ labourSell, crewSize: 3, cm });
+ok(be.available, "break-even available with real cost model");
+// Reconcile vs the existing Budget burn block (burnForLine) — same inputs → same whole-team-days.
+const burn = burnForLine(labourSell, 0, 0, cm);
+eq(be.atMarginDays, burn.atMarginDays, "atMarginDays reconciles with burnForLine (Budget burn block)");
+eq(be.breakEvenDays, burn.breakEvenDays, "breakEvenDays reconciles with burnForLine");
+// Crew-scaling: whole-team-days × headcount/crewSize → crew productive working-days.
+eq(be.targetMarginDays, round1((labourSell / cm.teamChargeUpPerDay) * (7 / 3)), "targetMarginDays scales to crew of 3");
+ok(be.breakEvenAllowanceDays > be.targetMarginDays, "break-even allowance is looser than target-margin days");
+ok(be.breakEvenAllowanceDays > be.breakEvenDays, "crew allowance (÷3) exceeds whole-team break-even days");
+const beNo = breakEven({ labourSell, crewSize: 3, cm: null });
+ok(!beNo.available, "break-even unavailable without a cost model");
+
+// ── scheduleIntelligence: forecast (budget-derived, no history/actuals) ──
+const fcBudget = forecastDuration({ labourSell, crewSize: 3, cm, includedStages: ["wall_framing", "roof_framing"], plannedStartDate: "2026-08-03" });
+eq(fcBudget.source, "budget_break_even", "no history/actuals → budget-derived source");
+eq(fcBudget.confidence, "Low", "budget-derived is Low confidence");
+eq(fcBudget.expectedProductiveCrewDays, be.targetMarginDays, "budget-derived expected crew-days = target-margin days");
+ok(!fcBudget.marginRisk, "budget-derived (at target margin) is NOT flagged as margin risk");
+ok(fcBudget.expectedCalendarDays > fcBudget.expectedProductiveCrewDays, "calendar span exceeds productive days (gaps+allowances)");
+ok(fcBudget.expectedCompletion > "2026-08-03", "expected completion is after the planned start");
+
+// ── scheduleIntelligence: margin-risk flag (historical hours exceed the allowance) ──
+const fcRisk = forecastDuration({
+  labourSell, crewSize: 3, cm, includedStages: ["wall_framing"],
+  historical: { expectedHoursByStage: { wall_framing: 2000 }, gapMediansByStage: {}, sampleSize: 5 },
+});
+eq(fcRisk.source, "historical", "history present → historical source");
+eq(fcRisk.confidence, "Medium", "sample of 5 → Medium confidence");
+ok(fcRisk.marginRisk, "forecast exceeding break-even allowance is flagged");
+ok(fcRisk.explanation.includes("exceeds the break-even"), "explanation names the margin-risk");
+
+// ── scheduleIntelligence: active job override (live production) ──
+const activeAgg = aggregateStages({
+  entries: [
+    { hours: 8, canonicalKey: "wall_framing", taskCategory: "first_fix_framing", date: "2026-07-13", employeeId: "A" },
+    { hours: 8, canonicalKey: "wall_framing", taskCategory: "first_fix_framing", date: "2026-07-14", employeeId: "B" },
+    { hours: 8, canonicalKey: "wall_framing", taskCategory: "first_fix_framing", date: "2026-07-15", employeeId: "A" },
+  ],
+});
+const fcActive = forecastDuration({
+  labourSell, crewSize: 3, cm, actuals: activeAgg, includedStages: ["wall_framing"],
+  historical: { expectedHoursByStage: { wall_framing: 240 }, gapMediansByStage: {}, sampleSize: 3 },
+});
+eq(fcActive.source, "active_production", "live timesheets → active source");
+eq(fcActive.consumedHours, 24, "consumed hours from approved timesheets");
+eq(fcActive.remainingHours, 216, "remaining = expected − consumed");
+ok(fcActive.percentComplete === 10, "percent complete = 24/240");
+ok(fcActive.productionRate === 8, "production rate 8 hrs/working-day");
+ok(fcActive.expectedCompletion > "2026-07-15", "completion projects forward from last worked day");
+
+// ── scheduleIntelligence: collate historical medians ──
+const h1 = aggregateStages({ entries: [{ hours: 100, canonicalKey: "wall_framing", taskCategory: "first_fix_framing", date: "2026-06-01", employeeId: "A" }] });
+const h2 = aggregateStages({ entries: [{ hours: 200, canonicalKey: "wall_framing", taskCategory: "first_fix_framing", date: "2026-06-01", employeeId: "A" }] });
+const hist = collateHistorical([h1, h2]);
+eq(hist.sampleSize, 2, "two comparable jobs collated");
+eq(hist.expectedHoursByStage.wall_framing, 150, "median wall-framing hours = 150");
+
+// ── workforceCapacity: supply vs demand (week Mon 07-13 … Fri 07-17 = 5 working days) ──
+const cap = computeCapacity({
+  horizonStart: "2026-07-13", horizonEnd: "2026-07-17", periodType: "week", today: "2026-07-13",
+  employees: [{ id: "A" }, { id: "B" }, { id: "C" }],           // 3 staff, no leave → 15 available
+  allocations: [                                                 // J1: 5 committed allocation-days
+    { jobId: "J1", employeeId: "A", date: "2026-07-13" },
+    { jobId: "J1", employeeId: "A", date: "2026-07-14" },
+    { jobId: "J1", employeeId: "A", date: "2026-07-15" },
+    { jobId: "J1", employeeId: "B", date: "2026-07-13" },
+    { jobId: "J1", employeeId: "B", date: "2026-07-14" },
+  ],
+  forecasts: [{ jobId: "J2", crewSize: 2, remainingHours: 32, hoursPerDay: 8, expectedStart: "2026-07-13", expectedCompletion: "2026-07-17" }],
+});
+eq(cap.periods.length, 1, "one week bucket");
+eq(cap.periods[0].availableCrewDays, 15, "available = 3 staff × 5 working days");
+eq(cap.periods[0].committedCrewDays, 5, "committed = 5 real allocation-days");
+eq(cap.periods[0].forecastCrewDays, 2, "forecast = 32h ÷ (2×8) crew-days spread over the week");
+eq(cap.periods[0].spareCrewDays, 8, "spare = 15 − (5 + 2)");
+eq(cap.periods[0].overbookedCrewDays, 0, "not overbooked");
+
+// ── workforceCapacity: committed/forecast dedup (a day is committed OR forecast, never both) ──
+const dedup = computeCapacity({
+  horizonStart: "2026-07-13", horizonEnd: "2026-07-17", periodType: "week", today: "2026-07-13",
+  employees: [{ id: "A" }],
+  allocations: [
+    { jobId: "J3", employeeId: "A", date: "2026-07-13" },       // J3 committed Mon+Tue
+    { jobId: "J3", employeeId: "A", date: "2026-07-14" },
+  ],
+  forecasts: [{ jobId: "J3", crewSize: 1, remainingHours: 24, hoursPerDay: 8, expectedStart: "2026-07-13", expectedCompletion: "2026-07-17" }],
+});
+eq(dedup.periods[0].committedCrewDays, 2, "J3 committed Mon+Tue");
+eq(dedup.periods[0].forecastCrewDays, 3, "J3 forecast only on the 3 UNallocated days (Wed–Fri), not double-counted");
+
+// ── workforceCapacity: overbooking flagged ──
+const over = computeCapacity({
+  horizonStart: "2026-07-13", horizonEnd: "2026-07-17", periodType: "week", today: "2026-07-13",
+  employees: [{ id: "A" }],                                      // 5 available
+  allocations: [
+    { jobId: "J1", employeeId: "A", date: "2026-07-13" }, { jobId: "J1", employeeId: "A", date: "2026-07-14" },
+    { jobId: "J1", employeeId: "A", date: "2026-07-15" }, { jobId: "J1", employeeId: "A", date: "2026-07-16" },
+    { jobId: "J1", employeeId: "A", date: "2026-07-17" },       // 5 committed
+  ],
+  forecasts: [{ jobId: "J2", crewSize: 1, remainingHours: 48, hoursPerDay: 8, expectedStart: "2026-07-13", expectedCompletion: "2026-07-17" }], // 6 forecast
+});
+eq(over.periods[0].overbookedCrewDays, 6, "demand 11 vs available 5 → 6 crew-days overbooked");
+eq(over.periods[0].spareCrewDays, 0, "no spare when overbooked");
+eq(over.totals.overbookedPeriods, 1, "one overbooked period in totals");
 
 console.log(`workforce-pipeline: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

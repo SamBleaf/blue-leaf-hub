@@ -87,6 +87,10 @@ export function bucketWorkingDays(fromYmd, toYmd, periodType, nonWork = {}) {
   buckets.push({ periodStart: start, workingDays: wd, periodType });
   return buckets;
 }
+// Re-exports so other pure services share one date/period implementation (no duplication).
+export const parseYmd = (ymd) => parse(ymd);
+export const periodKeyOf = (ymd, periodType) => periodKey(parse(ymd), periodType);
+
 function periodKey(date, periodType) {
   if (periodType === "month") return `${date.getFullYear()}-${date.getMonth()}`;
   if (periodType === "quarter") return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3)}`;

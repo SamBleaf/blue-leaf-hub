@@ -240,6 +240,10 @@ Condensed view (key columns):
 | `forecast_margin` | Metrics | **Generated** | Derived | — | finance, director portfolio | — | N | — |
 | `HRCW list` | Risks | **Generated** | Derived (whsRiskRules) | Building facts | WHS docs | — | N | — |
 | `risk_rating` | Risks | **Generated** | Derived | facts + history | director, WHS | — | N | — |
+| `expected_duration_crew_days` | Schedule | **Generated** | Derived (scheduleIntelligence) | labour hours + crew + comparable-job history | workforce pipeline, director | — | N | — |
+| `expected_completion_date` | Schedule | **Generated** | Derived (scheduleIntelligence) | expected duration + inter-stage gaps + calendar | workforce pipeline | — | N | — |
+| `break_even_allowance_days` | Schedule | **Generated** | Derived (scheduleIntelligence) | labour value ÷ team break-even rate × headcount/crew | workforce pipeline, margin | — | N | — |
+| `schedule_margin_risk` | Schedule | **Generated** | Derived (scheduleIntelligence) | expected productive crew-days > break-even allowance | workforce pipeline, director | — | N | — |
 | `target_margin` | BI | Versioned | Assigned | — | finance, pretender | Y | Y | Y |
 | `lead_source` | BI | Static | Sales/marketing | Lead form / attribution | marketing, reporting | N | Y | N |
 | `nearest_hospital` | Site Intel | Static | **Lookup** | Address geocode | WHS emergency | N | Y | N |

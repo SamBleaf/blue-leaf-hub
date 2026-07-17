@@ -85,6 +85,7 @@
 | 10-01 | Workforce overview | [workforce_overview.md](10_workforce/workforce_overview.md) | Workforce | Admin, Supervisor | Draft | untested | No | Low |
 | 10-02 | Install the Worker app on iPhone home screen | [worker_pwa_ios_install.md](10_workforce/worker_pwa_ios_install.md) | Workforce | Field worker, Admin | Draft | untested | Yes | Medium |
 | 10-03 | Add a photo when completing a site task | [add_completion_photo.md](10_workforce/add_completion_photo.md) | Workforce | Field worker, Admin, Supervisor | Draft | untested | Yes | Medium |
+| 10-04 | Workforce Pipeline — capacity & schedule intelligence | [workforce_pipeline.md](10_workforce/workforce_pipeline.md) | Workforce | Admin, Supervisor | Draft | untested | No | High |
 | 11-00 | Portal stack matrix (v1↔v2, v2 canonical) | [00_PORTAL_STACK_MATRIX.md](11_client_portal/00_PORTAL_STACK_MATRIX.md) | Client Portal | Admin | Reference | n/a | No | High |
 | 11-01 | Enable the client portal for a project (legacy v1) | [portal_enable_for_client.md](11_client_portal/portal_enable_for_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
 | 11-02 | View the portal as the client | [portal_view_as_client.md](11_client_portal/portal_view_as_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
