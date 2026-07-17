@@ -133,7 +133,9 @@ export default function WorkforcePlannerTab() {
   const [colorPop, setColorPop] = useState(null); // { jKey, x, y }
   const [chipMenu, setChipMenu] = useState(null); // { alloc, x, y } — touch long-press action menu
   const [moveMode, setMoveMode] = useState(null); // { alloc } — "tap a cell to move here"
+  const [dupMode, setDupMode] = useState(null);   // { alloc } — "tap a cell to drop a COPY here"
   const [cellPicker, setCellPicker] = useState(null); // { empId, day } — tap-empty-cell job picker
+  const altRef = useRef(false); // desktop: hold Alt while dragging a chip → duplicate instead of move
   const [fill, setFill] = useState(null); // { empId, jKey, anchorIdx, endIdx, prevRightIdx } — across days
   const [fillDown, setFillDown] = useState(null); // { day, dayIdx, jKey, anchorRow, endRow, prevBottomRow } — down workers
   const [nonWorking, setNonWorking] = useState({ holidays: [], rdo: [], teamRdo: [] });
@@ -155,6 +157,14 @@ export default function WorkforcePlannerTab() {
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } })
   );
+
+  // Desktop: track the Alt key live so a chip drop can duplicate (Alt-drag) instead of move.
+  useEffect(() => {
+    const down = (e) => { if (e.key === "Alt") altRef.current = true; };
+    const up = (e) => { if (e.key === "Alt") altRef.current = false; };
+    window.addEventListener("keydown", down); window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => ymd(addDays(monday, i))), [monday]);
   const weekFrom = days[0], weekTo = days[6];
@@ -389,7 +399,10 @@ export default function WorkforcePlannerTab() {
     const a = active.data.current, o = over.data.current;
     if (!o || o.kind !== "cell") return;
     if (a.kind === "legend") assignFromLegend(a.jKey, o.empId, o.day);
-    else if (a.kind === "chip") moveChip(a.alloc, o.empId, o.day);
+    else if (a.kind === "chip") {
+      if (altRef.current || evt.activatorEvent?.altKey) assignFromLegend(allocJobKey(a.alloc), o.empId, o.day); // Alt-drag = duplicate (original stays)
+      else moveChip(a.alloc, o.empId, o.day);
+    }
   }
 
   // ── Fill-handle custom pointer session ─────────────────────────────────────
@@ -512,10 +525,12 @@ export default function WorkforcePlannerTab() {
     setChipMenu({ alloc, x: x - (wrap?.left || 0), y: y - (wrap?.top || 0) });
   }
   function chipClicked(alloc, e) {
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); setDupMode(null); assignFromLegend(jk, alloc.employeeId, alloc.allocationDate); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (src.id !== alloc.id) moveChip(src, alloc.employeeId, alloc.allocationDate); return; }
     openNotes(alloc, e);
   }
   function onCellPick(empId, day) {
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); setDupMode(null); assignFromLegend(jk, empId, day); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (!(src.employeeId === empId && src.allocationDate === day)) moveChip(src, empId, day); return; }
     if (!allocMap[`${empId}|${day}`]) { setChipMenu(null); setCellPicker({ empId, day }); }
   }
@@ -562,6 +577,7 @@ export default function WorkforcePlannerTab() {
         <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-3 py-2 mb-3">
           Planner is advisory only. It does not create timesheets, approve hours, or sync anything to Buildexact.
         </div>
+        {!IS_TOUCH && <p className="text-[10px] text-muted mb-2">Drag a shift to move it · hold <b>Alt</b> while dragging to duplicate it.</p>}
 
         {/* Legend — only jobs on the board (opt-in) + any job allocated this week */}
         <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -683,10 +699,10 @@ export default function WorkforcePlannerTab() {
 
         {msg && <p className={`text-xs mb-2 ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
 
-        {moveMode && (
+        {(moveMode || dupMode) && (
           <div className="sticky top-0 z-30 mb-2 flex items-center justify-between gap-2 rounded-lg bg-accent/10 border border-accent/30 px-3 py-2">
-            <span className="text-xs text-accent font-medium">Tap a cell to move <b>{labelFor(allocJobKey(moveMode.alloc))}</b> there</span>
-            <button type="button" onClick={() => setMoveMode(null)} className="text-xs text-muted underline shrink-0">Cancel</button>
+            <span className="text-xs text-accent font-medium">Tap a cell to {moveMode ? "move" : "duplicate"} <b>{labelFor(allocJobKey((moveMode || dupMode).alloc))}</b> there</span>
+            <button type="button" onClick={() => { setMoveMode(null); setDupMode(null); }} className="text-xs text-muted underline shrink-0">Cancel</button>
           </div>
         )}
 
@@ -707,7 +723,7 @@ export default function WorkforcePlannerTab() {
                       const a = allocMap[`${emp.id}|${d}`];
                       const jKey = a && allocJobKey(a);
                       return (
-                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} picking={!!moveMode} onPick={onCellPick} className={i >= 5 ? "hidden sm:table-cell" : ""}>
+                        <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} picking={!!moveMode || !!dupMode} onPick={onCellPick} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
                               <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
@@ -756,6 +772,7 @@ export default function WorkforcePlannerTab() {
           const a = chipMenu.alloc;
           const items = [
             { label: "Move to…", fn: () => { setChipMenu(null); vibrate(8); setMoveMode({ alloc: a }); } },
+            { label: "Duplicate to…", fn: () => { setChipMenu(null); vibrate(8); setDupMode({ alloc: a }); } },
             { label: "Fill across week", fn: () => menuFillWeek(a) },
             { label: "Copy down to crew", fn: () => menuCopyDown(a) },
             { label: "Edit note", fn: () => { setChipMenu(null); setNotesPop({ alloc: a, value: a.notes || "", x: chipMenu.x, y: chipMenu.y }); } },
