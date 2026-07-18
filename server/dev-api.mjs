@@ -81,6 +81,7 @@ import { registerMarketingAreaPerformanceRoutes } from "./lib/marketingAreaPerfo
 import { registerCrmRoutes } from "./lib/crmRoutes.mjs";
 import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
+import { registerCarpentryStageScheduleRoutes } from "./lib/carpentryStageScheduleRoutes.mjs";
 import { registerTemplateRegistryRoutes } from "./lib/templateRegistryRoutes.mjs";
 import { registerProcurementRoutes } from "./lib/procurementRoutes.mjs";
 import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
@@ -971,6 +972,7 @@ registerMarketingAreaPerformanceRoutes(app);
 registerCrmRoutes(app);
 registerWhsEngineRoutes(app);
 registerCarpentryRoutes(app);
+registerCarpentryStageScheduleRoutes(app);
 registerTemplateRegistryRoutes(app);
 registerProcurementRoutes(app);
 registerFactsRoutes(app);

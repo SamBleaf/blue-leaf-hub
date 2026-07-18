@@ -138,7 +138,9 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
   // Carpentry jobs (active / on-hold / defects) — the pipeline rows.
   const jobs = await safe(
     sb.from("carpentry_jobs").select("id, address, reference, status, project_type, start_date, end_date, actual_start, actual_end, floor_area_m2, storey_count, crew_size_overrides")
-      .in("status", ACTIVE_STATUSES).order("start_date", { ascending: true, nullsFirst: false })
+      .in("status", ACTIVE_STATUSES)
+      .neq("project_type", "other")   // exclude internal time-capture buckets (Blue Leaf Internal, Charge Up) — not schedulable jobs
+      .order("start_date", { ascending: true, nullsFirst: false })
   );
   const jobIds = jobs.map((j) => j.id);
 

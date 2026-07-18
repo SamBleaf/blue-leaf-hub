@@ -12,7 +12,6 @@ import {
   CARPENTRY_PROJECT_TYPE_LABELS,
   CARPENTRY_COST_TYPES,
   CARPENTRY_COST_TYPE_LABELS,
-  CARPENTRY_MILESTONE_STATUSES,
 } from "../lib/constants.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -491,195 +490,108 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted, s
   );
 }
 
-// ── Schedule Tab (milestones) ─────────────────────────────────────────────────
+// ── Schedule Tab (stage schedule) ─────────────────────────────────────────────
+// Replaces the retired milestone list with the per-stage schedule (migration 144).
+// Planned dates edited here write to carpentry_job_stage_schedule — the SAME store
+// the Workforce → Pipeline calendar reads/writes, so edits sync both ways.
+
+const STAGE_STATUS_NEXT = { planned: "in_progress", in_progress: "complete", complete: "planned" };
+const STAGE_STATUS_STYLE = { planned: "border-slate-300", in_progress: "bg-blue-500 border-blue-500", complete: "bg-emerald-500 border-emerald-500" };
 
 function ScheduleTab({ jobId }) {
-  const [milestones, setMilestones] = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [addName, setAddName]       = useState("");
-  const [adding, setAdding]         = useState(false);
-  const [savingId, setSavingId]     = useState(null);
-  const [error, setError]           = useState(null);
-  // D2: auto-layout
-  const [autoDates, setAutoDates]   = useState({ commencement: "", frameDelivery: "" });
-  const [autoBusy, setAutoBusy]     = useState(false);
-  const [autoPreview, setAutoPreview] = useState(null);
+  const [stages, setStages]                   = useState([]);
+  const [loading, setLoading]                 = useState(true);
+  const [migrationPending, setMigrationPending] = useState(false);
+  const [savingId, setSavingId]               = useState(null);
+  const [seeding, setSeeding]                 = useState(false);
+  const [error, setError]                     = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { ok, data } = await apiFetch(`/api/carpentry/jobs/${jobId}/milestones`);
+    const { ok, data, error: e } = await apiFetch(`/api/carpentry/jobs/${jobId}/stage-schedule`);
     setLoading(false);
-    if (ok) setMilestones(data?.milestones || []);
+    if (!ok) { setError(e || "Could not load the stage schedule."); return; }
+    setError(null);
+    setMigrationPending(!!data?.migrationPending);
+    setStages(data?.stages || []);
   }, [jobId]);
-
-  async function runAutoLayout(apply) {
-    if (!autoDates.commencement) { setError("Set a commencement date first."); return; }
-    setAutoBusy(true); setError(null);
-    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/milestones/auto-layout`, {
-      commencementDate: autoDates.commencement,
-      frameDeliveryDate: autoDates.frameDelivery || undefined,
-      apply,
-    });
-    setAutoBusy(false);
-    if (!ok) { setError(e || "Auto-layout failed."); return; }
-    if (apply) { setAutoPreview(null); load(); }
-    else setAutoPreview(data?.affected || []);
-  }
-
   useEffect(() => { load(); }, [load]);
 
-  async function addMilestone() {
-    if (!addName.trim()) return;
-    setAdding(true);
-    const nextOrder = milestones.length ? Math.max(...milestones.map((m) => m.sortOrder || 0)) + 10 : 10;
-    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/milestones`, {
-      name: addName.trim(),
-      sortOrder: nextOrder,
-    });
-    setAdding(false);
-    if (!ok) { setError(e || "Failed to add milestone."); return; }
-    setMilestones((ms) => [...ms, data.milestone]);
-    setAddName("");
+  async function patchStage(row, patch) {
+    setSavingId(row.id); setError(null);
+    const { ok, data, error: e } = await apiPatch(`/api/carpentry/stage-schedule/${row.id}`, patch);
+    setSavingId(null);
+    if (!ok) { setError(e || "Update failed."); return; }
+    setStages((s) => s.map((x) => (x.id === row.id ? data.stage : x)));
   }
 
-  async function toggleComplete(m) {
-    const newStatus = m.status === CARPENTRY_MILESTONE_STATUSES.COMPLETE ? "pending" : "complete";
-    const actualDate = newStatus === "complete" ? new Date().toISOString().slice(0, 10) : null;
-    setSavingId(m.id);
-    const { ok, data } = await apiPatch(`/api/carpentry/milestones/${m.id}`, { status: newStatus, actualDate });
-    setSavingId(null);
-    if (ok) setMilestones((ms) => ms.map((x) => x.id === m.id ? data.milestone : x));
-  }
-
-  async function updateDate(m, field, value) {
-    const body = field === "target" ? { targetDate: value || null } : { actualDate: value || null };
-    setSavingId(m.id);
-    const { ok, data } = await apiPatch(`/api/carpentry/milestones/${m.id}`, body);
-    setSavingId(null);
-    if (ok) setMilestones((ms) => ms.map((x) => x.id === m.id ? data.milestone : x));
-  }
-
-  async function deleteMilestone(m) {
-    if (!confirm(`Delete milestone "${m.name}"?`)) return;
-    setSavingId(m.id);
-    const { ok } = await apiDelete(`/api/carpentry/milestones/${m.id}`);
-    setSavingId(null);
-    if (ok) setMilestones((ms) => ms.filter((x) => x.id !== m.id));
+  async function reseed() {
+    if (!confirm("Re-lay out all unlocked stages from the job start date? Locked stages stay put.")) return;
+    setSeeding(true); setError(null);
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/stage-schedule/seed`, {});
+    setSeeding(false);
+    if (!ok) { setError(e || "Re-layout failed."); return; }
+    setStages(data?.stages || []);
   }
 
   return (
     <div className="p-6">
-      <h3 className="text-sm font-semibold text-ink mb-4">Schedule Milestones</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-ink">Stage schedule</h3>
+        {!migrationPending && stages.length > 0 && (
+          <button onClick={reseed} disabled={seeding} className="text-xs px-3 py-1.5 rounded-lg border border-hairline text-muted hover:text-ink disabled:opacity-40">
+            {seeding ? "Laying out…" : "Re-auto-layout"}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-muted mb-4">Planned dates per stage. Edits sync to the Workforce &rarr; Pipeline calendar. Lock a stage to pin it against auto-layout &amp; ripple.</p>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
-
-      {/* D2: auto-lay out milestone target dates from a commencement + frame-delivery date */}
-      <div className="mb-6 p-4 rounded-card border border-hairline bg-slate-50">
-        <p className="text-sm font-medium text-ink mb-2">Auto-lay out dates</p>
-        <div className="grid grid-cols-2 gap-3 mb-2">
-          <div>
-            <label className="block text-xs font-medium text-ink mb-1">Commencement</label>
-            <input type="date" value={autoDates.commencement} onChange={(e) => setAutoDates((d) => ({ ...d, commencement: e.target.value }))} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-ink mb-1">Frame delivery (optional)</label>
-            <input type="date" value={autoDates.frameDelivery} onChange={(e) => setAutoDates((d) => ({ ...d, frameDelivery: e.target.value }))} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
-          </div>
+      {migrationPending && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800 mb-4">
+          Stage schedule isn&rsquo;t enabled yet — apply <span className="font-mono">migration 144</span> in Supabase, then reload.
         </div>
-        {!autoPreview ? (
-          <button onClick={() => runAutoLayout(false)} disabled={autoBusy || !autoDates.commencement} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-40">
-            {autoBusy ? "Calculating…" : "Preview dates"}
-          </button>
-        ) : (
-          <div>
-            <div className="rounded-lg border border-hairline bg-white divide-y divide-hairline mb-2">
-              {autoPreview.map((a) => (
-                <div key={a.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
-                  <span className="text-ink">{a.name}</span>
-                  <span className="text-muted">{a.oldTargetDate ? `${fmtDate(a.oldTargetDate)} → ` : ""}<span className="font-medium text-ink">{fmtDate(a.newTargetDate)}</span></span>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => runAutoLayout(true)} disabled={autoBusy} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-40">{autoBusy ? "Applying…" : "Apply dates"}</button>
-              <button onClick={() => setAutoPreview(null)} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium">Cancel</button>
-            </div>
-          </div>
-        )}
-        <p className="text-[11px] text-muted mt-2">Build durations scale with crew size; frame delivery + certifier waits use standard lead-times. Review before applying.</p>
-      </div>
+      )}
 
       {loading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : (
-        <div className="space-y-2 mb-6">
-          {milestones.length === 0 && (
-            <p className="text-sm text-muted">No milestones yet.</p>
+        <div className="rounded-card border border-hairline divide-y divide-hairline overflow-hidden">
+          {stages.length === 0 && !migrationPending && (
+            <p className="p-4 text-sm text-muted">No stages yet — set the job start date and add its budget, then Re-auto-layout.</p>
           )}
-          {milestones.map((m) => (
-            <div key={m.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${m.status === "complete" ? "bg-emerald-50 border-emerald-200" : "bg-white border-hairline"}`}>
+          {stages.map((st) => (
+            <div key={st.id} className={`flex items-center gap-3 p-3 ${savingId === st.id ? "opacity-60" : ""} ${st.status === "complete" ? "bg-emerald-50" : "bg-white"}`}>
               <button
-                onClick={() => toggleComplete(m)}
-                disabled={savingId === m.id}
-                className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${m.status === "complete" ? "bg-emerald-500 border-emerald-500" : "border-slate-300 hover:border-emerald-400"}`}
+                onClick={() => patchStage(st, { status: STAGE_STATUS_NEXT[st.status] })}
+                title={`Status: ${st.status} (click to advance)`}
+                className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${STAGE_STATUS_STYLE[st.status] || STAGE_STATUS_STYLE.planned}`}
               >
-                {m.status === "complete" && <span className="text-white text-xs">✓</span>}
+                {st.status === "complete" && <span className="text-white text-xs">✓</span>}
+                {st.status === "in_progress" && <span className="w-2 h-2 rounded-full bg-white" />}
               </button>
-              <span className={`flex-1 text-sm font-medium ${m.status === "complete" ? "line-through text-muted" : "text-ink"}`}>
-                {m.name}
-              </span>
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <label className="flex items-center gap-1">
-                  <span>Target</span>
-                  <input
-                    type="date"
-                    value={m.targetDate || ""}
-                    onChange={(e) => updateDate(m, "target", e.target.value)}
-                    className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring"
-                  />
-                </label>
-                {m.status === "complete" && (
-                  <label className="flex items-center gap-1">
-                    <span>Actual</span>
-                    <input
-                      type="date"
-                      value={m.actualDate || ""}
-                      onChange={(e) => updateDate(m, "actual", e.target.value)}
-                      className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring"
-                    />
-                  </label>
-                )}
+              <span className={`flex-1 text-sm font-medium ${st.status === "complete" ? "text-muted" : "text-ink"}`}>{st.stageLabel}</span>
+              {st.actualStart && (
+                <span className="text-[10px] text-emerald-600" title="Observed from approved timesheets">
+                  actual {fmtDate(st.actualStart)}{st.actualEnd ? `–${fmtDate(st.actualEnd)}` : ""}
+                </span>
+              )}
+              <div className="flex items-center gap-1.5 text-xs text-muted">
+                <input type="date" value={st.plannedStart || ""} onChange={(e) => patchStage(st, { plannedStart: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
+                <span>→</span>
+                <input type="date" value={st.plannedEnd || ""} onChange={(e) => patchStage(st, { plannedEnd: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
               </div>
               <button
-                onClick={() => deleteMilestone(m)}
-                disabled={savingId === m.id}
-                className="text-muted hover:text-red-500 text-xs transition-colors px-1"
-                title="Delete milestone"
+                onClick={() => patchStage(st, { locked: !st.locked })}
+                title={st.locked ? "Locked — click to unlock" : "Unlocked — click to pin against auto-layout"}
+                className={`flex-shrink-0 text-sm px-1 ${st.locked ? "text-primary" : "text-muted hover:text-ink"}`}
               >
-                ✕
+                {st.locked ? "🔒" : "🔓"}
               </button>
             </div>
           ))}
         </div>
       )}
-
-      {/* Add milestone */}
-      <div className="flex gap-2">
-        <input
-          value={addName}
-          onChange={(e) => setAddName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addMilestone()}
-          placeholder="Add a milestone… (press Enter)"
-          className="flex-1 border border-hairline rounded-lg px-3 py-2 text-sm focus-ring"
-        />
-        <button
-          onClick={addMilestone}
-          disabled={adding || !addName.trim()}
-          className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
-        >
-          {adding ? "Adding…" : "Add"}
-        </button>
-      </div>
     </div>
   );
 }
