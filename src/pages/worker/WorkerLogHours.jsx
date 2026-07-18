@@ -57,6 +57,8 @@ export default function WorkerLogHours() {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [subtasks, setSubtasks] = useState({});   // P3: { task_category: [{ key, label, budgetLineItemId }] }
   const [activeCat, setActiveCat] = useState(null); // which category's sub-task chooser is open
+  const [chargeUpSites, setChargeUpSites] = useState([]); // BLB Charge Up: sites to pick as a Location
+  const [chargeUpJobId, setChargeUpJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const preview = isWorkerPreview();
@@ -107,10 +109,12 @@ export default function WorkerLogHours() {
           })));
           if (ts.project_id) setSelectedId(ts.project_id);
           else if (ts.carpentry_job_id) setSelectedId(ts.carpentry_job_id);
+          setChargeUpJobId(ts.timesheet_entries?.[0]?.charge_up_job_id || "");   // restore the picked location
         } else {
           setExistingId(null);
           setApproved(false);
           setEntries([]);
+          setChargeUpJobId("");
         }
       })
       .catch(() => {});
@@ -120,11 +124,11 @@ export default function WorkerLogHours() {
   // P3: load the job's confirmed sub-tasks (carpentry only) for the two-level picker.
   useEffect(() => {
     const proj = projects.find(p => p.id === selectedId);
-    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); return; }
+    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); setChargeUpSites([]); return; }
     let stop = false;
     workerFetch(`/api/worker/jobs/${selectedId}/subtasks`)
       .then(r => r.json())
-      .then(j => { if (!stop && j?.ok) setSubtasks(j.subtasks || {}); })
+      .then(j => { if (!stop && j?.ok) { setSubtasks(j.subtasks || {}); setChargeUpSites(j.chargeUpSites || []); } })
       .catch(() => {});
     return () => { stop = true; };
   }, [selectedId, projects]);
@@ -216,6 +220,7 @@ export default function WorkerLogHours() {
 
   async function submit() {
     if (approved || !entries.length || !selectedProject) return;
+    if (chargeUpSites.length > 0 && !chargeUpJobId) { alert("Pick a location before submitting charge-up work."); return; }
     setSubmitting(true);
     try {
       const payload = entries.map(e => ({
@@ -230,7 +235,7 @@ export default function WorkerLogHours() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           selectedProject.type === "carpentry"
-            ? { date, carpentry_job_id: selectedProject.id, entries: payload }
+            ? { date, carpentry_job_id: selectedProject.id, charge_up_job_id: chargeUpJobId || null, entries: payload }
             : { date, project_id: selectedProject.id, job_id: selectedProject.job_id || null, entries: payload }
         ),
       });
@@ -319,7 +324,7 @@ export default function WorkerLogHours() {
             <label className="text-xs text-muted uppercase tracking-wide block mb-1">Site</label>
             <select
               value={selectedId}
-              onChange={e => setSelectedId(e.target.value)}
+              onChange={e => { setSelectedId(e.target.value); setChargeUpJobId(""); }}
               className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="" disabled>Select…</option>
@@ -331,6 +336,24 @@ export default function WorkerLogHours() {
             </select>
           </div>
         </div>
+
+        {/* BLB Charge Up: pick the location the work was done at (required) */}
+        {chargeUpSites.length > 0 && (
+          <div className="mb-4">
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Location <span className="text-red-500">*</span></label>
+            <select
+              value={chargeUpJobId}
+              onChange={e => setChargeUpJobId(e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="" disabled>Pick the site…</option>
+              {chargeUpSites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            {chargeUpJobId && chargeUpSites.find(s => s.id === chargeUpJobId)?.address && (
+              <p className="text-xs text-muted mt-1">{chargeUpSites.find(s => s.id === chargeUpJobId).address}</p>
+            )}
+          </div>
+        )}
         {date !== todayStr() && <p className="text-xs text-amber-600 mb-4">Backdating to {date}</p>}
         {date === todayStr() && <div className="mb-4" />}
 

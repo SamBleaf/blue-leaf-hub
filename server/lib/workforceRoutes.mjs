@@ -2178,7 +2178,7 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    const { date, project_id, job_id, carpentry_job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] required" });
     }
@@ -2213,6 +2213,18 @@ export function registerWorkforceRoutes(app) {
       if (vis.error) return res.status(500).json({ ok: false, error: translateDbError(vis.error) });
       if (!workerMaySeeJob(vis, jobId, jobType)) {
         return res.status(403).json({ ok: false, error: "You don't have access to this job." });
+      }
+    }
+
+    // BLB Charge Up: if the carpentry job HAS active charge-up sites, a location is required
+    // and must belong to this job. Jobs without sites (or before mig 145) log untagged as before.
+    let chargeUpJobId = null;
+    if (carpentry_job_id) {
+      const { data: siteRows, error: siteErr } = await sb.from("charge_up_jobs")
+        .select("id").eq("carpentry_job_id", carpentry_job_id).eq("status", "active");
+      if (!siteErr && (siteRows || []).length) {
+        if (charge_up_job_id && siteRows.some((s) => s.id === charge_up_job_id)) chargeUpJobId = charge_up_job_id;
+        if (!chargeUpJobId) return res.status(400).json({ ok: false, error: "Pick a location before submitting charge-up work." });
       }
     }
 
@@ -2256,17 +2268,23 @@ export function registerWorkforceRoutes(app) {
       validLineIds = new Set((liRows || []).map(r => r.id));
     }
     // Insert entries
-    const entryRows = entries.map(e => ({
-      timesheet_id: timesheetId,
-      employee_id: emp.id,
-      task_category: e.task_category,
-      budget_line_item_id: (validLineIds && e.budget_line_item_id && validLineIds.has(e.budget_line_item_id)) ? e.budget_line_item_id : null,
-      phase: TASK_PHASE_MAP[e.task_category] || "general",
-      hours: Number(e.hours),
-      overtime_hours: 0,
-      notes: e.notes || null,
-      completion_photo_url: e.completion_photo_url || null,
-    }));
+    const entryRows = entries.map(e => {
+      const row = {
+        timesheet_id: timesheetId,
+        employee_id: emp.id,
+        task_category: e.task_category,
+        budget_line_item_id: (validLineIds && e.budget_line_item_id && validLineIds.has(e.budget_line_item_id)) ? e.budget_line_item_id : null,
+        phase: TASK_PHASE_MAP[e.task_category] || "general",
+        hours: Number(e.hours),
+        overtime_hours: 0,
+        notes: e.notes || null,
+        completion_photo_url: e.completion_photo_url || null,
+      };
+      // Only include the charge-up site column when a site was picked — chargeUpJobId is only
+      // non-null when mig 145 is applied + sites exist, so this never references a missing column.
+      if (chargeUpJobId) row.charge_up_job_id = chargeUpJobId;
+      return row;
+    });
     const { error: entryErr } = await sb.from("timesheet_entries").insert(entryRows);
     if (entryErr) return res.status(500).json({ ok: false, error: translateDbError(entryErr) });
 
@@ -2286,13 +2304,24 @@ export function registerWorkforceRoutes(app) {
     try {
       const vis = await workerVisibleJobs(sb, emp.id);
       if (!vis.error && !workerMaySeeJob(vis, jobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+
+      // BLB Charge Up (reference BL-CHARGEUP): the "sub-tasks" are its sites (charge_up_jobs),
+      // which the worker picks as a Location instead of a budget sub-task.
+      let chargeUpSites = [];
+      const { data: jobRow } = await sb.from("carpentry_jobs").select("reference").eq("id", jobId).maybeSingle();
+      if (jobRow?.reference === "BL-CHARGEUP") {
+        const { data: sites } = await sb.from("charge_up_jobs").select("id, site_label, address")
+          .eq("carpentry_job_id", jobId).eq("status", "active").order("sort_order").order("site_label");
+        chargeUpSites = (sites || []).map((s) => ({ id: s.id, label: s.site_label, address: s.address || null }));
+      }
+
       const { data: rows, error } = await sb
         .from("carpentry_budget_line_items")
         .select("id, task_category, canonical_key, description, sort_order")
         .eq("job_id", jobId).eq("status", "confirmed")
         .not("task_category", "is", null).not("canonical_key", "is", null)
         .order("sort_order");
-      if (error) return ok(res, { subtasks: {} }); // table missing → no sub-tasks (fail-soft)
+      if (error) return ok(res, { subtasks: {}, chargeUpSites }); // line-items table missing → still return sites
       const byCat = {};
       for (const r of rows || []) {
         const m = (byCat[r.task_category] ||= new Map());
@@ -2303,7 +2332,7 @@ export function registerWorkforceRoutes(app) {
       }
       const subtasks = {};
       for (const [cat, m] of Object.entries(byCat)) subtasks[cat] = [...m.values()];
-      return ok(res, { subtasks });
+      return ok(res, { subtasks, chargeUpSites });
     } catch (e) {
       console.error("[worker/jobs subtasks]", e);
       return err(res, 502, translateDbError(e));
@@ -2335,7 +2364,11 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    const { data } = await sb.from("timesheets").select("*, timesheet_entries(id, task_category, budget_line_item_id, phase, hours, notes, completion_photo_url)").eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
+    // Echo charge_up_job_id so re-editing a charge-up day restores the picked location.
+    // Fall back to the old select if the column isn't there yet (mig 145 not applied).
+    const sel = (withCU) => `*, timesheet_entries(id, task_category, budget_line_item_id, ${withCU ? "charge_up_job_id, " : ""}phase, hours, notes, completion_photo_url)`;
+    let { data, error } = await sb.from("timesheets").select(sel(true)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
+    if (error) ({ data } = await sb.from("timesheets").select(sel(false)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle());
     res.json({ ok: true, timesheet: data || null });
   });
 
