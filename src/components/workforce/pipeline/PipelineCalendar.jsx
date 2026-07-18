@@ -31,6 +31,7 @@ function toBlocks(jobs) {
         start: s.plannedStart, end: s.plannedEnd || s.plannedStart,
         status: s.scheduleStatus, locked: s.locked, marginRisk: job.breakEven?.marginRisk,
         workforceTaskCategory: s.workforceTaskCategory, labourSell: s.labourSell, dependsOn: s.dependsOn,
+        actualStart: s.actualStart, actualEnd: s.actualEnd, actualHours: s.actualHours,
       });
     }
   }
@@ -214,9 +215,9 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
                       background: block.palette.dot, opacity: block.status === "complete" ? 0.55 : 0.95,
                       border: block.marginRisk ? "1px solid #dc2626" : "none", pointerEvents: "auto", touchAction: "none",
                     }}
-                    title={`${block.jobLabel} — ${block.stageLabel}\n${block.start} → ${block.end}${block.locked ? " (locked)" : " · drag to reschedule, click to edit"}`}
+                    title={`${block.jobLabel} — ${block.stageLabel}\nPlanned: ${block.start} → ${block.end}${block.actualStart ? `\nActual: ${block.actualStart} → ${block.actualEnd || "…"}${block.actualHours ? ` (${block.actualHours}h)` : ""}` : ""}${block.locked ? "\n(locked)" : "\ndrag to reschedule · click to edit"}`}
                   >
-                    {block.locked ? "🔒 " : ""}{block.stageLabel}
+                    {block.locked ? "🔒 " : ""}{block.actualStart ? "● " : ""}{block.stageLabel}
                   </div>
                 ))}
               </div>

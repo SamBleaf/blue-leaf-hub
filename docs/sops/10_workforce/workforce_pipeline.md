@@ -1,7 +1,7 @@
 ---
-sop_version: 1.0
+sop_version: 2.0
 last_reviewed: 2026-07-18
-app_version: 1.0 — built
+app_version: 2.0 — interactive stage calendar
 screenshot_status: not_applicable
 owner: Admin
 test_status: untested
@@ -26,7 +26,18 @@ Admin and supervisors planning the carpentry crew: deciding what jobs start when
 - To sanity-check a job's expected finish against its committed schedule and its actual progress from approved timesheets
 
 ## 3. What this does
-The **Pipeline** tab (Workforce → Pipeline; route `/workforce?tab=Pipeline`) is a forward-looking, read-only decision tool. It is **not** a data-entry screen — it composes existing data (carpentry jobs, budgets, approved timesheets, crew allocations, the cost model) into a timeline + capacity view.
+The **Pipeline** tab (Workforce → Pipeline; route `/workforce?tab=Pipeline`) has two views — an **interactive stage Calendar** (default) and the forward-looking **Timeline** (the read-only forecast/capacity view described below). Toggle between them top-left.
+
+### Stage Calendar (v2 — interactive)
+Each carpentry job is broken into its **stages** (the budget labour subsections — First Fix Framing, Cladding & Soffit, Second Fix…), drawn as blocks on a calendar, colour-coded by job (see the jobs legend above the grid).
+- **Year view** (default) — 12 mini-months, whole-year overview. Click a month to zoom in.
+- **Month view** — **drag a stage block** to reschedule it; its dependent stages **ripple forward** automatically (later stages are never pulled earlier). **Click a block** to open its editor (start/end, ±day/±week shift, lock). A **🔒 locked** stage doesn't move under auto-layout or ripple; a **●** prefix means the stage has started (approved timesheets exist).
+- **Stage length is earned-value-driven**: each stage's duration = its labour value ÷ the team day-rate, scaled to the stage crew (the same engine as the break-even). More labour $ in a subsection → longer stage.
+- **Two-way sync**: every move writes to `carpentry_job_stage_schedule` — the same store the carpentry job's **Schedule tab** reads/writes, so an edit in either place moves the other.
+- **Actual vs planned**: approved timesheets (by workforce task_category) show the real start/end + hours on each stage block + in the editor.
+
+### Timeline (forward-looking forecast — read-only)
+The Timeline view composes existing data (carpentry jobs, budgets, approved timesheets, crew allocations, the cost model) into a job-level forecast + capacity view. It is **not** a data-entry screen.
 
 **Four schedule measures, shown side by side and never conflated:**
 1. **Committed** — the real schedule (`start_date → end_date`). Solid bar.
@@ -172,4 +183,31 @@ Next review: 2026-11-30
 **TC-09 — Graceful degradation with no cost model / no history**
 1. On a DB with the cost model unsynced (or no completed jobs)
 2. Expected: the board still renders; a meta notice explains break-even is unavailable / forecasts are budget-derived (Low confidence); no crash
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Calendar shows budget-driven stage blocks**
+1. Calendar view (default Year) → a job with a labour budget
+2. Expected: the job's stages appear as blocks named for the budget subsections; stage lengths scale with labour value
+3. Expected API: `GET /api/carpentry/jobs/:id/stage-schedule` returns stages with `labourSell` + `plannedStart/plannedEnd`
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Drag a stage reschedules it + ripples dependents (Month view)**
+1. Switch to Month view → drag a stage block to a later day → drop
+2. Expected: the block moves; any dependent stages shift forward (never earlier); a "Saving…" indicator shows
+3. Expected DB: `carpentry_job_stage_schedule.planned_start/planned_end` updated for the moved stage + pushed dependents
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Two-way sync with the carpentry Schedule tab**
+1. Move a stage on the Pipeline calendar → open the same carpentry job → Schedule tab
+2. Expected: the stage shows the new dates. Reverse: edit a date on the Schedule tab → reload the Pipeline → the calendar reflects it
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Lock pins a stage against ripple; ● marks started stages**
+1. Open a stage's editor → tick Lock → save. Drag an earlier stage so ripple would hit it
+2. Expected: the locked stage does not move. A stage with approved timesheets shows a ● prefix + actual dates in its tooltip/editor
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Year default + Month/Year toggle**
+1. Open the Pipeline → Calendar
+2. Expected: it opens in **Year** view (12 mini-months). Toggling **Month** shows the 6-week grid; clicking a mini-month zooms to that month
 - [ ] Pass  [ ] Fail

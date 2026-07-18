@@ -244,6 +244,8 @@ Condensed view (key columns):
 | `expected_completion_date` | Schedule | **Generated** | Derived (scheduleIntelligence) | expected duration + inter-stage gaps + calendar | workforce pipeline | — | N | — |
 | `break_even_allowance_days` | Schedule | **Generated** | Derived (scheduleIntelligence) | labour value ÷ team break-even rate × headcount/crew | workforce pipeline, margin | — | N | — |
 | `schedule_margin_risk` | Schedule | **Generated** | Derived (scheduleIntelligence) | expected productive crew-days > break-even allowance | workforce pipeline, director | — | N | — |
+| `carpentry_stage_planned_start` / `_end` | Schedule | Versioned | Auto-layout (budget-driven), then edited by drag | `carpentry_job_stage_schedule` (mig 144); stage = budget subsection, duration from labour value ÷ team rate | workforce pipeline calendar, carpentry Schedule tab | Y | Y | N |
+| `carpentry_stage_actual_start` / `_end` | Schedule | **Generated** | Derived (timesheets by task_category) | approved `timesheet_entries` | workforce pipeline calendar | — | N | — |
 | `target_margin` | BI | Versioned | Assigned | — | finance, pretender | Y | Y | Y |
 | `lead_source` | BI | Static | Sales/marketing | Lead form / attribution | marketing, reporting | N | Y | N |
 | `nearest_hospital` | Site Intel | Static | **Lookup** | Address geocode | WHS emergency | N | Y | N |

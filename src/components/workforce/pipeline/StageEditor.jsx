@@ -36,6 +36,16 @@ export default function StageEditor({ block, saving, onClose, onSave }) {
           {fmt$(block.labourSell) && <div className="flex justify-between"><span className="text-muted">Labour value (drives duration)</span><span className="text-ink font-medium">{fmt$(block.labourSell)}</span></div>}
         </div>
 
+        {block.actualStart && (
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 mb-4 text-xs">
+            <p className="font-medium text-emerald-800 mb-0.5">Actual (from approved timesheets)</p>
+            <div className="flex justify-between text-emerald-700">
+              <span>{block.actualStart} → {block.actualEnd || "in progress"}</span>
+              {block.actualHours ? <span className="font-medium">{block.actualHours}h</span> : null}
+            </div>
+          </div>
+        )}
+
         <label className="block text-xs font-medium text-ink mb-1">Start</label>
         <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm focus-ring mb-3" />
         <label className="block text-xs font-medium text-ink mb-1">End</label>

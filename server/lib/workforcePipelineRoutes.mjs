@@ -170,6 +170,7 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
     const includedStages = includedStagesFor(items, budgets);
     const rows = entriesByJob.get(job.id) || [];
     const actuals = rows.length ? aggregateStages({ entries: rows, nonWork, hoursPerDay: cm?.hoursPerDay || 8 }) : null;
+    const coarse = coarseActualsByCategory(rows);   // timesheet actuals keyed by workforce task_category (matches budget stages)
     const historical = hist.byType.get(job.project_type) || null;
 
     const forecast = forecastDuration({
@@ -214,7 +215,7 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
         productionRate: forecast.productionRate, percentComplete: forecast.percentComplete,
         distinctEmployees: actuals.distinctEmployees,
       } : null,
-      stages: mergeStages(includedStages, actuals, historical, stageSchedByJob.get(job.id)),
+      stages: mergeStages(includedStages, actuals, historical, stageSchedByJob.get(job.id), coarse),
       excludedHours: actuals ? actuals.excluded : { total: 0, byReason: {} },
     };
   });
@@ -249,7 +250,24 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
   };
 }
 
-function mergeStages(includedStages, actuals, historical, sched) {
+// Coarse timesheet actuals keyed by workforce task_category (first/last worked date + hours) —
+// this matches the budget-driven stage schedule (which keys stages by workforce_task_category),
+// so a stage's real progress lines up with its block on the calendar.
+function coarseActualsByCategory(entries = []) {
+  const m = new Map();
+  for (const e of entries) {
+    const cat = e.taskCategory, date = e.date;
+    if (!cat || !date) continue;
+    const c = m.get(cat) || { firstDate: date, lastDate: date, hours: 0 };
+    if (date < c.firstDate) c.firstDate = date;
+    if (date > c.lastDate) c.lastDate = date;
+    c.hours += Number(e.hours) || 0;
+    m.set(cat, c);
+  }
+  return m;
+}
+
+function mergeStages(includedStages, actuals, historical, sched, coarse) {
   const keys = new Set(includedStages);
   (actuals?.stages || []).forEach((s) => keys.add(s.stage));
   if (sched) for (const k of sched.keys()) keys.add(k);
@@ -258,6 +276,8 @@ function mergeStages(includedStages, actuals, historical, sched) {
   return [...keys].map((stage) => {
     const a = actualByStage.get(stage);
     const p = sched?.get(stage);
+    const wfCat = p?.workforce_task_category || null;
+    const ca = wfCat && coarse ? coarse.get(wfCat) : null;   // real progress for this budget stage
     return {
       stage, label: p?.label || stageLabel(stage),
       // Planned dates (the draggable block) — from carpentry_job_stage_schedule (mig 144),
@@ -265,9 +285,13 @@ function mergeStages(includedStages, actuals, historical, sched) {
       rowId: p?.id || null,
       plannedStart: p?.planned_start || null, plannedEnd: p?.planned_end || null,
       scheduleStatus: p?.status || null, locked: p?.locked || false,
-      workforceTaskCategory: p?.workforce_task_category || null, labourSell: p?.labour_sell ?? null,
+      workforceTaskCategory: wfCat, labourSell: p?.labour_sell ?? null,
       dependsOn: Array.isArray(p?.depends_on) ? p.depends_on : [],
-      actualHours: a ? a.hours : 0,
+      // Actuals — coarse (by workforce category, aligned to the budget stage) with the fine
+      // taxonomy aggregation as a fallback for non-budget stages.
+      actualStart: ca?.firstDate || a?.firstDate || null,
+      actualEnd: ca?.lastDate || a?.lastDate || null,
+      actualHours: ca ? round1(ca.hours) : (a ? a.hours : 0),
       forecastHours: historical?.expectedHoursByStage?.[stage] ?? null,
       first: a?.firstDate || null, last: a?.lastDate || null,
       gapBeforeWorkingDays: gapByStage.get(stage) ?? null,
