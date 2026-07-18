@@ -6,12 +6,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { apiFetch, apiPatch, apiPost, apiDelete } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
+import ChargeUpJobDetail from "./ChargeUpJobDetail.jsx";
 import {
   CARPENTRY_JOB_STATUS_LABELS,
   CARPENTRY_PROJECT_TYPES,
   CARPENTRY_PROJECT_TYPE_LABELS,
   CARPENTRY_COST_TYPES,
   CARPENTRY_COST_TYPE_LABELS,
+  CHARGE_UP_REFERENCE,
 } from "../lib/constants.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2413,6 +2415,10 @@ export default function CarpentryJobDetail() {
   if (loading) return <div className="p-10 text-center text-muted text-sm">Loading…</div>;
   if (error)   return <div className="p-10 text-center text-red-600 text-sm">{error}</div>;
   if (!job)    return <div className="p-10 text-center text-muted text-sm">Job not found.</div>;
+
+  // BLB Charge Up gets its own layout (site list + per-site hours), not the standard tabs.
+  // Branch on the reference specifically — BL-INTERNAL is also project_type='other' but keeps the tabs.
+  if (job.reference === CHARGE_UP_REFERENCE) return <ChargeUpJobDetail job={job} />;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">

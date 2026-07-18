@@ -470,6 +470,11 @@ export const CARPENTRY_PROJECT_TYPES = {
   OTHER:        "other",
 };
 
+// Permanent internal carpentry-job references (mig 125). BL-CHARGEUP holds site-level
+// charge-up sub-jobs (mig 145) and gets its own detail layout; BL-INTERNAL keeps the
+// standard tabs even though both are project_type='other'.
+export const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
+
 export const CARPENTRY_PROJECT_TYPE_LABELS = {
   frame:        "Frame Only",
   fitoff:       "Fit-Off Only",
