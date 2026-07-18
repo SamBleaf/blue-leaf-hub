@@ -9,11 +9,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiFetch } from "../../lib/apiFetch.js";
 import { horizonWindow, shiftAnchor, todayYmd } from "../../lib/pipelineTimeline.js";
+import { resolveJobColor, jobKey } from "../../lib/plannerColors.js";
 import PipelineTimeline from "../../components/workforce/pipeline/PipelineTimeline.jsx";
+import PipelineCalendar from "../../components/workforce/pipeline/PipelineCalendar.jsx";
 
 const HORIZONS = ["week", "month", "quarter", "year"];
 
 export default function WorkforcePipelineTab() {
+  const [view, setView] = useState("calendar");       // calendar (primary) | timeline
   const [horizon, setHorizon] = useState("month");
   const [anchor, setAnchor] = useState(() => todayYmd());
   const [kind, setKind] = useState("all");            // all | carpentry
@@ -22,7 +25,9 @@ export default function WorkforcePipelineTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const win = useMemo(() => horizonWindow(anchor, horizon), [anchor, horizon]);
+  // Calendar mode fetches a wide (year) window so it can navigate months without refetching
+  // (stage blocks come back for all active jobs regardless); timeline mode uses the chosen horizon.
+  const win = useMemo(() => horizonWindow(anchor, view === "calendar" ? "year" : horizon), [anchor, horizon, view]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,24 +60,44 @@ export default function WorkforcePipelineTab() {
     <div className="space-y-4" data-testid="wf-pipeline">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 justify-between">
-        <div className="inline-flex rounded-lg border border-hairline overflow-hidden">
-          {HORIZONS.map((h) => (
-            <button
-              key={h}
-              type="button"
-              onClick={() => setHorizon(h)}
-              className={`px-3 py-1.5 text-sm font-medium capitalize transition ${horizon === h ? "bg-primary text-white" : "bg-surface text-muted hover:text-ink"}`}
-            >
-              {h}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* View mode — Calendar (primary) vs Timeline */}
+          <div className="inline-flex rounded-lg border border-hairline overflow-hidden">
+            {["calendar", "timeline"].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-sm font-medium capitalize transition ${view === v ? "bg-primary text-white" : "bg-surface text-muted hover:text-ink"}`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+
+          {view === "timeline" && (
+            <div className="inline-flex rounded-lg border border-hairline overflow-hidden">
+              {HORIZONS.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setHorizon(h)}
+                  className={`px-2.5 py-1.5 text-sm font-medium capitalize transition ${horizon === h ? "bg-primary text-white" : "bg-surface text-muted hover:text-ink"}`}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={() => setAnchor((a) => shiftAnchor(a, horizon, -1))} className="px-2.5 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink" aria-label="Previous period">←</button>
-          <button type="button" onClick={() => setAnchor(todayYmd())} className="px-3 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink">Today</button>
-          <button type="button" onClick={() => setAnchor((a) => shiftAnchor(a, horizon, 1))} className="px-2.5 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink" aria-label="Next period">→</button>
-        </div>
+        {view === "timeline" && (
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setAnchor((a) => shiftAnchor(a, horizon, -1))} className="px-2.5 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink" aria-label="Previous period">←</button>
+            <button type="button" onClick={() => setAnchor(todayYmd())} className="px-3 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink">Today</button>
+            <button type="button" onClick={() => setAnchor((a) => shiftAnchor(a, horizon, 1))} className="px-2.5 py-1.5 text-sm rounded-lg border border-hairline text-muted hover:text-ink" aria-label="Next period">→</button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <select
@@ -117,31 +142,74 @@ export default function WorkforcePipelineTab() {
 
       {!loading && !error && board && jobs.length === 0 && construction.length === 0 && (
         <div className="py-16 text-center text-muted text-sm">
-          No {riskOnly ? "margin-risk jobs" : "scheduled work"} in this {horizon}.
+          No {riskOnly ? "margin-risk jobs" : "scheduled work"} to show.
           {riskOnly && " Clear the filter to see all work."}
+        </div>
+      )}
+
+      {view === "calendar" && board?.meta && !board.meta.hasStageSchedule && jobs.length > 0 && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          No stage schedules yet — apply <span className="font-mono">migration 144</span>, then open each job&rsquo;s Schedule tab (or hit Re-auto-layout) to lay out its stages. They&rsquo;ll appear here.
         </div>
       )}
 
       {!loading && !error && board && (jobs.length > 0 || construction.length > 0) && (
         <>
-          <PipelineTimeline
-            jobs={jobs}
-            construction={construction}
-            capacity={board.capacity || []}
-            from={win.from}
-            to={win.to}
-            horizon={horizon}
-          />
-          <Legend costModelSynced={board.meta?.costModelSynced} />
+          {view === "calendar" ? (
+            <>
+              <JobsLegend jobs={jobs} />
+              <PipelineCalendar jobs={jobs} anchor={anchor} onOpenStage={() => {}} />
+            </>
+          ) : (
+            <PipelineTimeline
+              jobs={jobs}
+              construction={construction}
+              capacity={board.capacity || []}
+              from={win.from}
+              to={win.to}
+              horizon={horizon}
+            />
+          )}
+          <Legend costModelSynced={board.meta?.costModelSynced} calendar={view === "calendar"} />
         </>
       )}
     </div>
   );
 }
 
+// Colour key for the jobs on the calendar — colour dot per job (matches the Planner palette).
+function JobsLegend({ jobs }) {
+  const orderedKeys = jobs.map((j) => jobKey("carpentry", j.id));
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] px-1">
+      {jobs.map((j) => {
+        const c = resolveJobColor(jobKey("carpentry", j.id), orderedKeys);
+        return (
+          <span key={j.id} className="inline-flex items-center gap-1.5 text-muted">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ background: c.dot }} />
+            {j.label}
+            {j.breakEven?.marginRisk && <span className="text-red-600" title="Margin risk">⚠</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // Inline legend — explains the four schedule measures + capacity colours. Kept in the tab
 // (not a separate component) so the whole reading key lives with the board it explains.
-function Legend({ costModelSynced }) {
+function Legend({ costModelSynced, calendar }) {
+  if (calendar) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted px-1">
+        <LegendItem swatch={<span className="inline-block w-5 h-2.5 rounded bg-slate-500" />} label="Stage block (planned)" />
+        <LegendItem swatch={<span className="inline-block w-5 h-2.5 rounded bg-slate-500 opacity-50" />} label="Complete (faded)" />
+        <LegendItem swatch={<span className="inline-block w-5 h-2.5 rounded border border-red-600" />} label="Margin risk" />
+        <LegendItem swatch={<span>🔒</span>} label="Locked (pinned)" />
+        <span className="text-muted/70">Colour = job (see legend above). Edit dates in the job&rsquo;s Schedule tab.</span>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted px-1">
       <LegendItem swatch={<span className="inline-block w-5 h-2.5 rounded bg-slate-500 opacity-90" />} label="Committed (real schedule)" />

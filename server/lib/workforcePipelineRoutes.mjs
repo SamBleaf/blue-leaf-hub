@@ -144,14 +144,22 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
   );
   const jobIds = jobs.map((j) => j.id);
 
-  const [budgetRows, itemRows, entriesByJob, hist] = await Promise.all([
+  const [budgetRows, itemRows, entriesByJob, hist, stageSchedRows] = await Promise.all([
     jobIds.length ? safe(sb.from("carpentry_job_budgets").select("job_id, cost_type, budget_ex_gst, workforce_task_category").in("job_id", jobIds)) : [],
     jobIds.length ? safe(sb.from("carpentry_budget_line_items").select("job_id, canonical_key, task_category").in("job_id", jobIds)) : [],
     stageEntriesByJob(sb, jobIds, histSince),
     historicalByProjectType(sb, nonWork, histSince),
+    jobIds.length ? safe(sb.from("carpentry_job_stage_schedule").select("id, carpentry_job_id, stage_key, planned_start, planned_end, status, locked, depends_on").in("carpentry_job_id", jobIds)) : [],
   ]);
   const budgetsByJob = groupBy(budgetRows, "job_id");
   const itemsByJob = groupBy(itemRows, "job_id");
+  // Planned stage dates (migration 144) → the calendar's blocks + the forecast's real dates.
+  const stageSchedByJob = new Map();
+  for (const r of stageSchedRows) {
+    if (!stageSchedByJob.has(r.carpentry_job_id)) stageSchedByJob.set(r.carpentry_job_id, new Map());
+    stageSchedByJob.get(r.carpentry_job_id).set(r.stage_key, r);
+  }
+  const hasStageSchedule = stageSchedRows.length > 0;
 
   const forecastsForCapacity = [];
   const jobCards = jobs.map((job) => {
@@ -206,7 +214,7 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
         productionRate: forecast.productionRate, percentComplete: forecast.percentComplete,
         distinctEmployees: actuals.distinctEmployees,
       } : null,
-      stages: mergeStages(includedStages, actuals, historical),
+      stages: mergeStages(includedStages, actuals, historical, stageSchedByJob.get(job.id)),
       excludedHours: actuals ? actuals.excluded : { total: 0, byReason: {} },
     };
   });
@@ -234,28 +242,36 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
     meta: {
       from, to, today, horizon,
       costModelSynced: !!cm,
+      hasStageSchedule,
       historicalJobsSampled: hist.sampled, historicalCapped: hist.capped,
       generatedAt: new Date().toISOString(), calcVersion: CALC_VERSION,
     },
   };
 }
 
-function mergeStages(includedStages, actuals, historical) {
+function mergeStages(includedStages, actuals, historical, sched) {
   const keys = new Set(includedStages);
   (actuals?.stages || []).forEach((s) => keys.add(s.stage));
+  if (sched) for (const k of sched.keys()) keys.add(k);
   const actualByStage = new Map((actuals?.stages || []).map((s) => [s.stage, s]));
   const gapByStage = new Map((actuals?.gaps || []).map((g) => [g.toStage, g.gapWorkingDays]));
   return [...keys].map((stage) => {
     const a = actualByStage.get(stage);
+    const p = sched?.get(stage);
     return {
       stage, label: stageLabel(stage),
+      // Planned dates (the draggable block) — from carpentry_job_stage_schedule (mig 144).
+      rowId: p?.id || null,
+      plannedStart: p?.planned_start || null, plannedEnd: p?.planned_end || null,
+      scheduleStatus: p?.status || null, locked: p?.locked || false,
+      dependsOn: Array.isArray(p?.depends_on) ? p.depends_on : [],
       actualHours: a ? a.hours : 0,
       forecastHours: historical?.expectedHoursByStage?.[stage] ?? null,
       first: a?.firstDate || null, last: a?.lastDate || null,
       gapBeforeWorkingDays: gapByStage.get(stage) ?? null,
       productionRate: a?.productionRate ?? null,
     };
-  }).sort((x, y) => (x.first || "9999") < (y.first || "9999") ? -1 : 1);
+  }).sort((x, y) => ((x.plannedStart || x.first || "9999") < (y.plannedStart || y.first || "9999") ? -1 : 1));
 }
 
 function groupBy(rows, key) {
