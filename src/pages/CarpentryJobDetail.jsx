@@ -498,13 +498,16 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted, s
 const STAGE_STATUS_NEXT = { planned: "in_progress", in_progress: "complete", complete: "planned" };
 const STAGE_STATUS_STYLE = { planned: "border-slate-300", in_progress: "bg-blue-500 border-blue-500", complete: "bg-emerald-500 border-emerald-500" };
 
-function ScheduleTab({ jobId }) {
+function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
   const [stages, setStages]                   = useState([]);
   const [loading, setLoading]                 = useState(true);
   const [migrationPending, setMigrationPending] = useState(false);
   const [savingId, setSavingId]               = useState(null);
   const [seeding, setSeeding]                 = useState(false);
   const [error, setError]                     = useState(null);
+  const [commence, setCommence]               = useState(jobStartDate || "");
+  const [savingCommence, setSavingCommence]   = useState(false);
+  useEffect(() => { setCommence(jobStartDate || ""); }, [jobStartDate]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -525,14 +528,29 @@ function ScheduleTab({ jobId }) {
     setStages((s) => s.map((x) => (x.id === row.id ? data.stage : x)));
   }
 
+  // Set the job's commencement (start_date) — the anchor auto-layout builds from — then re-seed.
+  async function saveCommencement() {
+    if (!commence) { setError("Pick a commencement date first."); return; }
+    setSavingCommence(true); setError(null);
+    const p = await apiPatch(`/api/carpentry/jobs/${jobId}`, { startDate: commence });
+    if (!p.ok) { setSavingCommence(false); setError(p.error || "Could not set the commencement date."); return; }
+    const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/stage-schedule/seed`, {});
+    setSavingCommence(false);
+    if (!ok) { setError(e || "Laid out the date but the schedule didn’t rebuild — try Re-auto-layout."); return; }
+    setStages(data?.stages || []);
+    onStartDateSaved?.(commence);
+  }
+
   async function reseed() {
-    if (!confirm("Re-lay out all unlocked stages from the job start date? Locked stages stay put.")) return;
+    if (!confirm("Re-lay out all unlocked stages from the commencement date? Locked stages stay put.")) return;
     setSeeding(true); setError(null);
     const { ok, data, error: e } = await apiPost(`/api/carpentry/jobs/${jobId}/stage-schedule/seed`, {});
     setSeeding(false);
     if (!ok) { setError(e || "Re-layout failed."); return; }
     setStages(data?.stages || []);
   }
+
+  const noDates = stages.length > 0 && stages.every((s) => !s.plannedStart);
 
   return (
     <div className="p-6">
@@ -545,6 +563,26 @@ function ScheduleTab({ jobId }) {
         )}
       </div>
       <p className="text-xs text-muted mb-4">Planned dates per stage. Edits sync to the Workforce &rarr; Pipeline calendar. Lock a stage to pin it against auto-layout &amp; ripple.</p>
+
+      {/* Commencement — the anchor auto-layout builds from. Setting it lays out every stage. */}
+      {!migrationPending && (
+        <div className="mb-4 p-3 rounded-card border border-hairline bg-slate-50 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Commencement date</label>
+            <input type="date" value={commence} onChange={(e) => setCommence(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus-ring" />
+          </div>
+          <button onClick={saveCommencement} disabled={savingCommence || !commence} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-40">
+            {savingCommence ? "Laying out…" : "Set & lay out stages"}
+          </button>
+          <p className="text-[11px] text-muted flex-1 min-w-[12rem]">Stage lengths come from each budget subsection’s labour value; setting this date cascades them all from here.</p>
+        </div>
+      )}
+
+      {noDates && !savingCommence && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800 mb-4">
+          Stages have no dates yet — set a <span className="font-medium">commencement date</span> above to lay them out.
+        </div>
+      )}
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-4">{error}</div>}
       {migrationPending && (
@@ -2414,7 +2452,7 @@ export default function CarpentryJobDetail() {
             showCost={showCost}
           />
         )}
-        {tab === "schedule" && <ScheduleTab jobId={job.id} />}
+        {tab === "schedule" && <ScheduleTab jobId={job.id} jobStartDate={job.startDate} onStartDateSaved={(d) => setJob((j) => ({ ...j, startDate: d }))} />}
         {tab === "diary"    && <DiaryTab job={job} />}
         {tab === "costs"    && showCost && <CostsTab jobId={job.id} />}
         {tab === "budget"   && showCost && <BudgetTab jobId={job.id} />}
