@@ -64,39 +64,44 @@ export default function WorkforcePipelineTab() {
   }, []);
   const colourFor = useCallback((jobId) => resolveJobColor(jobKey("carpentry", jobId), plannerCtx.orderedKeys, plannerCtx.saved), [plannerCtx]);
 
-  // Apply {rowId, plannedStart, plannedEnd} changes: optimistic board update + PATCH each + reconcile.
-  const applyStageChanges = useCallback(async (changes) => {
-    if (!changes?.length) return;
+  // Optimistically apply {rowId, plannedStart, plannedEnd(, locked)} changes to the board in place,
+  // then persist. NO full reload on success (that's what jumped the page to the top) — the ripple
+  // already computed the exact dates, so the optimistic state IS the truth; reconcile only on error.
+  const applyStageChanges = useCallback(async (changes, extraByRow = {}) => {
+    if (!changes?.length && !Object.keys(extraByRow).length) return;
     setSaving(true);
     setBoard((b) => (b ? { ...b, jobs: b.jobs.map((j) => ({ ...j, stages: j.stages?.map((s) => {
       const ch = changes.find((c) => c.rowId === s.rowId);
-      return ch ? { ...s, plannedStart: ch.plannedStart, plannedEnd: ch.plannedEnd } : s;
+      const extra = extraByRow[s.rowId];
+      if (!ch && !extra) return s;
+      return { ...s, ...(ch ? { plannedStart: ch.plannedStart, plannedEnd: ch.plannedEnd } : {}), ...(extra || {}) };
     }) })) } : b));
-    await Promise.all(changes.map((c) => apiPatch(`/api/carpentry/stage-schedule/${c.rowId}`, { plannedStart: c.plannedStart, plannedEnd: c.plannedEnd })));
+    const results = await Promise.all(changes.map((c) =>
+      apiPatch(`/api/carpentry/stage-schedule/${c.rowId}`, { plannedStart: c.plannedStart, plannedEnd: c.plannedEnd, ...(extraByRow[c.rowId] || {}) })));
+    // rows with ONLY extra (e.g. a lock toggle, no date change) still need a PATCH
+    const extraOnly = Object.keys(extraByRow).filter((rid) => !changes.some((c) => c.rowId === rid));
+    const extraResults = await Promise.all(extraOnly.map((rid) => apiPatch(`/api/carpentry/stage-schedule/${rid}`, extraByRow[rid])));
     setSaving(false);
-    load();
+    if ([...results, ...extraResults].some((r) => !r.ok)) load();   // reconcile only if a write failed
   }, [load]);
 
-  // Drag: move a stage → ripple its dependents forward → persist.
+  // Drag: move a stage → ripple its dependents forward → persist (seamless).
   const onMoveStage = useCallback((block, newStart) => {
     const job = board?.jobs?.find((j) => j.id === block.jobId);
     if (!job) return;
     applyStageChanges(rippleStages(job.stages, block.id, newStart));
   }, [board, applyStageChanges]);
 
-  // Editor save: set the stage's dates/lock, then ripple downstream from the new dates.
-  const onSaveEdit = useCallback(async (edit) => {
-    const job = board?.jobs?.find((j) => j.id === edit.block.jobId);
-    setSaving(true);
-    await apiPatch(`/api/carpentry/stage-schedule/${edit.block.id}`, { plannedStart: edit.plannedStart, plannedEnd: edit.plannedEnd, locked: edit.locked });
-    if (job) {
-      const downstream = rippleStages(job.stages, edit.block.id, edit.plannedStart, edit.plannedEnd).filter((c) => c.rowId !== edit.block.id);
-      await Promise.all(downstream.map((c) => apiPatch(`/api/carpentry/stage-schedule/${c.rowId}`, { plannedStart: c.plannedStart, plannedEnd: c.plannedEnd })));
-    }
-    setSaving(false);
+  // Editor save: set the stage's dates/lock, ripple downstream — all optimistic, no reload.
+  const onSaveEdit = useCallback((edit) => {
     setEditing(null);
-    load();
-  }, [board, load]);
+    const job = board?.jobs?.find((j) => j.id === edit.block.jobId);
+    const changes = job
+      ? rippleStages(job.stages, edit.block.id, edit.plannedStart, edit.plannedEnd)
+      : [{ rowId: edit.block.id, plannedStart: edit.plannedStart, plannedEnd: edit.plannedEnd }];
+    if (!changes.some((c) => c.rowId === edit.block.id)) changes.unshift({ rowId: edit.block.id, plannedStart: edit.plannedStart, plannedEnd: edit.plannedEnd });
+    applyStageChanges(changes, { [edit.block.id]: { locked: edit.locked } });
+  }, [board, applyStageChanges]);
 
   const jobs = useMemo(() => {
     let rows = board?.jobs || [];

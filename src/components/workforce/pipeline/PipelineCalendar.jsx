@@ -52,9 +52,13 @@ function layoutWeek(blocks, wStart, wEnd) {
   return { segs, laneCount: Math.max(1, lanes.length) };
 }
 
+const seedCursor = (a, sc) => { const d = a ? parse(a) : new Date(); return new Date(d.getFullYear(), sc === "year" ? 0 : d.getMonth(), 1); };
+
 export default function PipelineCalendar({ jobs = [], scale = "year", anchor, onMoveStage, onOpenStage, onZoomMonth }) {
-  const [cursor, setCursor] = useState(() => { const d = anchor ? parse(anchor) : new Date(); return new Date(d.getFullYear(), scale === "year" ? 0 : d.getMonth(), 1); });
-  useEffect(() => { setCursor((c) => new Date(c.getFullYear(), scale === "year" ? 0 : c.getMonth(), 1)); }, [scale]);
+  // Cursor derives from the anchor + scale, so clicking a mini-month zooms to THAT month
+  // (previously it reset to January because the effect keyed only off scale).
+  const [cursor, setCursor] = useState(() => seedCursor(anchor, scale));
+  useEffect(() => { setCursor(seedCursor(anchor, scale)); }, [anchor, scale]);
   const blocks = useMemo(() => toBlocks(jobs), [jobs]);
   const todayY = ymd(new Date());
 
@@ -63,22 +67,77 @@ export default function PipelineCalendar({ jobs = [], scale = "year", anchor, on
   const showTip = (block, e) => setHover({ block, x: e.clientX, y: e.clientY });
   const hideTip = () => setHover(null);
 
+  // ONE drag engine for both views — rAF-smoothed, day-snapped, over any [data-day] cell in the grid.
+  const gridRef = useRef(null);
+  const { ghost, onBlockPointerDown } = useStageDrag(gridRef, onMoveStage, onOpenStage, hideTip);
+
   return (
-    <>
+    <div ref={gridRef}>
       {scale === "year" ? (
         <YearView year={cursor.getFullYear()} blocks={blocks} todayY={todayY}
           onPrev={() => setCursor(new Date(cursor.getFullYear() - 1, 0, 1))}
           onNext={() => setCursor(new Date(cursor.getFullYear() + 1, 0, 1))}
           onToday={() => setCursor(new Date(new Date().getFullYear(), 0, 1))}
-          onOpenStage={onOpenStage} showTip={showTip} hideTip={hideTip}
+          onBlockPointerDown={onBlockPointerDown} showTip={showTip} hideTip={hideTip} draggingId={ghost?.moved ? ghost.id : null}
           onZoomMonth={(mi) => onZoomMonth?.(`${cursor.getFullYear()}-${pad(mi + 1)}-01`)} />
       ) : (
         <MonthView cursor={cursor} setCursor={setCursor} blocks={blocks} todayY={todayY}
-          onMoveStage={onMoveStage} onOpenStage={onOpenStage} showTip={showTip} hideTip={hideTip} />
+          onBlockPointerDown={onBlockPointerDown} showTip={showTip} hideTip={hideTip} draggingId={ghost?.moved ? ghost.id : null} />
       )}
-      {hover && <CalendarTooltip hover={hover} />}
-    </>
+      {ghost && (
+        <div className="fixed z-50 pointer-events-none rounded px-2 py-1 text-[11px] font-semibold text-white shadow-lg" style={{ left: ghost.x + 12, top: ghost.y + 12, background: "#0f172a" }}>
+          {ghost.label}{ghost.moved ? ` → ${new Date(`${ghost.date}T12:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}` : ""}
+        </div>
+      )}
+      {hover && !ghost && <CalendarTooltip hover={hover} />}
+    </div>
   );
+}
+
+// Shared drag: grab a stage block, a floating chip snaps to the day under the cursor, drop to
+// reschedule. rAF-smoothed + a one-time rect cache of the grid's [data-day] cells (the Planner
+// pattern) so there's no elementFromPoint/layout thrash. Works in month AND year views.
+function useStageDrag(gridRef, onMoveStage, onOpenStage, hideTip) {
+  const dragRef = useRef(null);
+  const rafRef = useRef(0);
+  const [ghost, setGhost] = useState(null);
+
+  const snapshotCells = () => [...(gridRef.current?.querySelectorAll("[data-day]") || [])].map((el) => {
+    const r = el.getBoundingClientRect();
+    return { ymd: el.dataset.day, l: r.left, r: r.right, t: r.top, b: r.bottom };
+  });
+  const hit = (cells, x, y) => { const c = cells.find((r) => x >= r.l && x <= r.r && y >= r.t && y <= r.b); return c?.ymd || null; };
+
+  const onMove = (e) => {
+    const d = dragRef.current; if (!d) return;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const cur = hit(d.cells, e.clientX, e.clientY);
+      const delta = cur ? dayDiff(d.grabYmd, cur) : d.delta;
+      d.delta = delta;
+      setGhost({ id: d.block.id, label: d.block.stageLabel, date: addDays(d.block.start, delta), x: e.clientX, y: e.clientY, moved: delta !== 0 });
+    });
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    cancelAnimationFrame(rafRef.current);
+    const d = dragRef.current; dragRef.current = null;
+    setGhost(null);
+    if (!d) return;
+    if (d.delta) onMoveStage?.(d.block, addDays(d.block.start, d.delta));
+    else onOpenStage?.(d.block);
+  };
+  const onBlockPointerDown = (e, block) => {
+    if (block.locked) { onOpenStage?.(block); return; }
+    e.preventDefault();
+    hideTip?.();
+    const cells = snapshotCells();
+    dragRef.current = { block, cells, grabYmd: hit(cells, e.clientX, e.clientY) || block.start, delta: 0 };
+    setGhost({ id: block.id, label: block.stageLabel, date: block.start, x: e.clientX, y: e.clientY, moved: false });
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+  return { ghost, onBlockPointerDown };
 }
 
 // Instant, rich hover card — fixed near the cursor, no native-title delay.
@@ -99,7 +158,7 @@ function CalendarTooltip({ hover }) {
 }
 
 // ── Year view — 12 mini-months, whole-year overview ──────────────────────────
-function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onOpenStage, onZoomMonth, showTip, hideTip }) {
+function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onZoomMonth, showTip, hideTip, onBlockPointerDown, draggingId }) {
   return (
     <div className="rounded-card border border-hairline bg-surface p-3">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -113,14 +172,14 @@ function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onOpenStage, 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {MONTHS.map((mName, mi) => (
           <MiniMonth key={mi} year={year} month={mi} mName={mName} blocks={blocks} todayY={todayY}
-            onOpenStage={onOpenStage} onZoom={() => onZoomMonth?.(mi)} showTip={showTip} hideTip={hideTip} />
+            onBlockPointerDown={onBlockPointerDown} draggingId={draggingId} onZoom={() => onZoomMonth?.(mi)} showTip={showTip} hideTip={hideTip} />
         ))}
       </div>
     </div>
   );
 }
 
-function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom, showTip, hideTip }) {
+function MiniMonth({ year, month, mName, blocks, todayY, onZoom, showTip, hideTip, onBlockPointerDown, draggingId }) {
   const first = new Date(year, month, 1);
   const start = new Date(first); start.setDate(1 - first.getDay());
   const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
@@ -135,14 +194,17 @@ function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom, sh
         {days.map((d, i) => {
           const dY = ymd(d); const inMonth = d.getMonth() === month;
           const dayBlocks = inMonth ? blocks.filter((b) => b.start <= dY && b.end >= dY) : [];
+          // data-day only on in-month cells → each real date maps to exactly one drop target.
           return (
-            <div key={i} className={`min-h-[26px] p-0.5 ${inMonth ? "" : "opacity-30"}`}>
+            <div key={i} data-day={inMonth ? dY : undefined} className={`min-h-[30px] p-0.5 ${inMonth ? "" : "opacity-30"}`}>
               <div className={`text-[9px] leading-none ${dY === todayY ? "text-white bg-warning rounded-full w-3.5 h-3.5 flex items-center justify-center mx-auto" : "text-muted"}`}>{d.getDate()}</div>
-              <div className="flex flex-col gap-px mt-px">
+              <div className="flex flex-col gap-0.5 mt-px">
                 {dayBlocks.slice(0, 3).map((b) => (
-                  <button key={b.id} type="button" onClick={() => onOpenStage?.(b)}
-                    onMouseEnter={(e) => showTip?.(b, e)} onMouseLeave={hideTip}
-                    className="h-1 rounded-full" style={{ background: b.palette.dot, opacity: b.status === "complete" ? 0.5 : 1 }} />
+                  <div key={b.id}
+                    onPointerDown={(e) => onBlockPointerDown?.(e, b)}
+                    onMouseEnter={(e) => { if (!draggingId) showTip?.(b, e); }} onMouseLeave={hideTip}
+                    className={`h-1.5 rounded-full ${b.locked ? "cursor-pointer" : "cursor-grab"}`}
+                    style={{ background: b.palette.dot, opacity: draggingId === b.id ? 0.3 : (b.status === "complete" ? 0.5 : 1), touchAction: "none" }} />
                 ))}
               </div>
             </div>
@@ -154,10 +216,7 @@ function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom, sh
 }
 
 // ── Month view — draggable stage blocks ──────────────────────────────────────
-function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage, showTip, hideTip }) {
-  const gridRef = useRef(null);
-  const dragRef = useRef(null);
-  const [ghost, setGhost] = useState(null);
+function MonthView({ cursor, setCursor, blocks, todayY, onBlockPointerDown, showTip, hideTip, draggingId }) {
   const monthIdx = cursor.getMonth();
 
   const weeks = useMemo(() => {
@@ -171,37 +230,8 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
     });
   }, [cursor, monthIdx]);
 
-  function onPointerDown(e, block) {
-    if (block.locked) { onOpenStage?.(block); return; }
-    e.preventDefault();
-    hideTip?.();
-    const cells = [...(gridRef.current?.querySelectorAll("[data-day]") || [])].map((el) => {
-      const r = el.getBoundingClientRect(); return { ymd: el.dataset.day, l: r.left, r: r.right, t: r.top, b: r.bottom };
-    });
-    const grabYmd = hitDayIn(cells, e.clientX, e.clientY) || block.start;
-    dragRef.current = { block, cells, grabYmd, delta: 0 };
-    setGhost({ label: block.stageLabel, date: block.start, x: e.clientX, y: e.clientY, moved: false });
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
-  }
-  function onPointerMove(e) {
-    const d = dragRef.current; if (!d) return;
-    const cur = hitDayIn(d.cells, e.clientX, e.clientY);
-    const delta = cur ? dayDiff(d.grabYmd, cur) : d.delta;
-    d.delta = delta;
-    setGhost({ label: d.block.stageLabel, date: addDays(d.block.start, delta), x: e.clientX, y: e.clientY, moved: delta !== 0 });
-  }
-  function onPointerUp() {
-    window.removeEventListener("pointermove", onPointerMove);
-    const d = dragRef.current; dragRef.current = null;
-    setGhost(null);
-    if (!d) return;
-    if (d.delta && d.delta !== 0) onMoveStage?.(d.block, addDays(d.block.start, d.delta));
-    else onOpenStage?.(d.block);
-  }
-
   return (
-    <div className="rounded-card border border-hairline bg-surface p-3 relative" ref={gridRef}>
+    <div className="rounded-card border border-hairline bg-surface p-3 relative">
       <div className="flex items-center justify-between gap-3 mb-2">
         <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), monthIdx - 1, 1))} className="rounded-lg border border-hairline px-3 py-1.5 text-sm text-muted hover:text-ink">←</button>
         <h2 className="text-base font-semibold text-primary">{cursor.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2>
@@ -233,10 +263,10 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
                 {segs.map(({ block, c0, c1, lane }) => (
                   <div
                     key={block.id}
-                    onPointerDown={(e) => onPointerDown(e, block)}
-                    onMouseEnter={(e) => { if (!dragRef.current) showTip?.(block, e); }}
+                    onPointerDown={(e) => onBlockPointerDown(e, block)}
+                    onMouseEnter={(e) => { if (!draggingId) showTip?.(block, e); }}
                     onMouseLeave={hideTip}
-                    className={`absolute truncate rounded text-[10px] font-medium text-white text-left px-1.5 select-none ${block.locked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${ghost?.moved && dragRef.current?.block?.id === block.id ? "opacity-30" : ""}`}
+                    className={`absolute truncate rounded text-[10px] font-medium text-white text-left px-1.5 select-none ${block.locked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${draggingId === block.id ? "opacity-30" : ""}`}
                     style={{
                       left: `calc(${(c0 / 7) * 100}% + 2px)`, width: `calc(${((c1 - c0 + 1) / 7) * 100}% - 4px)`,
                       top: lane * LANE_H, height: LANE_H - 3, lineHeight: `${LANE_H - 3}px`,
@@ -253,18 +283,6 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
           );
         })}
       </div>
-
-      {ghost && (
-        <div className="fixed z-50 pointer-events-none rounded px-2 py-1 text-[11px] font-semibold text-white shadow-lg"
-          style={{ left: ghost.x + 12, top: ghost.y + 12, background: "#0f172a" }}>
-          {ghost.label}{ghost.moved ? ` → ${new Date(`${ghost.date}T12:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}` : ""}
-        </div>
-      )}
     </div>
   );
-}
-
-function hitDayIn(cells, x, y) {
-  const c = cells.find((r) => x >= r.l && x <= r.r && y >= r.t && y <= r.b);
-  return c?.ymd || null;
 }
