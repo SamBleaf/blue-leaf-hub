@@ -21,7 +21,10 @@
 CREATE TABLE IF NOT EXISTS public.carpentry_job_stage_schedule (
   id                uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
   carpentry_job_id  uuid          NOT NULL REFERENCES public.carpentry_jobs (id) ON DELETE CASCADE,
-  stage_key         text          NOT NULL,                              -- carpentryStages STAGES key (wall_framing, cladding, …)
+  stage_key         text          NOT NULL,                              -- slug of the budget subsection (or taxonomy key when no budget)
+  label             text,                                               -- the budget subsection name shown on the block (e.g. "Cladding and Soffit Lining")
+  workforce_task_category text,                                         -- links the stage to timesheet task_category + the 8-key workforce streams
+  labour_sell       numeric(12,2),                                      -- the subsection's labour value that drove the duration (audit)
   planned_start     date,
   planned_end       date,
   actual_start      date,                                               -- mirror of timesheet-observed first/last (optional persist)

@@ -149,7 +149,7 @@ async function buildPipeline(sb, cm, { from, to, today, horizon }) {
     jobIds.length ? safe(sb.from("carpentry_budget_line_items").select("job_id, canonical_key, task_category").in("job_id", jobIds)) : [],
     stageEntriesByJob(sb, jobIds, histSince),
     historicalByProjectType(sb, nonWork, histSince),
-    jobIds.length ? safe(sb.from("carpentry_job_stage_schedule").select("id, carpentry_job_id, stage_key, planned_start, planned_end, status, locked, depends_on").in("carpentry_job_id", jobIds)) : [],
+    jobIds.length ? safe(sb.from("carpentry_job_stage_schedule").select("id, carpentry_job_id, stage_key, label, workforce_task_category, labour_sell, planned_start, planned_end, status, locked, depends_on").in("carpentry_job_id", jobIds)) : [],
   ]);
   const budgetsByJob = groupBy(budgetRows, "job_id");
   const itemsByJob = groupBy(itemRows, "job_id");
@@ -259,11 +259,13 @@ function mergeStages(includedStages, actuals, historical, sched) {
     const a = actualByStage.get(stage);
     const p = sched?.get(stage);
     return {
-      stage, label: stageLabel(stage),
-      // Planned dates (the draggable block) — from carpentry_job_stage_schedule (mig 144).
+      stage, label: p?.label || stageLabel(stage),
+      // Planned dates (the draggable block) — from carpentry_job_stage_schedule (mig 144),
+      // where the stage IS the budget subsection with a cost-model-derived duration.
       rowId: p?.id || null,
       plannedStart: p?.planned_start || null, plannedEnd: p?.planned_end || null,
       scheduleStatus: p?.status || null, locked: p?.locked || false,
+      workforceTaskCategory: p?.workforce_task_category || null, labourSell: p?.labour_sell ?? null,
       dependsOn: Array.isArray(p?.depends_on) ? p.depends_on : [],
       actualHours: a ? a.hours : 0,
       forecastHours: historical?.expectedHoursByStage?.[stage] ?? null,

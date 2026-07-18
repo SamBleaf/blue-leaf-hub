@@ -1,68 +1,75 @@
 // Carpentry stage-schedule service — unit tests. Run: node scripts/tests/carpentry-stage-schedule.test.mjs
-// No framework — plain assertions, exits 1 on any failure.
-import { seedStageSchedule, resolveIncludedStages, mergeActuals, stageDurationDays } from "../../server/lib/carpentryStageScheduleService.mjs";
+// Budget-driven: stages ARE the labour subsections; durations come from the cost model.
+import {
+  seedStageSchedule, stagesFromBudget, costModelStageDays, mergeActuals, resolveIncludedStages,
+} from "../../server/lib/carpentryStageScheduleService.mjs";
 
 let pass = 0, fail = 0;
 function eq(a, e, name) { const A = JSON.stringify(a), E = JSON.stringify(e); if (A === E) pass++; else { fail++; console.error(`  ✗ ${name}\n      expected ${E}\n      got      ${A}`); } }
 function ok(c, name) { if (c) pass++; else { fail++; console.error(`  ✗ ${name}`); } }
 
-// ── resolveIncludedStages ── (2026-08-03 is a Monday)
-eq(resolveIncludedStages([{ canonical_key: "wall_framing" }, { canonical_key: "cladding_installation" }, { canonical_key: "doors" }]),
-  ["wall_framing", "cladding", "second_fix"], "budget line items → ordered stages");
-eq(resolveIncludedStages([]).length, 11, "no budget → default full-package set (11 stages)");
-ok(resolveIncludedStages([{ canonicalKey: "roof_framing" }, { canonicalKey: "floor_framing" }]).join(",") === "floor_system,roof_framing", "camelCase keys + reorder by stageOrder");
+const cm = { teamChargeUpPerDay: 3937, teamBreakEvenPerDay: 3281, headcount: 7, hoursPerDay: 8, marginPct: 0.2 };
+const SUBS = [
+  { category_name: "First Fix Framing", cost_type: "labour", budget_ex_gst: 38819, workforce_task_category: "first_fix_framing" },
+  { category_name: "Cladding and Soffit Lining", cost_type: "labour", budget_ex_gst: 30712, workforce_task_category: "cladding" },
+  { category_name: "Second Fix", cost_type: "labour", budget_ex_gst: 10626, workforce_task_category: "second_fix" },
+  { category_name: "Window supply", cost_type: "material", budget_ex_gst: 5000, workforce_task_category: null }, // excluded (material)
+];
 
-// ── crew-scaled durations ──
-eq(stageDurationDays("wall_framing", {}), 6, "wall framing 10d @ crew 5 → ceil(10×3/5)=6 working days");
-eq(stageDurationDays("wall_framing", { first_fix_framing: 10 }), 3, "more crew → fewer days (ceil(10×3/10)=3)");
-eq(stageDurationDays("cladding", {}), 6, "cladding 8d @ crew 4 → 6");
+// ── costModelStageDays — the earned-value duration ──
+eq(costModelStageDays(38819, cm, 5), 14, "framing $38,819 @ crew 5 → 14 working days (labour ÷ day-rate × 7/5)");
+eq(costModelStageDays(30712, cm, 4), 14, "cladding $30,712 @ crew 4 → 14");
+eq(costModelStageDays(10626, cm, 2), 10, "second fix $10,626 @ crew 2 → 10");
+eq(costModelStageDays(38819, null, 5), null, "no cost model → null (falls back to taxonomy)");
+ok(costModelStageDays(60000, cm, 5) > costModelStageDays(38819, cm, 5), "more labour $ → longer stage (interconnected)");
 
-// ── seed / auto-layout ──
-const rows = seedStageSchedule({
-  jobStartDate: "2026-08-03",
-  budgetLineItems: [{ canonical_key: "wall_framing" }, { canonical_key: "cladding_installation" }, { canonical_key: "doors" }],
-});
-eq(rows.map((r) => r.stage_key), ["wall_framing", "cladding", "second_fix"], "seed: three ordered stages");
-eq(rows[0].planned_start, "2026-08-03", "wall framing starts on the job start (Mon)");
-eq(rows[0].planned_end, "2026-08-10", "wall framing ends after 6 working days");
-eq(rows[1].planned_start, "2026-08-11", "cladding starts the next working day after framing");
-eq(rows[1].depends_on, [{ stageKey: "wall_framing", type: "FS", lagDays: 0 }], "cladding FS-depends on wall framing");
-eq(rows[2].depends_on[0].stageKey, "cladding", "second fix FS-depends on cladding (transitive gap enforcement)");
-ok(rows[0].sort_order < rows[1].sort_order && rows[1].sort_order < rows[2].sort_order, "sort_order follows stage order");
+// ── stagesFromBudget — stages ARE the labour subsections, ordered, material excluded ──
+const bs = stagesFromBudget(SUBS, cm, {});
+eq(bs.map((s) => s.stageKey), ["first_fix_framing", "cladding_and_soffit_lining", "second_fix"], "labour subsections → stages, material dropped, ordered");
+eq(bs.map((s) => s.label), ["First Fix Framing", "Cladding and Soffit Lining", "Second Fix"], "labels = the budget subsection names");
+eq(bs[0].durationDays, 14, "framing duration from its labour value");
+eq(bs[0].labourSell, 38819, "labour value carried for audit");
+ok(stagesFromBudget(SUBS, null, {}) === null, "no cost model → null");
+ok(stagesFromBudget([], cm, {}) === null, "no labour subsections → null");
 
-// ── milestone backfill overrides the auto-layout start ──
-const withMilestone = seedStageSchedule({
-  jobStartDate: "2026-08-03",
+// ── seed / auto-layout (budget-driven), 2026-08-03 is a Monday ──
+const rows = seedStageSchedule({ jobStartDate: "2026-08-03", budgetSubsections: SUBS, cm });
+eq(rows.map((r) => r.stage_key), ["first_fix_framing", "cladding_and_soffit_lining", "second_fix"], "seed: subsection stages");
+eq(rows[0].planned_start, "2026-08-03", "first stage starts at commencement (no lead)");
+eq(rows[0].planned_end, "2026-08-20", "framing ends after its 14 working days");
+eq(rows[0].labour_sell, 38819, "labour value stored on the row");
+eq(rows[1].planned_start, "2026-08-28", "cladding starts after framing + its lead gap (roof/windows/delivery)");
+eq(rows[1].depends_on, [{ stageKey: "first_fix_framing", type: "FS", lagDays: 5 }], "cladding FS-depends on framing with the lead as lag");
+eq(rows[2].depends_on[0].stageKey, "cladding_and_soffit_lining", "second fix depends on cladding");
+ok(rows[0].planned_end < rows[1].planned_start, "no overlap");
+
+// ── fallback: no budget / no cost model → generic taxonomy stages ──
+const fb = seedStageSchedule({
+  jobStartDate: "2026-08-03", budgetSubsections: [], cm: null,
   budgetLineItems: [{ canonical_key: "wall_framing" }, { canonical_key: "cladding_installation" }],
-  milestones: [{ name: "Cladding start", target_date: "2026-09-01" }],
 });
-eq(withMilestone.find((r) => r.stage_key === "cladding").planned_start, "2026-09-01", "milestone date backfills cladding start (carries user dates across)");
+eq(fb.map((r) => r.stage_key), ["wall_framing", "cladding"], "fallback: taxonomy stages from line items");
+eq(fb[0].label, "Wall framing", "fallback label from the taxonomy");
+eq(fb[0].planned_start, "2026-08-03", "fallback still lays out from commencement");
+ok(fb[0].labour_sell === null, "fallback has no labour value");
 
-// ── a milestone can push a stage LATER but never before its dependencies (no overlap) ──
-const noOverlap = seedStageSchedule({
-  jobStartDate: "2026-08-03",
-  budgetLineItems: [{ canonical_key: "wall_framing" }, { canonical_key: "cladding_installation" }],
-  milestones: [{ name: "Cladding start", target_date: "2026-08-05" }], // earlier than framing ends (08-10)
+// ── locked existing row preserved ──
+const locked = seedStageSchedule({
+  jobStartDate: "2026-08-03", budgetSubsections: SUBS, cm,
+  existing: [{ stage_key: "first_fix_framing", planned_start: "2026-07-01", planned_end: "2026-07-20", locked: true, depends_on: [], status: "in_progress" }],
 });
-const clad = noOverlap.find((r) => r.stage_key === "cladding");
-const wall = noOverlap.find((r) => r.stage_key === "wall_framing");
-ok(clad.planned_start > wall.planned_end, "cladding starts AFTER framing despite an earlier milestone date (deps win)");
-eq(clad.planned_start, "2026-08-11", "cladding clamped to the sequential start, not the overlapping milestone");
+eq(locked.find((r) => r.stage_key === "first_fix_framing").planned_start, "2026-07-01", "locked stage keeps its dates");
 
-// ── locked existing row is preserved, not re-laid-out ──
-const withLock = seedStageSchedule({
-  jobStartDate: "2026-08-03",
-  budgetLineItems: [{ canonical_key: "wall_framing" }, { canonical_key: "cladding_installation" }],
-  existing: [{ stage_key: "wall_framing", planned_start: "2026-07-01", planned_end: "2026-07-15", locked: true, depends_on: [], status: "in_progress" }],
-});
-eq(withLock.find((r) => r.stage_key === "wall_framing").planned_start, "2026-07-01", "locked stage keeps its dates");
-ok(withLock.find((r) => r.stage_key === "wall_framing").locked === true, "locked flag preserved");
+// ── mergeActuals matches by stage_key OR workforce_task_category ──
+const merged = mergeActuals(rows, { stages: [
+  { stage: "first_fix_framing", firstDate: "2026-08-04", lastDate: "2026-08-19" },
+  { stage: "cladding", firstDate: "2026-08-29", lastDate: "2026-09-05" },   // matches cladding row via wfCat
+] });
+eq(merged[0].actual_start, "2026-08-04", "actuals match by stage_key");
+eq(merged[1].actual_start, "2026-08-29", "actuals match by workforce_task_category when key differs");
 
-// ── mergeActuals attaches timesheet-observed dates ──
-const merged = mergeActuals(rows, { stages: [{ stage: "wall_framing", firstDate: "2026-08-04", lastDate: "2026-08-12" }] });
-eq(merged[0].actual_start, "2026-08-04", "actual_start from aggregation");
-eq(merged[0].actual_end, "2026-08-12", "actual_end from aggregation");
-ok(merged[1].actual_start === null, "stage with no timesheets → null actuals");
+// ── resolveIncludedStages still works (taxonomy helper) ──
+eq(resolveIncludedStages([{ canonical_key: "wall_framing" }, { canonical_key: "doors" }]), ["wall_framing", "second_fix"], "resolveIncludedStages taxonomy");
 
 console.log(`carpentry-stage-schedule: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

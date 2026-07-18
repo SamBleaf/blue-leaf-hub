@@ -13,33 +13,37 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel } from "./apiResponse.mjs";
 import { seedStageSchedule } from "./carpentryStageScheduleService.mjs";
+import { getCostModel } from "./costModelService.mjs";
 import { stageLabel } from "./carpentryStages.mjs";
 
 const TABLE = "carpentry_job_stage_schedule";
 const isMissingTable = (e) => /relation .* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
 
+// Prefer the stored subsection label (budget-driven); fall back to the taxonomy label.
 function withLabels(rows) {
-  return rowsToCamel(rows).map((r) => ({ ...r, stageLabel: stageLabel(r.stageKey) }));
+  return rowsToCamel(rows).map((r) => ({ ...r, stageLabel: r.label || stageLabel(r.stageKey) }));
 }
 
 async function loadSeedInputs(sb, jobId) {
-  const [{ data: job }, { data: lineItems }, { data: milestones }] = await Promise.all([
+  const [{ data: job }, { data: lineItems }, { data: budgets }, cm] = await Promise.all([
     sb.from("carpentry_jobs").select("id, start_date, actual_start, crew_size_overrides").eq("id", jobId).maybeSingle(),
     sb.from("carpentry_budget_line_items").select("canonical_key, task_category").eq("job_id", jobId),
-    sb.from("carpentry_job_milestones").select("name, target_date").eq("job_id", jobId),
+    sb.from("carpentry_job_budgets").select("category_name, cost_type, budget_ex_gst, workforce_task_category").eq("job_id", jobId),
+    getCostModel(sb).catch(() => null),
   ]);
-  return { job, lineItems: lineItems || [], milestones: milestones || [] };
+  return { job, lineItems: lineItems || [], budgetSubsections: budgets || [], cm };
 }
 
 // Compute the desired rows for a job and upsert them (preserving locked rows via the service).
 async function seedAndPersist(sb, jobId, existing) {
-  const { job, lineItems, milestones } = await loadSeedInputs(sb, jobId);
+  const { job, lineItems, budgetSubsections, cm } = await loadSeedInputs(sb, jobId);
   if (!job) return { error: "not_found" };
   const desired = seedStageSchedule({
     jobStartDate: job.start_date || job.actual_start || null,
+    budgetSubsections,
     budgetLineItems: lineItems,
+    cm,
     crewSizes: job.crew_size_overrides && typeof job.crew_size_overrides === "object" ? job.crew_size_overrides : {},
-    milestones,
     existing: existing || [],
   });
   const payload = desired.map((r) => ({ carpentry_job_id: jobId, ...r }));
