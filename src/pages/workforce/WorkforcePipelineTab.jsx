@@ -47,6 +47,23 @@ export default function WorkforcePipelineTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Job colours must match the Workforce Planner: resolve from the SAME saved colour map
+  // (/api/workforce/planner-jobs) + the SAME active-carpentry ordering (/api/carpentry/jobs).
+  const [plannerCtx, setPlannerCtx] = useState({ orderedKeys: [], saved: {} });
+  useEffect(() => {
+    (async () => {
+      const [carp, pj] = await Promise.all([
+        apiFetch("/api/carpentry/jobs?status=active"),
+        apiFetch("/api/workforce/planner-jobs"),
+      ]);
+      const orderedKeys = (carp.ok ? carp.data?.jobs || [] : []).map((j) => jobKey("carpentry", j.id));
+      const saved = {};
+      for (const r of pj.ok ? pj.data?.jobs || [] : []) if (r.carpentryJobId && r.color) saved[jobKey("carpentry", r.carpentryJobId)] = r.color;
+      setPlannerCtx({ orderedKeys, saved });
+    })();
+  }, []);
+  const colourFor = useCallback((jobId) => resolveJobColor(jobKey("carpentry", jobId), plannerCtx.orderedKeys, plannerCtx.saved), [plannerCtx]);
+
   // Apply {rowId, plannedStart, plannedEnd} changes: optimistic board update + PATCH each + reconcile.
   const applyStageChanges = useCallback(async (changes) => {
     if (!changes?.length) return;
@@ -84,8 +101,8 @@ export default function WorkforcePipelineTab() {
   const jobs = useMemo(() => {
     let rows = board?.jobs || [];
     if (riskOnly) rows = rows.filter((j) => j.breakEven?.marginRisk);
-    return rows;
-  }, [board, riskOnly]);
+    return rows.map((j) => ({ ...j, colour: colourFor(j.id) }));   // Planner-matched colour
+  }, [board, riskOnly, colourFor]);
 
   const construction = useMemo(
     () => (kind === "carpentry" || riskOnly ? [] : (board?.construction || [])),
@@ -245,11 +262,10 @@ export default function WorkforcePipelineTab() {
 
 // Colour key for the jobs on the calendar — colour dot per job (matches the Planner palette).
 function JobsLegend({ jobs }) {
-  const orderedKeys = jobs.map((j) => jobKey("carpentry", j.id));
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] px-1">
       {jobs.map((j) => {
-        const c = resolveJobColor(jobKey("carpentry", j.id), orderedKeys);
+        const c = j.colour || resolveJobColor(jobKey("carpentry", j.id), jobs.map((x) => jobKey("carpentry", x.id)));
         return (
           <span key={j.id} className="inline-flex items-center gap-1.5 text-muted">
             <span className="inline-block w-3 h-3 rounded-sm" style={{ background: c.dot }} />

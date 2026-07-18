@@ -22,7 +22,7 @@ function toBlocks(jobs) {
   const orderedKeys = jobs.map((j) => jobKey("carpentry", j.id));
   const blocks = [];
   for (const job of jobs) {
-    const palette = resolveJobColor(jobKey("carpentry", job.id), orderedKeys);
+    const palette = job.colour || resolveJobColor(jobKey("carpentry", job.id), orderedKeys);
     for (const s of job.stages || []) {
       if (!s.plannedStart || !s.rowId) continue;
       blocks.push({
@@ -58,24 +58,48 @@ export default function PipelineCalendar({ jobs = [], scale = "year", anchor, on
   const blocks = useMemo(() => toBlocks(jobs), [jobs]);
   const todayY = ymd(new Date());
 
-  if (scale === "year") {
-    return (
-      <YearView year={cursor.getFullYear()} blocks={blocks} todayY={todayY}
-        onPrev={() => setCursor(new Date(cursor.getFullYear() - 1, 0, 1))}
-        onNext={() => setCursor(new Date(cursor.getFullYear() + 1, 0, 1))}
-        onToday={() => setCursor(new Date(new Date().getFullYear(), 0, 1))}
-        onOpenStage={onOpenStage}
-        onZoomMonth={(mi) => onZoomMonth?.(`${cursor.getFullYear()}-${pad(mi + 1)}-01`)} />
-    );
-  }
+  // Instant hover tooltip (no native-title delay), shared by both views.
+  const [hover, setHover] = useState(null);
+  const showTip = (block, e) => setHover({ block, x: e.clientX, y: e.clientY });
+  const hideTip = () => setHover(null);
+
   return (
-    <MonthView cursor={cursor} setCursor={setCursor} blocks={blocks} todayY={todayY}
-      onMoveStage={onMoveStage} onOpenStage={onOpenStage} />
+    <>
+      {scale === "year" ? (
+        <YearView year={cursor.getFullYear()} blocks={blocks} todayY={todayY}
+          onPrev={() => setCursor(new Date(cursor.getFullYear() - 1, 0, 1))}
+          onNext={() => setCursor(new Date(cursor.getFullYear() + 1, 0, 1))}
+          onToday={() => setCursor(new Date(new Date().getFullYear(), 0, 1))}
+          onOpenStage={onOpenStage} showTip={showTip} hideTip={hideTip}
+          onZoomMonth={(mi) => onZoomMonth?.(`${cursor.getFullYear()}-${pad(mi + 1)}-01`)} />
+      ) : (
+        <MonthView cursor={cursor} setCursor={setCursor} blocks={blocks} todayY={todayY}
+          onMoveStage={onMoveStage} onOpenStage={onOpenStage} showTip={showTip} hideTip={hideTip} />
+      )}
+      {hover && <CalendarTooltip hover={hover} />}
+    </>
+  );
+}
+
+// Instant, rich hover card — fixed near the cursor, no native-title delay.
+function CalendarTooltip({ hover }) {
+  const b = hover.block;
+  const flip = hover.x > (typeof window !== "undefined" ? window.innerWidth - 240 : 9999);
+  return (
+    <div className="fixed z-50 pointer-events-none rounded-lg bg-slate-900 text-white shadow-xl px-3 py-2 text-[11px] leading-snug max-w-[240px]"
+      style={{ left: flip ? hover.x - 232 : hover.x + 14, top: hover.y + 14 }}>
+      <div className="font-semibold">{b.stageLabel}</div>
+      <div className="text-slate-300">{b.jobLabel}</div>
+      <div className="mt-1">Planned: {b.start} → {b.end}</div>
+      {b.actualStart && <div className="text-emerald-300">Actual: {b.actualStart} → {b.actualEnd || "in progress"}{b.actualHours ? ` (${b.actualHours}h)` : ""}</div>}
+      {b.labourSell ? <div className="text-slate-300">Labour ${Math.round(b.labourSell).toLocaleString()}</div> : null}
+      {b.locked && <div className="text-amber-300">🔒 locked</div>}
+    </div>
   );
 }
 
 // ── Year view — 12 mini-months, whole-year overview ──────────────────────────
-function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onOpenStage, onZoomMonth }) {
+function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onOpenStage, onZoomMonth, showTip, hideTip }) {
   return (
     <div className="rounded-card border border-hairline bg-surface p-3">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -89,14 +113,14 @@ function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onOpenStage, 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {MONTHS.map((mName, mi) => (
           <MiniMonth key={mi} year={year} month={mi} mName={mName} blocks={blocks} todayY={todayY}
-            onOpenStage={onOpenStage} onZoom={() => onZoomMonth?.(mi)} />
+            onOpenStage={onOpenStage} onZoom={() => onZoomMonth?.(mi)} showTip={showTip} hideTip={hideTip} />
         ))}
       </div>
     </div>
   );
 }
 
-function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom }) {
+function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom, showTip, hideTip }) {
   const first = new Date(year, month, 1);
   const start = new Date(first); start.setDate(1 - first.getDay());
   const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
@@ -116,7 +140,8 @@ function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom }) 
               <div className={`text-[9px] leading-none ${dY === todayY ? "text-white bg-warning rounded-full w-3.5 h-3.5 flex items-center justify-center mx-auto" : "text-muted"}`}>{d.getDate()}</div>
               <div className="flex flex-col gap-px mt-px">
                 {dayBlocks.slice(0, 3).map((b) => (
-                  <button key={b.id} type="button" onClick={() => onOpenStage?.(b)} title={`${b.jobLabel} — ${b.stageLabel}`}
+                  <button key={b.id} type="button" onClick={() => onOpenStage?.(b)}
+                    onMouseEnter={(e) => showTip?.(b, e)} onMouseLeave={hideTip}
                     className="h-1 rounded-full" style={{ background: b.palette.dot, opacity: b.status === "complete" ? 0.5 : 1 }} />
                 ))}
               </div>
@@ -129,7 +154,7 @@ function MiniMonth({ year, month, mName, blocks, todayY, onOpenStage, onZoom }) 
 }
 
 // ── Month view — draggable stage blocks ──────────────────────────────────────
-function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage }) {
+function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage, showTip, hideTip }) {
   const gridRef = useRef(null);
   const dragRef = useRef(null);
   const [ghost, setGhost] = useState(null);
@@ -149,6 +174,7 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
   function onPointerDown(e, block) {
     if (block.locked) { onOpenStage?.(block); return; }
     e.preventDefault();
+    hideTip?.();
     const cells = [...(gridRef.current?.querySelectorAll("[data-day]") || [])].map((el) => {
       const r = el.getBoundingClientRect(); return { ymd: el.dataset.day, l: r.left, r: r.right, t: r.top, b: r.bottom };
     });
@@ -208,6 +234,8 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
                   <div
                     key={block.id}
                     onPointerDown={(e) => onPointerDown(e, block)}
+                    onMouseEnter={(e) => { if (!dragRef.current) showTip?.(block, e); }}
+                    onMouseLeave={hideTip}
                     className={`absolute truncate rounded text-[10px] font-medium text-white text-left px-1.5 select-none ${block.locked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${ghost?.moved && dragRef.current?.block?.id === block.id ? "opacity-30" : ""}`}
                     style={{
                       left: `calc(${(c0 / 7) * 100}% + 2px)`, width: `calc(${((c1 - c0 + 1) / 7) * 100}% - 4px)`,
@@ -215,7 +243,6 @@ function MonthView({ cursor, setCursor, blocks, todayY, onMoveStage, onOpenStage
                       background: block.palette.dot, opacity: block.status === "complete" ? 0.55 : 0.95,
                       border: block.marginRisk ? "1px solid #dc2626" : "none", pointerEvents: "auto", touchAction: "none",
                     }}
-                    title={`${block.jobLabel} — ${block.stageLabel}\nPlanned: ${block.start} → ${block.end}${block.actualStart ? `\nActual: ${block.actualStart} → ${block.actualEnd || "…"}${block.actualHours ? ` (${block.actualHours}h)` : ""}` : ""}${block.locked ? "\n(locked)" : "\ndrag to reschedule · click to edit"}`}
                   >
                     {block.locked ? "🔒 " : ""}{block.actualStart ? "● " : ""}{block.stageLabel}
                   </div>
