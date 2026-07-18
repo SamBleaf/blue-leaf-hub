@@ -11,6 +11,8 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
+import { getCostModel } from "./costModelService.mjs";
+import { rollupBySubJob, categoryTotals, stripCost } from "./chargeUpService.mjs";
 
 const TABLE = "charge_up_jobs";
 const isMissingTable = (e) => /relation .* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
@@ -29,6 +31,54 @@ export function registerChargeUpRoutes(app) {
       if (isMissingTable(e)) return ok(res, { chargeUpJobs: [], migrationPending: true });
       err(res, 500, "Could not load the charge-up sites");
       console.error("[charge-up GET]", e?.message || e);
+    }
+  });
+
+  // Per-site + per-person invoicing analytics: hours + charge-out $ (billable) + cost
+  // (director-only) from approved timesheets, keyed by charge_up_job_id. Category total cost
+  // = "cost against the whole category"; per-site hours/charge-out = the invoicing signal.
+  app.get("/api/carpentry/jobs/:id/charge-up-summary", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    const jobId = req.params.id;
+    const isDirector = req.caller?.role === "admin";
+    try {
+      const { data: ts } = await sb.from("timesheets").select("id").eq("carpentry_job_id", jobId).eq("status", "approved");
+      const tsIds = (ts || []).map((t) => t.id);
+      let entries = [];
+      if (tsIds.length) {
+        const { data, error } = await sb.from("timesheet_entries")
+          .select("employee_id, charge_up_job_id, hours, cost_amount").in("timesheet_id", tsIds);
+        if (error) throw error;   // charge_up_job_id column missing → migrationPending
+        entries = data || [];
+      }
+      // employee names + per-employee charge-up rate (from the cost model)
+      const empIds = [...new Set(entries.map((e) => e.employee_id).filter(Boolean))];
+      const { data: emps } = empIds.length ? await sb.from("employees").select("id, name").in("id", empIds) : { data: [] };
+      const nameById = new Map((emps || []).map((e) => [e.id, e.name]));
+      const cm = await getCostModel(sb).catch(() => null);
+      const rateByEmp = {};
+      if (cm?.ratesById) for (const [id, r] of Object.entries(cm.ratesById)) rateByEmp[id] = Number(r.charge_up_hourly) || 0;
+      const { data: sites } = await sb.from(TABLE).select("id, site_label, address").eq("carpentry_job_id", jobId);
+      const siteById = new Map((sites || []).map((s) => [s.id, s]));
+
+      const input = entries.map((e) => ({
+        chargeUpJobId: e.charge_up_job_id, employeeId: e.employee_id,
+        employeeName: nameById.get(e.employee_id) || "Unknown",
+        hours: e.hours, cost: e.cost_amount,
+      }));
+      const roll = stripCost(rollupBySubJob(input, rateByEmp), isDirector);
+      const subJobs = roll.filter((s) => s.chargeUpJobId).map((s) => ({
+        ...s,
+        siteLabel: siteById.get(s.chargeUpJobId)?.site_label || "(deleted site)",
+        address: siteById.get(s.chargeUpJobId)?.address || null,
+      }));
+      const untagged = roll.find((s) => !s.chargeUpJobId) || null;
+      ok(res, { subJobs, untagged, categoryTotals: categoryTotals(roll), canViewCost: isDirector });
+    } catch (e) {
+      if (isMissingTable(e)) return ok(res, { subJobs: [], untagged: null, categoryTotals: { hours: 0, cost: 0, chargeOut: 0, sites: 0 }, migrationPending: true });
+      err(res, 500, "Could not build the charge-up summary");
+      console.error("[charge-up summary]", e?.message || e);
     }
   });
 

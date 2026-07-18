@@ -5,12 +5,20 @@
 // Workers pick a site when logging hours in the PWA; per-site hours + charge-out $
 // analytics (P3) drive invoicing. Rendered by CarpentryJobDetail's branch.
 // =============================================================================
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/apiFetch.js";
+import { useAuth } from "../lib/useAuth.js";
+import { can } from "../lib/roles.js";
+
+const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 
 export default function ChargeUpJobDetail({ job }) {
+  const { role } = useAuth();
+  const showCost = can.viewCostData(role);
   const [sites, setSites] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [openSite, setOpenSite] = useState(null);
   const [loading, setLoading] = useState(true);
   const [migrationPending, setMigrationPending] = useState(false);
   const [error, setError] = useState(null);
@@ -21,12 +29,16 @@ export default function ChargeUpJobDetail({ job }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { ok, data, error: e } = await apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-jobs`);
+    const [sitesRes, sumRes] = await Promise.all([
+      apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-jobs`),
+      apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-summary`),
+    ]);
     setLoading(false);
-    if (!ok) { setError(e || "Could not load charge-up sites."); return; }
+    if (!sitesRes.ok) { setError(sitesRes.error || "Could not load charge-up sites."); return; }
     setError(null);
-    setMigrationPending(!!data?.migrationPending);
-    setSites(data?.chargeUpJobs || []);
+    setMigrationPending(!!sitesRes.data?.migrationPending);
+    setSites(sitesRes.data?.chargeUpJobs || []);
+    if (sumRes.ok) setSummary(sumRes.data);
   }, [job.id]);
   useEffect(() => { load(); }, [load]);
 
@@ -140,9 +152,60 @@ export default function ChargeUpJobDetail({ job }) {
         )}
       </div>
 
-      <p className="text-xs text-muted px-1">
-        Per-site hours &amp; charge-out analytics appear here once the boys start logging time against these sites.
-      </p>
+      {/* Per-site invoicing analytics */}
+      {summary && summary.subJobs.length > 0 ? (
+        <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-hairline">
+            <h2 className="text-sm font-semibold text-ink">Hours &amp; charge-out by site</h2>
+            <span className="text-xs text-muted">{summary.categoryTotals.hours}h · {fmt$(summary.categoryTotals.chargeOut)} charge-out</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-muted border-b border-hairline">
+                  <th className="px-4 py-2">Location</th>
+                  <th className="px-2 py-2 text-right">Hours</th>
+                  <th className="px-2 py-2 text-right">Charge-out</th>
+                  {showCost && <th className="px-4 py-2 text-right">Cost</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.subJobs.map((s) => (
+                  <Fragment key={s.chargeUpJobId}>
+                    <tr className="border-b border-hairline/60 cursor-pointer hover:bg-page/40" onClick={() => setOpenSite((o) => (o === s.chargeUpJobId ? null : s.chargeUpJobId))}>
+                      <td className="px-4 py-2 font-medium text-ink">{openSite === s.chargeUpJobId ? "▾ " : "▸ "}{s.siteLabel}</td>
+                      <td className="px-2 py-2 text-right">{s.hours}</td>
+                      <td className="px-2 py-2 text-right font-medium text-ink">{fmt$(s.chargeOut)}</td>
+                      {showCost && <td className="px-4 py-2 text-right text-muted">{fmt$(s.cost)}</td>}
+                    </tr>
+                    {openSite === s.chargeUpJobId && s.byPerson.map((p) => (
+                      <tr key={p.employeeId || p.name} className="text-xs text-muted bg-page/30">
+                        <td className="px-8 py-1">{p.name}</td>
+                        <td className="px-2 py-1 text-right">{p.hours}</td>
+                        <td className="px-2 py-1 text-right">{fmt$(p.chargeOut)}</td>
+                        {showCost && <td className="px-4 py-1 text-right">{fmt$(p.cost)}</td>}
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+                {summary.untagged && summary.untagged.hours > 0 && (
+                  <tr className="text-xs text-amber-700 bg-amber-50">
+                    <td className="px-4 py-2">Untagged (no location picked)</td>
+                    <td className="px-2 py-2 text-right">{summary.untagged.hours}</td>
+                    <td className="px-2 py-2 text-right">{fmt$(summary.untagged.chargeOut)}</td>
+                    {showCost && <td className="px-4 py-2 text-right">{fmt$(summary.untagged.cost)}</td>}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="px-4 py-2 text-[11px] text-muted border-t border-hairline">Charge-out = approved hours × each person&rsquo;s charge-up rate. Click a site for the per-person breakdown.</p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted px-1">
+          Per-site hours &amp; charge-out appear here once the boys log time against these sites (and it&rsquo;s approved).
+        </p>
+      )}
     </div>
   );
 }
