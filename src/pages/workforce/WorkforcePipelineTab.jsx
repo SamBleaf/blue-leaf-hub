@@ -7,20 +7,26 @@
 // docs/plans/WORKFORCE_PIPELINE_FUTURE_TODO.md.
 // =============================================================================
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { apiFetch } from "../../lib/apiFetch.js";
+import { apiFetch, apiPatch } from "../../lib/apiFetch.js";
 import { horizonWindow, shiftAnchor, todayYmd } from "../../lib/pipelineTimeline.js";
 import { resolveJobColor, jobKey } from "../../lib/plannerColors.js";
+import { rippleStages } from "../../lib/stageRipple.js";
 import PipelineTimeline from "../../components/workforce/pipeline/PipelineTimeline.jsx";
 import PipelineCalendar from "../../components/workforce/pipeline/PipelineCalendar.jsx";
+import StageEditor from "../../components/workforce/pipeline/StageEditor.jsx";
 
 const HORIZONS = ["week", "month", "quarter", "year"];
 
 export default function WorkforcePipelineTab() {
   const [view, setView] = useState("calendar");       // calendar (primary) | timeline
+  const [scale, setScale] = useState("year");         // year (default) | month — calendar zoom
   const [horizon, setHorizon] = useState("month");
   const [anchor, setAnchor] = useState(() => todayYmd());
+  const [calAnchor, setCalAnchor] = useState(() => todayYmd());  // calendar's own month/year cursor seed
   const [kind, setKind] = useState("all");            // all | carpentry
   const [riskOnly, setRiskOnly] = useState(false);
+  const [editing, setEditing] = useState(null);       // stage block being edited (drawer)
+  const [saving, setSaving] = useState(false);
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -40,6 +46,40 @@ export default function WorkforcePipelineTab() {
   }, [win.from, win.to, horizon]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Apply {rowId, plannedStart, plannedEnd} changes: optimistic board update + PATCH each + reconcile.
+  const applyStageChanges = useCallback(async (changes) => {
+    if (!changes?.length) return;
+    setSaving(true);
+    setBoard((b) => (b ? { ...b, jobs: b.jobs.map((j) => ({ ...j, stages: j.stages?.map((s) => {
+      const ch = changes.find((c) => c.rowId === s.rowId);
+      return ch ? { ...s, plannedStart: ch.plannedStart, plannedEnd: ch.plannedEnd } : s;
+    }) })) } : b));
+    await Promise.all(changes.map((c) => apiPatch(`/api/carpentry/stage-schedule/${c.rowId}`, { plannedStart: c.plannedStart, plannedEnd: c.plannedEnd })));
+    setSaving(false);
+    load();
+  }, [load]);
+
+  // Drag: move a stage → ripple its dependents forward → persist.
+  const onMoveStage = useCallback((block, newStart) => {
+    const job = board?.jobs?.find((j) => j.id === block.jobId);
+    if (!job) return;
+    applyStageChanges(rippleStages(job.stages, block.id, newStart));
+  }, [board, applyStageChanges]);
+
+  // Editor save: set the stage's dates/lock, then ripple downstream from the new dates.
+  const onSaveEdit = useCallback(async (edit) => {
+    const job = board?.jobs?.find((j) => j.id === edit.block.jobId);
+    setSaving(true);
+    await apiPatch(`/api/carpentry/stage-schedule/${edit.block.id}`, { plannedStart: edit.plannedStart, plannedEnd: edit.plannedEnd, locked: edit.locked });
+    if (job) {
+      const downstream = rippleStages(job.stages, edit.block.id, edit.plannedStart, edit.plannedEnd).filter((c) => c.rowId !== edit.block.id);
+      await Promise.all(downstream.map((c) => apiPatch(`/api/carpentry/stage-schedule/${c.rowId}`, { plannedStart: c.plannedStart, plannedEnd: c.plannedEnd })));
+    }
+    setSaving(false);
+    setEditing(null);
+    load();
+  }, [board, load]);
 
   const jobs = useMemo(() => {
     let rows = board?.jobs || [];
@@ -89,6 +129,21 @@ export default function WorkforcePipelineTab() {
               ))}
             </div>
           )}
+          {view === "calendar" && (
+            <div className="inline-flex rounded-lg border border-hairline overflow-hidden">
+              {["year", "month"].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScale(s)}
+                  className={`px-2.5 py-1.5 text-sm font-medium capitalize transition ${scale === s ? "bg-primary text-white" : "bg-surface text-muted hover:text-ink"}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          {saving && <span className="text-xs text-muted">Saving…</span>}
         </div>
 
         {view === "timeline" && (
@@ -158,7 +213,14 @@ export default function WorkforcePipelineTab() {
           {view === "calendar" ? (
             <>
               <JobsLegend jobs={jobs} />
-              <PipelineCalendar jobs={jobs} anchor={anchor} onOpenStage={() => {}} />
+              <PipelineCalendar
+                jobs={jobs}
+                scale={scale}
+                anchor={calAnchor}
+                onMoveStage={onMoveStage}
+                onOpenStage={setEditing}
+                onZoomMonth={(ymd) => { setCalAnchor(ymd); setScale("month"); }}
+              />
             </>
           ) : (
             <PipelineTimeline
@@ -172,6 +234,10 @@ export default function WorkforcePipelineTab() {
           )}
           <Legend costModelSynced={board.meta?.costModelSynced} calendar={view === "calendar"} />
         </>
+      )}
+
+      {editing && (
+        <StageEditor block={editing} saving={saving} onClose={() => setEditing(null)} onSave={onSaveEdit} />
       )}
     </div>
   );

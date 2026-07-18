@@ -1,12 +1,11 @@
 // =============================================================================
-// Carpentry stage-schedule routes (Phase 1). Composition only — the layout maths
+// Carpentry stage-schedule routes (Phase 1/2). Composition only — the layout maths
 // live in carpentryStageScheduleService.mjs. The single canonical store both the
 // carpentry ScheduleTab and the Workforce Pipeline calendar read/write, so a date
-// edit in either place syncs to the other. Fail-soft until migration 144 is applied
-// (returns migrationPending so the UI shows a gentle "apply 144" state, never a 500).
+// edit in either place syncs to the other. Fail-soft until migration 144 is applied.
 //
-//   GET   /api/carpentry/jobs/:id/stage-schedule        — stages (auto-seed if empty)
-//   POST  /api/carpentry/jobs/:id/stage-schedule/seed   — (re)auto-layout, keeps locked
+//   GET   /api/carpentry/jobs/:id/stage-schedule        — stages (auto-seed / auto-heal)
+//   POST  /api/carpentry/jobs/:id/stage-schedule/seed   — clean re-auto-layout, keeps locked
 //   PATCH /api/carpentry/stage-schedule/:rowId          — move/resize/lock one stage
 // =============================================================================
 import { getServiceSupabase } from "./supabaseService.mjs";
@@ -20,9 +19,7 @@ const TABLE = "carpentry_job_stage_schedule";
 const isMissingTable = (e) => /relation .* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
 
 // Prefer the stored subsection label (budget-driven); fall back to the taxonomy label.
-function withLabels(rows) {
-  return rowsToCamel(rows).map((r) => ({ ...r, stageLabel: r.label || stageLabel(r.stageKey) }));
-}
+const withLabels = (rows) => rowsToCamel(rows).map((r) => ({ ...r, stageLabel: r.label || stageLabel(r.stageKey) }));
 
 async function loadSeedInputs(sb, jobId) {
   const [{ data: job }, { data: lineItems }, { data: budgets }, cm] = await Promise.all([
@@ -34,28 +31,40 @@ async function loadSeedInputs(sb, jobId) {
   return { job, lineItems: lineItems || [], budgetSubsections: budgets || [], cm };
 }
 
-// Compute the desired rows for a job and upsert them (preserving locked rows via the service).
-async function seedAndPersist(sb, jobId, existing) {
+// The stage rows this job SHOULD have right now (pure), given its budget + start + existing locks.
+async function computeDesired(sb, jobId, existing) {
   const { job, lineItems, budgetSubsections, cm } = await loadSeedInputs(sb, jobId);
-  if (!job) return { error: "not_found" };
-  const desired = seedStageSchedule({
+  if (!job) return null;
+  return seedStageSchedule({
     jobStartDate: job.start_date || job.actual_start || null,
-    budgetSubsections,
-    budgetLineItems: lineItems,
-    cm,
+    budgetSubsections, budgetLineItems: lineItems, cm,
     crewSizes: job.crew_size_overrides && typeof job.crew_size_overrides === "object" ? job.crew_size_overrides : {},
     existing: existing || [],
   });
+}
+
+// Persist the desired set: upsert, then drop any stale unlocked rows no longer wanted
+// (e.g. keys from a superseded seed). Returns the fresh rows.
+async function persistDesired(sb, jobId, desired) {
   const payload = desired.map((r) => ({ carpentry_job_id: jobId, ...r }));
-  const { data, error } = await sb.from(TABLE)
-    .upsert(payload, { onConflict: "carpentry_job_id,stage_key" })
-    .select("*");
+  const { error } = await sb.from(TABLE).upsert(payload, { onConflict: "carpentry_job_id,stage_key" });
   if (error) return { error };
+  const keep = desired.map((r) => r.stage_key);
+  if (keep.length) {
+    await sb.from(TABLE).delete().eq("carpentry_job_id", jobId).eq("locked", false)
+      .not("stage_key", "in", `(${keep.join(",")})`);
+  }
+  const { data, error: e2 } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId).order("sort_order");
+  if (e2) return { error: e2 };
   return { rows: data || [] };
 }
 
+const keySet = (rows) => new Set((rows || []).map((r) => r.stage_key));
+const sameKeys = (a, b) => { const A = keySet(a), B = keySet(b); return A.size === B.size && [...A].every((k) => B.has(k)); };
+
 export function registerCarpentryStageScheduleRoutes(app) {
-  // GET — stages for a job; auto-seed on first read (empty).
+  // GET — stages for a job; seed on empty + auto-heal when the stored keys drift from the
+  // current budget (e.g. after a superseded seed, or the budget changed).
   app.get("/api/carpentry/jobs/:id/stage-schedule", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured", "NO_DB");
@@ -63,11 +72,15 @@ export function registerCarpentryStageScheduleRoutes(app) {
     try {
       const { data: existing, error } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId).order("sort_order");
       if (error) throw error;
-      if (existing && existing.length) return ok(res, { stages: withLabels(existing) });
-      const seeded = await seedAndPersist(sb, jobId, existing);
-      if (seeded.error === "not_found") return err(res, 404, "Carpentry job not found", "NOT_FOUND");
-      if (seeded.error) throw seeded.error;
-      ok(res, { stages: withLabels(seeded.rows) });
+      const desired = await computeDesired(sb, jobId, existing || []);
+      if (desired === null) return err(res, 404, "Carpentry job not found", "NOT_FOUND");
+      // Reseed if empty or the stage set drifted; otherwise keep the stored (possibly hand-moved) dates.
+      if (!existing?.length || !sameKeys(existing, desired)) {
+        const done = await persistDesired(sb, jobId, desired);
+        if (done.error) throw done.error;
+        return ok(res, { stages: withLabels(done.rows) });
+      }
+      ok(res, { stages: withLabels(existing) });
     } catch (e) {
       if (isMissingTable(e)) return ok(res, { stages: [], migrationPending: true });
       err(res, 500, "Could not load the stage schedule");
@@ -75,17 +88,18 @@ export function registerCarpentryStageScheduleRoutes(app) {
     }
   });
 
-  // POST /seed — (re)auto-layout from the job start + durations, keeping locked stages.
+  // POST /seed — clean re-auto-layout from the job start + durations, keeping locked stages.
   app.post("/api/carpentry/jobs/:id/stage-schedule/seed", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured", "NO_DB");
     const jobId = req.params.id;
     try {
       const { data: existing } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId);
-      const seeded = await seedAndPersist(sb, jobId, existing || []);
-      if (seeded.error === "not_found") return err(res, 404, "Carpentry job not found", "NOT_FOUND");
-      if (seeded.error) throw seeded.error;
-      ok(res, { stages: withLabels(seeded.rows) });
+      const desired = await computeDesired(sb, jobId, existing || []);
+      if (desired === null) return err(res, 404, "Carpentry job not found", "NOT_FOUND");
+      const done = await persistDesired(sb, jobId, desired);
+      if (done.error) throw done.error;
+      ok(res, { stages: withLabels(done.rows) });
     } catch (e) {
       if (isMissingTable(e)) return err(res, 503, "Stage schedule not enabled yet — apply migration 144", "MIGRATION_PENDING");
       err(res, 500, "Could not seed the stage schedule");
@@ -112,7 +126,7 @@ export function registerCarpentryStageScheduleRoutes(app) {
       const { data, error } = await sb.from(TABLE).update(patch).eq("id", req.params.rowId).select("*").maybeSingle();
       if (error) throw error;
       if (!data) return err(res, 404, "Stage not found", "NOT_FOUND");
-      ok(res, { stage: { ...rowToCamel(data), stageLabel: stageLabel(data.stage_key) } });
+      ok(res, { stage: { ...rowToCamel(data), stageLabel: data.label || stageLabel(data.stage_key) } });
     } catch (e) {
       if (isMissingTable(e)) return err(res, 503, "Stage schedule not enabled yet — apply migration 144", "MIGRATION_PENDING");
       err(res, 500, "Could not update the stage");

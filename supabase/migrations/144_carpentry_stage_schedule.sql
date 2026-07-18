@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS public.carpentry_job_stage_schedule (
   UNIQUE (carpentry_job_id, stage_key)
 );
 
+-- Idempotent column adds — so a DB that already ran an earlier version of this migration
+-- (before these budget-driven columns existed) picks them up on a re-run. CREATE TABLE
+-- IF NOT EXISTS above skips an existing table, so these ALTERs are how it catches up.
+ALTER TABLE public.carpentry_job_stage_schedule
+  ADD COLUMN IF NOT EXISTS label                   text,
+  ADD COLUMN IF NOT EXISTS workforce_task_category text,
+  ADD COLUMN IF NOT EXISTS labour_sell             numeric(12,2);
+
 ALTER TABLE public.carpentry_job_stage_schedule ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "auth_users" ON public.carpentry_job_stage_schedule
