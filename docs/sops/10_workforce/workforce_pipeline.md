@@ -30,9 +30,10 @@ The **Pipeline** tab (Workforce → Pipeline; route `/workforce?tab=Pipeline`) h
 
 ### Stage Calendar (v2 — interactive)
 Each carpentry job is broken into its **stages** (the budget labour subsections — First Fix Framing, Cladding & Soffit, Second Fix…), drawn as blocks on a calendar, colour-coded by job (see the jobs legend above the grid).
-- **Year view** (default) — 12 mini-months, whole-year overview. Click a month to zoom in.
+- **Year view** (default) — a rolling **13-month** overview starting at **last month** (everything before today is irrelevant, so the window begins the previous calendar month and runs a year on). Click a month to zoom in. ← / Today / → shift the window.
 - **Month view** — **drag a stage block** to reschedule it; its dependent stages **ripple forward** automatically (later stages are never pulled earlier). **Click a block** to open its editor (start/end, ±day/±week shift, lock). A **🔒 locked** stage doesn't move under auto-layout or ripple; a **●** prefix means the stage has started (approved timesheets exist).
-- **Stage length is earned-value-driven**: each stage's duration = its labour value ÷ the team day-rate, scaled to the stage crew (the same engine as the break-even). More labour $ in a subsection → longer stage.
+- **Completed stages drop off the calendar** — once a stage is marked **complete** in the job's Schedule tab it's no longer forward-looking work, so it disappears from the Pipeline calendar (it stays visible on the job's own Schedule tab).
+- **Stage length is earned-value-driven**: each stage's duration = its labour value ÷ the team day-rate, scaled to the stage crew (the same engine as the break-even). More labour $ in a subsection → longer stage. On the job's **Schedule tab** a stage row can be **expanded** to see its budget **subsections** (e.g. First Fix Framing → wall framing, roof framing, window install), each with its own indicative duration derived the same way from its line-item value. The lock control there is a labelled **🔒 Locked / 🔓 Lock** pill.
 - **Two-way sync**: every move writes to `carpentry_job_stage_schedule` — the same store the carpentry job's **Schedule tab** reads/writes, so an edit in either place moves the other.
 - **Actual vs planned**: approved timesheets (by workforce task_category) show the real start/end + hours on each stage block + in the editor.
 
@@ -209,5 +210,21 @@ Next review: 2026-11-30
 
 **TC-14 — Year default + Month/Year toggle**
 1. Open the Pipeline → Calendar
-2. Expected: it opens in **Year** view (12 mini-months). Toggling **Month** shows the 6-week grid; clicking a mini-month zooms to that month
+2. Expected: it opens in **Year** view. Toggling **Month** shows the 6-week grid; clicking a mini-month zooms to that month
+- [ ] Pass  [ ] Fail
+
+**TC-15 — Year view starts at the previous month (13-month window)**
+1. Open the Pipeline → Calendar (Year). Note today's month (e.g. July 2026)
+2. Expected: the **first** mini-month is the **previous** calendar month (June 2026) and the grid runs 13 months to the same month next year (June 2027); the range label reflects this. Clicking any mini-month (incl. one in next year) zooms to the correct month/year
+- [ ] Pass  [ ] Fail
+
+**TC-16 — Completed stages leave the Pipeline calendar**
+1. On a job's Schedule tab, click a stage's status dot until it reads **complete**
+2. Reload the Pipeline calendar → Expected: that stage's block no longer appears (year or month view); it still shows on the job's Schedule tab
+- [ ] Pass  [ ] Fail
+
+**TC-17 — Schedule-tab lock pill + subsection dropdown**
+1. Carpentry → a job with a budget → Schedule tab
+2. Expected: each stage's lock control reads **🔒 Locked** (filled) or **🔓 Lock** (outline) and visibly changes when toggled
+3. Click a stage label with a **(n)** count → Expected: it expands to its budget subsections, each with an indicative duration (`N days`) derived from its line-item value; toggling lock/date on the row keeps the dropdown open
 - [ ] Pass  [ ] Fail

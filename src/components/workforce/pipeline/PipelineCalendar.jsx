@@ -24,7 +24,9 @@ function toBlocks(jobs) {
   for (const job of jobs) {
     const palette = job.colour || resolveJobColor(jobKey("carpentry", job.id), orderedKeys);
     for (const s of job.stages || []) {
-      if (!s.plannedStart || !s.rowId) continue;
+      // Completed stages drop off the pipeline calendar — once a stage is signed off in the
+      // job scheduler it's no longer forward-looking work to plan around.
+      if (!s.plannedStart || !s.rowId || s.scheduleStatus === "complete") continue;
       blocks.push({
         id: s.rowId, jobId: job.id, jobLabel: job.label, palette,
         stageKey: s.stage, stageLabel: s.label,
@@ -52,7 +54,9 @@ function layoutWeek(blocks, wStart, wEnd) {
   return { segs, laneCount: Math.max(1, lanes.length) };
 }
 
-const seedCursor = (a, sc) => { const d = a ? parse(a) : new Date(); return new Date(d.getFullYear(), sc === "year" ? 0 : d.getMonth(), 1); };
+// Year view starts at the PREVIOUS month (everything before now is irrelevant) and spans 13
+// months; the cursor is the FIRST month of that window. Month view anchors on the exact month.
+const seedCursor = (a, sc) => { const d = a ? parse(a) : new Date(); return new Date(d.getFullYear(), sc === "year" ? d.getMonth() - 1 : d.getMonth(), 1); };
 
 export default function PipelineCalendar({ jobs = [], scale = "year", anchor, onMoveStage, onOpenStage, onZoomMonth }) {
   // Cursor derives from the anchor + scale, so clicking a mini-month zooms to THAT month
@@ -74,12 +78,12 @@ export default function PipelineCalendar({ jobs = [], scale = "year", anchor, on
   return (
     <div ref={gridRef}>
       {scale === "year" ? (
-        <YearView year={cursor.getFullYear()} blocks={blocks} todayY={todayY}
-          onPrev={() => setCursor(new Date(cursor.getFullYear() - 1, 0, 1))}
-          onNext={() => setCursor(new Date(cursor.getFullYear() + 1, 0, 1))}
-          onToday={() => setCursor(new Date(new Date().getFullYear(), 0, 1))}
+        <YearView cursor={cursor} blocks={blocks} todayY={todayY}
+          onPrev={() => setCursor(new Date(cursor.getFullYear() - 1, cursor.getMonth(), 1))}
+          onNext={() => setCursor(new Date(cursor.getFullYear() + 1, cursor.getMonth(), 1))}
+          onToday={() => setCursor(seedCursor(null, "year"))}
           onBlockPointerDown={onBlockPointerDown} showTip={showTip} hideTip={hideTip} draggingId={ghost?.moved ? ghost.id : null}
-          onZoomMonth={(mi) => onZoomMonth?.(`${cursor.getFullYear()}-${pad(mi + 1)}-01`)} />
+          onZoomMonth={(y, m) => onZoomMonth?.(`${y}-${pad(m + 1)}-01`)} />
       ) : (
         <MonthView cursor={cursor} setCursor={setCursor} blocks={blocks} todayY={todayY}
           onBlockPointerDown={onBlockPointerDown} showTip={showTip} hideTip={hideTip} draggingId={ghost?.moved ? ghost.id : null} />
@@ -157,22 +161,29 @@ function CalendarTooltip({ hover }) {
   );
 }
 
-// ── Year view — 12 mini-months, whole-year overview ──────────────────────────
-function YearView({ year, blocks, todayY, onPrev, onNext, onToday, onZoomMonth, showTip, hideTip, onBlockPointerDown, draggingId }) {
+// ── Year view — 13 mini-months from the previous month, rolling overview ──────
+function YearView({ cursor, blocks, todayY, onPrev, onNext, onToday, onZoomMonth, showTip, hideTip, onBlockPointerDown, draggingId }) {
+  // A rolling 13-month window starting at the cursor month (= previous calendar month).
+  const months = Array.from({ length: 13 }, (_, i) => {
+    const dt = new Date(cursor.getFullYear(), cursor.getMonth() + i, 1);
+    return { y: dt.getFullYear(), m: dt.getMonth() };
+  });
+  const first = months[0], last = months[months.length - 1];
+  const rangeLabel = `${MONTHS[first.m]} ${first.y} – ${MONTHS[last.m]} ${last.y}`;
   return (
     <div className="rounded-card border border-hairline bg-surface p-3">
       <div className="flex items-center justify-between gap-3 mb-3">
         <button type="button" onClick={onPrev} className="rounded-lg border border-hairline px-3 py-1.5 text-sm text-muted hover:text-ink">←</button>
-        <h2 className="text-base font-semibold text-primary">{year}</h2>
+        <h2 className="text-base font-semibold text-primary">{rangeLabel}</h2>
         <div className="flex gap-1">
           <button type="button" onClick={onToday} className="rounded-lg border border-hairline px-3 py-1.5 text-sm text-muted hover:text-ink">Today</button>
           <button type="button" onClick={onNext} className="rounded-lg border border-hairline px-3 py-1.5 text-sm text-muted hover:text-ink">→</button>
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {MONTHS.map((mName, mi) => (
-          <MiniMonth key={mi} year={year} month={mi} mName={mName} blocks={blocks} todayY={todayY}
-            onBlockPointerDown={onBlockPointerDown} draggingId={draggingId} onZoom={() => onZoomMonth?.(mi)} showTip={showTip} hideTip={hideTip} />
+        {months.map(({ y, m }) => (
+          <MiniMonth key={`${y}-${m}`} year={y} month={m} mName={`${MONTHS[m]} ${String(y).slice(2)}`} blocks={blocks} todayY={todayY}
+            onBlockPointerDown={onBlockPointerDown} draggingId={draggingId} onZoom={() => onZoomMonth?.(y, m)} showTip={showTip} hideTip={hideTip} />
         ))}
       </div>
     </div>

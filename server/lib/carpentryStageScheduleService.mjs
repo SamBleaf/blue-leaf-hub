@@ -68,6 +68,44 @@ export function stagesFromBudget(budgetSubsections = [], cm, crewSizes = {}) {
   return rows;
 }
 
+// Derive each stage's budget SUBSECTIONS — the leaf line items (carpentry_budget_line_items)
+// grouped by canonical_key within the stage's labour budget category — with a cost-model
+// duration per subsection. DISPLAY-ONLY (a Generated fact — never persisted): the same formula
+// as the parent stage, so a bigger subsection sell → longer subsection. Because each rounds up
+// (Math.ceil) independently, subsection days can sum to MORE than the parent — surface as indicative.
+// Returns { [stageKey]: [{ label, canonicalKey, sell, days }] } sorted by sell desc.
+export function subsectionsForStages(budgetSubsections = [], budgetLineItems = [], cm, crewSizes = {}) {
+  // labour budget category id → { stageKey, wfCat } (matches stagesFromBudget's stageKey = slug(category_name))
+  const byBudgetId = new Map();
+  for (const b of budgetSubsections) {
+    if ((b.cost_type ?? b.costType) !== "labour") continue;
+    const id = b.id ?? b.budgetId;
+    if (id == null) continue;
+    byBudgetId.set(id, { stageKey: slug(b.category_name ?? b.categoryName ?? ""), wfCat: b.workforce_task_category ?? b.workforceTaskCategory ?? null });
+  }
+  const groups = {}; // stageKey -> Map(canonicalKey|__other__ -> { label, canonicalKey, sell, taskCat })
+  for (const li of budgetLineItems) {
+    const budgetId = li.carpentry_job_budget_id ?? li.carpentryJobBudgetId ?? null;
+    const meta = budgetId != null ? byBudgetId.get(budgetId) : null;
+    if (!meta || !meta.stageKey) continue;
+    const canon = li.canonical_key ?? li.canonicalKey ?? null;
+    const key = canon || "__other__";
+    const label = li.description ?? canon ?? "Other";
+    const sell = Number(li.sell_ex_gst ?? li.sellExGst) || 0;
+    const taskCat = li.task_category ?? li.taskCategory ?? meta.wfCat;
+    const m = (groups[meta.stageKey] ||= new Map());
+    if (!m.has(key)) m.set(key, { label, canonicalKey: canon, sell: 0, taskCat });
+    m.get(key).sell += sell;
+  }
+  const out = {};
+  for (const [stageKey, m] of Object.entries(groups)) {
+    out[stageKey] = [...m.values()]
+      .map((s) => ({ label: s.label, canonicalKey: s.canonicalKey, sell: Math.round(s.sell * 100) / 100, days: costModelStageDays(s.sell, cm, crewFor(s.taskCat, crewSizes)) }))
+      .sort((a, b) => (b.sell || 0) - (a.sell || 0));
+  }
+  return out;
+}
+
 // Taxonomy fallback (no budget / no cost model): generic durations from STAGE_RULES.
 function stagesFromTaxonomy(budgetLineItems, crewSizes) {
   const set = new Set();

@@ -509,7 +509,9 @@ function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
   const [error, setError]                     = useState(null);
   const [commence, setCommence]               = useState(jobStartDate || "");
   const [savingCommence, setSavingCommence]   = useState(false);
+  const [expanded, setExpanded]               = useState(() => new Set());
   useEffect(() => { setCommence(jobStartDate || ""); }, [jobStartDate]);
+  const toggleExpanded = (key) => setExpanded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -527,7 +529,8 @@ function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
     const { ok, data, error: e } = await apiPatch(`/api/carpentry/stage-schedule/${row.id}`, patch);
     setSavingId(null);
     if (!ok) { setError(e || "Update failed."); return; }
-    setStages((s) => s.map((x) => (x.id === row.id ? data.stage : x)));
+    // Keep the derived subsections (the PATCH response doesn't carry them) so the dropdown survives.
+    setStages((s) => s.map((x) => (x.id === row.id ? { ...data.stage, subsections: x.subsections } : x)));
   }
 
   // Set the job's commencement (start_date) — the anchor auto-layout builds from — then re-seed.
@@ -600,36 +603,65 @@ function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
           {stages.length === 0 && !migrationPending && (
             <p className="p-4 text-sm text-muted">No stages yet — set the job start date and add its budget, then Re-auto-layout.</p>
           )}
-          {stages.map((st) => (
-            <div key={st.id} className={`flex items-center gap-3 p-3 ${savingId === st.id ? "opacity-60" : ""} ${st.status === "complete" ? "bg-emerald-50" : "bg-white"}`}>
-              <button
-                onClick={() => patchStage(st, { status: STAGE_STATUS_NEXT[st.status] })}
-                title={`Status: ${st.status} (click to advance)`}
-                className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${STAGE_STATUS_STYLE[st.status] || STAGE_STATUS_STYLE.planned}`}
-              >
-                {st.status === "complete" && <span className="text-white text-xs">✓</span>}
-                {st.status === "in_progress" && <span className="w-2 h-2 rounded-full bg-white" />}
-              </button>
-              <span className={`flex-1 text-sm font-medium ${st.status === "complete" ? "text-muted" : "text-ink"}`}>{st.stageLabel}</span>
-              {st.actualStart && (
-                <span className="text-[10px] text-emerald-600" title="Observed from approved timesheets">
-                  actual {fmtDate(st.actualStart)}{st.actualEnd ? `–${fmtDate(st.actualEnd)}` : ""}
-                </span>
-              )}
-              <div className="flex items-center gap-1.5 text-xs text-muted">
-                <input type="date" value={st.plannedStart || ""} onChange={(e) => patchStage(st, { plannedStart: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
-                <span>→</span>
-                <input type="date" value={st.plannedEnd || ""} onChange={(e) => patchStage(st, { plannedEnd: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
+          {stages.map((st) => {
+            const subs = st.subsections || [];
+            const open = expanded.has(st.stageKey);
+            return (
+            <div key={st.id} className={`${savingId === st.id ? "opacity-60" : ""} ${st.status === "complete" ? "bg-emerald-50" : "bg-white"}`}>
+              <div className="flex items-center gap-3 p-3">
+                <button
+                  onClick={() => patchStage(st, { status: STAGE_STATUS_NEXT[st.status] })}
+                  title={`Status: ${st.status} (click to advance)`}
+                  className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${STAGE_STATUS_STYLE[st.status] || STAGE_STATUS_STYLE.planned}`}
+                >
+                  {st.status === "complete" && <span className="text-white text-xs">✓</span>}
+                  {st.status === "in_progress" && <span className="w-2 h-2 rounded-full bg-white" />}
+                </button>
+                {subs.length > 0 ? (
+                  <button type="button" onClick={() => toggleExpanded(st.stageKey)}
+                    title="Show budget subsections"
+                    className={`flex-1 flex items-center gap-1.5 text-left text-sm font-medium ${st.status === "complete" ? "text-muted" : "text-ink"}`}>
+                    <span className="text-[10px] text-muted w-2">{open ? "▾" : "▸"}</span>{st.stageLabel}
+                    <span className="text-[10px] text-muted font-normal">({subs.length})</span>
+                  </button>
+                ) : (
+                  <span className={`flex-1 text-sm font-medium ${st.status === "complete" ? "text-muted" : "text-ink"}`}>{st.stageLabel}</span>
+                )}
+                {st.actualStart && (
+                  <span className="text-[10px] text-emerald-600" title="Observed from approved timesheets">
+                    actual {fmtDate(st.actualStart)}{st.actualEnd ? `–${fmtDate(st.actualEnd)}` : ""}
+                  </span>
+                )}
+                <div className="flex items-center gap-1.5 text-xs text-muted">
+                  <input type="date" value={st.plannedStart || ""} onChange={(e) => patchStage(st, { plannedStart: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
+                  <span>→</span>
+                  <input type="date" value={st.plannedEnd || ""} onChange={(e) => patchStage(st, { plannedEnd: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
+                </div>
+                <button
+                  onClick={() => patchStage(st, { locked: !st.locked })}
+                  title={st.locked ? "Locked — click to unlock" : "Unlocked — click to pin against auto-layout"}
+                  className={`flex-shrink-0 inline-flex items-center gap-1 text-[11px] font-medium rounded-full border px-2 py-0.5 ${st.locked ? "bg-primary/10 text-primary border-primary/30" : "text-muted border-hairline hover:text-ink hover:border-slate-300"}`}
+                >
+                  {st.locked ? "🔒 Locked" : "🔓 Lock"}
+                </button>
               </div>
-              <button
-                onClick={() => patchStage(st, { locked: !st.locked })}
-                title={st.locked ? "Locked — click to unlock" : "Unlocked — click to pin against auto-layout"}
-                className={`flex-shrink-0 text-sm px-1 ${st.locked ? "text-primary" : "text-muted hover:text-ink"}`}
-              >
-                {st.locked ? "🔒" : "🔓"}
-              </button>
+              {open && subs.length > 0 && (
+                <div className="pl-11 pr-3 pb-3 space-y-1">
+                  {subs.map((sub, i) => (
+                    <div key={sub.canonicalKey || i} className="flex items-center justify-between text-xs border-t border-hairline/60 pt-1">
+                      <span className="text-ink">{sub.label}</span>
+                      <span className="text-muted tabular-nums">
+                        {sub.days != null ? `${sub.days} day${sub.days === 1 ? "" : "s"}` : "—"}
+                        {sub.sell ? <span className="text-muted/70"> · ${Math.round(sub.sell).toLocaleString()}</span> : null}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-muted pt-1">Indicative durations — each subsection is rounded up from its budget labour value (they can total more than the stage).</p>
+                </div>
+              )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>

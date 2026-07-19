@@ -11,7 +11,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel } from "./apiResponse.mjs";
-import { seedStageSchedule } from "./carpentryStageScheduleService.mjs";
+import { seedStageSchedule, subsectionsForStages } from "./carpentryStageScheduleService.mjs";
 import { getCostModel } from "./costModelService.mjs";
 import { stageLabel } from "./carpentryStages.mjs";
 
@@ -24,24 +24,29 @@ const withLabels = (rows) => rowsToCamel(rows).map((r) => ({ ...r, stageLabel: r
 async function loadSeedInputs(sb, jobId) {
   const [{ data: job }, { data: lineItems }, { data: budgets }, cm] = await Promise.all([
     sb.from("carpentry_jobs").select("id, start_date, actual_start, crew_size_overrides").eq("id", jobId).maybeSingle(),
-    sb.from("carpentry_budget_line_items").select("canonical_key, task_category").eq("job_id", jobId),
-    sb.from("carpentry_job_budgets").select("category_name, cost_type, budget_ex_gst, workforce_task_category").eq("job_id", jobId),
+    sb.from("carpentry_budget_line_items").select("id, carpentry_job_budget_id, description, canonical_key, task_category, sell_ex_gst").eq("job_id", jobId),
+    sb.from("carpentry_job_budgets").select("id, category_name, cost_type, budget_ex_gst, workforce_task_category").eq("job_id", jobId),
     getCostModel(sb).catch(() => null),
   ]);
   return { job, lineItems: lineItems || [], budgetSubsections: budgets || [], cm };
 }
 
+const crewSizesOf = (job) => (job?.crew_size_overrides && typeof job.crew_size_overrides === "object" ? job.crew_size_overrides : {});
+
 // The stage rows this job SHOULD have right now (pure), given its budget + start + existing locks.
-async function computeDesired(sb, jobId, existing) {
-  const { job, lineItems, budgetSubsections, cm } = await loadSeedInputs(sb, jobId);
+function computeDesired(inputs, existing) {
+  const { job, lineItems, budgetSubsections, cm } = inputs;
   if (!job) return null;
   return seedStageSchedule({
     jobStartDate: job.start_date || job.actual_start || null,
     budgetSubsections, budgetLineItems: lineItems, cm,
-    crewSizes: job.crew_size_overrides && typeof job.crew_size_overrides === "object" ? job.crew_size_overrides : {},
+    crewSizes: crewSizesOf(job),
     existing: existing || [],
   });
 }
+
+// Attach each stage's display-only budget subsections (derived; never persisted).
+const withSubsections = (stages, subMap) => stages.map((s) => ({ ...s, subsections: subMap[s.stageKey] || [] }));
 
 // Persist the desired set: upsert, then drop any stale unlocked rows no longer wanted
 // (e.g. keys from a superseded seed). Returns the fresh rows.
@@ -72,15 +77,17 @@ export function registerCarpentryStageScheduleRoutes(app) {
     try {
       const { data: existing, error } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId).order("sort_order");
       if (error) throw error;
-      const desired = await computeDesired(sb, jobId, existing || []);
+      const inputs = await loadSeedInputs(sb, jobId);
+      const desired = computeDesired(inputs, existing || []);
       if (desired === null) return err(res, 404, "Carpentry job not found", "NOT_FOUND");
+      const subMap = subsectionsForStages(inputs.budgetSubsections, inputs.lineItems, inputs.cm, crewSizesOf(inputs.job));
       // Reseed if empty or the stage set drifted; otherwise keep the stored (possibly hand-moved) dates.
       if (!existing?.length || !sameKeys(existing, desired)) {
         const done = await persistDesired(sb, jobId, desired);
         if (done.error) throw done.error;
-        return ok(res, { stages: withLabels(done.rows) });
+        return ok(res, { stages: withSubsections(withLabels(done.rows), subMap) });
       }
-      ok(res, { stages: withLabels(existing) });
+      ok(res, { stages: withSubsections(withLabels(existing), subMap) });
     } catch (e) {
       if (isMissingTable(e)) return ok(res, { stages: [], migrationPending: true });
       err(res, 500, "Could not load the stage schedule");
@@ -95,11 +102,13 @@ export function registerCarpentryStageScheduleRoutes(app) {
     const jobId = req.params.id;
     try {
       const { data: existing } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId);
-      const desired = await computeDesired(sb, jobId, existing || []);
+      const inputs = await loadSeedInputs(sb, jobId);
+      const desired = computeDesired(inputs, existing || []);
       if (desired === null) return err(res, 404, "Carpentry job not found", "NOT_FOUND");
       const done = await persistDesired(sb, jobId, desired);
       if (done.error) throw done.error;
-      ok(res, { stages: withLabels(done.rows) });
+      const subMap = subsectionsForStages(inputs.budgetSubsections, inputs.lineItems, inputs.cm, crewSizesOf(inputs.job));
+      ok(res, { stages: withSubsections(withLabels(done.rows), subMap) });
     } catch (e) {
       if (isMissingTable(e)) return err(res, 503, "Stage schedule not enabled yet — apply migration 144", "MIGRATION_PENDING");
       err(res, 500, "Could not seed the stage schedule");

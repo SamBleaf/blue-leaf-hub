@@ -26,12 +26,15 @@ export default function ChargeUpJobDetail({ job }) {
   const [form, setForm] = useState({ siteLabel: "", address: "", notes: "" });
   const [savingId, setSavingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [untagged, setUntagged] = useState([]);
+  const [assigning, setAssigning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [sitesRes, sumRes] = await Promise.all([
+    const [sitesRes, sumRes, untagRes] = await Promise.all([
       apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-jobs`),
       apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-summary`),
+      apiFetch(`/api/carpentry/jobs/${job.id}/charge-up-untagged`),
     ]);
     setLoading(false);
     if (!sitesRes.ok) { setError(sitesRes.error || "Could not load charge-up sites."); return; }
@@ -39,8 +42,20 @@ export default function ChargeUpJobDetail({ job }) {
     setMigrationPending(!!sitesRes.data?.migrationPending);
     setSites(sitesRes.data?.chargeUpJobs || []);
     if (sumRes.ok) setSummary(sumRes.data);
+    setUntagged(untagRes.ok ? (untagRes.data?.untaggedEntries || []) : []);
   }, [job.id]);
   useEffect(() => { load(); }, [load]);
+
+  // Assign untagged charge-up hours to a site (all entryIds → one site), then reload so they
+  // move into the per-site analytics.
+  async function assignUntagged(entryIds, chargeUpJobId) {
+    if (!chargeUpJobId || !entryIds.length) return;
+    setAssigning(true); setError(null);
+    const { ok, error: e } = await apiPost(`/api/carpentry/jobs/${job.id}/charge-up-assign`, { entryIds, chargeUpJobId });
+    if (!ok) { setError(e || "Could not assign the hours."); setAssigning(false); return; }
+    await load();
+    setAssigning(false);
+  }
 
   async function addSite() {
     if (!form.siteLabel.trim()) return;
@@ -87,6 +102,30 @@ export default function ChargeUpJobDetail({ job }) {
       {migrationPending && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
           Charge-up sites aren&rsquo;t enabled yet — apply <span className="font-mono">migration 145</span> in Supabase, then reload.
+        </div>
+      )}
+
+      {/* ① Category summary — top-line totals for the whole Charge Up category */}
+      {!migrationPending && summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted">Total hours</p>
+            <p className="text-2xl font-semibold text-ink mt-0.5">{summary.categoryTotals.hours}</p>
+          </div>
+          <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted">Charge-out</p>
+            <p className="text-2xl font-semibold text-ink mt-0.5">{fmt$(summary.categoryTotals.chargeOut)}</p>
+          </div>
+          <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted">Active sites</p>
+            <p className="text-2xl font-semibold text-ink mt-0.5">{sites.filter((s) => s.status !== "archived").length}</p>
+          </div>
+          {showCost && (
+            <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-muted">Cost</p>
+              <p className="text-2xl font-semibold text-muted mt-0.5">{fmt$(summary.categoryTotals.cost)}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -151,6 +190,38 @@ export default function ChargeUpJobDetail({ job }) {
           </div>
         )}
       </div>
+
+      {/* ② Untagged hours — assign historic/un-located charge-up hours to a site */}
+      {untagged.length > 0 && sites.some((s) => s.status !== "archived") && (
+        <div className="rounded-card border border-amber-200 bg-amber-50/60 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-amber-200">
+            <h2 className="text-sm font-semibold text-amber-900">Untagged hours — assign to a site</h2>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-800">{untagged.length} entr{untagged.length === 1 ? "y" : "ies"} · {untagged.reduce((t, e) => t + e.hours, 0)}h</span>
+              <select disabled={assigning} defaultValue="" onChange={(e) => { if (e.target.value) assignUntagged(untagged.map((u) => u.entryId), e.target.value); }}
+                className="text-xs border border-amber-300 rounded px-2 py-1 bg-white">
+                <option value="">Assign all to…</option>
+                {sites.filter((s) => s.status !== "archived").map((s) => <option key={s.id} value={s.id}>{s.siteLabel}</option>)}
+              </select>
+            </div>
+          </div>
+          <p className="px-4 py-2 text-[11px] text-amber-800">These charge-up hours were approved without a site (e.g. logged before the Location picker). Assign each to a site so it shows in the per-site invoicing figures below.</p>
+          <div className="divide-y divide-amber-200/70 max-h-72 overflow-y-auto">
+            {untagged.map((u) => (
+              <div key={u.entryId} className={`flex items-center gap-3 px-4 py-2 text-sm ${assigning ? "opacity-60" : ""}`}>
+                <span className="text-xs text-muted w-24 shrink-0">{u.date || "—"}</span>
+                <span className="flex-1 text-ink truncate">{u.employeeName}</span>
+                <span className="text-xs text-muted w-14 text-right shrink-0">{u.hours}h</span>
+                <select disabled={assigning} defaultValue="" onChange={(e) => { if (e.target.value) assignUntagged([u.entryId], e.target.value); }}
+                  className="text-xs border border-hairline rounded px-2 py-1 bg-white w-40 shrink-0">
+                  <option value="">Assign to…</option>
+                  {sites.filter((s) => s.status !== "archived").map((s) => <option key={s.id} value={s.id}>{s.siteLabel}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Per-site invoicing analytics */}
       {summary && summary.subJobs.length > 0 ? (

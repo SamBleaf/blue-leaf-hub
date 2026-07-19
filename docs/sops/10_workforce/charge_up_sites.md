@@ -57,9 +57,14 @@ In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker
 3. Add what you worked on + hours, **Submit**. You can't submit charge-up without a location.
 
 ### Read the invoicing figures (admin/supervisor)
-1. Carpentry → BLB Charge Up → the **Hours & charge-out by site** table.
-2. Each row: Location · Hours · Charge-out $ (· Cost, directors). Click a row for the per-person breakdown.
+1. Carpentry → BLB Charge Up. The top **summary strip** shows the category totals — total hours, total charge-out $, active sites (· Cost for directors) — and a **by-financial-year** table (each FY's hours + charge-out $).
+2. The **Hours & charge-out by site** table below: each row Location · Hours · Charge-out $ (· Cost, directors). Click a row for the per-person breakdown.
 3. Use the charge-out $ (or hours) to raise the invoice for that site.
+
+### Assign untagged hours to a site (admin/supervisor)
+Charge-up hours approved **without a site** (e.g. logged before the Location picker existed) show in an amber **"Untagged hours — assign to a site"** card.
+1. For each entry (date · person · hours), pick a site from its **Assign to…** dropdown — or use **Assign all to…** in the card header to move every untagged entry to one site.
+2. The hours immediately move into that site's per-site figures. (Only entries on this job's approved timesheets can be assigned.)
 
 ## 6. What happens after
 Hours become part of the site's totals once the worker's timesheet is **approved** (approval books the cost; charge-out is computed from the rate). Archiving a site keeps its historical hours visible. Deleting a site (rare) leaves its hours counting at the category level (never orphaned).
@@ -142,6 +147,17 @@ Next review: 2026-11-30
 **TC-07 — Graceful before migration / no sites**
 1. Before mig 145 (or a category with no sites): open BLB Charge Up; log hours to Charge Up
 2. Expected: an "apply 145" note (or no Location dropdown); logging still works untagged; no crash
+- [ ] Pass  [ ] Fail
+
+**TC-08b — Category summary + by-FY**
+1. Open BLB Charge Up with some approved hours
+2. Expected: a top strip with Total hours / Charge-out $ / Active sites (+ Cost for directors) matching the category totals; a by-financial-year table (FY · hours · charge-out); non-directors never see a cost column
+- [ ] Pass  [ ] Fail
+
+**TC-08c — Assign untagged hours**
+1. With ≥1 untagged approved charge-up entry and ≥1 active site, open BLB Charge Up
+2. Expected: an amber "Untagged hours" card listing each entry (date · person · hours)
+3. Pick a site on one row → Expected: that entry disappears from untagged and its hours appear under that site in the analytics; "Assign all to…" moves every remaining untagged entry at once
 - [ ] Pass  [ ] Fail
 
 **TC-08 — Planner charge-up shift requires a site**

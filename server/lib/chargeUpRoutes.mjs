@@ -12,10 +12,14 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { getCostModel } from "./costModelService.mjs";
-import { rollupBySubJob, categoryTotals, stripCost } from "./chargeUpService.mjs";
+import { rollupBySubJob, categoryTotals, stripCost, rollupByFinancialYear } from "./chargeUpService.mjs";
 
 const TABLE = "charge_up_jobs";
-const isMissingTable = (e) => /relation .* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
+// Match a missing table OR a missing column (charge_up_job_id before mig 145): PostgREST
+// surfaces a select-list gap as a "schema cache" error, but a column referenced only in a
+// filter/update reaches Postgres as raw 42703 "column ... does not exist" — cover both so
+// every charge-up route fails soft (migrationPending) instead of 500ing pre-migration.
+const isMissingTable = (e) => /relation .* does not exist|column .* does not exist|could not find the (table|column)|schema cache/i.test(String(e?.message || e || ""));
 
 export function registerChargeUpRoutes(app) {
   // List the sites under a charge-up category.
@@ -43,12 +47,13 @@ export function registerChargeUpRoutes(app) {
     const jobId = req.params.id;
     const isDirector = req.caller?.role === "admin";
     try {
-      const { data: ts } = await sb.from("timesheets").select("id").eq("carpentry_job_id", jobId).eq("status", "approved");
+      const { data: ts } = await sb.from("timesheets").select("id, date").eq("carpentry_job_id", jobId).eq("status", "approved");
       const tsIds = (ts || []).map((t) => t.id);
+      const dateByTs = new Map((ts || []).map((t) => [t.id, t.date]));
       let entries = [];
       if (tsIds.length) {
         const { data, error } = await sb.from("timesheet_entries")
-          .select("employee_id, charge_up_job_id, hours, cost_amount").in("timesheet_id", tsIds);
+          .select("timesheet_id, employee_id, charge_up_job_id, hours, cost_amount").in("timesheet_id", tsIds);
         if (error) throw error;   // charge_up_job_id column missing → migrationPending
         entries = data || [];
       }
@@ -74,9 +79,13 @@ export function registerChargeUpRoutes(app) {
         address: siteById.get(s.chargeUpJobId)?.address || null,
       }));
       const untagged = roll.find((s) => !s.chargeUpJobId) || null;
-      ok(res, { subJobs, untagged, categoryTotals: categoryTotals(roll), canViewCost: isDirector });
+      // by-financial-year rollup WITH charge-out $ (the older internal-cost-summary has cost+hours only)
+      const fyInput = entries.map((e) => ({ date: dateByTs.get(e.timesheet_id), employeeId: e.employee_id, hours: e.hours, cost: e.cost_amount }));
+      let byFy = rollupByFinancialYear(fyInput, rateByEmp);
+      if (!isDirector) byFy = byFy.map((f) => ({ ...f, cost: null }));
+      ok(res, { subJobs, untagged, byFy, categoryTotals: categoryTotals(roll), canViewCost: isDirector });
     } catch (e) {
-      if (isMissingTable(e)) return ok(res, { subJobs: [], untagged: null, categoryTotals: { hours: 0, cost: 0, chargeOut: 0, sites: 0 }, migrationPending: true });
+      if (isMissingTable(e)) return ok(res, { subJobs: [], untagged: null, byFy: [], categoryTotals: { hours: 0, cost: 0, chargeOut: 0, sites: 0 }, migrationPending: true });
       err(res, 500, "Could not build the charge-up summary");
       console.error("[charge-up summary]", e?.message || e);
     }
@@ -150,6 +159,64 @@ export function registerChargeUpRoutes(app) {
       if (isMissingTable(e)) return err(res, 503, "Charge-up sites not enabled yet — apply migration 145", "MIGRATION_PENDING");
       err(res, 500, translateDbError(e));
       console.error("[charge-up DELETE]", e?.message || e);
+    }
+  });
+
+  // ── Untagged hours (charge-up entries logged before/without a site) ──────────
+  // List approved charge-up timesheet entries that have no site yet, so an admin can
+  // assign them to a site retroactively (e.g. hours logged before the Location picker existed).
+  app.get("/api/carpentry/jobs/:id/charge-up-untagged", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    const jobId = req.params.id;
+    try {
+      const { data: ts } = await sb.from("timesheets").select("id, date").eq("carpentry_job_id", jobId).eq("status", "approved");
+      const tsIds = (ts || []).map((t) => t.id);
+      const dateByTs = new Map((ts || []).map((t) => [t.id, t.date]));
+      if (!tsIds.length) return ok(res, { untaggedEntries: [] });
+      const { data: rows, error } = await sb.from("timesheet_entries")
+        .select("id, timesheet_id, employee_id, hours").in("timesheet_id", tsIds).is("charge_up_job_id", null);
+      if (error) throw error;   // charge_up_job_id column missing → migrationPending
+      const empIds = [...new Set((rows || []).map((r) => r.employee_id).filter(Boolean))];
+      const { data: emps } = empIds.length ? await sb.from("employees").select("id, name").in("id", empIds) : { data: [] };
+      const nameById = new Map((emps || []).map((e) => [e.id, e.name]));
+      const untaggedEntries = (rows || [])
+        .map((r) => ({ entryId: r.id, date: dateByTs.get(r.timesheet_id) || null, employeeName: nameById.get(r.employee_id) || "Unknown", hours: Number(r.hours) || 0 }))
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.employeeName.localeCompare(b.employeeName));
+      ok(res, { untaggedEntries });
+    } catch (e) {
+      if (isMissingTable(e)) return ok(res, { untaggedEntries: [], migrationPending: true });
+      err(res, 500, "Could not load untagged hours");
+      console.error("[charge-up untagged]", e?.message || e);
+    }
+  });
+
+  // Assign untagged entries to a site. Validates the site belongs to this job and that the
+  // entries belong to this job's approved timesheets (so we never re-tag someone else's hours).
+  app.post("/api/carpentry/jobs/:id/charge-up-assign", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    const jobId = req.params.id;
+    const chargeUpJobId = req.body?.chargeUpJobId;
+    const entryIds = Array.isArray(req.body?.entryIds) ? req.body.entryIds.filter(Boolean) : [];
+    if (!chargeUpJobId) return err(res, 400, "Pick a site to assign to");
+    if (!entryIds.length) return err(res, 400, "No hours selected");
+    try {
+      // site must belong to this job (any status — you can assign to an archived site's history)
+      const { data: site } = await sb.from(TABLE).select("id").eq("id", chargeUpJobId).eq("carpentry_job_id", jobId).maybeSingle();
+      if (!site) return err(res, 400, "That site isn't part of this job");
+      // entries must belong to this job's approved timesheets
+      const { data: ts } = await sb.from("timesheets").select("id").eq("carpentry_job_id", jobId).eq("status", "approved");
+      const tsIds = (ts || []).map((t) => t.id);
+      if (!tsIds.length) return err(res, 400, "No approved hours to assign");
+      const { data: updated, error } = await sb.from("timesheet_entries")
+        .update({ charge_up_job_id: chargeUpJobId }).in("id", entryIds).in("timesheet_id", tsIds).select("id");
+      if (error) throw error;
+      ok(res, { assigned: (updated || []).length });
+    } catch (e) {
+      if (isMissingTable(e)) return err(res, 503, "Charge-up sites not enabled yet — apply migration 145", "MIGRATION_PENDING");
+      err(res, 500, translateDbError(e));
+      console.error("[charge-up assign]", e?.message || e);
     }
   });
 }

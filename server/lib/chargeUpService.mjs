@@ -59,6 +59,34 @@ export function stripCost(rollup = [], isDirector = false) {
   return rollup.map((s) => ({ ...s, cost: null, byPerson: s.byPerson.map((p) => ({ ...p, cost: null })) }));
 }
 
+// AU financial year label for a YYYY-MM-DD date. The FY runs 1 Jul → 30 Jun and is
+// labelled by its start year + the last two digits of the end year, e.g. "2025/26".
+export function auFinancialYear(dateStr) {
+  if (!dateStr) return null;
+  const [y, m] = String(dateStr).split("-").map(Number);
+  if (!y || !m) return null;
+  const startYear = m >= 7 ? y : y - 1;
+  return `${startYear}/${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+// Roll charge-up entries up by AU financial year, WITH charge-out $ (which the older
+// internal-cost-summary lacks). entry: { date, employeeId, hours, cost }
+export function rollupByFinancialYear(entries = [], chargeUpRateByEmployee = {}) {
+  const byFy = new Map();
+  for (const e of entries) {
+    const fy = auFinancialYear(e.date);
+    if (!fy) continue;
+    const hours = Number(e.hours) || 0;
+    const rate = Number(chargeUpRateByEmployee[e.employeeId]) || 0;
+    if (!byFy.has(fy)) byFy.set(fy, { fy, hours: 0, cost: 0, chargeOut: 0 });
+    const f = byFy.get(fy);
+    f.hours += hours; f.cost += Number(e.cost) || 0; f.chargeOut += hours * rate;
+  }
+  return [...byFy.values()]
+    .map((f) => ({ fy: f.fy, hours: round1(f.hours), cost: round2(f.cost), chargeOut: round2(f.chargeOut) }))
+    .sort((a, b) => a.fy.localeCompare(b.fy));
+}
+
 // Planner site-choice validation for a charge-up allocation. Pure so the route stays
 // declarative (no business rule in the handler). "Charge-up shifts always need a job
 // address" — a shift on the BL-CHARGEUP category MUST name a site, but only once the

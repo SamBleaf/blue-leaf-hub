@@ -1,6 +1,6 @@
 // Charge Up service — unit tests. Run: node scripts/tests/charge-up.test.mjs
 // No framework — plain assertions, exits 1 on any failure.
-import { rollupBySubJob, categoryTotals, stripCost, validateChargeUpSite } from "../../server/lib/chargeUpService.mjs";
+import { rollupBySubJob, categoryTotals, stripCost, validateChargeUpSite, auFinancialYear, rollupByFinancialYear } from "../../server/lib/chargeUpService.mjs";
 
 let pass = 0, fail = 0;
 function eq(a, e, name) { const A = JSON.stringify(a), E = JSON.stringify(e); if (A === E) pass++; else { fail++; console.error(`  ✗ ${name}\n      expected ${E}\n      got      ${A}`); } }
@@ -46,6 +46,23 @@ eq(validateChargeUpSite({ isChargeUpJob: true, activeSiteIds: [], chargeUpJobId:
 ok(!!validateChargeUpSite({ isChargeUpJob: true, activeSiteIds: ["S1", "S2"], chargeUpJobId: null }).error, "charge-up with sites but none picked → required error");
 ok(!!validateChargeUpSite({ isChargeUpJob: true, activeSiteIds: ["S1"], chargeUpJobId: "S9" }).error, "picked a site that isn't part of the job → error");
 eq(validateChargeUpSite({ isChargeUpJob: true, activeSiteIds: ["S1", "S2"], chargeUpJobId: "S2" }), { chargeUpJobId: "S2" }, "valid site choice → stored");
+
+// ── AU financial year labelling ──
+eq(auFinancialYear("2026-07-19"), "2026/27", "July → new FY starts");
+eq(auFinancialYear("2026-06-30"), "2025/26", "June → prior FY");
+eq(auFinancialYear("2027-01-05"), "2026/27", "Jan → FY started previous July");
+eq(auFinancialYear(null), null, "no date → null");
+
+// ── by-FY rollup with charge-out ──
+const fyRates = { A: 100, B: 80 };
+const fyRoll = rollupByFinancialYear([
+  { date: "2026-06-20", employeeId: "A", hours: 10, cost: 250 }, // FY 2025/26
+  { date: "2026-07-02", employeeId: "A", hours: 5, cost: 125 },  // FY 2026/27
+  { date: "2026-08-10", employeeId: "B", hours: 4, cost: 88 },   // FY 2026/27
+], fyRates);
+eq(fyRoll.map((f) => f.fy), ["2025/26", "2026/27"], "FYs sorted ascending");
+eq(fyRoll[0], { fy: "2025/26", hours: 10, cost: 250, chargeOut: 1000 }, "FY 2025/26 = 10h × $100");
+eq(fyRoll[1], { fy: "2026/27", hours: 9, cost: 213, chargeOut: 820 }, "FY 2026/27 = 5×100 + 4×80");
 
 console.log(`charge-up: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

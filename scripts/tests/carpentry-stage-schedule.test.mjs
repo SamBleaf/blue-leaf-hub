@@ -1,7 +1,7 @@
 // Carpentry stage-schedule service — unit tests. Run: node scripts/tests/carpentry-stage-schedule.test.mjs
 // Budget-driven: stages ARE the labour subsections; durations come from the cost model.
 import {
-  seedStageSchedule, stagesFromBudget, costModelStageDays, mergeActuals, resolveIncludedStages,
+  seedStageSchedule, stagesFromBudget, costModelStageDays, mergeActuals, resolveIncludedStages, subsectionsForStages,
 } from "../../server/lib/carpentryStageScheduleService.mjs";
 
 let pass = 0, fail = 0;
@@ -70,6 +70,28 @@ eq(merged[1].actual_start, "2026-08-29", "actuals match by workforce_task_catego
 
 // ── resolveIncludedStages still works (taxonomy helper) ──
 eq(resolveIncludedStages([{ canonical_key: "wall_framing" }, { canonical_key: "doors" }]), ["wall_framing", "second_fix"], "resolveIncludedStages taxonomy");
+
+// ── subsectionsForStages — derived, per-subsection durations (B2) ──
+const SUB_BUDGETS = [
+  { id: "b1", category_name: "First Fix Framing", cost_type: "labour", budget_ex_gst: 38819, workforce_task_category: "first_fix_framing" },
+  { id: "bm", category_name: "Window supply", cost_type: "material", budget_ex_gst: 5000, workforce_task_category: null },
+];
+const SUB_LINES = [
+  { carpentry_job_budget_id: "b1", description: "Wall framing", canonical_key: "wall_framing", task_category: "first_fix_framing", sell_ex_gst: 20000 },
+  { carpentry_job_budget_id: "b1", description: "Roof framing", canonical_key: "roof_framing", task_category: "first_fix_framing", sell_ex_gst: 12000 },
+  { carpentry_job_budget_id: "b1", description: "Window install A", canonical_key: "windows_doors", task_category: "first_fix_framing", sell_ex_gst: 4000 },
+  { carpentry_job_budget_id: "b1", description: "Window install B", canonical_key: "windows_doors", task_category: "first_fix_framing", sell_ex_gst: 2819 },
+  { carpentry_job_budget_id: "b1", description: "Misc", canonical_key: null, task_category: "first_fix_framing", sell_ex_gst: 500 },
+  { carpentry_job_budget_id: "bm", description: "Window unit", canonical_key: "window_supply", task_category: null, sell_ex_gst: 5000 }, // material category → excluded
+];
+const subMap = subsectionsForStages(SUB_BUDGETS, SUB_LINES, cm, { first_fix_framing: 5 });
+eq(Object.keys(subMap), ["first_fix_framing"], "only the labour stage gets subsections (material excluded)");
+eq(subMap.first_fix_framing.map((s) => [s.label, s.sell, s.days]),
+  [["Wall framing", 20000, 8], ["Roof framing", 12000, 5], ["Window install A", 6819, 3], ["Misc", 500, 1]],
+  "subsections grouped by canonical_key, summed, cost-model days, sorted by sell desc; unmapped → its own bucket");
+ok(subMap.first_fix_framing[2].canonicalKey === "windows_doors", "windows_doors group merges both window line items");
+ok(subMap.first_fix_framing[3].canonicalKey === null, "unmapped line item keeps null canonicalKey");
+eq(subsectionsForStages(SUB_BUDGETS, SUB_LINES, null, {}).first_fix_framing[0].days, null, "no cost model → days null (never NaN)");
 
 console.log(`carpentry-stage-schedule: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
