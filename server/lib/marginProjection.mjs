@@ -46,11 +46,11 @@ export function categoryPctComplete({
     const el = scheduleElapsed(plannedStart, plannedEnd, today);
     if (el != null) signals.push(el);
     if (allowableCost > 0) signals.push(clamp((Number(actual) || 0) / allowableCost, 0, 1));
-    if (!signals.length) return fallbackRatio != null ? clamp(fallbackRatio, 0, 0.99) : 0.5;
+    if (!signals.length) return Number.isFinite(fallbackRatio) ? clamp(fallbackRatio, 0, 0.99) : 0.5;
     return clamp(signals.reduce((a, b) => a + b, 0) / signals.length, 0, 0.99);
   }
   if (stageStatus === "planned") return 0;
-  return fallbackRatio; // may be null
+  return Number.isFinite(fallbackRatio) ? fallbackRatio : null; // non-finite → no signal
 }
 
 // Target-anchored projection: projected final cost = spent-so-far + the allowable cost for the
@@ -63,7 +63,8 @@ export function categoryPctComplete({
 //
 // → { projectedCost, projectedMarginPct, flag }  (nulls when there's no completion signal)
 export function projectMargin({ budget = 0, actual = 0, pctComplete = null, targetPct = 0.25 } = {}) {
-  if (!(budget > 0) || pctComplete == null) return { projectedCost: null, projectedMarginPct: null, flag: null };
+  // Non-finite pct (null OR NaN) → no completion signal, so no projection (never a phantom 100%).
+  if (!(budget > 0) || !Number.isFinite(pctComplete)) return { projectedCost: null, projectedMarginPct: null, flag: null };
   const pct = clamp(pctComplete, 0, 1);
   const spent = Number(actual) || 0;
   const allowableCost = budget * (1 - targetPct);

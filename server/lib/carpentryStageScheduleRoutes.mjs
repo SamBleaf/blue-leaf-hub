@@ -157,8 +157,9 @@ export function registerCarpentryStageScheduleRoutes(app) {
 
       const cm = await getCostModel(sb).catch(() => null);
       // Auto-recompute the end from the value-based (crew-scaled) duration when the START moves or the
-      // CREW changes — UNLESS the caller explicitly set an end (a manual drag/resize keeps its span).
-      if (("plannedStart" in req.body || crewChanged) && !("plannedEnd" in req.body)) {
+      // CREW changes — UNLESS the caller explicitly set an end (a manual drag/resize keeps its span) or
+      // the stage is LOCKED (its dates are pinned; unlock to move it).
+      if (("plannedStart" in req.body || crewChanged) && !("plannedEnd" in req.body) && !cur.locked) {
         const start = ("plannedStart" in req.body) ? patch.planned_start : cur.planned_start;
         let crew = crewChanged ? crewVal : (hasCrewCol ? cur.crew_size : null);
         if (crew == null) {
@@ -168,7 +169,11 @@ export function registerCarpentryStageScheduleRoutes(app) {
         const days = costModelStageDays(cur.labour_sell, cm, crew);
         if (start && days) patch.planned_end = addWorkingDays(start, days - 1, {});
       }
-      if (patch.planned_start && patch.planned_end && patch.planned_end < patch.planned_start) {
+      // Reversed-window guard — compare the EFFECTIVE dates (patched value, else current), so an
+      // end-only edit (End date picker sends {plannedEnd} alone) can't write end < start.
+      const effStart = ("planned_start" in patch) ? patch.planned_start : cur.planned_start;
+      const effEnd = ("planned_end" in patch) ? patch.planned_end : cur.planned_end;
+      if (effStart && effEnd && effEnd < effStart) {
         return err(res, 400, "Stage end cannot be before its start");
       }
       if (!Object.keys(patch).length) return ok(res, { stage: withCrewDays([{ ...rowToCamel(cur), stageLabel: cur.label || stageLabel(cur.stage_key) }], cm, {})[0] });

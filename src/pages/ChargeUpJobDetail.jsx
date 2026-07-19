@@ -129,6 +129,35 @@ export default function ChargeUpJobDetail({ job }) {
         </div>
       )}
 
+      {/* ① by-financial-year breakdown */}
+      {!migrationPending && summary?.byFy?.length > 0 && (
+        <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+          <h2 className="text-sm font-semibold text-ink px-4 py-2 border-b border-hairline">By financial year</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-muted border-b border-hairline">
+                  <th className="px-4 py-2">Financial year</th>
+                  <th className="px-2 py-2 text-right">Hours</th>
+                  <th className="px-2 py-2 text-right">Charge-out</th>
+                  {showCost && <th className="px-4 py-2 text-right">Cost</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.byFy.map((f) => (
+                  <tr key={f.fy} className="border-b border-hairline/60 last:border-0">
+                    <td className="px-4 py-2 font-medium text-ink">FY {f.fy}</td>
+                    <td className="px-2 py-2 text-right">{f.hours}</td>
+                    <td className="px-2 py-2 text-right font-medium text-ink">{fmt$(f.chargeOut)}</td>
+                    {showCost && <td className="px-4 py-2 text-right text-muted">{fmt$(f.cost)}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Add a site */}
       {!migrationPending && (
         <div className="rounded-card border border-hairline bg-surface p-4">

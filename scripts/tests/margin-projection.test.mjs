@@ -33,6 +33,8 @@ eq(projectMargin({ budget: 10000, actual: 2000, pctComplete: 0.5 }), { projected
 eq(projectMargin({ budget: 10000, actual: 1000, pctComplete: 0.5 }), { projectedCost: 7500, projectedMarginPct: 25, flag: "actuals_incomplete" }, "in-progress, logged cost too thin for the claimed saving → held at target");
 eq(projectMargin({ budget: 0, actual: 0, pctComplete: 0.5 }), { projectedCost: null, projectedMarginPct: null, flag: null }, "no budget → null");
 eq(projectMargin({ budget: 10000, actual: 0, pctComplete: null }), { projectedCost: null, projectedMarginPct: null, flag: null }, "no completion signal → null (unchanged for unscheduled/untasked lines)");
+eq(projectMargin({ budget: 10000, actual: 0, pctComplete: NaN }), { projectedCost: null, projectedMarginPct: null, flag: null }, "NaN pct (e.g. undefined/N task ratio) → null, NOT a resurrected phantom 100%");
+eq(categoryPctComplete({ stageStatus: null, fallbackRatio: NaN }), null, "NaN fallbackRatio → null, not NaN");
 eq(projectMargin({ budget: 10000, actual: 3000, pctComplete: 0.4, targetPct: 0.20 }), { projectedCost: 7800, projectedMarginPct: 22, flag: null }, "material target 20%: allowable 8000, 3000 + 8000×0.6 = 7800 → 22%");
 
 console.log(`margin-projection: ${pass} passed, ${fail} failed`);

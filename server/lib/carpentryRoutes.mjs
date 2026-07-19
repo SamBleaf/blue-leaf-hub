@@ -1827,7 +1827,9 @@ export function registerCarpentryRoutes(app) {
         if (t.status === "done") taskDone[t.category] = (taskDone[t.category] || 0) + 1;
       }
       // Site-task ratio 0..1 (or null) — now only the FALLBACK for a category with no stage row.
-      const taskRatioFor = (cat) => (taskTotal[cat] > 0 ? taskDone[cat] / taskTotal[cat] : null);
+      // `taskDone[cat]` is undefined when a category has tasks but none are done — coerce to 0 so
+      // the ratio is 0 (not undefined/N = NaN, which would slip past the projection's null-guard).
+      const taskRatioFor = (cat) => (taskTotal[cat] > 0 ? (taskDone[cat] || 0) / taskTotal[cat] : null);
 
       // Sam's model (2026-07-19): % complete is driven by the STAGE SCHEDULE (mig 144), not the
       // site-task checkboxes — a category whose stage reads 'complete' is 100% done regardless of
