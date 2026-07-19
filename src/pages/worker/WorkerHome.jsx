@@ -23,6 +23,8 @@ const STATUS_BADGE = {
 function allocJob(a) {
   if (!a) return null;
   // Workers need WHERE to go → lead with the address; the carpentry client name is the sub-label.
+  // BLB Charge Up: show the Planner-assigned site (still log against the carpentry job → pick location).
+  if (a.chargeUpJobId) return { id: a.carpentryJobId, type: "carpentry", name: a.chargeUpSiteLabel || "Charge Up", address: a.chargeUpSiteAddress || "", kind: "Charge Up" };
   if (a.carpentryJobId) return { id: a.carpentryJobId, type: "carpentry", name: a.carpentryJobAddress || a.carpentryJobClientName || "Carpentry job", address: (a.carpentryJobAddress && a.carpentryJobClientName) ? a.carpentryJobClientName : "", kind: "Carpentry" };
   if (a.projectId) return { id: a.projectId, type: "project", name: a.projectAddress || "Building site", address: "", kind: "Building" };
   return null;

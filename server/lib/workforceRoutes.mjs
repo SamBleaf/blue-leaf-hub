@@ -2931,6 +2931,7 @@ export function registerWorkforceRoutes(app) {
 
     const formatted = (data || []).map(formatAllocation);
     await attachAllocationColors(sb, formatted);
+    await attachChargeUpSites(sb, formatted);   // BLB Charge Up: show the specific site, not just the category
     const byDate = {};
     for (const a of formatted) byDate[a.allocationDate] = a;
     ok(res, { today: byDate[today] ?? null, tomorrow: byDate[tomorrow] ?? null });
@@ -2954,6 +2955,7 @@ export function registerWorkforceRoutes(app) {
     if (error) return err(res, 500, translateDbError(error));
     const allocations = (data || []).map(formatAllocation);
     await attachAllocationColors(sb, allocations);
+    await attachChargeUpSites(sb, allocations);   // BLB Charge Up: show the specific site, not just the category
     ok(res, { weekStart: from, weekEnd: to, allocations });
   });
 

@@ -13,6 +13,8 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 // Where the worker is scheduled — address leads (where to go); carpentry client is the sub-label.
 function shiftSite(a) {
   if (!a) return { name: "", sub: "", kind: "" };
+  // BLB Charge Up: show the specific site the Planner assigned, not just "Charge Up".
+  if (a.chargeUpJobId) return { name: a.chargeUpSiteLabel || "Charge Up", sub: a.chargeUpSiteAddress || "", kind: "Charge Up" };
   if (a.carpentryJobId) return { name: a.carpentryJobAddress || a.carpentryJobClientName || "Carpentry job", sub: (a.carpentryJobAddress && a.carpentryJobClientName) ? a.carpentryJobClientName : "", kind: "Carpentry" };
   return { name: a.projectAddress || "Building site", sub: "", kind: "Building" };
 }
