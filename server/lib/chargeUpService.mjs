@@ -58,3 +58,24 @@ export function stripCost(rollup = [], isDirector = false) {
   if (isDirector) return rollup;
   return rollup.map((s) => ({ ...s, cost: null, byPerson: s.byPerson.map((p) => ({ ...p, cost: null })) }));
 }
+
+// Planner site-choice validation for a charge-up allocation. Pure so the route stays
+// declarative (no business rule in the handler). "Charge-up shifts always need a job
+// address" — a shift on the BL-CHARGEUP category MUST name a site, but only once the
+// category actually has active sites to choose from (else there's nothing to pick and
+// we fail soft to untagged, same as the PWA log-hours guard).
+//   isChargeUpJob : is the allocation's carpentry job the BL-CHARGEUP category?
+//   activeSiteIds : ids of the category's active charge_up_jobs (empty if none/pre-mig)
+//   chargeUpJobId : the site the caller picked (or null)
+// → { chargeUpJobId }  (the value to store — null when not a charge-up allocation)
+// → { error }          (reject: a required-but-missing or a not-a-member site)
+export function validateChargeUpSite({ isChargeUpJob = false, activeSiteIds = [], chargeUpJobId = null } = {}) {
+  if (!isChargeUpJob) return { chargeUpJobId: null };          // ordinary allocation — never tagged
+  const active = new Set(activeSiteIds.filter(Boolean));
+  if (!chargeUpJobId) {
+    if (active.size === 0) return { chargeUpJobId: null };     // no sites yet → allow untagged
+    return { error: "Pick a charge-up site for this shift." };
+  }
+  if (!active.has(chargeUpJobId)) return { error: "That charge-up site isn't part of this job." };
+  return { chargeUpJobId };
+}

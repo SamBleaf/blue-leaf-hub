@@ -10,6 +10,14 @@ import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiRespons
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey, isStoragePath } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
+import { validateChargeUpSite } from "./chargeUpService.mjs";
+
+// BLB Charge Up category — an allocation to this carpentry job must name a site (address).
+const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
+// PostgREST reports a missing table/column via a schema-cache error, not the raw PG code.
+const chargeUpColMissing = (e) =>
+  !!e && (e.code === "42703" || e.code === "42P01" || e.code === "PGRST204" || e.code === "PGRST205" ||
+    /charge_up|could not find|schema cache|does not exist/i.test(e.message || ""));
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
 
@@ -525,7 +533,47 @@ function formatAllocation(row) {
     carpentryJobAddress: row.carpentry_jobs?.address ?? null,
     carpentryJobClientName: row.carpentry_jobs?.client_name ?? null,
     crewName: row.workforce_crews?.name ?? null,
+    // BLB Charge Up: which site this shift is on (label + address the crew sees).
+    // Present only when the allocation is tagged to a charge_up_jobs row (mig 146).
+    chargeUpJobId: base.chargeUpJobId ?? null,
+    chargeUpSiteLabel: null,
+    chargeUpSiteAddress: null,
   };
+}
+
+// Is this carpentry job the BLB Charge Up category? (cheap, cached per call site).
+async function isChargeUpJob(sb, carpentryJobId) {
+  if (!carpentryJobId) return false;
+  const { data } = await sb.from("carpentry_jobs").select("reference").eq("id", carpentryJobId).maybeSingle();
+  return data?.reference === CHARGE_UP_REFERENCE;
+}
+
+// Validate + resolve the site to store on a charge-up allocation. Fails soft (allows
+// untagged) before mig 145/146 is applied so the Planner never breaks. Delegates the
+// required/belongs-to rule to the pure validateChargeUpSite so there's no rule in the route.
+async function resolveAllocChargeUpSite(sb, carpentryJobId, chargeUpJobId) {
+  if (!(await isChargeUpJob(sb, carpentryJobId))) return { chargeUpJobId: null };
+  const { data: sites, error } = await sb.from("charge_up_jobs")
+    .select("id").eq("carpentry_job_id", carpentryJobId).eq("status", "active");
+  if (error) return chargeUpColMissing(error) ? { chargeUpJobId: null } : { error: translateDbError(error) };
+  return validateChargeUpSite({ isChargeUpJob: true, activeSiteIds: (sites || []).map((s) => s.id), chargeUpJobId });
+}
+
+// Attach each allocation's charge-up site label/address in one query (guarded — a missing
+// table/column pre-migration just leaves the labels null; ids still flow through).
+async function attachChargeUpSites(sb, allocations) {
+  const ids = [...new Set(allocations.map((a) => a.chargeUpJobId).filter(Boolean))];
+  if (!ids.length) return allocations;
+  const { data, error } = await sb.from("charge_up_jobs").select("id, site_label, address").in("id", ids);
+  if (error) return allocations; // pre-mig or transient — labels stay null, non-fatal
+  const byId = new Map((data || []).map((s) => [s.id, s]));
+  for (const a of allocations) {
+    if (!a.chargeUpJobId) continue;
+    const s = byId.get(a.chargeUpJobId);
+    a.chargeUpSiteLabel = s?.site_label ?? "(deleted site)";
+    a.chargeUpSiteAddress = s?.address ?? null;
+  }
+  return allocations;
 }
 
 // Planner palette keys, in the same order as src/lib/plannerColors.js PLANNER_PALETTE.
@@ -1510,7 +1558,8 @@ export function registerWorkforceRoutes(app) {
     if (carpentryJobId) q = q.eq("carpentry_job_id", carpentryJobId);
     const { data, error } = await q;
     if (error) return err(res, 500, translateDbError(error));
-    ok(res, { allocations: (data || []).map(formatAllocation) });
+    const allocations = await attachChargeUpSites(sb, (data || []).map(formatAllocation));
+    ok(res, { allocations });
   });
 
   app.post("/api/workforce/allocations", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -1526,6 +1575,9 @@ export function registerWorkforceRoutes(app) {
       .select("id").eq("employee_id", employeeId).eq("allocation_date", allocationDate).maybeSingle();
     if (existing) return err(res, 409, "This employee already has an allocation on that date", "DUPLICATE_ALLOCATION");
 
+    const cu = await resolveAllocChargeUpSite(sb, spine.carpentryJobId, req.body.chargeUpJobId ?? req.body.charge_up_job_id ?? null);
+    if (cu.error) return err(res, 400, cu.error);
+
     const crewId = req.body.crewId ?? req.body.crew_id ?? null;
     const row = {
       allocation_date: allocationDate,
@@ -1537,6 +1589,9 @@ export function registerWorkforceRoutes(app) {
       created_by: req.caller.id,
       updated_at: new Date().toISOString(),
     };
+    // Only include the column when a site is actually chosen, so the insert never references
+    // charge_up_job_id before mig 146 is applied (would 500 the whole Planner otherwise).
+    if (cu.chargeUpJobId) row.charge_up_job_id = cu.chargeUpJobId;
     const { data, error } = await sb.from("workforce_allocations").insert(row).select("id").single();
     if (error) {
       if (/duplicate key|unique constraint/i.test(error.message || "")) {
@@ -1621,7 +1676,7 @@ export function registerWorkforceRoutes(app) {
     for (const id of ids) {
       try { const full = await fetchAllocationById(sb, id); if (full) out.push(formatAllocation(full)); } catch { /* deleted mid-swap */ }
     }
-    return out;
+    return attachChargeUpSites(sb, out);
   }
 
   app.post("/api/workforce/allocations/assign", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -1632,7 +1687,19 @@ export function registerWorkforceRoutes(app) {
     if (!employeeId || !isUuid(employeeId)) return err(res, 400, "employeeId is required");
     const spine = parseJobSpine(req.body);
     if (spine.error) return err(res, 400, spine.error);
+    const cu = await resolveAllocChargeUpSite(sb, spine.carpentryJobId, req.body.chargeUpJobId ?? req.body.charge_up_job_id ?? null);
+    if (cu.error) return err(res, 400, cu.error);
     const notes = req.body.notes ?? null;
+    // The assign RPC replaces-or-inserts one (employee, date) cell but doesn't know about the
+    // charge-up site column; stamp it on the resulting row afterwards. Guarded so it never runs
+    // (nor references the column) unless a real site was chosen — safe before mig 146.
+    const tagSite = async (ids) => {
+      if (cu.chargeUpJobId) {
+        await sb.from("workforce_allocations").update({ charge_up_job_id: cu.chargeUpJobId })
+          .eq("employee_id", employeeId).eq("allocation_date", allocationDate);
+      }
+      return formatAllocIds(sb, ids);
+    };
     try {
       const { data, error } = await sb.rpc("workforce_allocation_assign", {
         p_employee: employeeId, p_date: allocationDate,
@@ -1642,15 +1709,17 @@ export function registerWorkforceRoutes(app) {
       if (error && !rpcMissing(error)) return err(res, 500, translateDbError(error));
       if (error) { // fallback (mig 143 not applied) — ordered ops, non-atomic
         await sb.from("workforce_allocations").delete().eq("employee_id", employeeId).eq("allocation_date", allocationDate);
-        const ins = await sb.from("workforce_allocations").insert({
+        const insRow = {
           employee_id: employeeId, allocation_date: allocationDate,
           project_id: spine.projectId, carpentry_job_id: spine.carpentryJobId,
           notes, created_by: req.caller.id, updated_at: new Date().toISOString(),
-        }).select("id").single();
+        };
+        if (cu.chargeUpJobId) insRow.charge_up_job_id = cu.chargeUpJobId;
+        const ins = await sb.from("workforce_allocations").insert(insRow).select("id").single();
         if (ins.error) return err(res, 500, translateDbError(ins.error));
         return ok(res, { allocations: await formatAllocIds(sb, [ins.data.id]) });
       }
-      return ok(res, { allocations: await formatAllocIds(sb, (data || []).map((r) => r.id)) });
+      return ok(res, { allocations: await tagSite((data || []).map((r) => r.id)) });
     } catch (e) { return err(res, 500, e.message); }
   });
 
@@ -1677,6 +1746,8 @@ export function registerWorkforceRoutes(app) {
           await sb.from("workforce_allocations").insert({
             employee_id: src.employee_id, allocation_date: src.allocation_date,
             project_id: tgt.project_id, carpentry_job_id: tgt.carpentry_job_id,
+            // preserve the displaced shift's charge-up site (undefined pre-mig → key omitted)
+            charge_up_job_id: tgt.charge_up_job_id ?? undefined,
             notes: tgt.notes, created_by: tgt.created_by, updated_at: new Date().toISOString(),
           });
         } else {

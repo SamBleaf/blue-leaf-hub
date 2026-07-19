@@ -31,10 +31,10 @@ Admin/supervisors set up the charge-up sites and read the per-site invoicing fig
 - **Cost** rolls up to the whole Charge Up category; **hours track per site + per person**.
 - **Charge-out $** per site = approved hours × each person's charge-up rate (from the cost model) — the ready-to-invoice figure. Internal cost is director-only; charge-out is shown to admin/supervisor.
 
-The Planner is unchanged — allocating someone to BLB Charge Up stays coarse; the site is chosen when they log hours.
+In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker** — a charge-up shift always names its site (address), so everyone can see where the boys are before they log hours. (The site is also confirmed when logging hours, so it's captured either way.)
 
 ## 4. Before you start
-- Migration 145 applied.
+- Migrations 145 (sites) and 146 (Planner shift → site link) applied.
 - The cost model synced (Workforce → Buildexact sync) for charge-out $ to compute.
 - Workers use the Worker app to log hours (they must have BLB Charge Up visible/assignable).
 
@@ -45,6 +45,11 @@ The Planner is unchanged — allocating someone to BLB Charge Up stays coarse; t
 2. Under **Add a charge-up site**, type the site/location (and an optional address/info the boys see).
 3. Click **Add site**. It appears in the list and in the workers' Location picker.
 4. Edit a site inline (click the label/address); **Archive** a finished site (its logged hours stay in the analytics; it's hidden from the picker).
+
+### Assign a charge-up shift in the Planner (admin/supervisor)
+1. Workforce → **Planner**. Drag **BLB Charge Up** onto a person's shift cell (or tap an empty cell on mobile and choose it).
+2. A **"Which charge-up site?"** sheet appears — pick the site (its address shows). The shift can't be saved without one.
+3. The cell then shows the **site** (not just "BLB Charge Up"), so the crew can see where they're going. Drag-fill across days / down workers copies that site; moving the shift keeps it.
 
 ### Log hours against a site (worker, Worker app)
 1. Log Hours → pick **Charge Up** in the Site dropdown.
@@ -77,7 +82,8 @@ Hours become part of the site's totals once the worker's timesheet is **approved
 ## 10. Automation notes
 - Sites CRUD: `GET/POST /api/carpentry/jobs/:id/charge-up-jobs`, `PATCH/DELETE /api/carpentry/charge-up-jobs/:id` (admin/supervisor). Analytics: `GET /api/carpentry/jobs/:id/charge-up-summary` (charge-out $ + per person; cost director-gated).
 - Worker: `/api/worker/jobs/:id/subtasks` returns `chargeUpSites` for BL-CHARGEUP; `POST /api/worker/timesheets` accepts + guards `charge_up_job_id`.
-- Rollup maths in `server/lib/chargeUpService.mjs` (no calc in routes/UI). Tables `charge_up_jobs` + `timesheet_entries.charge_up_job_id` (mig 145). Unit tests: `scripts/tests/charge-up.test.mjs`.
+- Planner: `POST /api/workforce/allocations/assign` (+ POST/move) accept `chargeUpJobId`; `resolveAllocChargeUpSite` requires a valid site when the allocation's job is BL-CHARGEUP and it has active sites (belongs-to via `validateChargeUpSite`, a pure helper). `workforce_allocations.charge_up_job_id` (mig 146) stores it; `GET /api/workforce/allocations` echoes `chargeUpSiteLabel`/`chargeUpSiteAddress`.
+- Rollup + Planner site-choice maths in `server/lib/chargeUpService.mjs` (no calc in routes/UI). Tables `charge_up_jobs` + `timesheet_entries.charge_up_job_id` (mig 145) + `workforce_allocations.charge_up_job_id` (mig 146). Unit tests: `scripts/tests/charge-up.test.mjs`.
 
 ## 11. Screenshots
 Not yet captured — capture on first live use (the site list + the by-site analytics table).
@@ -136,4 +142,12 @@ Next review: 2026-11-30
 **TC-07 — Graceful before migration / no sites**
 1. Before mig 145 (or a category with no sites): open BLB Charge Up; log hours to Charge Up
 2. Expected: an "apply 145" note (or no Location dropdown); logging still works untagged; no crash
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Planner charge-up shift requires a site**
+1. Workforce → Planner → drag BLB Charge Up onto a shift cell (mig 146 applied, ≥1 active site)
+2. Expected: a "Which charge-up site?" sheet; the shift isn't saved until a site is picked
+3. Pick a site → Expected: the cell shows the site label; a second GET shows `chargeUpSiteLabel` on that allocation
+4. Drag-fill the shift across days / down to another worker → Expected: the same site carries; move it → site stays
+5. With NO active sites (or before mig 146): Expected: a "add a charge-up site first" message (before mig, the shift saves untagged — no crash)
 - [ ] Pass  [ ] Fail

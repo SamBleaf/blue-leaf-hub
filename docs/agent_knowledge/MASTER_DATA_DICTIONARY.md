@@ -247,6 +247,7 @@ Condensed view (key columns):
 | `carpentry_stage_planned_start` / `_end` | Schedule | Versioned | Auto-layout (budget-driven), then edited by drag | `carpentry_job_stage_schedule` (mig 144); stage = budget subsection, duration from labour value ÷ team rate | workforce pipeline calendar, carpentry Schedule tab | Y | Y | N |
 | `carpentry_stage_actual_start` / `_end` | Schedule | **Generated** | Derived (timesheets by task_category) | approved `timesheet_entries` | workforce pipeline calendar | — | N | — |
 | `charge_up_job_id` (on timesheet_entries) | Labour | Static (per entry) | Worker submit (PWA Location pick) | `charge_up_jobs` (mig 145); the BLB Charge Up site the hour was worked at | charge-up analytics + invoicing | N | N | N |
+| `charge_up_job_id` (on workforce_allocations) | Labour | Static (per allocation) | Planner assign (site picker) | `charge_up_jobs` (mig 146, ON DELETE SET NULL); the BLB Charge Up site a shift is planned at | Planner shift label + crew visibility | N | N | N |
 | `target_margin` | BI | Versioned | Assigned | — | finance, pretender | Y | Y | Y |
 | `lead_source` | BI | Static | Sales/marketing | Lead form / attribution | marketing, reporting | N | Y | N |
 | `nearest_hospital` | Site Intel | Static | **Lookup** | Address geocode | WHS emergency | N | Y | N |

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
 import { PLANNER_PALETTE, resolveJobColor } from "../../lib/plannerColors.js";
+import { CHARGE_UP_REFERENCE } from "../../lib/constants.js";
 
 // W17-P4b — Planner drag-drop + colour redesign.
 // Advisory only: calls the W16 allocation routes + the job-colour routes; never a
@@ -135,6 +136,8 @@ export default function WorkforcePlannerTab() {
   const [moveMode, setMoveMode] = useState(null); // { alloc } — "tap a cell to move here"
   const [dupMode, setDupMode] = useState(null);   // { alloc } — "tap a cell to drop a COPY here"
   const [cellPicker, setCellPicker] = useState(null); // { empId, day } — tap-empty-cell job picker
+  const [chargeUpSites, setChargeUpSites] = useState([]); // active BLB Charge Up sites (for the shift's site picker)
+  const [sitePicker, setSitePicker] = useState(null); // { empId, day, jKey } — pick a charge-up site before the shift is saved
   const altRef = useRef(false); // desktop: hold Alt while dragging a chip → duplicate instead of move
   const [fill, setFill] = useState(null); // { empId, jKey, anchorIdx, endIdx, prevRightIdx } — across days
   const [fillDown, setFillDown] = useState(null); // { day, dayIdx, jKey, anchorRow, endRow, prevBottomRow } — down workers
@@ -210,6 +213,20 @@ export default function WorkforcePlannerTab() {
     ];
     return list;
   }, [projects, carpJobs]);
+  // BLB Charge Up is a carpentry job (reference BL-CHARGEUP) used as a category of sites. A shift
+  // on it must name a site (address), so we fetch its active sites and gate assignment on a pick.
+  const chargeUpJKey = useMemo(() => {
+    const j = carpJobs.find((c) => c.reference === CHARGE_UP_REFERENCE);
+    return j ? `carpentry:${j.id}` : null;
+  }, [carpJobs]);
+  useEffect(() => {
+    if (!chargeUpJKey) { setChargeUpSites([]); return; }
+    const id = chargeUpJKey.split(":")[1];
+    authFetch(`/api/carpentry/jobs/${id}/charge-up-jobs`).then(json)
+      .then((j) => { if (j.ok) setChargeUpSites((j.chargeUpJobs || []).filter((s) => s.status === "active")); })
+      .catch(() => {});
+  }, [chargeUpJKey]);
+  const siteLabelById = useMemo(() => { const m = {}; for (const s of chargeUpSites) m[s.id] = s.siteLabel; return m; }, [chargeUpSites]);
   // Board membership (W17-P4c, opt-in): a job is on the board if it's been added (onBoard)
   // OR it already has a shift this week (so nothing scheduled ever disappears).
   const allocKeys = useMemo(() => new Set(allocations.map((a) => allocJobKey(a)).filter(Boolean)), [allocations]);
@@ -255,18 +272,27 @@ export default function WorkforcePlannerTab() {
 
   // Atomic assign (replace-or-insert for one cell) + delete. Fill/duplicate use assignReq so they never
   // hit the old POST's 409 on an occupied cell, and apply the returned rows (no full-week refetch = no lag).
-  const assignReq = (empId, day, jKey) =>
-    authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey) }) }).then(json);
+  const assignReq = (empId, day, jKey, siteId = null) =>
+    authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), ...(siteId ? { chargeUpJobId: siteId } : {}) }) }).then(json);
   const del = (id) => authFetch(`/api/workforce/allocations/${id}`, { method: "DELETE" }).then(json);
 
-  async function assignFromLegend(jKey, empId, day) {
+  // A charge-up shift always needs a site (address). If one wasn't chosen, open the site picker
+  // and defer the assign until the user picks; every add path funnels through here.
+  function needsSite(jKey, siteId) { return jKey === chargeUpJKey && !siteId; }
+
+  async function assignFromLegend(jKey, empId, day, siteId = null) {
+    if (needsSite(jKey, siteId)) {
+      if (!chargeUpSites.length) { setMsg({ type: "error", text: "Add a charge-up site first — open BLB Charge Up to create one." }); return; }
+      setSitePicker({ empId, day, jKey });   // pick a site, then re-enter with siteId
+      return;
+    }
     const existing = allocMap[`${empId}|${day}`];
-    if (existing && allocJobKey(existing) === jKey) return;
+    if (existing && allocJobKey(existing) === jKey && (existing.chargeUpJobId || null) === (siteId || null)) return;
     setMsg(null); setBusy(true);
-    const tmp = { id: `tmp-${empId}-${day}-${Date.now()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null };
+    const tmp = { id: `tmp-${empId}-${day}-${Date.now()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null };
     setAllocations((prev) => [...prev.filter((a) => !(a.employeeId === empId && a.allocationDate === day)), tmp]); // optimistic
     try {
-      const r = await authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey) }) }).then(json);
+      const r = await assignReq(empId, day, jKey, siteId);
       if (r.ok) applyAllocations(r.allocations);              // atomic replace-or-insert → server truth
       else { setMsg({ type: "error", text: r.error || "Could not assign." }); loadAllocations(true); }
     } catch { setMsg({ type: "error", text: "Network error." }); loadAllocations(true); } finally { setBusy(false); }
@@ -290,17 +316,17 @@ export default function WorkforcePlannerTab() {
   }
 
   // Fill / deduct across a row: days anchor..end get the job; days end+1..prevRight (this job) are removed.
-  async function fillCommit(empId, jKey, anchorIdx, endIdx, prevRightIdx) {
+  async function fillCommit(empId, jKey, anchorIdx, endIdx, prevRightIdx, siteId = null) {
     const creates = [], removes = [];
     for (let i = anchorIdx; i <= endIdx; i++) { if (!allocMap[`${empId}|${days[i]}`]) creates.push(days[i]); }         // fill empties only
     for (let i = endIdx + 1; i <= prevRightIdx; i++) { const c = allocMap[`${empId}|${days[i]}`]; if (c && allocJobKey(c) === jKey) removes.push(c); } // deduct the trailing run
     if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
     const removeIds = new Set(removes.map((r) => r.id));
-    const temps = creates.map((day) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null }));
+    const temps = creates.map((day) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null }));
     setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const results = await Promise.all([...creates.map((day) => assignReq(empId, day, jKey)), ...removes.map((r) => del(r.id))]);
+      const results = await Promise.all([...creates.map((day) => assignReq(empId, day, jKey, siteId)), ...removes.map((r) => del(r.id))]);
       const returned = results.flatMap((r) => r.allocations || []);
       if (returned.length) applyAllocations(returned);
       if (results.some((r) => !r.ok)) loadAllocations(true);
@@ -400,7 +426,7 @@ export default function WorkforcePlannerTab() {
     if (!o || o.kind !== "cell") return;
     if (a.kind === "legend") assignFromLegend(a.jKey, o.empId, o.day);
     else if (a.kind === "chip") {
-      if (altRef.current || evt.activatorEvent?.altKey) assignFromLegend(allocJobKey(a.alloc), o.empId, o.day); // Alt-drag = duplicate (original stays)
+      if (altRef.current || evt.activatorEvent?.altKey) assignFromLegend(allocJobKey(a.alloc), o.empId, o.day, a.alloc.chargeUpJobId || null); // Alt-drag = duplicate (original stays; carries its site)
       else moveChip(a.alloc, o.empId, o.day);
     }
   }
@@ -415,7 +441,7 @@ export default function WorkforcePlannerTab() {
     const anchorIdx = dIdx;
     let prevRightIdx = dIdx;
     while (prevRightIdx < 6 && allocJobKey(allocMap[`${empId}|${days[prevRightIdx + 1]}`]) === jKey) prevRightIdx++;
-    setFill({ empId, jKey, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
+    setFill({ empId, jKey, siteId: alloc.chargeUpJobId || null, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
     e.target.setPointerCapture?.(e.pointerId);
     // Snapshot this row's cell rects ONCE, then hit-test with pure maths + rAF — no elementFromPoint
     // per pointermove (that forced a sync layout every move = the "laggy control" stutter).
@@ -441,24 +467,24 @@ export default function WorkforcePlannerTab() {
       document.removeEventListener("pointerup", onUp);
       const f = fillRef.current;
       setFill(null);
-      if (f) fillCommit(f.empId, f.jKey, f.anchorIdx, f.endIdx, f.prevRightIdx);
+      if (f) fillCommit(f.empId, f.jKey, f.anchorIdx, f.endIdx, f.prevRightIdx, f.siteId);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
   }
 
   // Duplicate downwards: copy a shift down the day-column to other workers (drag back up = deduct).
-  async function fillDownCommit(day, jKey, anchorRow, endRow, prevBottomRow) {
+  async function fillDownCommit(day, jKey, anchorRow, endRow, prevBottomRow, siteId = null) {
     const creates = [], removes = [];
     for (let r = anchorRow; r <= endRow; r++) { const emp = employees[r]; if (emp && !allocMap[`${emp.id}|${day}`]) creates.push(emp.id); }
     for (let r = endRow + 1; r <= prevBottomRow; r++) { const emp = employees[r]; if (!emp) continue; const c = allocMap[`${emp.id}|${day}`]; if (c && allocJobKey(c) === jKey) removes.push(c); }
     if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
     const removeIds = new Set(removes.map((r) => r.id));
-    const temps = creates.map((empId) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), notes: null }));
+    const temps = creates.map((empId) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null }));
     setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const results = await Promise.all([...creates.map((empId) => assignReq(empId, day, jKey)), ...removes.map((r) => del(r.id))]);
+      const results = await Promise.all([...creates.map((empId) => assignReq(empId, day, jKey, siteId)), ...removes.map((r) => del(r.id))]);
       const returned = results.flatMap((r) => r.allocations || []);
       if (returned.length) applyAllocations(returned);
       if (results.some((r) => !r.ok)) loadAllocations(true);
@@ -473,7 +499,7 @@ export default function WorkforcePlannerTab() {
     if (anchorRow < 0) return;
     let prevBottomRow = anchorRow;
     while (prevBottomRow < employees.length - 1 && allocJobKey(allocMap[`${employees[prevBottomRow + 1].id}|${day}`]) === jKey) prevBottomRow++;
-    setFillDown({ day, dayIdx, jKey, anchorRow, endRow: prevBottomRow, prevBottomRow });
+    setFillDown({ day, dayIdx, jKey, siteId: alloc.chargeUpJobId || null, anchorRow, endRow: prevBottomRow, prevBottomRow });
     e.target.setPointerCapture?.(e.pointerId);
     // Snapshot this day-column's cell rects ONCE (indexed by employee row) → maths hit-test + rAF.
     const rects = [];
@@ -501,7 +527,7 @@ export default function WorkforcePlannerTab() {
       document.removeEventListener("pointerup", onUp);
       const f = fillDownRef.current;
       setFillDown(null);
-      if (f) fillDownCommit(f.day, f.jKey, f.anchorRow, f.endRow, f.prevBottomRow);
+      if (f) fillDownCommit(f.day, f.jKey, f.anchorRow, f.endRow, f.prevBottomRow, f.siteId);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
@@ -525,12 +551,12 @@ export default function WorkforcePlannerTab() {
     setChipMenu({ alloc, x: x - (wrap?.left || 0), y: y - (wrap?.top || 0) });
   }
   function chipClicked(alloc, e) {
-    if (dupMode) { const jk = allocJobKey(dupMode.alloc); setDupMode(null); assignFromLegend(jk, alloc.employeeId, alloc.allocationDate); return; }
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; setDupMode(null); assignFromLegend(jk, alloc.employeeId, alloc.allocationDate, sid); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (src.id !== alloc.id) moveChip(src, alloc.employeeId, alloc.allocationDate); return; }
     openNotes(alloc, e);
   }
   function onCellPick(empId, day) {
-    if (dupMode) { const jk = allocJobKey(dupMode.alloc); setDupMode(null); assignFromLegend(jk, empId, day); return; }
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; setDupMode(null); assignFromLegend(jk, empId, day, sid); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (!(src.employeeId === empId && src.allocationDate === day)) moveChip(src, empId, day); return; }
     if (!allocMap[`${empId}|${day}`]) { setChipMenu(null); setCellPicker({ empId, day }); }
   }
@@ -726,7 +752,7 @@ export default function WorkforcePlannerTab() {
                         <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} picking={!!moveMode || !!dupMode} onPick={onCellPick} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
-                              <ShiftChip alloc={a} label={labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
+                              <ShiftChip alloc={a} label={a.chargeUpJobId ? (a.chargeUpSiteLabel || siteLabelById[a.chargeUpJobId] || labelFor(jKey)) : labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
                               <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeAlloc(a); }}
                                 className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-hairline text-muted text-[10px] leading-none opacity-0 hover:opacity-100 focus:opacity-100" title="Remove" aria-label="Remove allocation">×</button>
                             </div>
@@ -807,6 +833,32 @@ export default function WorkforcePlannerTab() {
                       <span className="text-sm truncate" style={{ color: c.text }}>{j.label}</span>
                     </button>
                   ); })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Charge-up site picker (bottom sheet) — a BLB Charge Up shift must name its site */}
+        {sitePicker && (
+          <div className="fixed inset-0 z-50 flex items-end" onClick={() => setSitePicker(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative w-full bg-white rounded-t-2xl p-4 max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold text-ink">Which charge-up site?</p>
+                <button type="button" onClick={() => setSitePicker(null)} className="text-sm text-muted">Cancel</button>
+              </div>
+              <p className="text-[11px] text-muted mb-2">Charge-up shifts always need a site address — pick where the work is.</p>
+              {chargeUpSites.length === 0 ? <p className="text-xs text-muted py-4">No active charge-up sites — add one in BLB Charge Up first.</p> : (
+                <div className="space-y-1.5">
+                  {chargeUpSites.map((s) => (
+                    <button key={s.id} type="button"
+                      onClick={() => { const { empId, day, jKey } = sitePicker; setSitePicker(null); vibrate(8); assignFromLegend(jKey, empId, day, s.id); }}
+                      className="w-full flex flex-col items-start min-h-[48px] justify-center px-3 py-2 rounded-lg border border-hairline text-left hover:bg-page">
+                      <span className="text-sm text-ink truncate">{s.siteLabel}</span>
+                      {s.address ? <span className="text-[11px] text-muted truncate">{s.address}</span> : null}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
