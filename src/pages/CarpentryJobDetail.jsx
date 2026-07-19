@@ -2167,6 +2167,11 @@ function SubtaskSections({ line, jobId, onChanged }) {
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
               <span className="text-xs font-semibold text-ink">{secLabel(k)}<span className="text-muted font-normal"> · {rows.length} line{rows.length > 1 ? "s" : ""}</span></span>
               <div className="flex items-center gap-2">
+                {line.subtaskActuals?.[k]?.actual != null && (
+                  <span className="text-[11px] text-emerald-700 tabular-nums whitespace-nowrap" title="Actual from approved timesheets logged against this sub-task">
+                    {fmt$(line.subtaskActuals[k].actual)} act{line.subtaskActuals[k].hours ? ` · ${line.subtaskActuals[k].hours}h` : ""}
+                  </span>
+                )}
                 <span className="text-xs font-semibold text-ink tabular-nums">{fmt$(sum(rows, (x) => x.sellExGst))}</span>
                 {k !== "" && <button type="button" disabled={busy} onClick={() => dissolveLocal(k)} title="Delete section — its lines roll up to the parent" className="text-red-600 border border-hairline rounded w-5 h-5 leading-none text-sm disabled:opacity-40">×</button>}
               </div>

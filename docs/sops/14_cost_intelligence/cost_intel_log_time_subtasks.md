@@ -40,7 +40,7 @@ Lets you record your hours against the actual task you did, not just the broad c
 3. Pick the **site** you worked on
 4. Tap **Add what you worked on** — the 8 main categories appear
 5. Tap the category you worked in:
-   - **If the carpentry job has confirmed sub-tasks for that category:** a chooser opens (e.g. *"First fix / framing — pick the task"*). Tap the sub-task you did (e.g. **Wall framing**). It is added with your hours against that sub-task.
+   - **If the carpentry job has confirmed sub-tasks for that category:** a chooser opens (e.g. *"First fix / framing — pick the task"*). You **must** pick the sub-task you did (e.g. **Wall framing**) — the category can't be logged on its own, and the app won't let you submit until a sub-task is chosen. This is what attributes your hours to the right budget sub-task (mig 147).
    - **If the category has no confirmed sub-tasks:** it is added at category level, exactly as before — no extra step.
 6. Enter your **hours** for that entry
 7. Repeat for each thing you worked on. If you did **two sub-tasks under the same parent** (e.g. Wall framing *and* Truss framing), add them as **two separate entries** — do not roll them into one

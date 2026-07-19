@@ -50,10 +50,12 @@ const TASK_CATEGORIES = Object.keys(TASK_LABELS);
 // Display label for a timesheet entry: the chosen sub-task (e.g. "Wall framing") when one was picked,
 // else the main category. Lets the Approvals table show tasks inline without expanding each row.
 function taskLabelForEntry(e) {
-  const li = e?.carpentry_budget_line_items;
-  if (e?.budget_line_item_id && li?.canonical_key) {
-    const opt = catalogueFor({ parentTaskCategory: e.task_category, costType: "labour" }).find((o) => o.key === li.canonical_key);
-    return opt?.label || li.description || li.canonical_key;
+  // Prefer the sub-task the worker picked: canonical_key (mig 147) is the first-class attribution;
+  // fall back to the legacy budget_line_item_id join, then the main category.
+  const canon = e?.canonical_key || (e?.budget_line_item_id ? e?.carpentry_budget_line_items?.canonical_key : null);
+  if (canon) {
+    const opt = catalogueFor({ parentTaskCategory: e.task_category, costType: "labour" }).find((o) => o.key === canon);
+    return opt?.label || e?.carpentry_budget_line_items?.description || canon;
   }
   return TASK_LABELS[e?.task_category] || e?.task_category || "—";
 }
@@ -2299,6 +2301,33 @@ export function registerWorkforceRoutes(app) {
       }
     }
 
+    // Sub-task spine (Phase 1, mig 147): a carpentry labour entry attributes to a budget SUB-TASK
+    // (task_category, canonical_key). Required when the job's category has confirmed sub-tasks.
+    // Gated on a column probe so it fails soft (logs coarse, as before) until mig 147 is applied.
+    let subtaskKeysByCat = null;   // Map task_category -> Set(canonical_key)
+    let hasCanonicalCol = false;
+    if (carpentry_job_id) {
+      const { error: probeErr } = await sb.from("timesheet_entries").select("canonical_key").limit(1);
+      hasCanonicalCol = !probeErr;
+      if (hasCanonicalCol) {
+        const { data: liRows } = await sb.from("carpentry_budget_line_items")
+          .select("task_category, canonical_key").eq("job_id", carpentry_job_id).eq("status", "confirmed")
+          .not("task_category", "is", null).not("canonical_key", "is", null);
+        subtaskKeysByCat = new Map();
+        for (const r of liRows || []) {
+          if (!subtaskKeysByCat.has(r.task_category)) subtaskKeysByCat.set(r.task_category, new Set());
+          subtaskKeysByCat.get(r.task_category).add(r.canonical_key);
+        }
+        for (const e of entries) {
+          const avail = subtaskKeysByCat.get(e.task_category);
+          if (avail && avail.size) {   // this category HAS sub-tasks → one must be picked
+            if (!e.canonical_key) return res.status(400).json({ ok: false, error: `Pick a sub-task for ${TASK_LABELS[e.task_category] || e.task_category} before submitting.` });
+            if (!avail.has(e.canonical_key)) return res.status(400).json({ ok: false, error: "That sub-task isn't part of this job." });
+          }
+        }
+      }
+    }
+
     // Check existing timesheet for today
     const { data: existing } = await sb.from("timesheets").select("id, status").eq("employee_id", emp.id).eq("date", date).maybeSingle();
     if (existing && existing.status === "approved") {
@@ -2354,6 +2383,11 @@ export function registerWorkforceRoutes(app) {
       // Only include the charge-up site column when a site was picked — chargeUpJobId is only
       // non-null when mig 145 is applied + sites exist, so this never references a missing column.
       if (chargeUpJobId) row.charge_up_job_id = chargeUpJobId;
+      // Sub-task attribution — only written when mig 147 is applied AND the picked key belongs to
+      // this job's category (so the column is never referenced pre-migration).
+      if (hasCanonicalCol && e.canonical_key && subtaskKeysByCat?.get(e.task_category)?.has(e.canonical_key)) {
+        row.canonical_key = e.canonical_key;
+      }
       return row;
     });
     const { error: entryErr } = await sb.from("timesheet_entries").insert(entryRows);
@@ -2435,9 +2469,9 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    // Echo charge_up_job_id so re-editing a charge-up day restores the picked location.
-    // Fall back to the old select if the column isn't there yet (mig 145 not applied).
-    const sel = (withCU) => `*, timesheet_entries(id, task_category, budget_line_item_id, ${withCU ? "charge_up_job_id, " : ""}phase, hours, notes, completion_photo_url)`;
+    // Echo the sub-task (canonical_key, mig 147) + charge-up site (charge_up_job_id, mig 145) so
+    // re-editing a day restores the picks. Fall back to the base select if a column isn't there yet.
+    const sel = (withNew) => `*, timesheet_entries(id, task_category, budget_line_item_id, ${withNew ? "canonical_key, charge_up_job_id, " : ""}phase, hours, notes, completion_photo_url)`;
     let { data, error } = await sb.from("timesheets").select(sel(true)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
     if (error) ({ data } = await sb.from("timesheets").select(sel(false)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle());
     res.json({ ok: true, timesheet: data || null });

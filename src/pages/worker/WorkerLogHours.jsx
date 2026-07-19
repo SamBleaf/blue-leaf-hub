@@ -100,6 +100,7 @@ export default function WorkerLogHours() {
           setApproved(ts.status === "approved");
           setEntries((ts.timesheet_entries || []).map(e => ({
             task_category: e.task_category,
+            canonical_key: e.canonical_key || null,
             budget_line_item_id: e.budget_line_item_id || null,
             label: TASK_OPTIONS.find(t => t.value === e.task_category)?.label || e.task_category,
             hours: Number(e.hours) || 8,
@@ -140,8 +141,8 @@ export default function WorkerLogHours() {
   // Display label = parent category + sub-task (resolved from the loaded sub-tasks when re-editing).
   const displayLabel = (e) => {
     if (e.subtaskLabel) return `${e.label} · ${e.subtaskLabel}`;
-    if (e.budget_line_item_id) {
-      const st = (subtasks[e.task_category] || []).find(s => s.budgetLineItemId === e.budget_line_item_id);
+    if (e.canonical_key) {
+      const st = (subtasks[e.task_category] || []).find(s => s.key === e.canonical_key);
       return st ? `${e.label} · ${st.label}` : e.label;
     }
     return e.label;
@@ -173,16 +174,16 @@ export default function WorkerLogHours() {
   function addTask(task) {
     // Two-level: a category with sub-tasks opens its chooser instead of adding directly.
     if (hasSub(task.value)) { setActiveCat(prev => (prev === task.value ? null : task.value)); return; }
-    const existing = entries.findIndex(e => e.task_category === task.value && !e.budget_line_item_id);
+    const existing = entries.findIndex(e => e.task_category === task.value && !e.canonical_key);
     if (existing !== -1) { removeEntry(existing); return; } // tap again to remove
-    setEntries(prev => redistribute([...prev, { task_category: task.value, budget_line_item_id: null, label: task.label, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
+    setEntries(prev => redistribute([...prev, { task_category: task.value, canonical_key: null, budget_line_item_id: null, label: task.label, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
   }
-  // P3: add/remove a sub-task entry, keyed by (category, budget_line_item_id) so two sub-tasks under
-  // one parent don't collapse into one entry.
+  // Add/remove a sub-task entry, keyed by (category, canonical_key) — the budget sub-task identity —
+  // so two sub-tasks under one parent don't collapse into one entry (mig 147 spine).
   function addSubtask(cat, catLabel, st) {
-    const existing = entries.findIndex(e => e.task_category === cat && e.budget_line_item_id === st.budgetLineItemId);
+    const existing = entries.findIndex(e => e.task_category === cat && e.canonical_key === st.key);
     if (existing !== -1) { removeEntry(existing); return; }
-    setEntries(prev => redistribute([...prev, { task_category: cat, budget_line_item_id: st.budgetLineItemId, subtaskLabel: st.label, label: catLabel, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
+    setEntries(prev => redistribute([...prev, { task_category: cat, canonical_key: st.key, budget_line_item_id: st.budgetLineItemId || null, subtaskLabel: st.label, label: catLabel, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
   }
   function patchEntry(idx, patch) {
     setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
@@ -225,6 +226,7 @@ export default function WorkerLogHours() {
     try {
       const payload = entries.map(e => ({
         task_category: e.task_category,
+        canonical_key: e.canonical_key || null,
         budget_line_item_id: e.budget_line_item_id || null,
         hours: Number(e.hours),
         notes: e.notes || null,
@@ -384,10 +386,10 @@ export default function WorkerLogHours() {
             <p className="text-xs font-semibold text-primary mb-2">{TASK_OPTIONS.find(t => t.value === activeCat)?.label} — pick the task</p>
             <div className="grid grid-cols-2 gap-2">
               {subtasks[activeCat].map(st => {
-                const on = entries.some(e => e.task_category === activeCat && e.budget_line_item_id === st.budgetLineItemId);
+                const on = entries.some(e => e.task_category === activeCat && e.canonical_key === st.key);
                 const catLabel = TASK_OPTIONS.find(t => t.value === activeCat)?.label || activeCat;
                 return (
-                  <button key={st.budgetLineItemId} type="button" onClick={() => addSubtask(activeCat, catLabel, st)}
+                  <button key={st.key} type="button" onClick={() => addSubtask(activeCat, catLabel, st)}
                     className={`min-h-11 px-3 rounded-lg border text-sm text-left ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-white text-ink"}`}>
                     {on ? "✓ " : "+ "}{st.label}
                   </button>
@@ -406,7 +408,7 @@ export default function WorkerLogHours() {
               {entries.map((e, idx) => {
                 const hasDetail = e.notes || e.completion_photo_url;
                 return (
-                  <div key={`${e.task_category}|${e.budget_line_item_id || ""}`} className="rounded-lg border border-hairline bg-white">
+                  <div key={`${e.task_category}|${e.canonical_key || ""}`} className="rounded-lg border border-hairline bg-white">
                     <div className="flex items-center gap-1.5 px-3 py-2.5">
                       <span className="flex-1 min-w-0 truncate text-sm text-ink">{displayLabel(e)}</span>
                       <button type="button" onClick={() => bumpHours(idx, -0.5)} aria-label="Less hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">−</button>

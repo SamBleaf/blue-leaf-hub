@@ -42,6 +42,7 @@ import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor } from "./carpentrySubtaskDictionary.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
+import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 
 // Projected-margin targets — labour 25% / material 20% (matches the frontend MARGIN_TARGET).
 const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
@@ -1804,6 +1805,15 @@ export function registerCarpentryRoutes(app) {
         labourByTask[e.task_category] = (labourByTask[e.task_category] || 0) + Number(e.cost_amount || 0);
         hoursByTask[e.task_category] = (hoursByTask[e.task_category] || 0) + Number(e.hours || 0);
       }
+      // Per-SUB-TASK actuals (mig 147): roll approved labour up by (task_category, canonical_key) so
+      // each budget sub-task shows its real actual, not just the coarse category. Fail-soft pre-mig.
+      let actualByCanon = {};
+      try {
+        const { data: canonRows, error: canErr } = await sb.from("timesheet_entries")
+          .select("task_category, canonical_key, cost_amount, hours, timesheets!inner(carpentry_job_id, status)")
+          .eq("timesheets.carpentry_job_id", jobId).eq("timesheets.status", "approved").not("canonical_key", "is", null);
+        if (!canErr) actualByCanon = rollupSubtaskActuals(canonRows || []);
+      } catch { /* mig 147 not applied — sub-task actuals stay empty (coarse only) */ }
       // P1 (earned value): task-completion % per labour category — done/total of site_tasks for this
       // job, grouped by category (the shared 8-key spine). Excludes 'wont_do' from the denominator so a
       // parked task can't cap completion below 100% forever. This is the % complete that turns
@@ -1920,6 +1930,14 @@ export function registerCarpentryRoutes(app) {
             source: li.source,
           })),
           subtaskOptions: catalogueFor({ parentTaskCategory: b.workforce_task_category, categoryName: b.category_name, costType: b.cost_type }).map((o) => ({ key: o.key, label: o.label })),
+          // Real per-sub-task actuals (mig 147): { canonical_key: { actual, hours } } from timesheets
+          // tagged to (this category's workforce_task_category, canonical_key). Empty until logged.
+          subtaskActuals: isLabour ? Object.fromEntries(
+            [...new Set((lineItemsByBudget[b.id] || []).map((li) => li.canonical_key).filter(Boolean))]
+              .map((ck) => [ck, actualByCanon[subtaskKey(b.workforce_task_category, ck)]])
+              .filter(([, a]) => a)
+              .map(([ck, a]) => [ck, { actual: a.cost, hours: a.hours }])
+          ) : {},
         };
       });
 

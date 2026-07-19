@@ -248,6 +248,7 @@ Condensed view (key columns):
 | `carpentry_stage_actual_start` / `_end` | Schedule | **Generated** | Derived (timesheets by task_category) | approved `timesheet_entries` | workforce pipeline calendar | — | N | — |
 | `charge_up_job_id` (on timesheet_entries) | Labour | Static (per entry) | Worker submit (PWA Location pick) | `charge_up_jobs` (mig 145); the BLB Charge Up site the hour was worked at | charge-up analytics + invoicing | N | N | N |
 | `charge_up_job_id` (on workforce_allocations) | Labour | Static (per allocation) | Planner assign (site picker) | `charge_up_jobs` (mig 146, ON DELETE SET NULL); the BLB Charge Up site a shift is planned at | Planner shift label + crew visibility | N | N | N |
+| `canonical_key` (on timesheet_entries) | Labour | Static (per entry) | Worker submit (PWA sub-task pick, required) | `carpentry_budget_line_items.canonical_key` (mig 147); the budget SUB-TASK an hour was worked on. Sub-task identity = (task_category, canonical_key) — the single spine shared by budget, schedule, PWA | per-sub-task actual + earned value (budget) | N | N | N |
 | `target_margin` | BI | Versioned | Assigned | — | finance, pretender | Y | Y | Y |
 | `lead_source` | BI | Static | Sales/marketing | Lead form / attribution | marketing, reporting | N | Y | N |
 | `nearest_hospital` | Site Intel | Static | **Lookup** | Address geocode | WHS emergency | N | Y | N |
