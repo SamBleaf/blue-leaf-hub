@@ -51,16 +51,21 @@ const DEFAULT_FULL_PACKAGE_STAGES = [
 const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
 const crewFor = (wfCat, crewSizes) => (crewSizes?.[wfCat] || CREW_DEFAULTS[wfCat] || CREW_DEFAULTS.default);
 
-// Duration (working days) for a labour value at target margin = the budget's "Days @ margin":
-// labourSell ÷ teamChargeUpPerDay = whole-team working-days (the WHOLE crew works each stage, in
-// sequence). Reconciles the calendar duration with the budget page's allowable-days-at-25%-margin
-// (Sam 2026-07-19). Crew-scaling was removed: with a SEQUENTIAL layout it double-counted calendar
-// time (it assumed a sub-crew while the rest sat idle). The `crew` arg is retained for call-site
-// compatibility but no longer changes the result.
-export function costModelStageDays(labourSell, cm, _crew) {
+// Duration (working days) for a labour value, scaled to the CREW actually on that category:
+//   labourSell ÷ teamChargeUpPerDay = whole-team-days; × headcount/crew = the days a smaller crew
+//   takes (fewer people → proportionally longer). This is the "value-based duration". crew is the
+//   editable per-category worker count (mig 148), defaulting to a task-sensible CREW_DEFAULT.
+//   With crew = headcount it equals the budget's whole-team "Days @ margin"; fewer → longer.
+//   (Sam 2026-07-19b: the whole-team assumption was inaccurate — each category runs a different crew.)
+export function costModelStageDays(labourSell, cm, crew) {
   if (!cm || !(cm.teamChargeUpPerDay > 0) || !(labourSell > 0)) return null;
-  return Math.max(1, Math.ceil(labourSell / cm.teamChargeUpPerDay));
+  const headcount = cm.headcount || 1;
+  const c = crew > 0 ? crew : headcount;
+  return Math.max(1, Math.ceil((labourSell / cm.teamChargeUpPerDay) * (headcount / c)));
 }
+
+// The default crew size for a labour category (task-sensible), before any per-category override.
+export function defaultCrewFor(wfCat, crewSizes = {}) { return crewFor(wfCat, crewSizes); }
 
 // Build the ordered stage list FROM the budget labour subsections, with cost-model durations.
 // Returns null when there's nothing to build from (→ caller falls back to the taxonomy).
@@ -71,11 +76,12 @@ export function stagesFromBudget(budgetSubsections = [], cm, crewSizes = {}) {
     const wfCat = b.workforce_task_category ?? b.workforceTaskCategory ?? null;
     const labourSell = Number(b.budget_ex_gst ?? b.budgetExGst);
     const order = (wfCat && TASKCAT_TO_STAGE[wfCat]) ? stageOrder(TASKCAT_TO_STAGE[wfCat]) : 500 + i;
+    const crew = crewFor(wfCat, crewSizes);
     return {
       stageKey: slug(b.category_name ?? b.categoryName ?? `subsection_${i}`),
       label: b.category_name ?? b.categoryName ?? "Labour",
-      wfCat, labourSell,
-      durationDays: costModelStageDays(labourSell, cm, crewFor(wfCat, crewSizes)) || 2,
+      wfCat, labourSell, crew,
+      durationDays: costModelStageDays(labourSell, cm, crew) || 2,
       order,
     };
   }).sort((a, b) => a.order - b.order || b.labourSell - a.labourSell);
@@ -133,7 +139,7 @@ function stagesFromTaxonomy(budgetLineItems, crewSizes) {
     const wfCat = Object.keys(TASKCAT_TO_STAGE).find((c) => TASKCAT_TO_STAGE[c] === k) || null;
     const base = STAGE_RULES[k] || 2;
     const crew = crewFor(wfCat, crewSizes);
-    return { stageKey: k, label: meta?.label || stageLabel(k), wfCat, labourSell: null,
+    return { stageKey: k, label: meta?.label || stageLabel(k), wfCat, labourSell: null, crew,
       durationDays: Math.max(1, Math.ceil(base * (BASELINE_CREW / Math.max(1, crew)))), order: stageOrder(k) };
   });
 }
@@ -162,14 +168,19 @@ export function seedStageSchedule({
       prevKey = st.stageKey;
       continue;
     }
+    // Per-category crew: a stored crew_size (user-set, mig 148) wins over the task default, and its
+    // value-based duration follows. So the crew persists through re-auto-layout like a locked date.
+    const crew = (ex && ex.crew_size != null) ? ex.crew_size : st.crew;
+    const durationDays = (st.labourSell != null && costModelStageDays(st.labourSell, cm, crew)) || st.durationDays;
     // Lead/gap before this stage (procurement + external trades). The first stage starts at
     // commencement; leads apply only between stages, then the crew-scaled duration.
     const lead = prevKey ? (LEAD_GAP_DAYS[st.wfCat] ?? LEAD_GAP_DAYS.default) : 0;
     const plannedStart = cursor ? addWorkingDays(cursor, lead, nonWork) : start0;
-    const plannedEnd = plannedStart ? addWorkingDays(plannedStart, st.durationDays - 1, nonWork) : null;
+    const plannedEnd = plannedStart ? addWorkingDays(plannedStart, durationDays - 1, nonWork) : null;
     rows.push({
       stage_key: st.stageKey, label: st.label,
       workforce_task_category: st.wfCat, labour_sell: st.labourSell,
+      crew_size: crew ?? null,
       planned_start: plannedStart, planned_end: plannedEnd,
       depends_on: prevKey ? [{ stageKey: prevKey, type: "FS", lagDays: lead }] : [],
       status: ex?.status || "planned", locked: ex?.locked || false,
@@ -185,6 +196,7 @@ function carryExisting(ex, prevKey, st) {
   return {
     stage_key: ex.stage_key, label: ex.label ?? st.label,
     workforce_task_category: ex.workforce_task_category ?? st.wfCat, labour_sell: ex.labour_sell ?? st.labourSell,
+    crew_size: ex.crew_size ?? st.crew ?? null,
     planned_start: ex.planned_start, planned_end: ex.planned_end,
     depends_on: Array.isArray(ex.depends_on) ? ex.depends_on : (prevKey ? [{ stageKey: prevKey, type: "FS", lagDays: 0 }] : []),
     status: ex.status || "planned", locked: ex.locked || false,

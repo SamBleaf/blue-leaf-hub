@@ -76,7 +76,7 @@ Each sub-task group shows its **sell** (budget), its **actual** (green — real 
 1. Below the gauge, each category row shows: **Budget**, **Actual**, **Variance**, **% done** (from the schedule), **Proj. margin**, **Days @ margin**
 2. **Proj. margin** turns **amber/red** when the projected margin drops **below target** (25% labour / 20% material) — that is your early warning to act
 3. A **`*`** on Proj. margin means the projection is **held at target** — the stage is under way but the logged labour is still too thin to confirm a saving; it sharpens as approved timesheets accrue (so a stage marked complete with almost nothing logged reads 25%, not a phantom 100%)
-4. **Days @ margin** reads how many more work-days the remaining budget affords at the current loaded burn rate before the target margin is breached. Note: this is a **whole-team** figure and matches the stage's duration on the Workforce Pipeline calendar.
+4. **Days @ margin** reads how many more work-days the remaining budget affords at the current loaded burn rate before the target margin is breached. This is a **whole-team** figure; the job's **Schedule** tab shows the same value scaled to the actual **number of workers** you set on each category (fewer workers → longer), so a category's schedule duration equals its Days @ margin only when the whole team is on it.
 
 [insert screenshot: Budget tab with the Labour + Material margin gauges at the top and Import estimate XLSX button top-right]
 [insert screenshot: a category row expanded to show sub-task sections grouped by canonical_key, with the Save & confirm ✓ button]

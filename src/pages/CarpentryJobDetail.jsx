@@ -567,7 +567,7 @@ function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
           </button>
         )}
       </div>
-      <p className="text-xs text-muted mb-4">Planned dates per stage. Edits sync to the Workforce &rarr; Pipeline calendar. Lock a stage to pin it against auto-layout &amp; ripple.</p>
+      <p className="text-xs text-muted mb-4">Planned dates per stage. Each category&rsquo;s length comes from its labour value ÷ the <span className="inline-flex items-center gap-0.5">👷 workers</span> on it — change the workers (or the start date) and the end recomputes. Edits sync to the Workforce &rarr; Pipeline calendar. Lock a stage to pin it against auto-layout &amp; ripple.</p>
 
       {/* Commencement — the anchor auto-layout builds from. Setting it lays out every stage. */}
       {!migrationPending && (
@@ -632,6 +632,14 @@ function ScheduleTab({ jobId, jobStartDate, onStartDateSaved }) {
                     actual {fmtDate(st.actualStart)}{st.actualEnd ? `–${fmtDate(st.actualEnd)}` : ""}
                   </span>
                 )}
+                {/* Workers on this category → drives the value-based duration. Changing it (or the start) recomputes the end. */}
+                <div className="flex items-center gap-1 text-[11px] text-muted" title="Number of workers on this category — sets the duration">
+                  <span aria-hidden>👷</span>
+                  <input type="number" min="1" max="30" key={`crew-${st.id}-${st.crewSize ?? ""}`} defaultValue={st.crewSize ?? ""}
+                    onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (st.crewSize ?? null)) patchStage(st, { crewSize: v }); }}
+                    className="w-10 border border-hairline rounded px-1 py-0.5 text-xs text-center focus-ring" />
+                  {st.valueDays != null && <span className="tabular-nums whitespace-nowrap">{st.valueDays}d</span>}
+                </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted">
                   <input type="date" value={st.plannedStart || ""} onChange={(e) => patchStage(st, { plannedStart: e.target.value })} className="border border-hairline rounded px-1.5 py-0.5 text-xs focus-ring" />
                   <span>→</span>
