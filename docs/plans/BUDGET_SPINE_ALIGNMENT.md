@@ -55,9 +55,9 @@ Sub-decision to confirm at build time: whether picking a sub-task in the PWA is 
 - `POST /api/worker/timesheets`: accept + validate + store `canonical_key` (belongs-to the category's confirmed sub-tasks; required when they exist). `GET /timesheets/:date` echoes it.
 - `GET /budget`: roll up labour actuals by `(task_category, canonical_key)` → real per-sub-task actual, attached to each `SubtaskSections` group (currently the group shows $0). Pure `subtaskRollup` helper + tests.
 
-**Phase 2 — margin + schedule at sub-task grain**
-- Margin engine consumes the per-sub-task actual for earned value + the drill-down; category %done/projection reconcile from the sub-tasks up.
-- Reconcile the schedule↔budget join off the fragile `slug(category_name)`: carry `workforce_task_category` as the primary key, slug as fallback (harden the drift/auto-heal).
+**Phase 2 — earned value at sub-task grain** ✅ (this session)
+- Budget drill-down (`SubtaskSections`) is now a real per-sub-task earned-value view: each sub-task shows **sell vs actual (from mig-147 timesheets) vs variance** (red when over), + hours; a footer surfaces the category's **untagged actual** (`line.untaggedActual` = category actual − Σ sub-task actuals) so legacy/coarse hours are visible. Category-level margin already includes all logged hours (labourByTask), so no double-count.
+- **Deferred to a hardening pass:** reconciling the schedule↔budget join off the fragile `slug(category_name)` → `workforce_task_category` primary. It touches the auto-heal drift logic that previously lost hand-set dates — not worth risking mid-stream; folded into Phase 3 / a dedicated hardening pass.
 
 **Phase 3 — coverage**
 - Extend the sub-task dictionary/mapping so **every** labour + material category can split (kills the ~$60k / 33 unmapped leaves): generalise `materialGroup()` beyond framing supply; allow a manual sub-task on any category.

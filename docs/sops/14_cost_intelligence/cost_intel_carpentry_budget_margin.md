@@ -60,6 +60,9 @@ Turns a carpentry estimate into a live budget you can track against real cost. I
 3. A **solid marker** with a **"Proj." badge** = the projected final margin. It **baselines at the target** (25% labour / 20% material) and moves off target only as real approved timesheet cost proves you're tracking under or over — it never reads a phantom 100%.
 4. **% complete comes from the job's Schedule** (the stage schedule), not ticked task boxes: a category whose stage is **complete** is 100% done; **not started** is 0%; an **in-progress** stage blends how far through its planned dates it is with how much of the allowable cost has been logged.
 
+### Read the per-sub-task earned value (in the expanded row)
+Each sub-task group shows its **sell** (budget), its **actual** (green — real hours logged against that sub-task in the field, mig 147), and the **variance** (red when over). A footer notes any of the category's logged labour **not yet attributed to a sub-task** (older coarse entries) — new hours attribute automatically as the boys log against a sub-task on the app.
+
 ### Confirm the sub-task mapping (money-tier — must be confirmed)
 1. Expand a category row by clicking its **▶ chevron**
 2. The lines appear grouped into **sub-task sections** by their `canonical_key`

@@ -2162,17 +2162,25 @@ function SubtaskSections({ line, jobId, onChanged }) {
     <div className="px-4 py-3 bg-page space-y-2">
       {keys.map((k) => {
         const rows = groups[k];
+        const groupSell = sum(rows, (x) => x.sellExGst);
+        const sa = line.subtaskActuals?.[k];
+        const variance = sa?.actual != null ? Math.round((groupSell - sa.actual) * 100) / 100 : null;   // sub-task budget vs spent
         return (
           <div key={k || "__unmapped"} className="rounded-lg border border-hairline bg-surface">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
               <span className="text-xs font-semibold text-ink">{secLabel(k)}<span className="text-muted font-normal"> · {rows.length} line{rows.length > 1 ? "s" : ""}</span></span>
               <div className="flex items-center gap-2">
-                {line.subtaskActuals?.[k]?.actual != null && (
+                {sa?.actual != null && (
                   <span className="text-[11px] text-emerald-700 tabular-nums whitespace-nowrap" title="Actual from approved timesheets logged against this sub-task">
-                    {fmt$(line.subtaskActuals[k].actual)} act{line.subtaskActuals[k].hours ? ` · ${line.subtaskActuals[k].hours}h` : ""}
+                    {fmt$(sa.actual)} act{sa.hours ? ` · ${sa.hours}h` : ""}
                   </span>
                 )}
-                <span className="text-xs font-semibold text-ink tabular-nums">{fmt$(sum(rows, (x) => x.sellExGst))}</span>
+                {variance != null && (
+                  <span className={`text-[11px] tabular-nums whitespace-nowrap ${variance < 0 ? "text-red-600" : "text-muted"}`} title="Budget − actual (sub-task variance)">
+                    {variance < 0 ? "−" : ""}{fmt$(Math.abs(variance))}
+                  </span>
+                )}
+                <span className="text-xs font-semibold text-ink tabular-nums">{fmt$(groupSell)}</span>
                 {k !== "" && <button type="button" disabled={busy} onClick={() => dissolveLocal(k)} title="Delete section — its lines roll up to the parent" className="text-red-600 border border-hairline rounded w-5 h-5 leading-none text-sm disabled:opacity-40">×</button>}
               </div>
             </div>
@@ -2193,6 +2201,10 @@ function SubtaskSections({ line, jobId, onChanged }) {
           </div>
         );
       })}
+
+      {line.untaggedActual > 0 && (
+        <p className="text-[11px] text-amber-600 pt-0.5">{fmt$(line.untaggedActual)} of logged labour isn&rsquo;t attributed to a sub-task yet (older coarse entries) — new hours attribute automatically as the boys log against a sub-task.</p>
+      )}
 
       <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
         {adding ? (

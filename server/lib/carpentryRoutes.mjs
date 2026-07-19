@@ -1900,6 +1900,16 @@ export function registerCarpentryRoutes(app) {
         const proj = isLabour ? projectMargin({ budget, actual, pctComplete, targetPct: MARGIN_TARGET.labour }) : { projectedCost: null, projectedMarginPct: null, flag: null };
         const projectedCost = proj.projectedCost;
         const projectedMarginPct = proj.projectedMarginPct;
+        // Per-sub-task actuals (mig 147) for this labour line, keyed by canonical_key, + the untagged
+        // remainder = category actual not yet attributed to any sub-task (legacy coarse hours).
+        const subtaskActuals = isLabour ? Object.fromEntries(
+          [...new Set((lineItemsByBudget[b.id] || []).map((li) => li.canonical_key).filter(Boolean))]
+            .map((ck) => [ck, actualByCanon[subtaskKey(b.workforce_task_category, ck)]])
+            .filter(([, a]) => a)
+            .map(([ck, a]) => [ck, { actual: a.cost, hours: a.hours }])
+        ) : {};
+        const taggedActual = round2(Object.values(subtaskActuals).reduce((s, a) => s + (a.actual || 0), 0));
+        const untaggedActual = isLabour ? round2(Math.max(0, actual - taggedActual)) : 0;
         return {
           id: b.id,
           categoryName: b.category_name,
@@ -1930,14 +1940,8 @@ export function registerCarpentryRoutes(app) {
             source: li.source,
           })),
           subtaskOptions: catalogueFor({ parentTaskCategory: b.workforce_task_category, categoryName: b.category_name, costType: b.cost_type }).map((o) => ({ key: o.key, label: o.label })),
-          // Real per-sub-task actuals (mig 147): { canonical_key: { actual, hours } } from timesheets
-          // tagged to (this category's workforce_task_category, canonical_key). Empty until logged.
-          subtaskActuals: isLabour ? Object.fromEntries(
-            [...new Set((lineItemsByBudget[b.id] || []).map((li) => li.canonical_key).filter(Boolean))]
-              .map((ck) => [ck, actualByCanon[subtaskKey(b.workforce_task_category, ck)]])
-              .filter(([, a]) => a)
-              .map(([ck, a]) => [ck, { actual: a.cost, hours: a.hours }])
-          ) : {},
+          subtaskActuals,       // { canonical_key: { actual, hours } } — real per-sub-task actuals (mig 147)
+          untaggedActual,       // $ of this category's actual not attributed to any sub-task
         };
       });
 
