@@ -15,6 +15,18 @@
 // =============================================================================
 import { STAGES, stageOrder, stageLabel, resolveStage, TASKCAT_TO_STAGE } from "./carpentryStages.mjs";
 import { addWorkingDays } from "./workingCalendar.mjs";
+import { catalogueFor } from "./carpentrySubtaskDictionary.mjs";
+
+// The canonical sub-task label = the dictionary label for its canonical_key, so a sub-task reads
+// IDENTICALLY on the Budget, the Schedule, and the PWA (was diverging to the first line-item
+// description). Falls back to the description, then the raw key.
+function subtaskLabel(canonicalKey, taskCat, fallbackDesc) {
+  if (canonicalKey) {
+    const hit = catalogueFor({ parentTaskCategory: taskCat, costType: "labour" }).find((o) => o.key === canonicalKey);
+    if (hit?.label) return hit.label;
+  }
+  return fallbackDesc || canonicalKey || "Other";
+}
 
 const BASELINE_CREW = 3;
 const CREW_DEFAULTS = { first_fix_framing: 5, cladding: 4, second_fix: 2, outdoor_works: 2, formwork_slab_prep: 3, site_labouring: 2, site_cleanup: 2, default: 3 };
@@ -92,11 +104,11 @@ export function subsectionsForStages(budgetSubsections = [], budgetLineItems = [
     if (!meta || !meta.stageKey) continue;
     const canon = li.canonical_key ?? li.canonicalKey ?? null;
     const key = canon || "__other__";
-    const label = li.description ?? canon ?? "Other";
     const sell = Number(li.sell_ex_gst ?? li.sellExGst) || 0;
     const taskCat = li.task_category ?? li.taskCategory ?? meta.wfCat;
     const m = (groups[meta.stageKey] ||= new Map());
-    if (!m.has(key)) m.set(key, { label, canonicalKey: canon, sell: 0, taskCat });
+    // canonical dictionary label so the sub-task matches the Budget + PWA exactly
+    if (!m.has(key)) m.set(key, { label: subtaskLabel(canon, taskCat, li.description ?? li.desc), canonicalKey: canon, sell: 0, taskCat });
     m.get(key).sell += sell;
   }
   const out = {};
