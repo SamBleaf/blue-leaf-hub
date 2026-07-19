@@ -57,8 +57,8 @@ Turns a carpentry estimate into a live budget you can track against real cost. I
    - The **fill** = real cost so far — loaded timesheets plus tagged invoices (this is actual cost, **not** the estimate's cost figure)
    - The **green tail** = the margin still being kept
    - The **dashed line** = the point where cost starts eating into margin (target-margin threshold)
-3. A **solid marker** with a **"Proj." badge** = the projected final margin, calculated from how much of the work is done (task completion %)
-4. If no task completion has been logged yet, a **manual % box** appears instead — type in your own estimate of % complete to get a projected margin
+3. A **solid marker** with a **"Proj." badge** = the projected final margin. It **baselines at the target** (25% labour / 20% material) and moves off target only as real approved timesheet cost proves you're tracking under or over — it never reads a phantom 100%.
+4. **% complete comes from the job's Schedule** (the stage schedule), not ticked task boxes: a category whose stage is **complete** is 100% done; **not started** is 0%; an **in-progress** stage blends how far through its planned dates it is with how much of the allowable cost has been logged.
 
 ### Confirm the sub-task mapping (money-tier — must be confirmed)
 1. Expand a category row by clicking its **▶ chevron**
@@ -70,9 +70,10 @@ Turns a carpentry estimate into a live budget you can track against real cost. I
 7. **Nothing persists until you Confirm.** Until then every reassignment, add, and delete lives only in the browser.
 
 ### Read the per-category table
-1. Below the gauge, each category row shows: **Budget**, **Actual**, **Variance**, **% done**, **Proj. margin**, **Days @ margin**
+1. Below the gauge, each category row shows: **Budget**, **Actual**, **Variance**, **% done** (from the schedule), **Proj. margin**, **Days @ margin**
 2. **Proj. margin** turns **amber/red** when the projected margin drops **below target** (25% labour / 20% material) — that is your early warning to act
-3. **Days @ margin** reads how many more work-days the remaining budget affords at the current loaded burn rate before the target margin is breached
+3. A **`*`** on Proj. margin means the projection is **held at target** — the stage is under way but the logged labour is still too thin to confirm a saving; it sharpens as approved timesheets accrue (so a stage marked complete with almost nothing logged reads 25%, not a phantom 100%)
+4. **Days @ margin** reads how many more work-days the remaining budget affords at the current loaded burn rate before the target margin is breached. Note: this is a **whole-team** figure and matches the stage's duration on the Workforce Pipeline calendar.
 
 [insert screenshot: Budget tab with the Labour + Material margin gauges at the top and Import estimate XLSX button top-right]
 [insert screenshot: a category row expanded to show sub-task sections grouped by canonical_key, with the Save & confirm ✓ button]

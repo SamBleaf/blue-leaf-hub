@@ -5,6 +5,7 @@
 // labour value + workforce category so the schedule stays tied to the budget.
 // =============================================================================
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 const fmt$ = (n) => (n == null ? null : `$${Math.round(n).toLocaleString()}`);
 const shift = (ymd, days) => { if (!ymd) return ymd; const d = new Date(`${ymd}T12:00:00`); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
@@ -29,7 +30,11 @@ export default function StageEditor({ block, saving, onClose, onSave }) {
           </div>
           <button type="button" onClick={onClose} className="text-muted hover:text-ink text-lg leading-none">×</button>
         </div>
-        <p className="text-xs text-muted mb-4">{block.jobLabel}</p>
+        <p className="text-xs mb-4">
+          {block.jobId
+            ? <Link to={`/carpentry/${block.jobId}?tab=schedule`} className="text-primary hover:underline" title="Open this job's schedule">{block.jobLabel} ↗</Link>
+            : <span className="text-muted">{block.jobLabel}</span>}
+        </p>
 
         <div className="space-y-1 mb-4 text-xs">
           {block.workforceTaskCategory && <div className="flex justify-between"><span className="text-muted">Workforce stream</span><span className="text-ink">{block.workforceTaskCategory}</span></div>}

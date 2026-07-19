@@ -41,6 +41,11 @@ import { parseXLSX } from "./buildexactParser.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor } from "./carpentrySubtaskDictionary.mjs";
+import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
+
+// Projected-margin targets — labour 25% / material 20% (matches the frontend MARGIN_TARGET).
+const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
+const catSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1811,8 +1816,25 @@ export function registerCarpentryRoutes(app) {
         taskTotal[t.category] = (taskTotal[t.category] || 0) + 1;
         if (t.status === "done") taskDone[t.category] = (taskDone[t.category] || 0) + 1;
       }
-      // Fraction 0..1, or null when the category has no counted tasks (can't project).
-      const pctCompleteFor = (cat) => (taskTotal[cat] > 0 ? taskDone[cat] / taskTotal[cat] : null);
+      // Site-task ratio 0..1 (or null) — now only the FALLBACK for a category with no stage row.
+      const taskRatioFor = (cat) => (taskTotal[cat] > 0 ? taskDone[cat] / taskTotal[cat] : null);
+
+      // Sam's model (2026-07-19): % complete is driven by the STAGE SCHEDULE (mig 144), not the
+      // site-task checkboxes — a category whose stage reads 'complete' is 100% done regardless of
+      // how many tasks are ticked. Keyed by workforce_task_category AND slug(category_name) so the
+      // NULL-category labour lines (e.g. XCEM, Pro Clima) still link to their stage. Fail-soft.
+      const stageByCat = {}, stageByKey = {};
+      try {
+        const { data: stageRows, error: stErr } = await sb.from("carpentry_job_stage_schedule")
+          .select("stage_key, workforce_task_category, status, planned_start, planned_end").eq("carpentry_job_id", jobId);
+        if (!stErr) for (const s of stageRows || []) {
+          if (s.workforce_task_category) stageByCat[s.workforce_task_category] = s;
+          if (s.stage_key) stageByKey[s.stage_key] = s;
+        }
+      } catch { /* mig 144 not applied — falls back to the site-task ratio */ }
+      const stageFor = (b) => stageByCat[b.workforce_task_category] || stageByKey[catSlug(b.category_name)] || null;
+      const nowD = new Date();
+      const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
 
       const cm = await getCostModel(sb); // company cost model (null until mig 090 + sync)
 
@@ -1854,12 +1876,20 @@ export function registerCarpentryRoutes(app) {
           ? round2(labourByTask[b.workforce_task_category] || 0)
           : round2(materialActualByLine[b.id] || 0); // D5: per-line material actuals from tagged costs
         const actualHours = isLabour ? (hoursByTask[b.workforce_task_category] || 0) : 0;
-        // P1: earned-value projection for this line — labour only (material has no completion signal).
-        // projectedCost = actual ÷ %complete; projectedMargin = (sell − projectedCost) / sell.
-        const pctComplete = isLabour ? pctCompleteFor(b.workforce_task_category) : null;
-        const projectedCost = pctComplete > 0 ? round2(actual / pctComplete) : null;
-        const projectedMarginPct = (pctComplete > 0 && budget > 0)
-          ? round2(((budget - projectedCost) / budget) * 100) : null;
+        // Schedule-driven earned value (labour only — material has no completion signal). % complete
+        // comes from the stage schedule (complete/planned, or an in-progress schedule+cost blend);
+        // the projection baselines at the 25% target and slides off only as real burn proves it.
+        const allowableCost = budget * (1 - MARGIN_TARGET.labour);
+        const st = isLabour ? stageFor(b) : null;
+        const pctComplete = isLabour
+          ? categoryPctComplete({
+              stageStatus: st?.status || null, plannedStart: st?.planned_start, plannedEnd: st?.planned_end,
+              today, actual, allowableCost, fallbackRatio: taskRatioFor(b.workforce_task_category),
+            })
+          : null;
+        const proj = isLabour ? projectMargin({ budget, actual, pctComplete, targetPct: MARGIN_TARGET.labour }) : { projectedCost: null, projectedMarginPct: null, flag: null };
+        const projectedCost = proj.projectedCost;
+        const projectedMarginPct = proj.projectedMarginPct;
         return {
           id: b.id,
           categoryName: b.category_name,
@@ -1870,10 +1900,12 @@ export function registerCarpentryRoutes(app) {
           variance: round2(budget - actual),
           // P3: profitable-days + live actuals per labour category (null until cost model synced)
           burn: isLabour ? burnForLine(budget, actual, actualHours, cm) : null,
-          // P1: null unless this is a labour line with counted tasks
+          // Schedule-driven: null unless this is a labour line with a stage/task signal
           pctComplete,          // fraction 0..1 or null
           projectedCost,        // $ or null
           projectedMarginPct,   // percent (e.g. 24.3) or null
+          projectionFlag: proj.flag,   // 'actuals_incomplete' when a saving can't be substantiated
+          stageStatus: st?.status || null,
           // P3: sub-task line items + the catalogue options for "add sub-task" (empty until mig 140 + import)
           lineItems: (lineItemsByBudget[b.id] || []).map((li) => ({
             id: li.id,
@@ -1901,24 +1933,28 @@ export function registerCarpentryRoutes(app) {
         totalBudget: round2(labourBudget + materialBudget),
         totalActual: round2(labourActual + materialActualTotal),
       };
-      // P1: job-level LABOUR projection — aggregate % complete across DISTINCT labour task categories
-      // (shared categories not double-counted), then project final labour cost + margin. Material is
-      // excluded (guardrail #4 — no task signal; its thermometer stays spend-vs-allowable).
-      const labourCats = [...new Set((budgets || [])
-        .filter((b) => b.cost_type === "labour" && b.workforce_task_category)
-        .map((b) => b.workforce_task_category))];
-      let projDone = 0, projTotal = 0;
-      for (const cat of labourCats) { projDone += taskDone[cat] || 0; projTotal += taskTotal[cat] || 0; }
-      const labourPct = projTotal > 0 ? projDone / projTotal : null;
-      const labourProjectedCost = labourPct > 0 ? round2(labourActual / labourPct) : null;
+      // Job-level LABOUR projection — sum the per-line schedule-driven projected cost (each already
+      // target-anchored + evidence-clamped). A labour line with no completion signal contributes its
+      // allowable cost (i.e. sits at target), so the top widget baselines at 25% and moves only on
+      // real burn — never the old actual÷%done blow-up. Material excluded (no task/schedule signal).
+      const labourLines = lines.filter((l) => l.costType === "labour");
+      let labourProjCost = 0, wPct = 0, wBudget = 0;
+      let anySignal = false;
+      for (const l of labourLines) {
+        // No completion signal → baseline at target, but never project BELOW money already spent
+        // (else a real overspend on an unscheduled/untasked line is erased from the top gauge).
+        labourProjCost += (l.projectedCost != null) ? l.projectedCost : round2(Math.max(l.budget * (1 - MARGIN_TARGET.labour), l.actual));
+        if (l.pctComplete != null) { anySignal = true; wPct += l.pctComplete * l.budget; wBudget += l.budget; }
+      }
+      labourProjCost = round2(labourProjCost);
+      const labourPct = wBudget > 0 ? round2(wPct / wBudget) : (anySignal ? 0 : null);
       totals.projection = {
-        available: labourPct != null,
-        labourPctComplete: labourPct,                    // fraction 0..1 or null
-        labourProjectedCost,                             // $ or null
-        labourProjectedMarginPct: (labourPct > 0 && labourBudget > 0)
-          ? round2(((labourBudget - labourProjectedCost) / labourBudget) * 100) : null,
-        labourTasksDone: projDone,
-        labourTasksTotal: projTotal,
+        available: labourBudget > 0,
+        labourPctComplete: labourPct,                    // budget-weighted fraction 0..1 or null
+        labourProjectedCost: labourBudget > 0 ? labourProjCost : null,
+        labourProjectedMarginPct: labourBudget > 0
+          ? round2(((labourBudget - labourProjCost) / labourBudget) * 100) : null,
+        labourFlagged: labourLines.some((l) => l.projectionFlag === "actuals_incomplete"),
       };
       // P3/P5: job-level burn-rate — how many full-team days the labour budget supports (the
       // schedule guardrail) + live labour margin. Null-safe when the cost model isn't synced.

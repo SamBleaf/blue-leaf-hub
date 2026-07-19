@@ -16,10 +16,11 @@ const SUBS = [
   { category_name: "Window supply", cost_type: "material", budget_ex_gst: 5000, workforce_task_category: null }, // excluded (material)
 ];
 
-// ── costModelStageDays — the earned-value duration ──
-eq(costModelStageDays(38819, cm, 5), 14, "framing $38,819 @ crew 5 → 14 working days (labour ÷ day-rate × 7/5)");
-eq(costModelStageDays(30712, cm, 4), 14, "cladding $30,712 @ crew 4 → 14");
-eq(costModelStageDays(10626, cm, 2), 10, "second fix $10,626 @ crew 2 → 10");
+// ── costModelStageDays — whole-team allowable days @ margin (= budget 'Days @ margin'), crew arg ignored ──
+eq(costModelStageDays(38819, cm, 5), 10, "framing $38,819 → 10 working days (ceil 38819/3937), reconciles with budget");
+eq(costModelStageDays(30712, cm, 4), 8, "cladding $30,712 → 8 (ceil 7.80); crew no longer stretches it");
+eq(costModelStageDays(10626, cm, 2), 3, "second fix $10,626 → 3 (ceil 2.70)");
+eq(costModelStageDays(30712, cm, 4), costModelStageDays(30712, cm, 7), "crew argument no longer changes the duration");
 eq(costModelStageDays(38819, null, 5), null, "no cost model → null (falls back to taxonomy)");
 ok(costModelStageDays(60000, cm, 5) > costModelStageDays(38819, cm, 5), "more labour $ → longer stage (interconnected)");
 
@@ -27,7 +28,7 @@ ok(costModelStageDays(60000, cm, 5) > costModelStageDays(38819, cm, 5), "more la
 const bs = stagesFromBudget(SUBS, cm, {});
 eq(bs.map((s) => s.stageKey), ["first_fix_framing", "cladding_and_soffit_lining", "second_fix"], "labour subsections → stages, material dropped, ordered");
 eq(bs.map((s) => s.label), ["First Fix Framing", "Cladding and Soffit Lining", "Second Fix"], "labels = the budget subsection names");
-eq(bs[0].durationDays, 14, "framing duration from its labour value");
+eq(bs[0].durationDays, 10, "framing duration from its labour value (whole-team days)");
 eq(bs[0].labourSell, 38819, "labour value carried for audit");
 ok(stagesFromBudget(SUBS, null, {}) === null, "no cost model → null");
 ok(stagesFromBudget([], cm, {}) === null, "no labour subsections → null");
@@ -36,9 +37,9 @@ ok(stagesFromBudget([], cm, {}) === null, "no labour subsections → null");
 const rows = seedStageSchedule({ jobStartDate: "2026-08-03", budgetSubsections: SUBS, cm });
 eq(rows.map((r) => r.stage_key), ["first_fix_framing", "cladding_and_soffit_lining", "second_fix"], "seed: subsection stages");
 eq(rows[0].planned_start, "2026-08-03", "first stage starts at commencement (no lead)");
-eq(rows[0].planned_end, "2026-08-20", "framing ends after its 14 working days");
+eq(rows[0].planned_end, "2026-08-14", "framing ends after its 10 working days");
 eq(rows[0].labour_sell, 38819, "labour value stored on the row");
-eq(rows[1].planned_start, "2026-08-28", "cladding starts after framing + its lead gap (roof/windows/delivery)");
+eq(rows[1].planned_start, "2026-08-24", "cladding starts after framing + its lead gap (roof/windows/delivery)");
 eq(rows[1].depends_on, [{ stageKey: "first_fix_framing", type: "FS", lagDays: 5 }], "cladding FS-depends on framing with the lead as lag");
 eq(rows[2].depends_on[0].stageKey, "cladding_and_soffit_lining", "second fix depends on cladding");
 ok(rows[0].planned_end < rows[1].planned_start, "no overlap");
@@ -87,8 +88,8 @@ const SUB_LINES = [
 const subMap = subsectionsForStages(SUB_BUDGETS, SUB_LINES, cm, { first_fix_framing: 5 });
 eq(Object.keys(subMap), ["first_fix_framing"], "only the labour stage gets subsections (material excluded)");
 eq(subMap.first_fix_framing.map((s) => [s.label, s.sell, s.days]),
-  [["Wall framing", 20000, 8], ["Roof framing", 12000, 5], ["Window install A", 6819, 3], ["Misc", 500, 1]],
-  "subsections grouped by canonical_key, summed, cost-model days, sorted by sell desc; unmapped → its own bucket");
+  [["Wall framing", 20000, 6], ["Roof framing", 12000, 4], ["Window install A", 6819, 2], ["Misc", 500, 1]],
+  "subsections grouped by canonical_key, summed, whole-team cost-model days, sorted by sell desc; unmapped → its own bucket");
 ok(subMap.first_fix_framing[2].canonicalKey === "windows_doors", "windows_doors group merges both window line items");
 ok(subMap.first_fix_framing[3].canonicalKey === null, "unmapped line item keeps null canonicalKey");
 eq(subsectionsForStages(SUB_BUDGETS, SUB_LINES, null, {}).first_fix_framing[0].days, null, "no cost model → days null (never NaN)");

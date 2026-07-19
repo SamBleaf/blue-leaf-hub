@@ -39,13 +39,15 @@ const DEFAULT_FULL_PACKAGE_STAGES = [
 const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
 const crewFor = (wfCat, crewSizes) => (crewSizes?.[wfCat] || CREW_DEFAULTS[wfCat] || CREW_DEFAULTS.default);
 
-// Duration (working days) for a labour value at target margin, scaled to the stage's crew:
-// labourSell ÷ teamChargeUpPerDay = whole-team-days; × headcount/crew = crew working-days.
-export function costModelStageDays(labourSell, cm, crew) {
+// Duration (working days) for a labour value at target margin = the budget's "Days @ margin":
+// labourSell ÷ teamChargeUpPerDay = whole-team working-days (the WHOLE crew works each stage, in
+// sequence). Reconciles the calendar duration with the budget page's allowable-days-at-25%-margin
+// (Sam 2026-07-19). Crew-scaling was removed: with a SEQUENTIAL layout it double-counted calendar
+// time (it assumed a sub-crew while the rest sat idle). The `crew` arg is retained for call-site
+// compatibility but no longer changes the result.
+export function costModelStageDays(labourSell, cm, _crew) {
   if (!cm || !(cm.teamChargeUpPerDay > 0) || !(labourSell > 0)) return null;
-  const headcount = cm.headcount || 1;
-  const c = crew > 0 ? crew : headcount;
-  return Math.max(1, Math.ceil((labourSell / cm.teamChargeUpPerDay) * (headcount / c)));
+  return Math.max(1, Math.ceil(labourSell / cm.teamChargeUpPerDay));
 }
 
 // Build the ordered stage list FROM the budget labour subsections, with cost-model durations.

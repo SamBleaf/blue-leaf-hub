@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -2027,8 +2027,13 @@ function MarginGauge({ totals }) {
   const actualTot = Number(totals.totalActual) || 0;
   const over = actualTot > allowableTot;
 
-  // P1: labour projection — prefer the task-derived %, fall back to a manual % where there's no task signal.
+  // Labour projection — schedule-driven, target-anchored (server). Falls back to a manual % only
+  // when the server has no signal at all.
   const proj = totals.projection || {};
+  // Snapshot badge reflects the PROJECTION now, not just raw spend: at risk if we're projected to
+  // land below the labour target (or already over allowable).
+  const projLabourMarginPct = proj.labourProjectedMarginPct != null ? Number(proj.labourProjectedMarginPct) : null;
+  const atRisk = over || (projLabourMarginPct != null && projLabourMarginPct < MARGIN_TARGET.labour * 100 - 0.5);
   const labourActual = Number(totals.labourActual) || 0;
   const [manualPct, setManualPct] = useState("");
   const manualNum = parseFloat(manualPct);
@@ -2054,8 +2059,8 @@ function MarginGauge({ totals }) {
           <p className="text-xs text-muted">of {fmt$(allowableTot)} allowable</p>
         </div>
         <div>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${over ? "bg-red-50 text-red-600" : "bg-accent/10 text-accent"}`}>
-            {over ? "Over allowable — margin at risk" : "On target — margin protected"}
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${atRisk ? "bg-red-50 text-red-600" : "bg-accent/10 text-accent"}`}>
+            {atRisk ? (over ? "Over allowable — margin at risk" : "Tracking below target") : "On target — margin protected"}
           </span>
         </div>
       </div>
@@ -2351,7 +2356,10 @@ function BudgetTab({ jobId }) {
                   <td className="py-2 px-3 text-right text-ink">{fmt$(l.actual)}</td>
                   <td className={`py-2 px-3 text-right font-medium ${l.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(l.variance)}</td>
                   <td className="py-2 px-3 text-right text-muted">{l.pctComplete != null ? `${Math.round(l.pctComplete * 100)}%` : "—"}</td>
-                  <td className={`py-2 px-3 text-right font-semibold ${projCls}`}>{l.projectedMarginPct != null ? fmtPct(l.projectedMarginPct) : "—"}</td>
+                  <td className={`py-2 px-3 text-right font-semibold ${projCls}`}>
+                    {l.projectedMarginPct != null ? fmtPct(l.projectedMarginPct) : "—"}
+                    {l.projectionFlag === "actuals_incomplete" && <span className="ml-0.5 text-amber-500" title="Held at target — logged labour is too thin to confirm a saving">*</span>}
+                  </td>
                   <td className={`py-2 pl-3 text-right font-semibold ${dot}`}>{l.burn?.atMarginDays != null ? `${l.burn.atMarginDays}d` : "—"}</td>
                 </tr>
               )];
@@ -2364,6 +2372,9 @@ function BudgetTab({ jobId }) {
         </table>
         {labour.some((l) => !l.workforceTaskCategory) && (
           <p className="text-xs text-amber-600 mt-1">Some labour lines have no workforce task mapped — those actuals will not accrue until mapped.</p>
+        )}
+        {labour.some((l) => l.projectionFlag === "actuals_incomplete") && (
+          <p className="text-[11px] text-muted mt-1">* Projection held at the 25% target — the stage is under way but its logged labour is too thin to confirm a saving. It sharpens as approved timesheets accrue.</p>
         )}
       </div>
 
@@ -2426,7 +2437,11 @@ export default function CarpentryJobDetail() {
   // diary) but don't see Costs/Budget $ figures. Directors/admin see everything.
   const showCost = can.viewCostData(role);
   const visibleTabs = TABS.filter((t) => showCost || (t.id !== "budget" && t.id !== "costs"));
-  const [tab, setTab]         = useState("overview");
+  // Deep-link support: /carpentry/:id?tab=schedule opens straight on that tab (e.g. from the
+  // Pipeline stage editor's job-name link). Falls back to overview for an unknown/hidden tab.
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab]         = useState(() => visibleTabs.some((t) => t.id === requestedTab) ? requestedTab : "overview");
   const [job, setJob]         = useState(null);
   const [performance, setPerformance] = useState(null);
   const [loading, setLoading] = useState(true);
