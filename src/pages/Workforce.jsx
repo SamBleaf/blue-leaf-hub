@@ -5,6 +5,7 @@ import { apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
+import { CHARGE_UP_REFERENCE } from "../lib/constants.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
 import WorkforcePipelineTab from "./workforce/WorkforcePipelineTab.jsx";
@@ -587,6 +588,8 @@ function MassFillTab() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [carpJobs, setCarpJobs] = useState([]);
   const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>"
+  const [chargeUpSites, setChargeUpSites] = useState([]);   // active sites for the BL-CHARGEUP job
+  const [chargeUpJobId, setChargeUpJobId] = useState("");   // selected charge-up site
   const [rows, setRows] = useState(() => {
     const today = new Date().toISOString().slice(0, 10);
     return [{ employee_id: "", task_category: "", hours: "8", notes: "", date: today }];
@@ -603,6 +606,23 @@ function MassFillTab() {
     authFetch("/api/carpentry/jobs?status=active").then(r => r.json()).then(j => { if (j.ok) setCarpJobs(j.jobs || []); }).catch(() => {});
   }, []);
 
+  // BLB Charge Up: when the selected job is the charge-up category, load its sites into a second
+  // dropdown so hours can be tagged to a location (the invoicing signal). Cleared for any other site.
+  const selectedCarpJob = site.startsWith("carpentry:")
+    ? carpJobs.find(j => j.id === site.slice(10))
+    : null;
+  const isChargeUp = selectedCarpJob?.reference === CHARGE_UP_REFERENCE;
+  useEffect(() => {
+    setChargeUpJobId("");
+    if (!isChargeUp || !selectedCarpJob) { setChargeUpSites([]); return; }
+    let cancelled = false;
+    authFetch(`/api/carpentry/jobs/${selectedCarpJob.id}/charge-up-jobs`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.ok) setChargeUpSites((j.chargeUpJobs || []).filter(s => s.status === "active")); })
+      .catch(() => { if (!cancelled) setChargeUpSites([]); });
+    return () => { cancelled = true; };
+  }, [isChargeUp, selectedCarpJob?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function addRow() {
     setRows(prev => [...prev, { employee_id: "", task_category: "", hours: "8", notes: "", date }]);
   }
@@ -612,6 +632,8 @@ function MassFillTab() {
 
   async function submit() {
     if (!date) return;
+    // Charge-up hours need a location to be invoiced — block before the round-trip.
+    if (isChargeUp && chargeUpSites.length > 0 && !chargeUpJobId) { alert("Pick a charge-up site before submitting."); return; }
     setSubmitting(true);
     try {
       const entries = rows.filter(r => r.employee_id && r.task_category && r.hours).map(r => ({
@@ -625,12 +647,14 @@ function MassFillTab() {
       const payload = { date, entries };
       if (site.startsWith("project:")) payload.project_id = site.slice(8);
       else if (site.startsWith("carpentry:")) payload.carpentry_job_id = site.slice(10);
+      if (isChargeUp && chargeUpJobId) payload.charge_up_job_id = chargeUpJobId;
       const res = await authFetch("/api/workforce/timesheets/mass-fill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const j = await res.json();
+      if (!j.ok && j.error) { alert(j.error); return; }   // batch-level reject (e.g. missing location)
       setResults(j.results || []);
     } catch { /* ignore */ } finally { setSubmitting(false); }
   }
@@ -659,6 +683,18 @@ function MassFillTab() {
             )}
           </select>
         </div>
+        {isChargeUp && (
+          <div>
+            <label className="text-xs text-muted block mb-1">Charge-up site</label>
+            <select value={chargeUpJobId} onChange={e => setChargeUpJobId(e.target.value)} className="border border-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <option value="">— Select site —</option>
+              {chargeUpSites.map(s => <option key={s.id} value={s.id}>{s.siteLabel}</option>)}
+            </select>
+            {chargeUpJobId
+              ? <p className="text-[10px] text-muted mt-1">{chargeUpSites.find(s => s.id === chargeUpJobId)?.address || " "}</p>
+              : <p className="text-[10px] text-warning mt-1">Pick a site so the hours can be invoiced</p>}
+          </div>
+        )}
       </div>
 
       <div className="border border-hairline rounded-lg overflow-hidden bg-white mb-3">

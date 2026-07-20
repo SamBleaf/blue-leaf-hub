@@ -67,6 +67,7 @@ export default function WorkerLogHours() {
   const [photoBusy, setPhotoBusy] = useState(false);
   const photoInputRef = useRef(null);
   const photoTargetIdx = useRef(null);
+  const uidRef = useRef(0);   // stable keys for free-text charge-up rows (all share task_category "other")
 
   useEffect(() => {
     let stop = false;
@@ -98,10 +99,12 @@ export default function WorkerLogHours() {
         if (ts) {
           setExistingId(ts.id);
           setApproved(ts.status === "approved");
-          setEntries((ts.timesheet_entries || []).map(e => ({
+          setEntries((ts.timesheet_entries || []).map((e, i) => ({
             task_category: e.task_category,
             canonical_key: e.canonical_key || null,
             budget_line_item_id: e.budget_line_item_id || null,
+            chargeUpTask: !!e.charge_up_job_id,   // free-text charge-up line (description lives in notes)
+            uid: e.charge_up_job_id ? `cu-p${i}` : undefined,
             label: TASK_OPTIONS.find(t => t.value === e.task_category)?.label || e.task_category,
             hours: Number(e.hours) || 8,
             notes: e.notes || "",
@@ -137,9 +140,13 @@ export default function WorkerLogHours() {
   const standardHours = me?.settings?.standard_hours ?? 8;
   const isLeadingHand = me?.employee?.is_leading_hand ?? false;
   const selectedProject = projects.find(p => p.id === selectedId) || null;
+  // BLB Charge Up: this job logs free-text tasks + hours against a Location instead of the fixed
+  // category / sub-task pickers. Presence of active charge-up sites is the signal.
+  const isChargeUp = selectedProject?.type === "carpentry" && chargeUpSites.length > 0;
   const hasSub = (cat) => (subtasks[cat] || []).length > 0;
   // Display label = parent category + sub-task (resolved from the loaded sub-tasks when re-editing).
   const displayLabel = (e) => {
+    if (e.chargeUpTask) return e.notes?.trim() || "Charge-up task";
     if (e.subtaskLabel) return `${e.label} · ${e.subtaskLabel}`;
     if (e.canonical_key) {
       const st = (subtasks[e.task_category] || []).find(s => s.key === e.canonical_key);
@@ -184,6 +191,15 @@ export default function WorkerLogHours() {
     const existing = entries.findIndex(e => e.task_category === cat && e.canonical_key === st.key);
     if (existing !== -1) { removeEntry(existing); return; }
     setEntries(prev => redistribute([...prev, { task_category: cat, canonical_key: st.key, budget_line_item_id: st.budgetLineItemId || null, subtaskLabel: st.label, label: catLabel, hours: standardHours, notes: "", completion_photo_url: "", manuallyEdited: false }]));
+  }
+  // BLB Charge Up: add a blank free-text line the worker fills in (description → notes, own hours).
+  // Uses task_category "other" so it satisfies the server's category check; each gets a stable uid
+  // since they'd otherwise collide on task_category. First line seeds a full day, extras seed 1h.
+  function addChargeUpTask() {
+    setEntries(prev => {
+      const firstCu = !prev.some(e => e.chargeUpTask);
+      return [...prev, { uid: `cu-${++uidRef.current}`, task_category: "other", chargeUpTask: true, canonical_key: null, budget_line_item_id: null, label: "Charge-up task", hours: firstCu ? standardHours : 1, notes: "", completion_photo_url: "", manuallyEdited: true }];
+    });
   }
   function patchEntry(idx, patch) {
     setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
@@ -289,7 +305,7 @@ export default function WorkerLogHours() {
                   <span className="text-sm text-ink">{displayLabel(e)}</span>
                   <span className="text-sm font-semibold text-ink">{e.hours}h</span>
                 </div>
-                {e.notes && <p className="text-xs text-muted mt-1">{e.notes}</p>}
+                {e.notes && !e.chargeUpTask && <p className="text-xs text-muted mt-1">{e.notes}</p>}
               </div>
             ))}
           </div>
@@ -359,26 +375,39 @@ export default function WorkerLogHours() {
         {date !== todayStr() && <p className="text-xs text-amber-600 mb-4">Backdating to {date}</p>}
         {date === todayStr() && <div className="mb-4" />}
 
-        {/* Add task — one tap adds at a standard day (categories with sub-tasks open a chooser) */}
-        <label className="text-xs text-muted uppercase tracking-wide block mb-2">Add what you worked on</label>
-        <div className="grid grid-cols-2 gap-2 mb-3">
-          {TASK_OPTIONS.map(t => {
-            const added = entries.some(e => e.task_category === t.value);
-            const sub = hasSub(t.value);
-            const isActive = activeCat === t.value;
-            return (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => addTask(t)}
-                className={`min-h-12 px-3 rounded-lg border text-sm text-left transition flex items-center justify-between gap-1 ${added || isActive ? "border-primary bg-primary/5 text-primary" : "border-hairline bg-white text-ink hover:border-primary hover:bg-primary/5"}`}
-              >
-                <span>{added ? "✓ " : "+ "}{t.label}</span>
-                {sub && <span className="text-[10px] opacity-70">{isActive ? "▾" : "›"}</span>}
-              </button>
-            );
-          })}
-        </div>
+        {/* Add task — charge-up jobs get a free-text add; normal jobs get the category grid
+            (categories with sub-tasks open a chooser). */}
+        <label className="text-xs text-muted uppercase tracking-wide block mb-2">
+          {isChargeUp ? "Tasks & hours" : "Add what you worked on"}
+        </label>
+        {isChargeUp ? (
+          <button
+            type="button"
+            onClick={addChargeUpTask}
+            className="w-full min-h-12 mb-3 rounded-lg border border-dashed border-primary bg-primary/5 text-primary text-sm font-semibold flex items-center justify-center gap-1.5"
+          >
+            + Add task
+          </button>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {TASK_OPTIONS.map(t => {
+              const added = entries.some(e => e.task_category === t.value);
+              const sub = hasSub(t.value);
+              const isActive = activeCat === t.value;
+              return (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => addTask(t)}
+                  className={`min-h-12 px-3 rounded-lg border text-sm text-left transition flex items-center justify-between gap-1 ${added || isActive ? "border-primary bg-primary/5 text-primary" : "border-hairline bg-white text-ink hover:border-primary hover:bg-primary/5"}`}
+                >
+                  <span>{added ? "✓ " : "+ "}{t.label}</span>
+                  {sub && <span className="text-[10px] opacity-70">{isActive ? "▾" : "›"}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Sub-task chooser for the active category (two-level picker) */}
         {activeCat && hasSub(activeCat) && (
@@ -408,9 +437,19 @@ export default function WorkerLogHours() {
               {entries.map((e, idx) => {
                 const hasDetail = e.notes || e.completion_photo_url;
                 return (
-                  <div key={`${e.task_category}|${e.canonical_key || ""}`} className="rounded-lg border border-hairline bg-white">
+                  <div key={e.uid || `${e.task_category}|${e.canonical_key || ""}`} className="rounded-lg border border-hairline bg-white">
                     <div className="flex items-center gap-1.5 px-3 py-2.5">
-                      <span className="flex-1 min-w-0 truncate text-sm text-ink">{displayLabel(e)}</span>
+                      {e.chargeUpTask ? (
+                        <input
+                          type="text"
+                          placeholder="What did you do?"
+                          value={e.notes || ""}
+                          onChange={ev => patchEntry(idx, { notes: ev.target.value })}
+                          className="flex-1 min-w-0 text-sm text-ink border-b border-hairline bg-transparent outline-none focus:border-primary"
+                        />
+                      ) : (
+                        <span className="flex-1 min-w-0 truncate text-sm text-ink">{displayLabel(e)}</span>
+                      )}
                       <button type="button" onClick={() => bumpHours(idx, -0.5)} aria-label="Less hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">−</button>
                       <input
                         type="number"
@@ -423,10 +462,12 @@ export default function WorkerLogHours() {
                         className="w-12 shrink-0 text-center text-sm font-semibold text-ink border-b border-hairline bg-transparent outline-none"
                       />
                       <button type="button" onClick={() => bumpHours(idx, 0.5)} aria-label="More hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">+</button>
-                      <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
+                      {!e.chargeUpTask && (
+                        <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
+                      )}
                       <button type="button" onClick={() => removeEntry(idx)} aria-label="Remove" className="w-7 h-8 shrink-0 text-muted text-xl leading-none flex items-center justify-center">×</button>
                     </div>
-                    {expandedIdx === idx && (
+                    {!e.chargeUpTask && expandedIdx === idx && (
                       <div className="px-3 pb-3 pt-1 border-t border-hairline space-y-3">
                         <textarea
                           placeholder="Notes (optional)"

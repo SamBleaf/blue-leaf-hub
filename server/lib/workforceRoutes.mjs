@@ -933,9 +933,21 @@ export function registerWorkforceRoutes(app) {
 
   app.post("/api/workforce/timesheets/mass-fill", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
-    const { date, project_id, job_id, carpentry_job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] are required" });
+    }
+    // BLB Charge Up: if the carpentry job HAS active charge-up sites, a location is required for the
+    // whole batch and must belong to this job. Mirrors POST /api/worker/timesheets. Fail-soft: before
+    // mig 145 (no charge_up_jobs table) the probe errors and we log untagged, as before.
+    let chargeUpJobId = null;
+    if (carpentry_job_id) {
+      const { data: siteRows, error: siteErr } = await sb.from("charge_up_jobs")
+        .select("id").eq("carpentry_job_id", carpentry_job_id).eq("status", "active");
+      if (!siteErr && (siteRows || []).length) {
+        if (charge_up_job_id && siteRows.some((s) => s.id === charge_up_job_id)) chargeUpJobId = charge_up_job_id;
+        if (!chargeUpJobId) return res.status(400).json({ ok: false, error: "Pick a location before submitting charge-up work." });
+      }
     }
     const results = [];
     for (const e of entries) {
@@ -962,7 +974,7 @@ export function registerWorkforceRoutes(app) {
         }
         if (!ts?.id) { results.push({ employee_id, ok: false, error: "Could not create timesheet" }); continue; }
 
-        const { error: entryErr } = await sb.from("timesheet_entries").insert({
+        const entryRow = {
           timesheet_id: ts.id,
           employee_id,
           task_category,
@@ -970,7 +982,11 @@ export function registerWorkforceRoutes(app) {
           hours: Number(hours),
           overtime_hours: 0,
           notes: notes || null,
-        });
+        };
+        // Only reference the charge-up site column when a site was picked — chargeUpJobId is only
+        // non-null when mig 145 is applied + active sites exist, so this never hits a missing column.
+        if (chargeUpJobId) entryRow.charge_up_job_id = chargeUpJobId;
+        const { error: entryErr } = await sb.from("timesheet_entries").insert(entryRow);
         results.push({ employee_id, date: rowDate, timesheet_id: ts.id, ok: !entryErr, error: entryErr?.message });
       } catch (err) {
         results.push({ employee_id: e.employee_id, ok: false, error: err?.message });
