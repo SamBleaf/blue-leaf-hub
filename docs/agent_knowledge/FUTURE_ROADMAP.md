@@ -1,7 +1,9 @@
 # Blue Leaf Hub — Future Roadmap
 
-> Last updated: 2026-05-21
+> Last updated: 2026-05-21 · **STALE — reconciled 2026-07-19.** Current backlog of truth: `docs/UNRESOLVED_WORK_INVENTORY.md`.
 > Derived from CLAUDE.md sprint backlog, MODULE_6_7_SPEC.md, BUILDEXACT_INTEGRATION_PROMPT.md, and known product gaps.
+
+> **RECONCILE 2026-07-19:** Sprints 2 & 3 below are marked "Next/Planned" but **shipped long ago** (Baseline/EOT, typed deps + Dep Map — see CLAUDE.md Sprint Backlog ✅). This doc predates a year of work (Sales/CRM, Carpentry, Workforce Planner/Pipeline, Marketing, Portal v2, Geo, the earned-value + budget-spine builds). Treat the statuses below as historical; use the inventory doc for what's genuinely open.
 
 ---
 

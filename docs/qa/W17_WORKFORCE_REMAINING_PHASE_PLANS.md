@@ -31,16 +31,18 @@ Remaining work is ordered for **launch readiness**:
 
 ## 2. Approved revised phase order
 
+> **RECONCILE 2026-07-19:** P2–P5 all SHIPPED (Snapshot review, Worker task/job/category, Planner + drag/ripple redesign, RDO/holiday display — see the Workforce memories + build log). P6 (voice-to-task) delivered ad hoc. Genuinely open: **P7** (leading-hand QC v1) and **P8** (deputy-replacement hardening / final launch gate), plus the optional P5b snapshot grey-overlay follow-on.
+
 | # | Phase | Status | Next action |
 |---|-------|--------|-------------|
 | 1 | W17-P1 Team tab | **Closed** 2026-06-26 | — |
-| 2 | W17-P2 Snapshot weekly review | **Planned** | Approve → implement |
-| 3 | W17-P3 Worker task/job/category + preview | **Planned** | After P2 |
-| 4 | W17-P4 Planner UI minimum | **Planned** | After P3 |
-| 5 | W17-P5 RDO/public holiday display | **Planned** | After P4 |
-| 6 | W17-P6 Voice-to-task transcript import | **Planned** | After P5 (can parallel P7 if needed) |
-| 7 | W17-P7 Leading-hand QC v1 | **Planned** | After P3 (depends on `task_audience` fix) |
-| 8 | W17-P8 Deputy replacement hardening | **Planned** | Final gate |
+| 2 | W17-P2 Snapshot weekly review | **Shipped** | — |
+| 3 | W17-P3 Worker task/job/category + preview | **Shipped** | — |
+| 4 | W17-P4 Planner UI minimum | **Shipped** (+ P4b/c redesign) | — |
+| 5 | W17-P5 RDO/public holiday display | **Shipped** | — |
+| 6 | W17-P6 Voice-to-task transcript import | **Delivered ad hoc** | Close formally if desired |
+| 7 | W17-P7 Leading-hand QC v1 | **Planned** (open) | After `task_audience` fix |
+| 8 | W17-P8 Deputy replacement hardening | **Planned** (open, final gate) | Final gate |
 
 ---
 

@@ -1,13 +1,19 @@
 # Blue Leaf Hub — Known Issues & Technical Debt
 
-> Last updated: 2026-05-21
+> Last updated: 2026-05-21 · **Reconciled 2026-07-19** (see banner). Full current backlog: `docs/UNRESOLVED_WORK_INVENTORY.md`.
 > Maintained continuously. Mark resolved issues with [RESOLVED] + date.
+
+> **RECONCILE 2026-07-19 (verified against prod):**
+> - **ISSUE-001 [RESOLVED]** — `vercel.json` now points at `blue-leaf-hub-production.up.railway.app` (prod API works).
+> - **ISSUE-004 [DORMANT]** — `jobs.buildexact_job_id` has **0** populated rows, so no duplication can occur today; the structural column-on-both remains as latent debt, not a live bug.
+> - **ISSUE-005 (RLS) [anon exposure CLOSED]** — the raw anon key (unauthenticated) reads 0 rows from every sensitive table (employees/timesheets/jobs/leads/…). No anonymous leak. Residual: a full `TO authenticated` policy audit still needs SQL access (low practical risk — app is API/service-role mediated).
+> - **ISSUE-002 / ISSUE-003 [STILL OPEN]** — AGENT_OVERVIEW schema doc is now ~108 migrations behind (mig 148); the dual trade taxonomy (`trade_categories` vs `trade_master_library`) still has no FK link. Genuine, low-urgency.
 
 ---
 
 ## CRITICAL — Must Fix Before Production Handoff
 
-### ISSUE-001: Vercel Production Rewrite Placeholder
+### ISSUE-001: Vercel Production Rewrite Placeholder — **[RESOLVED 2026-07-19]** (real Railway host in `vercel.json`)
 **Severity**: CRITICAL (breaks all API calls in production)
 **File**: `vercel.json`
 **Detail**: The `/api/:path*` rewrite destination still contains `YOUR-RAILWAY-HOST` placeholder. This means all production API calls will fail until the actual Railway hostname is substituted.
