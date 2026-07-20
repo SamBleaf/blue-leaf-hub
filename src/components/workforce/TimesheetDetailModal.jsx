@@ -85,6 +85,21 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
     if (ok) { onChanged?.(); onClose(); } else setError(e || "Could not decline this timesheet.");
   }
 
+  // Revert an APPROVED timesheet back to submitted so it can be edited, then re-approved. The server
+  // clears the booked cost (recomputed on re-approval) and flags any existing Buildexact order for review.
+  async function unapprove() {
+    if (!confirm("Un-approve this timesheet? It goes back to pending so you can edit it, and its booked cost is cleared — you'll need to Approve it again after.")) return;
+    setBusy(true); setError("");
+    const { ok, data, error: e } = await apiPost(`/api/workforce/timesheets/${timesheetId}/unapprove`, {});
+    if (!ok) { setBusy(false); setError(e || "Could not un-approve this timesheet."); return; }
+    // Reload the detail so the modal now shows it as pending (Edit / Decline / Approve available).
+    const r = await apiFetch(`/api/workforce/timesheets/${timesheetId}/detail`);
+    setBusy(false);
+    if (r.ok) { setTs(r.data.timesheet); setTasks(r.data.tasksCompleted || []); }
+    if (data?.buildexactNeedsReview) setError(`Reverted. Note: a Buildexact order (${data.workOrderId || "existing"}) is attached — adjust/delete it in Buildexact and use Force re-sync after re-approving.`);
+    onChanged?.();
+  }
+
   function startEdit() {
     const d = {};
     for (const e of entries) d[e.id] = { hours: String(Number(e.hours)), taskCategory: e.task_category };
@@ -302,6 +317,9 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                   )}
                   {canApprove && isSubmitted && !editing && (
                     <button onClick={approve} disabled={busy} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-50">{busy ? "…" : "Approve"}</button>
+                  )}
+                  {canApprove && ts.status === "approved" && !editing && (
+                    <button onClick={unapprove} disabled={busy} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium disabled:opacity-50" title="Revert to pending so you can edit, then re-approve">{busy ? "…" : "Un-approve to edit"}</button>
                   )}
                   {(!isSubmitted || !canModerate) && !editing && (
                     <button onClick={onClose} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium text-muted">Close</button>
