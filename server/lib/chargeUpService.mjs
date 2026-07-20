@@ -4,39 +4,48 @@
 // Pure (no Supabase) so it's unit-testable, like stageAggregation.mjs. The route
 // fetches the approved entries + the per-employee charge-up rate and passes them in.
 //
-// entry shape: { chargeUpJobId, employeeId, employeeName, hours, cost }
+// entry shape: { chargeUpJobId, employeeId, employeeName, hours, cost, date, notes, entryId }
 //   chargeUpJobId null → untagged charge-up hours (roll up to the category, no site)
 //   cost = timesheet_entries.cost_amount (pay-derived, booked at approval)
-// charge-out $ = hours × the employee's charge_up_hourly (billable, from the cost model)
+//   date/notes/entryId → the per-shift detail surfaced when a site is expanded
+// charge-out $ = hours × rate, where rate = the site's charge_out_hourly OVERRIDE when set
+//   (Phase 2, rateBySite), else the employee's charge_up_hourly (billable, from the cost model)
 // =============================================================================
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 
-export function rollupBySubJob(entries = [], chargeUpRateByEmployee = {}) {
+// rateBySite: { [chargeUpJobId]: chargeOutHourly } — a per-site flat charge-out rate that
+// OVERRIDES each worker's charge_up_hourly for that site (Phase 2). Absent/null → per-person rate.
+export function rollupBySubJob(entries = [], chargeUpRateByEmployee = {}, rateBySite = {}) {
   const bySub = new Map();
   for (const e of entries) {
     const key = e.chargeUpJobId || null;
     const hours = Number(e.hours) || 0;
     if (hours <= 0 && !e.cost) continue;
     const cost = Number(e.cost) || 0;
-    const rate = Number(chargeUpRateByEmployee[e.employeeId]) || 0;
+    const override = key != null ? rateBySite[key] : null;
+    const rate = override != null ? Number(override) || 0 : Number(chargeUpRateByEmployee[e.employeeId]) || 0;
     const chargeOut = hours * rate;
-    if (!bySub.has(key)) bySub.set(key, { chargeUpJobId: key, hours: 0, cost: 0, chargeOut: 0, _people: new Map() });
+    if (!bySub.has(key)) bySub.set(key, { chargeUpJobId: key, hours: 0, cost: 0, chargeOut: 0, lastDate: null, _people: new Map(), _entries: [] });
     const s = bySub.get(key);
     s.hours += hours; s.cost += cost; s.chargeOut += chargeOut;
+    if (e.date && (!s.lastDate || String(e.date) > String(s.lastDate))) s.lastDate = e.date;
     const pid = e.employeeId || "unknown";
     if (!s._people.has(pid)) s._people.set(pid, { employeeId: e.employeeId || null, name: e.employeeName || "Unknown", hours: 0, cost: 0, chargeOut: 0 });
     const p = s._people.get(pid);
     p.hours += hours; p.cost += cost; p.chargeOut += chargeOut;
+    s._entries.push({ entryId: e.entryId || null, date: e.date || null, employeeName: e.employeeName || "Unknown", notes: e.notes || null, hours: round1(hours), cost: round2(cost), chargeOut: round2(chargeOut) });
   }
   return [...bySub.values()]
     .map((s) => ({
       chargeUpJobId: s.chargeUpJobId,
       hours: round1(s.hours), cost: round2(s.cost), chargeOut: round2(s.chargeOut),
+      lastDate: s.lastDate,
       byPerson: [...s._people.values()]
         .map((p) => ({ ...p, hours: round1(p.hours), cost: round2(p.cost), chargeOut: round2(p.chargeOut) }))
         .sort((a, b) => b.hours - a.hours),
+      entries: s._entries.sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))),
     }))
     .sort((a, b) => b.chargeOut - a.chargeOut || b.hours - a.hours);
 }
@@ -56,7 +65,12 @@ export function categoryTotals(rollup = []) {
 // not pay). Mirrors the director-gating in workforceRoutes.
 export function stripCost(rollup = [], isDirector = false) {
   if (isDirector) return rollup;
-  return rollup.map((s) => ({ ...s, cost: null, byPerson: s.byPerson.map((p) => ({ ...p, cost: null })) }));
+  return rollup.map((s) => ({
+    ...s,
+    cost: null,
+    byPerson: s.byPerson.map((p) => ({ ...p, cost: null })),
+    entries: (s.entries || []).map((en) => ({ ...en, cost: null })),
+  }));
 }
 
 // AU financial year label for a YYYY-MM-DD date. The FY runs 1 Jul → 30 Jun and is
@@ -70,14 +84,19 @@ export function auFinancialYear(dateStr) {
 }
 
 // Roll charge-up entries up by AU financial year, WITH charge-out $ (which the older
-// internal-cost-summary lacks). entry: { date, employeeId, hours, cost }
-export function rollupByFinancialYear(entries = [], chargeUpRateByEmployee = {}) {
+// internal-cost-summary lacks). entry: { date, chargeUpJobId, employeeId, hours, cost }
+// Uses the same rate precedence as rollupBySubJob — the site's charge_out_hourly OVERRIDE
+// when set (rateBySite), else the employee's charge_up_hourly — so the FY charge-out totals
+// reconcile with the category + per-site totals rather than contradicting them.
+export function rollupByFinancialYear(entries = [], chargeUpRateByEmployee = {}, rateBySite = {}) {
   const byFy = new Map();
   for (const e of entries) {
     const fy = auFinancialYear(e.date);
     if (!fy) continue;
     const hours = Number(e.hours) || 0;
-    const rate = Number(chargeUpRateByEmployee[e.employeeId]) || 0;
+    const key = e.chargeUpJobId || null;
+    const override = key != null ? rateBySite[key] : null;
+    const rate = override != null ? Number(override) || 0 : Number(chargeUpRateByEmployee[e.employeeId]) || 0;
     if (!byFy.has(fy)) byFy.set(fy, { fy, hours: 0, cost: 0, chargeOut: 0 });
     const f = byFy.get(fy);
     f.hours += hours; f.cost += Number(e.cost) || 0; f.chargeOut += hours * rate;

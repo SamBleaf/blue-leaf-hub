@@ -12,6 +12,9 @@ import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
+const pctFmt = (n) => (n == null ? "—" : `${Math.round(n)}%`);
+// Gross margin % = (charge-out − cost) / charge-out. null when cost is hidden (non-director) or no charge-out.
+const marginPct = (chargeOut, cost) => (cost != null && Number(chargeOut) > 0 ? ((chargeOut - cost) / chargeOut) * 100 : null);
 
 export default function ChargeUpJobDetail({ job }) {
   const { role } = useAuth();
@@ -75,6 +78,18 @@ export default function ChargeUpJobDetail({ job }) {
     setSites((s) => s.map((x) => (x.id === row.id ? data.chargeUpJob : x)));
   }
 
+  // Rate override changes charge-out + margin (computed server-side), so reload the summary after.
+  async function patchSiteRate(row, value) {
+    const v = String(value).trim();
+    const chargeOutHourly = v === "" ? null : Number(v);
+    if (chargeOutHourly != null && (!Number.isFinite(chargeOutHourly) || chargeOutHourly < 0 || chargeOutHourly > 999999.9999)) { setError("Charge-out rate must be a positive number under 1,000,000."); return; }
+    setSavingId(row.id); setError(null);
+    const { ok, error: e } = await apiPatch(`/api/carpentry/charge-up-jobs/${row.id}`, { chargeOutHourly });
+    if (!ok) { setError(e || "Update failed."); setSavingId(null); return; }
+    await load();
+    setSavingId(null);
+  }
+
   async function archive(row) {
     if (!confirm(`Archive "${row.siteLabel}"? It's hidden from the worker picker, but its logged hours stay in the analytics.`)) return;
     setSavingId(row.id);
@@ -85,6 +100,8 @@ export default function ChargeUpJobDetail({ job }) {
 
   const visible = sites.filter((s) => showArchived || s.status !== "archived");
   const archivedCount = sites.filter((s) => s.status === "archived").length;
+  // The per-site rate override column (mig 149) is present once site rows carry the key.
+  const rateReady = sites.length > 0 && Object.prototype.hasOwnProperty.call(sites[0], "chargeOutHourly");
 
   return (
     <div className="space-y-6 pb-24 p-6 max-w-4xl mx-auto">
@@ -107,7 +124,7 @@ export default function ChargeUpJobDetail({ job }) {
 
       {/* ① Category summary — top-line totals for the whole Charge Up category */}
       {!migrationPending && summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-2 gap-3 ${showCost ? "sm:grid-cols-5" : "sm:grid-cols-3"}`}>
           <div className="rounded-card border border-hairline bg-surface px-4 py-3">
             <p className="text-[11px] uppercase tracking-wide text-muted">Total hours</p>
             <p className="text-2xl font-semibold text-ink mt-0.5">{summary.categoryTotals.hours}</p>
@@ -116,16 +133,22 @@ export default function ChargeUpJobDetail({ job }) {
             <p className="text-[11px] uppercase tracking-wide text-muted">Charge-out</p>
             <p className="text-2xl font-semibold text-ink mt-0.5">{fmt$(summary.categoryTotals.chargeOut)}</p>
           </div>
-          <div className="rounded-card border border-hairline bg-surface px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted">Active sites</p>
-            <p className="text-2xl font-semibold text-ink mt-0.5">{sites.filter((s) => s.status !== "archived").length}</p>
-          </div>
+          {showCost && (
+            <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-muted">Gross margin</p>
+              <p className="text-2xl font-semibold text-accent mt-0.5">{pctFmt(marginPct(summary.categoryTotals.chargeOut, summary.categoryTotals.cost))}</p>
+            </div>
+          )}
           {showCost && (
             <div className="rounded-card border border-hairline bg-surface px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-muted">Cost</p>
               <p className="text-2xl font-semibold text-muted mt-0.5">{fmt$(summary.categoryTotals.cost)}</p>
             </div>
           )}
+          <div className="rounded-card border border-hairline bg-surface px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted">Active sites</p>
+            <p className="text-2xl font-semibold text-ink mt-0.5">{sites.filter((s) => s.status !== "archived").length}</p>
+          </div>
         </div>
       )}
 
@@ -206,6 +229,20 @@ export default function ChargeUpJobDetail({ job }) {
                   <input defaultValue={s.address || ""} onBlur={(e) => e.target.value !== (s.address || "") && patchSite(s, { address: e.target.value })}
                     placeholder="Address / info" className="w-full text-xs text-muted bg-transparent border-0 border-b border-transparent hover:border-hairline focus:border-primary focus-ring px-0 py-0.5 mt-0.5" />
                 </div>
+                {rateReady && s.status !== "archived" && (
+                  <label className="flex items-center gap-1 shrink-0 text-xs text-muted" title="Flat charge-out rate per hour for this site — overrides each worker's rate. Blank = use each worker's charge-up rate.">
+                    <span>$</span>
+                    <input type="number" min="0" step="1" defaultValue={s.chargeOutHourly != null ? Number(s.chargeOutHourly) : ""}
+                      onBlur={(e) => {
+                        const raw = e.target.value.trim();
+                        const next = raw === "" ? null : Number(raw);
+                        const cur = s.chargeOutHourly != null ? Number(s.chargeOutHourly) : null;
+                        if (next !== cur) patchSiteRate(s, raw);
+                      }}
+                      placeholder="rate" className="w-16 text-right text-sm text-ink bg-transparent border-0 border-b border-hairline focus:border-primary focus-ring px-0 py-0.5" />
+                    <span>/hr</span>
+                  </label>
+                )}
                 {s.status === "archived" ? (
                   <>
                     <span className="text-[10px] uppercase tracking-wide text-muted">Archived</span>
@@ -239,7 +276,10 @@ export default function ChargeUpJobDetail({ job }) {
             {untagged.map((u) => (
               <div key={u.entryId} className={`flex items-center gap-3 px-4 py-2 text-sm ${assigning ? "opacity-60" : ""}`}>
                 <span className="text-xs text-muted w-24 shrink-0">{u.date || "—"}</span>
-                <span className="flex-1 text-ink truncate">{u.employeeName}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="block text-ink truncate">{u.employeeName}</span>
+                  {u.notes && <span className="block text-[11px] text-muted truncate">{u.notes}</span>}
+                </div>
                 <span className="text-xs text-muted w-14 text-right shrink-0">{u.hours}h</span>
                 <select disabled={assigning} defaultValue="" onChange={(e) => { if (e.target.value) assignUntagged([u.entryId], e.target.value); }}
                   className="text-xs border border-hairline rounded px-2 py-1 bg-white w-40 shrink-0">
@@ -266,6 +306,7 @@ export default function ChargeUpJobDetail({ job }) {
                   <th className="px-4 py-2">Location</th>
                   <th className="px-2 py-2 text-right">Hours</th>
                   <th className="px-2 py-2 text-right">Charge-out</th>
+                  {showCost && <th className="px-2 py-2 text-right">Margin</th>}
                   {showCost && <th className="px-4 py-2 text-right">Cost</th>}
                 </tr>
               </thead>
@@ -273,17 +314,31 @@ export default function ChargeUpJobDetail({ job }) {
                 {summary.subJobs.map((s) => (
                   <Fragment key={s.chargeUpJobId}>
                     <tr className="border-b border-hairline/60 cursor-pointer hover:bg-page/40" onClick={() => setOpenSite((o) => (o === s.chargeUpJobId ? null : s.chargeUpJobId))}>
-                      <td className="px-4 py-2 font-medium text-ink">{openSite === s.chargeUpJobId ? "▾ " : "▸ "}{s.siteLabel}</td>
+                      <td className="px-4 py-2 font-medium text-ink">
+                        <div>
+                          {openSite === s.chargeUpJobId ? "▾ " : "▸ "}{s.siteLabel}
+                          {s.chargeOutHourly != null && <span className="ml-1.5 text-[10px] font-normal text-accent">@ {fmt$(s.chargeOutHourly)}/hr</span>}
+                        </div>
+                        {s.lastDate && <div className="text-[10px] font-normal text-muted">last worked {s.lastDate}</div>}
+                      </td>
                       <td className="px-2 py-2 text-right">{s.hours}</td>
                       <td className="px-2 py-2 text-right font-medium text-ink">{fmt$(s.chargeOut)}</td>
+                      {showCost && <td className="px-2 py-2 text-right text-muted">{pctFmt(marginPct(s.chargeOut, s.cost))}</td>}
                       {showCost && <td className="px-4 py-2 text-right text-muted">{fmt$(s.cost)}</td>}
                     </tr>
-                    {openSite === s.chargeUpJobId && s.byPerson.map((p) => (
-                      <tr key={p.employeeId || p.name} className="text-xs text-muted bg-page/30">
-                        <td className="px-8 py-1">{p.name}</td>
-                        <td className="px-2 py-1 text-right">{p.hours}</td>
-                        <td className="px-2 py-1 text-right">{fmt$(p.chargeOut)}</td>
-                        {showCost && <td className="px-4 py-1 text-right">{fmt$(p.cost)}</td>}
+                    {openSite === s.chargeUpJobId && (s.entries || []).map((en) => (
+                      <tr key={en.entryId || `${en.date}-${en.employeeName}`} className="text-xs bg-page/30 align-top">
+                        <td className="px-8 py-1.5">
+                          <div className="flex items-baseline gap-2">
+                            <span className="tabular-nums text-muted shrink-0">{en.date || "—"}</span>
+                            <span className="font-medium text-ink">{en.employeeName}</span>
+                          </div>
+                          <div className="text-muted">{en.notes || <span className="italic opacity-60">Charge-up task</span>}</div>
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-muted">{en.hours}</td>
+                        <td className="px-2 py-1.5 text-right text-muted">{fmt$(en.chargeOut)}</td>
+                        {showCost && <td className="px-2 py-1.5" />}
+                        {showCost && <td className="px-4 py-1.5 text-right text-muted">{fmt$(en.cost)}</td>}
                       </tr>
                     ))}
                   </Fragment>
@@ -293,13 +348,14 @@ export default function ChargeUpJobDetail({ job }) {
                     <td className="px-4 py-2">Untagged (no location picked)</td>
                     <td className="px-2 py-2 text-right">{summary.untagged.hours}</td>
                     <td className="px-2 py-2 text-right">{fmt$(summary.untagged.chargeOut)}</td>
+                    {showCost && <td className="px-2 py-2 text-right">{pctFmt(marginPct(summary.untagged.chargeOut, summary.untagged.cost))}</td>}
                     {showCost && <td className="px-4 py-2 text-right">{fmt$(summary.untagged.cost)}</td>}
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-          <p className="px-4 py-2 text-[11px] text-muted border-t border-hairline">Charge-out = approved hours × each person&rsquo;s charge-up rate. Click a site for the per-person breakdown.</p>
+          <p className="px-4 py-2 text-[11px] text-muted border-t border-hairline">Charge-out = approved hours × each worker&rsquo;s charge-up rate (or the site&rsquo;s own rate when set). Click a site to see each shift.</p>
         </div>
       ) : (
         <p className="text-xs text-muted px-1">

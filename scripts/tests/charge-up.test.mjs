@@ -64,5 +64,38 @@ eq(fyRoll.map((f) => f.fy), ["2025/26", "2026/27"], "FYs sorted ascending");
 eq(fyRoll[0], { fy: "2025/26", hours: 10, cost: 250, chargeOut: 1000 }, "FY 2025/26 = 10h × $100");
 eq(fyRoll[1], { fy: "2026/27", hours: 9, cost: 213, chargeOut: 820 }, "FY 2026/27 = 5×100 + 4×80");
 
+// ── FY rollup honours the per-site rate override (reconciles with per-site totals) ──
+const fyOv = rollupByFinancialYear([
+  { date: "2026-07-02", chargeUpJobId: "S1", employeeId: "A", hours: 10, cost: 250 }, // site override wins
+  { date: "2026-07-03", chargeUpJobId: null, employeeId: "A", hours: 2, cost: 50 },   // untagged → per-person
+], { A: 130 }, { S1: 100 });
+eq(fyOv[0].chargeOut, 1260, "FY charge-out uses site override for S1 (10×$100) + per-person for untagged (2×$130)");
+
+// ── per-shift entries + lastDate (Phase 1 drill-down) ──
+const dated = [
+  { chargeUpJobId: "S1", employeeId: "A", employeeName: "Anna", hours: 8, cost: 200, date: "2026-07-10", notes: "Deck boards", entryId: "e1" },
+  { chargeUpJobId: "S1", employeeId: "B", employeeName: "Ben", hours: 4, cost: 100, date: "2026-07-12", notes: "", entryId: "e2" },
+];
+const dr = rollupBySubJob(dated, rates);
+const ds1 = dr.find((s) => s.chargeUpJobId === "S1");
+eq(ds1.entries.map((en) => [en.date, en.employeeName, en.hours, en.chargeOut]), [["2026-07-12", "Ben", 4, 320], ["2026-07-10", "Anna", 8, 720]], "entries per shift, newest first, with charge-out");
+eq(ds1.entries[1].notes, "Deck boards", "entry keeps the worker's free-text note");
+eq(ds1.entries[0].notes, null, "empty note → null");
+eq(ds1.lastDate, "2026-07-12", "lastDate = most recent shift date");
+
+// ── per-site rate override (Phase 2) — a flat site rate overrides each worker's rate ──
+const ovs1 = rollupBySubJob(dated, rates, { S1: 100 }).find((s) => s.chargeUpJobId === "S1");
+eq(ovs1.chargeOut, 1200, "site rate override: (8+4)×$100, ignoring per-person rates");
+eq(ovs1.entries.find((en) => en.entryId === "e1").chargeOut, 800, "override applies per entry: 8×$100");
+eq(ovs1.byPerson.find((p) => p.name === "Anna").chargeOut, 800, "override flows into per-person too");
+eq(rollupBySubJob(dated, rates, {}).find((s) => s.chargeUpJobId === "S1").chargeOut, 1040, "no override → per-person rate as before");
+eq(rollupBySubJob(dated, rates, { S1: 0 }).find((s) => s.chargeUpJobId === "S1").chargeOut, 0, "override of $0 → charge-out 0 (comped)");
+// untagged bucket never takes an override
+eq(rollupBySubJob([{ chargeUpJobId: null, employeeId: "A", employeeName: "Anna", hours: 2, cost: 50 }], rates, { S1: 999 }).find((s) => !s.chargeUpJobId).chargeOut, 180, "untagged ignores site overrides (2×$90)");
+
+// ── stripCost also nulls per-entry cost for non-directors ──
+ok(stripCost(dr, false).find((s) => s.chargeUpJobId === "S1").entries.every((en) => en.cost === null), "non-director: per-entry cost nulled");
+ok(stripCost(dr, true).find((s) => s.chargeUpJobId === "S1").entries[0].cost != null, "director: per-entry cost preserved");
+
 console.log(`charge-up: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

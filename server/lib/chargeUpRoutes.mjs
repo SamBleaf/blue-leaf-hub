@@ -53,7 +53,7 @@ export function registerChargeUpRoutes(app) {
       let entries = [];
       if (tsIds.length) {
         const { data, error } = await sb.from("timesheet_entries")
-          .select("timesheet_id, employee_id, charge_up_job_id, hours, cost_amount").in("timesheet_id", tsIds);
+          .select("id, timesheet_id, employee_id, charge_up_job_id, hours, cost_amount, notes").in("timesheet_id", tsIds);
         if (error) throw error;   // charge_up_job_id column missing → migrationPending
         entries = data || [];
       }
@@ -64,24 +64,30 @@ export function registerChargeUpRoutes(app) {
       const cm = await getCostModel(sb).catch(() => null);
       const rateByEmp = {};
       if (cm?.ratesById) for (const [id, r] of Object.entries(cm.ratesById)) rateByEmp[id] = Number(r.charge_up_hourly) || 0;
-      const { data: sites } = await sb.from(TABLE).select("id, site_label, address").eq("carpentry_job_id", jobId);
+      // select("*") so charge_out_hourly (mig 149) is picked up when present, and its absence
+      // pre-migration doesn't error — the per-site override just stays off.
+      const { data: sites } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId);
       const siteById = new Map((sites || []).map((s) => [s.id, s]));
+      const rateBySite = {};
+      for (const s of sites || []) if (s.charge_out_hourly != null) rateBySite[s.id] = Number(s.charge_out_hourly);
 
       const input = entries.map((e) => ({
         chargeUpJobId: e.charge_up_job_id, employeeId: e.employee_id,
         employeeName: nameById.get(e.employee_id) || "Unknown",
         hours: e.hours, cost: e.cost_amount,
+        date: dateByTs.get(e.timesheet_id) || null, notes: e.notes || null, entryId: e.id,
       }));
-      const roll = stripCost(rollupBySubJob(input, rateByEmp), isDirector);
+      const roll = stripCost(rollupBySubJob(input, rateByEmp, rateBySite), isDirector);
       const subJobs = roll.filter((s) => s.chargeUpJobId).map((s) => ({
         ...s,
         siteLabel: siteById.get(s.chargeUpJobId)?.site_label || "(deleted site)",
         address: siteById.get(s.chargeUpJobId)?.address || null,
+        chargeOutHourly: siteById.get(s.chargeUpJobId)?.charge_out_hourly ?? null,
       }));
       const untagged = roll.find((s) => !s.chargeUpJobId) || null;
       // by-financial-year rollup WITH charge-out $ (the older internal-cost-summary has cost+hours only)
-      const fyInput = entries.map((e) => ({ date: dateByTs.get(e.timesheet_id), employeeId: e.employee_id, hours: e.hours, cost: e.cost_amount }));
-      let byFy = rollupByFinancialYear(fyInput, rateByEmp);
+      const fyInput = entries.map((e) => ({ date: dateByTs.get(e.timesheet_id), chargeUpJobId: e.charge_up_job_id, employeeId: e.employee_id, hours: e.hours, cost: e.cost_amount }));
+      let byFy = rollupByFinancialYear(fyInput, rateByEmp, rateBySite);
       if (!isDirector) byFy = byFy.map((f) => ({ ...f, cost: null }));
       ok(res, { subJobs, untagged, byFy, categoryTotals: categoryTotals(roll), canViewCost: isDirector });
     } catch (e) {
@@ -127,6 +133,15 @@ export function registerChargeUpRoutes(app) {
     if ("notes" in req.body) patch.notes = req.body.notes || null;
     if ("sortOrder" in req.body) patch.sort_order = Number(req.body.sortOrder) || 0;
     if ("status" in req.body && ["active", "archived"].includes(req.body.status)) patch.status = req.body.status;
+    // Per-site charge-out rate override (mig 149). "" / null → clear (fall back to each worker's
+    // charge_up_hourly). Pre-migration the write hits a missing column → caught as MIGRATION_PENDING.
+    if ("chargeOutHourly" in req.body) {
+      const raw = req.body.chargeOutHourly;
+      if (raw === null || raw === "") patch.charge_out_hourly = null;
+      // Upper bound = numeric(10,4) max (mig 149) so an out-of-range value returns a clean 400,
+      // not a Postgres overflow 500.
+      else { const n = Number(raw); if (!Number.isFinite(n) || n < 0 || n > 999999.9999) return err(res, 400, "Charge-out rate must be a positive number under 1,000,000"); patch.charge_out_hourly = n; }
+    }
     if (!Object.keys(patch).length) return err(res, 400, "No valid fields to update");
     try {
       const { data, error } = await sb.from(TABLE).update(patch).eq("id", req.params.id).select("*").maybeSingle();
@@ -175,13 +190,13 @@ export function registerChargeUpRoutes(app) {
       const dateByTs = new Map((ts || []).map((t) => [t.id, t.date]));
       if (!tsIds.length) return ok(res, { untaggedEntries: [] });
       const { data: rows, error } = await sb.from("timesheet_entries")
-        .select("id, timesheet_id, employee_id, hours").in("timesheet_id", tsIds).is("charge_up_job_id", null);
+        .select("id, timesheet_id, employee_id, hours, notes").in("timesheet_id", tsIds).is("charge_up_job_id", null);
       if (error) throw error;   // charge_up_job_id column missing → migrationPending
       const empIds = [...new Set((rows || []).map((r) => r.employee_id).filter(Boolean))];
       const { data: emps } = empIds.length ? await sb.from("employees").select("id, name").in("id", empIds) : { data: [] };
       const nameById = new Map((emps || []).map((e) => [e.id, e.name]));
       const untaggedEntries = (rows || [])
-        .map((r) => ({ entryId: r.id, date: dateByTs.get(r.timesheet_id) || null, employeeName: nameById.get(r.employee_id) || "Unknown", hours: Number(r.hours) || 0 }))
+        .map((r) => ({ entryId: r.id, date: dateByTs.get(r.timesheet_id) || null, employeeName: nameById.get(r.employee_id) || "Unknown", hours: Number(r.hours) || 0, notes: r.notes || null }))
         .sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.employeeName.localeCompare(b.employeeName));
       ok(res, { untaggedEntries });
     } catch (e) {
