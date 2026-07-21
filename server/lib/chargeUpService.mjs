@@ -8,25 +8,35 @@
 //   chargeUpJobId null → untagged charge-up hours (roll up to the category, no site)
 //   cost = timesheet_entries.cost_amount (pay-derived, booked at approval)
 //   date/notes/entryId → the per-shift detail surfaced when a site is expanded
-// charge-out $ = hours × rate, where rate = the site's charge_out_hourly OVERRIDE when set
-//   (Phase 2, rateBySite), else the employee's charge_up_hourly (billable, from the cost model)
+// charge-out $: when the site has a TARGET GROSS MARGIN set (Phase 2, marginBySite) it's derived
+//   from the wage cost — cost ÷ (1 − margin/100) — so the realised gross margin equals the number
+//   set; otherwise it's hours × the employee's charge_up_hourly (billable, from the cost model).
 // =============================================================================
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 
-// rateBySite: { [chargeUpJobId]: chargeOutHourly } — a per-site flat charge-out rate that
-// OVERRIDES each worker's charge_up_hourly for that site (Phase 2). Absent/null → per-person rate.
-export function rollupBySubJob(entries = [], chargeUpRateByEmployee = {}, rateBySite = {}) {
+// Charge-out from a target gross margin: charge = cost ÷ (1 − margin%/100) so gross margin
+// (charge − cost)/charge == margin. marginPct is a percentage in [0, 100).
+export function chargeOutFromMargin(cost, marginPct) {
+  const c = Number(cost) || 0;
+  const denom = 1 - (Number(marginPct) || 0) / 100;
+  return denom > 0 ? c / denom : 0;
+}
+
+// marginBySite: { [chargeUpJobId]: targetGrossMarginPct } — a per-site target gross margin that
+// prices the site off its wage cost (Phase 2). Absent/null → each worker's charge_up_hourly.
+export function rollupBySubJob(entries = [], chargeUpRateByEmployee = {}, marginBySite = {}) {
   const bySub = new Map();
   for (const e of entries) {
     const key = e.chargeUpJobId || null;
     const hours = Number(e.hours) || 0;
     if (hours <= 0 && !e.cost) continue;
     const cost = Number(e.cost) || 0;
-    const override = key != null ? rateBySite[key] : null;
-    const rate = override != null ? Number(override) || 0 : Number(chargeUpRateByEmployee[e.employeeId]) || 0;
-    const chargeOut = hours * rate;
+    const margin = key != null ? marginBySite[key] : null;
+    const chargeOut = margin != null
+      ? chargeOutFromMargin(cost, margin)
+      : hours * (Number(chargeUpRateByEmployee[e.employeeId]) || 0);
     if (!bySub.has(key)) bySub.set(key, { chargeUpJobId: key, hours: 0, cost: 0, chargeOut: 0, lastDate: null, _people: new Map(), _entries: [] });
     const s = bySub.get(key);
     s.hours += hours; s.cost += cost; s.chargeOut += chargeOut;
@@ -85,21 +95,22 @@ export function auFinancialYear(dateStr) {
 
 // Roll charge-up entries up by AU financial year, WITH charge-out $ (which the older
 // internal-cost-summary lacks). entry: { date, chargeUpJobId, employeeId, hours, cost }
-// Uses the same rate precedence as rollupBySubJob — the site's charge_out_hourly OVERRIDE
-// when set (rateBySite), else the employee's charge_up_hourly — so the FY charge-out totals
-// reconcile with the category + per-site totals rather than contradicting them.
-export function rollupByFinancialYear(entries = [], chargeUpRateByEmployee = {}, rateBySite = {}) {
+// Uses the same precedence as rollupBySubJob — the site's target gross margin when set
+// (marginBySite, priced off wage cost), else the employee's charge_up_hourly — so the FY
+// charge-out totals reconcile with the category + per-site totals rather than contradicting them.
+export function rollupByFinancialYear(entries = [], chargeUpRateByEmployee = {}, marginBySite = {}) {
   const byFy = new Map();
   for (const e of entries) {
     const fy = auFinancialYear(e.date);
     if (!fy) continue;
     const hours = Number(e.hours) || 0;
+    const cost = Number(e.cost) || 0;
     const key = e.chargeUpJobId || null;
-    const override = key != null ? rateBySite[key] : null;
-    const rate = override != null ? Number(override) || 0 : Number(chargeUpRateByEmployee[e.employeeId]) || 0;
+    const margin = key != null ? marginBySite[key] : null;
+    const chargeOut = margin != null ? chargeOutFromMargin(cost, margin) : hours * (Number(chargeUpRateByEmployee[e.employeeId]) || 0);
     if (!byFy.has(fy)) byFy.set(fy, { fy, hours: 0, cost: 0, chargeOut: 0 });
     const f = byFy.get(fy);
-    f.hours += hours; f.cost += Number(e.cost) || 0; f.chargeOut += hours * rate;
+    f.hours += hours; f.cost += cost; f.chargeOut += chargeOut;
   }
   return [...byFy.values()]
     .map((f) => ({ fy: f.fy, hours: round1(f.hours), cost: round2(f.cost), chargeOut: round2(f.chargeOut) }))

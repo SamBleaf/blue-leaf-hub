@@ -1,7 +1,7 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-20
-app_version: 1.1 — built (per-shift drill-down + gross margin + per-site rate override)
+sop_version: 1.2
+last_reviewed: 2026-07-21
+app_version: 1.2 — built (per-shift drill-down + gross margin + per-site target-margin pricing)
 screenshot_status: not_applicable
 owner: Admin
 test_status: untested
@@ -32,12 +32,12 @@ Admin/supervisors set up the charge-up sites and read the per-site invoicing fig
 - **Charge-out $** per site = approved hours × each person's charge-up rate (from the cost model) — the ready-to-invoice figure. Internal cost is director-only; charge-out is shown to admin/supervisor.
 - **Gross margin** (director-only) = (charge-out − cost) ÷ charge-out, shown on the summary strip and per site, so you can see the return at a glance.
 - **Per-site drill-down**: clicking a site row lists every approved shift behind the total — date · worker · **what they did** (the note the worker typed on the app) · hours · charge-out (· cost, directors). No need to open the timesheets to see the work.
-- **Per-site charge-out rate override** (director/supervisor, mig 149): a site can carry a flat charge-out $/hr that **overrides** each worker's charge-up rate for that site — the lever for "adjust the margin on this job". Blank = fall back to each worker's rate. Changing it re-computes charge-out + margin live. It never changes approved hours or the internal cost.
+- **Per-site target gross margin** (director-only, mig 150): a site can carry a **margin %** that prices it off the wage cost — charge-out = wage cost ÷ (1 − margin), so the realised gross margin equals the number set. It's the lever for "adjust the margin on this job". Blank = fall back to each worker's charge-up rate. Changing it re-computes charge-out + margin live; it never changes approved hours or the internal cost. Margin reveals cost, so it's shown/editable to directors only.
 
 In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker** — a charge-up shift always names its site (address), so everyone can see where the boys are before they log hours. (The site is also confirmed when logging hours, so it's captured either way.)
 
 ## 4. Before you start
-- Migrations 145 (sites), 146 (Planner shift → site link) and 149 (per-site charge-out rate override) applied.
+- Migrations 145 (sites), 146 (Planner shift → site link) and 150 (per-site target gross margin) applied.
 - The cost model synced (Workforce → Buildexact sync) for charge-out $ to compute.
 - Workers use the Worker app to log hours (they must have BLB Charge Up visible/assignable).
 
@@ -64,9 +64,9 @@ In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker
 2. The **Hours & charge-out by site** table below: each row Location (+ its rate badge + last-worked date) · Hours · Charge-out $ (· Margin · Cost, directors). **Click a row to see every shift** behind the total — date · worker · what they did · hours · charge-out.
 3. Use the charge-out $ (or hours) to raise the invoice for that site.
 
-### Adjust the charge / margin on a job (director/supervisor)
-1. In the **Charge-up sites** list, each active site has a **$ rate /hr** field.
-2. Type a flat charge-out rate for that site (e.g. `95`) and click away. Charge-out $ and the margin re-compute for that site (its rate badge shows in the by-site table). Leave it blank to bill at each worker's own charge-up rate.
+### Adjust the margin on a job (director only)
+1. In the **Charge-up sites** list, each active site has a **Margin %** field (directors only).
+2. Type the target gross margin (e.g. `40`) and click away. Charge-out re-computes as wage cost ÷ (1 − 0.40) and the site's Margin column reads exactly 40% (a "40% margin" badge shows in the by-site table). Leave it blank to bill at each worker's own charge-up rate.
 3. This only changes the **billable** figure — approved hours and the internal cost are untouched.
 
 ### Assign untagged hours to a site (admin/supervisor)
@@ -93,7 +93,7 @@ Hours become part of the site's totals once the worker's timesheet is **approved
 - SOP 10-04 Workforce Pipeline; SOP 14-xx Cost Intelligence (the charge-up rate lives in the cost model)
 
 ## 10. Automation notes
-- Sites CRUD: `GET/POST /api/carpentry/jobs/:id/charge-up-jobs`, `PATCH/DELETE /api/carpentry/charge-up-jobs/:id` (admin/supervisor). PATCH whitelists `chargeOutHourly` (per-site rate override, mig 149; validated 0–999999.9999, blank clears). Analytics: `GET /api/carpentry/jobs/:id/charge-up-summary` returns per-site `entries[]` (date · worker · notes · hours · charge-out · cost), `lastDate`, `chargeOutHourly`, and by-FY — all cost fields director-gated (`stripCost`).
+- Sites CRUD: `GET/POST /api/carpentry/jobs/:id/charge-up-jobs`, `PATCH/DELETE /api/carpentry/charge-up-jobs/:id` (admin/supervisor). PATCH whitelists `marginPct` (per-site target gross margin, mig 150; **admin-only** since it reveals cost; validated 0 ≤ x < 100, blank clears). Analytics: `GET /api/carpentry/jobs/:id/charge-up-summary` returns per-site `entries[]` (date · worker · notes · hours · charge-out · cost), `lastDate`, `marginPct` (directors only), and by-FY — all cost/margin fields director-gated (`stripCost`).
 - Worker: `/api/worker/jobs/:id/subtasks` returns `chargeUpSites` for BL-CHARGEUP; `POST /api/worker/timesheets` accepts + guards `charge_up_job_id`.
 - Planner: `POST /api/workforce/allocations/assign` (+ POST/move) accept `chargeUpJobId`; `resolveAllocChargeUpSite` requires a valid site when the allocation's job is BL-CHARGEUP and it has active sites (belongs-to via `validateChargeUpSite`, a pure helper). `workforce_allocations.charge_up_job_id` (mig 146) stores it; `GET /api/workforce/allocations` echoes `chargeUpSiteLabel`/`chargeUpSiteAddress`.
 - Rollup + Planner site-choice maths in `server/lib/chargeUpService.mjs` (no calc in routes/UI). `rollupBySubJob`/`rollupByFinancialYear` both take an optional `rateBySite` map so the FY totals reconcile with the per-site totals. Tables `charge_up_jobs` (+ `charge_out_hourly`, mig 149) + `timesheet_entries.charge_up_job_id` (mig 145) + `workforce_allocations.charge_up_job_id` (mig 146). Unit tests: `scripts/tests/charge-up.test.mjs`.
@@ -188,10 +188,11 @@ Next review: 2026-11-30
 3. As a supervisor (non-director): Expected: NO margin or cost anywhere (charge-out + hours only) — margin must not leak cost
 - [ ] Pass  [ ] Fail
 
-**TC-11 — Per-site charge-out rate override (mig 149)**
-1. In the sites list, set a site's **$ rate /hr** to e.g. 95 → click away
-2. Expected: the site's charge-out $ becomes hours × 95, the Margin updates, a "@ $95/hr" badge shows in the by-site table, and the by-FY charge-out reconciles (no contradiction with the per-site total)
+**TC-11 — Per-site target gross margin (mig 150)**
+1. As a director, in the sites list set a site's **Margin %** to e.g. 40 → click away
+2. Expected: the site's charge-out $ becomes wage cost ÷ (1 − 0.40), the Margin column reads exactly 40%, a "40% margin" badge shows in the by-site table, and the by-FY charge-out reconciles (no contradiction with the per-site total)
 3. Clear the field → Expected: charge-out reverts to each worker's charge-up rate
-4. Enter a negative or ≥1,000,000 value → Expected: a clean validation message, not a server error
-5. Before mig 149: Expected: no rate field appears (and no crash) until the migration is applied
+4. Enter a negative or ≥100 value → Expected: a clean validation message ("between 0 and 99.99%"), not a server error
+5. As a supervisor (non-director): Expected: NO Margin field is shown (it reveals cost); the API also rejects a margin write from a non-director
+6. Before mig 150: Expected: no Margin field appears (and no crash) until the migration is applied
 - [ ] Pass  [ ] Fail

@@ -64,12 +64,12 @@ export function registerChargeUpRoutes(app) {
       const cm = await getCostModel(sb).catch(() => null);
       const rateByEmp = {};
       if (cm?.ratesById) for (const [id, r] of Object.entries(cm.ratesById)) rateByEmp[id] = Number(r.charge_up_hourly) || 0;
-      // select("*") so charge_out_hourly (mig 149) is picked up when present, and its absence
-      // pre-migration doesn't error — the per-site override just stays off.
+      // select("*") so margin_pct (mig 150) is picked up when present, and its absence
+      // pre-migration doesn't error — the per-site margin just stays off.
       const { data: sites } = await sb.from(TABLE).select("*").eq("carpentry_job_id", jobId);
       const siteById = new Map((sites || []).map((s) => [s.id, s]));
-      const rateBySite = {};
-      for (const s of sites || []) if (s.charge_out_hourly != null) rateBySite[s.id] = Number(s.charge_out_hourly);
+      const marginBySite = {};
+      for (const s of sites || []) if (s.margin_pct != null) marginBySite[s.id] = Number(s.margin_pct);
 
       const input = entries.map((e) => ({
         chargeUpJobId: e.charge_up_job_id, employeeId: e.employee_id,
@@ -77,17 +77,18 @@ export function registerChargeUpRoutes(app) {
         hours: e.hours, cost: e.cost_amount,
         date: dateByTs.get(e.timesheet_id) || null, notes: e.notes || null, entryId: e.id,
       }));
-      const roll = stripCost(rollupBySubJob(input, rateByEmp, rateBySite), isDirector);
+      const roll = stripCost(rollupBySubJob(input, rateByEmp, marginBySite), isDirector);
       const subJobs = roll.filter((s) => s.chargeUpJobId).map((s) => ({
         ...s,
         siteLabel: siteById.get(s.chargeUpJobId)?.site_label || "(deleted site)",
         address: siteById.get(s.chargeUpJobId)?.address || null,
-        chargeOutHourly: siteById.get(s.chargeUpJobId)?.charge_out_hourly ?? null,
+        // margin reveals cost (cost = chargeOut × (1 − margin)), so only expose it to directors.
+        marginPct: isDirector ? (siteById.get(s.chargeUpJobId)?.margin_pct ?? null) : null,
       }));
       const untagged = roll.find((s) => !s.chargeUpJobId) || null;
       // by-financial-year rollup WITH charge-out $ (the older internal-cost-summary has cost+hours only)
       const fyInput = entries.map((e) => ({ date: dateByTs.get(e.timesheet_id), chargeUpJobId: e.charge_up_job_id, employeeId: e.employee_id, hours: e.hours, cost: e.cost_amount }));
-      let byFy = rollupByFinancialYear(fyInput, rateByEmp, rateBySite);
+      let byFy = rollupByFinancialYear(fyInput, rateByEmp, marginBySite);
       if (!isDirector) byFy = byFy.map((f) => ({ ...f, cost: null }));
       ok(res, { subJobs, untagged, byFy, categoryTotals: categoryTotals(roll), canViewCost: isDirector });
     } catch (e) {
@@ -133,14 +134,15 @@ export function registerChargeUpRoutes(app) {
     if ("notes" in req.body) patch.notes = req.body.notes || null;
     if ("sortOrder" in req.body) patch.sort_order = Number(req.body.sortOrder) || 0;
     if ("status" in req.body && ["active", "archived"].includes(req.body.status)) patch.status = req.body.status;
-    // Per-site charge-out rate override (mig 149). "" / null → clear (fall back to each worker's
-    // charge_up_hourly). Pre-migration the write hits a missing column → caught as MIGRATION_PENDING.
-    if ("chargeOutHourly" in req.body) {
-      const raw = req.body.chargeOutHourly;
-      if (raw === null || raw === "") patch.charge_out_hourly = null;
-      // Upper bound = numeric(10,4) max (mig 149) so an out-of-range value returns a clean 400,
-      // not a Postgres overflow 500.
-      else { const n = Number(raw); if (!Number.isFinite(n) || n < 0 || n > 999999.9999) return err(res, 400, "Charge-out rate must be a positive number under 1,000,000"); patch.charge_out_hourly = n; }
+    // Per-site target gross margin (mig 150). "" / null → clear (fall back to each worker's
+    // charge_up_hourly). Margin reveals cost, so it's director(admin)-only. Pre-migration the write
+    // hits a missing column → caught as MIGRATION_PENDING.
+    if ("marginPct" in req.body) {
+      if (req.caller?.role !== "admin") return err(res, 403, "Only a director can set the charge-up margin", "FORBIDDEN");
+      const raw = req.body.marginPct;
+      if (raw === null || raw === "") patch.margin_pct = null;
+      // Gross margin must be in [0, 100) — at 100% charge-out would be infinite.
+      else { const n = Number(raw); if (!Number.isFinite(n) || n < 0 || n >= 100) return err(res, 400, "Margin must be between 0 and 99.99%"); patch.margin_pct = n; }
     }
     if (!Object.keys(patch).length) return err(res, 400, "No valid fields to update");
     try {

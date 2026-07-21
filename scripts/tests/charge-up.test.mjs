@@ -1,6 +1,6 @@
 // Charge Up service — unit tests. Run: node scripts/tests/charge-up.test.mjs
 // No framework — plain assertions, exits 1 on any failure.
-import { rollupBySubJob, categoryTotals, stripCost, validateChargeUpSite, auFinancialYear, rollupByFinancialYear } from "../../server/lib/chargeUpService.mjs";
+import { rollupBySubJob, categoryTotals, stripCost, validateChargeUpSite, auFinancialYear, rollupByFinancialYear, chargeOutFromMargin } from "../../server/lib/chargeUpService.mjs";
 
 let pass = 0, fail = 0;
 function eq(a, e, name) { const A = JSON.stringify(a), E = JSON.stringify(e); if (A === E) pass++; else { fail++; console.error(`  ✗ ${name}\n      expected ${E}\n      got      ${A}`); } }
@@ -64,12 +64,12 @@ eq(fyRoll.map((f) => f.fy), ["2025/26", "2026/27"], "FYs sorted ascending");
 eq(fyRoll[0], { fy: "2025/26", hours: 10, cost: 250, chargeOut: 1000 }, "FY 2025/26 = 10h × $100");
 eq(fyRoll[1], { fy: "2026/27", hours: 9, cost: 213, chargeOut: 820 }, "FY 2026/27 = 5×100 + 4×80");
 
-// ── FY rollup honours the per-site rate override (reconciles with per-site totals) ──
+// ── FY rollup honours the per-site margin (reconciles with per-site totals) ──
 const fyOv = rollupByFinancialYear([
-  { date: "2026-07-02", chargeUpJobId: "S1", employeeId: "A", hours: 10, cost: 250 }, // site override wins
+  { date: "2026-07-02", chargeUpJobId: "S1", employeeId: "A", hours: 10, cost: 250 }, // margin priced off cost
   { date: "2026-07-03", chargeUpJobId: null, employeeId: "A", hours: 2, cost: 50 },   // untagged → per-person
-], { A: 130 }, { S1: 100 });
-eq(fyOv[0].chargeOut, 1260, "FY charge-out uses site override for S1 (10×$100) + per-person for untagged (2×$130)");
+], { A: 130 }, { S1: 40 });
+eq(fyOv[0].chargeOut, 676.67, "FY charge-out: S1 250÷0.6 (margin) + untagged 2×$130");
 
 // ── per-shift entries + lastDate (Phase 1 drill-down) ──
 const dated = [
@@ -83,15 +83,18 @@ eq(ds1.entries[1].notes, "Deck boards", "entry keeps the worker's free-text note
 eq(ds1.entries[0].notes, null, "empty note → null");
 eq(ds1.lastDate, "2026-07-12", "lastDate = most recent shift date");
 
-// ── per-site rate override (Phase 2) — a flat site rate overrides each worker's rate ──
-const ovs1 = rollupBySubJob(dated, rates, { S1: 100 }).find((s) => s.chargeUpJobId === "S1");
-eq(ovs1.chargeOut, 1200, "site rate override: (8+4)×$100, ignoring per-person rates");
-eq(ovs1.entries.find((en) => en.entryId === "e1").chargeOut, 800, "override applies per entry: 8×$100");
-eq(ovs1.byPerson.find((p) => p.name === "Anna").chargeOut, 800, "override flows into per-person too");
-eq(rollupBySubJob(dated, rates, {}).find((s) => s.chargeUpJobId === "S1").chargeOut, 1040, "no override → per-person rate as before");
-eq(rollupBySubJob(dated, rates, { S1: 0 }).find((s) => s.chargeUpJobId === "S1").chargeOut, 0, "override of $0 → charge-out 0 (comped)");
-// untagged bucket never takes an override
-eq(rollupBySubJob([{ chargeUpJobId: null, employeeId: "A", employeeName: "Anna", hours: 2, cost: 50 }], rates, { S1: 999 }).find((s) => !s.chargeUpJobId).chargeOut, 180, "untagged ignores site overrides (2×$90)");
+// ── per-site target gross margin (Phase 2) — charge-out priced off wage cost ──
+eq(chargeOutFromMargin(300, 40), 500, "chargeOutFromMargin: 300 ÷ (1−0.40) = 500");
+eq(chargeOutFromMargin(100, 100), 0, "100% margin guarded → 0 (never divide by zero)");
+const mvs1 = rollupBySubJob(dated, rates, { S1: 40 }).find((s) => s.chargeUpJobId === "S1");
+eq(mvs1.chargeOut, 500, "40% target margin: cost 300 ÷ 0.6 = 500");
+ok(Math.abs((mvs1.chargeOut - mvs1.cost) / mvs1.chargeOut - 0.4) < 1e-9, "realised gross margin == the target (40%)");
+eq(mvs1.entries.find((en) => en.entryId === "e1").chargeOut, 333.33, "margin applies per entry: 200 ÷ 0.6");
+eq(mvs1.byPerson.find((p) => p.name === "Anna").chargeOut, 333.33, "margin flows into per-person too");
+eq(rollupBySubJob(dated, rates, {}).find((s) => s.chargeUpJobId === "S1").chargeOut, 1040, "no margin → per-person rate as before");
+eq(rollupBySubJob(dated, rates, { S1: 0 }).find((s) => s.chargeUpJobId === "S1").chargeOut, 300, "0% margin → charge-out = wage cost (300)");
+// untagged bucket never takes a margin
+eq(rollupBySubJob([{ chargeUpJobId: null, employeeId: "A", employeeName: "Anna", hours: 2, cost: 50 }], rates, { S1: 40 }).find((s) => !s.chargeUpJobId).chargeOut, 180, "untagged ignores site margin (2×$90)");
 
 // ── stripCost also nulls per-entry cost for non-directors ──
 ok(stripCost(dr, false).find((s) => s.chargeUpJobId === "S1").entries.every((en) => en.cost === null), "non-director: per-entry cost nulled");

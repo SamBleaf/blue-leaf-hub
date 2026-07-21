@@ -78,13 +78,13 @@ export default function ChargeUpJobDetail({ job }) {
     setSites((s) => s.map((x) => (x.id === row.id ? data.chargeUpJob : x)));
   }
 
-  // Rate override changes charge-out + margin (computed server-side), so reload the summary after.
-  async function patchSiteRate(row, value) {
+  // Margin changes charge-out (computed server-side off wage cost), so reload the summary after.
+  async function patchSiteMargin(row, value) {
     const v = String(value).trim();
-    const chargeOutHourly = v === "" ? null : Number(v);
-    if (chargeOutHourly != null && (!Number.isFinite(chargeOutHourly) || chargeOutHourly < 0 || chargeOutHourly > 999999.9999)) { setError("Charge-out rate must be a positive number under 1,000,000."); return; }
+    const marginPct = v === "" ? null : Number(v);
+    if (marginPct != null && (!Number.isFinite(marginPct) || marginPct < 0 || marginPct >= 100)) { setError("Margin must be between 0 and 99.99%."); return; }
     setSavingId(row.id); setError(null);
-    const { ok, error: e } = await apiPatch(`/api/carpentry/charge-up-jobs/${row.id}`, { chargeOutHourly });
+    const { ok, error: e } = await apiPatch(`/api/carpentry/charge-up-jobs/${row.id}`, { marginPct });
     if (!ok) { setError(e || "Update failed."); setSavingId(null); return; }
     await load();
     setSavingId(null);
@@ -100,8 +100,8 @@ export default function ChargeUpJobDetail({ job }) {
 
   const visible = sites.filter((s) => showArchived || s.status !== "archived");
   const archivedCount = sites.filter((s) => s.status === "archived").length;
-  // The per-site rate override column (mig 149) is present once site rows carry the key.
-  const rateReady = sites.length > 0 && Object.prototype.hasOwnProperty.call(sites[0], "chargeOutHourly");
+  // The per-site margin column (mig 150) is present once site rows carry the key.
+  const marginReady = sites.length > 0 && Object.prototype.hasOwnProperty.call(sites[0], "marginPct");
 
   return (
     <div className="space-y-6 pb-24 p-6 max-w-4xl mx-auto">
@@ -229,18 +229,18 @@ export default function ChargeUpJobDetail({ job }) {
                   <input defaultValue={s.address || ""} onBlur={(e) => e.target.value !== (s.address || "") && patchSite(s, { address: e.target.value })}
                     placeholder="Address / info" className="w-full text-xs text-muted bg-transparent border-0 border-b border-transparent hover:border-hairline focus:border-primary focus-ring px-0 py-0.5 mt-0.5" />
                 </div>
-                {rateReady && s.status !== "archived" && (
-                  <label className="flex items-center gap-1 shrink-0 text-xs text-muted" title="Flat charge-out rate per hour for this site — overrides each worker's rate. Blank = use each worker's charge-up rate.">
-                    <span>$</span>
-                    <input type="number" min="0" step="1" defaultValue={s.chargeOutHourly != null ? Number(s.chargeOutHourly) : ""}
+                {marginReady && showCost && s.status !== "archived" && (
+                  <label className="flex items-center gap-1 shrink-0 text-xs text-muted" title="Target gross margin on wages for this site. Charge-out = wage cost ÷ (1 − margin). Blank = use each worker's charge-up rate.">
+                    <span>Margin</span>
+                    <input type="number" min="0" max="99.99" step="1" defaultValue={s.marginPct != null ? Number(s.marginPct) : ""}
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
                         const next = raw === "" ? null : Number(raw);
-                        const cur = s.chargeOutHourly != null ? Number(s.chargeOutHourly) : null;
-                        if (next !== cur) patchSiteRate(s, raw);
+                        const cur = s.marginPct != null ? Number(s.marginPct) : null;
+                        if (next !== cur) patchSiteMargin(s, raw);
                       }}
-                      placeholder="rate" className="w-16 text-right text-sm text-ink bg-transparent border-0 border-b border-hairline focus:border-primary focus-ring px-0 py-0.5" />
-                    <span>/hr</span>
+                      placeholder="—" className="w-14 text-right text-sm text-ink bg-transparent border-0 border-b border-hairline focus:border-primary focus-ring px-0 py-0.5" />
+                    <span>%</span>
                   </label>
                 )}
                 {s.status === "archived" ? (
@@ -317,7 +317,7 @@ export default function ChargeUpJobDetail({ job }) {
                       <td className="px-4 py-2 font-medium text-ink">
                         <div>
                           {openSite === s.chargeUpJobId ? "▾ " : "▸ "}{s.siteLabel}
-                          {s.chargeOutHourly != null && <span className="ml-1.5 text-[10px] font-normal text-accent">@ {fmt$(s.chargeOutHourly)}/hr</span>}
+                          {s.marginPct != null && <span className="ml-1.5 text-[10px] font-normal text-accent">{Number(s.marginPct)}% margin</span>}
                         </div>
                         {s.lastDate && <div className="text-[10px] font-normal text-muted">last worked {s.lastDate}</div>}
                       </td>
