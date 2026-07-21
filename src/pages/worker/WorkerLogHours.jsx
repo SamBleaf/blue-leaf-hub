@@ -465,6 +465,20 @@ export default function WorkerLogHours() {
                       {!e.chargeUpTask && (
                         <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
                       )}
+                      {e.chargeUpTask && isLeadingHand && (
+                        e.completion_photo_url ? (
+                          <button type="button" onClick={() => openPhotoFor(idx)} title="Replace photo" className="w-9 h-9 shrink-0 rounded-full overflow-hidden border border-hairline">
+                            <img src={e.completion_photo_url} alt="" className="w-full h-full object-cover" />
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => openPhotoFor(idx)} disabled={photoBusy} aria-label="Add photo" title="Add a photo of the work" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-muted flex items-center justify-center disabled:opacity-50">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                              <circle cx="12" cy="13" r="4" />
+                            </svg>
+                          </button>
+                        )
+                      )}
                       <button type="button" onClick={() => removeEntry(idx)} aria-label="Remove" className="w-7 h-8 shrink-0 text-muted text-xl leading-none flex items-center justify-center">×</button>
                     </div>
                     {!e.chargeUpTask && expandedIdx === idx && (

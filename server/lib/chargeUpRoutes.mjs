@@ -13,6 +13,13 @@ import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { getCostModel } from "./costModelService.mjs";
 import { rollupBySubJob, categoryTotals, stripCost, rollupByFinancialYear } from "./chargeUpService.mjs";
+import { signSiteTaskPhotos, isUuid } from "./siteMedia.mjs";
+
+// Task field validation — mirrors the job task POST so the SAME TasksPanel component works
+// against a charge-up site (site_tasks re-keyed to charge_up_job_id, mig 151).
+const TASK_PRIORITIES = ["urgent", "normal", "when_time_permits"];
+const TASK_CATEGORIES = ["general", "defect", "safety", "materials", "inspection", "first_fix_framing", "cladding", "second_fix", "outdoor_works", "formwork_slab_prep", "site_labouring", "site_cleanup", "supervision"];
+const TASK_CREATED_VIA = ["manual", "voice_note", "ai_extraction"];
 
 const TABLE = "charge_up_jobs";
 // Match a missing table OR a missing column (charge_up_job_id before mig 145): PostgREST
@@ -95,6 +102,148 @@ export function registerChargeUpRoutes(app) {
       if (isMissingTable(e)) return ok(res, { subJobs: [], untagged: null, byFy: [], categoryTotals: { hours: 0, cost: 0, chargeOut: 0, sites: 0 }, migrationPending: true });
       err(res, 500, "Could not build the charge-up summary");
       console.error("[charge-up summary]", e?.message || e);
+    }
+  });
+
+  // Full per-site shift detail for the site-detail pop-up: the site's own fields + every approved
+  // shift worked there (date, worker, task, description, hours, charge-out, cost[director],
+  // completion photo). Charge-out is margin-priced exactly like the summary. Fetched lazily on open
+  // so the (potentially photo-heavy) payload never loads with the main page.
+  app.get("/api/carpentry/charge-up-jobs/:id/shifts", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    const isDirector = req.caller?.role === "admin";
+    try {
+      const { data: site, error: siteErr } = await sb.from(TABLE).select("*").eq("id", req.params.id).maybeSingle();
+      if (siteErr) throw siteErr;
+      if (!site) return err(res, 404, "Charge-up site not found", "NOT_FOUND");
+      const { data: ts } = await sb.from("timesheets").select("id, date").eq("carpentry_job_id", site.carpentry_job_id).eq("status", "approved");
+      const tsIds = (ts || []).map((t) => t.id);
+      const dateByTs = new Map((ts || []).map((t) => [t.id, t.date]));
+      let entries = [];
+      if (tsIds.length) {
+        const { data, error } = await sb.from("timesheet_entries")
+          .select("id, timesheet_id, employee_id, hours, cost_amount, notes, task_category, completion_photo_url")
+          .in("timesheet_id", tsIds).eq("charge_up_job_id", site.id);
+        if (error) throw error;
+        entries = data || [];
+      }
+      const empIds = [...new Set(entries.map((e) => e.employee_id).filter(Boolean))];
+      const { data: emps } = empIds.length ? await sb.from("employees").select("id, name").in("id", empIds) : { data: [] };
+      const nameById = new Map((emps || []).map((e) => [e.id, e.name]));
+      const cm = await getCostModel(sb).catch(() => null);
+      const rateByEmp = {};
+      if (cm?.ratesById) for (const [id, r] of Object.entries(cm.ratesById)) rateByEmp[id] = Number(r.charge_up_hourly) || 0;
+      const marginBySite = site.margin_pct != null ? { [site.id]: Number(site.margin_pct) } : {};
+      const input = entries.map((e) => ({
+        chargeUpJobId: site.id, employeeId: e.employee_id, employeeName: nameById.get(e.employee_id) || "Unknown",
+        hours: e.hours, cost: e.cost_amount, date: dateByTs.get(e.timesheet_id) || null,
+        notes: e.notes || null, entryId: e.id, taskCategory: e.task_category || null, completionPhotoUrl: e.completion_photo_url || null,
+      }));
+      const [rolled] = stripCost(rollupBySubJob(input, rateByEmp, marginBySite), isDirector);
+      ok(res, {
+        site: { id: site.id, siteLabel: site.site_label, address: site.address || null, notes: site.notes || null, status: site.status, marginPct: isDirector ? (site.margin_pct ?? null) : null },
+        shifts: rolled?.entries || [],
+        totals: { hours: rolled?.hours || 0, cost: rolled ? rolled.cost : (isDirector ? 0 : null), chargeOut: rolled?.chargeOut || 0 },
+      });
+    } catch (e) {
+      if (isMissingTable(e)) return ok(res, { site: null, shifts: [], totals: null, migrationPending: true });
+      err(res, 500, "Could not load the site's shifts");
+      console.error("[charge-up shifts]", e?.message || e);
+    }
+  });
+
+  // ── Per-site TASKS (site_tasks re-keyed to charge_up_job_id, mig 151) ────────
+  // Same table + component as a real carpentry job; scoped to the site. Edits/deletes reuse the
+  // existing id-scoped PATCH/DELETE /api/carpentry/tasks/:id. Owned by the SITE alone
+  // (project_id + carpentry_job_id NULL — the mig-151 3-way one-owner rule) so they NEVER match a
+  // parent-job reader (worker PWA task list, job Tasks tab, earned-value rollup) — no leak.
+  app.get("/api/carpentry/charge-up-jobs/:id/tasks", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    try {
+      const { data, error } = await sb.from("site_tasks")
+        .select("*, assigned:employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
+        .eq("charge_up_job_id", req.params.id).neq("status", "wont_do")
+        .order("sort_order").order("created_at");
+      if (error) throw error;
+      await signSiteTaskPhotos(sb, data || []);
+      ok(res, { tasks: rowsToCamel(data || []) });
+    } catch (e) {
+      if (isMissingTable(e)) return ok(res, { tasks: [], migrationPending: true });
+      err(res, 500, "Could not load the site's tasks");
+      console.error("[charge-up tasks GET]", e?.message || e);
+    }
+  });
+
+  app.post("/api/carpentry/charge-up-jobs/:id/tasks", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    try {
+      if (!isUuid(req.params.id)) return err(res, 400, "Invalid site id");
+      const { data: site } = await sb.from(TABLE).select("id").eq("id", req.params.id).maybeSingle();
+      if (!site) return err(res, 404, "Charge-up site not found", "NOT_FOUND");
+      const { title, description, priority = "normal", dueDate, category = "general", assignedTo, createdVia = "manual", taskAudience = "worker" } = req.body || {};
+      if (!title?.trim()) return err(res, 400, "title is required");
+      if (!["worker", "supervisor"].includes(taskAudience)) return err(res, 400, "Invalid taskAudience");
+      if (!TASK_PRIORITIES.includes(priority)) return err(res, 400, "Invalid priority");
+      if (!TASK_CATEGORIES.includes(category)) return err(res, 400, "Invalid category");
+      if (!TASK_CREATED_VIA.includes(createdVia)) return err(res, 400, "Invalid createdVia");
+      if (assignedTo && !isUuid(assignedTo)) return err(res, 400, "Invalid assignee");
+      const row = {
+        carpentry_job_id: null, charge_up_job_id: site.id, project_id: null,   // site-owned only (no parent → no leak)
+        title: title.trim(), description: description?.trim() || null, priority, category,
+        assigned_to: assignedTo || null, due_date: dueDate || null, created_by: req.caller.id,
+        created_via: createdVia, status: "open", sort_order: 0,
+        ...(taskAudience && taskAudience !== "worker" ? { task_audience: taskAudience } : {}),
+      };
+      const { data: task, error } = await sb.from("site_tasks").insert(row).select("*, employees!assigned_to(id, name)").single();
+      if (error) throw error;
+      ok(res, { task });
+    } catch (e) {
+      if (isMissingTable(e)) return err(res, 503, "Charge-up tasks not enabled yet — apply migration 151", "MIGRATION_PENDING");
+      err(res, 500, translateDbError(e));
+      console.error("[charge-up tasks POST]", e?.message || e);
+    }
+  });
+
+  // ── Per-site SITE DIARY (carpentry_site_diary re-keyed to charge_up_job_id, mig 151) ──
+  app.get("/api/carpentry/charge-up-jobs/:id/diary", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    try {
+      const { data, error } = await sb.from("carpentry_site_diary").select("*")
+        .eq("charge_up_job_id", req.params.id).order("entry_date", { ascending: false });
+      if (error) throw error;
+      ok(res, { entries: rowsToCamel(data || []) });
+    } catch (e) {
+      if (isMissingTable(e)) return ok(res, { entries: [], migrationPending: true });
+      err(res, 500, "Could not load the site diary");
+      console.error("[charge-up diary GET]", e?.message || e);
+    }
+  });
+
+  app.post("/api/carpentry/charge-up-jobs/:id/diary", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured", "NO_DB");
+    try {
+      const { data: site } = await sb.from(TABLE).select("id").eq("id", req.params.id).maybeSingle();
+      if (!site) return err(res, 404, "Charge-up site not found", "NOT_FOUND");
+      const { entryDate, weather, tradesOnsite, workCompleted, issues, instructionsGiven, visitors, rawVoiceTranscript, structuredByAi = false, supervisor, photoPaths } = req.body || {};
+      const { data: entry, error } = await sb.from("carpentry_site_diary").insert({
+        job_id: null, charge_up_job_id: site.id,   // site-owned only (mig 151 drops diary job_id NOT NULL)
+        entry_date: entryDate || new Date().toISOString().slice(0, 10),
+        weather: weather || null, trades_onsite: Array.isArray(tradesOnsite) ? tradesOnsite : [],
+        work_completed: workCompleted || null, issues: issues || null, instructions_given: instructionsGiven || null,
+        visitors: visitors || null, raw_voice_transcript: rawVoiceTranscript || null, structured_by_ai: Boolean(structuredByAi),
+        supervisor: supervisor || null, photo_paths: Array.isArray(photoPaths) ? photoPaths : [], created_at: new Date().toISOString(),
+      }).select("*").single();
+      if (error) throw error;
+      ok(res, { entry: rowToCamel(entry) });
+    } catch (e) {
+      if (isMissingTable(e)) return err(res, 503, "Charge-up diary not enabled yet — apply migration 151", "MIGRATION_PENDING");
+      err(res, 500, translateDbError(e));
+      console.error("[charge-up diary POST]", e?.message || e);
     }
   });
 

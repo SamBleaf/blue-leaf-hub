@@ -45,7 +45,7 @@ export function rollupBySubJob(entries = [], chargeUpRateByEmployee = {}, margin
     if (!s._people.has(pid)) s._people.set(pid, { employeeId: e.employeeId || null, name: e.employeeName || "Unknown", hours: 0, cost: 0, chargeOut: 0 });
     const p = s._people.get(pid);
     p.hours += hours; p.cost += cost; p.chargeOut += chargeOut;
-    s._entries.push({ entryId: e.entryId || null, date: e.date || null, employeeName: e.employeeName || "Unknown", notes: e.notes || null, hours: round1(hours), cost: round2(cost), chargeOut: round2(chargeOut) });
+    s._entries.push({ entryId: e.entryId || null, date: e.date || null, employeeName: e.employeeName || "Unknown", taskCategory: e.taskCategory || null, notes: e.notes || null, hours: round1(hours), cost: round2(cost), chargeOut: round2(chargeOut), completionPhotoUrl: e.completionPhotoUrl || null });
   }
   return [...bySub.values()]
     .map((s) => ({

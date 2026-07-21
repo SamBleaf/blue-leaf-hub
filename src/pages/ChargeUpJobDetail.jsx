@@ -5,11 +5,12 @@
 // Workers pick a site when logging hours in the PWA; per-site hours + charge-out $
 // analytics (P3) drive invoicing. Rendered by CarpentryJobDetail's branch.
 // =============================================================================
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
+import ChargeUpSiteDetailModal from "../components/carpentry/ChargeUpSiteDetailModal.jsx";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 const pctFmt = (n) => (n == null ? "—" : `${Math.round(n)}%`);
@@ -19,9 +20,10 @@ const marginPct = (chargeOut, cost) => (cost != null && Number(chargeOut) > 0 ? 
 export default function ChargeUpJobDetail({ job }) {
   const { role } = useAuth();
   const showCost = can.viewCostData(role);
+  const canModerate = can.accessCarpentry(role);   // admin/supervisor — manage site details, tasks, diary
   const [sites, setSites] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [openSite, setOpenSite] = useState(null);
+  const [detailSite, setDetailSite] = useState(null);   // site whose detail pop-up is open
   const [loading, setLoading] = useState(true);
   const [migrationPending, setMigrationPending] = useState(false);
   const [error, setError] = useState(null);
@@ -224,10 +226,11 @@ export default function ChargeUpJobDetail({ job }) {
             {visible.map((s) => (
               <div key={s.id} className={`flex flex-wrap items-center gap-3 p-3 ${savingId === s.id ? "opacity-60" : ""} ${s.status === "archived" ? "bg-page/40" : ""}`}>
                 <div className="flex-1 min-w-[12rem]">
-                  <input defaultValue={s.siteLabel} onBlur={(e) => e.target.value.trim() && e.target.value !== s.siteLabel && patchSite(s, { siteLabel: e.target.value })}
-                    className="w-full text-sm font-medium text-ink bg-transparent border-0 border-b border-transparent hover:border-hairline focus:border-primary focus-ring px-0 py-0.5" />
-                  <input defaultValue={s.address || ""} onBlur={(e) => e.target.value !== (s.address || "") && patchSite(s, { address: e.target.value })}
-                    placeholder="Address / info" className="w-full text-xs text-muted bg-transparent border-0 border-b border-transparent hover:border-hairline focus:border-primary focus-ring px-0 py-0.5 mt-0.5" />
+                  <button type="button" onClick={() => setDetailSite(s)}
+                    className="text-sm font-medium text-primary hover:underline text-left inline-flex items-center gap-1" title="Open site details, shifts & photos">
+                    {s.siteLabel}<span className="text-[10px] text-muted">↗</span>
+                  </button>
+                  {s.address && <p className="text-xs text-muted mt-0.5">{s.address}</p>}
                 </div>
                 {marginReady && showCost && s.status !== "archived" && (
                   <label className="flex items-center gap-1 shrink-0 text-xs text-muted" title="Target gross margin on wages for this site. Charge-out = wage cost ÷ (1 − margin). Blank = use each worker's charge-up rate.">
@@ -312,36 +315,20 @@ export default function ChargeUpJobDetail({ job }) {
               </thead>
               <tbody>
                 {summary.subJobs.map((s) => (
-                  <Fragment key={s.chargeUpJobId}>
-                    <tr className="border-b border-hairline/60 cursor-pointer hover:bg-page/40" onClick={() => setOpenSite((o) => (o === s.chargeUpJobId ? null : s.chargeUpJobId))}>
-                      <td className="px-4 py-2 font-medium text-ink">
-                        <div>
-                          {openSite === s.chargeUpJobId ? "▾ " : "▸ "}{s.siteLabel}
-                          {s.marginPct != null && <span className="ml-1.5 text-[10px] font-normal text-accent">{Number(s.marginPct)}% margin</span>}
-                        </div>
-                        {s.lastDate && <div className="text-[10px] font-normal text-muted">last worked {s.lastDate}</div>}
-                      </td>
-                      <td className="px-2 py-2 text-right">{s.hours}</td>
-                      <td className="px-2 py-2 text-right font-medium text-ink">{fmt$(s.chargeOut)}</td>
-                      {showCost && <td className="px-2 py-2 text-right text-muted">{pctFmt(marginPct(s.chargeOut, s.cost))}</td>}
-                      {showCost && <td className="px-4 py-2 text-right text-muted">{fmt$(s.cost)}</td>}
-                    </tr>
-                    {openSite === s.chargeUpJobId && (s.entries || []).map((en) => (
-                      <tr key={en.entryId || `${en.date}-${en.employeeName}`} className="text-xs bg-page/30 align-top">
-                        <td className="px-8 py-1.5">
-                          <div className="flex items-baseline gap-2">
-                            <span className="tabular-nums text-muted shrink-0">{en.date || "—"}</span>
-                            <span className="font-medium text-ink">{en.employeeName}</span>
-                          </div>
-                          <div className="text-muted">{en.notes || <span className="italic opacity-60">Charge-up task</span>}</div>
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-muted">{en.hours}</td>
-                        <td className="px-2 py-1.5 text-right text-muted">{fmt$(en.chargeOut)}</td>
-                        {showCost && <td className="px-2 py-1.5" />}
-                        {showCost && <td className="px-4 py-1.5 text-right text-muted">{fmt$(en.cost)}</td>}
-                      </tr>
-                    ))}
-                  </Fragment>
+                  <tr key={s.chargeUpJobId} className="border-b border-hairline/60 cursor-pointer hover:bg-page/40"
+                    onClick={() => setDetailSite(sites.find((x) => x.id === s.chargeUpJobId) || { id: s.chargeUpJobId, siteLabel: s.siteLabel, address: s.address })}>
+                    <td className="px-4 py-2 font-medium">
+                      <div className="text-primary">
+                        {s.siteLabel}<span className="ml-1 text-[10px] text-muted">↗</span>
+                        {s.marginPct != null && <span className="ml-1.5 text-[10px] font-normal text-accent">{Number(s.marginPct)}% margin</span>}
+                      </div>
+                      {s.lastDate && <div className="text-[10px] font-normal text-muted">last worked {s.lastDate}</div>}
+                    </td>
+                    <td className="px-2 py-2 text-right text-ink">{s.hours}</td>
+                    <td className="px-2 py-2 text-right font-medium text-ink">{fmt$(s.chargeOut)}</td>
+                    {showCost && <td className="px-2 py-2 text-right text-muted">{pctFmt(marginPct(s.chargeOut, s.cost))}</td>}
+                    {showCost && <td className="px-4 py-2 text-right text-muted">{fmt$(s.cost)}</td>}
+                  </tr>
                 ))}
                 {summary.untagged && summary.untagged.hours > 0 && (
                   <tr className="text-xs text-amber-700 bg-amber-50">
@@ -355,12 +342,22 @@ export default function ChargeUpJobDetail({ job }) {
               </tbody>
             </table>
           </div>
-          <p className="px-4 py-2 text-[11px] text-muted border-t border-hairline">Charge-out = approved hours × each worker&rsquo;s charge-up rate (or the site&rsquo;s own rate when set). Click a site to see each shift.</p>
+          <p className="px-4 py-2 text-[11px] text-muted border-t border-hairline">Charge-out = approved hours × each worker&rsquo;s charge-up rate (or the site&rsquo;s target margin when set). Click a site to open its details, shifts &amp; photos.</p>
         </div>
       ) : (
         <p className="text-xs text-muted px-1">
           Per-site hours &amp; charge-out appear here once the boys log time against these sites (and it&rsquo;s approved).
         </p>
+      )}
+
+      {detailSite && (
+        <ChargeUpSiteDetailModal
+          site={detailSite}
+          showCost={showCost}
+          canModerate={canModerate}
+          onClose={() => setDetailSite(null)}
+          onChanged={load}
+        />
       )}
     </div>
   );
