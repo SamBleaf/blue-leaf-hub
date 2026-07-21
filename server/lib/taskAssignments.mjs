@@ -20,7 +20,7 @@ export function firstAssigneeId(assignees = []) {
 }
 
 // Group task_assignments rows (joined to employees for the name) → Map(taskId → [{id,name}]),
-// preserving the ordering of the input (query orders by `position` — row 0 = the assigned_to mirror).
+// preserving the ordering of the input (query orders by assigned_at, id — row 0 = the assigned_to mirror).
 export function assigneesByTask(rows = []) {
   const m = new Map();
   for (const r of rows) {
@@ -60,7 +60,9 @@ export function overlayAssignees(tasks = [], byTask = new Map(), { hasJoin = tru
 }
 
 // ── Impure DB helpers (used by the routes) ──────────────────────────────────
-const _missingJoin = (e) => /task_assignments.*does not exist|relation .*task_assignments.* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
+// True only for a genuinely-ABSENT table (pre-mig-153) — NOT for a missing column, which must
+// surface as a real error rather than silently degrading multi-assign to legacy single-assignee.
+const _missingJoin = (e) => /relation .*task_assignments.* does not exist|could not find the table|schema cache/i.test(String(e?.message || e || ""));
 
 // Dual-READ: overlay assignees onto task rows (already carrying the legacy embed) from
 // task_assignments when present, else the single assigned_to. Fail-soft pre-mig-153.
@@ -70,8 +72,8 @@ export async function attachAssigneesFromDb(sb, tasks) {
   const ids = list.map((t) => t.id).filter(Boolean);
   try {
     const { data, error } = await sb.from("task_assignments")
-      .select("task_id, worker_id, position, assigned_at").in("task_id", ids)
-      .order("position", { ascending: true }).order("assigned_at", { ascending: true });
+      .select("task_id, worker_id, assigned_at").in("task_id", ids)
+      .order("assigned_at", { ascending: true }).order("id", { ascending: true });
     if (error) throw error;
     const workerIds = [...new Set((data || []).map((r) => r.worker_id))];
     const { data: emps } = workerIds.length ? await sb.from("employees").select("id, name").in("id", workerIds) : { data: [] };
@@ -87,8 +89,8 @@ export async function attachAssigneesFromDb(sb, tasks) {
 // Assignees for ONE task (for guards). Returns [{id,name?}]; pre-mig falls back to assigned_to.
 export async function assigneesForTask(sb, taskId) {
   try {
-    const { data, error } = await sb.from("task_assignments").select("worker_id, position, assigned_at").eq("task_id", taskId)
-      .order("position", { ascending: true }).order("assigned_at", { ascending: true });
+    const { data, error } = await sb.from("task_assignments").select("worker_id, assigned_at, id").eq("task_id", taskId)
+      .order("assigned_at", { ascending: true }).order("id", { ascending: true });
     if (error) throw error;
     return (data || []).map((r) => ({ id: r.worker_id }));
   } catch (e) {
@@ -109,8 +111,13 @@ export async function setAssignees(sb, taskId, workerIds, assignedBy) {
   try {
     await sb.from("task_assignments").delete().eq("task_id", taskId);
     if (ids.length) {
-      // Stamp `position` from the array index so reads return insertion order and row 0 stays the mirror.
-      const { error } = await sb.from("task_assignments").insert(ids.map((w, i) => ({ task_id: taskId, worker_id: w, position: i, assigned_by: assignedBy || null })));
+      // Stamp a distinct assigned_at per assignee (index → +i ms) so reads return insertion order
+      // and row 0 (earliest) stays the assigned_to mirror — no schema column needed.
+      const t0 = Date.now();
+      const { error } = await sb.from("task_assignments").insert(ids.map((w, i) => ({
+        task_id: taskId, worker_id: w, assigned_by: assignedBy || null,
+        assigned_at: new Date(t0 + i).toISOString(),
+      })));
       if (error) throw error;
     }
   } catch (e) {

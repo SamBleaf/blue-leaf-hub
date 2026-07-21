@@ -10,14 +10,12 @@ CREATE TABLE IF NOT EXISTS public.task_assignments (
   id           uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id      uuid          NOT NULL REFERENCES public.site_tasks (id) ON DELETE CASCADE,
   worker_id    uuid          NOT NULL REFERENCES public.employees (id) ON DELETE CASCADE,
-  position     int           NOT NULL DEFAULT 0,   -- insertion order; row 0 = the assigned_to mirror
+  -- assigned_at is the ORDER key: setAssignees stamps a distinct ms per assignee (index offset),
+  -- so reads return insertion order and row 0 stays the assigned_to mirror. No extra column needed.
   assigned_at  timestamptz   NOT NULL DEFAULT now(),
   assigned_by  uuid          REFERENCES public.employees (id) ON DELETE SET NULL,
   UNIQUE (task_id, worker_id)
 );
-
--- Idempotent add for a table that pre-existed without `position`.
-ALTER TABLE public.task_assignments ADD COLUMN IF NOT EXISTS position int NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS task_assignments_task_idx   ON public.task_assignments (task_id);
 CREATE INDEX IF NOT EXISTS task_assignments_worker_idx ON public.task_assignments (worker_id);
