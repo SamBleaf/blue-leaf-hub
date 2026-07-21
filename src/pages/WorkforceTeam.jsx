@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { authFetch } from "../lib/authFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { ROLES, ROLE_LABELS } from "../lib/roles.js";
+import AssigneeStack from "../components/AssigneeStack.jsx";
 
 const TRADE_OPTIONS = ["carpenter", "labourer", "leading_hand", "supervisor", "other"];
 const EMPLOYMENT_OPTIONS = ["full_time", "part_time", "casual"];
@@ -507,7 +508,7 @@ export default function WorkforceTeam({ embedded = false }) {
                             <div className="flex flex-wrap gap-x-1.5 mt-0.5 text-[10px] text-muted">
                               {t.category && <span className="capitalize">{t.category.replace(/_/g, " ")}</span>}
                               <span>· {t.status}</span>
-                              <span>· {t.assigned_to ? (t.employees?.name || "assigned") : "unassigned"}</span>
+                              <span className="inline-flex items-center gap-1">· <AssigneeStack assignees={t.assignees} size="xs" /></span>
                               {t.task_audience === "supervisor" && <span className="text-amber-600">· QC</span>}
                             </div>
                           </div>

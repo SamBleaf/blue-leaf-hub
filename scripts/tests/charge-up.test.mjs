@@ -83,6 +83,13 @@ eq(ds1.entries[1].notes, "Deck boards", "entry keeps the worker's free-text note
 eq(ds1.entries[0].notes, null, "empty note → null");
 eq(ds1.lastDate, "2026-07-12", "lastDate = most recent shift date");
 
+// ── entry passthrough for the site-detail pop-up: task category + completion photo ──
+const wp = rollupBySubJob([
+  { chargeUpJobId: "S1", employeeId: "A", employeeName: "Anna", hours: 5, cost: 120, date: "2026-07-14", notes: "Fixed gate", entryId: "e9", taskCategory: "site_labouring", completionPhotoUrl: "data:image/jpeg;base64,zzz" },
+], rates)[0].entries[0];
+eq([wp.taskCategory, wp.completionPhotoUrl], ["site_labouring", "data:image/jpeg;base64,zzz"], "entry carries taskCategory + completion photo");
+ok(stripCost(rollupBySubJob([{ chargeUpJobId: "S1", employeeId: "A", hours: 5, cost: 120, entryId: "e9", completionPhotoUrl: "data:x" }], rates), false)[0].entries[0].completionPhotoUrl === "data:x", "non-director keeps the photo (only cost is stripped)");
+
 // ── per-site target gross margin (Phase 2) — charge-out priced off wage cost ──
 eq(chargeOutFromMargin(300, 40), 500, "chargeOutFromMargin: 300 ÷ (1−0.40) = 500");
 eq(chargeOutFromMargin(100, 100), 0, "100% margin guarded → 0 (never divide by zero)");

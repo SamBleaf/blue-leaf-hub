@@ -11,6 +11,7 @@ import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR, isUuid, isValidPhotoKey, isStoragePath } from "./siteMedia.mjs";
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 import { validateChargeUpSite } from "./chargeUpService.mjs";
+import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker } from "./taskAssignments.mjs";
 
 // BLB Charge Up category — an allocation to this carpentry job must name a site (address).
 const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
@@ -1369,7 +1370,7 @@ export function registerWorkforceRoutes(app) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     const sorted = (data || []).sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
-    res.json({ ok: true, tasks: sorted });
+    res.json({ ok: true, tasks: await attachAssigneesFromDb(sb, sorted) });
   });
 
   app.post("/api/projects/:id/site-tasks", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -1387,7 +1388,9 @@ export function registerWorkforceRoutes(app) {
       created_via: "manual",
     }).select().single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    res.json({ ok: true, task: data });
+    if (assigned_to) await setAssignees(sb, data.id, [assigned_to], null);   // dual-write the join
+    const [withA] = await attachAssigneesFromDb(sb, [data]);
+    res.json({ ok: true, task: withA });
   });
 
   app.post("/api/projects/:id/site-tasks/bulk", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -1408,7 +1411,8 @@ export function registerWorkforceRoutes(app) {
     }));
     const { data, error } = await sb.from("site_tasks").insert(rows).select();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    res.json({ ok: true, tasks: data });
+    for (const t of (data || [])) { if (t.assigned_to) await setAssignees(sb, t.id, [t.assigned_to], null); }
+    res.json({ ok: true, tasks: await attachAssigneesFromDb(sb, data || []) });
   });
 
   // ── W17-P6: voice-to-tasks for building projects (mirror of the carpentry path) ──
@@ -1456,7 +1460,8 @@ export function registerWorkforceRoutes(app) {
 
   app.patch("/api/site-tasks/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
-    const allowed = ["title", "description", "assigned_to", "priority", "category", "status", "due_date", "completion_notes", "sort_order"];
+    // assigned_to is written through the join (setAssignees) below, not as a bare column.
+    const allowed = ["title", "description", "priority", "category", "status", "due_date", "completion_notes", "sort_order"];
     const update = { updated_at: new Date().toISOString() };
     for (const k of allowed) {
       if (req.body[k] !== undefined) update[k] = req.body[k];
@@ -1468,9 +1473,16 @@ export function registerWorkforceRoutes(app) {
       const { data: callerEmp } = await sb.from("employees").select("id").eq("user_id", req.caller.id).maybeSingle();
       if (callerEmp?.id) update.completed_by = callerEmp.id;
     }
-    const { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id).select().single();
+    let { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id).select().single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    res.json({ ok: true, task: data });
+    if (req.body.assigned_to !== undefined) {
+      await setAssignees(sb, req.params.id, req.body.assigned_to ? [req.body.assigned_to] : [], null);
+      // Re-read so the pre-mig fallback overlays the freshly-mirrored assigned_to, not the stale row.
+      const { data: fresh } = await sb.from("site_tasks").select().eq("id", req.params.id).maybeSingle();
+      if (fresh) data = fresh;
+    }
+    const [withA] = await attachAssigneesFromDb(sb, [data]);
+    res.json({ ok: true, task: withA });
   });
 
   app.delete("/api/site-tasks/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -2132,22 +2144,26 @@ export function registerWorkforceRoutes(app) {
       const vis = await workerVisibleJobs(sb, emp.id);
       selJobAllowed = workerMaySeeJob(vis, selJobId, selJobType);
     }
+    // Multi-assign: count open tasks the worker actually sees (shared OR they're on it). Fetch +
+    // filter in JS (small volume) — a COUNT can't express the join predicate. Also fixes the old
+    // fallback path that skipped the visibility filter entirely.
+    const countVisibleOpen = async (buildFilter) => {
+      let q = sb.from("site_tasks").select("id, assigned_to").in("status", ["open", "in_progress"]);
+      q = buildFilter(q);
+      const { data: rows } = await q;
+      const withA = await attachAssigneesFromDb(sb, rows || []);
+      return withA.filter((t) => visibleToWorker(t.assignees, emp.id)).length;
+    };
     if (selJobAllowed) {
-      let q = sb.from("site_tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]);
-      if (selJobType === "carpentry") q = q.eq("carpentry_job_id", selJobId);
-      else if (selJobType === "project") q = q.eq("project_id", selJobId);
-      else q = q.or(`project_id.eq.${selJobId},carpentry_job_id.eq.${selJobId}`);
-      // match the list's visibility: unassigned OR mine
-      q = q.or(`assigned_to.is.null,assigned_to.eq.${emp.id}`);
-      const { count } = await q;
-      openTaskCount = count || 0;
+      openTaskCount = await countVisibleOpen((q) =>
+        selJobType === "carpentry" ? q.eq("carpentry_job_id", selJobId)
+          : selJobType === "project" ? q.eq("project_id", selJobId)
+            : q.or(`project_id.eq.${selJobId},carpentry_job_id.eq.${selJobId}`));
     } else if (currentProjectId || currentCarpentryJobId) {
-      let q = sb.from("site_tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]);
-      if (currentProjectId && currentCarpentryJobId) q = q.or(`project_id.eq.${currentProjectId},carpentry_job_id.eq.${currentCarpentryJobId}`);
-      else if (currentProjectId) q = q.eq("project_id", currentProjectId);
-      else q = q.eq("carpentry_job_id", currentCarpentryJobId);
-      const { count } = await q;
-      openTaskCount = count || 0;
+      openTaskCount = await countVisibleOpen((q) =>
+        (currentProjectId && currentCarpentryJobId) ? q.or(`project_id.eq.${currentProjectId},carpentry_job_id.eq.${currentCarpentryJobId}`)
+          : currentProjectId ? q.eq("project_id", currentProjectId)
+            : q.eq("carpentry_job_id", currentCarpentryJobId));
     }
 
     // Return employee without rate
@@ -2241,6 +2257,22 @@ export function registerWorkforceRoutes(app) {
     if (jobType === "carpentry") return vis.carpentryIds.has(jobId);
     if (jobType === "project") return vis.projectIds.has(jobId);
     return vis.projectIds.has(jobId) || vis.carpentryIds.has(jobId);
+  }
+
+  // Worker WRITE-guard: may this worker act on (complete/photo/edit) THIS task? The list/preview
+  // paths are job-gated (workerVisibleJobs), but the write endpoints previously authorised on
+  // assignee-visibility alone — so a shared (unassigned) task on a job the worker isn't on could
+  // be actioned by id. Resolve the task's job and gate on membership, matching the list paths.
+  // Site-owned tasks (charge-up: no project_id AND no carpentry_job_id) are not a worker-PWA
+  // write path → denied here. { found, allowed }.
+  async function workerMayActOnTask(sb, empId, taskId) {
+    const { data: t } = await sb.from("site_tasks").select("project_id, carpentry_job_id").eq("id", taskId).maybeSingle();
+    if (!t) return { found: false, allowed: false };
+    const jobId = t.carpentry_job_id || t.project_id || null;
+    const jobType = t.carpentry_job_id ? "carpentry" : "project";
+    if (!jobId) return { found: true, allowed: false };
+    const vis = await workerVisibleJobs(sb, empId);
+    return { found: true, allowed: !vis.error && workerMaySeeJob(vis, jobId, jobType) };
   }
 
   app.get("/api/worker/jobs", workerAuth, async (req, res) => {
@@ -2415,6 +2447,143 @@ export function registerWorkforceRoutes(app) {
   // Job's confirmed sub-tasks for the two-level PWA timesheet picker — grouped by the parent
   // task_category. One option per canonical_key (distinct sub-task), with a representative line-item
   // id for the worker's time to attach to. Labour only; fail-soft if migration 140 isn't applied.
+  // ── Job PLANS (F1) — uploaded into the Hub → Supabase Storage → shown on the PWA ──────
+  // A "plan" = job_documents row: storage_provider='supabase', status='current', a plan
+  // document_type, audience_layer='worker'. mig 152 adds the carpentry spine + 'job-plans' bucket.
+  // Supersession is EXPLICIT (uploader names the target), never inferred.
+  const PLAN_DOC_TYPES = ["architectural", "engineering", "structural", "survey", "specification", "plan"];
+  const PLANS_BUCKET = "job-plans";
+  const isMissingPlanCol = (e) => /carpentry_job_id.*does not exist|column .* does not exist|schema cache|relation .* does not exist|bucket .* not found|Bucket not found/i.test(String(e?.message || e || ""));
+  const sanitizePlanName = (n) => (String(n || "plan.pdf").toLowerCase().replace(/[^a-z0-9.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "plan.pdf");
+
+  async function listCurrentPlans(sb, spine) {
+    let q = sb.from("job_documents")
+      .select("id, document_type, title, version, uploaded_at, created_at")
+      .eq("status", "current").eq("storage_provider", "supabase").in("document_type", PLAN_DOC_TYPES);
+    q = spine.carpentryJobId ? q.eq("carpentry_job_id", spine.carpentryJobId) : q.eq("job_id", spine.jobId);
+    const { data, error } = await q.order("document_type").order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map((r) => ({ docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at || r.created_at }));
+  }
+  async function uploadPlan(sb, spine, body, callerId) {
+    const fileName = sanitizePlanName(body.fileName);
+    const b64 = String(body.fileBase64 || "").replace(/^data:[^;]+;base64,/, "");
+    if (!b64) throw new Error("No file provided");
+    const buffer = Buffer.from(b64, "base64");
+    const documentType = PLAN_DOC_TYPES.includes(body.documentType) ? body.documentType : "plan";
+    const dir = spine.carpentryJobId ? `carpentry/${spine.carpentryJobId}` : `job/${spine.jobId}`;
+    const path = `${dir}/${todayYmd()}-${crypto.randomUUID().slice(0, 8)}-${fileName}`;
+    const { error: upErr } = await sb.storage.from(PLANS_BUCKET).upload(path, buffer, { contentType: "application/pdf", upsert: false });
+    if (upErr) throw upErr;
+    const supersedes = body.supersedesDocumentId && isUuid(body.supersedesDocumentId) ? body.supersedesDocumentId : null;
+    if (supersedes) await sb.from("job_documents").update({ status: "superseded" }).eq("id", supersedes);
+    const rev = String(body.revision || "").trim();
+    const row = {
+      job_id: spine.jobId || null, carpentry_job_id: spine.carpentryJobId || null,
+      document_type: documentType, title: rev ? `${fileName} — ${rev}` : fileName,
+      storage_provider: "supabase", storage_path: `${PLANS_BUCKET}/${path}`, audience_layer: "worker",
+      status: "current", supersedes_document_id: supersedes, uploaded_by: callerId || null, uploaded_at: new Date().toISOString(),
+    };
+    const { data, error } = await sb.from("job_documents").insert(row).select("id, title").maybeSingle();
+    if (error) throw error;
+    return { docId: data?.id, title: data?.title };
+  }
+  async function signPlan(sb, storagePath) {
+    const [bucket, ...rest] = String(storagePath).split("/");
+    const { data, error } = await sb.storage.from(bucket).createSignedUrl(rest.join("/"), 60);
+    if (error) throw error;
+    return data.signedUrl;
+  }
+  async function resolveProjectJobId(sb, projectId) {
+    const { data } = await sb.from("projects").select("job_id").eq("id", projectId).maybeSingle();
+    return data?.job_id || null;
+  }
+
+  // Admin/supervisor — carpentry job plans
+  app.get("/api/carpentry/jobs/:id/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id");
+    try { return ok(res, { plans: await listCurrentPlans(sb, { carpentryJobId: req.params.id }) }); }
+    catch (e) { if (isMissingPlanCol(e)) return ok(res, { plans: [], migrationPending: true }); console.error("[plans GET carp]", e?.message || e); return err(res, 500, "Could not load plans"); }
+  });
+  app.post("/api/carpentry/jobs/:id/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id");
+    try { return ok(res, await uploadPlan(sb, { carpentryJobId: req.params.id }, req.body || {}, req.caller?.id)); }
+    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Plans aren't enabled yet — apply migration 152", "MIGRATION_PENDING"); console.error("[plans POST carp]", e?.message || e); return err(res, 500, translateDbError(e)); }
+  });
+  // Admin/supervisor — construction project plans (resolve project → job_id)
+  app.get("/api/projects/:id/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid project id");
+    const jobId = await resolveProjectJobId(sb, req.params.id);
+    if (!jobId) return err(res, 409, "This project has no linked job to hold plans.");
+    try { return ok(res, { plans: await listCurrentPlans(sb, { jobId }) }); }
+    catch (e) { if (isMissingPlanCol(e)) return ok(res, { plans: [], migrationPending: true }); console.error("[plans GET proj]", e?.message || e); return err(res, 500, "Could not load plans"); }
+  });
+  app.post("/api/projects/:id/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid project id");
+    const jobId = await resolveProjectJobId(sb, req.params.id);
+    if (!jobId) return err(res, 409, "This project has no linked job to hold plans.");
+    try { return ok(res, await uploadPlan(sb, { jobId }, req.body || {}, req.caller?.id)); }
+    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Plans aren't enabled yet — apply migration 152", "MIGRATION_PENDING"); console.error("[plans POST proj]", e?.message || e); return err(res, 500, translateDbError(e)); }
+  });
+  // Admin/supervisor — remove a plan (storage object + row) and view (signed URL)
+  app.delete("/api/job-plans/:docId", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    const { data: doc } = await sb.from("job_documents").select("id, storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
+    if (!doc) return err(res, 404, "Plan not found", "NOT_FOUND");
+    if (doc.storage_provider === "supabase" && doc.storage_path) {
+      const [bucket, ...rest] = doc.storage_path.split("/");
+      await sb.storage.from(bucket).remove([rest.join("/")]).catch(() => {});
+    }
+    await sb.from("job_documents").delete().eq("id", req.params.docId);
+    return ok(res);
+  });
+  app.get("/api/job-plans/:docId/download", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    const { data: doc } = await sb.from("job_documents").select("storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
+    if (!doc?.storage_path || doc.storage_provider !== "supabase") return err(res, 404, "Plan not available");
+    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: 60 }); }
+    catch { return err(res, 500, "Could not generate a download link"); }
+  });
+  // Worker — current plans for a job they can see, + a signed download (access-gated)
+  app.get("/api/worker/jobs/:id/plans", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id");
+    const jobType = req.query.jobType === "carpentry" ? "carpentry" : "project";
+    const vis = await workerVisibleJobs(sb, emp.id);
+    if (vis.error) return err(res, 500, translateDbError(vis.error));
+    if (!workerMaySeeJob(vis, req.params.id, jobType)) return err(res, 403, "You don't have access to this job.");
+    try {
+      let spine;
+      if (jobType === "carpentry") spine = { carpentryJobId: req.params.id };
+      else { const jobId = await resolveProjectJobId(sb, req.params.id); if (!jobId) return ok(res, { plans: [] }); spine = { jobId }; }
+      return ok(res, { plans: await listCurrentPlans(sb, spine) });
+    } catch (e) { if (isMissingPlanCol(e)) return ok(res, { plans: [], migrationPending: true }); console.error("[worker plans GET]", e?.message || e); return err(res, 500, "Could not load plans"); }
+  });
+  app.get("/api/worker/plans/:docId/download", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    const { data: doc } = await sb.from("job_documents").select("job_id, carpentry_job_id, storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
+    if (!doc || doc.storage_provider !== "supabase" || !doc.storage_path) return err(res, 404, "Plan not available");
+    const vis = await workerVisibleJobs(sb, emp.id);
+    if (vis.error) return err(res, 500, translateDbError(vis.error));
+    let allowed = false;
+    if (doc.carpentry_job_id) allowed = workerMaySeeJob(vis, doc.carpentry_job_id, "carpentry");
+    else if (doc.job_id && vis.projectIds?.size) {
+      const { data: ps } = await sb.from("projects").select("id").eq("job_id", doc.job_id).in("id", [...vis.projectIds]);
+      allowed = (ps || []).length > 0;
+    }
+    if (!allowed) return err(res, 403, "You don't have access to this plan.");
+    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: 60 }); }
+    catch { return err(res, 500, "Could not generate a download link"); }
+  });
+
   app.get("/api/worker/jobs/:id/subtasks", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
@@ -2607,12 +2776,9 @@ export function registerWorkforceRoutes(app) {
     const { data: tasks, error } = await q;
     if (error) return err(res, 500, error.message);
 
-    // Filter: open+in_progress tasks (unassigned OR assigned to this employee) + done tasks
-    const visible = (tasks || []).filter(t =>
-      t.status === "done" ||
-      t.assigned_to === null ||
-      t.assigned_to === emp.id
-    );
+    // Filter (multi-assign dual-read): done tasks (history) + SHARED (no assignees) + tasks I'm on.
+    const withAssignees = await attachAssigneesFromDb(sb, tasks || []);
+    const visible = withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
     // Who-signed-off (completer name) is supervisor/admin-only info in the field app: strip it
@@ -2660,7 +2826,8 @@ export function registerWorkforceRoutes(app) {
     q = q.order("sort_order").order("created_at");
     const { data: tasks, error } = await q;
     if (error) return err(res, 500, error.message);
-    const visible = (tasks || []).filter(t => t.status === "done" || t.assigned_to === null || t.assigned_to === emp.id);
+    const withAssignees = await attachAssigneesFromDb(sb, tasks || []);
+    const visible = withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
     ok(res, { preview: true, employee: emp, tasks: sorted, jobId, jobType: jobType || null });
@@ -2678,9 +2845,10 @@ export function registerWorkforceRoutes(app) {
     if (!PHOTO_ENTITY_DIR[entityType]) return err(res, 400, "Invalid entityType.");
     if (!isUuid(entityId)) return err(res, 400, "Invalid entityId.");
     if (entityType === "site_task") {
-      const { data: task } = await sb.from("site_tasks").select("id, assigned_to").eq("id", entityId).maybeSingle();
-      if (!task) return err(res, 404, "Task not found.");
-      if (task.assigned_to && task.assigned_to !== emp.id) return err(res, 403, "You can only add photos to your own or unassigned tasks.");
+      const j = await workerMayActOnTask(sb, emp.id, entityId);
+      if (!j.found) return err(res, 404, "Task not found.");
+      if (!j.allowed) return err(res, 403, "You don't have access to this job.");
+      if (!visibleToWorker(await assigneesForTask(sb, entityId), emp.id)) return err(res, 403, "You can only add photos to your own or unassigned tasks.");
     }
     const m = /^data:(image\/(?:jpe?g|png|webp));base64,(.+)$/i.exec(String(raw));
     if (!m) return err(res, 400, "Photo must be a base64 image.");
@@ -2724,14 +2892,17 @@ export function registerWorkforceRoutes(app) {
       if (tk?.task_audience === "supervisor") return err(res, 403, "QC tasks can only be completed by a leading hand.");
     }
 
-    // Scope the update so a worker can only complete tasks assigned to them or unassigned (mirrors
-    // GET /api/worker/tasks visibility). 0 rows updated -> the task isn't theirs.
-    const { data, error } = await sb.from("site_tasks").update(update)
-      .eq("id", req.params.id)
-      .or(`assigned_to.is.null,assigned_to.eq.${emp.id}`)
-      .select().maybeSingle();
+    // Job-membership gate (mirror the list paths): can't act on a task on a job you're not on.
+    const jm = await workerMayActOnTask(sb, emp.id, req.params.id);
+    if (!jm.found) return err(res, 404, "Task not found.");
+    if (!jm.allowed) return err(res, 403, "You don't have access to this job.");
+    // Multi-assign: a worker can complete a task that's shared (no assignees) or that they're on.
+    if (!visibleToWorker(await assigneesForTask(sb, req.params.id), emp.id)) {
+      return err(res, 403, "You can only complete tasks assigned to you or unassigned tasks.");
+    }
+    const { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id).select().maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    if (!data) return err(res, 403, "You can only complete tasks assigned to you or unassigned tasks.");
+    if (!data) return err(res, 404, "Task not found.");
     res.json({ ok: true, task: data });
   });
 
@@ -2844,23 +3015,58 @@ export function registerWorkforceRoutes(app) {
       update.completion_photo_url = p || null;
     }
 
-    // C3: leading hand may assign a task to a crew member (null = unassign).
+    // C3: leading hand may assign a task to a crew member (null = unassign) — written through
+    // the join (setAssignees) below, never a bare assigned_to write.
+    let assignVal;   // undefined = no change; null = unassign; else the assignee id
     if (assigned_to !== undefined) {
-      const val = assigned_to === null ? null : String(assigned_to).trim();
-      if (val !== null && !isUuid(val)) return err(res, 400, "Invalid assigned_to value.");
-      update.assigned_to = val;
+      assignVal = assigned_to === null ? null : String(assigned_to).trim();
+      if (assignVal !== null && !isUuid(assignVal)) return err(res, 400, "Invalid assigned_to value.");
     }
 
-    // Scope: a leading hand may update any task on the job; a regular worker may only
-    // update tasks assigned to them or unassigned.
-    let q = sb.from("site_tasks").update(update).eq("id", req.params.id);
+    // Multi-assign scope: a leading hand may update any task; a regular worker only a task that's
+    // shared (no assignees) or that they're on — AND only on a job they can see.
     if (!emp.is_leading_hand) {
-      q = q.or(`assigned_to.is.null,assigned_to.eq.${emp.id}`);
+      const jm = await workerMayActOnTask(sb, emp.id, req.params.id);
+      if (!jm.found) return err(res, 404, "Task not found.");
+      if (!jm.allowed) return err(res, 403, "You don't have access to this job.");
+      if (!visibleToWorker(await assigneesForTask(sb, req.params.id), emp.id)) {
+        return err(res, 403, "You can only update tasks assigned to you or unassigned tasks.");
+      }
     }
-    const { data, error } = await q.select("*, employees!assigned_to(id, name)").maybeSingle();
+    let { data, error } = await sb.from("site_tasks").update(update).eq("id", req.params.id)
+      .select("*, employees!assigned_to(id, name)").maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    if (!data) return err(res, 403, "You can only update tasks assigned to you or unassigned tasks.");
-    return res.json({ ok: true, task: data });
+    if (!data) return err(res, 404, "Task not found.");
+    if (assignVal !== undefined) {
+      await setAssignees(sb, req.params.id, assignVal ? [assignVal] : [], emp.id);
+      // Re-read so the pre-mig fallback overlays the freshly-mirrored assigned_to, not the stale row.
+      const { data: fresh } = await sb.from("site_tasks").select("*, employees!assigned_to(id, name)").eq("id", req.params.id).maybeSingle();
+      if (fresh) data = fresh;
+    }
+    const [withAssignees] = await attachAssigneesFromDb(sb, [data]);
+    return res.json({ ok: true, task: withAssignees });
+  });
+
+  // ── POST /api/worker/tasks/:id/assignees (multi-assign from the PWA, leading hand) ──
+  // SET the task's assignees to workerIds[] (dual-writes the join + the first→assigned_to mirror).
+  app.post("/api/worker/tasks/:id/assignees", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (req.workerPreview) return err(res, 403, "Read-only preview — you can't assign as a worker.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can assign tasks to crew.");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid task id.");
+    const workerIds = Array.isArray(req.body?.workerIds) ? req.body.workerIds.filter(isUuid) : [];
+    try {
+      await setAssignees(sb, req.params.id, workerIds, emp.id);
+      const { data: task } = await sb.from("site_tasks").select("*, employees!assigned_to(id, name)").eq("id", req.params.id).maybeSingle();
+      if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
+      const [withA] = await attachAssigneesFromDb(sb, [task]);
+      return res.json({ ok: true, task: withA });
+    } catch (e) {
+      console.error("[worker/tasks/:id/assignees]", e?.message || e);
+      return err(res, 502, translateDbError(e));
+    }
   });
 
   // ── GET /api/worker/jobs/:id/crew ────────────────────────────────────────────
@@ -2884,6 +3090,62 @@ export function registerWorkforceRoutes(app) {
     if (empErr) return err(res, 500, translateDbError(empErr));
 
     ok(res, { crew: (crew || []).map(e => ({ id: e.id, name: e.name, trade: e.trade, isLeadingHand: e.is_leading_hand })) });
+  });
+
+  // ── GET /api/worker/crew/day?date=&jobId=&jobType= (F2 + F3 picker) ──────────
+  // Same-site/same-day crew (leading hand only). Without jobId → the caller's OWN rostered
+  // site that day (Week Crew view). With jobId+jobType → who's rostered to THAT site that day
+  // (multi-assign picker scope). Charge-up narrowing is fail-soft (attachChargeUpSites).
+  app.get("/api/worker/crew/day", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found");
+    if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can view the crew.");
+    const date = String(req.query.date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return err(res, 400, "A valid date is required.");
+    const jobId = String(req.query.jobId || "").trim();
+    const jobType = req.query.jobType === "carpentry" ? "carpentry" : req.query.jobType === "project" ? "project" : null;
+    try {
+      // Resolve the day's site spine.
+      let spine = null;   // { projectId } | { carpentryJobId, chargeUpJobId? }
+      if (jobId && isUuid(jobId) && jobType) {
+        const vis = await workerVisibleJobs(sb, emp.id);
+        if (vis.error) return err(res, 500, translateDbError(vis.error));   // fail CLOSED, matching the plans endpoints
+        if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "You don't have access to this job.");
+        spine = jobType === "carpentry" ? { carpentryJobId: jobId } : { projectId: jobId };
+      } else {
+        const { data: mineRows } = await sb.from("workforce_allocations").select(ALLOCATION_SELECT).eq("employee_id", emp.id).eq("allocation_date", date);
+        const [mine] = await attachChargeUpSites(sb, (mineRows || []).map(formatAllocation));
+        if (!mine) return ok(res, { date, site: null, crew: [] });
+        if (mine.chargeUpJobId) spine = { carpentryJobId: mine.carpentryJobId, chargeUpJobId: mine.chargeUpJobId };
+        else if (mine.carpentryJobId) spine = { carpentryJobId: mine.carpentryJobId };
+        else if (mine.projectId) spine = { projectId: mine.projectId };
+      }
+      if (!spine) return ok(res, { date, site: null, crew: [] });
+      let q = sb.from("workforce_allocations").select(ALLOCATION_SELECT).eq("allocation_date", date);
+      q = spine.projectId ? q.eq("project_id", spine.projectId) : q.eq("carpentry_job_id", spine.carpentryJobId);
+      const { data: rows, error } = await q;
+      if (error) return err(res, 500, translateDbError(error));
+      let allocs = await attachChargeUpSites(sb, (rows || []).map(formatAllocation));
+      if (spine.chargeUpJobId) allocs = allocs.filter((a) => a.chargeUpJobId === spine.chargeUpJobId);
+      const empIds = [...new Set(allocs.map((a) => a.employeeId).filter(Boolean))];
+      const { data: emps } = empIds.length ? await sb.from("employees").select("id, name, trade").in("id", empIds) : { data: [] };
+      const tradeById = new Map((emps || []).map((e) => [e.id, e.trade]));
+      const f = allocs[0];
+      const site = f ? {
+        label: f.chargeUpSiteLabel || f.carpentryJobAddress || f.carpentryJobClientName || f.projectAddress || "Site",
+        address: f.chargeUpSiteAddress || f.carpentryJobAddress || f.projectAddress || null,
+        kind: f.chargeUpJobId ? "Charge Up" : f.carpentryJobId ? "Carpentry" : "Building",
+      } : null;
+      const crew = allocs
+        .map((a) => ({ employeeId: a.employeeId, name: a.employeeName || "Unknown", trade: tradeById.get(a.employeeId) || null, isSelf: a.employeeId === emp.id }))
+        .sort((x, y) => (x.name || "").localeCompare(y.name || ""));
+      return ok(res, { date, site, crew });
+    } catch (e) {
+      console.error("[worker/crew/day]", e?.message || e);
+      return err(res, 500, "Could not load the crew");
+    }
   });
 
   // ── PUT /api/worker/tasks/reorder ───────────────────────────────────────────

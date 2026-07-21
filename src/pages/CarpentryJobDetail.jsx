@@ -8,6 +8,9 @@ import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import ChargeUpJobDetail from "./ChargeUpJobDetail.jsx";
 import CarpentrySiteDiary from "../components/carpentry/CarpentrySiteDiary.jsx";
+import JobPlansCard from "../components/JobPlansCard.jsx";
+import AssigneeStack from "../components/AssigneeStack.jsx";
+import AssigneePickerSheet from "../components/AssigneePickerSheet.jsx";
 import {
   CARPENTRY_JOB_STATUS_LABELS,
   CARPENTRY_PROJECT_TYPES,
@@ -446,6 +449,9 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted, s
         </div>
       )}
 
+      {/* Plans issued to the field (worker PWA) */}
+      <div className="mt-2"><JobPlansCard base={`/api/carpentry/jobs/${job.id}`} /></div>
+
       {/* Closeout performance snapshot (shown once job is complete) */}
       {job.status === "complete" && performance && (
         <div className="mt-2 p-4 bg-blue-50 rounded-card border border-blue-200">
@@ -742,6 +748,17 @@ function TasksPanel({ jobId }) {
   const [drafts, setDrafts] = useState([]); // { title, priority, category, description, _keep }
   const [addingDrafts, setAddingDrafts] = useState(false);
   const [voiceError, setVoiceError] = useState(null);
+  // Multi-assign picker
+  const [pickerTask, setPickerTask] = useState(null);
+  const [pickerSaving, setPickerSaving] = useState(false);
+  async function saveAssignees(workerIds) {
+    if (!pickerTask) return;
+    setPickerSaving(true);
+    const { ok, data } = await apiPost(`/api/carpentry/tasks/${pickerTask.id}/assignees`, { workerIds });
+    setPickerSaving(false);
+    if (ok && data?.task) { setTasks((prev) => prev.map((t) => t.id === pickerTask.id ? data.task : t)); setPickerTask(null); }
+    else setTaskError("Could not update assignees.");
+  }
   // Edit sheet state
   const [editTask, setEditTask]       = useState(null);  // task being edited
   const [editTitle, setEditTitle]     = useState("");
@@ -947,7 +964,7 @@ function TasksPanel({ jobId }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm text-ink leading-snug">{task.title}</p>
         {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
-        {task.assigned?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.assigned.name}</p>}
+        <div className="mt-1"><AssigneeStack assignees={task.assignees} size="xs" onClick={() => setPickerTask(task)} /></div>
       </div>
       <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TASK_PRIORITY_BADGE[task.priority] || ""}`}>
         {TASK_PRIORITY_LABEL[task.priority] || task.priority}
@@ -1485,6 +1502,16 @@ function TasksPanel({ jobId }) {
             </div>
           )}
         </>
+      )}
+      {pickerTask && (
+        <AssigneePickerSheet
+          title="Assign to task"
+          candidates={employees.map((e) => ({ id: e.id, name: e.name, trade: e.trade }))}
+          initial={(pickerTask.assignees || []).map((a) => a.id)}
+          saving={pickerSaving}
+          onSave={saveAssignees}
+          onClose={() => setPickerTask(null)}
+        />
       )}
     </div>
   );

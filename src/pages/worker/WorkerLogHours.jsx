@@ -59,6 +59,7 @@ export default function WorkerLogHours() {
   const [activeCat, setActiveCat] = useState(null); // which category's sub-task chooser is open
   const [chargeUpSites, setChargeUpSites] = useState([]); // BLB Charge Up: sites to pick as a Location
   const [chargeUpJobId, setChargeUpJobId] = useState("");
+  const [scheduledId, setScheduledId] = useState(null);  // F4: the site prefilled from the roster
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const preview = isWorkerPreview();
@@ -119,6 +120,23 @@ export default function WorkerLogHours() {
           setApproved(false);
           setEntries([]);
           setChargeUpJobId("");
+          // F4: autofill the site from the day's roster (editable default). Keyed to the entry's
+          // date, so back-filling a past day pulls that day's scheduled site.
+          workerFetch(`/api/worker/allocations/week?from=${date}&to=${date}`)
+            .then(r => r.json())
+            .then(a => {
+              if (stop || !a?.ok) return;
+              const al = (a.allocations || [])[0];
+              const sid = al ? (al.carpentryJobId || al.projectId || null) : null;
+              if (sid) {
+                setSelectedId(sid);
+                setScheduledId(sid);
+                if (al.chargeUpJobId) setChargeUpJobId(al.chargeUpJobId);
+              } else {
+                setScheduledId(null);
+              }
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {});
@@ -342,7 +360,7 @@ export default function WorkerLogHours() {
             <label className="text-xs text-muted uppercase tracking-wide block mb-1">Site</label>
             <select
               value={selectedId}
-              onChange={e => { setSelectedId(e.target.value); setChargeUpJobId(""); }}
+              onChange={e => { setSelectedId(e.target.value); setChargeUpJobId(""); setScheduledId(null); }}
               className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="" disabled>Select…</option>
@@ -352,6 +370,7 @@ export default function WorkerLogHours() {
                 </option>
               ))}
             </select>
+            {scheduledId && selectedId === scheduledId && <p className="text-[11px] text-primary mt-1">From your schedule — change if you moved</p>}
           </div>
         </div>
 

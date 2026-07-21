@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../../lib/apiFetch.js";
 import { mediaUrl } from "../../lib/media.js";
+import AssigneeStack from "../AssigneeStack.jsx";
+import AssigneePickerSheet from "../AssigneePickerSheet.jsx";
 
 const PRIORITIES = [
   { v: "urgent", l: "Urgent" },
@@ -41,6 +43,8 @@ export default function ChargeUpTasksPanel({ siteId, canModerate = false }) {
   const [editTask, setEditTask] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [enlarged, setEnlarged] = useState(null);
+  const [pickerTask, setPickerTask] = useState(null);
+  const [pickerSaving, setPickerSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const load = useCallback(async () => {
@@ -80,6 +84,14 @@ export default function ChargeUpTasksPanel({ siteId, canModerate = false }) {
     const { ok } = await apiDelete(`/api/carpentry/tasks/${task.id}`);
     if (!ok) load();
   }
+  async function saveAssignees(workerIds) {
+    if (!pickerTask) return;
+    setPickerSaving(true); setError(null);
+    const { ok, error: e } = await apiPost(`/api/carpentry/tasks/${pickerTask.id}/assignees`, { workerIds });
+    setPickerSaving(false);
+    if (!ok) { setError(e || "Could not update assignees."); return; }
+    setPickerTask(null); load();
+  }
   async function saveEdit() {
     if (!editTask?.title?.trim()) return;
     setSavingEdit(true);
@@ -107,7 +119,9 @@ export default function ChargeUpTasksPanel({ siteId, canModerate = false }) {
         <div className="flex-1 min-w-0">
           <p className={`text-sm leading-snug ${isDone ? "text-muted line-through" : "text-ink"}`}>{task.title}</p>
           {task.description && <p className="text-xs text-muted mt-0.5">{task.description}</p>}
-          {task.assigned?.name && <p className="text-xs text-muted mt-0.5">Assigned: {task.assigned.name}</p>}
+          <div className="mt-1">
+            <AssigneeStack assignees={task.assignees} size="xs" onClick={canModerate ? () => setPickerTask(task) : undefined} />
+          </div>
           {isDone && task.completer?.name && <p className="text-[11px] text-emerald-700 mt-0.5">✓ {task.completer.name}</p>}
           {photo && (
             <button type="button" onClick={() => setEnlarged(photo)} className="mt-1.5 block" title="View photo">
@@ -218,6 +232,17 @@ export default function ChargeUpTasksPanel({ siteId, canModerate = false }) {
         <div className="fixed inset-0 z-[10002] bg-black/80 flex items-center justify-center p-6" onClick={() => setEnlarged(null)}>
           <img src={enlarged} alt="Completed work" className="max-w-full max-h-full rounded-lg" />
         </div>
+      )}
+
+      {pickerTask && (
+        <AssigneePickerSheet
+          title="Assign to task"
+          candidates={employees.map((e) => ({ id: e.id, name: e.name, trade: e.trade }))}
+          initial={(pickerTask.assignees || []).map((a) => a.id)}
+          saving={pickerSaving}
+          onSave={saveAssignees}
+          onClose={() => setPickerTask(null)}
+        />
       )}
     </div>
   );

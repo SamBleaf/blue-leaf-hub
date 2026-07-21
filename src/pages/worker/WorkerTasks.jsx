@@ -6,6 +6,9 @@ import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
 import { uploadWorkerPhoto } from "../../lib/workerPhoto.js";
 import { getSelectedJob, setSelectedJob } from "../../lib/workerJob.js";
+import PlansSheet from "../../components/worker/PlansSheet.jsx";
+import AssigneeStack from "../../components/AssigneeStack.jsx";
+import AssigneePickerSheet from "../../components/AssigneePickerSheet.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -110,15 +113,11 @@ function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssig
       <Tick checked={isDone} onToggle={onToggle} disabled={toggling} />
       <button type="button" onClick={onTap} className="flex-1 min-w-0 text-left">
         <p className={`text-sm leading-snug ${isDone ? "line-through text-muted" : "text-ink"}`}>{task.title}</p>
-        {/* C4: leading hand sees who the task is assigned to; regular workers just see "Your task" */}
+        {/* Multi-assign: leading hand sees the assignee stack; a worker just sees "Assigned to you". */}
         {isLeadingHand ? (
-          task.employees?.name
-            ? <p className="text-xs text-muted mt-0.5">{task.assigned_to === myId ? "You" : task.employees.name}</p>
-            : <p className="text-xs text-slate-300 mt-0.5">Unassigned</p>
+          <div className="mt-1"><AssigneeStack assignees={task.assignees || []} size="xs" meId={myId} /></div>
         ) : (
-          task.employees?.name && task.assigned_to === myId && (
-            <p className="text-xs text-muted mt-0.5">Your task</p>
-          )
+          (task.assignees || []).some(a => a.id === myId) && <p className="text-xs text-primary font-medium mt-0.5">Assigned to you</p>
         )}
       </button>
       {/* C3: assign affordance — leading hand only */}
@@ -129,7 +128,7 @@ function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssig
           aria-label="Assign task"
           className="shrink-0 px-2 py-1 rounded-md border border-slate-200 text-xs text-muted hover:text-primary hover:border-primary transition-colors"
         >
-          {task.employees?.name ? "Re-assign" : "Assign"}
+          {(task.assignees || []).length ? "Re-assign" : "Assign"}
         </button>
       )}
     </div>
@@ -226,6 +225,7 @@ export default function WorkerTasks() {
   const [me, setMe] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [job, setJob] = useState(getSelectedJob());
+  const [plansOpen, setPlansOpen] = useState(false);
   const [showJobPicker, setShowJobPicker] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -254,6 +254,7 @@ export default function WorkerTasks() {
   const [assignTask, setAssignTask] = useState(null);   // task being assigned
   const [crew, setCrew] = useState([]);
   const [crewLoading, setCrewLoading] = useState(false);
+  const [crewShowAll, setCrewShowAll] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
 
   // From-transcript sheet (leading hand only)
@@ -462,44 +463,51 @@ export default function WorkerTasks() {
 
   // ── C3: assign task (leading hand only) ──────────────────────────────────────
 
-  async function openAssignSheet(task) {
-    setAssignTask(task);
-    setCrew([]);
+  // Crew scope: default to who's rostered to this site TODAY (crew/day), with a "show all" fallback.
+  async function loadCrew(showAll) {
     setCrewLoading(true);
     try {
-      const res = await workerFetch(
-        `/api/worker/jobs/${encodeURIComponent(job.id)}/crew?jobType=${encodeURIComponent(job.type || "")}`
-      );
+      const t = new Date();
+      const dk = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+      const url = showAll
+        ? `/api/worker/jobs/${encodeURIComponent(job.id)}/crew?jobType=${encodeURIComponent(job.type || "")}`
+        : `/api/worker/crew/day?date=${dk}&jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type || "")}`;
+      const res = await workerFetch(url);
       const j = await res.json().catch(() => ({}));
-      if (j.ok) setCrew(j.crew || []);
+      if (j.ok) setCrew((j.crew || []).map((c) => ({ id: c.employeeId || c.id, name: c.name, trade: c.trade })));
     } catch { /* non-fatal — picker shows empty */ }
     finally { setCrewLoading(false); }
   }
+  function openAssignSheet(task) {
+    setAssignTask(task);
+    setCrewShowAll(false);
+    setCrew([]);
+    loadCrew(false);
+  }
+  function showAllCrew() { setCrewShowAll(true); loadCrew(true); }
 
-  async function doAssign(empId) {
+  async function doAssignMulti(workerIds) {
     if (!assignTask || preview) return;
     setAssignBusy(true);
     try {
-      const res = await workerFetch(`/api/worker/tasks/${assignTask.id}`, {
-        method: "PATCH",
+      const res = await workerFetch(`/api/worker/tasks/${assignTask.id}/assignees`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigned_to: empId }),
+        body: JSON.stringify({ workerIds }),
       });
       const j = await res.json().catch(() => ({}));
       if (j.ok) {
         const updated = j.task;
         setTasks(prev => prev.map(t => t.id === assignTask.id
-          ? { ...t, assigned_to: updated?.assigned_to ?? empId, employees: updated?.employees ?? (empId ? crew.find(c => c.id === empId) : null) }
+          ? { ...t, assignees: updated?.assignees || [], assigned_to: updated?.assigned_to ?? null, employees: updated?.employees ?? null }
           : t
         ));
         setAssignTask(null);
       } else {
-        alert(res.status === 403
-          ? (j.error || "Only a leading hand can assign tasks.")
-          : (j.error || "Could not assign task."));
+        alert(res.status === 403 ? (j.error || "Only a leading hand can assign tasks.") : (j.error || "Could not update assignees."));
       }
     } catch {
-      alert("Couldn't assign — check your connection.");
+      alert("Couldn't save — check your connection.");
     } finally {
       setAssignBusy(false);
     }
@@ -705,6 +713,21 @@ export default function WorkerTasks() {
           </span>
           <span className="text-primary text-sm font-semibold shrink-0">Change ▾</span>
         </button>
+
+        {/* Plans for this job (opens a sheet — no new route) */}
+        {job && (
+          <button
+            type="button"
+            onClick={() => setPlansOpen(true)}
+            className="w-full flex items-center justify-between gap-2 mb-4 -mt-2 px-3 py-2 rounded-lg bg-white border border-hairline text-left"
+          >
+            <span className="text-sm text-ink flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-muted"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+              Plans
+            </span>
+            <span className="text-primary text-sm font-medium shrink-0">View →</span>
+          </button>
+        )}
 
         {/* Supervisor add task buttons */}
         {job && isSupervisor && (
@@ -1012,58 +1035,23 @@ export default function WorkerTasks() {
       )}
 
       {/* ── C3: Assign task sheet (leading hand only) ───────────────────────── */}
-      {assignTask && (
-        <div className="fixed inset-0 z-50 flex items-end">
+      {assignTask && (crewLoading && crew.length === 0 ? (
+        <div className="fixed inset-0 z-[60] flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setAssignTask(null)} />
-          <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[75vh] overflow-y-auto">
-            <h3 className="text-base font-bold text-ink mb-1">Assign task</h3>
-            <p className="text-sm text-muted mb-1 truncate">{assignTask.title}</p>
-            {preview && <p className="text-xs text-amber-600 mb-3">Read-only preview — assigning works in the leading-hand app, not in preview.</p>}
-            {crewLoading ? (
-              <p className="text-sm text-muted text-center py-6">Loading crew…</p>
-            ) : crew.length === 0 ? (
-              <p className="text-sm text-muted text-center py-6">No crew found for this job yet.</p>
-            ) : (
-              <div className="divide-y divide-hairline">
-                {/* Unassign option */}
-                <button
-                  type="button"
-                  disabled={assignBusy || preview}
-                  onClick={() => doAssign(null)}
-                  className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
-                >
-                  <span className="flex-1 min-w-0">
-                    <span className={`block text-sm ${assignTask.assigned_to === null ? "font-semibold text-primary" : "text-muted"}`}>Unassigned</span>
-                  </span>
-                  {assignTask.assigned_to === null && <span className="text-primary shrink-0 text-sm">✓</span>}
-                </button>
-                {crew.map(c => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    disabled={assignBusy || preview}
-                    onClick={() => doAssign(c.id)}
-                    className="w-full flex items-center gap-3 py-3 text-left disabled:opacity-40"
-                  >
-                    <span className="flex-1 min-w-0">
-                      <span className={`block text-sm truncate ${assignTask.assigned_to === c.id ? "font-semibold text-primary" : "text-ink"}`}>{c.name}</span>
-                      {c.trade && <span className="block text-xs text-muted capitalize">{c.trade.replace(/_/g, " ")}{c.isLeadingHand ? " · Leading hand" : ""}</span>}
-                    </span>
-                    {assignTask.assigned_to === c.id && <span className="text-primary shrink-0 text-sm">✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => setAssignTask(null)}
-              className="mt-4 w-full py-3 rounded-lg border border-hairline text-ink text-sm font-medium"
-            >
-              Cancel
-            </button>
-          </div>
+          <div className="relative w-full bg-white rounded-t-2xl p-5"><p className="text-sm text-muted text-center py-6">Loading crew…</p></div>
         </div>
-      )}
+      ) : (
+        <AssigneePickerSheet
+          title="Assign task"
+          candidates={crew}
+          initial={(assignTask.assignees || []).map(a => a.id)}
+          saving={assignBusy}
+          onSave={doAssignMulti}
+          onClose={() => setAssignTask(null)}
+          onShowAll={showAllCrew}
+          showingAll={crewShowAll}
+        />
+      ))}
       {/* ── From-transcript sheet (leading hand only) ─────────────────────── */}
       {showTranscriptSheet && (
         <div className="fixed inset-0 z-50 flex items-end">
@@ -1164,6 +1152,7 @@ export default function WorkerTasks() {
           </div>
         </div>
       )}
+      {plansOpen && job && <PlansSheet jobId={job.id} jobType={job.type} jobLabel={job.address} onClose={() => setPlansOpen(false)} />}
     </WorkerLayout>
   );
 }

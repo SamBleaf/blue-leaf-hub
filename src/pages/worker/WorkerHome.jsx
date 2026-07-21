@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
 import { selectedJobQuery, setSelectedJob } from "../../lib/workerJob.js";
+import PlansSheet from "../../components/worker/PlansSheet.jsx";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -31,7 +32,7 @@ function allocJob(a) {
 }
 
 // Today's site — the worker's daily start: where am I, with which crew, and what's waiting on me.
-function TodaySiteCard({ today, tomorrow, counts, onOpenTasks }) {
+function TodaySiteCard({ today, tomorrow, counts, onOpenTasks, onOpenPlans }) {
   const t = allocJob(today);
   const tm = allocJob(tomorrow);
   return (
@@ -57,6 +58,17 @@ function TodaySiteCard({ today, tomorrow, counts, onOpenTasks }) {
               <span className="text-primary font-medium">Tasks →</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onOpenPlans?.(t)}
+            className="mt-2 w-full flex items-center justify-between rounded-lg bg-page px-3 py-2 text-sm"
+          >
+            <span className="text-ink flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-muted"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+              Plans
+            </span>
+            <span className="text-primary font-medium">View →</span>
+          </button>
         </>
       ) : (
         <p className="text-sm text-muted">Not scheduled yet — check with your supervisor.</p>
@@ -78,6 +90,7 @@ export default function WorkerHome() {
   const [alloc, setAlloc] = useState(null);
   const [counts, setCounts] = useState(null);
   const [error, setError] = useState(null);
+  const [plansJob, setPlansJob] = useState(null);   // { id, type, name } → Plans sheet
 
   // Home loads two things together: the worker summary (/me) and today+tomorrow's Planner
   // allocation. The allocation is non-blocking — if it fails, Home still renders.
@@ -184,7 +197,8 @@ export default function WorkerHome() {
         </div>
 
         {/* Today's site — where am I going + what matters today (Planner allocation) */}
-        <TodaySiteCard today={alloc?.today} tomorrow={alloc?.tomorrow} counts={counts} onOpenTasks={openTodayTasks} />
+        <TodaySiteCard today={alloc?.today} tomorrow={alloc?.tomorrow} counts={counts} onOpenTasks={openTodayTasks} onOpenPlans={(j) => setPlansJob(j)} />
+        {plansJob && <PlansSheet jobId={plansJob.id} jobType={plansJob.type} jobLabel={plansJob.name} onClose={() => setPlansJob(null)} />}
 
         {/* Timesheet card */}
         <div className="rounded-card bg-white shadow-sm border border-hairline p-4 mb-3">

@@ -13,6 +13,8 @@ import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
 import OpsJobHeader from "../components/operations/OpsJobHeader.jsx";
 import OpsJobKpiStrip from "../components/operations/OpsJobKpiStrip.jsx";
 import OpsJobRightRail from "../components/operations/OpsJobRightRail.jsx";
+import JobPlansCard from "../components/JobPlansCard.jsx";
+import AssigneeStack from "../components/AssigneeStack.jsx";
 
 const PHASE_ORDER = ["pre_construction", "site_prep", "substructure", "frame", "rough_in", "lock_up", "fitout", "completion"];
 const PHASE_LABELS = {
@@ -1352,7 +1354,7 @@ export default function OperationsProjectDetail() {
                           <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] || "bg-gray-400"}`} />
                           <div className="flex-1 min-w-0">
                             <p className={`text-sm text-ink ${task.status === "done" ? "line-through text-muted" : ""}`}>{task.title}</p>
-                            {task.employees?.name && <p className="text-xs text-muted mt-0.5">assigned: {task.employees.name}</p>}
+                            <div className="mt-1"><AssigneeStack assignees={task.assignees} size="xs" /></div>
                             {(task.created_via === "voice_note" || task.created_via === "ai_extraction") && (
                               <p className="text-xs text-muted">via voice note</p>
                             )}
@@ -1528,6 +1530,7 @@ export default function OperationsProjectDetail() {
           {tab === "tasks" && renderSiteTasksContent()}
           {tab === "files" && (
             <>
+              <JobPlansCard base={`/api/projects/${projectId}`} />
               {renderFinancialsContent()}
               {renderLabourContent()}
               <SectionCard title="Key details">

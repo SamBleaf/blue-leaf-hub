@@ -32,6 +32,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
 import { signSiteTaskPhotos, isUuid } from "./siteMedia.mjs";
+import { attachAssigneesFromDb, setAssignees } from "./taskAssignments.mjs";
 import { transcribeAudio, transcriptionConfigured } from "./transcribe.mjs";
 import { splitTranscriptToTasks } from "./voiceTasks.mjs";
 import { buildexactConfigured, getJobById, resolveBuildexactJobId, getEstimatesByJob, getEstimateItems, beList, getCustomerContacts } from "./buildexactClient.mjs";
@@ -1026,7 +1027,8 @@ export function registerCarpentryRoutes(app) {
         .order("created_at");
       if (error) throw error;
       await signSiteTaskPhotos(sb, data || []);
-      return ok(res, { tasks: rowsToCamel(data || []) });
+      const withAssignees = await attachAssigneesFromDb(sb, data || []);   // multi-assign dual-read
+      return ok(res, { tasks: rowsToCamel(withAssignees) });
     } catch (e) {
       console.error("[carpentry/tasks GET]", e);
       return err(res, 502, translateDbError(e));
@@ -1081,7 +1083,9 @@ export function registerCarpentryRoutes(app) {
         .select("*, employees!assigned_to(id, name)")
         .single();
       if (error) throw error;
-      return ok(res, { task });
+      if (assignedTo) await setAssignees(sb, task.id, [assignedTo], null);   // dual-write the join
+      const [withAssignees] = await attachAssigneesFromDb(sb, [task]);
+      return ok(res, { task: withAssignees });
     } catch (e) {
       console.error("[carpentry/tasks POST]", e);
       return err(res, 502, translateDbError(e));
@@ -1222,11 +1226,10 @@ export function registerCarpentryRoutes(app) {
       if (description !== undefined) patch.description = description?.trim() || null;
       const resolvedSortOrder = sortOrder !== undefined ? sortOrder : sort_order;
       if (resolvedSortOrder !== undefined) patch.sort_order = resolvedSortOrder;
+      // Single-assignee PATCH still supported, but written through the join (setAssignees below)
+      // so it stays consistent with multi-assign — never a bare assigned_to write.
       const resolvedAssignedTo = assignedTo !== undefined ? assignedTo : assigned_to;
-      if (resolvedAssignedTo !== undefined) {
-        if (resolvedAssignedTo !== null && !isUuid(resolvedAssignedTo)) return err(res, 400, "Invalid assignee.");
-        patch.assigned_to = resolvedAssignedTo || null;
-      }
+      if (resolvedAssignedTo !== undefined && resolvedAssignedTo !== null && !isUuid(resolvedAssignedTo)) return err(res, 400, "Invalid assignee.");
 
       if (status !== undefined) {
         const VALID = ["open", "in_progress", "done", "wont_do", "blocked"];
@@ -1261,7 +1264,7 @@ export function registerCarpentryRoutes(app) {
         patch.category = category;
       }
 
-      const { data: task, error } = await sb
+      let { data: task, error } = await sb
         .from("site_tasks")
         .update(patch)
         .eq("id", req.params.id)
@@ -1269,9 +1272,38 @@ export function registerCarpentryRoutes(app) {
         .single();
       if (error) throw error;
       if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
-      return ok(res, { task: rowToCamel(task) });
+      if (resolvedAssignedTo !== undefined) {
+        await setAssignees(sb, req.params.id, resolvedAssignedTo ? [resolvedAssignedTo] : [], null);
+        // Re-read so the pre-mig fallback overlays the freshly-mirrored assigned_to, not the stale row.
+        const { data: fresh } = await sb.from("site_tasks")
+          .select("*, assigned:employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
+          .eq("id", req.params.id).maybeSingle();
+        if (fresh) task = fresh;
+      }
+      const [withAssignees] = await attachAssigneesFromDb(sb, [task]);
+      return ok(res, { task: rowToCamel(withAssignees) });
     } catch (e) {
       console.error("[carpentry/tasks/:id PATCH]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/tasks/:id/assignees (multi-assign, admin/supervisor) ─
+  // SET the task's assignees to workerIds[] (dual-writes the join + the first→assigned_to mirror).
+  app.post("/api/carpentry/tasks/:id/assignees", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const workerIds = Array.isArray(req.body?.workerIds) ? req.body.workerIds.filter(isUuid) : [];
+    try {
+      await setAssignees(sb, req.params.id, workerIds, null);
+      const { data: task } = await sb.from("site_tasks")
+        .select("*, assigned:employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
+        .eq("id", req.params.id).maybeSingle();
+      if (!task) return err(res, 404, "Task not found.", "NOT_FOUND");
+      const [withAssignees] = await attachAssigneesFromDb(sb, [task]);
+      return ok(res, { task: rowToCamel(withAssignees) });
+    } catch (e) {
+      console.error("[carpentry/tasks/:id/assignees]", e);
       return err(res, 502, translateDbError(e));
     }
   });
