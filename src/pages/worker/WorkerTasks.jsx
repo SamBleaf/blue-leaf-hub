@@ -32,6 +32,10 @@ function categoryLabel(cat) {
   return CATEGORY_LABELS[cat] || cat;
 }
 
+function firstName(n) {
+  return String(n || "").trim().split(/\s+/)[0] || "?";
+}
+
 function vibrate(ms) {
   try { navigator.vibrate?.(ms); } catch { /* ignore */ }
 }
@@ -147,12 +151,20 @@ function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssig
         className="flex-1 min-w-0 text-left select-none"
       >
         <p className={`text-sm leading-snug ${isDone ? "line-through text-muted" : "text-ink"}`}>{task.title}</p>
-        {/* Multi-assign: leading hand sees the assignee stack; a worker just sees "Assigned to you". */}
+        {/* Multi-assign: leading hand sees every task's stack; a worker on the task sees who else
+            is on it (co-assignee first names) so they know who they're working with. */}
         {isLeadingHand ? (
           <div className="mt-1"><AssigneeStack assignees={task.assignees || []} size="xs" meId={myId} /></div>
-        ) : (
-          (task.assignees || []).some(a => a.id === myId) && <p className="text-xs text-primary font-medium mt-0.5">Assigned to you</p>
-        )}
+        ) : (task.assignees || []).some(a => a.id === myId) ? (
+          (task.assignees || []).length > 1 ? (
+            <div className="mt-1 flex items-center gap-1.5 min-w-0">
+              <AssigneeStack assignees={task.assignees || []} size="xs" meId={myId} />
+              <span className="text-xs text-primary font-medium truncate">with {(task.assignees || []).filter(a => a.id !== myId).map(a => firstName(a.name)).join(", ")}</span>
+            </div>
+          ) : (
+            <p className="text-xs text-primary font-medium mt-0.5">Assigned to you</p>
+          )
+        ) : null}
       </button>
       {/* C3: assign affordance — leading hand only */}
       {isLeadingHand && (
@@ -1007,6 +1019,12 @@ export default function WorkerTasks() {
               <div className="flex-1 min-w-0 mr-3">
                 <h3 className="text-base font-bold text-ink leading-snug">{sheet.title}</h3>
                 {sheet.description && <p className="text-sm text-muted mt-1">{sheet.description}</p>}
+                {/* Who's on this task — everyone sees the roster (self marked "you"), so a worker knows their crew. */}
+                {(sheet.assignees || []).length > 0 && (
+                  (sheet.assignees.length === 1 && sheet.assignees[0].id === myId)
+                    ? <p className="text-xs text-primary font-medium mt-1">Assigned to you</p>
+                    : <p className="text-xs text-primary font-medium mt-1">Assigned: {(sheet.assignees || []).map(a => a.id === myId ? "you" : (a.name || "?")).join(", ")}</p>
+                )}
                 {sheet.status === "done" && ((isSupervisor || preview) ? (
                   // Supervisors / admin: full sign-off detail — who + date & time (matches the Hub).
                   <p className="text-xs text-emerald-700 mt-1">

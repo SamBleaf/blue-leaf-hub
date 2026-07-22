@@ -28,7 +28,7 @@ Site workers + leading hands (worker app, magic-link token). Admin/supervisors u
 ## 3. What this does
 - **Plans (F1)** — plans are uploaded into the Hub (carpentry job / construction project → **Plans card**) and stored in Supabase (bucket `job-plans`); the worker sees the **current** set on the app (Today's site card + the Tasks job card → **Plans** bottom sheet) and taps to open the PDF in their device viewer. Source of truth is the Hub upload, so issuing is deliberate (the field never builds off an un-issued revision). Superseding a plan is **explicit** — the uploader picks which current plan a revision replaces.
 - **Crew view (F2)** — the Week page gains a **My week / Crew** toggle (leading hands only). Crew shows, per day, the site + who else is rostered to that same site that day (avatar stack + count, tap to expand name + trade). Read-only; refreshes when the app is re-opened.
-- **Multi-assign (F3)** — a task can hold **many** assignees (avatar stack + overflow). Tap the stack (leading hand / office) to open a multi-select picker (defaults to that day's crew for the site, "show all" available). A worker sees a task if it's **shared** (no assignees) or they're on it; any assignee can tick it done.
+- **Multi-assign (F3)** — a task can hold **many** assignees (avatar stack + overflow). Tap the stack (leading hand / office) to open a multi-select picker (defaults to that day's crew for the site, "show all" available). A worker sees a task if it's **shared** (no assignees) or they're on it; any assignee can tick it done. A worker who's on a task **sees who else is on it** — the row shows "with [names]" and the task detail lists everyone ("Assigned: you, …") — so the whole crew knows who they're working alongside (not just leading hands).
 - **Timesheet autofill (F4)** — logging hours pre-fills the site/location from the day's roster (an editable default with a "from your schedule" hint), keyed to the date being logged.
 - **Editable tasks (F5)** — when a leading hand extracts tasks from dictation/transcript, each draft is **tappable** to edit its name, info and category before adding the list. After a task is added, a leading hand can **press-and-hold** the task to reopen the same editor (name / info / category). A normal worker's tap still just opens the task to tick it done.
 
@@ -122,8 +122,9 @@ Admin. Next review: 2026-11-30.
 2. Remove the first assignee → Expected: it re-points to the next (primary mirror stays valid); remove all → Unassigned.
 - [ ] Pass  [ ] Fail
 
-**TC-06 — No leak of others' tasks**
+**TC-06 — No leak of others' tasks + co-assignee visibility**
 1. Worker M (not leading hand): task assigned only to X → Expected: M does NOT see it; a shared (unassigned) task and M's own tasks DO show; any assignee can tick a shared/own task done.
+2. Task assigned to [M, X]: as worker M → Expected: the row shows "with [X's first name]"; opening it lists "Assigned: you, [X]". A solo task assigned only to M still shows "Assigned to you".
 - [ ] Pass  [ ] Fail
 
 **TC-07 — Timesheet autofill**
