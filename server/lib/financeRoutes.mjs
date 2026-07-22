@@ -392,9 +392,10 @@ function criticalFieldCount(data) {
 
 // ── Tier 2 — Haiku vision OCR (fast, cheap; handles images + PDFs) ────────────
 
-const EXTRACT_PROMPT = `Extract structured data from this invoice or receipt. Return ONLY a JSON object:
+const EXTRACT_PROMPT = `Extract structured data from this document. Return ONLY a JSON object:
 
 {
+  "document_kind": "one of: invoice, receipt, quote, statement, other. Use 'invoice' or 'receipt' ONLY for a bill/tax invoice/receipt that requests payment for goods or services ALREADY supplied. Use 'quote' for a quotation/estimate/proposal/tender price for work NOT yet done. Use 'statement' for an account statement. Use 'other' for anything else.",
   "supplier_name": "company/person name",
   "supplier_abn": "ABN if present else null",
   "invoice_number": "invoice or receipt number else null",
@@ -511,6 +512,37 @@ async function moveDropboxFile(token, fromPath, toPath) {
 // The poller auto-routes these to the internal "Blue Leaf Building" job (booked, but never hits a
 // job's margin). Extend as needed, e.g. /buildxact|buildexact|xero|google|microsoft|adobe/i.
 const OVERHEAD_SUPPLIER_RE = /buildxact|buildexact/i;
+
+// ── Invoice vs quote/statement gate (the admin inbox receives all three) ──────────
+// Only true INVOICES/receipts are payables that belong in the finance inbox. Tender QUOTES
+// (subcontractor RFQ replies) and account STATEMENTS must NOT be ingested as invoices to
+// match/approve/pay — the RFQ engine handles quote replies separately.
+// Signals, in order of trust: the AI's document_kind, then the email subject + filename (the
+// reliable deterministic net — e.g. "Re: RFQ — Roof Plumber…", "Quote QU0360.pdf"). Conservative:
+// only classified away from "invoice" on a CLEAR quote/statement signal, so a real tax invoice for
+// a job (which may mention a quote number) is never dropped.
+const QUOTE_TEXT_RE = /\b(quotation|quote|estimate|proposal|rfq|request for quote|tender)\b/i;
+const STATEMENT_TEXT_RE = /\b(statement of account|account statement|customer statement|monthly statement)\b/i;
+const INVOICE_TEXT_RE = /\b(tax invoice|invoice|receipt|remittance)\b/i;
+
+export function classifyInboxDoc(extracted = {}, { filename = "", subject = "" } = {}) {
+  const kind = String(extracted.document_kind || "").toLowerCase().trim();
+  if (["quote", "quotation", "estimate", "proposal"].includes(kind)) return "quote";
+  if (kind === "statement") return "statement";
+
+  // Deterministic net on filename + subject (never the extracted amount — quotes carry a price
+  // too, which is exactly why the old amount-only gate let them through). An explicit invoice word
+  // protects a real invoice even when it references a quote number, so we only classify AWAY from
+  // "invoice" when there's a clean quote/statement signal and NO invoice word — safer to keep a
+  // stray quote (manual reject) than to drop a real payable.
+  const hay = `${filename} ${subject}`;
+  const invoiceSignal = INVOICE_TEXT_RE.test(hay);
+  if (QUOTE_TEXT_RE.test(hay) && !invoiceSignal) return "quote";
+  if (STATEMENT_TEXT_RE.test(hay) && !invoiceSignal) return "statement";
+
+  if (["invoice", "receipt"].includes(kind)) return "invoice";
+  return "invoice";                                          // default: treat as a payable (prior behaviour)
+}
 
 // Match an invoice to a CARPENTRY job by address, then by the email subject. Carpentry jobs
 // aren't in the tender `jobs` table, so the poller runs this only when no tender match was found.
@@ -849,7 +881,15 @@ export function registerFinanceRoutes(app) {
       res.setHeader("Cache-Control", "private, max-age=60");
       return res.end(buf);
     } catch (e) {
-      console.error("[finance] document file stream:", e?.message);
+      const detail = String(e?.message || "");
+      console.error("[finance] document file stream:", detail);
+      // Surface the actual cause so it's fixable rather than a dead-end "Could not load".
+      if (/missing_scope|files\.content\.read/i.test(detail)) {
+        return res.status(502).json({ ok: false, error: "Storage isn't authorised to read files. An admin needs to add the Dropbox files.content.read permission and re-run the Dropbox authorisation." });
+      }
+      if (e?.status === 409 || /not_found|path\/not_found|not_file/i.test(detail)) {
+        return res.status(404).json({ ok: false, error: "The original file is no longer in storage (it may have been moved or removed)." });
+      }
       return res.status(502).json({ ok: false, error: "Could not load the file from storage." });
     }
   });
@@ -1222,6 +1262,17 @@ export function registerFinanceRoutes(app) {
 
             const base64 = att.content.toString("base64");
             const extracted = await extractDocument(base64, mime);
+
+            // Quotes + statements are NOT payables. The admin inbox receives tender QUOTES (RFQ
+            // replies) and account STATEMENTS alongside invoices; ingesting them as invoices to
+            // match/pay is wrong (they even carry a price). Skip anything that isn't an invoice —
+            // the RFQ engine handles quote replies separately. (Manual upload can still force one in.)
+            const docClass = classifyInboxDoc(extracted, { filename, subject });
+            if (docClass !== "invoice") {
+              console.log(`[invoice-imap] skipped ${docClass} (not a payable): ${filename} — "${subject}" from ${from} [${cfg.auth.user}]`);
+              skipped++; continue;
+            }
+            delete extracted.document_kind;   // classification helper, not a financial_documents column
 
             // Not every PDF is an invoice. Account-approval letters, statements with no total,
             // header-only scans etc. have no monetary value AND no invoice number — they are not

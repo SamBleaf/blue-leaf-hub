@@ -88,6 +88,7 @@ A job match confidence score also appears (e.g., "Job match: 87%"). See SOP 09-0
 - Supplier ABN match → `supplier_trade_defaults` → if `auto_tag = true`, trade is pre-filled
 
 ## 12. Edge cases and limits
+- **Quotes vs invoices (email inbox):** the admin address receives tender QUOTES (subcontractor RFQ replies) and account STATEMENTS as well as invoices. The email scanner classifies each PDF (`classifyInboxDoc`) and **only ingests genuine invoices/receipts** — quotes and statements are skipped (logged, not added to the inbox). Rules: an explicit "invoice"/"tax invoice"/"receipt" word keeps it; a clean "Quote / Quotation / RFQ / Estimate" signal in the filename or subject (with no invoice word) skips it. RFQ quote replies are still handled by the RFQ engine separately. A manual **Upload** can always force a document in regardless. If a real invoice is ever skipped, upload it manually.
 - Photo uploads (JPEG/PNG from mobile) are lower quality than PDFs — expect more amber/red confidence fields; always verify manually
 - If the PDF is password-protected, extraction will fail entirely — ask the supplier to resend without a password
 - Some invoices do not include GST (supplier not GST registered) — the GST field will be 0, which is correct; do not add GST manually
