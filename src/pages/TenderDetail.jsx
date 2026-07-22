@@ -6,7 +6,7 @@ import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js
 import { plainBodyToHtml } from "../lib/rfqComposer.js";
 import { sharedJobDropboxRootPath } from "../lib/companySettings.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
-import { TRADE_LABEL } from "../lib/tradeTemplates.js";
+import { TRADE_LABEL, subcontractorsForTrade } from "../lib/tradeTemplates.js";
 import { bulletsFromTradeNote, coerceExtraction, RFQ_TRADE_ORDER } from "../lib/rfqExtraction.js";
 
 const JOB_STATUS_BADGE = {
@@ -477,11 +477,25 @@ export default function TenderDetail() {
   const [addBody, setAddBody] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addResult, setAddResult] = useState(null);
+  const [addMode, setAddMode] = useState("recipient");   // "recipient" (add a sub to a trade) | "trade" (add a missed trade)
 
   const existingTrades = useMemo(
     () => [...new Set(rfqs.map((r) => r.trade).filter(Boolean))],
     [rfqs]
   );
+
+  // Trades from the master list that aren't on this job yet — the "missed in the RFQ engine" set.
+  const tnorm = (t) => String(t || "").toLowerCase().replace(/[_\s]+/g, " ").trim();
+  const existingTradesNorm = useMemo(() => new Set(existingTrades.map(tnorm)), [existingTrades]);
+  const missedTrades = useMemo(
+    () => RFQ_TRADE_ORDER.filter((t) => !existingTradesNorm.has(tnorm(t)) && !existingTradesNorm.has(tnorm(TRADE_LABEL[t] || t))),
+    [existingTradesNorm]
+  );
+
+  // The chosen trade's subcontractors (surfaced first in the picker), then everyone else.
+  const addMatchedSubs = useMemo(() => (addTrade ? subcontractorsForTrade(addTrade, addSubs, 9999) : []), [addTrade, addSubs]);
+  const addMatchedIds = useMemo(() => new Set(addMatchedSubs.map((s) => String(s.id))), [addMatchedSubs]);
+  const addOtherSubs = useMemo(() => addSubs.filter((s) => !addMatchedIds.has(String(s.id))), [addSubs, addMatchedIds]);
 
   // Copy the most recent RFQ sent for this trade, swap the salutation to the new sub, and refresh
   // the project documents link — "a slightly modified version with the correct update link".
@@ -504,15 +518,20 @@ export default function TenderDetail() {
     return { subject, body };
   }, [rfqs, job, dropboxUrl, sigFooter]);
 
-  const openAddRecipient = useCallback(async () => {
+  // Open the add modal. mode "recipient" = add a subcontractor to one of this job's trades;
+  // mode "trade" = add a trade that was missed in the RFQ engine. presetTrade pins the trade
+  // (used by a trade card's "+ sub"). Both send via /api/rfq/add-recipient.
+  const openAdd = useCallback(async (mode = "recipient", presetTrade = "") => {
     setAddResult(null);
+    setAddMode(mode);
     setAddOpen(true);
-    setAddTrade(existingTrades[0] || "");
+    setAddTrade(presetTrade || (mode === "recipient" ? (existingTrades[0] || "") : ""));
     setAddSubId(""); setAddSubject(""); setAddBody("");
     if (!addSubs.length) {
       const sb = getSupabase();
       if (sb) {
-        const { data } = await sb.from("subcontractors").select("id, business_name, contact, email").order("business_name");
+        // trade is needed to filter the picker to the trade's subcontractors.
+        const { data } = await sb.from("subcontractors").select("id, business_name, contact, email, trade").order("business_name");
         setAddSubs(data || []);
       }
     }
@@ -1313,11 +1332,21 @@ function winRowMissingConfirmedQuote(row) {
             {!readOnly && job.status === "tendering" && (
               <button
                 type="button"
-                onClick={openAddRecipient}
-                title="Send an RFQ to a new subcontractor on this job — auto-fills from the same trade's existing RFQ with the current documents link"
+                onClick={() => openAdd("trade")}
+                title="Add a trade that was missed in the RFQ engine, then send its RFQ to subcontractors"
                 className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition hover:border-primary/40"
               >
-                + Add recipient
+                + Add trade
+              </button>
+            )}
+            {!readOnly && job.status === "tendering" && (
+              <button
+                type="button"
+                onClick={() => openAdd("recipient")}
+                title="Send an RFQ to another subcontractor for one of this job's trades — the picker filters to that trade's subs and auto-fills from the existing RFQ"
+                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition hover:border-primary/40"
+              >
+                + Add subcontractor
               </button>
             )}
             <button
@@ -1445,23 +1474,26 @@ function winRowMissingConfirmedQuote(row) {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !addBusy && setAddOpen(false)}>
             <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-card border border-hairline bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-primary">Add RFQ recipient</h3>
+                <h3 className="text-base font-semibold text-primary">{addMode === "trade" ? "Add a trade" : "Add a subcontractor"}</h3>
                 <button type="button" onClick={() => setAddOpen(false)} className="text-muted hover:text-ink">✕</button>
               </div>
               <p className="mt-2 text-xs text-muted">
-                Pick a trade and subcontractor — the email auto-fills from that trade&apos;s existing RFQ with the current documents link. Edit if needed, then send.
+                {addMode === "trade"
+                  ? "Add a trade that was missed in the RFQ engine, pick a subcontractor for it, then send. It appears on the board once sent."
+                  : "Pick the trade and a subcontractor — the picker shows that trade's subs first and the email auto-fills from the existing RFQ with the current documents link. Edit if needed, then send."}
               </p>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-xs font-semibold uppercase text-muted">Trade</label>
                   <select
                     value={addTrade}
-                    onChange={(e) => { setAddTrade(e.target.value); reprefill(e.target.value, addSubId); }}
+                    onChange={(e) => { setAddTrade(e.target.value); setAddSubId(""); reprefill(e.target.value, ""); }}
                     className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs"
                   >
-                    <option value="">Select trade…</option>
-                    {existingTrades.map((t) => <option key={t} value={t}>{t}</option>)}
-                    {RFQ_TRADE_ORDER.filter((t) => !existingTrades.includes(t)).map((t) => <option key={t} value={t}>{TRADE_LABEL[t] || t}</option>)}
+                    <option value="">{addMode === "trade" ? "Select a trade to add…" : "Select trade…"}</option>
+                    {addMode === "trade"
+                      ? missedTrades.map((t) => <option key={t} value={t}>{TRADE_LABEL[t] || t}</option>)
+                      : existingTrades.map((t) => <option key={t} value={t}>{TRADE_LABEL[t] || t}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1471,8 +1503,17 @@ function winRowMissingConfirmedQuote(row) {
                     onChange={(e) => { setAddSubId(e.target.value); reprefill(addTrade, e.target.value); }}
                     className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs"
                   >
-                    <option value="">Select subcontractor…</option>
-                    {addSubs.map((s) => <option key={s.id} value={s.id} disabled={!s.email}>{s.business_name}{s.email ? "" : " (no email)"}</option>)}
+                    <option value="">{addTrade ? "Select subcontractor…" : "Pick a trade first…"}</option>
+                    {addTrade && addMatchedSubs.length > 0 && (
+                      <optgroup label={`For ${TRADE_LABEL[addTrade] || addTrade}`}>
+                        {addMatchedSubs.map((s) => <option key={s.id} value={s.id} disabled={!s.email}>{s.business_name}{s.email ? "" : " (no email)"}</option>)}
+                      </optgroup>
+                    )}
+                    {addTrade && addOtherSubs.length > 0 && (
+                      <optgroup label={addMatchedSubs.length > 0 ? "All other subcontractors" : "Subcontractors (none tagged to this trade)"}>
+                        {addOtherSubs.map((s) => <option key={s.id} value={s.id} disabled={!s.email}>{s.business_name}{s.email ? "" : " (no email)"}</option>)}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
               </div>
@@ -1512,8 +1553,18 @@ function winRowMissingConfirmedQuote(row) {
               <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">{r.trade}</span>
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">{TRADE_LABEL[r.trade] || r.trade}</span>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${vis.cls}`}>{vis.label}</span>
+                    {!readOnly && job.status === "tendering" && (
+                      <button
+                        type="button"
+                        onClick={() => openAdd("recipient", r.trade)}
+                        title={`Send this trade's RFQ to another subcontractor`}
+                        className="rounded-full border border-hairline px-2 py-0.5 text-[10px] font-semibold text-primary transition hover:border-primary/40"
+                      >
+                        + sub
+                      </button>
+                    )}
                   </div>
                   <EngagementStrip rfq={r} />
                   <div className="text-sm font-semibold text-ink">{sub?.business_name || "—"}</div>

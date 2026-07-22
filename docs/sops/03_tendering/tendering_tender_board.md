@@ -58,6 +58,13 @@ Automatically populated from tendering jobs: chases first (red) → outstanding 
 - Archive and delete actions are available from each card's action menu (see SOP 03-04)
 - Clicking a card navigates to the tender detail page
 
+### Adding a trade or subcontractor after the RFQ engine (on the tender detail "Trades" section)
+Once the RFQ engine's steps are done you don't have to reopen the whole wizard to add work:
+- **+ Add trade** (Trades header) — add a trade that was **missed** in the RFQ engine. The trade picker lists only trades not already on the job; choose one, pick a subcontractor (the picker shows that trade's subs first), edit the auto-filled email, and **Send RFQ**. The trade appears on the board once sent.
+- **+ Add subcontractor** (Trades header) — send an RFQ to **another sub for a trade the job already has**. Pick the trade, then a sub (that trade's subs are listed first, all others below), and send.
+- **+ sub** (on each trade card) — the same as Add subcontractor but with that card's trade pre-selected — the quickest way to add one more quoter to a specific trade.
+- All three send through the same path and are protected by the double-send guard: if that subcontractor already has a **sent** RFQ for that trade, it is blocked so nobody is emailed twice.
+
 ## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
@@ -155,6 +162,18 @@ Next review: 2026-11-30
 **TC-07 — Stage grouping hides empty stages**
 1. Ensure there are no jobs with `status = 'lost'`
 2. Expected: no "Lost" group appears in Board or Scorecard view
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Add a missed trade after the RFQ engine**
+1. Open a tendering job's tender detail → **Trades** → **+ Add trade**.
+2. Expected: the Trade dropdown lists only trades NOT already on the job. Pick one → the Subcontractor dropdown shows that trade's subs first. Pick a sub → email auto-fills → **Send RFQ**.
+3. Expected: the new trade+sub appears as a card on the board after sending.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — Add another subcontractor to an existing trade + double-send guard**
+1. On a trade card, click **+ sub** (or Trades header → **+ Add subcontractor**).
+2. Expected: the trade is pre-selected (for **+ sub**); the sub picker lists that trade's subs first. Pick a new sub → **Send RFQ** → a second card appears for that trade.
+3. Try to add the SAME sub to the SAME trade again → Expected: it's blocked (already-sent guard), nobody is emailed twice.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
