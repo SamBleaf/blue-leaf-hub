@@ -27,7 +27,6 @@ export default function JobPlansCard({ base }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [pending, setPending] = useState(false);
   const [file, setFile] = useState(null);
   const [docType, setDocType] = useState("architectural");
   const [revision, setRevision] = useState("");
@@ -41,7 +40,6 @@ export default function JobPlansCard({ base }) {
     setLoading(false);
     if (!ok) { setError(e || "Could not load plans."); return; }
     setError(null);
-    setPending(!!data?.migrationPending);
     setPlans(data?.plans || []);
   }, [base]);
   useEffect(() => { load(); }, [load]);
@@ -82,7 +80,6 @@ export default function JobPlansCard({ base }) {
     <div className="rounded-card border border-hairline bg-surface p-4">
       <h3 className="text-sm font-semibold text-ink mb-3">Plans <span className="text-muted font-normal">(issued to the field)</span></h3>
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
-      {pending && <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800 mb-3">Plans aren&rsquo;t enabled yet — apply <span className="font-mono">migration 152</span>.</div>}
 
       {loading ? (
         <p className="text-sm text-muted">Loading…</p>
@@ -100,8 +97,7 @@ export default function JobPlansCard({ base }) {
         </div>
       )}
 
-      {!pending && (
-        <div className="border-t border-hairline pt-3 space-y-2">
+      <div className="border-t border-hairline pt-3 space-y-2">
           <input ref={fileRef} type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="block w-full text-sm" />
           <div className="grid grid-cols-2 gap-2">
             <select value={docType} onChange={(e) => setDocType(e.target.value)} className="border border-hairline rounded-lg px-2 py-2 text-sm focus-ring">
@@ -116,8 +112,7 @@ export default function JobPlansCard({ base }) {
           <button onClick={upload} disabled={!file || uploading} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-40">
             {uploading ? "Uploading…" : "Upload plan"}
           </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

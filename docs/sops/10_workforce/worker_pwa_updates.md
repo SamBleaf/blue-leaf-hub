@@ -30,6 +30,7 @@ Site workers + leading hands (worker app, magic-link token). Admin/supervisors u
 - **Crew view (F2)** — the Week page gains a **My week / Crew** toggle (leading hands only). Crew shows, per day, the site + who else is rostered to that same site that day (avatar stack + count, tap to expand name + trade). Read-only; refreshes when the app is re-opened.
 - **Multi-assign (F3)** — a task can hold **many** assignees (avatar stack + overflow). Tap the stack (leading hand / office) to open a multi-select picker (defaults to that day's crew for the site, "show all" available). A worker sees a task if it's **shared** (no assignees) or they're on it; any assignee can tick it done.
 - **Timesheet autofill (F4)** — logging hours pre-fills the site/location from the day's roster (an editable default with a "from your schedule" hint), keyed to the date being logged.
+- **Editable tasks (F5)** — when a leading hand extracts tasks from dictation/transcript, each draft is **tappable** to edit its name, info and category before adding the list. After a task is added, a leading hand can **press-and-hold** the task to reopen the same editor (name / info / category). A normal worker's tap still just opens the task to tick it done.
 
 ## 4. Before you start
 - Migrations **152** (plans carpentry spine + `job-plans` bucket) and **153** (`task_assignments` + backfill) applied.
@@ -49,6 +50,11 @@ Site workers + leading hands (worker app, magic-link token). Admin/supervisors u
 
 ### Assign workers to a task
 1. Tap a task's assignee stack (or **Assign**) → the picker lists today's crew (+ show all) → toggle people → **Save**. Removing everyone → Unassigned.
+
+### Add tasks by dictation + edit them (leading hand)
+1. Tasks → **From transcript** → dictate/paste the site walk-through → **Extract tasks**.
+2. In the draft list, **tap any task** to edit its **name**, **info** and **category**; untick any you don't want; then **Add** the list.
+3. For a task already on the list, **press and hold** it → the same editor opens → change name/info/category → **Save**.
 
 ### Log hours (worker)
 1. Log Hours → the **Site** is pre-filled from your schedule for that day — change it if you moved sites.
@@ -123,4 +129,10 @@ Admin. Next review: 2026-11-30.
 **TC-07 — Timesheet autofill**
 1. Log hours for today → Expected: the site is pre-filled from your schedule ("from your schedule" hint) and is still changeable.
 2. Back-fill a past rostered day via Week → Expected: that day's scheduled site pre-fills. Unrostered day → no default.
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Edit dictated tasks + hold-to-edit (leading hand)**
+1. From transcript → Extract → **tap** a draft → change its name, info and category → the row reflects the change → **Add**. Expected: the added task shows the edited name/category (and info in its detail).
+2. **Press and hold** an existing task → editor opens → change the name/category → **Save**. Expected: the row updates; reopening shows the new values; a plain tap still opens the completion sheet (not the editor).
+3. As a normal worker (not leading hand): Expected: holding a task does nothing (no editor); tap opens the task to tick it done.
 - [ ] Pass  [ ] Fail

@@ -2921,8 +2921,9 @@ export function registerWorkforceRoutes(app) {
     if (!isUuid(jobId) || !title) return err(res, 400, "jobId and title are required.");
     const category = String(req.body?.category || "general").trim() || "general";
     const priority = ["urgent", "normal", "when_time_permits"].includes(req.body?.priority) ? req.body.priority : "normal";
+    const description = String(req.body?.description || "").trim() || null;
     const { data, error } = await sb.from("site_tasks").insert({
-      carpentry_job_id: jobId, title, category, priority, status: "open",
+      carpentry_job_id: jobId, title, description, category, priority, status: "open",
       created_via: "manual", task_audience: "worker"
     }).select("*").single();
     if (error) return err(res, 500, translateDbError(error));
@@ -2986,8 +2987,24 @@ export function registerWorkforceRoutes(app) {
       return err(res, 403, "Only a leading hand can assign tasks to crew members.");
     }
 
-    const { status, completionNotes, completionPhotoUrl, assigned_to } = req.body || {};
+    const { status, completionNotes, completionPhotoUrl, assigned_to, title, description, category } = req.body || {};
     const update = { updated_at: new Date().toISOString() };
+
+    // Leading hand may edit a task's name / info / category (same fields as the Hub + draft editor).
+    if (title !== undefined || description !== undefined || category !== undefined) {
+      if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can edit a task's details.");
+      if (title !== undefined) {
+        const tt = String(title).trim();
+        if (!tt) return err(res, 400, "Task title can't be empty.");
+        update.title = tt;
+      }
+      if (description !== undefined) update.description = String(description || "").trim() || null;
+      if (category !== undefined) {
+        const c = String(category).trim();
+        if (!SITE_TASK_CATEGORIES.includes(c)) return err(res, 400, "Invalid category.");
+        update.category = c;
+      }
+    }
 
     if (status !== undefined) {
       const VALID = ["open", "in_progress", "done", "blocked"];

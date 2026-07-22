@@ -36,6 +36,34 @@ function vibrate(ms) {
   try { navigator.vibrate?.(ms); } catch { /* ignore */ }
 }
 
+// Press-and-hold gesture (leading hand → edit a task). Returns pointer handlers to spread onto a
+// row's tap target plus consumeClick(), which swallows the click that follows a fired long-press so
+// the tap (open detail sheet) doesn't also run. onHold falsy → inert (regular workers keep plain tap).
+function useLongPress(onHold, ms = 500) {
+  const timer = useRef(null);
+  const fired = useRef(false);
+  const start = useRef(null);
+  const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  if (!onHold) return { handlers: {}, consumeClick: () => false };
+  return {
+    handlers: {
+      onPointerDown: (e) => {
+        fired.current = false;
+        start.current = { x: e.clientX, y: e.clientY };
+        timer.current = setTimeout(() => { fired.current = true; vibrate(15); onHold(); }, ms);
+      },
+      onPointerMove: (e) => {
+        if (timer.current && start.current && (Math.abs(e.clientX - start.current.x) > 10 || Math.abs(e.clientY - start.current.y) > 10)) clear();
+      },
+      onPointerUp: clear,
+      onPointerCancel: clear,
+      onPointerLeave: clear,
+      onContextMenu: (e) => e.preventDefault(),
+    },
+    consumeClick: () => { if (fired.current) { fired.current = false; return true; } return false; },
+  };
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function Tick({ checked, onToggle, disabled }) {
@@ -106,12 +134,18 @@ function CategoryHeader({ label, done, total }) {
   );
 }
 
-function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssign }) {
+function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssign, onHold }) {
   const isDone = task.status === "done";
+  const { handlers, consumeClick } = useLongPress(onHold);
   return (
     <div className="flex items-center gap-3 bg-white border border-hairline rounded-lg px-3 py-3">
       <Tick checked={isDone} onToggle={onToggle} disabled={toggling} />
-      <button type="button" onClick={onTap} className="flex-1 min-w-0 text-left">
+      <button
+        type="button"
+        onClick={(e) => { if (consumeClick()) { e.preventDefault(); return; } onTap(); }}
+        {...handlers}
+        className="flex-1 min-w-0 text-left select-none"
+      >
         <p className={`text-sm leading-snug ${isDone ? "line-through text-muted" : "text-ink"}`}>{task.title}</p>
         {/* Multi-assign: leading hand sees the assignee stack; a worker just sees "Assigned to you". */}
         {isLeadingHand ? (
@@ -135,17 +169,18 @@ function TaskRow({ task, myId, isLeadingHand, toggling, onToggle, onTap, onAssig
   );
 }
 
-function DoneRow({ task, isLeadingHand, toggling, onToggle, onTap }) {
+function DoneRow({ task, isLeadingHand, toggling, onToggle, onTap, onHold }) {
   // C4: leading hand sees who completed the task + when; regular workers see plain "Done" date.
   const completedDate = task.completed_at
     ? new Date(task.completed_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })
     : null;
   // Prefer completed_by name embed (completer); fall back to assigned_to embed (employees).
   const completedByName = task.completer?.name || null;
+  const { handlers, consumeClick } = useLongPress(onHold);
   return (
     <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-3">
       <Tick checked onToggle={onToggle} disabled={toggling} />
-      <button type="button" onClick={onTap} className="flex-1 min-w-0 text-left">
+      <button type="button" onClick={(e) => { if (consumeClick()) { e.preventDefault(); return; } onTap(); }} {...handlers} className="flex-1 min-w-0 text-left select-none">
         <p className="text-sm text-muted line-through leading-snug">{task.title}</p>
         {completedDate && (
           <p className="text-xs text-muted mt-0.5">
@@ -160,12 +195,14 @@ function DoneRow({ task, isLeadingHand, toggling, onToggle, onTap }) {
   );
 }
 
-function BlockedRow({ task, onTap }) {
+function BlockedRow({ task, onTap, onHold }) {
+  const { handlers, consumeClick } = useLongPress(onHold);
   return (
     <button
       type="button"
-      onClick={onTap}
-      className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-3 text-left"
+      onClick={(e) => { if (consumeClick()) { e.preventDefault(); return; } onTap(); }}
+      {...handlers}
+      className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-3 text-left select-none"
     >
       <span className="shrink-0 text-amber-500 font-bold text-sm leading-none">!</span>
       <div className="flex-1 min-w-0">
@@ -173,6 +210,57 @@ function BlockedRow({ task, onTap }) {
         {task.completion_notes && <p className="text-xs text-amber-700 mt-0.5">{task.completion_notes}</p>}
       </div>
     </button>
+  );
+}
+
+// Shared editor for a task's name / info / category. Used both for a draft (before adding, saves
+// locally) and an already-added task (leading hand hold-to-edit, saves via PATCH). onSave receives
+// { title, description, category }.
+function TaskEditSheet({ heading = "Edit task", initial, saving, error, onSave, onClose }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [category, setCategory] = useState(initial?.category || "general");
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full bg-white rounded-t-2xl p-5 max-h-[85vh] overflow-y-auto">
+        <h3 className="text-base font-bold text-ink mb-4">{heading}</h3>
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+        <label className="block text-xs font-medium text-muted mb-1">Task name</label>
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          autoFocus
+          placeholder="Task name"
+          className="w-full border border-hairline rounded-lg px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-primary/30 mb-3"
+        />
+        <label className="block text-xs font-medium text-muted mb-1">Info / notes</label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          rows={3}
+          placeholder="Extra detail (optional)"
+          className="w-full border border-hairline rounded-lg px-3 py-2 text-sm text-ink resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 mb-3"
+        />
+        <label className="block text-xs font-medium text-muted mb-1">Category</label>
+        <select value={category} onChange={e => setCategory(e.target.value)} className="w-full border border-hairline rounded-lg px-3 py-2 text-sm bg-white focus:outline-none mb-4">
+          {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => onSave({ title: title.trim(), description: description.trim(), category })}
+            disabled={saving || !title.trim()}
+            className="flex-1 py-3 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button type="button" onClick={onClose} className="px-5 py-3 rounded-lg border border-hairline text-ink text-sm font-medium">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -264,6 +352,12 @@ export default function WorkerTasks() {
   const [transcriptError, setTranscriptError] = useState(null);
   const [draftTasks, setDraftTasks] = useState([]);       // [{ title, category, priority, description, kept }]
   const [bulkAdding, setBulkAdding] = useState(false);
+  const [editDraftIndex, setEditDraftIndex] = useState(null);   // which draft is being edited (tap)
+
+  // Edit an already-added task (leading hand hold-to-edit): name / info / category.
+  const [editTask, setEditTask] = useState(null);
+  const [editTaskSaving, setEditTaskSaving] = useState(false);
+  const [editTaskError, setEditTaskError] = useState(null);
 
   const photoInputRef = useRef(null);
 
@@ -549,7 +643,7 @@ export default function WorkerTasks() {
         const res = await workerFetch("/api/worker/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jobId: job.id, title: draft.title, category: draft.category || "general", priority: draft.priority || "normal" }),
+          body: JSON.stringify({ jobId: job.id, title: draft.title, description: draft.description || undefined, category: draft.category || "general", priority: draft.priority || "normal" }),
         });
         const j = await res.json().catch(() => ({}));
         if (j.ok && j.task) {
@@ -566,6 +660,40 @@ export default function WorkerTasks() {
       // Simple toast via alert — matches the rest of the PWA's feedback pattern
       // (no toast library; the PWA uses alert for non-blocking confirmations too).
       alert(`Added ${added} task${added === 1 ? "" : "s"}`);
+    }
+  }
+
+  // Tap a draft → edit its name / info / category before adding (saves to local draft state only).
+  function saveDraftEdit(fields) {
+    setDraftTasks(prev => prev.map((d, i) => i === editDraftIndex ? { ...d, ...fields } : d));
+    setEditDraftIndex(null);
+  }
+
+  // Hold an added task (leading hand) → edit its name / info / category via PATCH.
+  function openEditTask(task) { setEditTask(task); setEditTaskError(null); }
+  async function saveEditTask(fields) {
+    if (!editTask || preview) { setEditTask(null); return; }
+    setEditTaskSaving(true);
+    setEditTaskError(null);
+    try {
+      const res = await workerFetch(`/api/worker/tasks/${editTask.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: fields.title, description: fields.description, category: fields.category }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.ok) {
+        setTasks(prev => prev.map(t => t.id === editTask.id
+          ? { ...t, title: fields.title, description: fields.description || null, category: fields.category }
+          : t));
+        setEditTask(null);
+      } else {
+        setEditTaskError(res.status === 403 ? (j.error || "Only a leading hand can edit a task.") : (j.error || "Could not save the task."));
+      }
+    } catch {
+      setEditTaskError("Couldn't save — check your connection.");
+    } finally {
+      setEditTaskSaving(false);
     }
   }
 
@@ -604,6 +732,8 @@ export default function WorkerTasks() {
   // A leading hand on their worker link, or an admin previewing, can hold-drag the ⠿
   // handle to reorder tasks within a group. The new order persists and every worker sees it.
   const canReorder = !!(isSupervisor || preview);
+  // Hold-to-edit a task's name/info/category — leading hand on their own link (PATCH is blocked in preview).
+  const canEditTasks = !!isSupervisor && !preview;
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } })
@@ -645,14 +775,14 @@ export default function WorkerTasks() {
   function renderTaskRows(list) {
     if (!canReorder) {
       return list.map(t => (
-        <TaskRow key={t.id} task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} />
+        <TaskRow key={t.id} task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} onHold={canEditTasks ? () => openEditTask(t) : undefined} />
       ));
     }
     return (
       <SortableContext items={list.map(t => t.id)} strategy={verticalListSortingStrategy}>
         {list.map(t => (
           <SortableTaskRow key={t.id} id={t.id}>
-            <TaskRow task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} />
+            <TaskRow task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onAssign={() => openAssignSheet(t)} onHold={canEditTasks ? () => openEditTask(t) : undefined} />
           </SortableTaskRow>
         ))}
       </SortableContext>
@@ -794,7 +924,7 @@ export default function WorkerTasks() {
                   <div className="space-y-2 mb-2">
                     {allDone
                       ? rows.map(t => (
-                          <TaskRow key={t.id} task={t} myId={myId} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+                          <TaskRow key={t.id} task={t} myId={myId} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onHold={canEditTasks ? () => openEditTask(t) : undefined} />
                         ))
                       : renderTaskRows(rows)}
                   </div>
@@ -808,7 +938,7 @@ export default function WorkerTasks() {
                 <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Blocked</p>
                 <div className="space-y-2">
                   {blockedTasks.map(t => (
-                    <BlockedRow key={t.id} task={t} onTap={() => openSheet(t)} />
+                    <BlockedRow key={t.id} task={t} onTap={() => openSheet(t)} onHold={canEditTasks ? () => openEditTask(t) : undefined} />
                   ))}
                 </div>
               </div>
@@ -828,7 +958,7 @@ export default function WorkerTasks() {
                 {showDone && (
                   <div className="mt-2 space-y-2">
                     {doneTasks.map(t => (
-                      <DoneRow key={t.id} task={t} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} />
+                      <DoneRow key={t.id} task={t} isLeadingHand={isSupervisor} toggling={togglingId === t.id} onToggle={() => toggleTask(t)} onTap={() => openSheet(t)} onHold={canEditTasks ? () => openEditTask(t) : undefined} />
                     ))}
                   </div>
                 )}
@@ -1121,12 +1251,11 @@ export default function WorkerTasks() {
                         onChange={() => setDraftTasks(prev => prev.map((d, j) => j === i ? { ...d, kept: !d.kept } : d))}
                         className="mt-0.5 shrink-0 w-4 h-4 accent-primary"
                       />
-                      <div className="flex-1 min-w-0">
+                      <button type="button" onClick={() => setEditDraftIndex(i)} className="flex-1 min-w-0 text-left">
                         <p className={`text-sm leading-snug ${t.kept ? "text-ink" : "text-muted line-through"}`}>{t.title}</p>
-                        {t.category && t.category !== "general" && (
-                          <p className="text-xs text-muted mt-0.5">{categoryLabel(t.category)}</p>
-                        )}
-                      </div>
+                        {t.description && <p className="text-xs text-muted mt-0.5 truncate">{t.description}</p>}
+                        <p className="text-xs text-primary/70 mt-0.5">{categoryLabel(t.category || "general")} · tap to edit</p>
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1153,6 +1282,28 @@ export default function WorkerTasks() {
         </div>
       )}
       {plansOpen && job && <PlansSheet jobId={job.id} jobType={job.type} jobLabel={job.address} onClose={() => setPlansOpen(false)} />}
+
+      {/* Edit a draft (tap) before adding — saves to local state only */}
+      {editDraftIndex != null && draftTasks[editDraftIndex] && (
+        <TaskEditSheet
+          heading="Edit task"
+          initial={draftTasks[editDraftIndex]}
+          onSave={saveDraftEdit}
+          onClose={() => setEditDraftIndex(null)}
+        />
+      )}
+
+      {/* Edit an added task (hold) — leading hand, saves via PATCH */}
+      {editTask && (
+        <TaskEditSheet
+          heading="Edit task"
+          initial={editTask}
+          saving={editTaskSaving}
+          error={editTaskError}
+          onSave={saveEditTask}
+          onClose={() => { setEditTask(null); setEditTaskError(null); }}
+        />
+      )}
     </WorkerLayout>
   );
 }
