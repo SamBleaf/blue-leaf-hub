@@ -1947,11 +1947,21 @@ function SubtaskSections({ line, jobId, onChanged }) {
   const [deletedIds, setDeletedIds] = useState([]);
   const [dirty, setDirty] = useState(false);
 
+  // "Separate materials" — pull supply lines bundled into this labour category out to a new material category.
+  const materialRe = /\b(supply|delivery|material)\b/i;
+  const [separating, setSeparating] = useState(false);
+  const [sepName, setSepName] = useState("");
+  const [sepSel, setSepSel] = useState(() => new Set());
+  const [sepBusy, setSepBusy] = useState(false);
+  const [sepError, setSepError] = useState(null);
+
   // Re-sync when the server data changes (i.e. after a save + reload).
   useEffect(() => {
     setItems((line.lineItems || []).map((it) => ({ ...it, _key: it.id })));
     setDeletedIds([]);
     setDirty(false);
+    setSeparating(false);
+    setSepSel(new Set());
   }, [line.lineItems]);
 
   if (!items.length && !dirty) {
@@ -1983,6 +1993,29 @@ function SubtaskSections({ line, jobId, onChanged }) {
     setItems((prev) => [...prev, { _key: crypto.randomUUID(), id: null, description: desc, canonicalKey: newKey || null, sellExGst: 0, costExGst: 0, status: "suggested", source: "manual", _new: true }]);
     setDirty(true); setNewName(""); setNewKey(""); setAdding(false);
   };
+
+  // ── Separate materials → new supply category (server action, then reload) ──
+  const hasMaterialish = items.some((it) => it.id && materialRe.test(it.description || ""));
+  const openSeparate = () => {
+    setSepSel(new Set(items.filter((it) => it.id && materialRe.test(it.description || "")).map((it) => it.id)));
+    setSepName(`${line.categoryName} — Supply`);
+    setSepError(null);
+    setSeparating(true);
+  };
+  const toggleSep = (id) => setSepSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function doSeparate() {
+    const lineItemIds = [...sepSel];
+    if (!lineItemIds.length) { setSepError("Tick at least one line to separate."); return; }
+    if (!sepName.trim()) { setSepError("Name the new supply category."); return; }
+    setSepBusy(true); setSepError(null);
+    const { ok: ok_, error } = await apiPost(`/api/carpentry/jobs/${jobId}/budget/separate-materials`, {
+      fromBudgetId: line.id, lineItemIds, categoryName: sepName.trim(),
+    });
+    setSepBusy(false);
+    if (!ok_) { setSepError(error || "Could not separate materials."); return; }
+    setSeparating(false);
+    onChanged();
+  }
 
   // ── Persist all pending edits, then lock (confirm) + reload once ──
   async function saveAndConfirm() {
@@ -2055,6 +2088,28 @@ function SubtaskSections({ line, jobId, onChanged }) {
         <p className="text-[11px] text-amber-600 pt-0.5">{fmt$(line.untaggedActual)} of logged labour isn&rsquo;t attributed to a sub-task yet (older coarse entries) — new hours attribute automatically as the boys log against a sub-task.</p>
       )}
 
+      {separating && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/60 p-3 space-y-2">
+          <p className="text-xs font-semibold text-ink">Separate materials into a new supply category</p>
+          <p className="text-[11px] text-muted">Tick the supply/material lines bundled into “{line.categoryName}”. They move to a new material category (tracked as cost, not labour) — the overall job total is unchanged.</p>
+          <div className="max-h-48 overflow-auto rounded border border-hairline bg-white divide-y divide-hairline">
+            {items.filter((it) => it.id).map((it) => (
+              <label key={it.id} className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer">
+                <input type="checkbox" checked={sepSel.has(it.id)} onChange={() => toggleSep(it.id)} className="accent-primary" />
+                <span className="flex-1 min-w-0 truncate" title={it.description}>{it.description}</span>
+                <span className="tabular-nums text-muted">{fmt$(it.sellExGst)}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <input value={sepName} onChange={(e) => setSepName(e.target.value)} placeholder="New supply category name" className="flex-1 text-xs border border-hairline rounded px-2 py-1 text-ink" />
+            <button type="button" disabled={sepBusy} onClick={doSeparate} className="text-xs font-semibold text-white bg-primary rounded px-3 py-1 disabled:opacity-40 whitespace-nowrap">{sepBusy ? "Separating…" : `Separate ${sepSel.size} line${sepSel.size === 1 ? "" : "s"}`}</button>
+            <button type="button" onClick={() => setSeparating(false)} className="text-xs text-muted">Cancel</button>
+          </div>
+          {sepError && <p className="text-[11px] text-red-600">{sepError}</p>}
+        </div>
+      )}
+
       <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
         {adding ? (
           <div className="flex items-center gap-2">
@@ -2067,7 +2122,12 @@ function SubtaskSections({ line, jobId, onChanged }) {
             <button type="button" onClick={() => { setAdding(false); setNewName(""); setNewKey(""); }} className="text-xs text-muted">Cancel</button>
           </div>
         ) : (
-          <button type="button" onClick={() => setAdding(true)} className="text-xs font-medium text-accent border border-dashed border-accent rounded px-2 py-1">＋ Add sub-task</button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={() => setAdding(true)} className="text-xs font-medium text-accent border border-dashed border-accent rounded px-2 py-1">＋ Add sub-task</button>
+            {hasMaterialish && !dirty && !separating && (
+              <button type="button" onClick={openSeparate} title="Pull supply/material lines out of this labour category into a new material category" className="text-xs font-medium text-amber-700 border border-dashed border-amber-400 rounded px-2 py-1">Separate materials</button>
+            )}
+          </div>
         )}
         <div className="flex items-center gap-2">
           {dirty && <span className="text-[11px] text-amber-600">Unsaved</span>}

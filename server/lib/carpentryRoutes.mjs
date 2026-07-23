@@ -1620,6 +1620,55 @@ export function registerCarpentryRoutes(app) {
     } catch (e) { console.error("[carpentry/line-items DELETE]", e); return err(res, 502, translateDbError(e)); }
   });
 
+  // POST separate-materials — pull selected line items out of a labour category into a NEW material
+  // (supply) category. For the rare mixed quote where a builder bundles supply into an install
+  // category: the moved lines stop counting as labour earned-value and become material cost. The
+  // JOB total is unchanged — the source category total shrinks by exactly the moved amount.
+  app.post("/api/carpentry/jobs/:id/budget/separate-materials", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = req.params.id;
+    const b = req.body || {};
+    const fromBudgetId = String(b.fromBudgetId || "");
+    const ids = Array.isArray(b.lineItemIds) ? b.lineItemIds.filter(Boolean) : [];
+    const categoryName = String(b.categoryName || "").trim();
+    if (!fromBudgetId || !ids.length || !categoryName) return err(res, 400, "fromBudgetId, lineItemIds[] and categoryName are required.");
+    try {
+      const { data: src } = await sb.from("carpentry_job_budgets")
+        .select("id, category_name, budget_ex_gst, cost_ex_gst").eq("id", fromBudgetId).eq("job_id", jobId).maybeSingle();
+      if (!src) return err(res, 404, "Source category not found.", "NOT_FOUND");
+      const { data: clash } = await sb.from("carpentry_job_budgets")
+        .select("id").eq("job_id", jobId).ilike("category_name", categoryName).maybeSingle();
+      if (clash) return err(res, 409, "A budget category with that name already exists — pick another.");
+      const { data: lines } = await sb.from("carpentry_budget_line_items")
+        .select("id, sell_ex_gst, cost_ex_gst").in("id", ids).eq("carpentry_job_budget_id", fromBudgetId);
+      if (!lines?.length) return err(res, 400, "No matching line items to separate.");
+      const sumSell = round2(lines.reduce((a, l) => a + Number(l.sell_ex_gst || 0), 0));
+      const sumCost = round2(lines.reduce((a, l) => a + Number(l.cost_ex_gst || 0), 0));
+      const { data: maxRow } = await sb.from("carpentry_job_budgets")
+        .select("sort_order").eq("job_id", jobId).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+      const nextSort = (Number(maxRow?.sort_order) || 0) + 1;
+      // 1) new material category holding the moved value
+      const { data: newCat, error: ce } = await sb.from("carpentry_job_budgets").insert({
+        job_id: jobId, category_name: categoryName, cost_type: "material",
+        workforce_task_category: null, budget_ex_gst: sumSell, cost_ex_gst: sumCost, sort_order: nextSort,
+      }).select("*").single();
+      if (ce) return err(res, 500, translateDbError(ce));
+      // 2) re-home the lines → material (drop any labour sub-task mapping)
+      const { error: me } = await sb.from("carpentry_budget_line_items").update({
+        carpentry_job_budget_id: newCat.id, task_category: null, canonical_key: null, status: "confirmed", updated_at: new Date().toISOString(),
+      }).in("id", lines.map((l) => l.id));
+      if (me) return err(res, 500, translateDbError(me));
+      // 3) shrink the source category by exactly the moved amount (job total preserved)
+      const { data: updSrc, error: se } = await sb.from("carpentry_job_budgets").update({
+        budget_ex_gst: round2(Number(src.budget_ex_gst || 0) - sumSell),
+        cost_ex_gst: round2(Number(src.cost_ex_gst || 0) - sumCost),
+      }).eq("id", fromBudgetId).select("*").single();
+      if (se) return err(res, 500, translateDbError(se));
+      return ok(res, { newCategory: rowToCamel(newCat), sourceCategory: rowToCamel(updSrc), movedCount: lines.length });
+    } catch (e) { console.error("[carpentry/separate-materials]", e); return err(res, 502, translateDbError(e)); }
+  });
+
   // POST confirm — mark the job's suggested sub-task mappings as confirmed (Canonical Data Law).
   app.post("/api/carpentry/jobs/:id/budget/line-items/confirm", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();

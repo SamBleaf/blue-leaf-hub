@@ -82,6 +82,9 @@ Each sub-task group shows its **sell** (budget), its **actual** (green — real 
 [insert screenshot: a category row expanded to show sub-task sections grouped by canonical_key, with the Save & confirm ✓ button]
 [insert screenshot: the per-category table with an amber/red Proj. margin cell]
 
+### Separating materials bundled into a labour category
+Occasionally a builder prices **material supply inside an installation (labour) category** — e.g. "Cladding installation" containing `…supply` lines. Left as-is, that supply is counted as labour and pollutes labour tracking. To fix it, expand the category and click **Separate materials**: the supply/material lines are pre-ticked (anything with *supply / delivery / material* in the name), name the new supply category, and **Separate**. Those lines move into a **new material category** (tracked as cost, not labour); the source category's total shrinks by exactly that amount, so the **job total is unchanged**. The remaining labour lines still map to sub-tasks as normal. (Rare case — most quotes keep supply and install in separate categories already.)
+
 ## 6. What happens next
 - On import, the budget categories and sub-task line items are written for the job (`carpentry_job_budgets`, `carpentry_budget_line_items`)
 - On **Save & confirm**, the sub-task mapping is marked confirmed — this is the gate that makes the sub-tasks appear in the **Worker app** (SOP 14-04). Until you confirm, workers log at category level only.
