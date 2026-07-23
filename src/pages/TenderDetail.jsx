@@ -1,5 +1,5 @@
 import { authFetch } from "../lib/authFetch.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
@@ -215,6 +215,9 @@ export default function TenderDetail() {
   const jobTab = searchParams.get("tab") || "tender";
   const [job, setJob] = useState(null);
   const [rfqs, setRfqs] = useState([]);
+  // Step 6: the submission read model (mig 154) — rfqId → submissions[], used to group trades for
+  // comparison and to surface EVERY quote a sub sent (not just the last one to land on the rfq).
+  const [subView, setSubView] = useState({});
   const [corr, setCorr] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -326,6 +329,14 @@ export default function TenderDetail() {
     setRfqs((j.rfqs || []).slice().sort((a, b) => String(a.trade).localeCompare(String(b.trade))));
     const { data: c } = await sb.from("correspondence").select("*").eq("job_id", jobId).order("sent_at", { ascending: false });
     setCorr(c || []);
+    // Submission read model (fail-soft — pre-migration it returns an empty list).
+    try {
+      const sres = await authFetch(`/api/tender/jobs/${jobId}/submissions`);
+      const sj = await sres.json().catch(() => ({}));
+      const map = {};
+      for (const t of sj.trades || []) for (const rec of t.recipients || []) if (rec.submissions?.length) map[rec.rfqId] = rec.submissions;
+      setSubView(map);
+    } catch { setSubView({}); }
     setError("");
     setScreenContext?.({
       page: "tender-detail",
@@ -483,6 +494,26 @@ export default function TenderDetail() {
     () => [...new Set(rfqs.map((r) => r.trade).filter(Boolean))],
     [rfqs]
   );
+
+  // ── Step 6: group the trade cards for side-by-side comparison ──────────────
+  // rfqs arrive sorted by trade, so a header is emitted before each trade's first card.
+  // The "current" amount prefers the submission read model, falling back to the legacy columns.
+  const amountOfRfq = useCallback((x) => {
+    const cur = (subView[x.id] || []).find((s) => s.isCurrent && s.amountExGst != null);
+    if (cur) return Number(cur.amountExGst);
+    const legacy = x.quote_amount ?? x.quoted_amount;
+    return legacy != null ? Number(legacy) : null;
+  }, [subView]);
+  const tradeGroups = useMemo(() => {
+    const m = new Map();
+    for (const r of rfqs) { const t = r.trade || "(untraded)"; if (!m.has(t)) m.set(t, []); m.get(t).push(r); }
+    return m;
+  }, [rfqs]);
+  const firstOfTradeIds = useMemo(() => {
+    const s = new Set();
+    for (const list of tradeGroups.values()) if (list[0]) s.add(list[0].id);
+    return s;
+  }, [tradeGroups]);
 
   // Trades from the master list that aren't on this job yet — the "missed in the RFQ engine" set.
   const tnorm = (t) => String(t || "").toLowerCase().replace(/[_\s]+/g, " ").trim();
@@ -1549,7 +1580,23 @@ function winRowMissingConfirmedQuote(row) {
             || (r.quoted_amount != null && Number(r.quoted_amount) > 0)
           );
           return (
-            <div key={r.id} className="rounded-card border border-hairline bg-surface p-5 shadow-sm">
+            <Fragment key={r.id}>
+            {/* Trade group header — the comparison summary for this trade (step 6). */}
+            {firstOfTradeIds.has(r.id) && (() => {
+              const group = tradeGroups.get(r.trade || "(untraded)") || [r];
+              const priced = group.map((x) => ({ x, a: amountOfRfq(x) })).filter((o) => o.a != null).sort((p, q) => p.a - q.a);
+              const low = priced[0];
+              return (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-page px-3 py-2">
+                  <span className="text-sm font-bold text-ink">{TRADE_LABEL[r.trade] || r.trade}</span>
+                  <span className="text-xs text-muted">
+                    {priced.length}/{group.length} quoted
+                    {low ? <> · lowest <span className="font-semibold tabular-nums text-ink">${Number(low.a).toLocaleString()}</span> — {low.x.subcontractors?.business_name || "—"}</> : null}
+                  </span>
+                </div>
+              );
+            })()}
+            <div className="rounded-card border border-hairline bg-surface p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1574,6 +1621,23 @@ function winRowMissingConfirmedQuote(row) {
                     <div>Deadline: {r.deadline || "—"}</div>
                     <div>{deadlineLabel(r.deadline, r.status)}</div>
                   </div>
+                  {/* Every quote this sub sent — under one-quote-per-rfq only the last one survived. */}
+                  {(subView[r.id]?.length > 1) && (
+                    <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5">
+                      <span className="text-[11px] font-semibold text-amber-800">{subView[r.id].length} quotes on record from this subcontractor</span>
+                      <div className="mt-1 space-y-0.5">
+                        {subView[r.id].map((s) => (
+                          <div key={s.id} className="flex flex-wrap items-center gap-2 text-[11px]">
+                            <span className="text-muted">v{s.version}{s.isCurrent ? " · current" : ""}{s.subScopeLabel ? ` · ${s.subScopeLabel}` : ""}</span>
+                            <span className="tabular-nums font-semibold text-ink">{s.amountExGst != null ? `$${Number(s.amountExGst).toLocaleString()}` : "no amount"}</span>
+                            {s.attachments?.[0]?.pdfUrl && (
+                              <a href={s.attachments[0].pdfUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{s.attachments[0].filename || "PDF"}</a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex w-full max-w-md flex-col gap-2 border-t border-hairline pt-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
                   <label className="text-xs font-semibold text-muted">
@@ -1702,6 +1766,7 @@ function winRowMissingConfirmedQuote(row) {
                 );
               })()}
             </div>
+            </Fragment>
           );
         })}
       </section>
