@@ -2453,17 +2453,20 @@ export function registerWorkforceRoutes(app) {
   // Supersession is EXPLICIT (uploader names the target), never inferred.
   const PLAN_DOC_TYPES = ["architectural", "engineering", "structural", "survey", "specification", "plan"];
   const PLANS_BUCKET = "job-plans";
-  const isMissingPlanCol = (e) => /carpentry_job_id.*does not exist|column .* does not exist|schema cache|relation .* does not exist|bucket .* not found|Bucket not found/i.test(String(e?.message || e || ""));
+  // Only a genuinely-missing mig-152 spine (carpentry_job_id) / table / bucket counts as "not enabled".
+  // A different missing column must surface as a real error, not be masked as migrationPending.
+  const isMissingPlanCol = (e) => /carpentry_job_id.*does not exist|schema cache|relation .* does not exist|bucket .* not found|Bucket not found/i.test(String(e?.message || e || ""));
   const sanitizePlanName = (n) => (String(n || "plan.pdf").toLowerCase().replace(/[^a-z0-9.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "plan.pdf");
 
   async function listCurrentPlans(sb, spine) {
+    // NOTE: job_documents (mig 069) has NO created_at column — order/select by uploaded_at only.
     let q = sb.from("job_documents")
-      .select("id, document_type, title, version, uploaded_at, created_at")
+      .select("id, document_type, title, version, uploaded_at")
       .eq("status", "current").eq("storage_provider", "supabase").in("document_type", PLAN_DOC_TYPES);
     q = spine.carpentryJobId ? q.eq("carpentry_job_id", spine.carpentryJobId) : q.eq("job_id", spine.jobId);
-    const { data, error } = await q.order("document_type").order("created_at", { ascending: false });
+    const { data, error } = await q.order("document_type").order("uploaded_at", { ascending: false });
     if (error) throw error;
-    return (data || []).map((r) => ({ docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at || r.created_at }));
+    return (data || []).map((r) => ({ docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at }));
   }
   async function uploadPlan(sb, spine, body, callerId) {
     const fileName = sanitizePlanName(body.fileName);
