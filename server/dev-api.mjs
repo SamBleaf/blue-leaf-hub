@@ -45,6 +45,7 @@ import {
   logRfqMatchTrace
 } from "./lib/rfqMatchTrace.mjs";
 import { applyInboundQuoteToWorkflow, findRecipientLinkForRfq } from "./lib/rfqQuotePropagation.mjs";
+import { createInboundSubmission, addSubmissionAttachment } from "./lib/tenderSubmissions.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
@@ -467,7 +468,7 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
       ? Math.round((Number(extraction.total_inc_gst) / 1.1) * 100) / 100
       : extractAmountFromEmailText(textBody);
 
-  const { error: corrErr } = await sb.from("correspondence").insert({
+  const { data: corrRow, error: corrErr } = await sb.from("correspondence").insert({
     job_id: rfq.job_id,
     rfq_id: rfq.id,
     subcontractor_id: rfq.subcontractor_id,
@@ -478,7 +479,7 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
     logged_by: "imap-bot",
     message_id: externalId,
     attachments: uploadedMeta.length ? uploadedMeta : []
-  });
+  }).select("id").single();
   if (corrErr) throw new Error(corrErr.message || "Could not write correspondence row.");
 
   const updatePatch = {
@@ -506,6 +507,24 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
     quotedAmount: quotedAmount != null && Number.isFinite(quotedAmount) ? quotedAmount : null,
     quotePdfPath: first?.dropbox_path || null
   });
+
+  // Cutover (mig 154): ALSO write a quote submission per inbound email — a NEW version, never
+  // overwriting an earlier one (this is what kills the lost-quote bug). The legacy rfqs columns
+  // above stay the source of truth until the read/award path reads submissions. Fail-soft.
+  try {
+    const { submission } = await createInboundSubmission(sb, {
+      rfqId: rfq.id,
+      extractedAmountExGst: (quotedAmount != null && Number.isFinite(quotedAmount) && quotedAmount > 0) ? quotedAmount : null,
+      extraction, correspondenceId: corrRow?.id || null, sourceMessageId: externalId,
+      emailFrom: (parsed?.from?.text || parsed?.from?.value?.[0]?.address || null), matchConfidence: matchTrace?.confidence ?? null, receivedAt: sentAt,
+    });
+    if (submission?.id) {
+      for (let i = 0; i < uploadedMeta.length; i++) {
+        const m = uploadedMeta[i];
+        await addSubmissionAttachment(sb, { submissionId: submission.id, filename: m.filename, storagePath: m.dropbox_path, pdfUrl: m.url, isPrimary: i === 0 });
+      }
+    }
+  } catch (subErr) { console.error("[imap-quote submission dual-write]", subErr?.message || subErr); }
 
   const recipientLink = await findRecipientLinkForRfq(sb, rfq.id);
   logRfqMatchTrace(
