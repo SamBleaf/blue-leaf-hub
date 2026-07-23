@@ -20,9 +20,12 @@ const CATALOGUE = {
   labour: {
     first_fix_framing: [
       { key: "wall_framing",        label: "Wall framing",        keywords: ["wall fram", "wall frame", "stud", "nogg", "nog", "wall"] },
-      { key: "roof_framing",        label: "Roof framing",        keywords: ["roof", "truss", "rafter", "bracing", "outrigger", "purlin"] },
+      // roof framing incl. roof-plane structures Sam maps here: parapets, box gutters, bulkheads,
+      // skylight shafts, drop ceilings (from J1195 manual mapping 2026-07-24).
+      { key: "roof_framing",        label: "Roof framing",        keywords: ["roof", "truss", "rafter", "bracing", "outrigger", "purlin", "parapet", "box gutter", "gutter", "bulkhead", "bulk head", "skylight", "drop ceiling", "ceiling"] },
       { key: "window_installation", label: "Window installation", keywords: ["window", "door frame", "opening"] },
-      { key: "floor_framing",       label: "Floor framing",       keywords: ["floor", "bearer", "joist", "subfloor", "sub-floor", "sub floor"] },
+      // floor framing incl. beams + steel infill framing (Sam maps these here, J1195 2026-07-24).
+      { key: "floor_framing",       label: "Floor framing",       keywords: ["floor", "bearer", "joist", "subfloor", "sub-floor", "sub floor", "beam", "infill", "steel infill"] },
     ],
     cladding: [
       { key: "battening",             label: "Battening",             keywords: ["batten", "top hat", "furring"] },

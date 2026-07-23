@@ -129,7 +129,9 @@ function NewJobModal({ onClose, onCreated }) {
       const { ok: ok_, data, error } = await apiPost("/api/carpentry/estimate/parse-xlsx", { dataBase64, filename: file.name });
       if (!ok_) { setBxError(error || "Could not read the estimate file."); return; }
       const p = data?.prefill || {};
-      setEstimateCategories(Array.isArray(data?.prefill?.categories) ? data.prefill.categories : []);
+      // Categories (with leaf line items) live under `raw`, not `prefill` — reading prefill.categories
+      // was always undefined, so the budget seed at creation silently skipped (the "not linked" bug).
+      setEstimateCategories(Array.isArray(data?.raw?.categories) ? data.raw.categories : []);
       const storey = /triple/i.test(p.buildingType) ? "3" : /double/i.test(p.buildingType) ? "2" : null;
       setForm((f) => ({
         ...f,
