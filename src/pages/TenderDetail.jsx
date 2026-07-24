@@ -26,6 +26,75 @@ const RFQ_STATUS_VIS = {
   not_required: { label: "Not required", cls: "bg-slate-200 text-slate-700" }
 };
 
+// Step 7 — one row per quote submission with correction + verification controls.
+// Verifying confirms the commercial amount and flags it VERIFIED — the gate that lets a current,
+// non-superseded quote feed Cost-Intelligence benchmarks (see tenderReadModel). Amount is editable
+// while unverified so a wrong / missing extracted total can be corrected before it's trusted.
+function SubmissionRow({ s, busy, readOnly, onPatch, onPrimary }) {
+  const [amt, setAmt] = useState(s.amountExGst != null ? String(s.amountExGst) : "");
+  const verified = s.verificationStatus === "verified";
+  const rejected = s.verificationStatus === "rejected";
+  const fmt = (n) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const atts = s.attachments || [];
+  const amtValid = amt !== "" && Number.isFinite(Number(amt)) && Number(amt) >= 0;
+  return (
+    <div className="rounded-md bg-white/70 px-2 py-1.5 ring-1 ring-amber-200/60">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+        <span className="text-muted">v{s.version}{s.isCurrent ? " · current" : ""}{s.subScopeLabel ? ` · ${s.subScopeLabel}` : ""}</span>
+        {verified && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">✓ Verified</span>}
+        {rejected && <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 font-semibold text-zinc-600">✗ Rejected</span>}
+        {!verified && !rejected && s.amountExGst != null && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">Needs review</span>}
+        {(verified || rejected || readOnly) ? (
+          <span className="tabular-nums font-semibold text-ink">{s.amountExGst != null ? fmt(s.amountExGst) : "no amount"}</span>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted">$</span>
+            <input
+              type="number" value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="amount ex GST"
+              className="w-28 rounded border border-amber-300 bg-white px-1 py-0.5 text-[11px] tabular-nums"
+            />
+          </span>
+        )}
+        {!readOnly && !verified && !rejected && (
+          <>
+            <button
+              type="button" disabled={busy || !amtValid}
+              onClick={() => onPatch(s.id, { confirmedAmountExGst: Number(amt), verificationStatus: "verified" })}
+              className="rounded bg-emerald-600 px-2 py-0.5 font-semibold text-white disabled:opacity-40"
+            >Verify</button>
+            <button
+              type="button" disabled={busy}
+              onClick={() => onPatch(s.id, { verificationStatus: "rejected" })}
+              className="rounded border border-zinc-300 px-2 py-0.5 font-semibold text-zinc-600 disabled:opacity-40"
+            >Reject</button>
+          </>
+        )}
+        {!readOnly && (verified || rejected) && (
+          <button
+            type="button" disabled={busy}
+            onClick={() => onPatch(s.id, { verificationStatus: "unverified" })}
+            className="rounded border border-hairline px-2 py-0.5 font-semibold text-muted disabled:opacity-40"
+          >{verified ? "Un-verify" : "Restore"}</button>
+        )}
+      </div>
+      {atts.length > 0 && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+          {atts.map((a) => (
+            <span key={a.id} className="inline-flex items-center gap-1">
+              {a.pdfUrl
+                ? <a href={a.pdfUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{a.filename || "PDF"}</a>
+                : <span className="text-muted">{a.filename || "file"}</span>}
+              {atts.length > 1 && (a.isPrimary
+                ? <span className="rounded bg-primary/10 px-1 font-semibold text-primary">primary</span>
+                : (!readOnly && <button type="button" disabled={busy} onClick={() => onPrimary(a.id, s.id)} className="text-muted underline decoration-dotted disabled:opacity-40">make primary</button>))}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Per-trade email engagement strip, driven entirely by the denormalised rfqs.* columns the recipient
 // query already SELECTs (rfqs ( * )). No extra query. Events arrive via the Resend webhook:
 //   delivered → email_delivered_at, opened → email_opened_at, clicked → email_clicked_at,
@@ -218,6 +287,7 @@ export default function TenderDetail() {
   // Step 6: the submission read model (mig 154) — rfqId → submissions[], used to group trades for
   // comparison and to surface EVERY quote a sub sent (not just the last one to land on the rfq).
   const [subView, setSubView] = useState({});
+  const [submissionBusy, setSubmissionBusy] = useState({});
   const [corr, setCorr] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -306,6 +376,18 @@ export default function TenderDetail() {
     }
   }
 
+  // Submission read model (fail-soft — pre-migration it returns an empty list). Extracted so
+  // step-7 verify/correction actions can refresh just the quote strip without a full reload.
+  const loadSubmissions = useCallback(async () => {
+    try {
+      const sres = await authFetch(`/api/tender/jobs/${jobId}/submissions`);
+      const sj = await sres.json().catch(() => ({}));
+      const map = {};
+      for (const t of sj.trades || []) for (const rec of t.recipients || []) if (rec.submissions?.length) map[rec.rfqId] = rec.submissions;
+      setSubView(map);
+    } catch { setSubView({}); }
+  }, [jobId]);
+
   const load = useCallback(async () => {
     if (!supabaseConfigured) {
       setError("Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see Settings / Tender Manager).");
@@ -329,14 +411,7 @@ export default function TenderDetail() {
     setRfqs((j.rfqs || []).slice().sort((a, b) => String(a.trade).localeCompare(String(b.trade))));
     const { data: c } = await sb.from("correspondence").select("*").eq("job_id", jobId).order("sent_at", { ascending: false });
     setCorr(c || []);
-    // Submission read model (fail-soft — pre-migration it returns an empty list).
-    try {
-      const sres = await authFetch(`/api/tender/jobs/${jobId}/submissions`);
-      const sj = await sres.json().catch(() => ({}));
-      const map = {};
-      for (const t of sj.trades || []) for (const rec of t.recipients || []) if (rec.submissions?.length) map[rec.rfqId] = rec.submissions;
-      setSubView(map);
-    } catch { setSubView({}); }
+    await loadSubmissions();
     setError("");
     setScreenContext?.({
       page: "tender-detail",
@@ -348,7 +423,7 @@ export default function TenderDetail() {
       archRef: j.arch_ref || "",
       engRef: j.eng_ref || ""
     });
-  }, [jobId, setScreenContext]);
+  }, [jobId, setScreenContext, loadSubmissions]);
 
   useEffect(() => {
     load();
@@ -648,6 +723,41 @@ function winRowMissingConfirmedQuote(row) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) setError(data.error || "Could not update RFQ.");
     else await load();
+  }
+
+  // ── Step 7: verify / correct a quote submission (the Cost-Intelligence gate) ──
+  async function patchSubmission(subId, patch) {
+    if (readOnly) return;
+    setSubmissionBusy((p) => ({ ...p, [subId]: true }));
+    try {
+      const res = await authFetch(`/api/tender/submissions/${encodeURIComponent(subId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) setError(data.error || "Could not update the quote.");
+      else await loadSubmissions();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubmissionBusy((p) => ({ ...p, [subId]: false }));
+    }
+  }
+
+  async function setPrimaryAttachment(attId, subId) {
+    if (readOnly) return;
+    setSubmissionBusy((p) => ({ ...p, [subId]: true }));
+    try {
+      const res = await authFetch(`/api/tender/attachments/${encodeURIComponent(attId)}/primary`, { method: "PATCH" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) setError(data.error || "Could not set the primary file.");
+      else await loadSubmissions();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubmissionBusy((p) => ({ ...p, [subId]: false }));
+    }
   }
 
   async function reextractAmount(rfqId) {
@@ -1621,19 +1731,26 @@ function winRowMissingConfirmedQuote(row) {
                     <div>Deadline: {r.deadline || "—"}</div>
                     <div>{deadlineLabel(r.deadline, r.status)}</div>
                   </div>
-                  {/* Every quote this sub sent — under one-quote-per-rfq only the last one survived. */}
-                  {(subView[r.id]?.length > 1) && (
-                    <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5">
-                      <span className="text-[11px] font-semibold text-amber-800">{subView[r.id].length} quotes on record from this subcontractor</span>
-                      <div className="mt-1 space-y-0.5">
+                  {/* Every quote this sub sent (step 4 recovered them all; under one-quote-per-rfq only
+                      the last one survived) + step-7 verify/correct controls. Verify → feeds Cost Intelligence. */}
+                  {(subView[r.id]?.length >= 1) && (
+                    <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-2">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-amber-800">
+                          {subView[r.id].length} quote{subView[r.id].length === 1 ? "" : "s"} on record
+                        </span>
+                        <span className="text-[10px] text-amber-700/80">Verify to feed Cost Intelligence</span>
+                      </div>
+                      <div className="mt-1.5 space-y-1.5">
                         {subView[r.id].map((s) => (
-                          <div key={s.id} className="flex flex-wrap items-center gap-2 text-[11px]">
-                            <span className="text-muted">v{s.version}{s.isCurrent ? " · current" : ""}{s.subScopeLabel ? ` · ${s.subScopeLabel}` : ""}</span>
-                            <span className="tabular-nums font-semibold text-ink">{s.amountExGst != null ? `$${Number(s.amountExGst).toLocaleString()}` : "no amount"}</span>
-                            {s.attachments?.[0]?.pdfUrl && (
-                              <a href={s.attachments[0].pdfUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{s.attachments[0].filename || "PDF"}</a>
-                            )}
-                          </div>
+                          <SubmissionRow
+                            key={s.id}
+                            s={s}
+                            busy={!!submissionBusy[s.id]}
+                            readOnly={readOnly}
+                            onPatch={patchSubmission}
+                            onPrimary={setPrimaryAttachment}
+                          />
                         ))}
                       </div>
                     </div>

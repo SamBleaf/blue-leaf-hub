@@ -65,6 +65,19 @@ Once the RFQ engine's steps are done you don't have to reopen the whole wizard t
 - **+ sub** (on each trade card) — the same as Add subcontractor but with that card's trade pre-selected — the quickest way to add one more quoter to a specific trade.
 - All three send through the same path and are protected by the double-send guard: if that subcontractor already has a **sent** RFQ for that trade, it is blocked so nobody is emailed twice.
 
+### Comparing quotes by trade (tender detail)
+The Trades section groups every recipient under a **trade header** that shows the comparison at a glance — e.g. *"Joinery · 2/3 quoted · lowest $12,390.94 — Allan Carter"*. Cards within a trade are ordered quotes-first, then cheapest current quote up top, so the leading price is always at the top of the group.
+
+### Verifying and correcting a quote (feeds Cost Intelligence)
+Every quote a subcontractor emails is kept as a **submission** — if a sub sends a revised price, the old one is never overwritten; both appear on the card under **"N quotes on record"**. Each row can be checked and confirmed:
+- **Amount** — auto-extracted from the PDF where possible. If the figure is wrong or blank, type the correct **ex-GST** amount in the box before verifying.
+- **Verify** — confirms the amount and marks the quote **✓ Verified**. Only a *verified, current* quote (not a superseded older version) feeds the Cost Intelligence benchmarks, so verifying is what makes a price trustworthy for future estimating.
+- **Reject** — marks an extraction **✗ Rejected** (e.g. the PDF wasn't a real quote). Rejected quotes never feed benchmarks. Use **Restore** to undo.
+- **Un-verify** — takes a quote back out of the benchmark set without deleting it.
+- **make primary** — when one email carried several PDFs, pick which file *is* the quote (the others stay attached as exclusions/schedules).
+
+Verifying does **not** award the job — it only confirms the number. Awarding stays on the Accept button (award flow).
+
 ## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
@@ -174,6 +187,14 @@ Next review: 2026-11-30
 1. On a trade card, click **+ sub** (or Trades header → **+ Add subcontractor**).
 2. Expected: the trade is pre-selected (for **+ sub**); the sub picker lists that trade's subs first. Pick a new sub → **Send RFQ** → a second card appears for that trade.
 3. Try to add the SAME sub to the SAME trade again → Expected: it's blocked (already-sent guard), nobody is emailed twice.
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Trade comparison header + verify a quote (feeds Cost Intelligence)**
+1. Open a tender detail for a job with received quotes. Expected: each trade shows a **grouping header** with `X/Y quoted` and the lowest current price + sub name; cards are ordered cheapest-current-quote first.
+2. On a card with a quote, find the **"N quotes on record"** panel. If a quote's amount is blank or wrong, type the correct **ex-GST** figure, then click **Verify**. Expected: the row shows **✓ Verified** and the amount is fixed.
+3. Click **Un-verify** → Expected: the ✓ badge clears (the quote leaves the benchmark set) without deleting the quote. Click **Reject** on an extraction → **✗ Rejected**; **Restore** returns it to review.
+4. On a submission that carried more than one PDF, click **make primary** on a file → Expected: that file becomes the primary quote; the others stay attached.
+5. Expected: verifying does NOT change the job status or award it — Accept remains the only award action.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

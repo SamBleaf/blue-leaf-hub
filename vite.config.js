@@ -25,6 +25,14 @@ export default defineConfig(({ mode }) => {
         workbox: {
           mode: "production",
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+          // A new deploy must take over WITHOUT a manual cache-clear. `autoUpdate` above swaps the
+          // SW, but the OLD worker keeps serving its cached bundle until every tab closes — which is
+          // why a deploy could stay invisible for hours (the stale main-*.js the tender board showed).
+          // skipWaiting activates the new SW immediately; clientsClaim lets it control open pages, so
+          // the next navigation/reload gets the fresh bundle. `cleanupOutdatedCaches` drops old precache.
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           // The SW's SPA fallback serves index.html (the Hub identity) for in-app navigations.
           // /api is excluded so API calls hit the server. /worker* is ALSO excluded so the
           // worker routes resolve to worker.html (the Worker manifest + apple icons) via the
