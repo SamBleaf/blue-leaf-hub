@@ -6,7 +6,7 @@ import { authFetch } from "../../lib/authFetch.js";
 import { useEffect, useState } from "react";
 import { getSupabase, supabaseConfigured } from "../../lib/supabaseClient";
 
-export default function UnmatchedQuotesPanel({ onCountChange }) {
+export default function UnmatchedQuotesPanel() {
   const [unmatched, setUnmatched] = useState([]);
   const [loading, setLoading] = useState(true);
   const [jobs, setJobs] = useState([]);
@@ -19,7 +19,7 @@ export default function UnmatchedQuotesPanel({ onCountChange }) {
   useEffect(() => {
     authFetch("/api/quote-tracker/unmatched")
       .then((r) => r.json())
-      .then((j) => { const items = j?.items || []; setUnmatched(items); onCountChange?.(items.length); })
+      .then((j) => setUnmatched(j?.items || []))
       .catch(() => setUnmatched([]))
       .finally(() => setLoading(false));
 
@@ -28,8 +28,6 @@ export default function UnmatchedQuotesPanel({ onCountChange }) {
       sb.from("jobs").select("id, address, rfqs(id, trade, subcontractors(business_name))").order("created_at", { ascending: false })
         .then(({ data }) => setJobs(data || []));
     }
-    // onCountChange is a stable reporter; re-running on its identity would refetch needlessly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function confirmMatch() {
@@ -47,7 +45,7 @@ export default function UnmatchedQuotesPanel({ onCountChange }) {
       setMatchModal(null);
       setMatchJobId("");
       setMatchRfqId("");
-      setUnmatched((u) => { const next = u.filter((x) => x.id !== matchModal.id); onCountChange?.(next.length); return next; });
+      setUnmatched((u) => u.filter((x) => x.id !== matchModal.id));
     } catch (e) {
       setError(e?.message || String(e));
     } finally {

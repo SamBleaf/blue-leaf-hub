@@ -8,9 +8,13 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { getJobSubmissionView, getBoardQuoteSummary } from "./tenderReadModel.mjs";
 
-const isMissingSubmissions = (e) =>
-  /rfq_quote_submissions.*does not exist|could not find the table|schema cache|relation .* does not exist/i
-    .test(String(e?.message || e || ""));
+// Only treat as "migration not applied" when the error actually names OUR new tables — a greedy
+// `relation .* does not exist` would swallow unrelated missing-table/schema-cache errors as 503s.
+const isMissingSubmissions = (e) => {
+  const m = String(e?.message || e || "");
+  return /rfq_quote_submissions|rfq_quote_attachments/i.test(m)
+    && /(does not exist|could not find the table|schema cache)/i.test(m);
+};
 
 export function registerTenderRoutes(app) {
   // Grouped-by-trade submission view for a job — the read model the new Tender Detail renders.
@@ -102,15 +106,21 @@ export function registerTenderRoutes(app) {
     const now = new Date().toISOString();
     const uid = req.caller?.id || null;
     try {
-      // Mirror the awarded submission's commercial amount into the legacy rfqs.quote_amount so
-      // downstream consumers still on that column (PO issue, win-finalize) get the right price
-      // during the cutover. Confirmed wins; fall back to extracted; never null out an existing amount.
+      // App-level integrity (defence in depth alongside the mig-154 same-rfq trigger): the
+      // submission MUST belong to this rfq. Also read its amount to mirror into the legacy column.
       const { data: sub } = await sb.from("rfq_quote_submissions")
         .select("confirmed_amount_ex_gst, extracted_amount_ex_gst")
-        .eq("id", submissionId).maybeSingle();
-      const mirrorAmt = sub ? (sub.confirmed_amount_ex_gst ?? sub.extracted_amount_ex_gst ?? null) : null;
-      const patch = { accepted_submission_id: submissionId, accepted_at: now, accepted_by: uid, status: "accepted" };
-      if (mirrorAmt != null) patch.quote_amount = Number(mirrorAmt);
+        .eq("id", submissionId).eq("rfq_id", rfqId).maybeSingle();
+      if (!sub) return err(res, 400, "That quote is not on this RFQ.");
+      // Mirror the awarded submission's amount into legacy rfqs.quote_amount so downstream consumers
+      // (PO issue, win-finalize) get the right price during cutover. ALWAYS overwrite — including to
+      // null — so re-awarding a different (or amount-less) quote can't leave a prior award's phantom
+      // price behind. A quote with no amount should be verified/priced before PO anyway.
+      const mirrorAmt = sub.confirmed_amount_ex_gst ?? sub.extracted_amount_ex_gst ?? null;
+      const patch = {
+        accepted_submission_id: submissionId, accepted_at: now, accepted_by: uid, status: "accepted",
+        quote_amount: mirrorAmt != null ? Number(mirrorAmt) : null,
+      };
       const { data, error } = await sb.from("rfqs").update(patch).eq("id", rfqId).select("id").maybeSingle();
       if (error) throw error;
       if (!data) return err(res, 404, "RFQ not found.");
@@ -134,8 +144,10 @@ export function registerTenderRoutes(app) {
       const { data: rfq, error: e0 } = await sb.from("rfqs").select("id, accepted_submission_id").eq("id", rfqId).maybeSingle();
       if (e0) throw e0;
       if (!rfq) return err(res, 404, "RFQ not found.");
+      // Also revert the award's price mirror (award set rfqs.quote_amount) so an un-awarded rfq
+      // doesn't keep a phantom price that PO/alignment would read if it's re-accepted.
       const { error } = await sb.from("rfqs")
-        .update({ accepted_submission_id: null, accepted_at: null, accepted_by: null, status: "received" })
+        .update({ accepted_submission_id: null, accepted_at: null, accepted_by: null, status: "received", quote_amount: null })
         .eq("id", rfqId);
       if (error) throw error;
       if (rfq.accepted_submission_id) {

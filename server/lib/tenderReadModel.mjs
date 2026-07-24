@@ -10,16 +10,36 @@
 // an N+1. Mirrors getJobSubmissionView's current-version + verified derivation.
 // Returns { [jobId]: { quoteCount, verifiedCount, awardedCount, acceptedTotalExGst } }.
 export async function getBoardQuoteSummary(sb) {
-  const { data: rfqs, error } = await sb.from("rfqs").select("id, job_id, accepted_submission_id");
-  if (error) throw error;
-  const rfqJob = new Map((rfqs || []).map((r) => [r.id, r.job_id]));
-  const rfqIds = (rfqs || []).map((r) => r.id);
+  // Board-wide (all jobs) — page past PostgREST's 1000-row cap, else totals silently under-report
+  // once a builder accumulates >1000 rfqs or submissions. (getJobSubmissionView is per-job, so safe.)
+  const PAGE = 1000;
+  const fetchAll = async (makeQuery) => {
+    const out = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await makeQuery(from, from + PAGE - 1);
+      if (error) throw error;                    // surfaces missing-table → migrationPending upstream
+      const batch = data || [];
+      out.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    return out;
+  };
 
-  const subs = rfqIds.length
-    ? ((await sb.from("rfq_quote_submissions")
+  const rfqs = await fetchAll((f, t) =>
+    sb.from("rfqs").select("id, job_id, accepted_submission_id").range(f, t));
+  const rfqJob = new Map(rfqs.map((r) => [r.id, r.job_id]));
+  const rfqIds = rfqs.map((r) => r.id);
+
+  const subs = [];
+  const CHUNK = 300; // keep the .in() list bounded
+  for (let i = 0; i < rfqIds.length; i += CHUNK) {
+    const ids = rfqIds.slice(i, i + CHUNK);
+    const rows = await fetchAll((f, t) =>
+      sb.from("rfq_quote_submissions")
         .select("id, rfq_id, version, sub_scope_label, verification_status, status, confirmed_amount_ex_gst, extracted_amount_ex_gst")
-        .in("rfq_id", rfqIds)).data || [])
-    : [];
+        .in("rfq_id", ids).range(f, t));
+    subs.push(...rows);
+  }
   const amountOf = (s) => (s?.confirmed_amount_ex_gst ?? s?.extracted_amount_ex_gst);
   const subById = new Map(subs.map((s) => [s.id, s]));
 
@@ -40,13 +60,15 @@ export async function getBoardQuoteSummary(sb) {
       s.verification_status === "verified" && s.status !== "superseded" && s.version === maxByScope.get(s.sub_scope_label || ""));
     if (verifiedCurrent) rec.verifiedCount += 1;
   }
-  // awarded totals come from the enforceable pointer, not submission.status
-  for (const r of rfqs || []) {
+  // awarded totals come from the enforceable pointer, not submission.status. awardedCount counts
+  // every award; acceptedTotalExGst only sums awards with a known, finite amount (an award made
+  // before the price is confirmed shows in the count but not the $ — never poisons the total to NaN).
+  for (const r of rfqs) {
     if (!r.accepted_submission_id) continue;
     const rec = ensure(r.job_id);
     rec.awardedCount += 1;
     const amt = amountOf(subById.get(r.accepted_submission_id));
-    if (amt != null) rec.acceptedTotalExGst += Number(amt);
+    if (amt != null && Number.isFinite(Number(amt))) rec.acceptedTotalExGst += Number(amt);
   }
   return out;
 }

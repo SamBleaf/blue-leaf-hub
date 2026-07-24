@@ -335,6 +335,7 @@ export function registerJobsApiRoutes(app) {
       let quotePdfPath = null;
       let quotePdfUrl = null;
       let quotePdfName = null;
+      let inboundAtts = [];   // ALL PDFs on the unmatched email — so a multi-file quote keeps them all
       if (extId) {
         const { data: inboundCorr } = await sb
           .from("correspondence")
@@ -342,7 +343,8 @@ export function registerJobsApiRoutes(app) {
           .eq("message_id", extId)
           .eq("logged_by", "imap-unmatched")
           .maybeSingle();
-        const firstAtt = Array.isArray(inboundCorr?.attachments) ? inboundCorr.attachments[0] : null;
+        inboundAtts = Array.isArray(inboundCorr?.attachments) ? inboundCorr.attachments : [];
+        const firstAtt = inboundAtts[0] || null;
         if (firstAtt?.dropbox_path) quotePdfPath = firstAtt.dropbox_path;
         if (firstAtt?.url) quotePdfUrl = firstAtt.url;
         if (firstAtt?.name || firstAtt?.filename) quotePdfName = firstAtt.name || firstAtt.filename;
@@ -387,21 +389,30 @@ export function registerJobsApiRoutes(app) {
           rfqId: rfq.id,
           extractedAmountExGst: quotedAmount,
           correspondenceId: corrRow?.id || null,
-          sourceMessageId: extId || `manual:${unmatchedId}`,   // idempotent on re-resolve
-          emailFrom: u.from_address || u.sender || u.sender_email || null,
+          // Key on the email's real Message-ID (external_id) when present, so a later IMAP re-poll of
+          // the SAME email dedupes against this manual submission instead of creating a second one.
+          sourceMessageId: extId || `manual:${unmatchedId}`,
+          emailFrom: u.from_email || null,                      // mig-003 column is from_email
           matchConfidence: 1,                                   // manual match = certain
           receivedAt,
           status: "received"
         });
-        if (submission?.id && (quotePdfPath || quotePdfUrl)) {
-          await addSubmissionAttachment(sb, {
-            submissionId: submission.id,
-            filename: quotePdfName,
-            storagePath: quotePdfPath,
-            pdfUrl: quotePdfUrl,
-            isPrimary: true,
-            role: "quote"
-          });
+        if (submission?.id) {
+          // Attach every PDF the email carried (mirror the IMAP path), first = primary.
+          const atts = inboundAtts.length
+            ? inboundAtts
+            : ((quotePdfPath || quotePdfUrl) ? [{ dropbox_path: quotePdfPath, url: quotePdfUrl, name: quotePdfName }] : []);
+          for (let i = 0; i < atts.length; i++) {
+            const a = atts[i];
+            await addSubmissionAttachment(sb, {
+              submissionId: submission.id,
+              filename: a.name || a.filename || null,
+              storagePath: a.dropbox_path || null,
+              pdfUrl: a.url || null,
+              isPrimary: i === 0,
+              role: "quote"
+            });
+          }
         }
       } catch (subErr) {
         console.warn("[unmatched-quotes/resolve] submission dual-write skipped:", subErr?.message || subErr);

@@ -1742,6 +1742,8 @@ function winRowMissingConfirmedQuote(row) {
             || (r.quoted_amount != null && Number(r.quoted_amount) > 0)
             || (subView[r.id]?.length > 0)
           );
+          // Block a double-award while a submission action for this recipient is mid-flight.
+          const cardBusy = (subView[r.id] || []).some((s) => submissionBusy[s.id]);
           return (
             <Fragment key={r.id}>
             {/* Trade group header — the comparison summary for this trade (step 6). */}
@@ -1797,7 +1799,9 @@ function winRowMissingConfirmedQuote(row) {
                       <div className="mt-1.5 space-y-1.5">
                         {subView[r.id].map((s) => (
                           <SubmissionRow
-                            key={s.id}
+                            /* include the amount in the key so the editable field re-seeds if a
+                               background refresh changes this submission's extracted/confirmed amount */
+                            key={`${s.id}:${s.amountExGst ?? ""}`}
                             s={s}
                             rfqId={r.id}
                             busy={!!submissionBusy[s.id]}
@@ -1879,7 +1883,7 @@ function winRowMissingConfirmedQuote(row) {
                     )}
                     <button
                       type="button"
-                      disabled={readOnly || !canToggle}
+                      disabled={readOnly || !canToggle || cardBusy}
                       onClick={() => toggleAccept(r)}
                       className="rounded-lg border border-accent bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-40"
                     >
