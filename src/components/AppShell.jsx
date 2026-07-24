@@ -107,6 +107,7 @@ const TENDER_MODULES = [
   { to: "/tender-manager/rfq-packages",      label: "Quote Tracker" },
   { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
   { to: "/tender-manager/board",             label: "Tender Board" },
+  { to: "/tender-manager/quote-inbox",       label: "Quote Inbox" },
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
 ];
 
@@ -489,7 +490,7 @@ export default function AppShell() {
                         }
                       >
                         <span className="flex-1 truncate">{m.label}</span>
-                        {m.to === "/tender-manager/rfq-packages" && unmatchedQuoteCount > 0 && (
+                        {m.to === "/tender-manager/quote-inbox" && unmatchedQuoteCount > 0 && (
                           <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
                             {unmatchedQuoteCount}
                           </span>

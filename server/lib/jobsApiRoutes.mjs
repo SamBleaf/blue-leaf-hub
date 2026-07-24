@@ -16,6 +16,7 @@ import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactC
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { PLACEHOLDER_ADDRESS, isAddressPending } from "./jobGuards.mjs";
 import { applyInboundQuoteToWorkflow } from "./rfqQuotePropagation.mjs";
+import { createInboundSubmission, addSubmissionAttachment } from "./tenderSubmissions.mjs";
 import { setFact, emitEvent } from "./factsService.mjs";
 
 // Columns the RFQ Engine may write to a job after extraction. Allowlisted so the
@@ -333,6 +334,7 @@ export function registerJobsApiRoutes(app) {
       const extId = String(u.external_id || "").trim();
       let quotePdfPath = null;
       let quotePdfUrl = null;
+      let quotePdfName = null;
       if (extId) {
         const { data: inboundCorr } = await sb
           .from("correspondence")
@@ -343,10 +345,11 @@ export function registerJobsApiRoutes(app) {
         const firstAtt = Array.isArray(inboundCorr?.attachments) ? inboundCorr.attachments[0] : null;
         if (firstAtt?.dropbox_path) quotePdfPath = firstAtt.dropbox_path;
         if (firstAtt?.url) quotePdfUrl = firstAtt.url;
+        if (firstAtt?.name || firstAtt?.filename) quotePdfName = firstAtt.name || firstAtt.filename;
       }
 
       const body = String(u.body_preview || u.subject || "(matched manually)").slice(0, 16000);
-      const { error: cErr } = await sb.from("correspondence").insert({
+      const { data: corrRow, error: cErr } = await sb.from("correspondence").insert({
         job_id: rfq.job_id,
         rfq_id: rfq.id,
         subcontractor_id: rfq.subcontractor_id,
@@ -355,7 +358,7 @@ export function registerJobsApiRoutes(app) {
         body,
         sent_at: new Date().toISOString(),
         logged_by: "manual-match"
-      });
+      }).select("id").single();
       if (cErr) throw new Error(cErr.message);
 
       const receivedAt = new Date().toISOString();
@@ -375,6 +378,34 @@ export function registerJobsApiRoutes(app) {
         quotedAmount,
         quotePdfPath
       });
+
+      // Parity with the IMAP-matched path (step 9b): a manual match must ALSO land in the new
+      // submission model, else manually-matched quotes are invisible to the read model / Cost
+      // Intelligence. Fail-soft — a pre-mig-154 DB or any error never breaks the legacy resolve.
+      try {
+        const { submission } = await createInboundSubmission(sb, {
+          rfqId: rfq.id,
+          extractedAmountExGst: quotedAmount,
+          correspondenceId: corrRow?.id || null,
+          sourceMessageId: extId || `manual:${unmatchedId}`,   // idempotent on re-resolve
+          emailFrom: u.from_address || u.sender || u.sender_email || null,
+          matchConfidence: 1,                                   // manual match = certain
+          receivedAt,
+          status: "received"
+        });
+        if (submission?.id && (quotePdfPath || quotePdfUrl)) {
+          await addSubmissionAttachment(sb, {
+            submissionId: submission.id,
+            filename: quotePdfName,
+            storagePath: quotePdfPath,
+            pdfUrl: quotePdfUrl,
+            isPrimary: true,
+            role: "quote"
+          });
+        }
+      } catch (subErr) {
+        console.warn("[unmatched-quotes/resolve] submission dual-write skipped:", subErr?.message || subErr);
+      }
 
       const { error: resErr } = await sb
         .from("unmatched_quote_emails")

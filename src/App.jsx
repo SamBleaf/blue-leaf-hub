@@ -25,6 +25,7 @@ import SettingsCategory from "./pages/settings/SettingsCategory.jsx";
 import Subcontractors from "./pages/Subcontractors.jsx";
 import TenderBoard from "./pages/TenderBoard.jsx";
 import TenderDetail from "./pages/TenderDetail.jsx";
+import QuoteInbox from "./pages/QuoteInbox.jsx";
 import OperationsList from "./pages/OperationsList.jsx";
 import Procurement from "./pages/Procurement.jsx";
 import OperationsProjectDetail from "./pages/OperationsProjectDetail.jsx";
@@ -300,6 +301,7 @@ export default function App() {
                   <Route path="settings" element={<Navigate to="/settings/general" replace />} />
                   <Route path="board" element={<TenderBoard />} />
                   <Route path="board/:jobId" element={<TenderDetail />} />
+                  <Route path="quote-inbox" element={<QuoteInbox />} />
                   <Route path="cost-intelligence" element={<CostIntelligence />} />
                   <Route path="fee-proposal" element={<FeeProposalList />} />
                   <Route path="fee-proposal/new" element={<FeeProposalWizard />} />

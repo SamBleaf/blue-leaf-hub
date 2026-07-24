@@ -81,6 +81,9 @@ Verifying does **not** award the job — it only confirms the number.
 ### Awarding a quote
 **Accept** (on the card) awards that subcontractor by pointing the RFQ at their **current** quote — the award is recorded as an enforceable pointer (`accepted_submission_id`), and the awarded price is copied onto the RFQ so the PO and win-finalise steps use the right figure. When a sub sent more than one quote (versions), each row in the "quotes on record" panel has its own **Accept this quote** so you can award a *specific* version; the awarded row turns green with a **✓ Awarded** badge. **Un-accept** removes the award. Awarding one sub does not auto-decline the trade's other quoters — decline them yourself if needed.
 
+### Quote Inbox (unmatched quotes)
+Most subcontractor quote emails match to their RFQ automatically. When one can't be matched (a reply from an unexpected address, a forwarded quote), it lands in **Tendering → Quote Inbox** (a red count on the nav shows how many are waiting). Open it, click **Match to job** on an email, pick the **job** then the **RFQ / trade**, and **Match** — the quote is filed against that RFQ *and* recorded in the quote record so it shows on the tender detail and feeds Cost Intelligence like any other quote. (The same list also still appears under the Quote Tracker's "Unmatched" tab.)
+
 ## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
@@ -206,6 +209,13 @@ Next review: 2026-11-30
 3. Where a sub sent two quotes, click **Accept this quote** on the *older* version. Expected: the award moves to that row; only one row is Awarded at a time.
 4. Click **Un-accept**. Expected: the award clears and the badge returns to Received.
 5. Award a quote, then proceed to issue the PO / finalise the win. Expected: the PO uses the **awarded quote's amount** (the award copies it onto the RFQ), not $0.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Quote Inbox: match an unmatched quote (populates the quote record)**
+1. Open **Tendering → Quote Inbox**. Expected: it lists inbound quotes that couldn't be auto-matched; the nav shows a red count matching the list length.
+2. Click **Match to job** on one → pick a **job** → pick an **RFQ / trade** → **Match**. Expected: the row disappears and the nav count drops by one.
+3. Open that job's tender detail. Expected: the matched quote now appears in the "quotes on record" panel for that RFQ (i.e. the manual match created a submission, not just a legacy status change) and can be verified/awarded like any other.
+4. Board consolidation: on the Tender Board, a job with awarded quotes shows "N awarded · $X" on its card and in the List **Awarded** column; the KPI strip's **Committed** tile sums awarded amounts across active tenders.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
