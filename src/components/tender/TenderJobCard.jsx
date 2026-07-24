@@ -1,12 +1,13 @@
 // Tender job card (presentational) — coverage, missing/chase signals, ⋯ archive/delete menu.
 // All actions via callbacks; data/handlers stay in the page.
 import StatusBadge from "../ui/StatusBadge.jsx";
-import { rfqStats, STATUS_META, fmtDate } from "../../lib/tenderDashboard.js";
+import { rfqStats, STATUS_META, fmtDate, fmtMoney } from "../../lib/tenderDashboard.js";
 
-export default function TenderJobCard({ job, onOpen, menuOpen, onToggleMenu, onArchive, onDelete }) {
+export default function TenderJobCard({ job, summary, onOpen, menuOpen, onToggleMenu, onArchive, onDelete }) {
   const s = rfqStats(job);
   const meta = STATUS_META[job.status] || STATUS_META.tendering;
   const firstSent = (job.rfqs || []).map((r) => r.sent_at).filter(Boolean).sort()[0];
+  const qs = summary || null;
   return (
     <div className="relative rounded-card border border-hairline bg-surface shadow-sm transition hover:border-primary/40 hover:shadow-md">
       <div className="flex w-full items-stretch">
@@ -26,6 +27,13 @@ export default function TenderJobCard({ job, onOpen, menuOpen, onToggleMenu, onA
               </div>
             </>
           ) : <p className="mt-2 text-xs text-muted">No RFQs yet</p>}
+          {qs && (qs.quoteCount > 0 || qs.awardedCount > 0) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+              <span className="text-muted">{qs.quoteCount} quoted</span>
+              {qs.verifiedCount > 0 && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">{qs.verifiedCount} verified</span>}
+              {qs.awardedCount > 0 && <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">{qs.awardedCount} awarded · {fmtMoney(qs.acceptedTotalExGst)}</span>}
+            </div>
+          )}
           <p className="mt-1.5 text-[11px] text-muted">RFQs sent {fmtDate(firstSent)}</p>
         </button>
         <div className="flex shrink-0 flex-col border-l border-hairline bg-page/30">

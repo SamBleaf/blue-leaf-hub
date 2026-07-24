@@ -5,6 +5,52 @@
 // flags) → attachments. Spec: docs/plans/TENDER_SCHEMA_AND_MIGRATION.md.
 // =============================================================================
 
+// Board-level per-job quote metrics (step 9a). ONE pair of queries across every job's rfqs +
+// submissions so the Tender Board shows quote/verified counts + the committed (awarded) $ without
+// an N+1. Mirrors getJobSubmissionView's current-version + verified derivation.
+// Returns { [jobId]: { quoteCount, verifiedCount, awardedCount, acceptedTotalExGst } }.
+export async function getBoardQuoteSummary(sb) {
+  const { data: rfqs, error } = await sb.from("rfqs").select("id, job_id, accepted_submission_id");
+  if (error) throw error;
+  const rfqJob = new Map((rfqs || []).map((r) => [r.id, r.job_id]));
+  const rfqIds = (rfqs || []).map((r) => r.id);
+
+  const subs = rfqIds.length
+    ? ((await sb.from("rfq_quote_submissions")
+        .select("id, rfq_id, version, sub_scope_label, verification_status, status, confirmed_amount_ex_gst, extracted_amount_ex_gst")
+        .in("rfq_id", rfqIds)).data || [])
+    : [];
+  const amountOf = (s) => (s?.confirmed_amount_ex_gst ?? s?.extracted_amount_ex_gst);
+  const subById = new Map(subs.map((s) => [s.id, s]));
+
+  const byRfq = new Map();
+  for (const s of subs) { if (!byRfq.has(s.rfq_id)) byRfq.set(s.rfq_id, []); byRfq.get(s.rfq_id).push(s); }
+
+  const out = {};
+  const ensure = (jid) => (out[jid] ||= { quoteCount: 0, verifiedCount: 0, awardedCount: 0, acceptedTotalExGst: 0 });
+
+  // per-rfq: has a quote? has a verified CURRENT (non-superseded) quote?
+  for (const [rfqId, list] of byRfq) {
+    const jid = rfqJob.get(rfqId); if (!jid) continue;
+    const rec = ensure(jid);
+    rec.quoteCount += 1;
+    const maxByScope = new Map();
+    for (const s of list) { const k = s.sub_scope_label || ""; maxByScope.set(k, Math.max(maxByScope.get(k) || 0, s.version)); }
+    const verifiedCurrent = list.some((s) =>
+      s.verification_status === "verified" && s.status !== "superseded" && s.version === maxByScope.get(s.sub_scope_label || ""));
+    if (verifiedCurrent) rec.verifiedCount += 1;
+  }
+  // awarded totals come from the enforceable pointer, not submission.status
+  for (const r of rfqs || []) {
+    if (!r.accepted_submission_id) continue;
+    const rec = ensure(r.job_id);
+    rec.awardedCount += 1;
+    const amt = amountOf(subById.get(r.accepted_submission_id));
+    if (amt != null) rec.acceptedTotalExGst += Number(amt);
+  }
+  return out;
+}
+
 // A job's quotes, grouped by trade for side-by-side comparison.
 export async function getJobSubmissionView(sb, jobId) {
   const { data: rfqs, error } = await sb.from("rfqs")

@@ -1,4 +1,4 @@
-import { apiPost } from "../lib/apiFetch.js";
+import { apiPost, apiFetch } from "../lib/apiFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
@@ -8,11 +8,12 @@ import EmptyState from "../components/ui/EmptyState.jsx";
 import TenderKpiStrip from "../components/tender/TenderKpiStrip.jsx";
 import TenderActionQueue from "../components/tender/TenderActionQueue.jsx";
 import TenderJobCard from "../components/tender/TenderJobCard.jsx";
-import { computeTenderKpis, buildTenderActionQueue, groupByStage, rfqStats, STATUS_META } from "../lib/tenderDashboard.js";
+import { computeTenderKpis, buildTenderActionQueue, groupByStage, rfqStats, STATUS_META, fmtMoney } from "../lib/tenderDashboard.js";
 
 export default function TenderBoard() {
   const nav = useNavigate();
   const [jobs, setJobs] = useState([]);
+  const [quoteSummary, setQuoteSummary] = useState({});
   const [error, setError] = useState("");
   const [view, setView] = useState("board"); // board | actions | list | scorecard
   const [q, setQ] = useState("");
@@ -40,6 +41,11 @@ export default function TenderBoard() {
     }
     setJobs(data || []);
     setError("");
+    // Quote/award metrics from the submission model (fail-soft — pre-migration returns {}).
+    try {
+      const { ok, data: sum } = await apiFetch("/api/tender/board-quote-summary");
+      setQuoteSummary(ok ? (sum?.summary || {}) : {});
+    } catch { setQuoteSummary({}); }
   }, []);
 
   useEffect(() => {
@@ -77,7 +83,7 @@ export default function TenderBoard() {
     return rows;
   }, [jobs, q, showArchived]);
 
-  const kpis = useMemo(() => computeTenderKpis(jobs), [jobs]);
+  const kpis = useMemo(() => computeTenderKpis(jobs, quoteSummary), [jobs, quoteSummary]);
   const actions = useMemo(() => buildTenderActionQueue(jobs), [jobs]);
   const groups = useMemo(() => groupByStage(filtered), [filtered]);
 
@@ -111,6 +117,7 @@ export default function TenderBoard() {
                 <TenderJobCard
                   key={job.id}
                   job={job}
+                  summary={quoteSummary[job.id]}
                   onOpen={(id) => nav(`/tender-manager/board/${id}`)}
                   menuOpen={openJobMenu === job.id}
                   onToggleMenu={setOpenJobMenu}
@@ -163,10 +170,11 @@ export default function TenderBoard() {
             {view === "list" && (
               <div className="overflow-x-auto rounded-card border border-hairline bg-surface">
                 <table className="w-full text-left text-sm">
-                  <thead className="section-label border-b border-hairline bg-page"><tr>{["Address", "Stage", "Coverage", "Missing", "Chase"].map((h) => <th key={h} className="px-3 py-2.5">{h}</th>)}</tr></thead>
+                  <thead className="section-label border-b border-hairline bg-page"><tr>{["Address", "Stage", "Coverage", "Missing", "Chase", "Awarded"].map((h) => <th key={h} className="px-3 py-2.5">{h}</th>)}</tr></thead>
                   <tbody>
                     {filtered.map((job) => {
                       const s = rfqStats(job); const m = STATUS_META[job.status] || STATUS_META.tendering;
+                      const qs = quoteSummary[job.id];
                       return (
                         <tr key={job.id} className="border-b border-hairline hover:bg-page">
                           <td className="px-3 py-2.5"><button type="button" onClick={() => nav(`/tender-manager/board/${job.id}`)} className="font-semibold text-primary hover:underline focus-ring">{job.address}</button></td>
@@ -174,6 +182,7 @@ export default function TenderBoard() {
                           <td className="px-3 py-2.5 text-xs text-muted">{s.coverage}%</td>
                           <td className="px-3 py-2.5 text-xs">{s.missing > 0 ? <span className="font-semibold text-warning">{s.missing}</span> : <span className="text-green-600">—</span>}</td>
                           <td className="px-3 py-2.5 text-xs">{s.chase > 0 ? <span className="font-semibold text-danger">{s.chase}</span> : <span className="text-muted">—</span>}</td>
+                          <td className="px-3 py-2.5 text-xs">{qs?.awardedCount > 0 ? <span className="font-semibold text-primary">{qs.awardedCount} · {fmtMoney(qs.acceptedTotalExGst)}</span> : <span className="text-muted">—</span>}</td>
                         </tr>
                       );
                     })}

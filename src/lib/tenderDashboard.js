@@ -14,6 +14,12 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// Compact AUD, ex-GST, no cents — for board tiles/cards. e.g. 12390.94 -> "$12,391".
+export function fmtMoney(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return `$${Math.round(Number(n)).toLocaleString("en-AU")}`;
+}
+
 const GOT = (r) => r.status === "received" || r.status === "accepted";
 
 export function rfqStats(job) {
@@ -29,11 +35,14 @@ export function rfqStats(job) {
   return { total, got, coverage, missing: missing.length, chase: chase.length, accepted, ready };
 }
 
-export function computeTenderKpis(jobs = []) {
+export function computeTenderKpis(jobs = [], summary = {}) {
   const active = jobs.filter((j) => j.status === "tendering");
-  let missing = 0, chase = 0, ready = 0;
-  for (const j of active) { const s = rfqStats(j); missing += s.missing; chase += s.chase; if (s.ready) ready += 1; }
-  return { active: active.length, missing, chase, ready, won: jobs.filter((j) => j.status === "won").length };
+  let missing = 0, chase = 0, ready = 0, committed = 0;
+  for (const j of active) {
+    const s = rfqStats(j); missing += s.missing; chase += s.chase; if (s.ready) ready += 1;
+    committed += Number(summary[j.id]?.acceptedTotalExGst || 0);
+  }
+  return { active: active.length, missing, chase, ready, committed, won: jobs.filter((j) => j.status === "won").length };
 }
 
 export const ACTION_ICON = { missing: "📭", chase: "📞", ready: "✅" };

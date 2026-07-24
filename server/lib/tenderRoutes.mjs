@@ -6,7 +6,7 @@
 import { ok, err } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
-import { getJobSubmissionView } from "./tenderReadModel.mjs";
+import { getJobSubmissionView, getBoardQuoteSummary } from "./tenderReadModel.mjs";
 
 const isMissingSubmissions = (e) =>
   /rfq_quote_submissions.*does not exist|could not find the table|schema cache|relation .* does not exist/i
@@ -23,6 +23,19 @@ export function registerTenderRoutes(app) {
       if (isMissingSubmissions(e)) return ok(res, { trades: [], migrationPending: true });
       console.error("[tender submissions view]", e?.message || e);
       return err(res, 500, "Could not load quotes.");
+    }
+  });
+
+  // Step 9a: board consolidation — per-job quote/verified counts + committed (awarded) $.
+  app.get("/api/tender/board-quote-summary", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      return ok(res, { summary: await getBoardQuoteSummary(sb) });
+    } catch (e) {
+      if (isMissingSubmissions(e)) return ok(res, { summary: {}, migrationPending: true });
+      console.error("[tender board summary]", e?.message || e);
+      return err(res, 500, "Could not load the quote summary.");
     }
   });
 
