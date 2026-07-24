@@ -1744,6 +1744,11 @@ function winRowMissingConfirmedQuote(row) {
           );
           // Block a double-award while a submission action for this recipient is mid-flight.
           const cardBusy = (subView[r.id] || []).some((s) => submissionBusy[s.id]);
+          // ONE amount model (UX redesign phase 2): when this recipient has quote submissions, the
+          // submission strip above IS the single amount surface — hide the legacy "Quote amount" box +
+          // "tap to use" duplicate. The legacy box only shows for a recipient with no submission yet
+          // (e.g. a manually-tracked quote), so the amount is never entered/shown in two places.
+          const hasSub = (subView[r.id]?.length || 0) > 0;
           return (
             <Fragment key={r.id}>
             {/* Trade group header — the comparison summary for this trade (step 6). */}
@@ -1818,22 +1823,24 @@ function winRowMissingConfirmedQuote(row) {
                   )}
                 </div>
                 <div className="flex w-full max-w-md flex-col gap-2 border-t border-hairline pt-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-                  <label className="text-xs font-semibold text-muted">
-                    Quote amount (ex GST)
-                    <input
-                      type="number"
-                      disabled={readOnly}
-                      defaultValue={r.quote_amount ?? ""}
-                      className="mt-1 w-full rounded-lg border border-hairline px-2 py-1 text-sm"
-                      onBlur={(e) => {
-                        if (readOnly) return;
-                        const v = e.target.value;
-                        if (v === String(r.quote_amount ?? "")) return;
-                        updateRfq(r.id, { quote_amount: v === "" ? null : Number(v), manually_entered: true });
-                      }}
-                    />
-                  </label>
-                  {r.quoted_amount != null && Number(r.quoted_amount) > 0 && r.quote_amount == null && (
+                  {!hasSub && (
+                    <label className="text-xs font-semibold text-muted">
+                      Quote amount (ex GST)
+                      <input
+                        type="number"
+                        disabled={readOnly}
+                        defaultValue={r.quote_amount ?? ""}
+                        className="mt-1 w-full rounded-lg border border-hairline px-2 py-1 text-sm"
+                        onBlur={(e) => {
+                          if (readOnly) return;
+                          const v = e.target.value;
+                          if (v === String(r.quote_amount ?? "")) return;
+                          updateRfq(r.id, { quote_amount: v === "" ? null : Number(v), manually_entered: true });
+                        }}
+                      />
+                    </label>
+                  )}
+                  {!hasSub && r.quoted_amount != null && Number(r.quoted_amount) > 0 && r.quote_amount == null && (
                     <button
                       type="button"
                       className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1 text-[11px] font-semibold text-primary"
@@ -1870,7 +1877,7 @@ function winRowMissingConfirmedQuote(row) {
                         View quote PDF
                       </button>
                     )}
-                    {pdfOpenUrl && (r.quoted_amount == null || r.quoted_amount === 0) && (
+                    {!hasSub && pdfOpenUrl && (r.quoted_amount == null || r.quoted_amount === 0) && (
                       <button
                         type="button"
                         disabled={reextractBusy[r.id]}
@@ -1887,7 +1894,7 @@ function winRowMissingConfirmedQuote(row) {
                       onClick={() => toggleAccept(r)}
                       className="rounded-lg border border-accent bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-40"
                     >
-                      {r.status === "accepted" ? "Un-accept" : "Accept"}
+                      {r.status === "accepted" ? "Un-award" : "Award"}
                     </button>
                     <button
                       type="button"
