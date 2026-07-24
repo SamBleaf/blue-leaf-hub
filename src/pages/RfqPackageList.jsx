@@ -1,31 +1,11 @@
 import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
 import UnmatchedQuotesPanel from "../components/tender/UnmatchedQuotesPanel.jsx";
 import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
 import { useProject } from "../lib/ProjectContext.jsx";
-import {
-  packageProjectAddress,
-  packageProjectType,
-  packageTenderDeadline,
-  packageArchitectClient,
-  packageCreatedAt,
-  packageCoverageScore,
-  packageTradeScopes,
-  packageJobId,
-  scopeRecipients,
-  recipientFollowUpDue,
-} from "../lib/rfqPackageUtils.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-// Safe date format — returns "—" for null/invalid dates instead of "Invalid Date".
-function fmtDateSafe(value, opts = { day: "numeric", month: "short", year: "numeric" }) {
-  if (!value) return "—";
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-AU", opts);
-}
 
 function isOverdueLegacy(deadline, status) {
   if (!deadline || ["received", "accepted", "declined"].includes(status)) return false;
@@ -50,181 +30,6 @@ function completionPct(rfqs) {
   if (!rfqs?.length) return 0;
   const done = rfqs.filter((r) => ["received", "accepted"].includes(r.status)).length;
   return Math.round((done / rfqs.length) * 100);
-}
-
-const PKG_STATUS_CLS = {
-  draft:    "bg-slate-100 text-slate-600",
-  sent:     "bg-blue-50 text-blue-700",
-  received: "bg-green-50 text-green-700",
-  active:   "bg-primary/10 text-primary",
-  archived: "bg-slate-100 text-muted",
-};
-
-// ── package tab sub-components ───────────────────────────────────────────────
-
-function CoverageBar({ score }) {
-  const color = score >= 75 ? "bg-green-500" : score >= 50 ? "bg-amber-400" : "bg-red-400";
-  return (
-    <div className="mt-2">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-muted">Trade coverage</span>
-        <span className={`text-xs font-bold ${score >= 75 ? "text-green-600" : score >= 50 ? "text-amber-600" : "text-red-500"}`}>{score}%</span>
-      </div>
-      <div className="h-1.5 w-full rounded-full bg-hairline overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${score}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function PackageStatusSummary({ scopes }) {
-  const trades = scopes?.length || 0;
-  const sent = (scopes || []).filter((s) => ["sent", "followed_up"].includes(s.status)).length;
-  const received = (scopes || []).filter((s) => s.status === "received").length;
-  const pending = sent - received;
-  const totalRecipients = (scopes || []).reduce((n, s) => n + scopeRecipients(s).length, 0);
-  return (
-    <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-      {[
-        { label: "Trades", value: trades },
-        { label: "Recipients", value: totalRecipients },
-        { label: "Pending", value: pending },
-        { label: "Quotes in", value: received },
-      ].map(({ label, value }) => (
-        <div key={label} className="rounded-lg bg-page p-2">
-          <div className="text-base font-bold text-ink">{value}</div>
-          <div className="text-[10px] text-muted">{label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FollowUpAlert({ scopes }) {
-  const today = new Date();
-  const overdue = (scopes || []).flatMap((s) =>
-    scopeRecipients(s).filter((r) => {
-      if (!["sent", "followed_up"].includes(r.status)) return false;
-      const due = recipientFollowUpDue(r);
-      if (!due) return false;
-      return new Date(due) < today;
-    })
-  );
-  if (!overdue.length) return null;
-  return (
-    <div className="mt-3 flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/8 px-3 py-2">
-      <span className="text-warning text-sm">⏰</span>
-      <span className="text-xs text-ink font-medium">{overdue.length} follow-up{overdue.length !== 1 ? "s" : ""} overdue</span>
-    </div>
-  );
-}
-
-// ── packages tab ─────────────────────────────────────────────────────────────
-
-function PackagesTab({ packages, loading, error, activeJobId, projectAddress }) {
-  const navigate = useNavigate();
-  const [filter, setFilter] = useState("active");
-
-  const jobFiltered = activeJobId ? packages.filter((p) => packageJobId(p) === activeJobId) : packages;
-  const filtered = filter === "all" ? jobFiltered : jobFiltered.filter((p) => p.status === filter);
-
-  if (loading) return (
-    <div className="flex min-h-[30vh] items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-hairline border-t-primary" />
-    </div>
-  );
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        {["active", "archived", "all"].map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setFilter(f)}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold capitalize transition ${
-              filter === f ? "border-primary bg-primary/10 text-primary" : "border-hairline text-muted hover:text-ink"
-            }`}
-          >
-            {f}
-          </button>
-        ))}
-        {activeJobId && projectAddress && (
-          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-primary/8 border border-primary/20 px-3 py-1 text-xs font-semibold text-primary">
-            <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
-            {projectAddress}
-          </span>
-        )}
-      </div>
-
-      {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{error}</div>
-      )}
-
-      {!loading && filtered.length === 0 && (
-        <div className="rounded-card border border-hairline bg-surface p-12 text-center">
-          <div className="text-4xl mb-3">📦</div>
-          <div className="text-base font-semibold text-ink mb-1">No packages yet</div>
-          <p className="text-sm text-muted max-w-xs mx-auto">
-            Packages are created automatically after you send RFQs in the RFQ Engine.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("/tender-manager/rfq-engine")}
-            className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-          >
-            Go to RFQ Engine
-          </button>
-        </div>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((pkg) => {
-          const scopes = packageTradeScopes(pkg);
-          return (
-          <div
-            key={pkg.id}
-            className="rounded-card border border-hairline bg-surface p-5 hover:border-primary/30 hover:shadow-sm transition cursor-pointer"
-            onClick={() => navigate(`/tender-manager/rfq-packages/${pkg.id}`)}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-semibold text-ink text-sm leading-tight truncate">{packageProjectAddress(pkg)}</div>
-                {packageProjectType(pkg) && <div className="text-xs text-muted mt-0.5">{packageProjectType(pkg)}</div>}
-              </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PKG_STATUS_CLS[pkg.status] || PKG_STATUS_CLS.active}`}>
-                {pkg.status}
-              </span>
-            </div>
-
-            {packageTenderDeadline(pkg) && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-                <span>📅</span>
-                <span>Tender due <span className="font-semibold text-ink">{packageTenderDeadline(pkg)}</span></span>
-              </div>
-            )}
-            {packageArchitectClient(pkg) && (
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted">
-                <span>🏛</span>
-                <span>{packageArchitectClient(pkg)}</span>
-              </div>
-            )}
-
-            <PackageStatusSummary scopes={scopes} />
-            <CoverageBar score={packageCoverageScore(pkg)} />
-            <FollowUpAlert scopes={scopes} />
-
-            <div className="mt-3 pt-3 border-t border-hairline flex items-center justify-between">
-              <span className="text-[10px] text-muted">
-                {fmtDateSafe(packageCreatedAt(pkg))}
-              </span>
-              <span className="text-xs font-semibold text-primary">Open →</span>
-            </div>
-          </div>
-        );})}
-      </div>
-    </div>
-  );
 }
 
 // ── direct rfqs tab (legacy) ─────────────────────────────────────────────────
@@ -532,8 +337,8 @@ function DirectRfqsTab({ activeJobId, projectAddress }) {
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
+// Model B "Packages" tab retired (mig 155) — Quote Tracker is now Direct RFQs (Model A) + Unmatched.
 const TABS = [
-  { id: "packages",  label: "Packages" },
   { id: "direct",    label: "Direct RFQs" },
   { id: "unmatched", label: "Unmatched" },
 ];
@@ -543,32 +348,13 @@ export default function RfqPackageList() {
   const activeJobId = project?.job_id || null;
   const projectAddress = project?.address || null;
 
-  const [tab, setTab] = useState("packages");
-  const [packages, setPackages] = useState([]);
-  const [pkgLoading, setPkgLoading] = useState(true);
-  const [pkgError, setPkgError] = useState(null);
-
-  async function loadPackages() {
-    setPkgLoading(true);
-    try {
-      const res = await authFetch("/api/rfq-packages");
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || "Load failed");
-      setPackages(j.packages || []);
-    } catch (e) {
-      setPkgError(e.message);
-    } finally {
-      setPkgLoading(false);
-    }
-  }
-
-  useEffect(() => { loadPackages(); }, []);
+  const [tab, setTab] = useState("direct");
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="page-title">Quote Tracker</h1>
-        <p className="caption mt-0.5">Track all RFQ packages, direct quotes, and unmatched inbound emails.</p>
+        <p className="caption mt-0.5">Track direct quotes and unmatched inbound emails.</p>
       </header>
 
       <div className="flex gap-1 border-b border-hairline">
@@ -584,14 +370,10 @@ export default function RfqPackageList() {
             }`}
           >
             {t.label}
-            {t.id === "packages" && packages.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{packages.length}</span>
-            )}
           </button>
         ))}
       </div>
 
-      {tab === "packages"  && <PackagesTab packages={packages} loading={pkgLoading} error={pkgError} activeJobId={activeJobId} projectAddress={projectAddress} />}
       {tab === "direct"    && <DirectRfqsTab activeJobId={activeJobId} projectAddress={projectAddress} />}
       {tab === "unmatched" && <UnmatchedQuotesPanel />}
     </div>

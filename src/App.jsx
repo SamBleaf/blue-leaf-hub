@@ -49,7 +49,6 @@ import SupervisorHome from "./pages/SupervisorHome.jsx";
 import PortalAdmin from "./pages/PortalAdmin.jsx";
 const PortalV2Admin = React.lazy(() => import("./pages/PortalV2Admin.jsx"));
 import RfqPackageList from "./pages/RfqPackageList.jsx";
-import RfqPackageDetail from "./pages/RfqPackageDetail.jsx";
 const MarketingRouter = React.lazy(() => import("./components/marketing/MarketingRouter.jsx"));
 import Workforce from "./pages/Workforce.jsx";
 import WorkerHome from "./pages/worker/WorkerHome.jsx";
@@ -295,7 +294,6 @@ export default function App() {
                   <Route index element={<Navigate to="/home" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
                   <Route path="rfq-packages" element={<RfqPackageList />} />
-                  <Route path="rfq-packages/:packageId" element={<RfqPackageDetail />} />
                   <Route path="subcontractors" element={<Subcontractors />} />
                   <Route path="quote-tracker" element={<Navigate to="/tender-manager/rfq-packages" replace />} />
                   <Route path="settings" element={<Navigate to="/settings/general" replace />} />

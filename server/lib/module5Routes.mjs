@@ -233,20 +233,21 @@ export function registerModule5Routes(app) {
       const sb = getServiceSupabase();
       let scopeCats = 0;
       if (sb && jobId) {
-        const { data: pkgs } = await sb
-          .from("rfq_packages")
-          .select("id, rfq_trade_scopes ( trade_label, scope_bullets, trade_category_id, trade_categories ( name ) )")
+        // Model B (rfq_packages → rfq_trade_scopes) was retired in mig 155. Read the go-forward
+        // tender_trade_scopes (keyed directly by job, mig 154) for polished per-trade scope bullets.
+        // Fail-soft: an empty/absent table just yields import-only inclusions.
+        const { data: scopes } = await sb
+          .from("tender_trade_scopes")
+          .select("trade_label, scope_bullets, trade_category_id, trade_categories ( name )")
           .eq("job_id", jobId);
         const scopeByCategory = new Map();
-        for (const pkg of pkgs || []) {
-          for (const ts of pkg.rfq_trade_scopes || []) {
-            const catName = ts.trade_categories?.name || ts.trade_label || "";
-            if (!catName) continue;
-            const canon = getBuildexactCategoryMapping(catName)?.name || catName;
-            const bullets = Array.isArray(ts.scope_bullets) ? ts.scope_bullets.map((b) => String(b)) : [];
-            if (!bullets.length) continue;
-            scopeByCategory.set(canon, (scopeByCategory.get(canon) || []).concat(bullets));
-          }
+        for (const ts of scopes || []) {
+          const catName = ts.trade_categories?.name || ts.trade_label || "";
+          if (!catName) continue;
+          const canon = getBuildexactCategoryMapping(catName)?.name || catName;
+          const bullets = Array.isArray(ts.scope_bullets) ? ts.scope_bullets.map((b) => String(b)) : [];
+          if (!bullets.length) continue;
+          scopeByCategory.set(canon, (scopeByCategory.get(canon) || []).concat(bullets));
         }
         scopeCats = scopeByCategory.size;
         sections = mergeRfqScopeIntoInclusions(sections, scopeByCategory);

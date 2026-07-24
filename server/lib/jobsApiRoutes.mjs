@@ -236,16 +236,13 @@ export function registerJobsApiRoutes(app) {
     const jobId = String(req.body?.jobId || "").trim();
     if (!jobId) return res.status(400).json({ ok: false, error: "jobId required." });
     try {
-      // P0-A6 / SAM-W05-003 — block hard delete when tender has RFQ package or quote data.
-      const { count: pkgCount } = await sb
-        .from("rfq_packages")
-        .select("id", { count: "exact", head: true })
-        .eq("job_id", jobId);
+      // P0-A6 / SAM-W05-003 — block hard delete when tender has quote/RFQ data. (Model B
+      // rfq_packages retired in mig 155; the rfqs count is the guard.)
       const { count: rfqCount } = await sb
         .from("rfqs")
         .select("id", { count: "exact", head: true })
         .eq("job_id", jobId);
-      if ((pkgCount || 0) > 0 || (rfqCount || 0) > 0) {
+      if ((rfqCount || 0) > 0) {
         return err(
           res,
           409,

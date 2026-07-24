@@ -1998,86 +1998,18 @@ export default function RfqEngine() {
     }
     setPackageFinalizeBusy(true);
     try {
-      const tradeGroups = {};
-      for (const r of rows) {
-        if (!tradeGroups[r.tradeId]) {
-          const note = extraction.trade_notes?.[r.tradeId] || emptyTradeNote();
-          const planRow = tradePlanById.get(r.tradeId);
-          const scopeFromPlan = planRow?.scope_bullets?.length ? planRow.scope_bullets : bulletsFromTradeNote(note);
-          tradeGroups[r.tradeId] = {
-            trade_id: r.tradeId,
-            trade_label: labelForTrade(r.tradeId, tradePlan, getTradeRegistry().labels) || resolveTradeLabel(r.tradeId),
-            scope_bullets: scopeFromPlan,
-            source: planRow?.source || "manual",
-            ai_enrichment: planRow?.ai_enrichment || [],
-            estimate_line_refs: planRow?.estimate_line_refs || [],
-            due_date: deadline || "",
-            recipients: []
-          };
-        }
-        tradeGroups[r.tradeId].recipients.push({
-          subcontractor_id: r.subcontractor_id || null,
-          business_name: r.subcontractor?.business_name?.trim() || r.to,
-          email: r.to,
-          status: "sent",
-          sent_at: r.sentAt || new Date().toISOString(),
-          email_subject: String(r.subject || ""),
-          email_body: String(r.body || ""),
-          subject_variant: r.subjectVariant || "",
-          rfq_id: r.rfqId || null
-        });
-      }
-      const pkgRes = await authFetch("/api/rfq-packages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          job_id: extractionJobIdRef.current,
-          project_address: extraction.project_address || "",
-          project_type: extraction.project_type || "",
-          tender_deadline: deadline || "",
-          architect_client: extraction.architect_name || extraction.client_name || "",
-          dropbox_url: sharedJobDropboxUrl || "",
-          extraction_data: extraction,
-          pdf_meta: pdfItems.map((p) => ({ name: p.name, docType: p.docType })),
-          trade_scopes: Object.values(tradeGroups)
-        })
-      });
-      const pkgJson = await pkgRes.json().catch(() => null);
-      if (pkgRes.ok && pkgJson?.ok && pkgJson?.packageId) {
-        packageFinalizeFailedRef.current = false;
-        setPackageSnapshotFailed(false);
-        resetRfqSession();
-        navigate(`/tender-manager/rfq-packages/${pkgJson.packageId}`);
-        return;
-      }
-      const errMsg =
-        typeof pkgJson?.error === "string"
-          ? pkgJson.error
-          : `Package snapshot failed (${pkgRes.status})`;
-      console.warn("[rfq-package] create failed — session kept for retry", errMsg);
-      packageFinalizeFailedRef.current = true;
-      packageFinalizingRef.current = false;
-      setPackageSnapshotFailed(true);
-      setBanner({
-        variant: "warning",
-        title: "RFQs sent — package snapshot failed",
-        body: `${errMsg}\n\nYour sent RFQs are logged in Direct RFQs. Use “Retry package creation” below — supplier emails will not be sent again.`
-      });
-    } catch (pkgErr) {
-      const errMsg = pkgErr?.message || String(pkgErr);
-      console.warn("[rfq-package] create failed — session kept for retry", pkgErr);
-      packageFinalizeFailedRef.current = true;
-      packageFinalizingRef.current = false;
-      setPackageSnapshotFailed(true);
-      setBanner({
-        variant: "warning",
-        title: "RFQs sent — package snapshot failed",
-        body: `${errMsg}\n\nYour sent RFQs are logged in Direct RFQs. Use “Retry package creation” below — supplier emails will not be sent again.`
-      });
+      // Model B packages retired (mig 155): the sent RFQs ARE the source of truth (Model A `rfqs`,
+      // written by /api/rfq/send). Finalize no longer snapshots a package — it just resets the
+      // session and lands on the Tender Board for the job, where the quotes come back.
+      packageFinalizeFailedRef.current = false;
+      setPackageSnapshotFailed(false);
+      const jobId = extractionJobIdRef.current;
+      resetRfqSession();
+      navigate(jobId ? `/tender-manager/board/${jobId}` : "/tender-manager/board");
     } finally {
       setPackageFinalizeBusy(false);
     }
-  }, [outbound, extraction, deadline, sharedJobDropboxUrl, pdfItems, tradePlan, tradePlanById, resetRfqSession, navigate]);
+  }, [outbound, resetRfqSession, navigate]);
 
   const retryPackageSnapshot = useCallback(() => {
     if (packageFinalizeBusy) return;

@@ -34,7 +34,9 @@ export async function computeAcceptAlignment(db, jobId) {
 
   const rfqById = new Map((rfqs || []).map((r) => [r.id, r]));
 
-  const { data: packages, error: pkgErr } = await db
+  // Model B (rfq_packages/…) was retired in mig 155. Read fail-soft: a missing table just means
+  // "no package data", so the alignment reflects the Model A rfqs alone rather than 500-ing.
+  const { data: packages } = await db
     .from("rfq_packages")
     .select(`
       id,
@@ -52,7 +54,6 @@ export async function computeAcceptAlignment(db, jobId) {
       )
     `)
     .eq("job_id", jobId);
-  if (pkgErr) throw pkgErr;
 
   for (const pkg of packages || []) {
     for (const scope of pkg.rfq_trade_scopes || []) {
