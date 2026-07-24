@@ -30,7 +30,7 @@ const RFQ_STATUS_VIS = {
 // Verifying confirms the commercial amount and flags it VERIFIED — the gate that lets a current,
 // non-superseded quote feed Cost-Intelligence benchmarks (see tenderReadModel). Amount is editable
 // while unverified so a wrong / missing extracted total can be corrected before it's trusted.
-function SubmissionRow({ s, busy, readOnly, onPatch, onPrimary }) {
+function SubmissionRow({ s, rfqId, busy, readOnly, showAward, onPatch, onPrimary, onAward, onUnaward }) {
   const [amt, setAmt] = useState(s.amountExGst != null ? String(s.amountExGst) : "");
   const verified = s.verificationStatus === "verified";
   const rejected = s.verificationStatus === "rejected";
@@ -38,9 +38,10 @@ function SubmissionRow({ s, busy, readOnly, onPatch, onPrimary }) {
   const atts = s.attachments || [];
   const amtValid = amt !== "" && Number.isFinite(Number(amt)) && Number(amt) >= 0;
   return (
-    <div className="rounded-md bg-white/70 px-2 py-1.5 ring-1 ring-amber-200/60">
+    <div className={`rounded-md px-2 py-1.5 ring-1 ${s.isAccepted ? "bg-emerald-50 ring-emerald-300" : "bg-white/70 ring-amber-200/60"}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
         <span className="text-muted">v{s.version}{s.isCurrent ? " · current" : ""}{s.subScopeLabel ? ` · ${s.subScopeLabel}` : ""}</span>
+        {s.isAccepted && <span className="rounded-full bg-emerald-700 px-1.5 py-0.5 font-semibold text-white">✓ Awarded</span>}
         {verified && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">✓ Verified</span>}
         {rejected && <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 font-semibold text-zinc-600">✗ Rejected</span>}
         {!verified && !rejected && s.amountExGst != null && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">Needs review</span>}
@@ -75,6 +76,11 @@ function SubmissionRow({ s, busy, readOnly, onPatch, onPrimary }) {
             onClick={() => onPatch(s.id, { verificationStatus: "unverified" })}
             className="rounded border border-hairline px-2 py-0.5 font-semibold text-muted disabled:opacity-40"
           >{verified ? "Un-verify" : "Restore"}</button>
+        )}
+        {!readOnly && !rejected && (showAward || s.isAccepted) && (
+          s.isAccepted
+            ? <button type="button" disabled={busy} onClick={() => onUnaward(rfqId)} className="ml-auto rounded border border-hairline px-2 py-0.5 font-semibold text-muted disabled:opacity-40">Un-accept</button>
+            : <button type="button" disabled={busy} onClick={() => onAward(rfqId, s.id)} className="ml-auto rounded border border-accent px-2 py-0.5 font-semibold text-accent disabled:opacity-40">Accept this quote</button>
         )}
       </div>
       {atts.length > 0 && (
@@ -757,6 +763,52 @@ function winRowMissingConfirmedQuote(row) {
       setError(e.message);
     } finally {
       setSubmissionBusy((p) => ({ ...p, [subId]: false }));
+    }
+  }
+
+  // ── Step 8: award a specific quote (sets rfqs.accepted_submission_id) / un-award ──
+  async function awardSubmission(rfqId, submissionId) {
+    if (readOnly) return;
+    setSubmissionBusy((p) => ({ ...p, [submissionId]: true }));
+    try {
+      const res = await authFetch(`/api/tender/rfqs/${encodeURIComponent(rfqId)}/award`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) setError(data.error || "Could not award the quote.");
+      else await load(); // refresh rfq status + the award pointer + submissions
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubmissionBusy((p) => ({ ...p, [submissionId]: false }));
+    }
+  }
+
+  async function unawardRfq(rfqId) {
+    if (readOnly) return;
+    try {
+      const res = await authFetch(`/api/tender/rfqs/${encodeURIComponent(rfqId)}/unaward`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) setError(data.error || "Could not un-accept the quote.");
+      else await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  // The card-level Accept awards the CURRENT submission through the new pointer; a legacy rfq with
+  // no submissions falls back to the old invitation-status flip so nothing regresses mid-cutover.
+  function toggleAccept(r) {
+    const subs = subView[r.id] || [];
+    if (r.status === "accepted") {
+      if (r.accepted_submission_id || subs.length) unawardRfq(r.id);
+      else updateRfq(r.id, { status: "received" });
+    } else {
+      const cur = subs.find((s) => s.isCurrent) || subs[0];
+      if (cur) awardSubmission(r.id, cur.id);
+      else updateRfq(r.id, { status: "accepted" });
     }
   }
 
@@ -1688,6 +1740,7 @@ function winRowMissingConfirmedQuote(row) {
           const canToggle = !readOnly && (
             (r.quote_amount != null && Number(r.quote_amount) > 0)
             || (r.quoted_amount != null && Number(r.quoted_amount) > 0)
+            || (subView[r.id]?.length > 0)
           );
           return (
             <Fragment key={r.id}>
@@ -1746,10 +1799,14 @@ function winRowMissingConfirmedQuote(row) {
                           <SubmissionRow
                             key={s.id}
                             s={s}
+                            rfqId={r.id}
                             busy={!!submissionBusy[s.id]}
                             readOnly={readOnly}
+                            showAward={subView[r.id].length > 1 || s.isAccepted}
                             onPatch={patchSubmission}
                             onPrimary={setPrimaryAttachment}
+                            onAward={awardSubmission}
+                            onUnaward={unawardRfq}
                           />
                         ))}
                       </div>
@@ -1823,7 +1880,7 @@ function winRowMissingConfirmedQuote(row) {
                     <button
                       type="button"
                       disabled={readOnly || !canToggle}
-                      onClick={() => updateRfq(r.id, { status: r.status === "accepted" ? "received" : "accepted" })}
+                      onClick={() => toggleAccept(r)}
                       className="rounded-lg border border-accent bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-40"
                     >
                       {r.status === "accepted" ? "Un-accept" : "Accept"}

@@ -76,7 +76,10 @@ Every quote a subcontractor emails is kept as a **submission** — if a sub send
 - **Un-verify** — takes a quote back out of the benchmark set without deleting it.
 - **make primary** — when one email carried several PDFs, pick which file *is* the quote (the others stay attached as exclusions/schedules).
 
-Verifying does **not** award the job — it only confirms the number. Awarding stays on the Accept button (award flow).
+Verifying does **not** award the job — it only confirms the number.
+
+### Awarding a quote
+**Accept** (on the card) awards that subcontractor by pointing the RFQ at their **current** quote — the award is recorded as an enforceable pointer (`accepted_submission_id`), and the awarded price is copied onto the RFQ so the PO and win-finalise steps use the right figure. When a sub sent more than one quote (versions), each row in the "quotes on record" panel has its own **Accept this quote** so you can award a *specific* version; the awarded row turns green with a **✓ Awarded** badge. **Un-accept** removes the award. Awarding one sub does not auto-decline the trade's other quoters — decline them yourself if needed.
 
 ## 7. Common mistakes
 
@@ -195,6 +198,14 @@ Next review: 2026-11-30
 3. Click **Un-verify** → Expected: the ✓ badge clears (the quote leaves the benchmark set) without deleting the quote. Click **Reject** on an extraction → **✗ Rejected**; **Restore** returns it to review.
 4. On a submission that carried more than one PDF, click **make primary** on a file → Expected: that file becomes the primary quote; the others stay attached.
 5. Expected: verifying does NOT change the job status or award it — Accept remains the only award action.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Award a quote (accepted-submission pointer + price mirror)**
+1. On a card with a quote, click **Accept**. Expected: the card's status badge shows **Accepted**, and the awarded quote row turns green with **✓ Awarded**.
+2. Re-open the card / reload. Expected: the awarded state persists (it's stored as the RFQ's accepted-submission pointer, not just a label).
+3. Where a sub sent two quotes, click **Accept this quote** on the *older* version. Expected: the award moves to that row; only one row is Awarded at a time.
+4. Click **Un-accept**. Expected: the award clears and the badge returns to Received.
+5. Award a quote, then proceed to issue the PO / finalise the win. Expected: the PO uses the **awarded quote's amount** (the award copies it onto the RFQ), not $0.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -75,6 +75,67 @@ export function registerTenderRoutes(app) {
     }
   });
 
+  // ── Step 8: award flow — the enforceable accepted-submission pointer ────────
+  // Correctness rests on ONE single-row UPDATE of rfqs.accepted_submission_id — the trigger
+  // rfq_accepted_submission_same_rfq (mig 154) rejects a submission from another rfq, and the
+  // read model derives isAccepted from that pointer (not from submission.status), so the
+  // best-effort status-label writes below can never corrupt which quote is actually awarded.
+  app.post("/api/tender/rfqs/:rfqId/award", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const { rfqId } = req.params;
+    const submissionId = req.body?.submissionId;
+    if (!submissionId) return err(res, 400, "A quote to award is required.");
+    const now = new Date().toISOString();
+    const uid = req.caller?.id || null;
+    try {
+      // Mirror the awarded submission's commercial amount into the legacy rfqs.quote_amount so
+      // downstream consumers still on that column (PO issue, win-finalize) get the right price
+      // during the cutover. Confirmed wins; fall back to extracted; never null out an existing amount.
+      const { data: sub } = await sb.from("rfq_quote_submissions")
+        .select("confirmed_amount_ex_gst, extracted_amount_ex_gst")
+        .eq("id", submissionId).maybeSingle();
+      const mirrorAmt = sub ? (sub.confirmed_amount_ex_gst ?? sub.extracted_amount_ex_gst ?? null) : null;
+      const patch = { accepted_submission_id: submissionId, accepted_at: now, accepted_by: uid, status: "accepted" };
+      if (mirrorAmt != null) patch.quote_amount = Number(mirrorAmt);
+      const { data, error } = await sb.from("rfqs").update(patch).eq("id", rfqId).select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) return err(res, 404, "RFQ not found.");
+      // Cosmetic commercial-status labels (the pointer is the truth).
+      await sb.from("rfq_quote_submissions").update({ status: "accepted" }).eq("id", submissionId);
+      await sb.from("rfq_quote_submissions").update({ status: "received" }).eq("rfq_id", rfqId).neq("id", submissionId).eq("status", "accepted");
+      return ok(res, { id: rfqId, acceptedSubmissionId: submissionId });
+    } catch (e) {
+      if (/does not belong to rfq/i.test(String(e?.message || ""))) return err(res, 400, "That quote is not on this RFQ.");
+      if (isMissingSubmissions(e)) return err(res, 503, "Quote submissions not available yet.");
+      console.error("[tender award]", e?.message || e);
+      return err(res, 500, "Could not award the quote.");
+    }
+  });
+
+  app.post("/api/tender/rfqs/:rfqId/unaward", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const { rfqId } = req.params;
+    try {
+      const { data: rfq, error: e0 } = await sb.from("rfqs").select("id, accepted_submission_id").eq("id", rfqId).maybeSingle();
+      if (e0) throw e0;
+      if (!rfq) return err(res, 404, "RFQ not found.");
+      const { error } = await sb.from("rfqs")
+        .update({ accepted_submission_id: null, accepted_at: null, accepted_by: null, status: "received" })
+        .eq("id", rfqId);
+      if (error) throw error;
+      if (rfq.accepted_submission_id) {
+        await sb.from("rfq_quote_submissions").update({ status: "received" }).eq("id", rfq.accepted_submission_id).eq("status", "accepted");
+      }
+      return ok(res, { id: rfqId });
+    } catch (e) {
+      if (isMissingSubmissions(e)) return err(res, 503, "Quote submissions not available yet.");
+      console.error("[tender unaward]", e?.message || e);
+      return err(res, 500, "Could not un-accept the quote.");
+    }
+  });
+
   // Choose which attachment IS the quote (when an email carried several PDFs).
   app.patch("/api/tender/attachments/:id/primary", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
