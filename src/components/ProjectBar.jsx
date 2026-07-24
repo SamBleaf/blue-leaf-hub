@@ -44,9 +44,8 @@ function quickLinks(project, pathname) {
   }
   if (pathname.startsWith("/tender-manager")) {
     return [
-      { label: "Quotes",     to: "/tender-manager/rfq-packages" },
-      { label: "RFQ Engine", to: "/tender-manager/rfq-engine" },
-      ...(jobId ? [{ label: "Board", to: `/tender-manager/board/${jobId}` }] : [{ label: "Board", to: "/tender-manager/board" }]),
+      ...(jobId ? [{ label: "Tender", to: `/tender-manager/board/${jobId}` }] : [{ label: "Tenders", to: "/tender-manager/board" }]),
+      { label: "New tender", to: "/tender-manager/rfq-engine" },
     ];
   }
   if (pathname.startsWith("/finance")) {

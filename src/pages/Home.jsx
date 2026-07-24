@@ -140,7 +140,7 @@ function PipelineRow({ stage, count, value, maxCount, onNavigate }) {
 
 const QUICK_LINKS = [
   { label: "📋 New Lead", to: "/sales", state: { openNewLead: true } },
-  { label: "📦 New RFQ Package", to: "/tender-manager/rfq-packages" },
+  { label: "📦 New tender", to: "/tender-manager/rfq-engine" },
   { label: "📅 Schedule", to: "/operations" },
   { label: "💰 Approval Queue", to: "/finance/approvals" }
 ];

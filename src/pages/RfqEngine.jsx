@@ -2382,7 +2382,7 @@ export default function RfqEngine() {
           {[
             { id: 1, label: "Upload PDFs" },
             { id: 2, label: "Review extraction" },
-            { id: 3, label: "Recipients & packaging" },
+            { id: 3, label: "Recipients & send" },
             { id: 4, label: "Preview & send" }
           ].map((step, idx) => {
             const done = activeStep > step.id;
@@ -2862,7 +2862,7 @@ export default function RfqEngine() {
 
       {activeStep === 3 && (
         <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-primary">3 · Recipients &amp; packaging</h2>
+          <h2 className="text-xl font-semibold text-primary">3 · Recipients &amp; send</h2>
           <p className="mt-2 max-w-xl text-sm text-muted">
             Select one or more subcontractors per trade. Signature and disclaimer come from Settings (gear).
           </p>

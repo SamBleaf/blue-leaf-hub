@@ -136,7 +136,7 @@ export default function TenderBoard() {
     <div className="space-y-5 pb-24">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="page-title text-2xl">Tendering</h1>
+          <h1 className="page-title text-2xl">Tenders</h1>
           <p className="mt-0.5 text-sm text-muted">What&rsquo;s missing · who to chase · what&rsquo;s ready to award.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -291,7 +291,7 @@ export default function App() {
                   path="/tender-manager"
                   element={<RoleRoute element={<Outlet />} allowed={["admin"]} redirectTo="/home" />}
                 >
-                  <Route index element={<Navigate to="/home" replace />} />
+                  <Route index element={<Navigate to="/tender-manager/board" replace />} />
                   <Route path="rfq-engine" element={<RfqEngine />} />
                   <Route path="rfq-packages" element={<RfqPackageList />} />
                   <Route path="subcontractors" element={<Subcontractors />} />

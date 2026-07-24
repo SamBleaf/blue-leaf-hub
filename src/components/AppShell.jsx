@@ -102,13 +102,14 @@ const ICONS = {
   ),
 };
 
+// Workflow order (UX redesign, phase 1): overview → catch stray quotes → benchmark → directory,
+// with "New tender" (the RFQ Engine wizard) as the create ACTION at the end. Quote Tracker retired.
 const TENDER_MODULES = [
-  { to: "/tender-manager/rfq-engine",        label: "RFQ Engine" },
-  { to: "/tender-manager/rfq-packages",      label: "Quote Tracker" },
-  { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
-  { to: "/tender-manager/board",             label: "Tender Board" },
+  { to: "/tender-manager/board",             label: "Tenders" },
   { to: "/tender-manager/quote-inbox",       label: "Quote Inbox" },
   { to: "/tender-manager/cost-intelligence", label: "Cost Intelligence" },
+  { to: "/tender-manager/subcontractors",    label: "Subcontractors" },
+  { to: "/tender-manager/rfq-engine",        label: "New tender" },
 ];
 
 const MARKETING_MODULES = [
