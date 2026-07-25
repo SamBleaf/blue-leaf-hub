@@ -838,22 +838,6 @@ export default function TenderDetail() {
     }
   }, [emailSel, emailMsg, jobId, load]);
 
-  // Quick-select chips for the email modal — mirror the tender filters. Each chip selects exactly
-  // that category's recipients (category derived from the main rfqs by rfqId).
-  const emailCatChips = useMemo(() => {
-    const byCat = { awaiting: [], quoted: [], awarded: [] };
-    for (const rec of emailRecips) {
-      const rfq = rfqs.find((x) => x.id === rec.rfqId);
-      const c = rfq ? catOf(rfq) : "awaiting";
-      (byCat[c] || byCat.awaiting).push(rec.rfqId);
-    }
-    return [
-      { id: "awaiting", label: "Awaiting", ids: byCat.awaiting },
-      { id: "quoted", label: "Quoted", ids: [...byCat.quoted, ...byCat.awarded] },
-      { id: "awarded", label: "Awarded", ids: byCat.awarded },
-      { id: "all", label: "All trades", ids: emailRecips.map((r) => r.rfqId) },
-    ];
-  }, [emailRecips, rfqs, catOf]);
 
   useEffect(() => {
     if (!job?.id || jobTab !== "fee-proposal") return;
@@ -942,6 +926,23 @@ export default function TenderDetail() {
     }
     return { trades, quoted, awaiting, awarded, committed, verified, quotedTotal: quoted + awarded };
   }, [rfqs, catOf, subView, amountOfRfq]);
+
+  // Quick-select chips for the email modal — mirror the tender filters. Each chip selects exactly
+  // that category's recipients (category derived from the main rfqs by rfqId). Defined AFTER catOf.
+  const emailCatChips = useMemo(() => {
+    const byCat = { awaiting: [], quoted: [], awarded: [] };
+    for (const rec of emailRecips) {
+      const rfq = rfqs.find((x) => x.id === rec.rfqId);
+      const c = rfq ? catOf(rfq) : "awaiting";
+      (byCat[c] || byCat.awaiting).push(rec.rfqId);
+    }
+    return [
+      { id: "awaiting", label: "Awaiting", ids: byCat.awaiting },
+      { id: "quoted", label: "Quoted", ids: [...byCat.quoted, ...byCat.awarded] },
+      { id: "awarded", label: "Awarded", ids: byCat.awarded },
+      { id: "all", label: "All trades", ids: emailRecips.map((r) => r.rfqId) },
+    ];
+  }, [emailRecips, rfqs, catOf]);
 
   // Trades from the master list that aren't on this job yet — the "missed in the RFQ engine" set.
   const tnorm = (t) => String(t || "").toLowerCase().replace(/[_\s]+/g, " ").trim();
