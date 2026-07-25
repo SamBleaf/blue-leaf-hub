@@ -73,6 +73,71 @@ export async function getBoardQuoteSummary(sb) {
   return out;
 }
 
+// Verified-quote market benchmarks (UX redesign phase 5). A cross-job aggregate of VERIFIED, current,
+// non-superseded submissions per trade — the pre-award competitive spread. Deliberately SEPARATE from
+// the won-only `cost_intelligence` table and the post-award `cost_benchmarks` — this is a "what did
+// real quotes come in at" lens keyed by the rfq's trade. Read-only, paginated, no migration.
+export async function getQuoteBenchmarksByTrade(sb) {
+  const PAGE = 1000;
+  const fetchAll = async (makeQuery) => {
+    const out = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await makeQuery(from, from + PAGE - 1);
+      if (error) throw error;
+      const batch = data || [];
+      out.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    return out;
+  };
+
+  const rfqs = await fetchAll((f, t) => sb.from("rfqs").select("id, trade, trade_category_id").range(f, t));
+  const rfqMeta = new Map(rfqs.map((r) => [r.id, r]));
+  const rfqIds = rfqs.map((r) => r.id);
+
+  const subs = [];
+  const CHUNK = 300;
+  for (let i = 0; i < rfqIds.length; i += CHUNK) {
+    const ids = rfqIds.slice(i, i + CHUNK);
+    const rows = await fetchAll((f, t) => sb.from("rfq_quote_submissions")
+      .select("id, rfq_id, version, sub_scope_label, verification_status, status, confirmed_amount_ex_gst, extracted_amount_ex_gst")
+      .in("rfq_id", ids).eq("verification_status", "verified").range(f, t));
+    subs.push(...rows);
+  }
+
+  // Keep only the CURRENT (latest version per sub-scope), non-superseded verified submission's amount.
+  const byRfq = new Map();
+  for (const s of subs) { if (!byRfq.has(s.rfq_id)) byRfq.set(s.rfq_id, []); byRfq.get(s.rfq_id).push(s); }
+  const amountOf = (s) => (s.confirmed_amount_ex_gst ?? s.extracted_amount_ex_gst);
+
+  const groups = new Map(); // trade_category_id || ("txt:"+trade) → { tradeCategoryId, trade, amounts }
+  for (const [rfqId, list] of byRfq) {
+    const meta = rfqMeta.get(rfqId); if (!meta) continue;
+    const maxByScope = new Map();
+    for (const s of list) { const k = s.sub_scope_label || ""; maxByScope.set(k, Math.max(maxByScope.get(k) || 0, s.version)); }
+    for (const s of list) {
+      if (s.status === "superseded") continue;
+      if (s.version !== maxByScope.get(s.sub_scope_label || "")) continue;
+      const amt = amountOf(s);
+      if (amt == null || !Number.isFinite(Number(amt)) || Number(amt) <= 0) continue;
+      const key = meta.trade_category_id || `txt:${meta.trade || "(untraded)"}`;
+      if (!groups.has(key)) groups.set(key, { tradeCategoryId: meta.trade_category_id || null, trade: meta.trade || "(untraded)", amounts: [] });
+      groups.get(key).amounts.push(Number(amt));
+    }
+  }
+
+  const out = [];
+  for (const g of groups.values()) {
+    const a = g.amounts.slice().sort((x, y) => x - y);
+    const n = a.length; if (!n) continue;
+    const sum = a.reduce((acc, v) => acc + v, 0);
+    const p50 = n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2;
+    out.push({ tradeCategoryId: g.tradeCategoryId, trade: g.trade, sampleSize: n, avg: sum / n, min: a[0], max: a[n - 1], p50 });
+  }
+  out.sort((x, y) => (y.sampleSize - x.sampleSize) || x.trade.localeCompare(y.trade));
+  return out;
+}
+
 // A job's quotes, grouped by trade for side-by-side comparison.
 export async function getJobSubmissionView(sb, jobId) {
   const { data: rfqs, error } = await sb.from("rfqs")

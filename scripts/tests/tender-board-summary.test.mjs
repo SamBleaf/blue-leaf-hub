@@ -1,7 +1,7 @@
-// getBoardQuoteSummary — unit tests. Run: node scripts/tests/tender-board-summary.test.mjs
+// getBoardQuoteSummary + getQuoteBenchmarksByTrade — unit tests. Run: node scripts/tests/tender-board-summary.test.mjs
 // No framework — plain assertions, exits 1 on any failure. Uses a stub Supabase client that
-// mimics .from(table).select(...).range(from,to)/.in(col,vals) and paginates in 1000-row pages.
-import { getBoardQuoteSummary } from "../../server/lib/tenderReadModel.mjs";
+// mimics .from(table).select(...).range(from,to)/.in(col,vals)/.eq(col,val) and paginates in 1000-row pages.
+import { getBoardQuoteSummary, getQuoteBenchmarksByTrade } from "../../server/lib/tenderReadModel.mjs";
 
 let pass = 0, fail = 0;
 function eq(a, e, name) { const A = JSON.stringify(a), E = JSON.stringify(e); if (A === E) pass++; else { fail++; console.error(`  ✗ ${name}\n      expected ${E}\n      got      ${A}`); } }
@@ -63,6 +63,40 @@ function makeSb(tables) {
   eq(out.JBIG.quoteCount, 1500, "1500 rfqs counted despite the 1000-row page cap");
   eq(out.JBIG.awardedCount, 1500, "1500 awards counted across pages");
   eq(out.JBIG.acceptedTotalExGst, 15000, "committed total sums all 1500 pages (1500×10)");
+}
+
+// ── Scenario 3: getQuoteBenchmarksByTrade — only VERIFIED, current, non-superseded quotes ──
+{
+  const rfqs = [
+    { id: "r1", job_id: "J1", trade: "Joinery", trade_category_id: "tc-joinery" },
+    { id: "r2", job_id: "J2", trade: "Joinery", trade_category_id: "tc-joinery" },
+    { id: "r3", job_id: "J1", trade: "Plumbing", trade_category_id: "tc-plumb" },
+    { id: "r4", job_id: "J3", trade: "Painting", trade_category_id: null }, // text-keyed fallback
+  ];
+  const subs = [
+    // r1 Joinery: two scopes, both verified+current → both count (cabinetry + benchtops)
+    { id: "s1a", rfq_id: "r1", version: 1, sub_scope_label: "cabinetry", verification_status: "verified", status: "received", confirmed_amount_ex_gst: 20000, extracted_amount_ex_gst: null },
+    { id: "s1b", rfq_id: "r1", version: 1, sub_scope_label: "benchtops", verification_status: "verified", status: "received", confirmed_amount_ex_gst: 12000, extracted_amount_ex_gst: null },
+    // r1 also a superseded old version of cabinetry — excluded
+    { id: "s1c", rfq_id: "r1", version: 0, sub_scope_label: "cabinetry", verification_status: "verified", status: "superseded", confirmed_amount_ex_gst: 99999, extracted_amount_ex_gst: null },
+    // r2 Joinery: verified → counts (uses extracted since confirmed null)
+    { id: "s2", rfq_id: "r2", version: 1, sub_scope_label: null, verification_status: "verified", status: "received", confirmed_amount_ex_gst: null, extracted_amount_ex_gst: 16000 },
+    // r3 Plumbing: UNVERIFIED → excluded entirely
+    { id: "s3", rfq_id: "r3", version: 1, sub_scope_label: null, verification_status: "unverified", status: "received", confirmed_amount_ex_gst: 46905, extracted_amount_ex_gst: null },
+    // r4 Painting: verified but amount 0/null → excluded (no usable amount)
+    { id: "s4", rfq_id: "r4", version: 1, sub_scope_label: null, verification_status: "verified", status: "received", confirmed_amount_ex_gst: 0, extracted_amount_ex_gst: null },
+  ];
+  // The stub .eq filters, so a verification_status filter must actually apply:
+  const out = await getQuoteBenchmarksByTrade(makeSb({ rfqs, rfq_quote_submissions: subs }));
+  const joinery = out.find((t) => t.trade === "Joinery");
+  ok(joinery, "Joinery benchmark present");
+  eq(joinery.sampleSize, 3, "Joinery n = cabinetry 20k + benchtops 12k + r2 16k (superseded excluded)");
+  eq(joinery.min, 12000, "Joinery low = 12,000");
+  eq(joinery.max, 20000, "Joinery high = 20,000");
+  eq(joinery.avg, 16000, "Joinery avg = (20k+12k+16k)/3 = 16,000");
+  eq(joinery.p50, 16000, "Joinery median = 16,000");
+  ok(!out.find((t) => t.trade === "Plumbing"), "Plumbing excluded — only quote is unverified");
+  ok(!out.find((t) => t.trade === "Painting"), "Painting excluded — verified quote has no usable amount");
 }
 
 console.log(`\ntender-board-summary: ${pass} passed, ${fail} failed`);

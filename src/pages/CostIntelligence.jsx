@@ -855,6 +855,7 @@ export default function CostIntelligence() {
   const [estimateBusy, setEstimateBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [estimateError, setEstimateError] = useState("");
+  const [quoteBench, setQuoteBench] = useState([]); // phase 5: verified-quote benchmarks per trade
 
   const [manual, setManual] = useState({
     job_id: "",
@@ -909,6 +910,16 @@ export default function CostIntelligence() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // phase 5: verified-quote market benchmarks (fail-soft — empty until quotes are verified).
+  useEffect(() => {
+    let cancelled = false;
+    authFetch("/api/tender/quote-benchmarks")
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && j?.ok) setQuoteBench(j.benchmarks || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   async function loadJobEstimate(jobId) {
@@ -1328,6 +1339,49 @@ export default function CostIntelligence() {
                     <td className="py-2 pr-3 font-semibold text-accent">{formatAudM2(t.avg)}</td>
                     <td className="py-2 pr-3">{formatAudM2(t.high)}</td>
                     <td className="py-2">{t.trend}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Phase 5: verified-quote market benchmarks — fed by the tender verify flow. */}
+      <section className="rounded-card border border-hairline bg-surface p-6 shadow-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-lg font-semibold text-primary">Live quote benchmarks</h2>
+          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">from verified subcontractor quotes</span>
+        </div>
+        <p className="mt-1 text-xs text-muted">The competitive spread of the real quotes you&rsquo;ve <b>verified</b> across all tenders — a pre-award market lens (separate from won-job actuals below). Verify a quote on a tender to add it here.</p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-hairline text-xs uppercase text-muted">
+                <th className="py-2 pr-3">Trade</th>
+                <th className="py-2 pr-3">Quotes</th>
+                <th className="py-2 pr-3">Low</th>
+                <th className="py-2 pr-3">Median</th>
+                <th className="py-2 pr-3">Avg</th>
+                <th className="py-2">High</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quoteBench.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-6 text-muted">
+                    No verified quotes yet. Open a tender, check a quote&rsquo;s amount and hit <b>Verify</b> — it appears here.
+                  </td>
+                </tr>
+              ) : (
+                quoteBench.map((t) => (
+                  <tr key={t.tradeCategoryId || t.trade} className="border-b border-hairline/80">
+                    <td className="py-2 pr-3 font-medium text-ink">{t.trade}</td>
+                    <td className="py-2 pr-3">{t.sampleSize}</td>
+                    <td className="py-2 pr-3">{formatAud(t.min)}</td>
+                    <td className="py-2 pr-3">{formatAud(t.p50)}</td>
+                    <td className="py-2 pr-3 font-semibold text-accent">{formatAud(t.avg)}</td>
+                    <td className="py-2">{formatAud(t.max)}</td>
                   </tr>
                 ))
               )}

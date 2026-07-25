@@ -6,7 +6,7 @@
 import { ok, err, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
-import { getJobSubmissionView, getBoardQuoteSummary } from "./tenderReadModel.mjs";
+import { getJobSubmissionView, getBoardQuoteSummary, getQuoteBenchmarksByTrade } from "./tenderReadModel.mjs";
 
 // Only treat as "migration not applied" when the error actually names OUR new tables — a greedy
 // `relation .* does not exist` would swallow unrelated missing-table/schema-cache errors as 503s.
@@ -40,6 +40,19 @@ export function registerTenderRoutes(app) {
       if (isMissingSubmissions(e)) return ok(res, { summary: {}, migrationPending: true });
       console.error("[tender board summary]", e?.message || e);
       return err(res, 500, "Could not load the quote summary.");
+    }
+  });
+
+  // Phase 5: verified-quote market benchmarks per trade (feeds Cost Intelligence).
+  app.get("/api/tender/quote-benchmarks", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      return ok(res, { benchmarks: await getQuoteBenchmarksByTrade(sb) });
+    } catch (e) {
+      if (isMissingSubmissions(e)) return ok(res, { benchmarks: [], migrationPending: true });
+      console.error("[tender quote benchmarks]", e?.message || e);
+      return err(res, 500, "Could not load quote benchmarks.");
     }
   });
 
