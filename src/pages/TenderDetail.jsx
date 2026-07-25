@@ -123,9 +123,18 @@ function TKebab({ rfq, readOnly, on }) {
     <span className="relative inline-block" onClick={(e) => e.stopPropagation()}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="rounded-md border border-hairline px-2 py-1 text-xs font-bold leading-none text-muted hover:bg-page">⋯</button>
       {open && (
-        <div className="absolute right-0 top-8 z-30 w-44 rounded-lg border border-hairline bg-surface p-1 text-xs shadow-lg">
+        <div className="absolute right-0 top-8 z-30 w-48 rounded-lg border border-hairline bg-surface p-1 text-xs shadow-lg">
           <button type="button" onClick={() => { setOpen(false); on.query(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Reply / query</button>
           {!readOnly && <button type="button" onClick={() => { setOpen(false); on.decline(rfq.id); }} className="block w-full rounded px-2 py-1.5 text-left text-muted hover:bg-page">Decline</button>}
+          {!readOnly && (
+            <>
+              <div className="my-1 border-t border-hairline" />
+              <div className="px-2 py-1 text-[9.5px] font-bold uppercase tracking-wide text-muted/70">Fix a mistake</div>
+              <button type="button" onClick={() => { setOpen(false); on.changeTrade(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Change trade</button>
+              <button type="button" onClick={() => { setOpen(false); on.split(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Label / split scopes</button>
+              <button type="button" onClick={() => { setOpen(false); on.remove(rfq); }} className="block w-full rounded px-2 py-1.5 text-left font-semibold text-danger hover:bg-danger/10">Remove recipient</button>
+            </>
+          )}
         </div>
       )}
     </span>
@@ -269,6 +278,76 @@ function TenderCompareTable({ rows, tradeGroups, amountOfRfq, subView, submissio
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Phase 4 — the "rectify in the UI" sheet: change a recipient's trade, label/split its scopes
+// (the real cabinetry-vs-stone fix — give each quote its own sub_scope_label so neither supersedes
+// the other), or remove a junk recipient.
+function EditRowModal({ editRow, subView, onClose, onChangeTrade, onPatchSub, onRemove }) {
+  const { type, rfq } = editRow;
+  const subs = subView[rfq.id] || [];
+  const [trade, setTrade] = useState(rfq.trade || "");
+  const [labels, setLabels] = useState(() => Object.fromEntries(subs.map((s) => [s.id, s.subScopeLabel || ""])));
+  const [busy, setBusy] = useState(false);
+  const tradeOptions = [...new Set(RFQ_TRADE_ORDER.map((k) => TRADE_LABEL[k] || k))];
+  const subName = rfq.subcontractors?.business_name || "this subcontractor";
+  const run = async (fn) => { setBusy(true); try { await fn(); onClose(); } finally { setBusy(false); } };
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 p-4" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-md rounded-card border border-hairline bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        {type === "trade" && (
+          <>
+            <h3 className="text-lg font-bold text-primary">Change trade</h3>
+            <p className="mt-1 text-sm text-muted">Move <b>{subName}</b> to the correct trade.</p>
+            <select value={trade} onChange={(e) => setTrade(e.target.value)} className="mt-4 w-full rounded-lg border border-hairline px-3 py-2 text-sm">
+              {!tradeOptions.includes(trade) && trade ? <option value={trade}>{trade}</option> : null}
+              {tradeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="rounded-lg px-4 py-2 text-sm text-muted" onClick={onClose}>Cancel</button>
+              <button type="button" disabled={busy || !trade || trade === rfq.trade} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" onClick={() => run(() => onChangeTrade(rfq.id, trade))}>Save</button>
+            </div>
+          </>
+        )}
+        {type === "split" && (
+          <>
+            <h3 className="text-lg font-bold text-primary">Label the scopes</h3>
+            <p className="mt-1 text-sm text-muted">Give each quote its own scope so two prices from one sub (e.g. <b>cabinetry</b> + <b>benchtops</b>) sit side by side — neither supersedes the other or drops out of the comparison.</p>
+            {subs.length === 0 ? (
+              <p className="mt-4 rounded-lg bg-page px-3 py-3 text-sm text-muted">No quotes on record for {subName} yet.</p>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {subs.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1 text-xs">
+                      <div className="truncate font-semibold text-ink">{s.attachments?.[0]?.filename || `Quote v${s.version}`}</div>
+                      <div className="text-muted">{s.amountExGst != null ? fmtAud(s.amountExGst) : "no amount"}</div>
+                    </div>
+                    <input value={labels[s.id] || ""} onChange={(e) => setLabels((l) => ({ ...l, [s.id]: e.target.value }))} placeholder="scope e.g. Cabinetry" className="w-40 rounded-lg border border-hairline px-2 py-1.5 text-sm" />
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="rounded-lg px-4 py-2 text-sm text-muted" onClick={onClose}>Cancel</button>
+              <button type="button" disabled={busy || subs.length === 0} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                onClick={() => run(async () => { for (const s of subs) { const v = (labels[s.id] || "").trim(); if (v !== (s.subScopeLabel || "")) await onPatchSub(s.id, { subScopeLabel: v || null }); } })}>Save scopes</button>
+            </div>
+          </>
+        )}
+        {type === "remove" && (
+          <>
+            <h3 className="text-lg font-bold text-danger">Remove recipient</h3>
+            <p className="mt-2 text-sm text-ink">Remove <b>{subName}</b> from this tender? This deletes their RFQ and any quotes on record for them. This can&rsquo;t be undone.</p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="rounded-lg px-4 py-2 text-sm text-muted" onClick={onClose}>Cancel</button>
+              <button type="button" disabled={busy} className="rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" onClick={() => run(() => onRemove(rfq.id))}>Remove</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -467,6 +546,7 @@ export default function TenderDetail() {
   const [subView, setSubView] = useState({});
   const [submissionBusy, setSubmissionBusy] = useState({});
   const [tradeFilter, setTradeFilter] = useState("quoted"); // quoted | awaiting | awarded | all (UX redesign phase 3)
+  const [editRow, setEditRow] = useState(null); // { type: "trade"|"split"|"remove", rfq } (phase 4)
   const [corr, setCorr] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -996,6 +1076,24 @@ function winRowMissingConfirmedQuote(row) {
     } catch (e) {
       setError(e.message);
     }
+  }
+
+  // ── Phase 4: recipient correction controls ──
+  async function changeRfqTrade(rfqId, trade) {
+    if (readOnly) return;
+    const res = await authFetch(`/api/tender/rfqs/${encodeURIComponent(rfqId)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trade }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) setError(data.error || "Could not change the trade.");
+    else await load();
+  }
+  async function removeRecipient(rfqId) {
+    if (readOnly) return;
+    const res = await authFetch(`/api/tender/rfqs/${encodeURIComponent(rfqId)}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) setError(data.error || "Could not remove the recipient.");
+    else await load();
   }
 
   // The card-level Accept awards the CURRENT submission through the new pointer; a legacy rfq with
@@ -1984,6 +2082,9 @@ function winRowMissingConfirmedQuote(row) {
                 decline: (id) => updateRfq(id, { status: "declined" }),
                 query: (rr) => { setQueryRfq(rr); setQueryBody(""); },
                 addSub: (trade) => openAdd("recipient", trade),
+                changeTrade: (rr) => setEditRow({ type: "trade", rfq: rr }),
+                split: (rr) => setEditRow({ type: "split", rfq: rr }),
+                remove: (rr) => setEditRow({ type: "remove", rfq: rr }),
               }}
             />
           </div>
@@ -2216,6 +2317,17 @@ function winRowMissingConfirmedQuote(row) {
         })}
         </div>
       </section>
+      ) : null}
+
+      {editRow ? (
+        <EditRowModal
+          editRow={editRow}
+          subView={subView}
+          onClose={() => setEditRow(null)}
+          onChangeTrade={changeRfqTrade}
+          onPatchSub={patchSubmission}
+          onRemove={removeRecipient}
+        />
       ) : null}
 
       {queryRfq ? (

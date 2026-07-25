@@ -3,7 +3,7 @@
 // Build step 5 = the read model API (before the new Detail UI). Correction/verify/award
 // endpoints (steps 6–8) are added here as those phases land.
 // =============================================================================
-import { ok, err } from "./apiResponse.mjs";
+import { ok, err, translateDbError } from "./apiResponse.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { getJobSubmissionView, getBoardQuoteSummary } from "./tenderReadModel.mjs";
@@ -158,6 +158,47 @@ export function registerTenderRoutes(app) {
       if (isMissingSubmissions(e)) return err(res, 503, "Quote submissions not available yet.");
       console.error("[tender unaward]", e?.message || e);
       return err(res, 500, "Could not un-accept the quote.");
+    }
+  });
+
+  // ── Phase 4: recipient correction controls ("rectify in the UI, not in code") ──
+  // Re-home a recipient to a different trade or subcontractor. `sub_scope_label` on submissions
+  // is corrected via PATCH /submissions/:id (that's the "split into scopes" fix).
+  app.patch("/api/tender/rfqs/:rfqId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const b = req.body || {};
+    const patch = {};
+    if (b.trade !== undefined) patch.trade = b.trade ? String(b.trade) : null;
+    if (b.tradeCategoryId !== undefined) patch.trade_category_id = b.tradeCategoryId || null;
+    if (b.subcontractorId !== undefined) patch.subcontractor_id = b.subcontractorId || null;
+    if (!Object.keys(patch).length) return err(res, 400, "Nothing to update.");
+    try {
+      const { data, error } = await sb.from("rfqs").update(patch).eq("id", req.params.rfqId).select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) return err(res, 404, "Recipient not found.");
+      return ok(res, { id: data.id });
+    } catch (e) {
+      console.error("[tender rfq patch]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not update the recipient.");
+    }
+  });
+
+  // Remove a recipient (e.g. a junk/test entry). Blocks if awarded (un-accept first). Submissions
+  // cascade via the mig-154 FK; a plain-English error surfaces if another record still references it.
+  app.delete("/api/tender/rfqs/:rfqId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data: rfq } = await sb.from("rfqs").select("id, accepted_submission_id").eq("id", req.params.rfqId).maybeSingle();
+      if (!rfq) return err(res, 404, "Recipient not found.");
+      if (rfq.accepted_submission_id) return err(res, 409, "Un-accept this quote before removing the recipient.");
+      const { error } = await sb.from("rfqs").delete().eq("id", req.params.rfqId);
+      if (error) throw error;
+      return ok(res, { id: req.params.rfqId });
+    } catch (e) {
+      console.error("[tender rfq delete]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not remove the recipient.");
     }
   });
 
