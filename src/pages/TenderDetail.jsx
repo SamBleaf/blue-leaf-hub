@@ -6,7 +6,7 @@ import { formatSignatureFooter, formatSignatureCard, loadEmailSignature } from "
 import { plainBodyToHtml } from "../lib/rfqComposer.js";
 import { sharedJobDropboxRootPath } from "../lib/companySettings.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
-import { TRADE_LABEL, subcontractorsForTrade } from "../lib/tradeTemplates.js";
+import { TRADE_LABEL, subcontractorsForTrade, normalizeTradeKey } from "../lib/tradeTemplates.js";
 import { bulletsFromTradeNote, coerceExtraction, RFQ_TRADE_ORDER } from "../lib/rfqExtraction.js";
 
 const JOB_STATUS_BADGE = {
@@ -345,7 +345,7 @@ function EditRowModal({ editRow, subView, subsList = [], onClose, onChangeTrade,
   const pickerSubs = useMemo(() => {
     const q = subQuery.trim().toLowerCase();
     const matchStr = (s) => `${s.business_name || ""} ${s.contact || ""} ${s.email || ""}`.toLowerCase();
-    const matched = subcontractorsForTrade(rfq.trade, subsList, 9999);
+    const matched = subcontractorsForTrade(normalizeTradeKey(rfq.trade), subsList, 9999);
     const matchedIds = new Set(matched.map((s) => String(s.id)));
     const others = subsList.filter((s) => !matchedIds.has(String(s.id)));
     const withTag = (arr, m) => arr.map((s) => ({ ...s, _match: m }));

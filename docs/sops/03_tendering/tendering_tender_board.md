@@ -81,6 +81,21 @@ Verifying does **not** award the job — it only confirms the number.
 ### Awarding a quote
 **Accept** (on the card) awards that subcontractor by pointing the RFQ at their **current** quote — the award is recorded as an enforceable pointer (`accepted_submission_id`), and the awarded price is copied onto the RFQ so the PO and win-finalise steps use the right figure. When a sub sent more than one quote (versions), each row in the "quotes on record" panel has its own **Accept this quote** so you can award a *specific* version; the awarded row turns green with a **✓ Awarded** badge. **Un-accept** removes the award. Awarding one sub does not auto-decline the trade's other quoters — decline them yourself if needed.
 
+### Fixing a mistake on a row (⋯ menu)
+Each recipient row has a **⋯** menu for corrections when a quote lands in the wrong place:
+- **Change trade** — move the sub (and their quotes) to the correct trade.
+- **Change subcontractor** — re-point the RFQ and its quotes to a *different* sub (fixes a quote filed against the wrong company). The picker lists subs who do that trade first, then a searchable list of everyone else.
+- **Label / split scopes** — when one sub sent two quotes for two different things (e.g. cabinetry **and** stone benchtops), give each its own scope label so both sit side by side and neither is treated as superseding the other.
+- **Remove recipient** — delete a junk/test row (blocked while it's awarded — un-accept first).
+
+### Emailing the trade recipients (personalised blast)
+The **Email recipients** button opens a compose window to message subcontractors on the job (updated plans, a chase, a thank-you, an award/decline) — each email goes as a reply on that sub's original RFQ thread.
+- **Quick-select chips** (Awaiting / Quoted / Awarded / All) tick a whole group at once; you can still tick individuals.
+- **Templates** — five built-in presets written in Blue Leaf's voice (Updated plans / Reminder / Received / You've won it / Not this time). Click one to fill the message; the job address, plans link and deadline drop in automatically.
+- **Personalisation** — the greeting uses **`{{first_name}}`**, which is replaced with each subcontractor's contact first name when the email sends (falls back to "there" if we don't have a name). One message, but every sub gets an email that reads like it was written to them. You can also use `{{name}}` (full contact name) and `{{business}}` (company name).
+- **Signature** — your saved email signature (name, title, mobile, website, logo) is added automatically below the sign-off, so you don't paste it into every message. Edit it under **Settings → email signature**.
+- **Save preset** — save the current message as your own reusable template (**＋ Save preset**), then reuse, rename/update, or delete it from the template row. *(Saved presets require migration 156 to be applied; before that the built-in templates still work and Save just reports it needs the migration.)*
+
 ### Quote Inbox (unmatched quotes)
 Most subcontractor quote emails match to their RFQ automatically. When one can't be matched (a reply from an unexpected address, a forwarded quote), it lands in **Tendering → Quote Inbox** (a red count on the nav shows how many are waiting). Open it, click **Match to job** on an email, pick the **job** then the **RFQ / trade**, and **Match** — the quote is filed against that RFQ *and* recorded in the quote record so it shows on the tender detail and feeds Cost Intelligence like any other quote. (The same list also still appears under the Quote Tracker's "Unmatched" tab.)
 
@@ -226,6 +241,24 @@ Next review: 2026-11-30
 2. Confirm the guard's three skip categories and the keep-default in the test output logic: a `test_artifact` (subject containing `BLH TEST` / `__DRYRUN` / `__DEMO`), a `portal_notification` (subject "Client approved a variation — …"), and a `self_sent` email (from `@blueleafbuilding.com.au`) all classify as junk; a genuine RFQ reply from an external subcontractor domain classifies as `quote`.
 3. Dry-run the historic clean-up: `node scripts/cleanup-quote-inbox.mjs`. Expected: it prints the unresolved rows grouped by junk category with a per-row reason and writes **nothing** (dry run). Sanity-check the candidate list looks like junk before `--apply`.
 4. (Optional, with IMAP live) After a poll cycle, a client-portal variation-approval email sent to the office mailbox does **not** create a new Quote Inbox row; the server log shows `[imap-unmatched] skipped portal_notification …`.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Email recipients: personalisation + signature**
+1. On a tender with sent RFQs, open **Email recipients**. Click the **Updated plans** template — the message greets with `Hi {{first_name}},` and fills the address/plans link.
+2. Tick two subs whose contact first names differ, then send. Expected: each subcontractor's copy greets them by their own first name (a sub with no contact on file gets "Hi there,"), and each email carries the saved signature block (name/title/mobile/website/logo) below the "Cheers, Sam" sign-off. Verify by test-sending to a mailbox you control (`info@blueleafbuilding.com.au`).
+3. Confirm each send is a **reply on that sub's original RFQ thread** (subject "Re: …") and is logged in correspondence.
+- [ ] Pass  [ ] Fail
+
+**TC-15 — Save / edit / delete a custom email preset** *(requires migration 156)*
+1. In the Email recipients window, edit the message, click **＋ Save preset**, name it, **Save**. Expected: a new pill appears in the template row and the endpoint returns `{ ok: true, template: {...} }`.
+2. Click the saved pill (loads it), tweak the text, click **＋ Save preset → Update**. Expected: the preset's body updates (PATCH `/api/tender/email-templates/:id`).
+3. Click the pill's **×**. Expected: the preset is removed (DELETE). Reopen the window — it stays gone.
+4. Pre-migration behaviour: with migration 156 not yet applied, the template row shows only the built-in templates and **Save** reports it needs migration 156 — no crash.
+- [ ] Pass  [ ] Fail
+
+**TC-16 — Change subcontractor (⋯ menu)**
+1. On a recipient row, open **⋯ → Change subcontractor**. Expected: a picker opens with subs who do that trade listed first (tagged "matches trade"), plus a search box for the rest; the current sub is not listed.
+2. Pick a different sub. Expected: the RFQ (and any quotes on it) now show under the new subcontractor; PATCH `/api/tender/rfqs/:id { subcontractorId }` returns `{ ok: true }`.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
