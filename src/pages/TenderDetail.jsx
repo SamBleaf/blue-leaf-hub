@@ -113,17 +113,24 @@ function fmtAud(n) {
 // for now it exposes the reply + decline actions that already exist.
 function TKebab({ rfq, readOnly, on }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
   useEffect(() => {
     if (!open) return undefined;
     const close = () => setOpen(false);
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [open]);
+  // Fixed positioning (computed from the button's rect) so the menu escapes the table's
+  // overflow-x-auto container, which would otherwise clip an absolutely-positioned dropdown.
+  const toggle = (e) => {
+    if (!open) { const r = e.currentTarget.getBoundingClientRect(); setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); }
+    setOpen((o) => !o);
+  };
   return (
-    <span className="relative inline-block" onClick={(e) => e.stopPropagation()}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="rounded-md border border-hairline px-2 py-1 text-xs font-bold leading-none text-muted hover:bg-page">⋯</button>
-      {open && (
-        <div className="absolute right-0 top-8 z-30 w-48 rounded-lg border border-hairline bg-surface p-1 text-xs shadow-lg">
+    <span className="inline-block" onClick={(e) => e.stopPropagation()}>
+      <button type="button" onClick={toggle} className="rounded-md border border-hairline px-2 py-1 text-xs font-bold leading-none text-muted hover:bg-page">⋯</button>
+      {open && pos && (
+        <div style={{ position: "fixed", top: pos.top, right: pos.right }} className="z-[80] w-48 rounded-lg border border-hairline bg-surface p-1 text-xs shadow-lg">
           <button type="button" onClick={() => { setOpen(false); on.query(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Reply / query</button>
           {!readOnly && <button type="button" onClick={() => { setOpen(false); on.decline(rfq.id); }} className="block w-full rounded px-2 py-1.5 text-left text-muted hover:bg-page">Decline</button>}
           {!readOnly && (
