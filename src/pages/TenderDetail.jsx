@@ -26,6 +26,43 @@ const RFQ_STATUS_VIS = {
   not_required: { label: "Not required", cls: "bg-slate-200 text-slate-700" }
 };
 
+// Saved email templates for the "Email recipients" blast — written in Sam's voice (a builder:
+// warm, direct, first-name, no corporate/AI filler, an Aussie "give us a yell / no dramas / cheers").
+// ONE body goes to every selected recipient (threaded to their RFQ), so greetings stay generic;
+// these are a starting point you edit before sending. ctx = { address, link, deadline }.
+const EMAIL_TEMPLATES = [
+  {
+    id: "plans",
+    label: "Updated plans",
+    build: ({ address, link }) =>
+      `Hi,\n\nQuick heads up — we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
+  },
+  {
+    id: "reminder",
+    label: "Reminder",
+    build: ({ address, deadline }) =>
+      `Hi,\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` — we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
+  },
+  {
+    id: "received",
+    label: "Received — thanks",
+    build: ({ address }) =>
+      `Hi,\n\nGot your quote through for ${address || "the project"} — appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
+  },
+  {
+    id: "won",
+    label: "You've won it",
+    build: ({ address }) =>
+      `Hi,\n\nGood news — we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
+  },
+  {
+    id: "lost",
+    label: "Not this time",
+    build: ({ address }) =>
+      `Hi,\n\nThanks for taking the time to quote ${address || "the project"} — genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
+  },
+];
+
 // Step 7 — one row per quote submission with correction + verification controls.
 // Verifying confirms the commercial amount and flags it VERIFIED — the gate that lets a current,
 // non-superseded quote feed Cost-Intelligence benchmarks (see tenderReadModel). Amount is editable
@@ -603,6 +640,7 @@ export default function TenderDetail() {
   const [emailMsg, setEmailMsg] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
+  const [emailCtx, setEmailCtx] = useState({ address: "", link: "", deadline: "" }); // template variables
 
   const readOnly = job?.status === "archived";
 
@@ -745,14 +783,18 @@ export default function TenderDetail() {
       const json = await res.json();
       const recips = json?.recipients || [];
       setEmailRecips(recips);
-      setEmailSel(new Set()); // start with NONE ticked — you usually only update individual trades
+      setEmailSel(new Set()); // start with NONE ticked — use the quick-select chips or tick individually
       const link = json?.job?.dropboxLink || "";
-      setEmailMsg(
-        `Hi,\n\nA quick update on the ${json?.job?.address || "project"} tender — please use the updated project documentation link below. ` +
-          `It now opens for anyone, no Dropbox account needed:\n\n${link}\n\n` +
-          `If you've already started your quote, the scope is unchanged — this just refreshes the plans link. ` +
-          `Any questions, let me know.\n\nKind regards,\nSam Morris\nBlue Leaf Building`
-      );
+      // Representative deadline for the reminder template: the most common non-null rfq deadline.
+      const deadlines = (recips || []).map((r) => r.deadline).filter(Boolean);
+      let deadline = "";
+      if (deadlines.length) {
+        const common = [...deadlines].sort((a, b) => deadlines.filter((v) => v === a).length - deadlines.filter((v) => v === b).length).pop();
+        try { deadline = new Date(`${common}T00:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }); } catch { deadline = common; }
+      }
+      const ctx = { address: json?.job?.address || "", link, deadline };
+      setEmailCtx(ctx);
+      setEmailMsg(EMAIL_TEMPLATES[0].build(ctx)); // default to the "Updated plans" template
     } catch {
       setEmailResult({ error: "Could not load recipients." });
     } finally {
@@ -795,6 +837,23 @@ export default function TenderDetail() {
       setEmailBusy(false);
     }
   }, [emailSel, emailMsg, jobId, load]);
+
+  // Quick-select chips for the email modal — mirror the tender filters. Each chip selects exactly
+  // that category's recipients (category derived from the main rfqs by rfqId).
+  const emailCatChips = useMemo(() => {
+    const byCat = { awaiting: [], quoted: [], awarded: [] };
+    for (const rec of emailRecips) {
+      const rfq = rfqs.find((x) => x.id === rec.rfqId);
+      const c = rfq ? catOf(rfq) : "awaiting";
+      (byCat[c] || byCat.awaiting).push(rec.rfqId);
+    }
+    return [
+      { id: "awaiting", label: "Awaiting", ids: byCat.awaiting },
+      { id: "quoted", label: "Quoted", ids: [...byCat.quoted, ...byCat.awarded] },
+      { id: "awarded", label: "Awarded", ids: byCat.awarded },
+      { id: "all", label: "All trades", ids: emailRecips.map((r) => r.rfqId) },
+    ];
+  }, [emailRecips, rfqs, catOf]);
 
   useEffect(() => {
     if (!job?.id || jobTab !== "fee-proposal") return;
@@ -1920,6 +1979,20 @@ function winRowMissingConfirmedQuote(row) {
                   <p className="mt-2 text-xs text-muted">
                     Toggle trades/recipients, then send. Each email goes as a reply to that subcontractor&apos;s original RFQ thread.
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Quick select</span>
+                    {emailCatChips.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        disabled={c.ids.length === 0}
+                        onClick={() => setEmailSel(new Set(c.ids))}
+                        className="rounded-full border border-hairline bg-surface px-2.5 py-1 text-[11px] font-semibold text-muted transition hover:border-primary/40 hover:text-primary disabled:opacity-40"
+                      >
+                        {c.label} <span className="opacity-70 tabular-nums">{c.ids.length}</span>
+                      </button>
+                    ))}
+                  </div>
                   <div className="mt-3 flex items-center justify-between border-b border-hairline pb-2">
                     <label className="flex items-center gap-2 text-xs font-semibold text-ink">
                       <input
@@ -1955,7 +2028,22 @@ function winRowMissingConfirmedQuote(row) {
                       );
                     })}
                   </div>
-                  <label className="mt-3 block text-xs font-semibold uppercase text-muted">Message</label>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-semibold uppercase text-muted">Message</label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] uppercase tracking-wide text-muted">Template</span>
+                      {EMAIL_TEMPLATES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setEmailMsg(t.build(emailCtx))}
+                          className="rounded-full border border-hairline bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/5"
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <textarea
                     rows={10}
                     value={emailMsg}
