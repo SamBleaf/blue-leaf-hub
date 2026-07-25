@@ -35,31 +35,31 @@ const EMAIL_TEMPLATES = [
     id: "plans",
     label: "Updated plans",
     build: ({ address, link }) =>
-      `Hi {{first_name}},\n\nQuick heads up — we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nQuick heads up, we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
   },
   {
     id: "reminder",
     label: "Reminder",
     build: ({ address, deadline }) =>
-      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` — we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` , we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
   },
   {
     id: "received",
     label: "Received — thanks",
     build: ({ address }) =>
-      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"} — appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"} , appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
   },
   {
     id: "won",
     label: "You've won it",
     build: ({ address }) =>
-      `Hi {{first_name}},\n\nGood news — we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nGood news, we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
   },
   {
     id: "lost",
     label: "Not this time",
     build: ({ address }) =>
-      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"} — genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"} , genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
   },
 ];
 
@@ -1079,7 +1079,7 @@ export default function TenderDetail() {
     const prior = rfqs
       .filter((r) => r.trade === trade && (r.email_body || r.email_subject))
       .sort((a, b) => String(b.sent_at || "").localeCompare(String(a.sent_at || "")))[0];
-    let subject = prior?.email_subject || `RFQ — ${TRADE_LABEL[trade] || trade} — ${job?.address || ""}`.trim();
+    let subject = prior?.email_subject || `RFQ, ${TRADE_LABEL[trade] || trade}, ${job?.address || ""}`.trim();
     let body = (prior?.email_body || "").replace(/^Subject:.*\n+/i, "");
     if (body) {
       body = body.replace(/^\s*(hi|hello|dear)\b[^\n]*/i, `Hi ${contact},`);
@@ -1355,7 +1355,7 @@ function winRowMissingConfirmedQuote(row) {
     const r = rfqs.find((x) => x.id === rfqId);
     const to = r?.subcontractors?.email;
     if (!to) { setError("That subcontractor has no email address on file."); return; }
-    const subject = `Re: RFQ — ${r.trade || ""} — ${job?.address || ""}`.replace(/\s+—\s*$/, "").trim();
+    const subject = `Re: RFQ, ${r.trade || ""}, ${job?.address || ""}`.replace(/[,\s]+$/, "").trim();
     const fullBody = sigFooter ? `${body}\n\n${sigFooter}` : body;
     try {
       const res = await authFetch("/api/rfq/send", {
@@ -1422,7 +1422,7 @@ function winRowMissingConfirmedQuote(row) {
       const name = (sub?.contact || "there").trim();
       const trade = w.trade || "works";
       if (w.status === "accepted") {
-        const body = `Hi ${name},\n\nGreat news — we've been awarded the project at ${addr} and we'd love to proceed with your quote for the ${trade} package.\n\nWe'll be in touch shortly with a formal Purchase Order along with a tentative commencement date for the project. Please note you'll be advised of specific dates closer to the start.\n\nReally looking forward to working together on this one.\n\n${sigFooter}`;
+        const body = `Hi ${name},\n\nGreat news, we've been awarded the project at ${addr} and we'd love to proceed with your quote for the ${trade} package.\n\nWe'll be in touch shortly with a formal Purchase Order along with a tentative commencement date for the project. Please note you'll be advised of specific dates closer to the start.\n\nReally looking forward to working together on this one.\n\n${sigFooter}`;
         previews.push({
           kind: "accepted",
           rfq_id: w.id,
@@ -1430,12 +1430,12 @@ function winRowMissingConfirmedQuote(row) {
           to: sub?.email,
           trade,
           businessName: sub?.business_name,
-          subject: `Great news — ${addr} — ${trade}`,
+          subject: `Great news, ${addr}, ${trade}`,
           body,
           html: logo ? plainBodyToHtml(body, logo) : undefined
         });
       } else if (w.status === "declined") {
-        const body = `Hi ${name},\n\nGood news on our end — we've been awarded ${addr}. On this occasion we've gone with another contractor for the ${trade} package, but I genuinely appreciate the time and effort that goes into pricing a job like this.\n\nWe've got more coming through the pipeline and you'll be hearing from us again.\n\n${sigFooter}`;
+        const body = `Hi ${name},\n\nGood news on our end, we've been awarded ${addr}. On this occasion we've gone with another contractor for the ${trade} package, but I genuinely appreciate the time and effort that goes into pricing a job like this.\n\nWe've got more coming through the pipeline and you'll be hearing from us again.\n\n${sigFooter}`;
         previews.push({
           kind: "declined",
           rfq_id: w.id,
@@ -1443,7 +1443,7 @@ function winRowMissingConfirmedQuote(row) {
           to: sub?.email,
           trade,
           businessName: sub?.business_name,
-          subject: `Update on ${addr} — ${trade}`,
+          subject: `Update on ${addr}, ${trade}`,
           body,
           html: logo ? plainBodyToHtml(body, logo) : undefined
         });
@@ -1553,14 +1553,14 @@ function winRowMissingConfirmedQuote(row) {
       const sub = r.subcontractors;
       const name = (sub?.contact || "there").trim();
       const trade = r.trade || "works";
-      const body = `Hi ${name},\n\nI wanted to reach out personally — unfortunately we were unsuccessful on the tender for ${addr}.\n\nI know how much time and effort goes into pricing a job properly, and I genuinely appreciate you taking the time to put a number together for us. It doesn't go unnoticed.\n\nWe've got more work coming and I'll be in touch when the next one lands.\n\nThanks again,\n${sigFooter}`;
+      const body = `Hi ${name},\n\nI wanted to reach out personally, unfortunately we were unsuccessful on the tender for ${addr}.\n\nI know how much time and effort goes into pricing a job properly, and I genuinely appreciate you taking the time to put a number together for us. It doesn't go unnoticed.\n\nWe've got more work coming and I'll be in touch when the next one lands.\n\nThanks again,\n${sigFooter}`;
       previews.push({
         rfq_id: r.id,
         subcontractor_id: sub?.id,
         to: sub?.email,
         trade,
         businessName: sub?.business_name,
-        subject: `Tender outcome — ${addr}`,
+        subject: `Tender outcome, ${addr}`,
         body,
         html: logo ? plainBodyToHtml(body, logo) : undefined
       });
@@ -1680,7 +1680,7 @@ function winRowMissingConfirmedQuote(row) {
       setError("Subcontractor email missing.");
       return;
     }
-    const subject = `RE: Quote Request – ${job?.address} – ${queryRfq.trade}`;
+    const subject = `RE: Quote Request, ${job?.address}, ${queryRfq.trade}`;
     setQueryBusy(true);
     try {
       const sig = loadEmailSignature();
@@ -2636,7 +2636,7 @@ function winRowMissingConfirmedQuote(row) {
             </div>
             <p className="mt-2 text-xs text-muted">To: {(queryRfq.subcontractors?.email || "").trim()}</p>
             <p className="text-xs text-muted">
-              Subject: RE: Quote Request – {job.address} – {queryRfq.trade}
+              Subject: RE: Quote Request, {job.address}, {queryRfq.trade}
             </p>
             <textarea
               value={queryBody}

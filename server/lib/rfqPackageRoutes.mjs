@@ -13,7 +13,8 @@ import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
-import { appendRfqRefToBody, rfqRefHeaders } from "./rfqSendRef.mjs";
+import { appendRfqRefToBody, rfqRefHeaders, rfqRefLine } from "./rfqSendRef.mjs";
+import { getCompanySignatureCard } from "./emailSignature.mjs";
 import { randomUUID } from "crypto";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { assertJobReadyForRfqHandoff } from "./jobGuards.mjs";
@@ -303,9 +304,12 @@ export function registerRfqPackageRoutes(app) {
         .replace(/\{\{\s*name\s*\}\}/gi, (String(sub?.contact || "").trim() || String(sub?.business_name || "").trim() || "there"))
         .replace(/\{\{\s*business\s*\}\}/gi, String(sub?.business_name || "").trim());
 
-      // Optional signature card (contact block, no "Kind regards" — the body carries its own sign-off).
-      // Logo is pulled server-side from branding storage so it matches individual RFQ replies exactly.
-      const footer = String(signatureFooter || "").trim();
+      // Signature card (contact block, no "Kind regards" — the body carries its own sign-off).
+      // SERVER-AUTHORITATIVE: use the signature saved in Settings (company_profile) so every send uses
+      // the same one regardless of which browser fires it; fall back to the client-passed value only
+      // if nothing is saved server-side (pre-migration / not yet saved). Logo comes from branding storage.
+      const savedCard = await getCompanySignatureCard(s).catch(() => null);
+      const footer = (savedCard || String(signatureFooter || "").trim()).trim();
       const sigLogo = footer ? await getBrandingEmailLogo(s).catch(() => "") : "";
 
       const rows = rfqs || [];
@@ -318,7 +322,7 @@ export function registerRfqPackageRoutes(app) {
         const sub = subMap[r.subcontractor_id] || {};
         const to = String(sub.email || "").trim();
         if (!to) { results.push({ rfqId: r.id, ok: false, error: "no email" }); continue; }
-        const baseSubj = subjectOf(r.email_body) || `RFQ — ${tradeLabel(r.trade) || r.trade} — ${job.address}`;
+        const baseSubj = subjectOf(r.email_body) || `RFQ, ${tradeLabel(r.trade) || r.trade}, ${job.address}`;
         const subject = /^re:/i.test(baseSubj) ? baseSubj : `Re: ${baseSubj}`;
         const headers = {};
         if (r.sent_message_id) {
@@ -326,10 +330,13 @@ export function registerRfqPackageRoutes(app) {
           headers["In-Reply-To"] = mid;
           headers["References"] = mid;
         }
-        // Personalise for this recipient, stamp the RFQ ref, then append the signature card.
-        const stamped = appendRfqRefToBody(personalise(body, sub), r.id);
-        const text = footer ? `${stamped}\n\n${footer}` : stamped;
-        const html = wrapPlainTextEmailHtml(stamped, { footerText: footer, logoDataUrl: sigLogo });
+        // Personalise for this recipient, then append the signature card. The RFQ ref is NOT shown in
+        // the reader-facing body — it rides along as a hidden HTML preheader so inbound reply-matching
+        // (which scans quoted HTML for the BLH-RFQ token) still works, alongside the In-Reply-To /
+        // References thread and the X-BlueLeaf-RFQ-ID header. The reader never sees "Ref: BLH-RFQ-…".
+        const personalized = personalise(body, sub);
+        const text = footer ? `${personalized}\n\n${footer}` : personalized;
+        const html = wrapPlainTextEmailHtml(personalized, { footerText: footer, logoDataUrl: sigLogo, hiddenPreheader: rfqRefLine(r.id) });
         specs.push({ r, to, subject, headers, text, html });
       }
 
@@ -904,7 +911,7 @@ export function registerRfqPackageRoutes(app) {
             trade: scope?.trade_label || "your trade",
             sigName
           });
-          const subject = `Follow-up — ${scope?.trade_label || "quote"} at ${pkg?.project_address || "project"}`;
+          const subject = `Follow-up, ${scope?.trade_label || "quote"} at ${pkg?.project_address || "project"}`;
           const stampedText = appendRfqRefToBody(text, r.rfq_id || null);
           await sendPlainMail({
             to,
@@ -985,7 +992,7 @@ export function registerRfqPackageRoutes(app) {
               const text = [
                 `Hi ${r.business_name?.split(" ")[0] || "there"},`,
                 "",
-                `Please note Addendum ${nextNum} — ${name} has been issued for ${pkg?.project_address || "this project"}.`,
+                `Please note Addendum ${nextNum}, ${name}, has been issued for ${pkg?.project_address || "this project"}.`,
                 "This addendum affects your trade scope. Please review and update your quote if necessary.",
                 "",
                 `If you have any questions, don't hesitate to contact us.`,
@@ -996,7 +1003,7 @@ export function registerRfqPackageRoutes(app) {
               const stampedText = appendRfqRefToBody(text, r.rfq_id || null);
               await sendPlainMail({
                 to,
-                subject: `Addendum ${nextNum} — ${pkg?.project_address || "project"}`,
+                subject: `Addendum ${nextNum}, ${pkg?.project_address || "project"}`,
                 text: stampedText,
                 headers: rfqRefHeaders(r.rfq_id || null)
               });

@@ -53,7 +53,7 @@ export async function sendReminderForRfqId(rfqId, opts = {}) {
   const address = job?.address?.trim() || "the site";
   const deadlineFmt = formatAuDate(row.deadline);
   const sigName = process.env.SAM_NAME?.trim() || "Sam Morris";
-  const subject = `Reminder — quote for ${address}`;
+  const subject = `Reminder, quote for ${address}`;
   const baseLines = [
     `Hi ${name},`,
     "",

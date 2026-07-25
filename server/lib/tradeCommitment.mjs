@@ -45,11 +45,11 @@ function signOff(familiar, style = "normal") {
 // Each returns { subject, text, html }
 
 export function emailPoIssued({ contactName, jobAddress, trade, poNumber, quarterTiming, familiar, logo }) {
-  const subject = `Purchase Order — ${jobAddress} — ${trade} — ${poNumber}`;
+  const subject = `Purchase Order, ${jobAddress}, ${trade}, ${poNumber}`;
   const so = signOff(familiar);
   const text =
     `Hi ${contactName || "there"},\n\n` +
-    `Great news — ${jobAddress} has been awarded and we're looking forward to getting underway.\n\n` +
+    `Great news, ${jobAddress} has been awarded and we're looking forward to getting underway.\n\n` +
     `Please find attached your Purchase Order for the ${trade} works.\n\n` +
     `Timing is still being confirmed but we're targeting a commencement of ${quarterTiming || "TBC"}.\n\n` +
     `We'll be in touch with a more accurate schedule once pre-construction is wrapped up.\n\n` +
@@ -64,12 +64,12 @@ export function emailPoIssued({ contactName, jobAddress, trade, poNumber, quarte
 }
 
 export function emailCommencementNotice({ contactName, jobAddress, trade, commencementLabel, tradeLabel, familiar, logo }) {
-  const subject = `Schedule update — ${jobAddress} — ${trade}`;
+  const subject = `Schedule update, ${jobAddress}, ${trade}`;
   const so = signOff(familiar, "short");
   const text =
     `Hi ${contactName || "there"},\n\n` +
     `Contracts are signed and we're targeting commencement ${commencementLabel || "TBC"}.\n\n` +
-    `Your ${trade} works are pencilled in for ${tradeLabel || "TBC"} — we'll firm this up as the early ` +
+    `Your ${trade} works are pencilled in for ${tradeLabel || "TBC"}, we'll firm this up as the early ` +
     `stages progress and will be in touch to confirm once the preceding stage wraps up.\n\n` +
     `If anything has changed on your end that might affect that window, let us know.\n\n` +
     `${so}`;
@@ -78,7 +78,7 @@ export function emailCommencementNotice({ contactName, jobAddress, trade, commen
 }
 
 export function emailStageNoticeLabour({ contactName, jobAddress, trade, startLabel, familiar, logo }) {
-  const subject = `Coming up — ${jobAddress} — ${trade} — ${startLabel || "TBC"}`;
+  const subject = `Coming up, ${jobAddress}, ${trade}, ${startLabel || "TBC"}`;
   const so = signOff(familiar, "short");
   const text =
     `Hi ${contactName || "there"},\n\n` +
@@ -94,13 +94,13 @@ export function emailStageNoticeLabour({ contactName, jobAddress, trade, startLa
 }
 
 export function emailStageNoticeProcurement({ contactName, jobAddress, trade, startLabel, familiar, logo }) {
-  const subject = `Coming up — ${jobAddress} — ${trade} — ${startLabel || "TBC"}`;
+  const subject = `Coming up, ${jobAddress}, ${trade}, ${startLabel || "TBC"}`;
   const so = signOff(familiar, "short");
   const text =
     `Hi ${contactName || "there"},\n\n` +
     `Framing is tracking well and your ${trade} works are coming up on the schedule.\n\n` +
     `We have your scope pencilled in for ${startLabel || "TBC"}. Given your lead times we wanted to ` +
-    `touch base early — could you confirm:\n` +
+    `touch base early, could you confirm:\n` +
     `1. Materials are in stock or will be available in time\n` +
     `2. You're comfortable with that window\n\n` +
     `If there are any lead time issues or anything we should know about, let us know now so ` +
@@ -120,29 +120,29 @@ const PRIOR_EVENT_LABELS = {
 };
 
 export function emailFollowUp({ contactName, jobAddress, priorEventType, logo }) {
-  const subject = `Just checking in — ${jobAddress}`;
+  const subject = `Just checking in, ${jobAddress}`;
   // Always short sign-off for follow-ups
   const priorLabel = PRIOR_EVENT_LABELS[priorEventType] || "message";
   // Use street name only (first part before comma)
   const streetName = (jobAddress || "").split(",")[0].trim();
   const text =
     `Hi ${contactName || "there"},\n\n` +
-    `Just making sure our last email landed — sent through a ${priorLabel} for ` +
+    `Just making sure our last email landed, sent through a ${priorLabel} for ` +
     `${streetName} a few days ago.\n\n` +
-    `No stress if you're across it — let us know if you've got any questions.\n\n` +
+    `No stress if you're across it, let us know if you've got any questions.\n\n` +
     `Cheers,\nSam`;
   const html = wrapPlainTextEmailHtml(text, { logoDataUrl: logo });
   return { subject, text, html };
 }
 
 export function emailScheduleChange({ contactName, jobAddress, trade, oldLabel, newLabel, logo }) {
-  const subject = `Dates have shifted — ${jobAddress} — ${trade}`;
+  const subject = `Dates have shifted, ${jobAddress}, ${trade}`;
   const text =
     `Hi ${contactName || "there"},\n\n` +
-    `Heads-up — the schedule has moved and your ${trade} works have shifted with it.\n\n` +
+    `Heads-up, the schedule has moved and your ${trade} works have shifted with it.\n\n` +
     `Previous: ${oldLabel || "TBC"}\n` +
     `Updated:  ${newLabel || "TBC"}\n\n` +
-    `Sorry for the change — we're doing our best to keep things on track. If this causes a ` +
+    `Sorry for the change, we're doing our best to keep things on track. If this causes a ` +
     `problem on your end, give us a call and we'll sort it out.\n\n` +
     `Thanks,\nSam`;
   const html = wrapPlainTextEmailHtml(text, { logoDataUrl: logo });
@@ -165,10 +165,10 @@ export function emailCommencementConfirmed({ contactName, jobAddress, trade, con
         return isNaN(d.getTime()) ? confirmedDate : d.toLocaleDateString("en-AU", { day: "numeric", month: "long" });
       })()
     : "TBC";
-  const subject = `Confirmed — ${jobAddress} — ${shortDate}`;
+  const subject = `Confirmed, ${jobAddress}, ${shortDate}`;
   const text =
     `Hi ${contactName || "there"},\n\n` +
-    `Following on from our chat — just confirming ${trade} at ${streetName} is locked ` +
+    `Following on from our chat, just confirming ${trade} at ${streetName} is locked ` +
     `in for ${formattedDate}.\n\n` +
     `See you on site.\n\n` +
     `Cheers,\nSam`;
@@ -177,10 +177,10 @@ export function emailCommencementConfirmed({ contactName, jobAddress, trade, con
 }
 
 export function emailAvailabilityConflict({ contactName, jobAddress, trade, logo }) {
-  const subject = `No worries — ${jobAddress} — ${trade}`;
+  const subject = `No worries, ${jobAddress}, ${trade}`;
   const text =
     `Hi ${contactName || "there"},\n\n` +
-    `Thanks for letting us know — appreciate you flagging it early rather than leaving us ` +
+    `Thanks for letting us know, appreciate you flagging it early rather than leaving us ` +
     `in the dark.\n\n` +
     `We'll look at the schedule and see what we can work with. A couple of questions:\n` +
     `- Is there a window that could work for you? Even a week or two later might be ` +

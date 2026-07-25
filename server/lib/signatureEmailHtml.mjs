@@ -18,16 +18,22 @@ function isSafeInlineImageDataUrl(url) {
 
 /**
  * @param {string} bodyText — main message (plain)
- * @param {{ footerText?: string, logoDataUrl?: string }} sig
+ * @param {{ footerText?: string, logoDataUrl?: string, hiddenPreheader?: string }} sig
+ *   hiddenPreheader — text emitted in a visually-hidden div (e.g. the RFQ Ref token) so it never
+ *   shows to the reader but stays in the HTML source for reply-quote matching.
  */
 export function wrapPlainTextEmailHtml(bodyText, sig = {}) {
   const footer = String(sig.footerText || "").trim();
   const logo = String(sig.logoDataUrl || "").trim();
+  const hidden = String(sig.hiddenPreheader || "").trim();
   const showLogo = logo && isSafeInlineImageDataUrl(logo);
   const main = escapeHtml(String(bodyText || "")).replace(/\r\n/g, "\n").replace(/\n/g, "<br />");
   const foot = footer ? escapeHtml(footer).replace(/\n/g, "<br />") : "";
   const logoBlock = showLogo
     ? `<div style="margin:14px 0 10px;"><img src="${logo}" alt="" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`
     : "";
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.45;color:#111;">${main}${logoBlock}${foot ? `<div style="margin-top:12px;">${foot}</div>` : ""}</div>`;
+  const hiddenBlock = hidden
+    ? `<div style="display:none;max-height:0;overflow:hidden;font-size:0;line-height:0;color:transparent;mso-hide:all;">${escapeHtml(hidden)}</div>`
+    : "";
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.45;color:#111;">${hiddenBlock}${main}${logoBlock}${foot ? `<div style="margin-top:12px;">${foot}</div>` : ""}</div>`;
 }

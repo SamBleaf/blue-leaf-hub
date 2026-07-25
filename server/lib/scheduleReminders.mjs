@@ -108,7 +108,7 @@ async function sendStageEmail(sb, po, task, logo, isShortNotice) {
 
   let bodyText = tmpl.text;
   if (isShortNotice) {
-    bodyText += "\n\nNote: this is shorter notice than usual — please let us know immediately if this creates any issues.";
+    bodyText += "\n\nNote: this is shorter notice than usual, so please let us know immediately if this creates any issues.";
   }
 
   await sendPlainMail({ to: email, subject: tmpl.subject, text: bodyText, html: tmpl.html });

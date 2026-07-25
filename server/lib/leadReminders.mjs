@@ -334,7 +334,7 @@ export async function runLeadActionDigest({ dryRun = false, now = new Date(), fo
 // the only placeholder (→ the lead's first name, or "there").
 export const ENQUIRY_ACK_TEMPLATE_KEY = "crm_enquiry_ack";
 export const ENQUIRY_ACK_DEFAULTS = {
-  subject: "We've received your enquiry — Blue Leaf Building",
+  subject: "We've received your enquiry, Blue Leaf Building",
   body: [
     "Hi {name},",
     "",

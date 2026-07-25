@@ -76,7 +76,7 @@ export async function notifyClient(projectId, { type, title, body, entityType, e
     if (project.portal_client_email) {
       const link = `${appBase()}/client-portal`;
       const greeting = project.portal_client_name ? `Hi ${String(project.portal_client_name).split(" ")[0]},` : "Hi,";
-      const text = `${greeting}\n\n${body || title}\n\nView it in your portal: ${link}\n\n— Blue Leaf Building`;
+      const text = `${greeting}\n\n${body || title}\n\nView it in your portal: ${link}\n\nBlue Leaf Building`;
       const html =
         `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1B2B4B;line-height:1.6;max-width:520px">` +
         `<p style="margin:0 0 10px">${greeting}</p>` +

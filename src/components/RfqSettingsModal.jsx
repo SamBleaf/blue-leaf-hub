@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { apiFetch, apiPut } from "../lib/apiFetch.js";
 import {
   DEFAULT_EMAIL_SIGNATURE,
   formatSignatureFooter,
@@ -11,10 +12,24 @@ import {
 export default function RfqSettingsModal({ onClose, onApplied }) {
   const [sig, setSig] = useState(() => loadEmailSignature());
   const [preview, setPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
 
   useEffect(() => {
     setPreview(formatSignatureFooter(sig));
   }, [sig]);
+
+  // Server is the source of truth (so every send uses the same signature). On open, pull the saved
+  // one over the local cache — keeping the locally-held logo, which lives in the branding bucket.
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      const { ok, data } = await apiFetch("/api/settings/email-signature");
+      if (stop || !ok || !data?.signature) return;
+      setSig((s) => ({ ...DEFAULT_EMAIL_SIGNATURE, ...data.signature, logoDataUrl: s.logoDataUrl }));
+    })();
+    return () => { stop = true; };
+  }, []);
 
   const handleLogo = (e) => {
     const file = e.target.files?.[0];
@@ -35,8 +50,17 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
     e.target.value = "";
   };
 
-  const save = () => {
-    saveEmailSignature(sig);
+  const save = async () => {
+    setSaving(true);
+    setSaveErr("");
+    saveEmailSignature(sig); // local cache (offline + logo)
+    // Persist the text fields account-wide so every send path uses this signature.
+    const { fullName, title, mobile, website, postalAddress, legalDisclaimer } = sig;
+    const { ok, error } = await apiPut("/api/settings/email-signature", {
+      signature: { fullName, title, mobile, website, postalAddress, legalDisclaimer }
+    });
+    setSaving(false);
+    if (!ok) { setSaveErr(error || "Saved on this device, but couldn't save to the server."); return; }
     onApplied?.();
     onClose();
   };
@@ -55,7 +79,7 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
           <div>
             <h2 className="text-lg font-semibold text-primary">Email signature</h2>
             <p className="mt-1 text-xs text-muted">
-              Saved on this device (localStorage). Full mail & Dropbox setup:{" "}
+              Saved for the whole team — used on every outbound email, whoever sends it. Full mail & Dropbox setup:{" "}
               <Link to="/tender-manager/settings" className="font-semibold text-accent underline" onClick={onClose}>
                 Settings
               </Link>
@@ -164,10 +188,11 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
           <button type="button" onClick={onClose} className="rounded-lg border border-hairline px-4 py-2 text-sm font-semibold">
             Cancel
           </button>
-          <button type="button" onClick={save} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-white">
-            Save
+          <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
+        {saveErr ? <p className="mt-2 text-xs text-danger">{saveErr}</p> : null}
       </div>
     </div>
   );

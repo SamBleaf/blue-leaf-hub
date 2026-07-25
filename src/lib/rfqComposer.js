@@ -73,7 +73,7 @@ function greetingLine(contactName) {
 }
 
 function defaultSignatureFallback() {
-  return ["Sam Morris", "Director – Blue Leaf Building"].join("\n");
+  return ["Sam Morris", "Director, Blue Leaf Building"].join("\n");
 }
 
 function escapeHtml(s) {
@@ -153,7 +153,7 @@ export function plainBodyToHtml(plainBody, logoDataUrl) {
 
 /** Clean, professional subject — "RFQ — Carpentry — 9 Charles St, Norwood SA". No date (it's in the body). */
 function buildSubject({ label, addr }) {
-  return { subject: `RFQ — ${label} — ${addr}`, variant: "clean" };
+  return { subject: `RFQ, ${label}, ${addr}`, variant: "clean" };
 }
 
 /**

@@ -100,11 +100,11 @@ export function formatSignatureFooter(sig) {
  */
 export function formatSignatureCard(sig) {
   const s = { ...DEFAULT_EMAIL_SIGNATURE, ...sig };
-  const nameTitle = [s.fullName?.trim() || DEFAULT_EMAIL_SIGNATURE.fullName, s.title?.trim() || ""]
-    .filter(Boolean)
-    .join(" · ");
+  // Each field on its own line (no separators) — matches the saved-signature look and the server
+  // formatter in server/lib/emailSignature.mjs. Keep these two byte-identical.
   const lines = [
-    nameTitle,
+    s.fullName?.trim() || DEFAULT_EMAIL_SIGNATURE.fullName,
+    s.title?.trim() || "",
     s.mobile?.trim() || "",
     s.website?.trim() || "",
     s.postalAddress?.trim() || ""

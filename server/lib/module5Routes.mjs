@@ -477,6 +477,61 @@ export function registerModule5Routes(app) {
     return res.json({ ok: true, filename, dataBase64: buf.toString("base64"), size: buf.length });
   });
 
+  // ── Email signature (account-wide, persisted on company_profile) ──────────
+  // The signature was previously localStorage-only, so a send from a browser without it fell back
+  // to the default. Persisting it here makes every send path read the same saved signature.
+  app.get("/api/settings/email-signature", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    try {
+      const { data, error } = await sb.from("company_profile").select("email_signature").limit(1);
+      if (error) {
+        // Column missing (pre-migration 157) — behave as "nothing saved" so the client uses its cache.
+        if (/email_signature/i.test(String(error.message || ""))) return res.json({ ok: true, signature: null });
+        return res.status(502).json({ ok: false, error: error.message });
+      }
+      return res.json({ ok: true, signature: data?.[0]?.email_signature || null });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e?.message || "Could not load the signature." });
+    }
+  });
+
+  app.put("/api/settings/email-signature", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    const incoming = req.body?.signature;
+    if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "signature object required" });
+    // Store text fields only — never the (large) logo data URL; the logo lives in branding storage.
+    const pick = (k) => (typeof incoming[k] === "string" ? incoming[k] : "");
+    const signature = {
+      fullName: pick("fullName"),
+      title: pick("title"),
+      mobile: pick("mobile"),
+      website: pick("website"),
+      postalAddress: pick("postalAddress"),
+      legalDisclaimer: pick("legalDisclaimer")
+    };
+    try {
+      // company_profile is a single-company row: update the first row if present, else insert one.
+      const { data: existing, error: readErr } = await sb.from("company_profile").select("id").limit(1);
+      if (readErr) {
+        if (/email_signature/i.test(String(readErr.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
+        return res.status(502).json({ ok: false, error: readErr.message });
+      }
+      if (existing?.[0]?.id) {
+        const { error } = await sb.from("company_profile").update({ email_signature: signature, updated_at: new Date().toISOString() }).eq("id", existing[0].id);
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from("company_profile").insert({ email_signature: signature });
+        if (error) throw error;
+      }
+      return res.json({ ok: true, signature });
+    } catch (e) {
+      if (/email_signature/i.test(String(e?.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
+      return res.status(500).json({ ok: false, error: e?.message || "Could not save the signature." });
+    }
+  });
+
   app.post("/api/fee-proposal/generate-docx", requireAuth, async (req, res) => {
     try {
       let templateBase64 = String(req.body?.templateBase64 || "").trim();
