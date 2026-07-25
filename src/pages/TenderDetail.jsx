@@ -30,37 +30,24 @@ const RFQ_STATUS_VIS = {
 // warm, direct, first-name, no corporate/AI filler, an Aussie "give us a yell / no dramas / cheers").
 // ONE body goes to every selected recipient (threaded to their RFQ), so greetings stay generic;
 // these are a starting point you edit before sending. ctx = { address, link, deadline }.
+// Job-level merge tokens — resolved CLIENT-side at send (same for all recipients on the job), so a
+// saved preset stays job-agnostic and re-fills the right Dropbox link/address per job. Recipient
+// tokens ({{first_name}} / {{name}} / {{business}}) are resolved server-side per subcontractor.
+function fillJobTokens(body, ctx) {
+  return String(body || "")
+    .replace(/\{\{\s*plans_link\s*\}\}/gi, ctx?.link || "[plans link]")
+    .replace(/\{\{\s*address\s*\}\}/gi, ctx?.address || "the project")
+    .replace(/\{\{\s*deadline\s*\}\}/gi, ctx?.deadline || "");
+}
+
+// Built-in email templates for the "Email recipients" blast — Sam's voice, token-based so they (and
+// any preset saved from them) re-resolve per job + per recipient at send.
 const EMAIL_TEMPLATES = [
-  {
-    id: "plans",
-    label: "Updated plans",
-    build: ({ address, link }) =>
-      `Hi {{first_name}},\n\nQuick heads up, we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
-  },
-  {
-    id: "reminder",
-    label: "Reminder",
-    build: ({ address, deadline }) =>
-      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? `, we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
-  },
-  {
-    id: "received",
-    label: "Received — thanks",
-    build: ({ address }) =>
-      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"}, appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
-  },
-  {
-    id: "won",
-    label: "You've won it",
-    build: ({ address }) =>
-      `Hi {{first_name}},\n\nGood news, we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
-  },
-  {
-    id: "lost",
-    label: "Not this time",
-    build: ({ address }) =>
-      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"}, genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
-  },
+  { id: "plans", label: "Updated plans", body: `Hi {{first_name}},\n\nQuick heads up, we've updated the plans for {{address}}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n{{plans_link}}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam` },
+  { id: "reminder", label: "Reminder", body: `Hi {{first_name}},\n\nJust chasing your quote for {{address}} when you get a chance. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam` },
+  { id: "received", label: "Received, thanks", body: `Hi {{first_name}},\n\nGot your quote through for {{address}}, appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam` },
+  { id: "won", label: "You've won it", body: `Hi {{first_name}},\n\nGood news, we'd like to go ahead with your quote for {{address}}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam` },
+  { id: "lost", label: "Not this time", body: `Hi {{first_name}},\n\nThanks for taking the time to quote {{address}}, genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam` },
 ];
 
 // Step 7 — one row per quote submission with correction + verification controls.
@@ -857,7 +844,7 @@ export default function TenderDetail() {
       }
       const ctx = { address: json?.job?.address || "", link, deadline };
       setEmailCtx(ctx);
-      setEmailMsg(EMAIL_TEMPLATES[0].build(ctx)); // default to the "Updated plans" template
+      setEmailMsg(EMAIL_TEMPLATES[0].body); // default to the "Updated plans" template
       setActivePresetId(null);
       setPresetForm(null);
       // Load the org's saved presets (fails soft to [] before migration 156).
@@ -897,7 +884,7 @@ export default function TenderDetail() {
       const res = await authFetch("/api/rfq/notify-recipients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, rfqIds, message: emailMsg, signatureFooter: sigCard })
+        body: JSON.stringify({ jobId, rfqIds, message: fillJobTokens(emailMsg, emailCtx), signatureFooter: sigCard })
       });
       const json = await res.json();
       if (!res.ok || !json?.ok) setEmailResult({ error: json?.error || "Send failed." });
@@ -907,10 +894,10 @@ export default function TenderDetail() {
     } finally {
       setEmailBusy(false);
     }
-  }, [emailSel, emailMsg, jobId, load, sigCard]);
+  }, [emailSel, emailMsg, emailCtx, jobId, load, sigCard]);
 
   // ── Saved email presets (custom templates) ─────────────────────────────────
-  const applyPreset = (t) => { setEmailMsg(t.body); setActivePresetId(t.id); setPresetForm(null); };
+  const applyPreset = (t) => { setEmailMsg(t.body); setActivePresetId(t.id); setPresetForm(null); setEmailResult(null); };
   const saveNewPreset = useCallback(async () => {
     const label = (presetForm?.label || "").trim();
     if (!label) return;
@@ -925,23 +912,27 @@ export default function TenderDetail() {
       setCustomTemplates((prev) => [j.template, ...prev.filter((t) => t.id !== j.template.id)]);
       setActivePresetId(j.template.id);
       setPresetForm(null);
+      setEmailResult(null);
     } finally { setPresetBusy(false); }
   }, [presetForm, emailMsg]);
-  const updatePreset = useCallback(async () => {
-    if (!activePresetId) return;
+  // Overwrite an EXISTING preset (the active one, or a name match) instead of creating a duplicate.
+  const patchPreset = useCallback(async (id) => {
+    if (!id) return;
     const label = (presetForm?.label || "").trim();
     setPresetBusy(true);
     try {
-      const res = await authFetch(`/api/tender/email-templates/${activePresetId}`, {
+      const res = await authFetch(`/api/tender/email-templates/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(label ? { label } : {}), body: emailMsg })
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setEmailResult({ error: j?.error || "Could not update the template." }); return; }
       setCustomTemplates((prev) => prev.map((t) => (t.id === j.template.id ? j.template : t)));
+      setActivePresetId(j.template.id);
       setPresetForm(null);
+      setEmailResult(null);
     } finally { setPresetBusy(false); }
-  }, [activePresetId, presetForm, emailMsg]);
+  }, [presetForm, emailMsg]);
   const deletePreset = useCallback(async (id) => {
     setPresetBusy(true);
     try {
@@ -2171,7 +2162,7 @@ function winRowMissingConfirmedQuote(row) {
                     <label className="text-xs font-semibold uppercase text-muted">Message</label>
                     <button
                       type="button"
-                      onClick={() => setPresetForm({ label: activePresetId ? (customTemplates.find((t) => t.id === activePresetId)?.label || "") : "" })}
+                      onClick={() => { setEmailResult(null); setPresetForm({ label: activePresetId ? (customTemplates.find((t) => t.id === activePresetId)?.label || "") : "" }); }}
                       className="rounded-full border border-dashed border-hairline px-2.5 py-0.5 text-[11px] font-semibold text-muted transition hover:border-primary/40 hover:text-primary"
                     >
                       ＋ Save preset
@@ -2183,7 +2174,7 @@ function winRowMissingConfirmedQuote(row) {
                       <button
                         key={t.id}
                         type="button"
-                        onClick={() => { setEmailMsg(t.build(emailCtx)); setActivePresetId(null); }}
+                        onClick={() => { setEmailMsg(t.body); setActivePresetId(null); setEmailResult(null); }}
                         className="rounded-full border border-hairline bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/5"
                       >
                         {t.label}
@@ -2206,7 +2197,11 @@ function winRowMissingConfirmedQuote(row) {
                     ))}
                     {customTemplates.length === 0 ? <span className="text-[10px] text-muted/70">— save your own with ＋ Save preset</span> : null}
                   </div>
-                  {presetForm ? (
+                  {presetForm ? (() => {
+                    const typed = presetForm.label.trim().toLowerCase();
+                    // If the typed name matches an existing preset, offer to OVERWRITE it (not duplicate).
+                    const nameMatch = typed ? customTemplates.find((t) => t.label.trim().toLowerCase() === typed) : null;
+                    return (
                     <div className="mt-2 rounded-lg border border-hairline bg-page p-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <input
@@ -2216,19 +2211,20 @@ function winRowMissingConfirmedQuote(row) {
                           className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs"
                           autoFocus
                         />
-                        {activePresetId ? (
-                          <>
-                            <button type="button" disabled={presetBusy} onClick={updatePreset} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Update</button>
-                            <button type="button" disabled={presetBusy || !presetForm.label.trim()} onClick={saveNewPreset} className="rounded-md border border-primary px-3 py-1 text-xs font-semibold text-primary disabled:opacity-40">Save as new</button>
-                          </>
-                        ) : (
-                          <button type="button" disabled={presetBusy || !presetForm.label.trim()} onClick={saveNewPreset} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Save</button>
-                        )}
+                        {nameMatch ? (
+                          <button type="button" disabled={presetBusy} onClick={() => patchPreset(nameMatch.id)} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Overwrite “{nameMatch.label}”</button>
+                        ) : null}
+                        <button type="button" disabled={presetBusy || !presetForm.label.trim() || !!nameMatch} onClick={saveNewPreset} className={`rounded-md px-3 py-1 text-xs font-semibold disabled:opacity-40 ${nameMatch ? "border border-primary text-primary" : "bg-primary text-white"}`}>Save as new</button>
                         <button type="button" onClick={() => setPresetForm(null)} className="rounded-md px-2 py-1 text-xs text-muted">Cancel</button>
                       </div>
-                      <p className="mt-1 text-[10px] text-muted">Saves the current message as a reusable preset. Keep the {"{{first_name}}"} token to personalise per recipient.</p>
+                      <p className="mt-1 text-[10px] text-muted">
+                        {nameMatch
+                          ? <>A preset named “{nameMatch.label}” already exists — Overwrite it, or type a different name to save a new one.</>
+                          : <>Saves the current message as a reusable preset. Keep tokens like {"{{first_name}}"} and {"{{plans_link}}"} so it re-fills per job & recipient.</>}
+                      </p>
                     </div>
-                  ) : null}
+                    );
+                  })() : null}
                   <textarea
                     rows={10}
                     value={emailMsg}
@@ -2236,7 +2232,9 @@ function winRowMissingConfirmedQuote(row) {
                     className="mt-2 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs font-mono leading-relaxed"
                   />
                   <p className="mt-1 text-[10px] text-muted">
-                    <code className="rounded bg-page px-1">{"{{first_name}}"}</code> personalises each email (falls back to “there”). Your signature block is added automatically below the sign-off.
+                    Tokens fill in at send: <code className="rounded bg-page px-1">{"{{first_name}}"}</code> (per recipient),{" "}
+                    <code className="rounded bg-page px-1">{"{{plans_link}}"}</code> (this job&apos;s Dropbox link),{" "}
+                    <code className="rounded bg-page px-1">{"{{address}}"}</code>, <code className="rounded bg-page px-1">{"{{deadline}}"}</code>. Your signature is added automatically.
                   </p>
                   {emailResult?.error ? <p className="mt-2 text-xs text-danger">{emailResult.error}</p> : null}
                   {emailResult?.sent != null ? (
