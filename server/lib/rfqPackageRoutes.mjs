@@ -7,6 +7,7 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { resendSendConfigured, sendBatchViaResend } from "./resendSend.mjs";
 import { captureResendId } from "./rfqEngagement.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { buildRfqTradeIntelligence, reconcilePackageTradeCoverage } from "./rfqTradeIntelligence.mjs";
 import { tradeLabel } from "./tradeMasterLibrary.mjs";
 import { requireAuth } from "./requireAuth.mjs";
@@ -273,7 +274,7 @@ export function registerRfqPackageRoutes(app) {
     const s = db();
     if (!s) return err(res, 503, "Database not configured.");
     try {
-      const { jobId, rfqIds, message } = req.body || {};
+      const { jobId, rfqIds, message, signatureFooter } = req.body || {};
       if (!jobId || !Array.isArray(rfqIds) || rfqIds.length === 0) return err(res, 400, "jobId and rfqIds[] required.");
       const body = String(message || "").trim();
       if (!body) return err(res, 400, "message required.");
@@ -285,10 +286,27 @@ export function registerRfqPackageRoutes(app) {
       const subIds = [...new Set((rfqs || []).map((r) => r.subcontractor_id).filter(Boolean))];
       let subMap = {};
       if (subIds.length) {
-        const { data: subs } = await s.from("subcontractors").select("id, business_name, email").in("id", subIds);
+        const { data: subs } = await s.from("subcontractors").select("id, business_name, email, contact").in("id", subIds);
         subMap = Object.fromEntries((subs || []).map((x) => [x.id, x]));
       }
       const subjectOf = (b) => { const m = /^Subject:\s*(.+)$/im.exec(String(b || "")); return m ? m[1].trim() : ""; };
+
+      // Per-recipient mail-merge: the one composed body is sent, but {{first_name}} / {{name}} /
+      // {{business}} are substituted for each subcontractor so every email reads like it was written
+      // to them. Unknown contact → "there".
+      const firstNameOf = (sub) => {
+        const c = String(sub?.contact || "").trim();
+        return c ? c.split(/\s+/)[0] : "there";
+      };
+      const personalise = (raw, sub) => String(raw || "")
+        .replace(/\{\{\s*first_name\s*\}\}/gi, firstNameOf(sub))
+        .replace(/\{\{\s*name\s*\}\}/gi, (String(sub?.contact || "").trim() || String(sub?.business_name || "").trim() || "there"))
+        .replace(/\{\{\s*business\s*\}\}/gi, String(sub?.business_name || "").trim());
+
+      // Optional signature card (contact block, no "Kind regards" — the body carries its own sign-off).
+      // Logo is pulled server-side from branding storage so it matches individual RFQ replies exactly.
+      const footer = String(signatureFooter || "").trim();
+      const sigLogo = footer ? await getBrandingEmailLogo(s).catch(() => "") : "";
 
       const rows = rfqs || [];
       const nowIso = new Date().toISOString();
@@ -308,10 +326,12 @@ export function registerRfqPackageRoutes(app) {
           headers["In-Reply-To"] = mid;
           headers["References"] = mid;
         }
-        specs.push({ r, to, subject, headers });
+        // Personalise for this recipient, stamp the RFQ ref, then append the signature card.
+        const stamped = appendRfqRefToBody(personalise(body, sub), r.id);
+        const text = footer ? `${stamped}\n\n${footer}` : stamped;
+        const html = wrapPlainTextEmailHtml(stamped, { footerText: footer, logoDataUrl: sigLogo });
+        specs.push({ r, to, subject, headers, text, html });
       }
-
-      const bodyForRfq = (rfqId) => appendRfqRefToBody(body, rfqId);
 
       // Log everyone who actually went out, in ONE batched insert (best-effort).
       const logCorrespondence = async (out) => {
@@ -330,16 +350,13 @@ export function registerRfqPackageRoutes(app) {
       let batched = false;
       if (specs.length && resendSendConfigured()) {
         try {
-          const ids = await sendBatchViaResend(specs.map((sp) => {
-            const bodyText = bodyForRfq(sp.r.id);
-            return {
-              to: sp.to,
-              subject: sp.subject,
-              text: bodyText,
-              html: wrapPlainTextEmailHtml(bodyText),
-              headers: { ...sp.headers, ...rfqRefHeaders(sp.r.id) }
-            };
-          }));
+          const ids = await sendBatchViaResend(specs.map((sp) => ({
+            to: sp.to,
+            subject: sp.subject,
+            text: sp.text,
+            html: sp.html,
+            headers: { ...sp.headers, ...rfqRefHeaders(sp.r.id) }
+          })));
           for (let i = 0; i < specs.length; i++) {
             results.push({ rfqId: specs[i].r.id, ok: true, to: specs[i].to, transport: "resend-batch", messageId: ids[i]?.id || null });
             // Capture the per-recipient Resend id (ids[] maps 1:1 to specs[]) so the Resend webhook
@@ -349,7 +366,7 @@ export function registerRfqPackageRoutes(app) {
           await logCorrespondence(specs.map((sp) => ({
             r: sp.r,
             subject: sp.subject,
-            bodyText: bodyForRfq(sp.r.id)
+            bodyText: sp.text
           })));
           batched = true;
         } catch (batchErr) {
@@ -375,14 +392,14 @@ export function registerRfqPackageRoutes(app) {
           while (cursor < specs.length) {
             const i = cursor++;
             const sp = specs[i];
-            const bodyText = bodyForRfq(sp.r.id);
+            const bodyText = sp.text;
             try {
               const transport = await withTimeout(
                 sendPlainMail({
                   to: sp.to,
                   subject: sp.subject,
-                  text: bodyText,
-                  html: wrapPlainTextEmailHtml(bodyText),
+                  text: sp.text,
+                  html: sp.html,
                   headers: { ...sp.headers, ...rfqRefHeaders(sp.r.id) }
                 }),
                 SEND_TIMEOUT_MS, `Send to ${sp.to}`

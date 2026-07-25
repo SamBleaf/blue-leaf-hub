@@ -92,3 +92,26 @@ export function formatSignatureFooter(sig) {
     .join("\n")
     .trim();
 }
+
+/**
+ * A signature CARD (contact block) with no "Kind regards," sign-off line — for emails whose body
+ * already carries a human sign-off ("Cheers, Sam"). Appending this reads like a real email
+ * signature block below the message, not a second sign-off. Used by the tender recipient blast.
+ */
+export function formatSignatureCard(sig) {
+  const s = { ...DEFAULT_EMAIL_SIGNATURE, ...sig };
+  const nameTitle = [s.fullName?.trim() || DEFAULT_EMAIL_SIGNATURE.fullName, s.title?.trim() || ""]
+    .filter(Boolean)
+    .join(" · ");
+  const lines = [
+    nameTitle,
+    s.mobile?.trim() || "",
+    s.website?.trim() || "",
+    s.postalAddress?.trim() || ""
+  ];
+  lines.push("", s.legalDisclaimer?.trim() || DEFAULT_EMAIL_SIGNATURE.legalDisclaimer);
+  return lines
+    .filter((line, i, arr) => !(line === "" && arr[i - 1] === ""))
+    .join("\n")
+    .trim();
+}

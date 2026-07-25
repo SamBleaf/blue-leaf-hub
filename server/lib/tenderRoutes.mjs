@@ -235,4 +235,97 @@ export function registerTenderRoutes(app) {
       return err(res, 500, "Could not set the primary file.");
     }
   });
+
+  // ── Saved email presets (custom templates for the "Email recipients" blast) ───────────────
+  // Built-in templates live in code; these are the org's own saved ones. Bodies may carry
+  // {{first_name}} / {{name}} / {{business}} merge tokens (substituted per recipient at send time).
+  const templateOut = (r) => ({ id: r.id, label: r.label, body: r.body, updatedAt: r.updated_at });
+  const isMissingTemplates = (e) =>
+    /tender_email_templates/i.test(String(e?.message || "")) &&
+    /(does not exist|relation|schema cache|could not find)/i.test(String(e?.message || ""));
+
+  app.get("/api/tender/email-templates", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { data, error } = await sb
+        .from("tender_email_templates")
+        .select("id, label, body, updated_at")
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return ok(res, { templates: (data || []).map(templateOut) });
+    } catch (e) {
+      // Fail soft before migration 156 is applied — the modal just shows the built-in templates.
+      if (isMissingTemplates(e)) return ok(res, { templates: [] });
+      console.error("[tender email-templates list]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not load templates.");
+    }
+  });
+
+  app.post("/api/tender/email-templates", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const label = String(req.body?.label || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!label) return err(res, 400, "Give the template a name.");
+    if (!body) return err(res, 400, "Template body can't be empty.");
+    try {
+      const { data, error } = await sb
+        .from("tender_email_templates")
+        .insert({ label, body, created_by: req.user?.email || null })
+        .select("id, label, body, updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      return ok(res, { template: templateOut(data) });
+    } catch (e) {
+      if (isMissingTemplates(e)) return err(res, 503, "Saved templates need migration 156 applied first.");
+      console.error("[tender email-templates create]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not save the template.");
+    }
+  });
+
+  app.patch("/api/tender/email-templates/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const patch = { updated_at: new Date().toISOString() };
+    if (req.body?.label !== undefined) {
+      const label = String(req.body.label || "").trim();
+      if (!label) return err(res, 400, "Give the template a name.");
+      patch.label = label;
+    }
+    if (req.body?.body !== undefined) {
+      const body = String(req.body.body || "").trim();
+      if (!body) return err(res, 400, "Template body can't be empty.");
+      patch.body = body;
+    }
+    try {
+      const { data, error } = await sb
+        .from("tender_email_templates")
+        .update(patch)
+        .eq("id", req.params.id)
+        .select("id, label, body, updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return err(res, 404, "Template not found.");
+      return ok(res, { template: templateOut(data) });
+    } catch (e) {
+      if (isMissingTemplates(e)) return err(res, 503, "Saved templates need migration 156 applied first.");
+      console.error("[tender email-templates update]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not update the template.");
+    }
+  });
+
+  app.delete("/api/tender/email-templates/:id", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const { error } = await sb.from("tender_email_templates").delete().eq("id", req.params.id);
+      if (error) throw error;
+      return ok(res, { id: req.params.id });
+    } catch (e) {
+      if (isMissingTemplates(e)) return ok(res, { id: req.params.id });
+      console.error("[tender email-templates delete]", e?.message || e);
+      return err(res, 500, translateDbError(e) || "Could not delete the template.");
+    }
+  });
 }

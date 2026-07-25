@@ -2,7 +2,7 @@ import { authFetch } from "../lib/authFetch.js";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getSupabase, supabaseConfigured } from "../lib/supabaseClient";
-import { formatSignatureFooter, loadEmailSignature } from "../lib/rfqSettings.js";
+import { formatSignatureFooter, formatSignatureCard, loadEmailSignature } from "../lib/rfqSettings.js";
 import { plainBodyToHtml } from "../lib/rfqComposer.js";
 import { sharedJobDropboxRootPath } from "../lib/companySettings.js";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
@@ -35,31 +35,31 @@ const EMAIL_TEMPLATES = [
     id: "plans",
     label: "Updated plans",
     build: ({ address, link }) =>
-      `Hi,\n\nQuick heads up — we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nQuick heads up — we've updated the plans for ${address || "the project"}. Grab the latest set here (opens for anyone, no Dropbox login needed):\n\n${link || "[plans link]"}\n\nThe scope hasn't changed, just make sure you're pricing off the current drawings. Give us a yell if anything's unclear.\n\nCheers,\nSam`,
   },
   {
     id: "reminder",
     label: "Reminder",
     build: ({ address, deadline }) =>
-      `Hi,\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` — we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` — we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
   },
   {
     id: "received",
     label: "Received — thanks",
     build: ({ address }) =>
-      `Hi,\n\nGot your quote through for ${address || "the project"} — appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"} — appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
   },
   {
     id: "won",
     label: "You've won it",
     build: ({ address }) =>
-      `Hi,\n\nGood news — we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nGood news — we'd like to go ahead with your quote for ${address || "the project"}. Really happy to have you on board. I'll be in touch soon to lock in start dates and sort the paperwork.\n\nCheers,\nSam`,
   },
   {
     id: "lost",
     label: "Not this time",
     build: ({ address }) =>
-      `Hi,\n\nThanks for taking the time to quote ${address || "the project"} — genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"} — genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
   },
 ];
 
@@ -176,6 +176,7 @@ function TKebab({ rfq, readOnly, on }) {
               <div className="my-1 border-t border-hairline" />
               <div className="px-2 py-1 text-[9.5px] font-bold uppercase tracking-wide text-muted/70">Fix a mistake</div>
               <button type="button" onClick={() => { setOpen(false); on.changeTrade(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Change trade</button>
+              <button type="button" onClick={() => { setOpen(false); on.changeSub(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Change subcontractor</button>
               <button type="button" onClick={() => { setOpen(false); on.split(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Label / split scopes</button>
               <button type="button" onClick={() => { setOpen(false); on.remove(rfq); }} className="block w-full rounded px-2 py-1.5 text-left font-semibold text-danger hover:bg-danger/10">Remove recipient</button>
             </>
@@ -330,15 +331,29 @@ function TenderCompareTable({ rows, tradeGroups, amountOfRfq, subView, submissio
 // Phase 4 — the "rectify in the UI" sheet: change a recipient's trade, label/split its scopes
 // (the real cabinetry-vs-stone fix — give each quote its own sub_scope_label so neither supersedes
 // the other), or remove a junk recipient.
-function EditRowModal({ editRow, subView, onClose, onChangeTrade, onPatchSub, onRemove }) {
+function EditRowModal({ editRow, subView, subsList = [], onClose, onChangeTrade, onChangeSub, onPatchSub, onRemove }) {
   const { type, rfq } = editRow;
   const subs = subView[rfq.id] || [];
   const [trade, setTrade] = useState(rfq.trade || "");
   const [labels, setLabels] = useState(() => Object.fromEntries(subs.map((s) => [s.id, s.subScopeLabel || ""])));
   const [busy, setBusy] = useState(false);
+  const [subQuery, setSubQuery] = useState("");
   const tradeOptions = [...new Set(RFQ_TRADE_ORDER.map((k) => TRADE_LABEL[k] || k))];
   const subName = rfq.subcontractors?.business_name || "this subcontractor";
   const run = async (fn) => { setBusy(true); try { await fn(); onClose(); } finally { setBusy(false); } };
+  // Change-subcontractor picker: trade-matched subs first, then a searchable list of the rest.
+  const pickerSubs = useMemo(() => {
+    const q = subQuery.trim().toLowerCase();
+    const matchStr = (s) => `${s.business_name || ""} ${s.contact || ""} ${s.email || ""}`.toLowerCase();
+    const matched = subcontractorsForTrade(rfq.trade, subsList, 9999);
+    const matchedIds = new Set(matched.map((s) => String(s.id)));
+    const others = subsList.filter((s) => !matchedIds.has(String(s.id)));
+    const withTag = (arr, m) => arr.map((s) => ({ ...s, _match: m }));
+    const all = [...withTag(matched, true), ...withTag(others, false)]
+      .filter((s) => String(s.id) !== String(rfq.subcontractor_id))
+      .filter((s) => !q || matchStr(s).includes(q));
+    return all.slice(0, 60);
+  }, [subQuery, subsList, rfq.trade, rfq.subcontractor_id]);
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 p-4" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-md rounded-card border border-hairline bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -353,6 +368,45 @@ function EditRowModal({ editRow, subView, onClose, onChangeTrade, onPatchSub, on
             <div className="mt-6 flex justify-end gap-2">
               <button type="button" className="rounded-lg px-4 py-2 text-sm text-muted" onClick={onClose}>Cancel</button>
               <button type="button" disabled={busy || !trade || trade === rfq.trade} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" onClick={() => run(() => onChangeTrade(rfq.id, trade))}>Save</button>
+            </div>
+          </>
+        )}
+        {type === "changeSub" && (
+          <>
+            <h3 className="text-lg font-bold text-primary">Change subcontractor</h3>
+            <p className="mt-1 text-sm text-muted">Re-point this RFQ — and any quotes filed against it — from <b>{subName}</b> to the right subcontractor. Subs that do <b>{rfq.trade}</b> are listed first.</p>
+            <input
+              value={subQuery}
+              onChange={(e) => setSubQuery(e.target.value)}
+              placeholder="Search subcontractors…"
+              className="mt-4 w-full rounded-lg border border-hairline px-3 py-2 text-sm"
+              autoFocus
+            />
+            <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-lg border border-hairline bg-page p-1">
+              {subsList.length === 0 ? (
+                <p className="px-2 py-4 text-center text-sm text-muted">Loading subcontractors…</p>
+              ) : pickerSubs.length === 0 ? (
+                <p className="px-2 py-4 text-center text-sm text-muted">No other subcontractors match.</p>
+              ) : (
+                pickerSubs.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run(() => onChangeSub(rfq.id, s.id))}
+                    className="flex w-full items-center justify-between gap-2 rounded-md bg-surface px-3 py-2 text-left ring-1 ring-hairline transition hover:ring-primary/40 disabled:opacity-40"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-ink">{s.business_name || s.email || "—"}</span>
+                      <span className="block truncate text-[11px] text-muted">{[s.contact, s.email].filter(Boolean).join(" · ")}</span>
+                    </span>
+                    {s._match ? <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">matches trade</span> : null}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button type="button" className="rounded-lg px-4 py-2 text-sm text-muted" onClick={onClose}>Cancel</button>
             </div>
           </>
         )}
@@ -641,6 +695,10 @@ export default function TenderDetail() {
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailResult, setEmailResult] = useState(null);
   const [emailCtx, setEmailCtx] = useState({ address: "", link: "", deadline: "" }); // template variables
+  const [customTemplates, setCustomTemplates] = useState([]); // user-saved presets (mig 156)
+  const [activePresetId, setActivePresetId] = useState(null); // which saved preset is loaded in the box
+  const [presetForm, setPresetForm] = useState(null); // { mode: "new"|"edit", label } when the save panel is open
+  const [presetBusy, setPresetBusy] = useState(false);
 
   const readOnly = job?.status === "archived";
 
@@ -774,6 +832,11 @@ export default function TenderDetail() {
     }
   }, [jobId, load]);
 
+  // Signature CARD (no "Kind regards" line) for the recipient blast — the templates carry their own
+  // "Cheers, Sam" sign-off, so the card reads as a contact block below, not a second sign-off.
+  // Defined BEFORE sendEmailRecipients, which lists it in a dep array (avoid a const-TDZ render crash).
+  const sigCard = useMemo(() => formatSignatureCard(loadEmailSignature()), []);
+
   const openEmailRecipients = useCallback(async () => {
     setEmailOpen(true);
     setEmailResult(null);
@@ -795,6 +858,14 @@ export default function TenderDetail() {
       const ctx = { address: json?.job?.address || "", link, deadline };
       setEmailCtx(ctx);
       setEmailMsg(EMAIL_TEMPLATES[0].build(ctx)); // default to the "Updated plans" template
+      setActivePresetId(null);
+      setPresetForm(null);
+      // Load the org's saved presets (fails soft to [] before migration 156).
+      try {
+        const tr = await authFetch("/api/tender/email-templates");
+        const tj = await tr.json().catch(() => ({}));
+        if (tj?.ok) setCustomTemplates(tj.templates || []);
+      } catch { /* non-fatal — built-in templates still work */ }
     } catch {
       setEmailResult({ error: "Could not load recipients." });
     } finally {
@@ -826,7 +897,7 @@ export default function TenderDetail() {
       const res = await authFetch("/api/rfq/notify-recipients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, rfqIds, message: emailMsg })
+        body: JSON.stringify({ jobId, rfqIds, message: emailMsg, signatureFooter: sigCard })
       });
       const json = await res.json();
       if (!res.ok || !json?.ok) setEmailResult({ error: json?.error || "Send failed." });
@@ -836,7 +907,51 @@ export default function TenderDetail() {
     } finally {
       setEmailBusy(false);
     }
-  }, [emailSel, emailMsg, jobId, load]);
+  }, [emailSel, emailMsg, jobId, load, sigCard]);
+
+  // ── Saved email presets (custom templates) ─────────────────────────────────
+  const applyPreset = (t) => { setEmailMsg(t.body); setActivePresetId(t.id); setPresetForm(null); };
+  const saveNewPreset = useCallback(async () => {
+    const label = (presetForm?.label || "").trim();
+    if (!label) return;
+    setPresetBusy(true);
+    try {
+      const res = await authFetch("/api/tender/email-templates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label, body: emailMsg })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setEmailResult({ error: j?.error || "Could not save the template." }); return; }
+      setCustomTemplates((prev) => [j.template, ...prev.filter((t) => t.id !== j.template.id)]);
+      setActivePresetId(j.template.id);
+      setPresetForm(null);
+    } finally { setPresetBusy(false); }
+  }, [presetForm, emailMsg]);
+  const updatePreset = useCallback(async () => {
+    if (!activePresetId) return;
+    const label = (presetForm?.label || "").trim();
+    setPresetBusy(true);
+    try {
+      const res = await authFetch(`/api/tender/email-templates/${activePresetId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(label ? { label } : {}), body: emailMsg })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setEmailResult({ error: j?.error || "Could not update the template." }); return; }
+      setCustomTemplates((prev) => prev.map((t) => (t.id === j.template.id ? j.template : t)));
+      setPresetForm(null);
+    } finally { setPresetBusy(false); }
+  }, [activePresetId, presetForm, emailMsg]);
+  const deletePreset = useCallback(async (id) => {
+    setPresetBusy(true);
+    try {
+      const res = await authFetch(`/api/tender/email-templates/${id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setEmailResult({ error: j?.error || "Could not delete the template." }); return; }
+      setCustomTemplates((prev) => prev.filter((t) => t.id !== id));
+      if (activePresetId === id) setActivePresetId(null);
+    } finally { setPresetBusy(false); }
+  }, [activePresetId]);
 
 
   useEffect(() => {
@@ -1163,6 +1278,17 @@ function winRowMissingConfirmedQuote(row) {
     if (!res.ok || !data.ok) setError(data.error || "Could not remove the recipient.");
     else await load();
   }
+  // Re-point an RFQ (and its quotes) to a different subcontractor — fixes a quote filed against the
+  // wrong sub. Backend PATCH accepts subcontractorId (tenderRoutes.mjs).
+  async function changeRfqSub(rfqId, subcontractorId) {
+    if (readOnly) return;
+    const res = await authFetch(`/api/tender/rfqs/${encodeURIComponent(rfqId)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subcontractorId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) setError(data.error || "Could not change the subcontractor.");
+    else await load();
+  }
 
   // Shared row-action bundle — one source for the desktop comparison table AND the mobile card ⋯ menu.
   const rowActions = {
@@ -1175,9 +1301,21 @@ function winRowMissingConfirmedQuote(row) {
     query: (rr) => { setQueryRfq(rr); setQueryBody(""); },
     addSub: (trade) => openAdd("recipient", trade),
     changeTrade: (rr) => setEditRow({ type: "trade", rfq: rr }),
+    changeSub: (rr) => setEditRow({ type: "changeSub", rfq: rr }),
     split: (rr) => setEditRow({ type: "split", rfq: rr }),
     remove: (rr) => setEditRow({ type: "remove", rfq: rr }),
   };
+
+  // Ensure the subcontractor list is loaded when the change-subcontractor picker opens.
+  useEffect(() => {
+    if (editRow?.type !== "changeSub" || addSubs.length) return;
+    (async () => {
+      const sb = getSupabase();
+      if (!sb) return;
+      const { data } = await sb.from("subcontractors").select("id, business_name, contact, email, trade").order("business_name");
+      setAddSubs(data || []);
+    })();
+  }, [editRow, addSubs.length]);
 
   // The card-level Accept awards the CURRENT submission through the new pointer; a legacy rfq with
   // no submissions falls back to the old invitation-status flip so nothing regresses mid-cutover.
@@ -2029,28 +2167,77 @@ function winRowMissingConfirmedQuote(row) {
                       );
                     })}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="mt-3 flex items-center justify-between gap-2">
                     <label className="text-xs font-semibold uppercase text-muted">Message</label>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] uppercase tracking-wide text-muted">Template</span>
-                      {EMAIL_TEMPLATES.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => setEmailMsg(t.build(emailCtx))}
-                          className="rounded-full border border-hairline bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/5"
-                        >
-                          {t.label}
-                        </button>
-                      ))}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPresetForm({ label: activePresetId ? (customTemplates.find((t) => t.id === activePresetId)?.label || "") : "" })}
+                      className="rounded-full border border-dashed border-hairline px-2.5 py-0.5 text-[11px] font-semibold text-muted transition hover:border-primary/40 hover:text-primary"
+                    >
+                      ＋ Save preset
+                    </button>
                   </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-muted">Templates</span>
+                    {EMAIL_TEMPLATES.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { setEmailMsg(t.build(emailCtx)); setActivePresetId(null); }}
+                        className="rounded-full border border-hairline bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/5"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                    {customTemplates.map((t) => (
+                      <span
+                        key={t.id}
+                        className={`inline-flex items-center gap-1 rounded-full border px-1 py-0.5 text-[11px] font-semibold transition ${activePresetId === t.id ? "border-accent bg-accent/10 text-accent" : "border-accent/40 bg-accent/5 text-accent hover:bg-accent/10"}`}
+                      >
+                        <button type="button" onClick={() => applyPreset(t)} className="pl-1.5">{t.label}</button>
+                        <button
+                          type="button"
+                          title="Delete preset"
+                          disabled={presetBusy}
+                          onClick={() => deletePreset(t.id)}
+                          className="rounded-full px-1 text-accent/60 hover:bg-accent/20 hover:text-accent disabled:opacity-40"
+                        >×</button>
+                      </span>
+                    ))}
+                    {customTemplates.length === 0 ? <span className="text-[10px] text-muted/70">— save your own with ＋ Save preset</span> : null}
+                  </div>
+                  {presetForm ? (
+                    <div className="mt-2 rounded-lg border border-hairline bg-page p-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={presetForm.label}
+                          onChange={(e) => setPresetForm((f) => ({ ...f, label: e.target.value }))}
+                          placeholder="Preset name e.g. Site meeting invite"
+                          className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs"
+                          autoFocus
+                        />
+                        {activePresetId ? (
+                          <>
+                            <button type="button" disabled={presetBusy} onClick={updatePreset} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Update</button>
+                            <button type="button" disabled={presetBusy || !presetForm.label.trim()} onClick={saveNewPreset} className="rounded-md border border-primary px-3 py-1 text-xs font-semibold text-primary disabled:opacity-40">Save as new</button>
+                          </>
+                        ) : (
+                          <button type="button" disabled={presetBusy || !presetForm.label.trim()} onClick={saveNewPreset} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Save</button>
+                        )}
+                        <button type="button" onClick={() => setPresetForm(null)} className="rounded-md px-2 py-1 text-xs text-muted">Cancel</button>
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted">Saves the current message as a reusable preset. Keep the {"{{first_name}}"} token to personalise per recipient.</p>
+                    </div>
+                  ) : null}
                   <textarea
                     rows={10}
                     value={emailMsg}
                     onChange={(e) => setEmailMsg(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs font-mono leading-relaxed"
+                    className="mt-2 w-full rounded-lg border border-hairline bg-page px-3 py-2 text-xs font-mono leading-relaxed"
                   />
+                  <p className="mt-1 text-[10px] text-muted">
+                    <code className="rounded bg-page px-1">{"{{first_name}}"}</code> personalises each email (falls back to “there”). Your signature block is added automatically below the sign-off.
+                  </p>
                   {emailResult?.error ? <p className="mt-2 text-xs text-danger">{emailResult.error}</p> : null}
                   {emailResult?.sent != null ? (
                     <p className="mt-2 text-xs text-success">Sent {emailResult.sent} of {emailResult.total}.</p>
@@ -2425,8 +2612,10 @@ function winRowMissingConfirmedQuote(row) {
         <EditRowModal
           editRow={editRow}
           subView={subView}
+          subsList={addSubs}
           onClose={() => setEditRow(null)}
           onChangeTrade={changeRfqTrade}
+          onChangeSub={changeRfqSub}
           onPatchSub={patchSubmission}
           onRemove={removeRecipient}
         />
