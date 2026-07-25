@@ -101,6 +101,178 @@ function SubmissionRow({ s, rfqId, busy, readOnly, showAward, onPatch, onPrimary
   );
 }
 
+// ── UX redesign phase 3b: the desktop comparison table ──────────────────────
+// Cards stay on mobile (lg:hidden); desktop renders this dense table. Reuses the exact same
+// verify/award/patch handlers as the cards — it's a re-rendering of proven data, not new logic.
+function fmtAud(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return `$${Number(n).toLocaleString("en-AU", { maximumFractionDigits: 2 })}`;
+}
+
+// Row-level ⋯ menu. Change-trade / change-sub / split / remove land in phase 4 (need endpoints);
+// for now it exposes the reply + decline actions that already exist.
+function TKebab({ rfq, readOnly, on }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  return (
+    <span className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="rounded-md border border-hairline px-2 py-1 text-xs font-bold leading-none text-muted hover:bg-page">⋯</button>
+      {open && (
+        <div className="absolute right-0 top-8 z-30 w-44 rounded-lg border border-hairline bg-surface p-1 text-xs shadow-lg">
+          <button type="button" onClick={() => { setOpen(false); on.query(rfq); }} className="block w-full rounded px-2 py-1.5 text-left text-ink hover:bg-page">Reply / query</button>
+          {!readOnly && <button type="button" onClick={() => { setOpen(false); on.decline(rfq.id); }} className="block w-full rounded px-2 py-1.5 text-left text-muted hover:bg-page">Decline</button>}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// One table row for a submission (a sub's quote for a scope). Parallel scopes = sibling rows.
+function TSubRow({ s, rfq, busy, readOnly, on }) {
+  const [amt, setAmt] = useState(s.amountExGst != null ? String(s.amountExGst) : "");
+  const verified = s.verificationStatus === "verified";
+  const rejected = s.verificationStatus === "rejected";
+  const amtValid = amt !== "" && Number.isFinite(Number(amt)) && Number(amt) >= 0;
+  const primary = (s.attachments || []).find((a) => a.isPrimary) || (s.attachments || [])[0];
+  return (
+    <tr className={`border-t border-hairline align-top ${s.isAccepted ? "bg-emerald-50/60" : "hover:bg-page/40"}`}>
+      <td className="px-3 py-2">
+        <div className="font-semibold text-ink">
+          {s.subScopeLabel && <span className="mr-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{s.subScopeLabel}</span>}
+          {rfq.subcontractors?.business_name || "—"}
+        </div>
+        <div className="text-[11px] text-muted">{(rfq.subcontractors?.contact || "") + (rfq.subcontractors?.email ? ` · ${rfq.subcontractors.email}` : "")}</div>
+      </td>
+      <td className="px-3 py-2 text-[11px] whitespace-nowrap">
+        {s.isAccepted && <span className="mr-1 inline-block rounded-full bg-emerald-700 px-1.5 py-0.5 font-semibold text-white">✓ Awarded</span>}
+        {verified
+          ? <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">✓ Verified</span>
+          : rejected
+            ? <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 font-semibold text-zinc-600">Rejected</span>
+            : <span className="rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">Needs review</span>}
+      </td>
+      <td className="px-3 py-2 text-[11px]">
+        {primary?.pdfUrl ? <a href={primary.pdfUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{primary.filename || "PDF"}</a> : <span className="text-muted">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right whitespace-nowrap">
+        {(verified || rejected || readOnly)
+          ? <span className="font-bold tabular-nums text-ink">{s.amountExGst != null ? fmtAud(s.amountExGst) : "—"}</span>
+          : (
+            <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-1 ${amtValid ? "border-hairline" : "border-amber-300 bg-amber-50/50"}`}>
+              <span className="text-muted">$</span>
+              <input value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="amount" className="w-20 bg-transparent text-right text-xs font-semibold tabular-nums outline-none" />
+            </span>
+          )}
+      </td>
+      <td className="px-3 py-2 text-right whitespace-nowrap">
+        <div className="inline-flex items-center gap-1.5">
+          {!readOnly && !verified && !rejected && (
+            <button type="button" disabled={busy || !amtValid} onClick={() => on.patch(s.id, { confirmedAmountExGst: Number(amt), verificationStatus: "verified" })} className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">Verify</button>
+          )}
+          {!readOnly && (verified || rejected) && (
+            <button type="button" disabled={busy} onClick={() => on.patch(s.id, { verificationStatus: "unverified" })} className="rounded-md border border-hairline px-2 py-1 text-xs font-semibold text-muted disabled:opacity-40">{verified ? "Un-verify" : "Restore"}</button>
+          )}
+          {!readOnly && (s.isAccepted
+            ? <button type="button" disabled={busy} onClick={() => on.unaward(rfq.id)} className="rounded-md border border-hairline px-2 py-1 text-xs font-semibold text-muted disabled:opacity-40">Un-accept</button>
+            : <button type="button" disabled={busy} onClick={() => on.award(rfq.id, s.id)} className="rounded-md border border-accent px-2 py-1 text-xs font-semibold text-accent disabled:opacity-40">Award</button>)}
+          <TKebab rfq={rfq} readOnly={readOnly} on={on} />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// One table row for a recipient with NO submission yet (manual / awaiting). Legacy amount + toggle-award.
+function TLegacyRow({ rfq, readOnly, on }) {
+  const overdue = isOverdue(rfq.deadline, rfq.status);
+  const vis = overdue ? { label: "Overdue", cls: "bg-red-100 text-red-700" } : (RFQ_STATUS_VIS[rfq.status] || RFQ_STATUS_VIS.sent);
+  const pdfHref = String(rfq.quote_pdf_url || rfq.dropbox_pdf_url || "").trim();
+  const pdfOpenUrl = pdfHref.startsWith("http") ? pdfHref : "";
+  const accepted = rfq.status === "accepted";
+  return (
+    <tr className="border-t border-hairline align-top hover:bg-page/40">
+      <td className="px-3 py-2">
+        <div className="font-semibold text-ink">{rfq.subcontractors?.business_name || "—"}</div>
+        <div className="text-[11px] text-muted">{(rfq.subcontractors?.contact || "") + (rfq.subcontractors?.email ? ` · ${rfq.subcontractors.email}` : "")}</div>
+      </td>
+      <td className="px-3 py-2 text-[11px] whitespace-nowrap"><span className={`rounded-full px-1.5 py-0.5 font-semibold ${vis.cls}`}>{vis.label}</span></td>
+      <td className="px-3 py-2 text-[11px]">{pdfOpenUrl ? <a href={pdfOpenUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Quote PDF</a> : <span className="text-muted">—</span>}</td>
+      <td className="px-3 py-2 text-right whitespace-nowrap">
+        {readOnly
+          ? <span className="tabular-nums text-ink">{rfq.quote_amount != null ? fmtAud(rfq.quote_amount) : "—"}</span>
+          : (
+            <span className="inline-flex items-center gap-1 rounded border border-hairline px-1.5 py-1">
+              <span className="text-muted">$</span>
+              <input type="number" defaultValue={rfq.quote_amount ?? ""} placeholder="amount" className="w-20 bg-transparent text-right text-xs font-semibold tabular-nums outline-none"
+                onBlur={(e) => { const v = e.target.value; if (v === String(rfq.quote_amount ?? "")) return; on.updateRfq(rfq.id, { quote_amount: v === "" ? null : Number(v), manually_entered: true }); }} />
+            </span>
+          )}
+      </td>
+      <td className="px-3 py-2 text-right whitespace-nowrap">
+        <div className="inline-flex items-center gap-1.5">
+          {!readOnly && (accepted
+            ? <button type="button" onClick={() => on.toggleAccept(rfq)} className="rounded-md border border-hairline px-2 py-1 text-xs font-semibold text-muted">Un-award</button>
+            : <button type="button" disabled={!(rfq.quote_amount > 0 || rfq.quoted_amount > 0)} onClick={() => on.toggleAccept(rfq)} className="rounded-md border border-accent px-2 py-1 text-xs font-semibold text-accent disabled:opacity-40">Award</button>)}
+          <TKebab rfq={rfq} readOnly={readOnly} on={on} />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// The desktop table: rows grouped by trade with a per-trade comparison header.
+function TenderCompareTable({ rows, tradeGroups, amountOfRfq, subView, submissionBusy, readOnly, canAddSub, on }) {
+  const seen = new Set();
+  return (
+    <div className="overflow-x-auto rounded-card border border-hairline bg-surface">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-hairline bg-page/60 text-[10px] uppercase tracking-wide text-muted">
+            <th className="px-3 py-2 font-semibold">Subcontractor</th>
+            <th className="px-3 py-2 font-semibold">Status</th>
+            <th className="px-3 py-2 font-semibold">Quote file</th>
+            <th className="px-3 py-2 text-right font-semibold">Quote (ex GST)</th>
+            <th className="px-3 py-2 text-right font-semibold">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const t = r.trade || "(untraded)";
+            const first = !seen.has(t);
+            if (first) seen.add(t);
+            const group = tradeGroups.get(t) || [r];
+            const priced = group.map((x) => amountOfRfq(x)).filter((a) => a != null).sort((a, b) => a - b);
+            const subs = subView[r.id] || [];
+            return (
+              <Fragment key={r.id}>
+                {first && (
+                  <tr className="border-t border-hairline bg-page/40">
+                    <td colSpan={5} className="px-3 py-1.5">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-xs font-bold text-ink">{TRADE_LABEL[r.trade] || r.trade}</span>
+                        <span className="text-[11px] text-muted">{priced.length}/{group.length} quoted{priced.length ? <> · lowest <b className="tabular-nums text-ink">{fmtAud(priced[0])}</b></> : null}</span>
+                        {canAddSub && <button type="button" onClick={() => on.addSub(r.trade)} className="rounded-full border border-hairline px-2 py-0.5 text-[10px] font-semibold text-primary hover:border-primary/40">+ sub</button>}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {subs.length
+                  ? subs.map((s) => <TSubRow key={s.id} s={s} rfq={r} busy={!!submissionBusy[s.id]} readOnly={readOnly} on={on} />)
+                  : <TLegacyRow rfq={r} readOnly={readOnly} on={on} />}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Per-trade email engagement strip, driven entirely by the denormalised rfqs.* columns the recipient
 // query already SELECTs (rfqs ( * )). No extra query. Events arrive via the Resend webhook:
 //   delivered → email_delivered_at, opened → email_opened_at, clicked → email_clicked_at,
@@ -1792,6 +1964,32 @@ function winRowMissingConfirmedQuote(row) {
             )}
           </div>
         )}
+        {/* Desktop: dense comparison table (phase 3b). Mobile keeps the cards below. */}
+        {visibleRfqs.length > 0 && (
+          <div className="hidden lg:block">
+            <TenderCompareTable
+              rows={visibleRfqs}
+              tradeGroups={tradeGroups}
+              amountOfRfq={amountOfRfq}
+              subView={subView}
+              submissionBusy={submissionBusy}
+              readOnly={readOnly}
+              canAddSub={!readOnly && job.status === "tendering"}
+              on={{
+                patch: patchSubmission,
+                award: awardSubmission,
+                unaward: unawardRfq,
+                updateRfq,
+                toggleAccept,
+                decline: (id) => updateRfq(id, { status: "declined" }),
+                query: (rr) => { setQueryRfq(rr); setQueryBody(""); },
+                addSub: (trade) => openAdd("recipient", trade),
+              }}
+            />
+          </div>
+        )}
+        {/* Mobile: the existing cards */}
+        <div className="space-y-4 lg:hidden">
         {visibleRfqs.map((r) => {
           const sub = r.subcontractors;
           const vis = isOverdue(r.deadline, r.status)
@@ -2016,6 +2214,7 @@ function winRowMissingConfirmedQuote(row) {
             </Fragment>
           );
         })}
+        </div>
       </section>
       ) : null}
 
