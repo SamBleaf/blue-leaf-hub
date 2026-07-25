@@ -45,6 +45,7 @@ import {
   logRfqMatchTrace
 } from "./lib/rfqMatchTrace.mjs";
 import { applyInboundQuoteToWorkflow, findRecipientLinkForRfq } from "./lib/rfqQuotePropagation.mjs";
+import { classifyInboundQuoteEmail } from "./lib/quoteInboxClassify.mjs";
 import { createInboundSubmission, addSubmissionAttachment } from "./lib/tenderSubmissions.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
@@ -386,6 +387,19 @@ async function processIncomingQuoteMessage(sb, msg, rfqRows) {
     email_uid: msg.uid
   });
   if (!best) {
+    // Junk guard — the office mailbox also receives client-portal notifications (variation
+    // approvals etc., sent from admin@) and hardening test artifacts (BLH TEST / __DRYRUN /
+    // __DEMO). These are never subcontractor quotes, so writing them to the Quote Inbox pollutes
+    // it (the ~76-row cleanup, 2026-07). Mirror of financeRoutes.classifyInboxDoc: skip on a CLEAR
+    // junk signal only — a stray real quote is safer kept than dropped, so anything still
+    // quote-shaped falls through and is captured as before. Skips BOTH writes (no orphan row).
+    const junk = classifyInboundQuoteEmail({ fromEmail, subject, body: bodyForLog });
+    if (junk.category !== "quote") {
+      console.log(`[imap-unmatched] skipped ${junk.category} (not a subcontractor quote): "${subject}" from ${fromEmail} — ${junk.reason}`);
+      logRfqMatchTrace({ ...matchTrace, result: "skipped-not-a-quote", match_reason: `${junk.category}: ${junk.reason}`, rows_updated: {} });
+      return { matched: false, skipped: junk.category, uid: msg.uid };
+    }
+
     const unmatchedAttachments = [];
     if (pdfRows.length && dropboxConfigured()) {
       for (const row of pdfRows) {

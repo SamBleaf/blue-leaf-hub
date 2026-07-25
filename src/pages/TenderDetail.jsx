@@ -1104,6 +1104,21 @@ function winRowMissingConfirmedQuote(row) {
     else await load();
   }
 
+  // Shared row-action bundle — one source for the desktop comparison table AND the mobile card ⋯ menu.
+  const rowActions = {
+    patch: patchSubmission,
+    award: awardSubmission,
+    unaward: unawardRfq,
+    updateRfq,
+    toggleAccept,
+    decline: (id) => updateRfq(id, { status: "declined" }),
+    query: (rr) => { setQueryRfq(rr); setQueryBody(""); },
+    addSub: (trade) => openAdd("recipient", trade),
+    changeTrade: (rr) => setEditRow({ type: "trade", rfq: rr }),
+    split: (rr) => setEditRow({ type: "split", rfq: rr }),
+    remove: (rr) => setEditRow({ type: "remove", rfq: rr }),
+  };
+
   // The card-level Accept awards the CURRENT submission through the new pointer; a legacy rfq with
   // no submissions falls back to the old invitation-status flip so nothing regresses mid-cutover.
   function toggleAccept(r) {
@@ -2081,19 +2096,7 @@ function winRowMissingConfirmedQuote(row) {
               submissionBusy={submissionBusy}
               readOnly={readOnly}
               canAddSub={!readOnly && job.status === "tendering"}
-              on={{
-                patch: patchSubmission,
-                award: awardSubmission,
-                unaward: unawardRfq,
-                updateRfq,
-                toggleAccept,
-                decline: (id) => updateRfq(id, { status: "declined" }),
-                query: (rr) => { setQueryRfq(rr); setQueryBody(""); },
-                addSub: (trade) => openAdd("recipient", trade),
-                changeTrade: (rr) => setEditRow({ type: "trade", rfq: rr }),
-                split: (rr) => setEditRow({ type: "split", rfq: rr }),
-                remove: (rr) => setEditRow({ type: "remove", rfq: rr }),
-              }}
+              on={rowActions}
             />
           </div>
         )}
@@ -2284,6 +2287,8 @@ function winRowMissingConfirmedQuote(row) {
                     >
                       Query
                     </button>
+                    {/* Mobile ⋯ parity (matches the desktop table): change trade / split scopes / remove. */}
+                    <TKebab rfq={r} readOnly={readOnly} on={rowActions} />
                   </div>
                 </div>
               </div>

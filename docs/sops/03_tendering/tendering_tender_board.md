@@ -84,6 +84,8 @@ Verifying does **not** award the job — it only confirms the number.
 ### Quote Inbox (unmatched quotes)
 Most subcontractor quote emails match to their RFQ automatically. When one can't be matched (a reply from an unexpected address, a forwarded quote), it lands in **Tendering → Quote Inbox** (a red count on the nav shows how many are waiting). Open it, click **Match to job** on an email, pick the **job** then the **RFQ / trade**, and **Match** — the quote is filed against that RFQ *and* recorded in the quote record so it shows on the tender detail and feeds Cost Intelligence like any other quote. (The same list also still appears under the Quote Tracker's "Unmatched" tab.)
 
+**The Quote Inbox only shows real subcontractor quotes.** The office mailbox also receives things that are *not* quotes — client-portal notifications ("Client approved a variation — …", sent from admin@) and internal test emails (marked `BLH TEST` / `__DRYRUN` / `__DEMO`). A classifier filters these out at the source so they never reach the inbox, so the count reflects quotes that genuinely need a decision. If you ever see junk here, it usually means a new notification wording slipped past the filter — flag it so the pattern can be added. (One-off historic clean-up of already-captured junk: run `node scripts/cleanup-quote-inbox.mjs` for a dry-run list, then `--apply` to clear them — they're marked resolved, not deleted, so nothing is lost.)
+
 ## 7. Common mistakes
 
 | Mistake | Why it happens | How to avoid it |
@@ -119,6 +121,7 @@ Most subcontractor quote emails match to their RFQ automatically. When one can't
 - Delete: `POST /api/tender/job-delete { jobId }`
 - "New tender" links to `/tender-manager/rfq-engine`
 - Card click navigates to `/tender-manager/board/:jobId`
+- **Quote Inbox junk guard:** the inbound-quote IMAP poller (`processIncomingQuoteMessage` in `server/dev-api.mjs`) runs `classifyInboundQuoteEmail` (`server/lib/quoteInboxClassify.mjs`) on every email with **no RFQ match**. It skips writing to `unmatched_quote_emails` (and the backing `correspondence` row) when the email is a `test_artifact` (BLH TEST / `__DRYRUN` / `__DEMO` markers), a `portal_notification` (subject starts "Client approved/declined/… a variation", "New portal message …" etc.), or `self_sent` (from `@blueleafbuilding.com.au`). It's the direct sibling of `financeRoutes.classifyInboxDoc` (finance's invoice-vs-quote gate) and is conservative — it only skips on a clear junk signal, so an unusual-but-genuine quote still falls through and is captured. Unit test: `scripts/tests/quote-inbox-classify.test.mjs`. Historic backfill: `scripts/cleanup-quote-inbox.mjs` (dry-run default, `--apply` sets `resolved_at`).
 
 ## 12. Edge cases and limits
 - Archived tenders are filtered out unless "Show archived" is on
@@ -216,6 +219,13 @@ Next review: 2026-11-30
 2. Click **Match to job** on one → pick a **job** → pick an **RFQ / trade** → **Match**. Expected: the row disappears and the nav count drops by one.
 3. Open that job's tender detail. Expected: the matched quote now appears in the "quotes on record" panel for that RFQ (i.e. the manual match created a submission, not just a legacy status change) and can be verified/awarded like any other.
 4. Board consolidation: on the Tender Board, a job with awarded quotes shows "N awarded · $X" on its card and in the List **Awarded** column; the KPI strip's **Committed** tile sums awarded amounts across active tenders.
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Quote Inbox junk guard: notifications and test emails never appear**
+1. Run the classifier unit test: `node scripts/tests/quote-inbox-classify.test.mjs`. Expected: `quote-inbox-classify: 15 passed, 0 failed` (exit 0).
+2. Confirm the guard's three skip categories and the keep-default in the test output logic: a `test_artifact` (subject containing `BLH TEST` / `__DRYRUN` / `__DEMO`), a `portal_notification` (subject "Client approved a variation — …"), and a `self_sent` email (from `@blueleafbuilding.com.au`) all classify as junk; a genuine RFQ reply from an external subcontractor domain classifies as `quote`.
+3. Dry-run the historic clean-up: `node scripts/cleanup-quote-inbox.mjs`. Expected: it prints the unresolved rows grouped by junk category with a per-row reason and writes **nothing** (dry run). Sanity-check the candidate list looks like junk before `--apply`.
+4. (Optional, with IMAP live) After a poll cycle, a client-portal variation-approval email sent to the office mailbox does **not** create a new Quote Inbox row; the server log shows `[imap-unmatched] skipped portal_notification …`.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
