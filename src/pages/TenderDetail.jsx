@@ -294,6 +294,7 @@ export default function TenderDetail() {
   // comparison and to surface EVERY quote a sub sent (not just the last one to land on the rfq).
   const [subView, setSubView] = useState({});
   const [submissionBusy, setSubmissionBusy] = useState({});
+  const [tradeFilter, setTradeFilter] = useState("quoted"); // quoted | awaiting | awarded | all (UX redesign phase 3)
   const [corr, setCorr] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -590,11 +591,38 @@ export default function TenderDetail() {
     for (const r of rfqs) { const t = r.trade || "(untraded)"; if (!m.has(t)) m.set(t, []); m.get(t).push(r); }
     return m;
   }, [rfqs]);
-  const firstOfTradeIds = useMemo(() => {
-    const s = new Set();
-    for (const list of tradeGroups.values()) if (list[0]) s.add(list[0].id);
+  // ── UX redesign phase 3: category per recipient + filtered view + summary ──
+  const catOf = useCallback((r) => {
+    if (r.status === "accepted" || r.accepted_submission_id) return "awarded";
+    const hasQuote = (subView[r.id]?.length > 0)
+      || (r.quote_amount != null && Number(r.quote_amount) > 0)
+      || (r.quoted_amount != null && Number(r.quoted_amount) > 0);
+    return hasQuote ? "quoted" : "awaiting";
+  }, [subView]);
+  const matchesFilter = useCallback((r) => {
+    if (tradeFilter === "all") return true;
+    const c = catOf(r);
+    if (tradeFilter === "quoted") return c === "quoted" || c === "awarded"; // "has a quote"
+    return c === tradeFilter;                                                // awaiting | awarded
+  }, [tradeFilter, catOf]);
+  const visibleRfqs = useMemo(() => rfqs.filter(matchesFilter), [rfqs, matchesFilter]);
+  const visibleFirstOfTrade = useMemo(() => {
+    const s = new Set(); const seen = new Set();
+    for (const r of visibleRfqs) { const t = r.trade || "(untraded)"; if (!seen.has(t)) { seen.add(t); s.add(r.id); } }
     return s;
-  }, [tradeGroups]);
+  }, [visibleRfqs]);
+  const tenderSummary = useMemo(() => {
+    const trades = new Set(rfqs.map((r) => r.trade || "(untraded)")).size;
+    let quoted = 0, awaiting = 0, awarded = 0, committed = 0, verified = 0;
+    for (const r of rfqs) {
+      const c = catOf(r);
+      if (c === "awarded") { awarded++; const a = amountOfRfq(r); if (a != null && Number.isFinite(a)) committed += a; }
+      else if (c === "quoted") quoted++;
+      else awaiting++;
+      verified += (subView[r.id] || []).filter((s) => s.isVerified).length;
+    }
+    return { trades, quoted, awaiting, awarded, committed, verified, quotedTotal: quoted + awarded };
+  }, [rfqs, catOf, subView, amountOfRfq]);
 
   // Trades from the master list that aren't on this job yet — the "missed in the RFQ engine" set.
   const tnorm = (t) => String(t || "").toLowerCase().replace(/[_\s]+/g, " ").trim();
@@ -1730,7 +1758,41 @@ function winRowMissingConfirmedQuote(row) {
             </div>
           </div>
         )}
-        {rfqs.map((r) => {
+        {/* UX redesign phase 3 — summary + filter chips (collapses the 26-trade scroll to what matters) */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-lg border border-hairline bg-page/60 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+            <span><b className="tabular-nums">{tenderSummary.trades}</b> <span className="text-muted">trades</span></span>
+            <span><b className="tabular-nums">{tenderSummary.quotedTotal}</b> <span className="text-muted">quoted</span></span>
+            <span><b className="tabular-nums text-emerald-700">{tenderSummary.verified}</b> <span className="text-muted">verified</span></span>
+            <span><b className="tabular-nums text-primary">{tenderSummary.awarded}</b> <span className="text-muted">awarded · ${Math.round(tenderSummary.committed).toLocaleString()} ex GST</span></span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { id: "quoted", label: "Quoted", n: tenderSummary.quotedTotal },
+            { id: "awaiting", label: "Awaiting", n: tenderSummary.awaiting },
+            { id: "awarded", label: "Awarded", n: tenderSummary.awarded },
+            { id: "all", label: "All trades", n: rfqs.length },
+          ].map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setTradeFilter(c.id)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${tradeFilter === c.id ? "bg-primary text-white" : "border border-hairline bg-surface text-muted hover:text-ink"}`}
+            >
+              {c.label} <span className="opacity-70 tabular-nums">{c.n}</span>
+            </button>
+          ))}
+        </div>
+        {visibleRfqs.length === 0 && (
+          <div className="rounded-card border border-dashed border-hairline bg-page/40 px-4 py-8 text-center text-sm text-muted">
+            No trades in this view.{" "}
+            {tradeFilter !== "all" && (
+              <button type="button" className="font-semibold text-primary underline" onClick={() => setTradeFilter("all")}>Show all trades</button>
+            )}
+          </div>
+        )}
+        {visibleRfqs.map((r) => {
           const sub = r.subcontractors;
           const vis = isOverdue(r.deadline, r.status)
             ? { label: "Overdue", cls: "bg-red-600 text-white" }
@@ -1752,7 +1814,7 @@ function winRowMissingConfirmedQuote(row) {
           return (
             <Fragment key={r.id}>
             {/* Trade group header — the comparison summary for this trade (step 6). */}
-            {firstOfTradeIds.has(r.id) && (() => {
+            {visibleFirstOfTrade.has(r.id) && (() => {
               const group = tradeGroups.get(r.trade || "(untraded)") || [r];
               const priced = group.map((x) => ({ x, a: amountOfRfq(x) })).filter((o) => o.a != null).sort((p, q) => p.a - q.a);
               const low = priced[0];
