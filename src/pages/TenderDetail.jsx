@@ -117,8 +117,9 @@ function TKebab({ rfq, readOnly, on }) {
   useEffect(() => {
     if (!open) return undefined;
     const close = () => setOpen(false);
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    // Defer attaching past the opening click, or that same click would immediately close it.
+    const id = setTimeout(() => document.addEventListener("click", close), 0);
+    return () => { clearTimeout(id); document.removeEventListener("click", close); };
   }, [open]);
   // Fixed positioning (computed from the button's rect) so the menu escapes the table's
   // overflow-x-auto container, which would otherwise clip an absolutely-positioned dropdown.
