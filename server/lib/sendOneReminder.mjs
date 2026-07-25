@@ -3,7 +3,7 @@ import { appendRfqRefToBody, rfqRefHeaders } from "./rfqSendRef.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
-import { getCompanySignatureFooter } from "./emailSignature.mjs";
+import { getUserSignatureFooter } from "./emailSignature.mjs";
 
 function formatAuDate(isoDate) {
   if (!isoDate) return "";
@@ -40,9 +40,9 @@ export async function sendReminderForRfqId(rfqId, opts = {}) {
     throw new Error("Reminders can only be sent while the RFQ is still awaiting a quote (status: sent).");
   }
 
-  // Prefer the account-wide saved signature (Settings) so reminders match every other send path,
-  // regardless of which browser triggered them; the client-passed footer is only a fallback.
-  const footer = (await getCompanySignatureFooter(sb).catch(() => null)) || String(opts?.signatureFooter || "").trim();
+  // Sign as the user who triggered the reminder (their saved signature, else the team default);
+  // the client-passed footer is only a fallback (and cron/automated reminders pass no user).
+  const footer = (await getUserSignatureFooter(sb, opts?.userId).catch(() => null)) || String(opts?.signatureFooter || "").trim();
   // Auto-fetch email logo from Supabase Storage if not provided by caller
   const logoFromCaller = String(opts?.signatureLogoDataUrl || "").trim();
   const logo = logoFromCaller || await getBrandingEmailLogo(sb).catch(() => "");

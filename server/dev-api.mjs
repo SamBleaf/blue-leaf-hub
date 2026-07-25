@@ -2025,6 +2025,7 @@ app.post("/api/rfq/remind-one", requireAuth, async (req, res) => {
   }
   try {
     const out = await sendReminderForRfqId(rfqId, {
+      userId: req.caller?.id, // sign the reminder as the user who triggered it
       signatureFooter: String(req.body?.signatureFooter || "").trim(),
       signatureLogoDataUrl: String(req.body?.signatureLogoDataUrl || "").trim()
     });

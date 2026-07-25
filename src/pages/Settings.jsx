@@ -165,7 +165,7 @@ export default function Settings({ section, sections } = {}) {
       {show("email-signature") ? (
         <section id="email-signature" className="scroll-mt-24 rounded-card border border-hairline bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-primary">Email signature</h2>
-          <p className="mt-1 text-sm text-muted">Used on every outbound email (RFQ, reminders, the recipient blast). Saved for the whole team, so it&apos;s the same signature whoever sends.</p>
+          <p className="mt-1 text-sm text-muted">Your personal signature, used on emails you send (RFQ, reminders, the recipient blast). Each account sets its own; admins can also set a team default.</p>
           <button
             type="button"
             onClick={() => setSigOpen(true)}

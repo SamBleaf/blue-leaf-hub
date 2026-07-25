@@ -57,8 +57,8 @@ export function formatSignatureCard(sig) {
 }
 
 /**
- * Read the saved signature object from company_profile.email_signature.
- * Returns null when nothing is saved (or the column/table isn't there yet) so callers can fall back.
+ * The TEAM DEFAULT signature (company_profile.email_signature) — inherited by accounts that haven't
+ * set their own. Returns null when nothing is saved (or the column/table isn't there yet).
  */
 export async function getCompanySignature(sb) {
   const s = sb || getServiceSupabase();
@@ -74,14 +74,32 @@ export async function getCompanySignature(sb) {
   }
 }
 
-/** Signature CARD from the saved company signature, or null when none is saved. */
-export async function getCompanySignatureCard(sb) {
-  const sig = await getCompanySignature(sb);
+/**
+ * Resolve the signature for a SENDING user: their own (user_profiles.email_signature), else the team
+ * default (company_profile), else null. This is what every send path should use so each account's
+ * emails sign as that person.
+ */
+export async function getUserSignature(sb, userId) {
+  const s = sb || getServiceSupabase();
+  if (!s) return null;
+  if (userId) {
+    try {
+      const { data } = await s.from("user_profiles").select("email_signature").eq("id", userId).maybeSingle();
+      const own = data?.email_signature;
+      if (own && typeof own === "object") return own;
+    } catch { /* column missing pre-migration 158 — fall through to the team default */ }
+  }
+  return getCompanySignature(s);
+}
+
+/** Signature CARD (no "Kind regards") for the sending user, or null when nothing is saved. */
+export async function getUserSignatureCard(sb, userId) {
+  const sig = await getUserSignature(sb, userId);
   return sig ? formatSignatureCard(sig) : null;
 }
 
-/** Full sign-off footer from the saved company signature, or null when none is saved. */
-export async function getCompanySignatureFooter(sb) {
-  const sig = await getCompanySignature(sb);
+/** Full "Kind regards" footer for the sending user, or null when nothing is saved. */
+export async function getUserSignatureFooter(sb, userId) {
+  const sig = await getUserSignature(sb, userId);
   return sig ? formatSignatureFooter(sig) : null;
 }

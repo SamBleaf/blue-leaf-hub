@@ -14,7 +14,7 @@ import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowsToCamel, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { appendRfqRefToBody, rfqRefHeaders, rfqRefLine } from "./rfqSendRef.mjs";
-import { getCompanySignatureCard } from "./emailSignature.mjs";
+import { getUserSignatureCard } from "./emailSignature.mjs";
 import { randomUUID } from "crypto";
 import { buildexactConfigured } from "./buildexactClient.mjs";
 import { assertJobReadyForRfqHandoff } from "./jobGuards.mjs";
@@ -305,10 +305,10 @@ export function registerRfqPackageRoutes(app) {
         .replace(/\{\{\s*business\s*\}\}/gi, String(sub?.business_name || "").trim());
 
       // Signature card (contact block, no "Kind regards" — the body carries its own sign-off).
-      // SERVER-AUTHORITATIVE: use the signature saved in Settings (company_profile) so every send uses
-      // the same one regardless of which browser fires it; fall back to the client-passed value only
-      // if nothing is saved server-side (pre-migration / not yet saved). Logo comes from branding storage.
-      const savedCard = await getCompanySignatureCard(s).catch(() => null);
+      // PER-USER: use the SENDING user's saved signature (user_profiles), falling back to the team
+      // default (company_profile, = Sam's), then the client-passed value (pre-migration). So an email
+      // Josh sends signs as Josh. Logo comes from branding storage.
+      const savedCard = await getUserSignatureCard(s, req.caller?.id).catch(() => null);
       const footer = (savedCard || String(signatureFooter || "").trim()).trim();
       const sigLogo = footer ? await getBrandingEmailLogo(s).catch(() => "") : "";
 

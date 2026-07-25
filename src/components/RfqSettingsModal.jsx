@@ -14,21 +14,25 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
   const [preview, setPreview] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [alsoDefault, setAlsoDefault] = useState(false); // admin: also set as the team default
   const initialRef = useRef(sig); // the value at mount, to detect in-progress edits
 
   useEffect(() => {
     setPreview(formatSignatureFooter(sig));
   }, [sig]);
 
-  // Server is the source of truth (so every send uses the same signature). On open, pull the saved
-  // one over the local cache — but ONLY if the user hasn't started editing yet, so a slow GET can't
-  // clobber an in-flight edit. Keeps the locally-held logo (which lives in the branding bucket).
+  // Your PERSONAL signature is the source of truth for emails you send. On open, pull your saved one
+  // (or the team default if you haven't set one) over the local cache — but ONLY if you haven't started
+  // editing yet, so a slow GET can't clobber an in-flight edit. Keeps the locally-held logo.
   useEffect(() => {
     let stop = false;
     const norm = (o) => JSON.stringify({ ...o, logoDataUrl: "" });
     (async () => {
       const { ok, data } = await apiFetch("/api/settings/email-signature");
-      if (stop || !ok || !data?.signature) return;
+      if (stop || !ok) return;
+      if (data?.isAdmin) setIsAdmin(true);
+      if (!data?.signature) return;
       setSig((s) => (norm(s) === norm(initialRef.current)
         ? { ...DEFAULT_EMAIL_SIGNATURE, ...data.signature, logoDataUrl: s.logoDataUrl }
         : s));
@@ -59,10 +63,11 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
     setSaving(true);
     setSaveErr("");
     saveEmailSignature(sig); // local cache (offline + logo)
-    // Persist the text fields account-wide so every send path uses this signature.
+    // Persist YOUR OWN signature (per account); admins can also set it as the team default.
     const { fullName, title, mobile, website, postalAddress, legalDisclaimer } = sig;
     const { ok, error } = await apiPut("/api/settings/email-signature", {
-      signature: { fullName, title, mobile, website, postalAddress, legalDisclaimer }
+      signature: { fullName, title, mobile, website, postalAddress, legalDisclaimer },
+      alsoTeamDefault: isAdmin && alsoDefault
     });
     setSaving(false);
     if (!ok) { setSaveErr(error || "Saved on this device, but couldn't save to the server."); return; }
@@ -84,7 +89,7 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
           <div>
             <h2 className="text-lg font-semibold text-primary">Email signature</h2>
             <p className="mt-1 text-xs text-muted">
-              Saved for the whole team — used on every outbound email, whoever sends it. Full mail & Dropbox setup:{" "}
+              Your personal signature — used on emails <b>you</b> send. Each account has its own. Full mail & Dropbox setup:{" "}
               <Link to="/tender-manager/settings" className="font-semibold text-accent underline" onClick={onClose}>
                 Settings
               </Link>
@@ -178,6 +183,13 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Preview</div>
           <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-muted">{preview}</pre>
         </div>
+
+        {isAdmin ? (
+          <label className="mt-4 flex items-start gap-2 text-xs text-ink">
+            <input type="checkbox" className="mt-0.5" checked={alsoDefault} onChange={(e) => setAlsoDefault(e.target.checked)} />
+            <span>Also set as the <b>team default</b> — used for staff who haven&apos;t set up their own signature yet.</span>
+          </label>
+        ) : null}
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button

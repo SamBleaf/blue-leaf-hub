@@ -478,27 +478,33 @@ export function registerModule5Routes(app) {
     return res.json({ ok: true, filename, dataBase64: buf.toString("base64"), size: buf.length });
   });
 
-  // ── Email signature (account-wide, persisted on company_profile) ──────────
-  // The signature was previously localStorage-only, so a send from a browser without it fell back
-  // to the default. Persisting it here makes every send path read the same saved signature.
-  app.get("/api/settings/email-signature", requireAuth, async (_req, res) => {
+  // ── Email signature (PER USER — each account signs as themselves) ──────────
+  // Each user's signature lives on user_profiles.email_signature; the team default
+  // (company_profile.email_signature, seeded with Sam's) is inherited by accounts that haven't set
+  // their own. GET returns the caller's OWN if set, else the team default (so the editor pre-fills).
+  app.get("/api/settings/email-signature", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
+    const isAdmin = req.caller?.role === "admin";
     try {
-      // Deterministic .order so read and write always target the SAME single-company row.
-      const { data, error } = await sb.from("company_profile").select("email_signature").order("id", { ascending: true }).limit(1);
-      if (error) {
-        // Column missing (pre-migration 157) — behave as "nothing saved" so the client uses its cache.
-        if (/email_signature/i.test(String(error.message || ""))) return res.json({ ok: true, signature: null });
-        return res.status(502).json({ ok: false, error: translateDbError(error) });
-      }
-      return res.json({ ok: true, signature: data?.[0]?.email_signature || null });
+      let own = null;
+      try {
+        const { data } = await sb.from("user_profiles").select("email_signature").eq("id", req.caller.id).maybeSingle();
+        own = data?.email_signature || null;
+      } catch { /* pre-migration 158 — treat as none */ }
+      // Team default (company_profile), used as the pre-fill when the user has no personal signature.
+      let teamDefault = null;
+      try {
+        const { data } = await sb.from("company_profile").select("email_signature").order("id", { ascending: true }).limit(1);
+        teamDefault = data?.[0]?.email_signature || null;
+      } catch { /* pre-migration — none */ }
+      return res.json({ ok: true, signature: own || teamDefault || null, isOwn: !!own, isAdmin });
     } catch (e) {
       return res.status(500).json({ ok: false, error: translateDbError(e) || "Could not load the signature." });
     }
   });
 
-  app.put("/api/settings/email-signature", requireAuth, requireRole("admin"), async (req, res) => {
+  app.put("/api/settings/email-signature", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     const incoming = req.body?.signature;
@@ -513,24 +519,26 @@ export function registerModule5Routes(app) {
       postalAddress: pick("postalAddress"),
       legalDisclaimer: pick("legalDisclaimer")
     };
+    const isAdmin = req.caller?.role === "admin";
+    const alsoTeamDefault = isAdmin && req.body?.alsoTeamDefault === true;
     try {
-      // Single-company row: update the FIRST row (deterministic .order, same as the reader) if present,
-      // else insert one — so a saved signature is always written to the row every send reads from.
-      const { data: existing, error: readErr } = await sb.from("company_profile").select("id").order("id", { ascending: true }).limit(1);
-      if (readErr) {
-        if (/email_signature/i.test(String(readErr.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
-        return res.status(502).json({ ok: false, error: translateDbError(readErr) });
+      // Save the caller's OWN signature.
+      const { error } = await sb.from("user_profiles").update({ email_signature: signature, updated_at: new Date().toISOString() }).eq("id", req.caller.id);
+      if (error) {
+        if (/email_signature/i.test(String(error.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 158 (user_profiles.email_signature) first." });
+        throw error;
       }
-      if (existing?.[0]?.id) {
-        const { error } = await sb.from("company_profile").update({ email_signature: signature, updated_at: new Date().toISOString() }).eq("id", existing[0].id);
-        if (error) throw error;
-      } else {
-        const { error } = await sb.from("company_profile").insert({ email_signature: signature });
-        if (error) throw error;
+      // Admin opt-in: also set the TEAM DEFAULT (for staff who haven't personalised theirs).
+      if (alsoTeamDefault) {
+        const { data: existing } = await sb.from("company_profile").select("id").order("id", { ascending: true }).limit(1);
+        if (existing?.[0]?.id) {
+          await sb.from("company_profile").update({ email_signature: signature, updated_at: new Date().toISOString() }).eq("id", existing[0].id);
+        } else {
+          await sb.from("company_profile").insert({ email_signature: signature });
+        }
       }
-      return res.json({ ok: true, signature });
+      return res.json({ ok: true, signature, isOwn: true, teamDefaultUpdated: alsoTeamDefault });
     } catch (e) {
-      if (/email_signature/i.test(String(e?.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
       return res.status(500).json({ ok: false, error: translateDbError(e) || "Could not save the signature." });
     }
   });
