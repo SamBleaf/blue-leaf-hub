@@ -64,7 +64,8 @@ export async function getCompanySignature(sb) {
   const s = sb || getServiceSupabase();
   if (!s) return null;
   try {
-    const { data, error } = await s.from("company_profile").select("email_signature").limit(1);
+    // Deterministic .order so this reader targets the SAME single-company row the settings PUT writes.
+    const { data, error } = await s.from("company_profile").select("email_signature").order("id", { ascending: true }).limit(1);
     if (error) return null; // pre-migration or read error — caller falls back
     const sig = data?.[0]?.email_signature;
     return sig && typeof sig === "object" ? sig : null;

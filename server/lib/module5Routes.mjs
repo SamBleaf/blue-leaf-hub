@@ -11,6 +11,7 @@ import { tmpdir } from "os";
 import { parseCostMetrics, parsePDF, parseSchedItems, parseXLSX, getBuildexactCategoryMapping } from "./buildexactParser.mjs";
 import { proposalToDocxData, proposalToApbDocxData, findApbPlaceholders, extractPcSumsFromParse, buildSummaryRowsFromParse, buildInclusionSectionsFromParse, mergeRfqScopeIntoInclusions } from "./feeProposalTransform.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
+import { translateDbError } from "./apiResponse.mjs";
 import { resolveJobIdByAddress, upsertJobKnowledge } from "./jobResolver.mjs";
 import { mailTransportName, sendPlainMail } from "./notifyMail.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
@@ -484,15 +485,16 @@ export function registerModule5Routes(app) {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "DB unavailable" });
     try {
-      const { data, error } = await sb.from("company_profile").select("email_signature").limit(1);
+      // Deterministic .order so read and write always target the SAME single-company row.
+      const { data, error } = await sb.from("company_profile").select("email_signature").order("id", { ascending: true }).limit(1);
       if (error) {
         // Column missing (pre-migration 157) — behave as "nothing saved" so the client uses its cache.
         if (/email_signature/i.test(String(error.message || ""))) return res.json({ ok: true, signature: null });
-        return res.status(502).json({ ok: false, error: error.message });
+        return res.status(502).json({ ok: false, error: translateDbError(error) });
       }
       return res.json({ ok: true, signature: data?.[0]?.email_signature || null });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || "Could not load the signature." });
+      return res.status(500).json({ ok: false, error: translateDbError(e) || "Could not load the signature." });
     }
   });
 
@@ -512,11 +514,12 @@ export function registerModule5Routes(app) {
       legalDisclaimer: pick("legalDisclaimer")
     };
     try {
-      // company_profile is a single-company row: update the first row if present, else insert one.
-      const { data: existing, error: readErr } = await sb.from("company_profile").select("id").limit(1);
+      // Single-company row: update the FIRST row (deterministic .order, same as the reader) if present,
+      // else insert one — so a saved signature is always written to the row every send reads from.
+      const { data: existing, error: readErr } = await sb.from("company_profile").select("id").order("id", { ascending: true }).limit(1);
       if (readErr) {
         if (/email_signature/i.test(String(readErr.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
-        return res.status(502).json({ ok: false, error: readErr.message });
+        return res.status(502).json({ ok: false, error: translateDbError(readErr) });
       }
       if (existing?.[0]?.id) {
         const { error } = await sb.from("company_profile").update({ email_signature: signature, updated_at: new Date().toISOString() }).eq("id", existing[0].id);
@@ -528,7 +531,7 @@ export function registerModule5Routes(app) {
       return res.json({ ok: true, signature });
     } catch (e) {
       if (/email_signature/i.test(String(e?.message || ""))) return res.status(503).json({ ok: false, error: "Run migration 157 (company_profile.email_signature) first." });
-      return res.status(500).json({ ok: false, error: e?.message || "Could not save the signature." });
+      return res.status(500).json({ ok: false, error: translateDbError(e) || "Could not save the signature." });
     }
   });
 

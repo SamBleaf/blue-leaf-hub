@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, apiPut } from "../lib/apiFetch.js";
 import {
@@ -14,19 +14,24 @@ export default function RfqSettingsModal({ onClose, onApplied }) {
   const [preview, setPreview] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const initialRef = useRef(sig); // the value at mount, to detect in-progress edits
 
   useEffect(() => {
     setPreview(formatSignatureFooter(sig));
   }, [sig]);
 
   // Server is the source of truth (so every send uses the same signature). On open, pull the saved
-  // one over the local cache — keeping the locally-held logo, which lives in the branding bucket.
+  // one over the local cache — but ONLY if the user hasn't started editing yet, so a slow GET can't
+  // clobber an in-flight edit. Keeps the locally-held logo (which lives in the branding bucket).
   useEffect(() => {
     let stop = false;
+    const norm = (o) => JSON.stringify({ ...o, logoDataUrl: "" });
     (async () => {
       const { ok, data } = await apiFetch("/api/settings/email-signature");
       if (stop || !ok || !data?.signature) return;
-      setSig((s) => ({ ...DEFAULT_EMAIL_SIGNATURE, ...data.signature, logoDataUrl: s.logoDataUrl }));
+      setSig((s) => (norm(s) === norm(initialRef.current)
+        ? { ...DEFAULT_EMAIL_SIGNATURE, ...data.signature, logoDataUrl: s.logoDataUrl }
+        : s));
     })();
     return () => { stop = true; };
   }, []);

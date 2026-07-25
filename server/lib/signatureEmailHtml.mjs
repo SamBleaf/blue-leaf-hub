@@ -32,8 +32,10 @@ export function wrapPlainTextEmailHtml(bodyText, sig = {}) {
   const logoBlock = showLogo
     ? `<div style="margin:14px 0 10px;"><img src="${logo}" alt="" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`
     : "";
+  // Emitted LAST (not as a leading preheader) so email clients never lift it as the inbox preview
+  // snippet — it stays invisible in the opened email but present in the source for reply-quote matching.
   const hiddenBlock = hidden
     ? `<div style="display:none;max-height:0;overflow:hidden;font-size:0;line-height:0;color:transparent;mso-hide:all;">${escapeHtml(hidden)}</div>`
     : "";
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.45;color:#111;">${hiddenBlock}${main}${logoBlock}${foot ? `<div style="margin-top:12px;">${foot}</div>` : ""}</div>`;
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.45;color:#111;">${main}${logoBlock}${foot ? `<div style="margin-top:12px;">${foot}</div>` : ""}${hiddenBlock}</div>`;
 }

@@ -186,7 +186,9 @@ export function matchByRfqToken(parsed, rfqRows) {
     const hit = rows.find((r) => String(r.id).toLowerCase() === headerId);
     if (hit) return { rfq: hit, reason: "rfq_token_header" };
   }
-  const m = `${parsed?.subject || ""} ${parsed?.text || parsed?.html || ""}`.match(RFQ_TOKEN_RE);
+  // Scan subject + BOTH parts (not text-OR-html): a reply's text/plain is usually non-empty but may
+  // not carry the token (e.g. the tender blast hides it in the HTML), so html must be searched too.
+  const m = `${parsed?.subject || ""} ${parsed?.text || ""} ${parsed?.html || ""}`.match(RFQ_TOKEN_RE);
   if (m?.[1]) {
     const tok = m[1].toLowerCase();
     const hits = rows.filter((r) => String(r.id).toLowerCase().startsWith(tok));

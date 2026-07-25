@@ -41,13 +41,13 @@ const EMAIL_TEMPLATES = [
     id: "reminder",
     label: "Reminder",
     build: ({ address, deadline }) =>
-      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? ` , we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nJust chasing your quote for ${address || "the project"} when you get a chance${deadline ? `, we're hoping to have everything in by ${deadline}` : ""}. No dramas if you need a bit more time, just flick me a line and let me know where you're at.\n\nCheers,\nSam`,
   },
   {
     id: "received",
     label: "Received — thanks",
     build: ({ address }) =>
-      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"} , appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nGot your quote through for ${address || "the project"}, appreciate you getting that back to us. We're working through the numbers now and I'll be in touch shortly either way.\n\nCheers,\nSam`,
   },
   {
     id: "won",
@@ -59,7 +59,7 @@ const EMAIL_TEMPLATES = [
     id: "lost",
     label: "Not this time",
     build: ({ address }) =>
-      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"} , genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
+      `Hi {{first_name}},\n\nThanks for taking the time to quote ${address || "the project"}, genuinely appreciate it. We've gone another way on this one, but your pricing was solid and I'll keep you in mind for the next job that suits.\n\nCheers,\nSam`,
   },
 ];
 
