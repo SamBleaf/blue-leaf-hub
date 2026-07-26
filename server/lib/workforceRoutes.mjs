@@ -886,11 +886,14 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { data: ts, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*)")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description))")
       .eq("id", req.params.id)
       .maybeSingle();
     if (error) return err(res, 500, translateDbError(error));
     if (!ts) return err(res, 404, "Timesheet not found.", "NOT_FOUND");
+    // Attach the sub-task label to each entry (same as the Approvals list) so the modal can show
+    // the sub-section the worker logged against, not just the main category.
+    attachTaskLabels([ts]);
 
     // Sign entry completion photos that are storage paths (legacy inline data: URLs pass through).
     for (const en of ts.timesheet_entries || []) {

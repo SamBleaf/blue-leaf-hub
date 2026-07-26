@@ -27,16 +27,25 @@ function hashKey(s) {
   return Math.abs(h);
 }
 
-// Auto colour key: by index in the ordered active-jobs list (stable, no collision among
-// the first 10 active jobs); falls back to a hash for jobs outside that list.
-export function autoColorKey(key, orderedKeys = []) {
-  const i = orderedKeys.indexOf(key);
-  const idx = i >= 0 ? i : hashKey(key);
-  return PLANNER_PALETTE[idx % PLANNER_PALETTE.length].key;
+// Auto colour key: a STABLE hash of the job key, so a job's fallback colour never changes when other
+// jobs are added/removed (the old index-in-list version reshuffled every colour on add). The Planner
+// allocates + persists a collision-free colour per job (nextFreeColorKey); this is only the fallback
+// for a job that has no saved colour yet. `orderedKeys` kept for signature compatibility.
+export function autoColorKey(key, _orderedKeys = []) {
+  return PLANNER_PALETTE[hashKey(key) % PLANNER_PALETTE.length].key;
 }
 
 export function paletteByKey(colorKey) {
   return PLANNER_PALETTE.find((p) => p.key === colorKey) || FALLBACK;
+}
+
+// Next colour NOT already in use — for locking a colour to a job on first allocation. When a job is
+// removed its colour drops out of `takenKeys`, so it returns to the pool for the next new job.
+export function nextFreeColorKey(takenKeys) {
+  const taken = takenKeys instanceof Set ? takenKeys : new Set(takenKeys || []);
+  const free = PLANNER_PALETTE.find((p) => !taken.has(p.key));
+  if (free) return free.key;
+  return PLANNER_PALETTE[taken.size % PLANNER_PALETTE.length].key; // >10 concurrent jobs: deterministic wrap
 }
 
 // Resolve a job's palette entry: a saved colour wins, else the auto colour by order.

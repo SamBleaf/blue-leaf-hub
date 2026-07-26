@@ -212,7 +212,10 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                         ) : (
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="text-sm font-medium text-ink">{TASK_LABELS[e.task_category] || e.task_category}</p>
+                              <p className="text-sm font-medium text-ink">{e.taskLabel || TASK_LABELS[e.task_category] || e.task_category}</p>
+                              {e.taskLabel && (TASK_LABELS[e.task_category] || e.task_category) && e.taskLabel !== (TASK_LABELS[e.task_category] || e.task_category) && (
+                                <p className="text-[11px] text-muted mt-0.5">{TASK_LABELS[e.task_category] || e.task_category}</p>
+                              )}
                               {e.notes && <p className="text-xs text-muted mt-0.5 whitespace-pre-wrap">{e.notes}</p>}
                             </div>
                             <div className="text-right shrink-0">

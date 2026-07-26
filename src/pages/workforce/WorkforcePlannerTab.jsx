@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
-import { PLANNER_PALETTE, resolveJobColor } from "../../lib/plannerColors.js";
+import { PLANNER_PALETTE, paletteByKey, nextFreeColorKey } from "../../lib/plannerColors.js";
 import { CHARGE_UP_REFERENCE } from "../../lib/constants.js";
 
 // W17-P4b — Planner drag-drop + colour redesign.
@@ -233,10 +233,33 @@ export default function WorkforcePlannerTab() {
   const boardJobs = useMemo(() => jobs.filter((j) => settings[j.jKey]?.onBoard || allocKeys.has(j.jKey)), [jobs, settings, allocKeys]);
   const orderedKeys = useMemo(() => boardJobs.map((j) => j.jKey), [boardJobs]);
   const colorMap = useMemo(() => { const m = {}; for (const k of Object.keys(settings)) if (settings[k]?.color) m[k] = settings[k].color; return m; }, [settings]);
-  // Precompute each board job's resolved colour + label once → O(1) per-cell lookup (was an
-  // indexOf/find scan on every filled cell on every render, multiplied by the whole-board repaints).
-  const colorByKey = useMemo(() => { const m = {}; for (const k of orderedKeys) m[k] = resolveJobColor(k, orderedKeys, colorMap); return m; }, [orderedKeys, colorMap]);
-  const colorFor = useCallback((jKey) => colorByKey[jKey] || resolveJobColor(jKey, orderedKeys, colorMap), [colorByKey, orderedKeys, colorMap]);
+  // Colours are LOCKED to a job (not derived from its position). Greedy pool allocation: a saved
+  // colour wins; an unsaved board job takes the next colour NOT already used ON THE BOARD (so a
+  // removed job's colour returns to the pool). The auto colour is then persisted (below), so adding
+  // a job never recolours the existing ones. O(1) per-cell lookup via colorByKey.
+  const { colorByKey, autoAssigned } = useMemo(() => {
+    const taken = new Set(orderedKeys.map((k) => colorMap[k]).filter(Boolean));
+    const byKey = {}; const auto = {};
+    for (const k of orderedKeys) {
+      if (colorMap[k]) { byKey[k] = paletteByKey(colorMap[k]); continue; }
+      const ck = nextFreeColorKey(taken); taken.add(ck);
+      byKey[k] = paletteByKey(ck); auto[k] = ck;
+    }
+    return { colorByKey: byKey, autoAssigned: auto };
+  }, [orderedKeys, colorMap]);
+  const colorFor = useCallback((jKey) => colorByKey[jKey] || paletteByKey(colorMap[jKey]), [colorByKey, colorMap]);
+  // Persist each auto-allocated colour ONCE so it sticks (and shows the same everywhere). Guarded by a
+  // ref so this fires only for a job's first-ever allocation; setSettings then moves it into colorMap.
+  const autoColorPersisted = useRef(new Set());
+  useEffect(() => {
+    for (const [k, ck] of Object.entries(autoAssigned)) {
+      if (autoColorPersisted.current.has(k)) continue;
+      autoColorPersisted.current.add(k);
+      saveColor(k, ck);
+    }
+    // saveColor is a stable hoisted handler; the ref guard prevents repeat writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAssigned]);
   const labelMap = useMemo(() => { const m = {}; for (const j of jobs) m[j.jKey] = j.label; return m; }, [jobs]);
   const labelFor = useCallback((jKey) => labelMap[jKey] || "Job", [labelMap]);
   const holidayMap = useMemo(() => { const m = {}; for (const h of nonWorking.holidays) m[h.date] = h.name; return m; }, [nonWorking]);
