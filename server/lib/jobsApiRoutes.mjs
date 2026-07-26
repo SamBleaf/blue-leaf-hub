@@ -9,7 +9,11 @@ import {
   dropboxConfigured,
   ensureJobFolderStructure,
   mergeJobDataJsonFile,
-  uploadFeeProposalPdfToPresaleDocs
+  uploadFeeProposalPdfToPresaleDocs,
+  ensureSharedJobQuotesFolderExists,
+  getDropboxAccessToken,
+  copyDropboxFile,
+  sharedJobRootPath
 } from "./dropboxClient.mjs";
 import { buildFeeProposalPdfBuffer } from "./feeProposalPdfKit.mjs";
 import { getJobById, buildexactConfigured, buildexactLogin } from "./buildexactClient.mjs";
@@ -415,17 +419,44 @@ export function registerJobsApiRoutes(app) {
         console.warn("[unmatched-quotes/resolve] submission dual-write skipped:", subErr?.message || subErr);
       }
 
-      const { error: resErr } = await sb
-        .from("unmatched_quote_emails")
-        .update({
-          resolved_at: receivedAt,
-          matched_rfq_id: rfq.id,
-          matched_job_id: rfq.job_id
-        })
-        .eq("id", unmatchedId);
-      if (resErr) throw new Error(resErr.message);
+      // #3 — file the quote PDF into the job's INTERNAL/QUOTES folder, like an auto-matched quote.
+      // Best-effort: a copy (not move) so the app's existing holding-area links keep working; a
+      // Dropbox hiccup never fails the match.
+      let filedToJob = false;
+      try {
+        const jobAddress = (Array.isArray(rfq.jobs) ? rfq.jobs[0]?.address : rfq.jobs?.address) || "";
+        const primary = inboundAtts.find((a) => a?.dropbox_path) || null;
+        if (dropboxConfigured() && jobAddress && primary?.dropbox_path) {
+          await ensureSharedJobQuotesFolderExists(jobAddress);
+          const token = await getDropboxAccessToken();
+          const safeName = String(primary.name || primary.filename || "quote.pdf").replace(/[^\w.\- ]+/g, "").trim() || "quote.pdf";
+          await copyDropboxFile(token, primary.dropbox_path, `${sharedJobRootPath(jobAddress)}/INTERNAL/QUOTES/${safeName}`);
+          filedToJob = true;
+        }
+      } catch (fileErr) {
+        console.warn("[unmatched-quotes/resolve] file-to-job skipped:", fileErr?.message || fileErr);
+      }
 
-      return res.json({ ok: true });
+      const resPatch = {
+        resolved_at: receivedAt,
+        matched_rfq_id: rfq.id,
+        matched_job_id: rfq.job_id,
+        resolution: "matched",
+        resolved_by: req.caller?.email || null,
+      };
+      const { error: resErr } = await sb.from("unmatched_quote_emails").update(resPatch).eq("id", unmatchedId);
+      if (resErr) {
+        // Pre-migration-159 the resolution/resolved_by columns don't exist — retry with the legacy shape.
+        if (/resolution|resolved_by/i.test(resErr.message || "")) {
+          const { error: legacyErr } = await sb.from("unmatched_quote_emails")
+            .update({ resolved_at: receivedAt, matched_rfq_id: rfq.id, matched_job_id: rfq.job_id }).eq("id", unmatchedId);
+          if (legacyErr) throw new Error(legacyErr.message);
+        } else {
+          throw new Error(resErr.message);
+        }
+      }
+
+      return res.json({ ok: true, filedToJob });
     } catch (e) {
       console.error("[unmatched-quotes/resolve]", e);
       return res.status(502).json({ ok: false, error: e?.message || String(e) });

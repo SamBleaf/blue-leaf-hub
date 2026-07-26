@@ -31,6 +31,7 @@ import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
 import { buildexactConfigured } from "./lib/buildexactClient.mjs";
 import { sendReminderForRfqId } from "./lib/sendOneReminder.mjs";
+import { attachSuggestions } from "./lib/quoteInboxSuggest.mjs";
 import { handleBuildexactWebhook } from "./lib/buildexactWebhook.mjs";
 import { registerModule4Routes } from "./lib/module4Routes.mjs";
 import { registerModule5Routes } from "./lib/module5Routes.mjs";
@@ -2039,46 +2040,153 @@ app.post("/api/rfq/remind-one", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/quote-tracker/unmatched", requireAuth, requireRole("admin"), async (_req, res) => {
+// Quote Inbox list — tabbed (pending | matched | dismissed) with tab counts. Pending rows carry a
+// best-guess suggestion (#4) + a "senderKnown" flag (#10); every row carries its full attachments (#5).
+app.get("/api/quote-tracker/unmatched", requireAuth, async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) {
-    return res.json({
-      ok: true,
-      serviceConfigured: false,
-      items: [],
-      note: "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API to load unmatched rows."
+    return res.json({ ok: true, serviceConfigured: false, items: [], counts: { pending: 0, matched: 0, dismissed: 0 } });
+  }
+  const status = String(req.query?.status || "pending").toLowerCase();
+  try {
+    const headCount = async (b) => { const { count } = await b; return count || 0; };
+    const [pending, matched, dismissed] = await Promise.all([
+      headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).is("resolved_at", null)),
+      headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).eq("resolution", "matched")),
+      headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).in("resolution", ["dismissed", "invoice"])),
+    ]).catch(() => [0, 0, 0]);
+
+    let q = sb.from("unmatched_quote_emails").select("*").order("created_at", { ascending: false }).limit(100);
+    if (status === "matched") q = q.eq("resolution", "matched");
+    else if (status === "dismissed") q = q.in("resolution", ["dismissed", "invoice"]);
+    else q = q.is("resolved_at", null);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ ok: false, error: "Could not load the Quote Inbox." });
+    let items = data || [];
+
+    // Attachments live on the correspondence twin (message_id = external_id).
+    const extIds = items.map((i) => i.external_id).filter(Boolean);
+    let corrByMsg = {};
+    if (extIds.length) {
+      const { data: corrs } = await sb.from("correspondence")
+        .select("message_id, attachments").in("message_id", extIds).eq("logged_by", "imap-unmatched");
+      corrByMsg = Object.fromEntries((corrs || []).map((c) => [c.message_id, c]));
+    }
+    // "Sender on file?" — normalised against all subcontractor emails (small table).
+    const { data: subs } = await sb.from("subcontractors").select("email");
+    const knownEmails = new Set((subs || []).map((s) => String(s.email || "").toLowerCase().trim()).filter(Boolean));
+
+    items = items.map((u) => {
+      const atts = Array.isArray(corrByMsg[u.external_id]?.attachments) ? corrByMsg[u.external_id].attachments : [];
+      return {
+        ...u,
+        quote_pdf_url: atts[0]?.url || null,
+        attachments: atts,
+        senderKnown: knownEmails.has(String(u.from_email || "").toLowerCase().trim()),
+      };
     });
+    if (status === "pending") items = await attachSuggestions(sb, items);
+    return res.json({ ok: true, serviceConfigured: true, items, counts: { pending, matched, dismissed } });
+  } catch (e) {
+    console.error("[quote-inbox/list]", e);
+    return res.status(500).json({ ok: false, error: "Could not load the Quote Inbox." });
   }
-  const { data, error } = await sb
-    .from("unmatched_quote_emails")
-    .select("*")
-    .is("resolved_at", null)
-    .order("created_at", { ascending: false })
-    .limit(100);
+});
+
+const _qiMigNote = (e) => /resolution|dismiss_reason|resolved_by/i.test(String(e?.message || ""));
+
+// Dismiss a row that isn't a quote (#1) — clears it without a fake match, with an optional reason.
+app.post("/api/unmatched-quotes/dismiss", requireAuth, async (req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+  const id = String(req.body?.id || "").trim();
+  const reason = String(req.body?.reason || "").trim().slice(0, 300);
+  if (!id) return res.status(400).json({ ok: false, error: "id required." });
+  const { error } = await sb.from("unmatched_quote_emails").update({
+    resolved_at: new Date().toISOString(), resolution: "dismissed",
+    dismiss_reason: reason || null, resolved_by: req.caller?.email || null,
+  }).eq("id", id);
+  if (error) return res.status(_qiMigNote(error) ? 503 : 500).json({ ok: false, error: _qiMigNote(error) ? "Run migration 159 first." : "Could not dismiss." });
+  return res.json({ ok: true });
+});
+
+// Bulk dismiss (#13).
+app.post("/api/unmatched-quotes/bulk-dismiss", requireAuth, async (req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => String(x).trim()).filter(Boolean) : [];
+  const reason = String(req.body?.reason || "").trim().slice(0, 300);
+  if (!ids.length) return res.status(400).json({ ok: false, error: "ids[] required." });
+  const { error } = await sb.from("unmatched_quote_emails").update({
+    resolved_at: new Date().toISOString(), resolution: "dismissed",
+    dismiss_reason: reason || null, resolved_by: req.caller?.email || null,
+  }).in("id", ids);
+  if (error) return res.status(_qiMigNote(error) ? 503 : 500).json({ ok: false, error: _qiMigNote(error) ? "Run migration 159 first." : "Could not dismiss." });
+  return res.json({ ok: true, count: ids.length });
+});
+
+// Reclassify a mis-sent invoice → hand to Finance (#9). Creates a financial_documents row (lands in
+// the Finance inbox as 'unmatched' for the finance team) then resolves the quote row as 'invoice'.
+app.post("/api/unmatched-quotes/mark-invoice", requireAuth, async (req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+  const id = String(req.body?.id || "").trim();
+  if (!id) return res.status(400).json({ ok: false, error: "id required." });
+  try {
+    const { data: u } = await sb.from("unmatched_quote_emails").select("*").eq("id", id).maybeSingle();
+    if (!u) return res.status(404).json({ ok: false, error: "Quote not found." });
+    let dropboxPath = null, filename = null;
+    if (u.external_id) {
+      const { data: corr } = await sb.from("correspondence").select("attachments")
+        .eq("message_id", u.external_id).eq("logged_by", "imap-unmatched").maybeSingle();
+      const a = Array.isArray(corr?.attachments) ? corr.attachments[0] : null;
+      if (a) { dropboxPath = a.dropbox_path || null; filename = a.name || a.filename || null; }
+    }
+    const { error: fErr } = await sb.from("financial_documents").insert({
+      source: "email",
+      original_filename: filename || (u.subject ? `${u.subject}.pdf` : "reclassified-quote.pdf"),
+      dropbox_path: dropboxPath,
+      supplier_name: u.from_email || null,
+      status: "unmatched",
+      notes: "Reclassified from the Quote Inbox (arrived as a quote, is an invoice).",
+    });
+    if (fErr) {
+      console.error("[mark-invoice] finance insert", fErr);
+      return res.status(502).json({ ok: false, error: "Couldn't hand this to Finance — nothing was changed." });
+    }
+    const { error } = await sb.from("unmatched_quote_emails").update({
+      resolved_at: new Date().toISOString(), resolution: "invoice",
+      dismiss_reason: "Re-routed to Finance as an invoice", resolved_by: req.caller?.email || null,
+    }).eq("id", id);
+    if (error) return res.status(_qiMigNote(error) ? 503 : 500).json({ ok: false, error: _qiMigNote(error) ? "Run migration 159 first." : "Sent to Finance, but couldn't clear the inbox row." });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("[mark-invoice]", e);
+    return res.status(502).json({ ok: false, error: "Couldn't reclassify this email." });
+  }
+});
+
+// Create a subcontractor from an unknown sender (#10). Minimal server-side create (service role).
+app.post("/api/subcontractors", requireAuth, async (req, res) => {
+  const sb = getServiceSupabase();
+  if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
+  const b = req.body || {};
+  const business_name = String(b.businessName || b.business_name || "").trim();
+  if (!business_name) return res.status(400).json({ ok: false, error: "Business name is required." });
+  const payload = {
+    business_name,
+    email: String(b.email || "").trim(),
+    contact: String(b.contact || "").trim(),
+    mobile: String(b.mobile || "").trim(),
+    trade: String(b.trade || "").trim(),
+  };
+  const { data, error } = await sb.from("subcontractors").insert(payload)
+    .select("id, business_name, email, contact, trade").single();
   if (error) {
-    return res.status(500).json({ ok: false, error: error.message });
+    console.error("[subcontractors/create]", error);
+    return res.status(500).json({ ok: false, error: "Could not create the subcontractor." });
   }
-  const items = data || [];
-  const extIds = items.map((i) => i.external_id).filter(Boolean);
-  let corrByMessageId = {};
-  if (extIds.length) {
-    const { data: corrs } = await sb
-      .from("correspondence")
-      .select("message_id, attachments, body")
-      .in("message_id", extIds)
-      .eq("logged_by", "imap-unmatched");
-    corrByMessageId = Object.fromEntries((corrs || []).map((c) => [c.message_id, c]));
-  }
-  const enriched = items.map((u) => {
-    const corr = corrByMessageId[u.external_id];
-    const firstAtt = Array.isArray(corr?.attachments) ? corr.attachments[0] : null;
-    return {
-      ...u,
-      quote_pdf_url: firstAtt?.url || null,
-      attachments: corr?.attachments || []
-    };
-  });
-  return res.json({ ok: true, serviceConfigured: true, items: enriched });
+  return res.json({ ok: true, subcontractor: data });
 });
 
 // Add a single NEW subcontractor to an existing job/trade and send them the RFQ. Self-contained
