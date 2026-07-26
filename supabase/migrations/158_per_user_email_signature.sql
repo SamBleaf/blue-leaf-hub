@@ -26,8 +26,14 @@ update public.company_profile
    )
  where email_signature is null;
 
-insert into public.company_profile (name, email_signature)
-select 'Blue Leaf Building', jsonb_build_object(
+-- Fallback: only when the table is EMPTY, create the single config row carrying the team default.
+-- Insert ONLY email_signature — the live company_profile has drifted from migration 069 (it was
+-- created by an earlier step, so 069's CREATE TABLE IF NOT EXISTS never added `name`/`abn`/etc.).
+-- Referencing `name` here is what broke the first run ("column name does not exist"). In practice a
+-- config row already exists (bank details, mig 106), so the UPDATE above does the work and this
+-- INSERT is skipped.
+insert into public.company_profile (email_signature)
+select jsonb_build_object(
      'fullName', 'Sam Morris',
      'title', 'Director',
      'mobile', '0434 046 399',
