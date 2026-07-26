@@ -104,9 +104,10 @@ export default function UnmatchedQuotesPanel() {
   }
   function closeDrawer(id) { setOpenIds((s) => { const n = new Set(s); n.delete(id); return n; }); }
 
-  const dropRow = (id) => {
+  // Remove a pending row and keep the tab counts in sync (pending down, destination up).
+  const dropRow = (id, dest) => {
     setItems((rows) => rows.filter((r) => r.id !== id));
-    setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - 1) }));
+    setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - 1), ...(dest ? { [dest]: (c[dest] || 0) + 1 } : {}) }));
   };
 
   async function match(id) {
@@ -118,21 +119,21 @@ export default function UnmatchedQuotesPanel() {
     const { ok, error: e } = await apiPost("/api/unmatched-quotes/resolve", body);
     setBusyId(null);
     if (!ok) { setError(e || "Match failed."); return; }
-    dropRow(id);
+    dropRow(id, "matched");
   }
   async function doDismiss(id) {
     setBusyId(id); setError("");
     const { ok, error: e } = await apiPost("/api/unmatched-quotes/dismiss", { id, reason: dismissReason.trim() });
     setBusyId(null);
     if (!ok) { setError(e || "Could not dismiss."); return; }
-    setDismissFor(null); setDismissReason(""); dropRow(id);
+    setDismissFor(null); setDismissReason(""); dropRow(id, "dismissed");
   }
   async function markInvoice(id) {
     setBusyId(id); setError("");
     const { ok, error: e } = await apiPost("/api/unmatched-quotes/mark-invoice", { id });
     setBusyId(null);
     if (!ok) { setError(e || "Couldn't send to Finance."); return; }
-    dropRow(id);
+    dropRow(id, "dismissed");
   }
   async function bulkDismiss() {
     const ids = [...selected];
@@ -142,7 +143,7 @@ export default function UnmatchedQuotesPanel() {
     setBulkBusy(false);
     if (!ok) { setError(e || "Could not dismiss."); return; }
     setItems((rows) => rows.filter((r) => !selected.has(r.id)));
-    setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - ids.length) }));
+    setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - ids.length), dismissed: (c.dismissed || 0) + ids.length }));
     setSelected(new Set());
   }
   async function createSub(row) {
@@ -316,6 +317,7 @@ export default function UnmatchedQuotesPanel() {
                               <option value="">Select job…</option>
                               {jobs.map((j) => <option key={j.id} value={j.id}>{j.address || j.id}</option>)}
                             </select>
+                            {jobs.length === 0 && <span className="mt-1 block text-[11px] font-normal normal-case text-warning">Jobs didn&apos;t load — refresh the page and try again.</span>}
                           </label>
                           <label className="block text-[11px] font-bold uppercase tracking-wide text-muted">Trade / RFQ
                             <select value={draft.rfqId} onChange={(e) => setDraft(r.id, { rfqId: e.target.value })} disabled={!draft.jobId} className="mt-1 w-full rounded-md border border-hairline bg-surface px-2 py-2 text-sm font-normal text-ink disabled:opacity-50">

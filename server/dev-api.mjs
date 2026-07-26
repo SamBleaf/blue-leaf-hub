@@ -2040,28 +2040,40 @@ app.post("/api/rfq/remind-one", requireAuth, async (req, res) => {
   }
 });
 
+// True when a Supabase error is the missing mig-159 columns (resolution/dismiss_reason/resolved_by).
+const _qiMigNote = (e) => /resolution|dismiss_reason|resolved_by/i.test(String(e?.message || ""));
+
 // Quote Inbox list — tabbed (pending | matched | dismissed) with tab counts. Pending rows carry a
 // best-guess suggestion (#4) + a "senderKnown" flag (#10); every row carries its full attachments (#5).
-app.get("/api/quote-tracker/unmatched", requireAuth, async (req, res) => {
+// Admin-gated (restores the prior gate + the QA-SEC-04 test). NOTE: response `items` are intentionally
+// raw snake_case (from_email/created_at/resolution/…) — the panel reads them directly; do not camel-convert.
+app.get("/api/quote-tracker/unmatched", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) {
     return res.json({ ok: true, serviceConfigured: false, items: [], counts: { pending: 0, matched: 0, dismissed: 0 } });
   }
   const status = String(req.query?.status || "pending").toLowerCase();
+  const countOnly = req.query?.count === "1" || req.query?.count === "true"; // AppShell badge poll — skip the heavy enrich
   try {
-    const headCount = async (b) => { const { count } = await b; return count || 0; };
+    const headCount = async (b) => { try { const { count } = await b; return count || 0; } catch { return 0; } };
     const [pending, matched, dismissed] = await Promise.all([
       headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).is("resolved_at", null)),
       headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).eq("resolution", "matched")),
       headCount(sb.from("unmatched_quote_emails").select("id", { count: "exact", head: true }).in("resolution", ["dismissed", "invoice"])),
-    ]).catch(() => [0, 0, 0]);
+    ]);
+    if (countOnly) return res.json({ ok: true, serviceConfigured: true, items: [], counts: { pending, matched, dismissed } });
 
     let q = sb.from("unmatched_quote_emails").select("*").order("created_at", { ascending: false }).limit(100);
     if (status === "matched") q = q.eq("resolution", "matched");
     else if (status === "dismissed") q = q.in("resolution", ["dismissed", "invoice"]);
     else q = q.is("resolved_at", null);
     const { data, error } = await q;
-    if (error) return res.status(500).json({ ok: false, error: "Could not load the Quote Inbox." });
+    if (error) {
+      // Pre-migration-159 the `resolution` column is missing → the matched/dismissed queries error.
+      // Fail soft to an empty list (pending still works off resolved_at) instead of a 500.
+      if (_qiMigNote(error)) return res.json({ ok: true, serviceConfigured: true, items: [], counts: { pending, matched, dismissed }, migrationPending: true });
+      return res.status(500).json({ ok: false, error: "Could not load the Quote Inbox." });
+    }
     let items = data || [];
 
     // Attachments live on the correspondence twin (message_id = external_id).
@@ -2093,10 +2105,8 @@ app.get("/api/quote-tracker/unmatched", requireAuth, async (req, res) => {
   }
 });
 
-const _qiMigNote = (e) => /resolution|dismiss_reason|resolved_by/i.test(String(e?.message || ""));
-
 // Dismiss a row that isn't a quote (#1) — clears it without a fake match, with an optional reason.
-app.post("/api/unmatched-quotes/dismiss", requireAuth, async (req, res) => {
+app.post("/api/unmatched-quotes/dismiss", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
   const id = String(req.body?.id || "").trim();
@@ -2111,7 +2121,7 @@ app.post("/api/unmatched-quotes/dismiss", requireAuth, async (req, res) => {
 });
 
 // Bulk dismiss (#13).
-app.post("/api/unmatched-quotes/bulk-dismiss", requireAuth, async (req, res) => {
+app.post("/api/unmatched-quotes/bulk-dismiss", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => String(x).trim()).filter(Boolean) : [];
@@ -2127,7 +2137,7 @@ app.post("/api/unmatched-quotes/bulk-dismiss", requireAuth, async (req, res) => 
 
 // Reclassify a mis-sent invoice → hand to Finance (#9). Creates a financial_documents row (lands in
 // the Finance inbox as 'unmatched' for the finance team) then resolves the quote row as 'invoice'.
-app.post("/api/unmatched-quotes/mark-invoice", requireAuth, async (req, res) => {
+app.post("/api/unmatched-quotes/mark-invoice", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
   const id = String(req.body?.id || "").trim();
@@ -2135,6 +2145,7 @@ app.post("/api/unmatched-quotes/mark-invoice", requireAuth, async (req, res) => 
   try {
     const { data: u } = await sb.from("unmatched_quote_emails").select("*").eq("id", id).maybeSingle();
     if (!u) return res.status(404).json({ ok: false, error: "Quote not found." });
+    if (u.resolved_at) return res.json({ ok: true, already: true }); // idempotent: don't re-create the finance row
     let dropboxPath = null, filename = null;
     if (u.external_id) {
       const { data: corr } = await sb.from("correspondence").select("attachments")
@@ -2144,6 +2155,7 @@ app.post("/api/unmatched-quotes/mark-invoice", requireAuth, async (req, res) => 
     }
     const { error: fErr } = await sb.from("financial_documents").insert({
       source: "email",
+      email_message_id: u.external_id || null,   // lets the finance dedup index catch a retry
       original_filename: filename || (u.subject ? `${u.subject}.pdf` : "reclassified-quote.pdf"),
       dropbox_path: dropboxPath,
       supplier_name: u.from_email || null,
@@ -2167,7 +2179,7 @@ app.post("/api/unmatched-quotes/mark-invoice", requireAuth, async (req, res) => 
 });
 
 // Create a subcontractor from an unknown sender (#10). Minimal server-side create (service role).
-app.post("/api/subcontractors", requireAuth, async (req, res) => {
+app.post("/api/subcontractors", requireAuth, requireRole("admin"), async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
   const b = req.body || {};

@@ -281,10 +281,13 @@ export default function AppShell() {
     let stop = false;
     async function refresh() {
       try {
-        const res = await authFetch("/api/quote-tracker/unmatched");
+        // Badge only needs the pending count — ?count=1 skips the row enrich/suggestion pass.
+        const res = await authFetch("/api/quote-tracker/unmatched?count=1");
         const j = await res.json().catch(() => null);
-        if (stop || !res.ok || !j?.ok || !Array.isArray(j.items)) { setUnmatchedQuoteCount(0); return; }
-        setUnmatchedQuoteCount(j.items.length);
+        if (stop || !res.ok || !j?.ok) { setUnmatchedQuoteCount(0); return; }
+        const n = Number.isFinite(j.counts?.pending) ? j.counts.pending
+          : (Array.isArray(j.items) ? j.items.length : 0);
+        setUnmatchedQuoteCount(n);
       } catch { if (!stop) setUnmatchedQuoteCount(0); }
     }
     refresh();
