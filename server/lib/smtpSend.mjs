@@ -21,7 +21,18 @@ function smtpTransportOptions() {
     port,
     secure,
     auth: { user, pass },
-    tls: { rejectUnauthorized: true }
+    tls: { rejectUnauthorized: true },
+    // Fail FAST when the host can't reach the mail server (e.g. Railway egress hiccup) so the caller
+    // falls over to the Resend fallback in seconds, not the OS default of ~2 minutes. This tight
+    // timeout + notifyMail's SMTP cooldown is what lets "SMTP primary" stay iron-clad.
+    connectionTimeout: 10_000, // TCP connect
+    greetingTimeout: 10_000,   // wait for the server 220 banner
+    socketTimeout: 20_000,     // inactivity once connected
+    // Pool + reuse one authenticated connection across a recipient blast (a 19-recipient tender send
+    // is one handshake, not 19) — faster and gentler on the mail server.
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100
   };
   if (!secure && port === 587) {
     opts.requireTLS = true;
@@ -46,4 +57,23 @@ export function smtpFromAddress() {
 
 export function smtpReady() {
   return Boolean(getSmtpTransporter() && smtpFromAddress());
+}
+
+/**
+ * Handshake-only health check (connect + greet + auth, NO message sent) with a hard timeout.
+ * Used as a pre-flight before a blast so we can route the WHOLE batch to the fallback when the mail
+ * server is unreachable — instead of losing the first message to a timeout. Never throws.
+ * Returns true only when the mail server is reachable and the credentials are accepted.
+ */
+export async function verifySmtp(timeoutMs = 8000) {
+  const t = getSmtpTransporter();
+  if (!t || !smtpFromAddress()) return false;
+  try {
+    return await Promise.race([
+      t.verify().then(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs))
+    ]);
+  } catch {
+    return false;
+  }
 }

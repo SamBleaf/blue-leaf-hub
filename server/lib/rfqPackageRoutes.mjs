@@ -5,6 +5,7 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { resendSendConfigured, sendBatchViaResend } from "./resendSend.mjs";
+import { smtpReady, verifySmtp } from "./smtpSend.mjs";
 import { captureResendId } from "./rfqEngagement.mjs";
 import { wrapPlainTextEmailHtml } from "./signatureEmailHtml.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
@@ -351,11 +352,14 @@ export function registerRfqPackageRoutes(app) {
         } catch (cErr) { console.warn("[rfq/notify] correspondence", cErr?.message || cErr); }
       };
 
-      // Preferred path: ONE Resend Batch API call for every recipient. Sending them as separate
-      // concurrent requests trips Resend's per-second rate limit and the rejected ones fall back
-      // to slow SMTP (~2 min each) — which is what made a 19-recipient send hang. One call ≈ 1–2s.
+      // Transport choice: Blue Leaf's own mail server (SMTP) is PRIMARY — it sends as us and lands in
+      // our Sent folder. Probe it ONCE up front (handshake only, no message). When it's reachable we
+      // send per-recipient via sendPlainMail (SMTP → Sent mirror, Resend only as a per-message fallback
+      // for connection-level failures — never a double-send). Resend's Batch API is used ONLY when the
+      // mail server is unreachable, so a mail-server outage can't hang or block a blast.
+      const smtpUp = smtpReady() ? await verifySmtp() : false;
       let batched = false;
-      if (specs.length && resendSendConfigured()) {
+      if (specs.length && !smtpUp && resendSendConfigured()) {
         try {
           const ids = await sendBatchViaResend(specs.map((sp) => ({
             to: sp.to,
@@ -381,8 +385,9 @@ export function registerRfqPackageRoutes(app) {
         }
       }
 
-      // Fallback (Resend not configured, or the batch call failed): per-send with a hard timeout
-      // so one slow/hung transport can't block the batch past the proxy's ~30s response limit.
+      // Primary path (mail server reachable) OR fallback when the Resend batch itself failed: per-send
+      // via sendPlainMail (SMTP-first → Sent mirror). Bounded concurrency + a hard per-send timeout so
+      // one slow recipient can't block the blast past the proxy's ~30s limit.
       if (!batched && specs.length) {
         const SEND_TIMEOUT_MS = 20000;
         const CONCURRENCY = 3;
@@ -401,7 +406,7 @@ export function registerRfqPackageRoutes(app) {
             const sp = specs[i];
             const bodyText = sp.text;
             try {
-              const transport = await withTimeout(
+              const sendRes = await withTimeout(
                 sendPlainMail({
                   to: sp.to,
                   subject: sp.subject,
@@ -411,7 +416,9 @@ export function registerRfqPackageRoutes(app) {
                 }),
                 SEND_TIMEOUT_MS, `Send to ${sp.to}`
               );
-              outcome[i] = { ok: true, sp, transport, bodyText };
+              // sendPlainMail returns { transport, resendId }. A message goes out on exactly ONE
+              // transport, so this recipient is delivered once — never re-sent (no duplicate).
+              outcome[i] = { ok: true, sp, transport: sendRes?.transport || "smtp", resendId: sendRes?.resendId || null, bodyText };
             } catch (sendErr) {
               outcome[i] = { ok: false, sp, error: sendErr?.message || String(sendErr) };
             }
@@ -422,6 +429,9 @@ export function registerRfqPackageRoutes(app) {
         for (const o of outcome) {
           if (o.ok) {
             results.push({ rfqId: o.sp.r.id, ok: true, to: o.sp.to, transport: o.transport });
+            // Persist the Resend id even on the per-send fallback so the webhook can attribute
+            // delivery/open/bounce (the batch path did this; the per-send path used to drop it).
+            if (o.resendId) await captureResendId(s, o.sp.r.id, o.resendId);
             okOnes.push({ r: o.sp.r, subject: o.sp.subject, bodyText: o.bodyText });
           }
           else { results.push({ rfqId: o.sp.r.id, ok: false, to: o.sp.to, error: o.error }); }
@@ -430,7 +440,11 @@ export function registerRfqPackageRoutes(app) {
       }
 
       const sent = results.filter((x) => x && x.ok).length;
-      return ok(res, { sent, total: results.length, results });
+      // Per-transport tally so the UI can show HOW mail went out ("via your mail server" vs the
+      // Resend fallback) — visible proof the primary path is working.
+      const transports = {};
+      for (const r of results) if (r?.ok && r.transport) transports[r.transport] = (transports[r.transport] || 0) + 1;
+      return ok(res, { sent, total: results.length, results, transports });
     } catch (e) {
       console.error("[rfq/notify-recipients]", e);
       return err(res, 500, "Failed to send notifications.");

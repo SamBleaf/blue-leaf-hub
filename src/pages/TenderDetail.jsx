@@ -2199,8 +2199,14 @@ function winRowMissingConfirmedQuote(row) {
                   </div>
                   {presetForm ? (() => {
                     const typed = presetForm.label.trim().toLowerCase();
-                    // If the typed name matches an existing preset, offer to OVERWRITE it (not duplicate).
+                    // Overwrite target, in priority order: the CURRENTLY-LOADED custom preset (that's the
+                    // one you're editing), else an exact typed name-match. This is what makes "edit a
+                    // preset then Save" overwrite it instead of silently creating a duplicate.
+                    const activeCustom = customTemplates.find((t) => t.id === activePresetId) || null;
                     const nameMatch = typed ? customTemplates.find((t) => t.label.trim().toLowerCase() === typed) : null;
+                    const overwriteTarget = activeCustom || nameMatch;
+                    // Only block "Save as new" when the typed name would collide with an existing preset.
+                    const nameCollision = !!nameMatch && (!activeCustom || nameMatch.id !== activeCustom.id);
                     return (
                     <div className="mt-2 rounded-lg border border-hairline bg-page p-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2211,15 +2217,15 @@ function winRowMissingConfirmedQuote(row) {
                           className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs"
                           autoFocus
                         />
-                        {nameMatch ? (
-                          <button type="button" disabled={presetBusy} onClick={() => patchPreset(nameMatch.id)} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Overwrite “{nameMatch.label}”</button>
+                        {overwriteTarget ? (
+                          <button type="button" disabled={presetBusy} onClick={() => patchPreset(overwriteTarget.id)} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Update “{overwriteTarget.label}”</button>
                         ) : null}
-                        <button type="button" disabled={presetBusy || !presetForm.label.trim() || !!nameMatch} onClick={saveNewPreset} className={`rounded-md px-3 py-1 text-xs font-semibold disabled:opacity-40 ${nameMatch ? "border border-primary text-primary" : "bg-primary text-white"}`}>Save as new</button>
+                        <button type="button" disabled={presetBusy || !presetForm.label.trim() || nameCollision} onClick={saveNewPreset} className={`rounded-md px-3 py-1 text-xs font-semibold disabled:opacity-40 ${overwriteTarget ? "border border-primary text-primary" : "bg-primary text-white"}`}>Save as new</button>
                         <button type="button" onClick={() => setPresetForm(null)} className="rounded-md px-2 py-1 text-xs text-muted">Cancel</button>
                       </div>
                       <p className="mt-1 text-[10px] text-muted">
-                        {nameMatch
-                          ? <>A preset named “{nameMatch.label}” already exists — Overwrite it, or type a different name to save a new one.</>
+                        {overwriteTarget
+                          ? <><b>Update “{overwriteTarget.label}”</b> saves your edits back to that preset. <b>Save as new</b> keeps it and creates a separate one{nameCollision ? " — rename it first, that name is taken" : ""}.</>
                           : <>Saves the current message as a reusable preset. Keep tokens like {"{{first_name}}"} and {"{{plans_link}}"} so it re-fills per job & recipient.</>}
                       </p>
                     </div>
@@ -2238,7 +2244,15 @@ function winRowMissingConfirmedQuote(row) {
                   </p>
                   {emailResult?.error ? <p className="mt-2 text-xs text-danger">{emailResult.error}</p> : null}
                   {emailResult?.sent != null ? (
-                    <p className="mt-2 text-xs text-success">Sent {emailResult.sent} of {emailResult.total}.</p>
+                    <p className="mt-2 text-xs text-success">
+                      Sent {emailResult.sent} of {emailResult.total}.
+                      {emailResult.transports ? (() => {
+                        const t = emailResult.transports;
+                        const label = (k) => k === "smtp" ? "your mail server" : /resend/.test(k) ? "Resend (fallback)" : k;
+                        const parts = Object.entries(t).map(([k, n]) => `${n} via ${label(k)}`);
+                        return <span className="text-muted"> ({parts.join(", ")})</span>;
+                      })() : null}
+                    </p>
                   ) : null}
                   <div className="mt-4 flex items-center justify-end gap-3">
                     <button type="button" onClick={() => setEmailOpen(false)} className="rounded-lg border border-hairline bg-page px-4 py-2 text-xs font-semibold">
