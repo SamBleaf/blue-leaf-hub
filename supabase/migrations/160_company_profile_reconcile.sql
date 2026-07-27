@@ -35,13 +35,12 @@ where not exists (select 1 from public.company_profile);
 update public.company_profile set name = 'Blue Leaf Building' where name is null or name = '';
 
 -- ── 4. COMPANY DETAILS FOR PURCHASE ORDERS ────────────────────────────────────────────────────
--- These print on POs. Fill in the ABN (and confirm the address/phone/email proposed below from the
--- saved email signature), then UNCOMMENT this block and run it. Left commented so running the
--- migration as-is never writes unverified detail to a client-facing document.
---
--- update public.company_profile set
---   abn     = '00 000 000 000',                         -- << SET YOUR ABN
---   address = 'PO Box 3225 Newton, 5074',               -- from email signature — confirm
---   phone   = '0434 046 399',                           -- from email signature (mobile) — confirm
---   email   = 'admin@blueleafbuilding.com.au'           -- confirm the address POs should show
--- where id = (select id from public.company_profile order by id limit 1);
+-- These print on POs. ABN confirmed by Sam (2026-07-27); address/phone from the saved email
+-- signature; email is the send-from address. Only fills a field when it is currently blank, so it
+-- never overwrites a value later edited elsewhere.
+update public.company_profile set
+  abn     = coalesce(nullif(abn, ''),     '88 656 051 188'),
+  address = coalesce(nullif(address, ''), 'PO Box 3225 Newton, 5074'),
+  phone   = coalesce(nullif(phone, ''),   '0434 046 399'),
+  email   = coalesce(nullif(email, ''),   'admin@blueleafbuilding.com.au')
+where id = (select id from public.company_profile order by id limit 1);
