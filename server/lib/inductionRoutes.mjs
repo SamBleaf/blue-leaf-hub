@@ -73,6 +73,14 @@ export function registerInductionRoutes(app) {
       const emergencyContactPhone = String(req.body?.emergencyContactPhone || "").trim();
       const siteRulesAcknowledged = Boolean(req.body?.siteRulesAcknowledged);
       const swmsAcknowledged = Boolean(req.body?.swmsAcknowledged);
+      // The specific SWMS the worker acknowledged ([{id,title}]) — a defensible record, not a blanket
+      // boolean. Bounded + shape-guarded. Stored on site_inductions.acknowledged_swms (migration 161).
+      const acknowledgedSwms = Array.isArray(req.body?.acknowledgedSwms)
+        ? req.body.acknowledgedSwms
+            .filter((s) => s && (s.id != null))
+            .slice(0, 100)
+            .map((s) => ({ id: String(s.id), title: String(s.title || "").slice(0, 300) }))
+        : null;
       let signatureDataUrl = String(req.body?.signatureDataUrl || "").trim();
       const rawB64 = String(req.body?.signatureImageBase64 || "").trim();
       if (!signatureDataUrl && rawB64) {
@@ -136,7 +144,7 @@ export function registerInductionRoutes(app) {
         console.warn("[induction/submit] records filing:", err?.message || err);
       }
 
-      const { error: ie } = await sb.from("site_inductions").insert({
+      const baseRow = {
         project_id: projectId,
         person_name: personName,
         company,
@@ -150,7 +158,12 @@ export function registerInductionRoutes(app) {
         induction_pdf_path,
         inducted_at: inductedAt,
         ip_address: ipAddress
-      });
+      };
+      let ie = (await sb.from("site_inductions").insert({ ...baseRow, acknowledged_swms: acknowledgedSwms })).error;
+      if (ie && /acknowledged_swms/i.test(String(ie.message || ""))) {
+        // Pre-migration-161: column not present yet — still record the induction without the detail.
+        ie = (await sb.from("site_inductions").insert(baseRow)).error;
+      }
       if (ie) throw ie;
 
       return res.json({ ok: true });

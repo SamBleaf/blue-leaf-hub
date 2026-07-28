@@ -22,8 +22,23 @@ const TEMPLATES = {
     title: "Project WHS Management Plan",
     audience: "management",
     version: "1.0",
+    // The template body still carries placeholder legal content ("clause TBC"). A WHS management plan
+    // issued on placeholder clauses is worse than none (false assurance), so until a WHS professional
+    // reviews it, generation is watermarked DRAFT and the record can never reach an issuable status.
+    legalReviewPending: true,
   },
 };
+
+// Prominent, unmissable banner injected atop any legal-review-pending document so no exported copy
+// can be mistaken for a compliant, issuable plan.
+const LEGAL_REVIEW_BANNER = [
+  "> ⚠️ **DRAFT — NOT FOR SITE USE.**",
+  "> This document is generated from a template whose legal content is still placeholder and has",
+  "> **not been reviewed by a WHS professional for South Australia.** Do not issue it to a site or",
+  "> rely on it for compliance. It is a working draft only.",
+  "",
+  "",
+].join("\n");
 
 const BOOL_PROMOTED = new Set(["site_fenced", "temporary_fencing_required"]);
 
@@ -336,6 +351,15 @@ export function registerWhsEngineRoutes(app) {
       const markdown = await fs.readFile(path.join(TEMPLATE_DIR, tpl.file), "utf8");
       const { rendered, missing, missingRequired } = renderTemplate(markdown, context);
 
+      // Legal-review gate: stamp the DRAFT banner and force a non-issuable status so a placeholder
+      // template can never be treated as a compliant, issuable plan (audit stop-now item).
+      const renderedOut = tpl.legalReviewPending ? LEGAL_REVIEW_BANNER + rendered : rendered;
+      // Force a non-issuable status. 'draft' is in the whs_documents.status CHECK set and can never
+      // reach 'approved', so a legal-review-pending plan is structurally blocked from being issued.
+      const status = tpl.legalReviewPending
+        ? "draft"
+        : (missingRequired.length ? "requires_review" : "generated");
+
       const insert = {
         project_id: projectId,
         template_key: req.params.templateKey,
@@ -343,9 +367,9 @@ export function registerWhsEngineRoutes(app) {
         audience_layer: tpl.audience,
         template_version: tpl.version,
         profile_version: profile.version,
-        rendered_markdown: rendered,
+        rendered_markdown: renderedOut,
         missing_fields: missingRequired,
-        status: missingRequired.length ? "requires_review" : "generated",
+        status,
         is_stale: false,
         generated_by: req.caller?.id || null,
       };

@@ -160,8 +160,11 @@ export default function SiteInduction() {
           mobile: mobile.trim(),
           emergencyContactName: emName.trim(),
           emergencyContactPhone: emPhone.trim(),
-          siteRulesAcknowledged: true,
-          swmsAcknowledged: true,
+          // Real captured acknowledgement — NOT hardcoded. The wizard already gates progression on
+          // every rule + SWMS being ticked, so these reflect what the worker actually confirmed.
+          siteRulesAcknowledged: allRules,
+          swmsAcknowledged: allSwms,
+          acknowledgedSwms: filteredSwms.filter((s) => swmsAck[s.id]).map((s) => ({ id: s.id, title: s.title })),
           signatureDataUrl: dataUrl,
           ipAddress: ""
         })
