@@ -19,7 +19,13 @@ export async function ensureCarpentryJobSwms(sb, job) {
     const cats = workCategoriesForProjectType(job.project_type);
     const { data: tmpls } = await sb.from("swms_templates").select("id").eq("is_active", true).overlaps("work_category", cats);
     if (tmpls && tmpls.length) {
-      await sb.from("project_swms").insert(tmpls.map((t) => ({ carpentry_job_id: job.id, swms_template_id: t.id, trade: "Carpentry" })));
+      const rows = tmpls.map((t) => ({ carpentry_job_id: job.id, swms_template_id: t.id, trade: "Carpentry" }));
+      await sb.from("project_swms").insert(rows); // fast path (reconciled below, so its error is non-fatal)
+      // RECONCILE: guarantee EVERY matched SWMS is attached. A batch insert that partially fails (e.g. a
+      // concurrent first-open) must never silently drop a SWMS off a job — a missing SWMS is a WHS gap.
+      const { data: have } = await sb.from("project_swms").select("swms_template_id").eq("carpentry_job_id", job.id);
+      const haveIds = new Set((have || []).map((h) => h.swms_template_id));
+      for (const r of rows) { if (!haveIds.has(r.swms_template_id)) await sb.from("project_swms").insert(r); }
       autoSeeded = true;
       ({ data: links } = await sb.from("project_swms").select("swms_template_id").eq("carpentry_job_id", job.id));
     }
