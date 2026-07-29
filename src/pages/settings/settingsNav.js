@@ -47,6 +47,7 @@ export const SETTINGS_NAV = [
     label: "Modules & templates",
     subs: [
       { id: "templates", label: "Templates", kind: "component" },
+      { id: "swms-library", label: "WHS / SWMS Library", kind: "component", roles: ["admin", "supervisor"] },
       { id: "cost-model", label: "Tender & cost model", kind: "component" },
       { id: "marketing", label: "Marketing", kind: "component" },
       { id: "field-app", label: "Field app", kind: "component", roles: ["admin", "supervisor"] },

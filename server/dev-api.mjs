@@ -83,6 +83,7 @@ import { registerMarketingIntelligenceRoutes } from "./lib/marketingIntelligence
 import { registerMarketingAreaPerformanceRoutes } from "./lib/marketingAreaPerformanceRoutes.mjs";
 import { registerCrmRoutes } from "./lib/crmRoutes.mjs";
 import { registerWhsEngineRoutes } from "./lib/whs/whsEngineRoutes.mjs";
+import { registerCarpentrySwmsRoutes } from "./lib/whs/carpentrySwmsRoutes.mjs";
 import { registerCarpentryRoutes } from "./lib/carpentryRoutes.mjs";
 import { registerTenderRoutes } from "./lib/tenderRoutes.mjs";
 import { registerCarpentryStageScheduleRoutes } from "./lib/carpentryStageScheduleRoutes.mjs";
@@ -1007,6 +1008,7 @@ registerMarketingIntelligenceRoutes(app);
 registerMarketingAreaPerformanceRoutes(app);
 registerCrmRoutes(app);
 registerWhsEngineRoutes(app);
+registerCarpentrySwmsRoutes(app);
 registerCarpentryRoutes(app);
 registerTenderRoutes(app);
 registerCarpentryStageScheduleRoutes(app);

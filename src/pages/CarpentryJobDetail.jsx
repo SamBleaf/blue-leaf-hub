@@ -2347,10 +2347,146 @@ function BudgetTab({ jobId }) {
   );
 }
 
+// WHS Safety tab: the job's SWMS (auto-attached from its type) + the crew sign-on matrix. In-house,
+// task-based. SWMS content lives once in the shared library (Settings → WHS / SWMS Library).
+function SafetyTab({ jobId }) {
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr]         = useState("");
+  const [openId, setOpenId]   = useState(null);
+  const [busy, setBusy]       = useState(false);
+  const [adding, setAdding]   = useState(false);
+  const [library, setLibrary] = useState([]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/swms`);
+    setLoading(false);
+    if (!ok) { setErr(error || "Could not load SWMS."); return; }
+    setData(data);
+  }, [jobId]);
+  useEffect(() => { load(); }, [load]);
+
+  const removeSwms = async (swmsTemplateId) => {
+    setBusy(true);
+    await apiPost(`/api/carpentry/jobs/${jobId}/swms`, { action: "remove", swmsTemplateId });
+    setBusy(false); load();
+  };
+  const addSwms = async (swmsTemplateId) => {
+    setBusy(true);
+    await apiPost(`/api/carpentry/jobs/${jobId}/swms`, { action: "add", swmsTemplateId });
+    setBusy(false); setAdding(false); load();
+  };
+  const openAdd = async () => {
+    setAdding(true);
+    const { ok, data } = await apiFetch("/api/whs/swms-library");
+    if (ok) setLibrary(data?.templates || []);
+  };
+
+  if (loading) return <div className="p-8 text-center text-muted text-sm">Loading…</div>;
+  if (err)     return <div className="p-8 text-center text-red-600 text-sm">{err}</div>;
+
+  const swms = data?.swms || [];
+  const crew = data?.crew || [];
+  const signMap = {};
+  for (const s of (data?.signons || [])) { (signMap[s.swmsTemplateId] ||= {})[s.employeeId] = s.swmsVersion; }
+  const anyDraft = swms.some((s) => s.reviewStatus !== "reviewed");
+  const attachedIds = new Set(swms.map((s) => s.id));
+  const addable = library.filter((t) => !attachedIds.has(t.id) && String(t.trade || "").toLowerCase() === "carpentry" && t.isActive !== false);
+
+  return (
+    <div className="p-5 space-y-5">
+      {anyDraft && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
+          ⚠️ Some SWMS below are <b>DRAFT</b> — drafted from SafeWork SA sources but <b>not yet reviewed by a WHS professional.</b> Have them reviewed before relying on them on site.
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-ink">SWMS for this job <span className="text-muted font-normal">({swms.length})</span></h3>
+          <button onClick={openAdd} className="text-xs font-semibold text-primary hover:underline">+ Add SWMS</button>
+        </div>
+        {data?.autoSeeded && <p className="text-[11px] text-muted mb-2">Auto-selected from this job&apos;s type. Add or remove below if needed.</p>}
+        <div className="space-y-2">
+          {swms.length === 0 && <p className="text-sm text-muted">No SWMS attached.</p>}
+          {swms.map((s) => (
+            <div key={s.id} className="rounded-lg border border-hairline">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="flex-1 text-left">
+                  <div className="text-sm font-medium text-ink">{s.title} <span className="text-[10px] text-muted">v{s.version}</span></div>
+                  {s.summary && <div className="text-[11px] text-muted">{s.summary}</div>}
+                </button>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${s.reviewStatus === "reviewed" ? "bg-accent/15 text-accent" : "bg-warning/20 text-warning"}`}>{s.reviewStatus === "reviewed" ? "Reviewed" : "DRAFT"}</span>
+                <button onClick={() => removeSwms(s.id)} disabled={busy} className="text-muted hover:text-red-600 text-xs">Remove</button>
+              </div>
+              {openId === s.id && (
+                <div className="border-t border-hairline px-3 py-3 text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: s.contentHtml || "<p>No content.</p>" }} />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {adding && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-ink">Add a SWMS from the library</span>
+            <button onClick={() => setAdding(false)} className="text-xs text-muted">Close</button>
+          </div>
+          {addable.length === 0 ? <p className="text-xs text-muted">All Carpentry SWMS are already attached.</p> : (
+            <div className="space-y-1">
+              {addable.map((t) => (
+                <button key={t.id} onClick={() => addSwms(t.id)} disabled={busy} className="block w-full text-left text-sm px-2 py-1 rounded hover:bg-white">+ {t.title}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div>
+        <h3 className="text-sm font-semibold text-ink mb-2">Worker sign-on</h3>
+        {crew.length === 0 ? (
+          <p className="text-sm text-muted">No crew rostered to this job yet. Once workers are allocated on the Planner and sign on in the field app, their sign-ons appear here.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="text-xs border-collapse">
+              <thead>
+                <tr>
+                  <th className="text-left p-2 font-semibold text-muted">SWMS</th>
+                  {crew.map((c) => <th key={c.id} className="p-2 font-semibold text-muted whitespace-nowrap">{c.name}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {swms.map((s) => (
+                  <tr key={s.id} className="border-t border-hairline">
+                    <td className="p-2 text-ink whitespace-nowrap">{s.title}</td>
+                    {crew.map((c) => {
+                      const v = signMap[s.id]?.[c.id];
+                      return (
+                        <td key={c.id} className="p-2 text-center">
+                          {v == null ? <span className="text-muted">—</span>
+                            : v === s.version ? <span className="text-accent font-bold">✓</span>
+                            : <span className="text-warning" title={`Signed v${v}, now v${s.version}`}>re-sign</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { id: "overview",  label: "Overview" },
   { id: "schedule",  label: "Schedule" },
   { id: "diary",     label: "Diary" },
+  { id: "safety",    label: "Safety" },
   { id: "costs",     label: "Costs" },
   { id: "budget",    label: "Budget" },
 ];
@@ -2433,6 +2569,7 @@ export default function CarpentryJobDetail() {
         )}
         {tab === "schedule" && <ScheduleTab jobId={job.id} jobStartDate={job.startDate} onStartDateSaved={(d) => setJob((j) => ({ ...j, startDate: d }))} />}
         {tab === "diary"    && <DiaryTab job={job} />}
+        {tab === "safety"   && <SafetyTab jobId={job.id} />}
         {tab === "costs"    && showCost && <CostsTab jobId={job.id} />}
         {tab === "budget"   && showCost && <BudgetTab jobId={job.id} />}
       </div>

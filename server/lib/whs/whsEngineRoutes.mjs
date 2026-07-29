@@ -170,7 +170,10 @@ async function syncProjectSwms(sb, projectId, applicableSwms) {
     : [];
   try {
     const { data: templates } = await sb.from("swms_templates").select("id, trade, title, is_active");
-    const pool = templates || [];
+    // Exclude the carpentry SWMS library: those key to carpentry jobs by work_category, and their
+    // generic titles (e.g. "Roof Work") would otherwise be title-matched into Operations inductions —
+    // leaking DRAFT, carpentry-labelled content onto a project compliance surface.
+    const pool = (templates || []).filter((t) => normName(t.trade) !== normName("Carpentry"));
     const byTitle = new Map(pool.map((t) => [normName(t.title), t]));
     const linkRows = [];
     for (const name of names) {

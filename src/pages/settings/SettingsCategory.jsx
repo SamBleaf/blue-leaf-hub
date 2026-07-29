@@ -12,6 +12,7 @@ import AICostWidget from "../../components/settings/AICostWidget.jsx";
 import DataCleanup from "../DataCleanup.jsx";
 import ProfilePane from "./ProfilePane.jsx";
 import EnquiryAckSettings from "../../components/settings/EnquiryAckSettings.jsx";
+import SwmsLibrarySettings from "../../components/settings/SwmsLibrarySettings.jsx";
 
 // Maps a "component" kind sub.id → the element it renders. Kept here (rather than
 // in settingsNav.js) so the nav config stays plain data with no JSX/import weight.
@@ -20,6 +21,7 @@ const COMPONENT_MAP = {
   employees: () => <WorkforceTeam embedded />,
   xero: () => <XeroPane />,
   templates: () => <DocumentsTemplates />,
+  "swms-library": () => <SwmsLibrarySettings />,
   "cost-model": () => <CompanyCostModel />,
   marketing: () => <MusicLibrarySettings />,
   "field-app": () => <FieldAppPane />,

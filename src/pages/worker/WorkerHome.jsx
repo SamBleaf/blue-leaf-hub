@@ -4,6 +4,7 @@ import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch } from "../../lib/workerFetch.js";
 import { selectedJobQuery, setSelectedJob } from "../../lib/workerJob.js";
 import PlansSheet from "../../components/worker/PlansSheet.jsx";
+import SafetySheet from "../../components/worker/SafetySheet.jsx";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -32,7 +33,7 @@ function allocJob(a) {
 }
 
 // Today's site — the worker's daily start: where am I, with which crew, and what's waiting on me.
-function TodaySiteCard({ today, tomorrow, counts, onOpenTasks, onOpenPlans }) {
+function TodaySiteCard({ today, tomorrow, counts, onOpenTasks, onOpenPlans, onOpenSafety }) {
   const t = allocJob(today);
   const tm = allocJob(tomorrow);
   return (
@@ -69,6 +70,19 @@ function TodaySiteCard({ today, tomorrow, counts, onOpenTasks, onOpenPlans }) {
             </span>
             <span className="text-primary font-medium">View →</span>
           </button>
+          {t.type === "carpentry" && (
+            <button
+              type="button"
+              onClick={() => onOpenSafety?.(t)}
+              className="mt-2 w-full flex items-center justify-between rounded-lg bg-page px-3 py-2 text-sm"
+            >
+              <span className="text-ink flex items-center gap-1.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-muted"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                Safety — sign SWMS
+              </span>
+              <span className="text-primary font-medium">Open →</span>
+            </button>
+          )}
         </>
       ) : (
         <p className="text-sm text-muted">Not scheduled yet — check with your supervisor.</p>
@@ -91,6 +105,7 @@ export default function WorkerHome() {
   const [counts, setCounts] = useState(null);
   const [error, setError] = useState(null);
   const [plansJob, setPlansJob] = useState(null);   // { id, type, name } → Plans sheet
+  const [safetyJob, setSafetyJob] = useState(null); // { id, type, name } → SWMS sign-on sheet
 
   // Home loads two things together: the worker summary (/me) and today+tomorrow's Planner
   // allocation. The allocation is non-blocking — if it fails, Home still renders.
@@ -197,8 +212,9 @@ export default function WorkerHome() {
         </div>
 
         {/* Today's site — where am I going + what matters today (Planner allocation) */}
-        <TodaySiteCard today={alloc?.today} tomorrow={alloc?.tomorrow} counts={counts} onOpenTasks={openTodayTasks} onOpenPlans={(j) => setPlansJob(j)} />
+        <TodaySiteCard today={alloc?.today} tomorrow={alloc?.tomorrow} counts={counts} onOpenTasks={openTodayTasks} onOpenPlans={(j) => setPlansJob(j)} onOpenSafety={(j) => setSafetyJob(j)} />
         {plansJob && <PlansSheet jobId={plansJob.id} jobType={plansJob.type} jobLabel={plansJob.name} onClose={() => setPlansJob(null)} />}
+        {safetyJob && <SafetySheet jobId={safetyJob.id} jobLabel={safetyJob.name} onClose={() => setSafetyJob(null)} />}
 
         {/* Timesheet card */}
         <div className="rounded-card bg-white shadow-sm border border-hairline p-4 mb-3">

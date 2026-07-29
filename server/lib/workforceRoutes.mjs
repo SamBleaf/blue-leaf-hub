@@ -12,6 +12,7 @@ import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 import { validateChargeUpSite } from "./chargeUpService.mjs";
 import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker } from "./taskAssignments.mjs";
+import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 
 // BLB Charge Up category — an allocation to this carpentry job must name a site (address).
 const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
@@ -2631,6 +2632,79 @@ export function registerWorkforceRoutes(app) {
       return ok(res, { subtasks, chargeUpSites });
     } catch (e) {
       console.error("[worker/jobs subtasks]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // WHS: the SWMS a worker must sign for a carpentry job, with their own sign-on status.
+  app.get("/api/worker/jobs/:id/swms", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    const jobId = String(req.params.id || "");
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.");
+    try {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error || !workerMaySeeJob(vis, jobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+      const { data: job } = await sb.from("carpentry_jobs").select("id, reference, address, project_type").eq("id", jobId).maybeSingle();
+      if (!job) return err(res, 404, "Job not found.");
+      const { templateIds } = await ensureCarpentryJobSwms(sb, job);
+      let swms = [];
+      if (templateIds.length) {
+        const { data: t } = await sb.from("swms_templates").select("*").in("id", templateIds).order("title");
+        const { data: mine } = await sb.from("whs_swms_signon")
+          .select("swms_template_id, swms_version").eq("carpentry_job_id", jobId).eq("employee_id", emp.id);
+        const signed = new Set((mine || []).map((s) => `${s.swms_template_id}:${s.swms_version}`));
+        swms = (t || []).map((row) => ({
+          id: row.id, title: row.title, version: row.version, summary: row.summary,
+          workCategory: row.work_category, isHighRisk: row.is_high_risk, reviewStatus: row.review_status,
+          source: row.source, contentHtml: row.content_html, pdfPath: row.pdf_path,
+          signed: signed.has(`${row.id}:${row.version}`), // false if a new version needs re-signing
+        }));
+      }
+      return ok(res, { job: { id: job.id, reference: job.reference, address: job.address }, swms });
+    } catch (e) {
+      console.error("[worker/jobs swms]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // WHS: a worker signs on to a SWMS (once per job; a new version needs a fresh sign-on). The shield record.
+  app.post("/api/worker/swms/:swmsTemplateId/signon", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    if (req.workerPreview) return err(res, 403, "Read-only preview — you can't sign on as a worker.");
+    const swmsTemplateId = String(req.params.swmsTemplateId || "");
+    const carpentryJobId = String(req.body?.carpentryJobId || "");
+    const signatureDataUrl = typeof req.body?.signatureDataUrl === "string" ? req.body.signatureDataUrl : null;
+    if (!isUuid(swmsTemplateId) || !isUuid(carpentryJobId)) return err(res, 400, "Invalid ids.");
+    try {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error || !workerMaySeeJob(vis, carpentryJobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+      // The SWMS must be current-attached to THIS job, active, and REVIEWED — a worker can only sign a
+      // SWMS actually issued to their job that has passed WHS review (never a DRAFT). Version is taken
+      // server-side (never a client-supplied version).
+      const { data: tpl } = await sb.from("swms_templates").select("id, version, review_status, is_active").eq("id", swmsTemplateId).maybeSingle();
+      if (!tpl) return err(res, 404, "SWMS not found.");
+      if (tpl.is_active === false) return err(res, 409, "This SWMS is no longer active.");
+      if (tpl.review_status !== "reviewed") return err(res, 409, "This SWMS is awaiting WHS review and can't be signed yet.");
+      const { data: link } = await sb.from("project_swms").select("id").eq("carpentry_job_id", carpentryJobId).eq("swms_template_id", swmsTemplateId).maybeSingle();
+      if (!link) return err(res, 409, "This SWMS isn't assigned to this job.");
+      const { error } = await sb.from("whs_swms_signon").insert({
+        swms_template_id: swmsTemplateId, swms_version: tpl.version,
+        carpentry_job_id: carpentryJobId, employee_id: emp.id,
+        signature_data_url: signatureDataUrl, created_by: emp.id,
+      });
+      if (error) {
+        if (/duplicate|unique/i.test(String(error.message || ""))) return ok(res, { already: true });
+        return err(res, 500, translateDbError(error));
+      }
+      return ok(res, { signed: true, version: tpl.version });
+    } catch (e) {
+      console.error("[worker/swms signon]", e);
       return err(res, 502, translateDbError(e));
     }
   });
