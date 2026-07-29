@@ -13,6 +13,7 @@ import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 import { validateChargeUpSite } from "./chargeUpService.mjs";
 import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker } from "./taskAssignments.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
+import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
 
 // BLB Charge Up category — an allocation to this carpentry job must name a site (address).
 const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
@@ -2705,6 +2706,71 @@ export function registerWorkforceRoutes(app) {
       return ok(res, { signed: true, version: tpl.version });
     } catch (e) {
       console.error("[worker/swms signon]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // WHS pack (Phase C): the ONE composed site WHS pack a worker signs. Returns the composed HTML +
+  // the current version + whether THIS worker has signed that version. Only an ISSUED (reviewed +
+  // approved) pack is signable — a draft is not shown as ready.
+  app.get("/api/worker/jobs/:id/whs-pack", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    const jobId = String(req.params.id || "");
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.");
+    try {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error || !workerMaySeeJob(vis, jobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+      const { error, job, pack, html } = await loadAndComposePack(sb, jobId);
+      if (error) return err(res, 404, error);
+      const issued = !!pack && pack.review_status === "issued";
+      let signed = false;
+      if (pack) {
+        const { data: mine } = await sb.from("whs_swms_signon")
+          .select("id").eq("pack_id", pack.id).eq("pack_version", pack.version).eq("employee_id", emp.id).maybeSingle();
+        signed = !!mine;
+      }
+      return ok(res, {
+        job: { id: job.id, reference: job.reference, address: job.address },
+        pack: pack ? { version: pack.version, issued, signed, html: issued ? html : null } : null,
+      });
+    } catch (e) {
+      console.error("[worker/jobs whs-pack]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // A worker signs the current pack version (once per version; a new version needs a fresh sign-on).
+  // The version is taken server-side (never client-supplied). Only an ISSUED pack can be signed.
+  app.post("/api/worker/jobs/:id/whs-pack/signon", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
+    if (!emp) return err(res, 403, "No employee record found.");
+    if (req.workerPreview) return err(res, 403, "Read-only preview — you can't sign on as a worker.");
+    const jobId = String(req.params.id || "");
+    const signatureDataUrl = typeof req.body?.signatureDataUrl === "string" ? req.body.signatureDataUrl : null;
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.");
+    try {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (vis.error || !workerMaySeeJob(vis, jobId, "carpentry")) return err(res, 403, "You don't have access to this job.");
+      const { data: pack } = await sb.from("carpentry_whs_packs").select("id, version, review_status").eq("carpentry_job_id", jobId).maybeSingle();
+      if (!pack) return err(res, 404, "No WHS pack for this job yet.");
+      if (pack.review_status !== "issued") return err(res, 409, "This WHS pack is awaiting review/approval and can't be signed yet.");
+      const { error } = await sb.from("whs_swms_signon").insert({
+        pack_id: pack.id, pack_version: pack.version,
+        carpentry_job_id: jobId, employee_id: emp.id,
+        signature_data_url: signatureDataUrl, created_by: emp.id,
+      });
+      if (error) {
+        if (/duplicate|unique/i.test(String(error.message || ""))) return ok(res, { already: true });
+        return err(res, 500, translateDbError(error));
+      }
+      return ok(res, { signed: true, version: pack.version });
+    } catch (e) {
+      console.error("[worker/jobs whs-pack signon]", e);
       return err(res, 502, translateDbError(e));
     }
   });
