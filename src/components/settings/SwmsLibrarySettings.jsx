@@ -99,7 +99,8 @@ export default function SwmsLibrarySettings() {
   };
 
   const carpentry = useMemo(
-    () => (templates || []).filter((t) => String(t.trade || "").toLowerCase() === "carpentry")
+    () => (templates || [])
+      .filter((t) => String(t.trade || "").toLowerCase() === "carpentry" && t.isActive !== false)
       .sort((a, b) => String(a.moduleCode || a.title).localeCompare(String(b.moduleCode || b.title))),
     [templates]);
   const part1 = carpentry.filter((t) => t.part === 1 || t.isHrcw === "yes" || t.isHrcw === "boundary");
