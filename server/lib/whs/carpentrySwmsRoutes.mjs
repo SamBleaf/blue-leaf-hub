@@ -7,6 +7,7 @@ import { ok, err, rowsToCamel, translateDbError } from "../apiResponse.mjs";
 import { requireAuth, requireRole } from "../requireAuth.mjs";
 import { getServiceSupabase } from "../supabaseService.mjs";
 import { workCategoriesForProjectType } from "./carpentrySwmsMap.mjs";
+import { renderSwmsModuleHtml } from "./swmsRender.mjs";
 
 /**
  * Attach every active SWMS whose work_category overlaps the job's project_type categories, if the job
@@ -114,7 +115,19 @@ export function registerCarpentrySwmsRoutes(app) {
     if (typeof b.title === "string") patch.title = b.title.trim();
     if (typeof b.summary === "string") patch.summary = b.summary;
     if (typeof b.source === "string") patch.source = b.source;
-    if (typeof b.contentHtml === "string") patch.content_html = b.contentHtml;
+    // Structured content is the source of truth: store content_json AND re-render content_html from it
+    // so the worker field sheet + previews stay in sync. No hand-edited HTML.
+    if (b.contentJson && typeof b.contentJson === "object") {
+      patch.content_json = b.contentJson;
+      patch.content_html = renderSwmsModuleHtml(b.contentJson);
+      // Keep the display/query columns in sync with the structured source of truth.
+      if (typeof b.contentJson.activity === "string") patch.activity = b.contentJson.activity;
+      if (typeof b.contentJson.hazard === "string") patch.hazard = b.contentJson.hazard;
+      if (typeof b.contentJson.trigger === "string") patch.trigger = b.contentJson.trigger;
+    } else if (typeof b.contentHtml === "string") {
+      patch.content_html = b.contentHtml; // legacy fallback
+    }
+    if (b.isHrcw === "yes" || b.isHrcw === "no" || b.isHrcw === "boundary") patch.is_hrcw = b.isHrcw;
     if (typeof b.isHighRisk === "boolean") patch.is_high_risk = b.isHighRisk;
     if (typeof b.isActive === "boolean") patch.is_active = b.isActive;
     if (Array.isArray(b.workCategory)) patch.work_category = b.workCategory.map((c) => String(c));
@@ -131,6 +144,22 @@ export function registerCarpentrySwmsRoutes(app) {
       return ok(res, { template: rowsToCamel([data])[0] });
     } catch (e) {
       return err(res, 500, translateDbError(e) || "Could not update the SWMS.");
+    }
+  });
+
+  // WHS Source Register + conflict log (the tiered, currency-checked evidence base behind the modules).
+  app.get("/api/whs/sources", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const [{ data: sources, error: se }, { data: conflicts, error: ce }] = await Promise.all([
+        sb.from("whs_sources").select("*").order("tier").order("id"),
+        sb.from("whs_source_conflicts").select("*").order("id"),
+      ]);
+      if (se && !/whs_sources/i.test(String(se.message))) return err(res, 500, translateDbError(se));
+      return ok(res, { sources: rowsToCamel(sources || []), conflicts: rowsToCamel(conflicts || []), migrationPending: !!(se || ce) });
+    } catch (e) {
+      return err(res, 500, translateDbError(e) || "Could not load the WHS sources.");
     }
   });
 }

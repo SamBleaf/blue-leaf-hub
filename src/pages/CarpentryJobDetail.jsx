@@ -2486,7 +2486,7 @@ const TABS = [
   { id: "overview",  label: "Overview" },
   { id: "schedule",  label: "Schedule" },
   { id: "diary",     label: "Diary" },
-  { id: "safety",    label: "Safety" },
+  { id: "safety",    label: "WHS" },
   { id: "costs",     label: "Costs" },
   { id: "budget",    label: "Budget" },
 ];
