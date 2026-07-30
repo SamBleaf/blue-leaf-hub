@@ -192,7 +192,10 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
   const allReviewed = [...hrcw, ...task].every((m) => m.review_status === "reviewed");
   const draft = pack.review_status !== "issued" || !allReviewed || missing.length > 0;
   const siteAddress = [a.addressStreet, a.addressSuburb, a.addressPostcode].filter(Boolean).join(", ") || job.address;
-  const pastDue = pack.review_status === "issued" && pack.review_due_at && new Date(pack.review_due_at) < new Date();
+  // review_due_at is a DATE — compare calendar days in LOCAL time (en-CA gives YYYY-MM-DD, sorts
+  // lexicographically), so a pack isn't "overdue" until the day AFTER its due date, not UTC-midnight.
+  const _todayLocal = new Date().toLocaleDateString("en-CA");
+  const pastDue = pack.review_status === "issued" && pack.review_due_at && String(pack.review_due_at).slice(0, 10) < _todayLocal;
 
   const draftBanner = draft
     ? `<div style="background:#fff3cd;border:1px solid #ffe08a;color:#5a4500;padding:8px 10px;font-weight:700;margin-bottom:10px">⚠️ DRAFT — NOT FOR SITE USE. Not all modules are reviewed / the pack is not approved. Do not rely on this on site.</div>`

@@ -156,5 +156,16 @@ const base = { job: { address: "1 Test St", reference: "J1" }, company: { name: 
   ok(!noArrest.includes("Fall-arrest rescue plan"), "no fall-arrest → rescue block hidden");
 }
 
+// 15. Review-due is date-only + local: a pack due TODAY is still in-date, due YESTERDAY is overdue.
+{
+  const todayLocal = new Date().toLocaleDateString("en-CA");
+  const y = new Date(Date.now() - 864e5).toLocaleDateString("en-CA");
+  const mk = (due) => ({ version: 1, review_status: "issued", review_due_at: due, selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] }, answers: {} });
+  const dueToday = composeWhsPack({ ...base, pack: mk(todayLocal), modules: [H] });
+  const dueYesterday = composeWhsPack({ ...base, pack: mk(y), modules: [H] });
+  ok(!dueToday.includes("REVIEW OVERDUE"), "pack due today is NOT overdue (local date, not UTC-midnight)");
+  ok(dueYesterday.includes("REVIEW OVERDUE"), "pack due yesterday IS overdue");
+}
+
 console.log(`whs-pack-compose: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -113,7 +113,13 @@ export function registerCarpentryWhsPackRoutes(app) {
     if (typeof b.reviewedBy === "string" || b.reviewedBy === null) patch.reviewed_by = b.reviewedBy || null;
     if (typeof b.reviewedAt === "string" || b.reviewedAt === null) patch.reviewed_at = b.reviewedAt || null;
     try {
-      const { data, error } = await sb.from("carpentry_whs_packs").update(patch).eq("carpentry_job_id", jobId).select("*").single();
+      let { data, error } = await sb.from("carpentry_whs_packs").update(patch).eq("carpentry_job_id", jobId).select("*").single();
+      // Deploy-order net: if migration 168 hasn't been applied yet the review-date columns don't exist —
+      // don't 500 the whole save; drop just those keys and persist everything else.
+      if (error && (error.code === "42703" || /review_due_at|reviewed_by|reviewed_at|column .* does not exist/i.test(String(error.message || "")))) {
+        delete patch.review_due_at; delete patch.reviewed_by; delete patch.reviewed_at;
+        ({ data, error } = await sb.from("carpentry_whs_packs").update(patch).eq("carpentry_job_id", jobId).select("*").single());
+      }
       if (error) return err(res, 500, translateDbError(error));
       return ok(res, { pack: rowToCamel(data) });
     } catch (e) {
@@ -169,6 +175,9 @@ export function registerCarpentryWhsPackRoutes(app) {
       const { data: pack } = await sb.from("carpentry_whs_packs").select("*").eq("carpentry_job_id", jobId).maybeSingle();
       if (!pack) return err(res, 404, "No pack for this job.");
       if (action === "approve") {
+        // An issued pack is immutable through approve — re-approving would silently reassign the reviewer
+        // record (approved_by/at) with no revision. Force a revision to change anything.
+        if (pack.review_status === "issued") return err(res, 409, "This pack is already issued. Click 'New revision' to change it, then re-approve.");
         const codes = [...(pack.selected_hrcw || []), ...(pack.selected_task || [])];
         if (!codes.length) return err(res, 409, "Select at least one module that applies to this job before issuing.");
         const { data: mods } = await sb.from("swms_templates").select("module_code, review_status, content_json, part, is_hrcw").in("module_code", codes);
@@ -181,7 +190,10 @@ export function registerCarpentryWhsPackRoutes(app) {
         const sel = pack.selected_controls || {};
         const noControls = (mods || []).filter((m) => {
           const opts = Array.isArray(m.content_json?.controlOptions) ? m.content_json.controlOptions : [];
-          return opts.length > 0 && !(Array.isArray(sel[m.module_code]) && sel[m.module_code].length > 0);
+          // Count only ticks whose TEXT still exists in the register — a control edited/removed after it was
+          // ticked leaves a stale text that must NOT count as a live control (else an HRCW issues with none).
+          const validPicked = (Array.isArray(sel[m.module_code]) ? sel[m.module_code] : []).filter((t) => opts.some((o) => o.text === t));
+          return opts.length > 0 && validPicked.length === 0;
         }).map((m) => m.module_code);
         if (noControls.length) return err(res, 409, `Select the controls in place for: ${noControls.join(", ")}. You can't issue a pack with an HRCW/task that has no controls ticked.`);
         // G-2: an HRCW module whose top ticked control is admin (L5) or PPE (L6) is leaning on paperwork/a
@@ -207,7 +219,9 @@ export function registerCarpentryWhsPackRoutes(app) {
         return ok(res, { pack: rowToCamel(data) });
       }
       if (action === "revise") {
-        const { data, error } = await sb.from("carpentry_whs_packs").update({ version: (Number(pack.version) || 1) + 1, review_status: "draft", approved_by: null, approved_at: null, updated_at: new Date().toISOString() }).eq("carpentry_job_id", jobId).select("*").single();
+        // Clear the competent-reviewer sign-off too — a revised pack must not re-issue carrying the previous
+        // reviewer's name/date as if they'd seen the changed content (the stale-sign-off this system guards against).
+        const { data, error } = await sb.from("carpentry_whs_packs").update({ version: (Number(pack.version) || 1) + 1, review_status: "draft", approved_by: null, approved_at: null, reviewed_by: null, reviewed_at: null, updated_at: new Date().toISOString() }).eq("carpentry_job_id", jobId).select("*").single();
         if (error) return err(res, 500, translateDbError(error));
         return ok(res, { pack: rowToCamel(data) });
       }

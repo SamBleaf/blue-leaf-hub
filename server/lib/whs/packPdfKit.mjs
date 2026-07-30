@@ -26,7 +26,8 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
   const missing = [...(pack.selected_hrcw || []), ...(pack.selected_task || [])].filter((c) => !byCode[c]);
   const draft = pack.review_status !== "issued" || !allReviewed || missing.length > 0;
   const siteAddress = [a.addressStreet, a.addressSuburb, a.addressPostcode].filter(Boolean).join(", ") || job.address || "";
-  const pastDue = pack.review_status === "issued" && pack.review_due_at && new Date(pack.review_due_at) < new Date();
+  const _todayLocal = new Date().toLocaleDateString("en-CA");
+  const pastDue = pack.review_status === "issued" && pack.review_due_at && String(pack.review_due_at).slice(0, 10) < _todayLocal;
   const ppe = resolvePpe([...hrcw, ...task], a);
   const logoBuf = (() => { const m = String(logoDataUrl || "").match(/^data:image\/(png|jpe?g);base64,(.+)$/i); try { return m ? Buffer.from(m[2], "base64") : null; } catch { return null; } })();
 
@@ -43,9 +44,11 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
     doc.moveTo(M, M + 26).lineTo(PW - M, M + 26).lineWidth(1).strokeColor(NAVY).stroke();
     y = TOP;
   };
-  const newPage = () => { doc.addPage(); header(); };
+  // Any new page — whether from newPage() or pdfkit's own overflow flow — gets the branding band.
+  doc.on("pageAdded", header);
+  const newPage = () => { doc.addPage(); };
   const need = (h) => { if (y + h > BOT) newPage(); };
-  header();
+  header(); // page 1 was added by the constructor before the listener, so draw it once by hand
 
   // ---- primitives ----
   const barGlyph = (levels, x, yy) => {
@@ -67,7 +70,8 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
       doc.rect(M, y, CW, rh).lineWidth(0.5).strokeColor(RULE).stroke();
       doc.moveTo(M + lw, y).lineTo(M + lw, y + rh).strokeColor(RULE).stroke();
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor(INK).text(clean(k), M + 4, y + 4, { width: lw - 8 });
-      doc.font(/\d/.test(val) ? "Courier" : "Helvetica").fontSize(9).fillColor(INK).text(val, M + lw + 6, y + 4, { width: CW - lw - 12 });
+      // Mono only for values that are ENTIRELY numeric/date/phone-like — not any prose that merely contains a digit.
+      doc.font(/^[\d\s()+\-.:/]+$/.test(val) ? "Courier" : "Helvetica").fontSize(9).fillColor(INK).text(val, M + lw + 6, y + 4, { width: CW - lw - 12 });
       y += rh;
     }
     y += 4;
@@ -230,8 +234,11 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     doc.switchToPage(range.start + i);
+    // The footer sits below the bottom margin; zero it on this page so the write doesn't trip pdfkit's
+    // overflow flow and append a blank page per footer (which was doubling the document).
+    doc.page.margins.bottom = 0;
     doc.font("Courier").fontSize(7.5).fillColor(INK60)
-      .text(`Blue Leaf Building · ${siteAddress} · v${pack.version || 1} · ${fdate(new Date())} · Page ${i + 1} of ${range.count}`, M, PH - 30, { width: CW, align: "center" });
+      .text(`Blue Leaf Building · ${siteAddress} · v${pack.version || 1} · ${fdate(new Date())} · Page ${i + 1} of ${range.count}`, M, PH - 30, { width: CW, align: "center", lineBreak: false });
   }
 
   doc.end();

@@ -67,10 +67,13 @@ export default function WhsPackTab({ jobId }) {
   // isn't ambushed by the server's 409.
   const needControls = useMemo(() => {
     const codes = [...hrcw, ...task];
-    return codes
-      .map((code) => byCode[code])
-      .filter((m) => m && (m.contentJson?.controlOptions?.length > 0) && !((controls[m.moduleCode]?.size) > 0))
-      .map((m) => m.moduleCode);
+    return codes.map((code) => byCode[code]).filter(Boolean).filter((m) => {
+      const opts = m.contentJson?.controlOptions || [];
+      if (!opts.length) return false;
+      const set = controls[m.moduleCode] || new Set();
+      // Only ticks whose text still exists in the register count (mirrors the server) — a stale tick isn't a control.
+      return opts.filter((o) => set.has(o.text)).length === 0;
+    }).map((m) => m.moduleCode);
   }, [hrcw, task, controls, byCode]);
 
   // G-2: an HRCW module whose top ticked control is admin (L5) or PPE (L6) needs a written justification.
@@ -143,7 +146,11 @@ export default function WhsPackTab({ jobId }) {
   for (const s of (data.signons || [])) { const v = Number(s.packVersion); if (!signedVersion[s.employeeId] || v > signedVersion[s.employeeId]) signedVersion[s.employeeId] = v; }
   // G-3 (fall-arrest rescue plan) + the combined issue-gate mirroring the server.
   const arrestGaps = (!issued && answers.fallArrestInUse) ? ["rescuer", "rescueMethod", "groundClearance"].filter((k) => !String(answers[k] || "").trim()) : [];
-  const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0;
+  // Mirror the server's reviewed-module + missing-module gates so the button never enables into a 409.
+  const selectedCodes = [...hrcw, ...task];
+  const unreviewedSel = selectedCodes.filter((c) => byCode[c] && byCode[c].reviewStatus !== "reviewed");
+  const missingSel = selectedCodes.filter((c) => !byCode[c]);
+  const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0 && unreviewedSel.length === 0 && missingSel.length === 0;
 
   const ModuleCard = ({ m, selected, onToggle }) => {
     const opts = m.contentJson?.controlOptions || [];
@@ -299,6 +306,11 @@ export default function WhsPackTab({ jobId }) {
       {!issued && arrestGaps.length > 0 && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
           <b>Rescue plan incomplete (G-3).</b> Fall arrest is in use — complete before issuing: <b>{arrestGaps.map((k) => ARREST_LABEL[k]).join(", ")}</b>.
+        </div>
+      )}
+      {!issued && (unreviewedSel.length > 0 || missingSel.length > 0) && (
+        <div className="rounded-lg border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-ink">
+          <b>Not ready for issue.</b> {unreviewedSel.length > 0 && <>These selected modules aren&apos;t WHS-reviewed yet: <b>{unreviewedSel.join(", ")}</b> — a competent reviewer must mark each reviewed in Settings first. </>}{missingSel.length > 0 && <>Missing from the register: <b>{missingSel.join(", ")}</b>.</>}
         </div>
       )}
 
