@@ -32,8 +32,20 @@ export default function WhsPackTab({ jobId }) {
   useEffect(() => { load(); }, [load]);
 
   const modules = useMemo(() => data?.modules || [], [data]);
+  const byCode = useMemo(() => Object.fromEntries(modules.map((m) => [m.moduleCode, m])), [modules]);
   const part1 = modules.filter(isPart1);
   const part2 = modules.filter((m) => !isPart1(m));
+
+  // G-1: any selected module that HAS control options but none ticked can't be issued (the pack would
+  // assert high-risk work with no controls). Surface it up front + block Approve, so the supervisor
+  // isn't ambushed by the server's 409.
+  const needControls = useMemo(() => {
+    const codes = [...hrcw, ...task];
+    return codes
+      .map((code) => byCode[code])
+      .filter((m) => m && (m.contentJson?.controlOptions?.length > 0) && !((controls[m.moduleCode]?.size) > 0))
+      .map((m) => m.moduleCode);
+  }, [hrcw, task, controls, byCode]);
 
   const toggleMod = (code, set, setter) => { const n = new Set(set); n.has(code) ? n.delete(code) : n.add(code); setter(n); };
   // Controls are identified by their TEXT (stable), never an array index, so reordering/editing the
@@ -146,12 +158,18 @@ export default function WhsPackTab({ jobId }) {
         </div>
       </div>
 
+      {!issued && needControls.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <b>Can&apos;t issue yet.</b> These selected modules have no controls ticked — a pack can&apos;t assert high-risk work with no controls in place: <b>{needControls.join(", ")}</b>. Tick the controls actually installed, or untick the module if it doesn&apos;t apply.
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 pt-2 border-t border-hairline">
         <button disabled={busy || issued} onClick={save} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={issued ? "Issued — start a new revision to edit" : ""}>Save</button>
         <button disabled={busy} onClick={compose} className="rounded-md border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Generate / preview pack</button>
         <button disabled={busy} onClick={downloadPdf} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink">Download PDF</button>
         {!issued
-          ? <button disabled={busy} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white">Approve &amp; issue</button>
+          ? <button disabled={busy || needControls.length > 0} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={needControls.length ? `Tick controls for: ${needControls.join(", ")}` : ""}>Approve &amp; issue</button>
           : <button disabled={busy} onClick={() => act("revise")} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold">New revision (re-sign)</button>}
       </div>
 

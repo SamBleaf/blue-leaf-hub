@@ -6,7 +6,18 @@
 
 const HOC = { 1: "Eliminate", 2: "Substitute", 3: "Isolate", 4: "Engineering", 5: "Administrative", 6: "PPE" };
 const PPE_FLAG = { R: "mandatory", C: "conditional", S: "recommended", NA: "n/a" };
+const RANK = { R: 3, C: 2, S: 1, NA: 0 };
+// Defensive: strip stray markdown emphasis, and normalise a PPE flag to a single known value. A compound
+// flag ("C → R", "R / N/A") or an unknown token resolves to the MORE protective value — never a silent
+// "n/a" (the bug that hid P2-respirator on the earlier sample). The register is already clean; this stops
+// any future bad data from leaking into a liability document.
+const stripMd = (s) => String(s ?? "").replace(/\*\*/g, "").replace(/\*\(/g, "(").replace(/\)\*/g, ")").replace(/\s{2,}/g, " ").trim();
+function normFlag(raw) {
+  const norm = (String(raw ?? "").toUpperCase().match(/N\/?A|R|C|S/g) || []).map((t) => (t.startsWith("N") ? "NA" : t));
+  return norm.length ? norm.sort((a, b) => RANK[b] - RANK[a])[0] : "C";
+}
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const txt = (s) => esc(stripMd(s));
 const bar = (t) => `<div style="background:#111;color:#fff;font-weight:700;font-size:12px;letter-spacing:.04em;padding:6px 10px;margin:18px 0 8px">${esc(t)}</div>`;
 
 function moduleBlock(m, pickedKeys, part) {
@@ -21,33 +32,33 @@ function moduleBlock(m, pickedKeys, part) {
   const ctrlRows = controls.length === 0
     ? `<li style="color:#444">Controls for this item are the site PPE matrix (Part 3) + general site rules.</li>`
     : picked.length
-      ? picked.map((x) => `<li><b>L${esc(x.level)} ${esc(HOC[x.level] || "")}:</b> ${esc(x.text)}</li>`).join("")
+      ? picked.map((x) => `<li><b>L${esc(x.level)} ${esc(HOC[x.level] || "")}:</b> ${txt(x.text)}</li>`).join("")
       : `<li style="color:#b00"><b>No controls selected — this ${part === 1 ? "HRCW" : "task"} cannot proceed until the supervisor selects the controls actually in place.</b></li>`;
   const ppeRow = ppe.length
-    ? `<div style="font-size:12px;margin-top:4px"><b>PPE:</b> ${ppe.map((p) => `${esc(p.item)} (${esc(PPE_FLAG[p.flag] || p.flag)}${p.condition ? " — " + esc(p.condition) : ""})`).join("; ")}</div>`
+    ? `<div style="font-size:12px;margin-top:4px"><b>PPE:</b> ${ppe.map((p) => `${txt(p.item)} (${esc(PPE_FLAG[normFlag(p.flag)])}${p.condition ? " — " + txt(p.condition) : ""})`).join("; ")}</div>`
     : "";
   return `
   <div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px">
     <div style="font-weight:700;color:#006c9b">${esc(m.module_code || "")} · ${esc(m.title || "")}</div>
-    ${c.activity ? `<div style="font-size:12px"><b>Activity:</b> ${esc(c.activity)}</div>` : ""}
-    ${c.hazard ? `<div style="font-size:12px"><b>Hazards:</b> ${esc(c.hazard)}</div>` : ""}
+    ${c.activity ? `<div style="font-size:12px"><b>Activity:</b> ${txt(c.activity)}</div>` : ""}
+    ${c.hazard ? `<div style="font-size:12px"><b>Hazards:</b> ${txt(c.hazard)}</div>` : ""}
     <div style="font-size:12px;margin-top:4px"><b>Controls in place (hierarchy order):</b></div>
     <ol style="font-size:12px;margin:2px 0 0 16px">${ctrlRows}</ol>
     ${ppeRow}
-    ${c.monitorReview ? `<div style="font-size:11px;color:#444;margin-top:4px"><b>Monitor &amp; review:</b> ${esc(c.monitorReview)}</div>` : ""}
-    ${(c.responsibleInstall || c.responsibleUse) ? `<div style="font-size:11px;color:#444"><b>Responsible:</b> ${c.responsibleInstall ? "install/verify " + esc(c.responsibleInstall) : ""}${c.responsibleUse ? " · use " + esc(c.responsibleUse) : ""}</div>` : ""}
+    ${c.monitorReview ? `<div style="font-size:11px;color:#444;margin-top:4px"><b>Monitor &amp; review:</b> ${txt(c.monitorReview)}</div>` : ""}
+    ${(c.responsibleInstall || c.responsibleUse) ? `<div style="font-size:11px;color:#444"><b>Responsible:</b> ${c.responsibleInstall ? "install/verify " + txt(c.responsibleInstall) : ""}${c.responsibleUse ? " · use " + txt(c.responsibleUse) : ""}</div>` : ""}
   </div>`;
 }
 
 // Resolve the site-wide PPE matrix from every selected module's ppeRules + site conditions.
 // R (required) wins; a C item is "conditional (…)" unless a site condition makes it mandatory.
 function resolvePpe(modules, answers = {}) {
-  const rank = { R: 3, C: 2, S: 1, NA: 0 };
   const items = {};
   for (const m of modules) {
     for (const p of (m.content_json?.ppeRules || [])) {
+      const flag = normFlag(p.flag);
       const cur = items[p.item];
-      if (!cur || rank[p.flag] > rank[cur.flag]) items[p.item] = { flag: p.flag, condition: p.condition || "" };
+      if (!cur || RANK[flag] > RANK[cur.flag]) items[p.item] = { flag, condition: stripMd(p.condition || "") };
     }
   }
   const out = {};

@@ -86,5 +86,28 @@ const base = { job: { address: "1 Test St", reference: "J1" }, company: { name: 
   ok(html.includes("&lt;script&gt;"), "escaped form present");
 }
 
+// 9. A compound / unknown PPE flag never silently resolves to n/a — audit-follow-up (register cleanup).
+{
+  const cm = mod("H-01", 1, ["Isolate: edge protection"], [
+    { item: "hard hat", flag: "C → R", condition: "mandatory when a crane is on site" },
+    { item: "gloves", flag: "R / N/A", condition: "not at rotating blades" },
+    { item: "boots", flag: "bogus", condition: "" },
+  ]);
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] }, answers: {} };
+  const html = composeWhsPack({ ...base, pack, modules: [cm] });
+  ok(!/hard hat<\/td><td[^>]*>n\/a/.test(html), "compound flag 'C → R' does not resolve to n/a");
+  ok(!/gloves<\/td><td[^>]*>n\/a/.test(html), "compound flag 'R / N/A' does not resolve to n/a");
+  ok(!/boots<\/td><td[^>]*>n\/a/.test(html), "unknown flag 'bogus' does not resolve to n/a (→ conditional)");
+}
+
+// 10. Stray markdown in control text is stripped, not rendered literally.
+{
+  const cm = mod("H-01", 1, ["**Edge protection** installed *(guardrail)*"], []);
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["**Edge protection** installed *(guardrail)*"] }, answers: {} };
+  const html = composeWhsPack({ ...base, pack, modules: [cm] });
+  ok(!html.includes("**"), "literal ** stripped from rendered control text");
+  ok(html.includes("Edge protection installed (guardrail)"), "words preserved after markdown strip");
+}
+
 console.log(`whs-pack-compose: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

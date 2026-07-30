@@ -640,7 +640,7 @@
         },
         {
           "level": 4,
-          "text": "**Propping designed and documented by a structural engineer for this specific structure**, including prop capacity, spacing, load path to a suitable bearing, and removal sequence. Design attached to the pack."
+          "text": "Propping designed and documented by a structural engineer for this specific structure, including prop capacity, spacing, load path to a suitable bearing, and removal sequence. Design attached to the pack."
         },
         {
           "level": 4,
@@ -656,7 +656,7 @@
         },
         {
           "level": 5,
-          "text": "Competent person inspects and signs off the propping **before** any load-bearing element is removed, and again before props are struck."
+          "text": "Competent person inspects and signs off the propping before any load-bearing element is removed, and again before props are struck."
         },
         {
           "level": 5,
@@ -721,7 +721,7 @@
       "controlOptions": [
         {
           "level": 4,
-          "text": "Temporary support installed and signed off per **H-08 before any removal begins**."
+          "text": "Temporary support installed and signed off per H-08 before any removal begins."
         },
         {
           "level": 4,
@@ -737,7 +737,7 @@
         },
         {
           "level": 5,
-          "text": "Asbestos status confirmed per **H-10 before any disturbance**."
+          "text": "Asbestos status confirmed per H-10 before any disturbance."
         },
         {
           "level": 5,
@@ -794,7 +794,7 @@
       "isHrcw": "yes",
       "activity": "Any renovation, demolition, drilling, cutting or removal in a structure that may contain asbestos",
       "hazard": "Release of and exposure to airborne asbestos fibre",
-      "trigger": "**Any work on a structure built before 2004**, or where asbestos-containing material is identified or suspected",
+      "trigger": "Any work on a structure built before 2004, or where asbestos-containing material is identified or suspected",
       "controlOptions": [
         {
           "level": 1,
@@ -802,19 +802,19 @@
         },
         {
           "level": 1,
-          "text": "Licensed asbestos removalist engaged to remove ACM **before** carpentry commences; clearance certificate obtained and attached."
+          "text": "Licensed asbestos removalist engaged to remove ACM before carpentry commences; clearance certificate obtained and attached."
         },
         {
           "level": 5,
-          "text": "Where a structure predates 2004 and no register exists, a competent person inspects and, where required, samples before work starts. **Unidentified material is treated as asbestos until proven otherwise.**"
+          "text": "Where a structure predates 2004 and no register exists, a competent person inspects and, where required, samples before work starts. Unidentified material is treated as asbestos until proven otherwise."
         },
         {
           "level": 5,
-          "text": "**STOP-WORK RULE:** any suspected ACM encountered unexpectedly → stop immediately, leave the material undisturbed, isolate the area, notify the supervisor and principal contractor. Work does not resume until cleared in writing."
+          "text": "STOP-WORK RULE: any suspected ACM encountered unexpectedly → stop immediately, leave the material undisturbed, isolate the area, notify the supervisor and principal contractor. Work does not resume until cleared in writing."
         },
         {
           "level": 5,
-          "text": "Blue Leaf carpentry crew do **not** remove asbestos. No exceptions."
+          "text": "Blue Leaf carpentry crew do not remove asbestos. No exceptions."
         }
       ],
       "ppeRules": [
@@ -859,7 +859,7 @@
         },
         {
           "level": 3,
-          "text": "Overhead lines insulated/tiger-tailed by the network operator; **no-go clearance distances confirmed with the network operator and physically marked on site**."
+          "text": "Overhead lines insulated/tiger-tailed by the network operator; no-go clearance distances confirmed with the network operator and physically marked on site."
         },
         {
           "level": 4,
@@ -879,7 +879,7 @@
         },
         {
           "level": 5,
-          "text": "Blue Leaf crew perform **no electrical work**. Licensed electrician only."
+          "text": "Blue Leaf crew perform no electrical work. Licensed electrician only."
         }
       ],
       "ppeRules": [
@@ -984,7 +984,7 @@
       "isHrcw": "yes",
       "activity": "Work in or near an excavation — pier holes, service trenches, footings",
       "hazard": "Ground collapse; engulfment; fall into excavation",
-      "trigger": "Excavation deeper than 1.5 m in the work area. **Trigger-only for standard carpentry — normally N/A.**",
+      "trigger": "Excavation deeper than 1.5 m in the work area. Trigger-only for standard carpentry — normally N/A.",
       "controlOptions": [
         {
           "level": 1,
@@ -1034,13 +1034,13 @@
       "title": "High-risk processing of a crystalline silica substance (boundary module)",
       "part": 1,
       "isHrcw": "boundary",
-      "activity": "Cutting, grinding, drilling, sanding or trimming any material containing ≥1% crystalline silica, where the processing is assessed as **high risk**",
+      "activity": "Cutting, grinding, drilling, sanding or trimming any material containing ≥1% crystalline silica, where the processing is assessed as high risk",
       "hazard": "Respirable crystalline silica → silicosis, lung cancer, chronic kidney disease, autoimmune conditions",
-      "trigger": "Written risk assessment determines the processing is high risk, **or** the assessment cannot determine it (in which case it is treated as high risk until determined otherwise)",
+      "trigger": "Written risk assessment determines the processing is high risk, or the assessment cannot determine it (in which case it is treated as high risk until determined otherwise)",
       "controlOptions": [
         {
           "level": 5,
-          "text": "Written risk assessment completed and retained, assessing the specific processing, the form and proportion of crystalline silica, frequency and duration of exposure, whether airborne RCS is likely to exceed half the workplace exposure standard, and any prior monitoring results. **The assessment must disregard PPE and administrative controls when determining whether processing is high risk.**"
+          "text": "Written risk assessment completed and retained, assessing the specific processing, the form and proportion of crystalline silica, frequency and duration of exposure, whether airborne RCS is likely to exceed half the workplace exposure standard, and any prior monitoring results. The assessment must disregard PPE and administrative controls when determining whether processing is high risk."
         },
         {
           "level": 5,
@@ -1125,7 +1125,7 @@
         },
         {
           "level": 4,
-          "text": "**On-tool dust extraction with an H-class vacuum**, correctly fitted and emptied per manufacturer instructions."
+          "text": "On-tool dust extraction with an H-class vacuum, correctly fitted and emptied per manufacturer instructions."
         },
         {
           "level": 4,
@@ -1133,7 +1133,7 @@
         },
         {
           "level": 5,
-          "text": "Dry sweeping and compressed-air blow-down of silica dust **prohibited**. H-class vacuum or wet methods only."
+          "text": "Dry sweeping and compressed-air blow-down of silica dust prohibited. H-class vacuum or wet methods only."
         },
         {
           "level": 5,
@@ -1145,7 +1145,7 @@
         },
         {
           "level": 6,
-          "text": "P2 (or higher) respirator, **fit-tested**, worn by the operator and anyone within the cutting zone. Clean-shaven for tight-fitting RPE."
+          "text": "P2 (or higher) respirator, fit-tested, worn by the operator and anyone within the cutting zone. Clean-shaven for tight-fitting RPE."
         }
       ],
       "ppeRules": [
@@ -1345,7 +1345,7 @@
       "controlOptions": [
         {
           "level": 2,
-          "text": "Battery tools used in place of leads where practical, removing trailing-lead and electrical risk."
+          "text": "Battery tools used in place of 240 V leads for all tasks where a battery equivalent is available on site."
         },
         {
           "level": 4,
@@ -1365,7 +1365,7 @@
         },
         {
           "level": 5,
-          "text": "**No freehand cutting.** All material clamped or securely supported on stands before cutting."
+          "text": "No freehand cutting. All material clamped or securely supported on stands before cutting."
         },
         {
           "level": 5,
@@ -1438,7 +1438,7 @@
         },
         {
           "level": 5,
-          "text": "Damaged leads or tools tagged **OUT OF SERVICE** and removed from site — not repaired on site by unlicensed persons."
+          "text": "Damaged leads or tools tagged OUT OF SERVICE and removed from site — not repaired on site by unlicensed persons."
         }
       ],
       "ppeRules": [
@@ -1481,7 +1481,7 @@
         },
         {
           "level": 4,
-          "text": "Mechanical aids used — telehandler, panel lifter, sheet trolley, beam dolly, gin wheel. **Nominated aid for this job recorded in Part 3.**"
+          "text": "Mechanical aids used — telehandler, panel lifter, sheet trolley, beam dolly, gin wheel. Nominated aid for this job recorded in Part 3."
         },
         {
           "level": 4,
@@ -1489,7 +1489,7 @@
         },
         {
           "level": 5,
-          "text": "Team lift with a stated crew number and a nominated caller for defined loads. Loads and crew numbers listed in Part 3, not left to judgement."
+          "text": "Team lift with a stated crew number and a nominated caller for defined loads. Loads and crew numbers listed in Part 3."
         },
         {
           "level": 5,
@@ -1563,7 +1563,7 @@
         },
         {
           "level": 6,
-          "text": "**Where hearing protection is relied on as a control, audiometric testing is provided to affected workers.**"
+          "text": "Where hearing protection is relied on as a control, audiometric testing is provided to affected workers."
         }
       ],
       "ppeRules": [
@@ -1603,19 +1603,19 @@
         },
         {
           "level": 2,
-          "text": "**Mobile scaffold, platform ladder or EWP used in place of a leaning ladder.** Ladders are for access, not as a work platform."
+          "text": "Mobile scaffold, platform ladder or EWP used in place of a leaning ladder. Ladders are for access, not as a work platform."
         },
         {
           "level": 4,
-          "text": "Industrial-rated ladder (minimum 120 kg), inspected before use; defective ladders tagged **DO NOT USE** and removed from site."
+          "text": "Industrial-rated ladder (minimum 120 kg), inspected before use; defective ladders tagged DO NOT USE and removed from site."
         },
         {
           "level": 4,
-          "text": "Ladder set at **1:4**, on firm level ground, extending at least 1 m above the landing, top and bottom secured."
+          "text": "Ladder set at 1:4, on firm level ground, extending at least 1 m above the landing, top and bottom secured."
         },
         {
           "level": 5,
-          "text": "Three points of contact maintained at all times. *(A harness is **not** a point of contact.)*"
+          "text": "Three points of contact maintained at all times. (A harness is not a point of contact.)"
         },
         {
           "level": 5,
@@ -1631,7 +1631,7 @@
         },
         {
           "level": 5,
-          "text": "**No power tool use from a leaning ladder.**"
+          "text": "No power tool use from a leaning ladder."
         }
       ],
       "ppeRules": [
@@ -1801,7 +1801,7 @@
         },
         {
           "level": 5,
-          "text": "**Stated stop-work limits recorded in Part 3** — heat threshold, wind speed for work at height and for lifting, rain/frost limit for roof and joist work. Not \"when weather is suitable\"."
+          "text": "Stated stop-work limits recorded in Part 3 — heat threshold, wind speed for work at height and for lifting, rain/frost limit for roof and joist work. Not \"when weather is suitable\"."
         },
         {
           "level": 5,
@@ -1864,7 +1864,7 @@
         },
         {
           "level": 5,
-          "text": "**SDS obtained for every chemical on site and held with the pack** — the \"nil\" entry on the superseded SWMS is not acceptable. Chemical register maintained."
+          "text": "SDS obtained for every chemical on site and held with the pack. Chemical register maintained."
         },
         {
           "level": 5,
@@ -1920,7 +1920,7 @@
       "controlOptions": [
         {
           "level": 4,
-          "text": "**Handover certificate received and scaffold tag inspected before first use.** No access to an untagged, red-tagged or incomplete scaffold."
+          "text": "Handover certificate received and scaffold tag inspected before first use. No access to an untagged, red-tagged or incomplete scaffold."
         },
         {
           "level": 4,
@@ -1928,7 +1928,7 @@
         },
         {
           "level": 5,
-          "text": "**Blue Leaf crew do not alter, move, remove or add to any scaffold component.** Any change requested through the supervisor to the licensed scaffolder. Removing a guardrail to pass material is prohibited."
+          "text": "Blue Leaf crew do not alter, move, remove or add to any scaffold component. Any change requested through the supervisor to the licensed scaffolder. Removing a guardrail to pass material is prohibited."
         },
         {
           "level": 5,
@@ -1988,28 +1988,28 @@
         },
         {
           "item": "Hi-vis upper body",
-          "flag": "C → R",
-          "condition": "**Mandatory whenever powered mobile plant or heavy machinery is on site**"
+          "flag": "C",
+          "condition": "Mandatory whenever powered mobile plant or heavy machinery is on site"
         },
         {
           "item": "Hard hat",
-          "flag": "C → R",
-          "condition": "**Mandatory whenever a crane is on site**, when working below others, and during demolition"
+          "flag": "C",
+          "condition": "Mandatory whenever a crane is on site, when working below others, and during demolition"
         },
         {
           "item": "Hearing protection (AS/NZS 1270 class per exposure)",
-          "flag": "C → R",
+          "flag": "C",
           "condition": "Mandatory for saws, nail guns, compressors, and when working near noisy trades"
         },
         {
           "item": "P2 respirator, fit-tested",
-          "flag": "C → R",
-          "condition": "**Mandatory for all silica processing (T-01)** and MDF machining (T-02); per SDS for chemicals (T-12)"
+          "flag": "C",
+          "condition": "Mandatory for all silica processing (T-01) and MDF machining (T-02); per SDS for chemicals (T-12)"
         },
         {
           "item": "Gloves",
-          "flag": "R / N/A",
-          "condition": "Required for timber, sheet and chemical handling. **Not to be worn at rotating blades.**"
+          "flag": "C",
+          "condition": "Required for timber, sheet and chemical handling. Not to be worn at rotating blades."
         },
         {
           "item": "Sun protection (hat, rated sunglasses, SPF 50+, long sleeves)",
@@ -2019,7 +2019,7 @@
         {
           "item": "Full-body harness + lanyard",
           "flag": "C",
-          "condition": "Only where a restraint or arrest option has been **selected** in H-01 to H-05, with anchor and rescue arrangements recorded"
+          "condition": "Only where a restraint or arrest option has been selected in H-01 to H-05, with anchor and rescue arrangements recorded"
         },
         {
           "item": "Knee pads",
