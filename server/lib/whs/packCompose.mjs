@@ -4,6 +4,8 @@
 // answers come from the carpentry_whs_packs record. DRAFT watermark unless every included module is
 // reviewed. No conditional wording is invented here — only the controls the supervisor actually ticked.
 
+import { renderBarHtml } from "./hierarchyBar.mjs";
+
 const HOC = { 1: "Eliminate", 2: "Substitute", 3: "Isolate", 4: "Engineering", 5: "Administrative", 6: "PPE" };
 const PPE_FLAG = { R: "mandatory", C: "conditional", S: "recommended", NA: "n/a" };
 const RANK = { R: 3, C: 2, S: 1, NA: 0 };
@@ -20,7 +22,7 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 const txt = (s) => esc(stripMd(s));
 const bar = (t) => `<div style="background:#111;color:#fff;font-weight:700;font-size:12px;letter-spacing:.04em;padding:6px 10px;margin:18px 0 8px">${esc(t)}</div>`;
 
-function moduleBlock(m, pickedKeys, part) {
+function moduleBlock(m, pickedKeys, part, justification = "") {
   const c = m.content_json || {};
   const controls = Array.isArray(c.controlOptions) ? c.controlOptions : [];
   // selected_controls stores each ticked control's TEXT (stable identity) — never a positional index —
@@ -37,9 +39,13 @@ function moduleBlock(m, pickedKeys, part) {
   const ppeRow = ppe.length
     ? `<div style="font-size:12px;margin-top:4px"><b>PPE:</b> ${ppe.map((p) => `${txt(p.item)} (${esc(PPE_FLAG[normFlag(p.flag)])}${p.condition ? " — " + txt(p.condition) : ""})`).join("; ")}</div>`
     : "";
+  const levels = picked.map((x) => x.level);
+  const justRow = justification ? `<div style="font-size:11px;color:#7a1616;margin-top:2px"><b>Why this is acceptable:</b> ${txt(justification)}</div>` : "";
   return `
   <div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px">
     <div style="font-weight:700;color:#006c9b">${esc(m.module_code || "")} · ${esc(m.title || "")}</div>
+    <div style="margin:3px 0 2px">${renderBarHtml(levels)}</div>
+    ${justRow}
     ${c.activity ? `<div style="font-size:12px"><b>Activity:</b> ${txt(c.activity)}</div>` : ""}
     ${c.hazard ? `<div style="font-size:12px"><b>Hazards:</b> ${txt(c.hazard)}</div>` : ""}
     <div style="font-size:12px;margin-top:4px"><b>Controls in place (hierarchy order):</b></div>
@@ -76,6 +82,47 @@ function resolvePpe(modules, answers = {}) {
 }
 
 const kv = (rows) => `<table style="width:100%;border-collapse:collapse;font-size:12px">${rows.map(([k, v]) => `<tr><td style="border:1px solid #ccc;padding:4px;background:#f4f6f8;font-weight:600;width:38%">${esc(k)}</td><td style="border:1px solid #ccc;padding:4px">${v == null || v === "" ? "—" : esc(v)}</td></tr>`).join("")}</table>`;
+
+// The Site Card (Design §7.2) — the one page that actually gets read at pre-start. Max 3 kill risks
+// (the top selected HRCW modules), the stop-work limits, and the emergency block. No module IDs — a
+// carpenter never needs to see "H-01". Renders as the lead block of the pack + (Phase 3) a standalone.
+export function renderSiteCard({ hrcw = [], sel = {}, a = {}, company = {}, draft = true }) {
+  const kill = hrcw.slice(0, 3).map((m) => {
+    const inPlace = (sel[m.module_code] || []).slice(0, 2).map(txt).join(" · ");
+    return `<li style="margin:0 0 5px"><b>${txt(m.title || m.module_code)}</b>${inPlace
+      ? `<div style="font-size:11px;color:#1F7A3D">■ In place: ${inPlace}</div>`
+      : `<div style="font-size:11px;color:#B3261E;font-weight:700">■ No controls recorded — do not start</div>`}</li>`;
+  }).join("");
+  const more = hrcw.length > 3 ? `<div style="font-size:11px;color:#5A646E">+ ${hrcw.length - 3} more high-risk item(s) in Part 1</div>` : "";
+
+  const stopBits = [];
+  if (a.stopWind) stopBits.push(`Wind over <b>${esc(a.stopWind)} km/h</b>`);
+  if (a.stopHeat) stopBits.push(`Heat over <b>${esc(a.stopHeat)} °C</b>`);
+  if (a.noWetWork) stopBits.push("No roof / joist work when wet or frosted");
+  const stop = stopBits.length ? stopBits.join(" &nbsp;·&nbsp; ") : `<span style="color:#5A646E">Stop-work limits not set — capture them in site facts.</span>`;
+
+  const emerg = kv([
+    ["Hospital", a.hospital],
+    ["First aid", a.firstAider],
+    ["Muster point", a.musterPoint],
+    ["Rescue", a.rescuer || (a.rescueRequired ? "" : "No fall-arrest in use on this job")],
+    ["Call", company.phone],
+  ]);
+
+  return `
+  <div style="border:2px solid #10151C;border-radius:6px;margin-bottom:14px">
+    <div style="background:#1B3A5C;color:#fff;font-weight:800;font-size:15px;letter-spacing:.04em;padding:8px 12px">TODAY ON THIS SITE${draft ? ` &nbsp;<span style="color:#ffd6a0;font-size:12px">— DRAFT, NOT FOR SITE USE</span>` : ""}</div>
+    <div style="padding:12px">
+      <div style="font-weight:800;font-size:12px;color:#B3261E;letter-spacing:.05em;margin-bottom:3px">WHAT WILL KILL YOU HERE</div>
+      ${kill ? `<ol style="margin:0 0 4px 16px;padding:0">${kill}</ol>${more}` : `<div style="font-size:12px;color:#5A646E">No HRCW selected for this job yet.</div>`}
+      <div style="font-weight:800;font-size:12px;letter-spacing:.05em;margin:10px 0 3px">STOP WORK IF</div>
+      <div style="font-size:12px">${stop}</div>
+      <div style="font-weight:800;font-size:12px;letter-spacing:.05em;margin:10px 0 3px">IF SOMETHING HAPPENS</div>
+      ${emerg}
+      <div style="font-size:11px;font-style:italic;color:#10151C;margin-top:8px">Stop the work if a control isn't there. No one will be disadvantaged for stopping the work.</div>
+    </div>
+  </div>`;
+}
 
 /**
  * @param {object} p  { job, company, pack, modules }  modules = swms_templates rows (content_json) for the
@@ -114,6 +161,8 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
     ${draftBanner}
     ${missingBanner}
 
+    ${renderSiteCard({ hrcw, sel, a, company, draft })}
+
     ${bar("PART 1 — COMBINED HRCW SAFE WORK METHOD STATEMENT")}
     ${kv([
       ["Company", company.name || "Blue Leaf Building"],
@@ -127,13 +176,13 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
     ])}
 
     <div style="font-weight:700;margin:12px 0 4px">HRCW identified for this job</div>
-    ${hrcw.length ? hrcw.map((m) => moduleBlock(m, sel[m.module_code], 1)).join("") : `<div style="font-size:12px;color:#777">No HRCW selected — confirm the questionnaire.</div>`}
+    ${hrcw.length ? hrcw.map((m) => moduleBlock(m, sel[m.module_code], 1, (a.justifications || {})[m.module_code])).join("") : `<div style="font-size:12px;color:#777">No HRCW selected — confirm the questionnaire.</div>`}
 
     <div style="font-weight:700;margin:12px 0 4px">Compliance &amp; stop-work (WHS Reg 300)</div>
     <div style="font-size:12px;border:1px solid #ccc;padding:8px;background:#fafafa">This work is carried out in accordance with this SWMS. If any person becomes aware the work is not being carried out in accordance with it, or a control is not adequately controlling the risk, <b>the HRCW stops immediately</b> and does not resume until the work complies or the SWMS is revised. Any worker may stop the work; no worker will be disadvantaged for doing so.</div>
 
     ${bar("▓ DIVIDER — END OF SWMS ▓  PART 2 — TASK-CONTROL MODULES (NOT HRCW)")}
-    ${task.length ? task.map((m) => moduleBlock(m, sel[m.module_code], 2)).join("") : `<div style="font-size:12px;color:#777">No task modules selected.</div>`}
+    ${task.length ? task.map((m) => moduleBlock(m, sel[m.module_code], 2, (a.justifications || {})[m.module_code])).join("") : `<div style="font-size:12px;color:#777">No task modules selected.</div>`}
 
     ${bar("PART 3 — SITE IMPLEMENTATION RECORD")}
     <div style="font-weight:700;margin:8px 0 4px">Site PPE</div>

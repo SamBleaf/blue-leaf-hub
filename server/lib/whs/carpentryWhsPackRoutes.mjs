@@ -7,6 +7,7 @@ import { requireAuth, requireRole } from "../requireAuth.mjs";
 import { getServiceSupabase } from "../supabaseService.mjs";
 import { workCategoriesForProjectType } from "./carpentrySwmsMap.mjs";
 import { composeWhsPack } from "./packCompose.mjs";
+import { needsJustification } from "./hierarchyBar.mjs";
 
 const isPart1 = (m) => m.part === 1 || m.is_hrcw === "yes" || m.is_hrcw === "boundary";
 
@@ -141,7 +142,7 @@ export function registerCarpentryWhsPackRoutes(app) {
       if (action === "approve") {
         const codes = [...(pack.selected_hrcw || []), ...(pack.selected_task || [])];
         if (!codes.length) return err(res, 409, "Select at least one module that applies to this job before issuing.");
-        const { data: mods } = await sb.from("swms_templates").select("module_code, review_status, content_json").in("module_code", codes);
+        const { data: mods } = await sb.from("swms_templates").select("module_code, review_status, content_json, part, is_hrcw").in("module_code", codes);
         // Every selected code must still exist in the register (a deleted/renamed module can't silently vanish).
         const missing = codes.filter((c) => !(mods || []).some((m) => m.module_code === c));
         if (missing.length) return err(res, 409, `These modules no longer exist in the register: ${missing.join(", ")}. Fix the pack selection before issuing.`);
@@ -154,6 +155,16 @@ export function registerCarpentryWhsPackRoutes(app) {
           return opts.length > 0 && !(Array.isArray(sel[m.module_code]) && sel[m.module_code].length > 0);
         }).map((m) => m.module_code);
         if (noControls.length) return err(res, 409, `Select the controls in place for: ${noControls.join(", ")}. You can't issue a pack with an HRCW/task that has no controls ticked.`);
+        // G-2: an HRCW module whose top ticked control is admin (L5) or PPE (L6) is leaning on paperwork/a
+        // mask — require a written justification before issue (it renders in the pack for the reviewer).
+        const just = pack.answers?.justifications || {};
+        const needJust = (mods || []).filter((m) => {
+          const opts = Array.isArray(m.content_json?.controlOptions) ? m.content_json.controlOptions : [];
+          const picked = Array.isArray(sel[m.module_code]) ? sel[m.module_code] : [];
+          const levels = opts.filter((o) => picked.includes(o.text)).map((o) => Number(o.level));
+          return needsJustification(levels, isPart1(m)) && !String(just[m.module_code] || "").trim();
+        }).map((m) => m.module_code);
+        if (needJust.length) return err(res, 409, `These high-risk modules rely on admin/PPE as the top control — add a written justification for: ${needJust.join(", ")}.`);
         const { data, error } = await sb.from("carpentry_whs_packs").update({ review_status: "issued", approved_by: req.caller?.id || null, approved_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("carpentry_job_id", jobId).select("*").single();
         if (error) return err(res, 500, translateDbError(error));
         return ok(res, { pack: rowToCamel(data) });

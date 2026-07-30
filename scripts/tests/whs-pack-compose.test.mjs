@@ -109,5 +109,25 @@ const base = { job: { address: "1 Test St", reference: "J1" }, company: { name: 
   ok(html.includes("Edge protection installed (guardrail)"), "words preserved after markdown strip");
 }
 
+// 11. Site Card renders as the lead block, with kill risks from selected HRCW + the emergency block.
+{
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] }, answers: { hospital: "Flinders Medical Centre", musterPoint: "Front verge", stopWind: "32", stopHeat: "38" } };
+  const html = composeWhsPack({ ...base, company: { name: "BLB", abn: "1", phone: "0434 046 399" }, pack, modules: [H] });
+  const card = html.indexOf("TODAY ON THIS SITE");
+  ok(card >= 0, "Site Card present");
+  ok(card < html.indexOf("PART 1"), "Site Card is the lead block, before Part 1");
+  ok(html.includes("WHAT WILL KILL YOU HERE") && html.includes("Flinders Medical Centre"), "kill-risks + emergency block populate");
+  ok(html.includes("32 km/h") && html.includes("38 °C"), "stop-work limits render from answers");
+}
+
+// 12. Hierarchy bar + G-2 justification render in the module block.
+{
+  const ppeMod = mod("H-01", 1, ["Admin: exclusion sign", "PPE: harness worn"], []); // top control = L2 here → set levels via selection
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["PPE: harness worn"] }, answers: { justifications: { "H-01": "elimination not practicable on this cut-in" } } };
+  const html = composeWhsPack({ ...base, pack, modules: [ppeMod] });
+  ok((html.match(/width:16px;height:8px/g) || []).length >= 6, "hierarchy bar (6 segments) renders in the module block");
+  ok(html.includes("Why this is acceptable:") && html.includes("elimination not practicable"), "G-2 justification renders when present");
+}
+
 console.log(`whs-pack-compose: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

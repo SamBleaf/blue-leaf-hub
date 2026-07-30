@@ -4,9 +4,25 @@
 // reviewer approves it; the crew then signs that version in the field app (Phase C).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../lib/apiFetch.js";
+import { HOC, TIER_COLOR, hierarchyTier, needsJustification } from "../../lib/whsHierarchy.js";
 
-const HOC = { 1: "Eliminate", 2: "Substitute", 3: "Isolate", 4: "Engineering", 5: "Administrative", 6: "PPE" };
 const isPart1 = (m) => m.part === 1 || m.isHrcw === "yes" || m.isHrcw === "boundary";
+
+// The live hierarchy bar (Design §6.1) — 6 segments, filled at the selected levels, coloured by the tier.
+function HBar({ levels }) {
+  const { filled, tier, label } = hierarchyTier(levels);
+  const on = TIER_COLOR[tier];
+  return (
+    <span className="inline-flex items-center gap-1.5 align-middle">
+      <span className="inline-flex gap-[2px]">
+        {[1, 2, 3, 4, 5, 6].map((l) => (
+          <span key={l} style={{ width: 14, height: 7, borderRadius: 1, background: filled.includes(l) ? on : "#E3E7EB" }} />
+        ))}
+      </span>
+      <span className="text-[10px] font-bold tracking-wide" style={{ color: on }}>{label}</span>
+    </span>
+  );
+}
 
 export default function WhsPackTab({ jobId }) {
   const [data, setData] = useState(null);
@@ -16,8 +32,9 @@ export default function WhsPackTab({ jobId }) {
   // local editable selection state
   const [hrcw, setHrcw] = useState(() => new Set());
   const [task, setTask] = useState(() => new Set());
-  const [controls, setControls] = useState({}); // { code: Set(indexes) }
+  const [controls, setControls] = useState({}); // { code: Set(control text) }
   const [answers, setAnswers] = useState({});
+  const [just, setJust] = useState({}); // { code: justification } for G-2 (admin/PPE-led HRCW)
 
   const load = useCallback(async () => {
     const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack`);
@@ -28,6 +45,7 @@ export default function WhsPackTab({ jobId }) {
     setTask(new Set(p.selectedTask || []));
     setControls(Object.fromEntries(Object.entries(p.selectedControls || {}).map(([k, v]) => [k, new Set(v)])));
     setAnswers(p.answers || {});
+    setJust(p.answers?.justifications || {});
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -47,6 +65,16 @@ export default function WhsPackTab({ jobId }) {
       .map((m) => m.moduleCode);
   }, [hrcw, task, controls, byCode]);
 
+  // G-2: an HRCW module whose top ticked control is admin (L5) or PPE (L6) needs a written justification.
+  const needJust = useMemo(() => {
+    const codes = [...hrcw, ...task];
+    return codes.map((c) => byCode[c]).filter(Boolean).filter((m) => {
+      const sel = controls[m.moduleCode] || new Set();
+      const levels = (m.contentJson?.controlOptions || []).filter((o) => sel.has(o.text)).map((o) => o.level);
+      return needsJustification(levels, isPart1(m)) && !String(just[m.moduleCode] || "").trim();
+    }).map((m) => m.moduleCode);
+  }, [hrcw, task, controls, just, byCode]);
+
   const toggleMod = (code, set, setter) => { const n = new Set(set); n.has(code) ? n.delete(code) : n.add(code); setter(n); };
   // Controls are identified by their TEXT (stable), never an array index, so reordering/editing the
   // register can't silently remap a tick to a different control.
@@ -58,7 +86,7 @@ export default function WhsPackTab({ jobId }) {
   const payload = () => ({
     selectedHrcw: [...hrcw], selectedTask: [...task],
     selectedControls: Object.fromEntries(Object.entries(controls).map(([k, v]) => [k, [...v]])),
-    answers,
+    answers: { ...answers, justifications: just },
   });
   const save = async () => {
     setBusy(true); setMsg("");
@@ -105,31 +133,44 @@ export default function WhsPackTab({ jobId }) {
   const signedVersion = {}; // employeeId → highest signed pack version
   for (const s of (data.signons || [])) { const v = Number(s.packVersion); if (!signedVersion[s.employeeId] || v > signedVersion[s.employeeId]) signedVersion[s.employeeId] = v; }
 
-  const ModuleCard = ({ m, selected, onToggle }) => (
-    <div className="rounded-lg border border-hairline">
-      <label className="flex items-start gap-2 px-3 py-2 cursor-pointer">
-        <input type="checkbox" checked={selected} onChange={onToggle} disabled={issued} className="mt-1 h-4 w-4" />
-        <div className="flex-1">
-          <div className="text-sm font-medium text-ink">{m.moduleCode} · {m.title} {m.reviewStatus !== "reviewed" && <span className="text-[10px] font-bold text-warning">DRAFT</span>}</div>
-          {selected && m.trigger && <div className="text-[11px] text-muted">{m.trigger}</div>}
-        </div>
-      </label>
-      {selected && (
-        <div className="border-t border-hairline px-3 py-2">
-          <div className="text-[11px] font-semibold text-muted mb-1">Tick the controls actually installed on this site (hierarchy order):</div>
-          <div className="space-y-1">
-            {(m.contentJson?.controlOptions || []).map((x, i) => (
-              <label key={i} className="flex items-start gap-2 text-xs">
-                <input type="checkbox" checked={(controls[m.moduleCode] || new Set()).has(x.text)} onChange={() => toggleCtrl(m.moduleCode, x.text)} disabled={issued} className="mt-0.5 h-4 w-4" />
-                <span><b className="text-primary">L{x.level} {HOC[x.level]}:</b> {x.text}</span>
-              </label>
-            ))}
-            {(m.contentJson?.controlOptions || []).length === 0 && <div className="text-[11px] text-muted">No control options (PPE-matrix module).</div>}
+  const ModuleCard = ({ m, selected, onToggle }) => {
+    const opts = m.contentJson?.controlOptions || [];
+    const set = controls[m.moduleCode] || new Set();
+    const levels = opts.filter((o) => set.has(o.text)).map((o) => o.level);
+    const showJust = selected && needsJustification(levels, isPart1(m));
+    return (
+      <div className="rounded-lg border border-hairline">
+        <label className="flex items-start gap-2 px-3 py-2 cursor-pointer">
+          <input type="checkbox" checked={selected} onChange={onToggle} disabled={issued} className="mt-1 h-4 w-4" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-ink">{m.moduleCode} · {m.title} {m.reviewStatus !== "reviewed" && <span className="text-[10px] font-bold text-warning">DRAFT</span>}</div>
+            {selected && <div className="mt-1"><HBar levels={levels} /></div>}
+            {selected && m.trigger && <div className="text-[11px] text-muted mt-0.5">{m.trigger}</div>}
           </div>
-        </div>
-      )}
-    </div>
-  );
+        </label>
+        {selected && (
+          <div className="border-t border-hairline px-3 py-2">
+            <div className="text-[11px] font-semibold text-muted mb-1">Tick the controls actually installed on this site (hierarchy order):</div>
+            <div className="space-y-1">
+              {opts.map((x, i) => (
+                <label key={i} className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" checked={set.has(x.text)} onChange={() => toggleCtrl(m.moduleCode, x.text)} disabled={issued} className="mt-0.5 h-4 w-4" />
+                  <span><b className="text-primary">L{x.level} {HOC[x.level]}:</b> {x.text}</span>
+                </label>
+              ))}
+              {opts.length === 0 && <div className="text-[11px] text-muted">No control options (PPE-matrix module).</div>}
+            </div>
+            {showJust && (
+              <div className="mt-2 rounded-md border border-red-300 bg-red-50 p-2">
+                <div className="text-[11px] font-semibold text-red-800 mb-1">This HRCW is relying on admin / PPE as its top control. Justify why a higher control isn&apos;t reasonably practicable (required to issue — G-2):</div>
+                <textarea value={just[m.moduleCode] || ""} onChange={(e) => setJust((j) => ({ ...j, [m.moduleCode]: e.target.value }))} disabled={issued} rows={2} className="w-full rounded border border-hairline px-2 py-1 text-xs" placeholder="e.g. silica processing — elimination not possible on a cut-to-fit job; wet-cut + H-class extraction + P2 fit-test in place" />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -163,13 +204,18 @@ export default function WhsPackTab({ jobId }) {
           <b>Can&apos;t issue yet.</b> These selected modules have no controls ticked — a pack can&apos;t assert high-risk work with no controls in place: <b>{needControls.join(", ")}</b>. Tick the controls actually installed, or untick the module if it doesn&apos;t apply.
         </div>
       )}
+      {!issued && needJust.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <b>Justification needed (G-2).</b> These HRCW modules are relying on admin/PPE as the top control — add a written justification on each before issuing: <b>{needJust.join(", ")}</b>.
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 pt-2 border-t border-hairline">
         <button disabled={busy || issued} onClick={save} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={issued ? "Issued — start a new revision to edit" : ""}>Save</button>
         <button disabled={busy} onClick={compose} className="rounded-md border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Generate / preview pack</button>
         <button disabled={busy} onClick={downloadPdf} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink">Download PDF</button>
         {!issued
-          ? <button disabled={busy || needControls.length > 0} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={needControls.length ? `Tick controls for: ${needControls.join(", ")}` : ""}>Approve &amp; issue</button>
+          ? <button disabled={busy || needControls.length > 0 || needJust.length > 0} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={needControls.length ? `Tick controls for: ${needControls.join(", ")}` : needJust.length ? `Justify: ${needJust.join(", ")}` : ""}>Approve &amp; issue</button>
           : <button disabled={busy} onClick={() => act("revise")} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold">New revision (re-sign)</button>}
       </div>
 
