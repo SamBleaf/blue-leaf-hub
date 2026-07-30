@@ -53,13 +53,30 @@ export default function WhsPackTab({ jobId }) {
     const { ok, error } = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload());
     setBusy(false); setMsg(ok ? "Saved." : (error || "Save failed.")); if (ok) load();
   };
+  // Persist current on-screen selections first so the composed doc matches — but never PUT an issued
+  // pack (the server rejects that; edits need a revision). Returns { html } or { error }.
+  const fetchComposedHtml = async () => {
+    if (!isIssued()) { const p = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload()); if (!p.ok) return { error: p.error || "Save failed." }; }
+    const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack/compose`);
+    return ok ? { html: data.html } : { error: error || "Could not compose." };
+  };
   const compose = async () => {
     setBusy(true); setMsg("");
-    // Persist current on-screen selections first so the preview matches — but never PUT an issued pack
-    // (the server rejects that; edits need a revision).
-    if (!isIssued()) { const p = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload()); if (!p.ok) { setBusy(false); setMsg(p.error || "Save failed."); return; } }
-    const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack/compose`);
-    setBusy(false); ok ? setPreview(data.html) : setMsg(error || "Could not compose.");
+    const r = await fetchComposedHtml();
+    setBusy(false); r.html ? setPreview(r.html) : setMsg(r.error);
+  };
+  // Client-side PDF: open the composed pack in a print window → the browser's native "Save as PDF".
+  // No server/headless dependency; produces the same document as the preview.
+  const downloadPdf = async () => {
+    setBusy(true); setMsg("");
+    const r = await fetchComposedHtml();
+    setBusy(false);
+    if (!r.html) { setMsg(r.error); return; }
+    const ref = data?.job?.reference || "pack";
+    const w = window.open("", "_blank");
+    if (!w) { setMsg("Allow pop-ups for this site to download the PDF."); return; }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Site WHS Pack — ${ref}</title><style>@page{size:A4;margin:14mm}body{font-family:Lato,Arial,sans-serif;margin:0;color:#111}</style></head><body>${r.html}<scr${""}ipt>window.onload=function(){setTimeout(function(){window.print()},300)}</scr${""}ipt></body></html>`);
+    w.document.close();
   };
   const act = async (action) => {
     setBusy(true); setMsg("");
@@ -132,6 +149,7 @@ export default function WhsPackTab({ jobId }) {
       <div className="flex flex-wrap gap-2 pt-2 border-t border-hairline">
         <button disabled={busy || issued} onClick={save} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={issued ? "Issued — start a new revision to edit" : ""}>Save</button>
         <button disabled={busy} onClick={compose} className="rounded-md border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Generate / preview pack</button>
+        <button disabled={busy} onClick={downloadPdf} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink">Download PDF</button>
         {!issued
           ? <button disabled={busy} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white">Approve &amp; issue</button>
           : <button disabled={busy} onClick={() => act("revise")} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold">New revision (re-sign)</button>}
