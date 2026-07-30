@@ -58,7 +58,7 @@ function moduleBlock(m, pickedKeys, part, justification = "") {
 
 // Resolve the site-wide PPE matrix from every selected module's ppeRules + site conditions.
 // R (required) wins; a C item is "conditional (…)" unless a site condition makes it mandatory.
-function resolvePpe(modules, answers = {}) {
+export function resolvePpe(modules, answers = {}) {
   const items = {};
   for (const m of modules) {
     for (const p of (m.content_json?.ppeRules || [])) {

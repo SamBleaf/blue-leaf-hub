@@ -3,7 +3,7 @@
 // the reviewed register — never free text) → generates ONE composed 3-part site WHS pack. A competent
 // reviewer approves it; the crew then signs that version in the field app (Phase C).
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch, apiPut, apiPost } from "../../lib/apiFetch.js";
+import { apiFetch, apiPut, apiPost, apiBlob } from "../../lib/apiFetch.js";
 import { HOC, TIER_COLOR, hierarchyTier, needsJustification } from "../../lib/whsHierarchy.js";
 
 const isPart1 = (m) => m.part === 1 || m.isHrcw === "yes" || m.isHrcw === "boundary";
@@ -114,18 +114,18 @@ export default function WhsPackTab({ jobId }) {
     const r = await fetchComposedHtml();
     setBusy(false); r.html ? setPreview(r.html) : setMsg(r.error);
   };
-  // Client-side PDF: open the composed pack in a print window → the browser's native "Save as PDF".
-  // No server/headless dependency; produces the same document as the preview.
+  // Official PDF: the server-rendered, branded, page-numbered A4 pack (the archival record). Persist the
+  // current selections first (unless issued) so the PDF matches the screen, then stream + download it.
   const downloadPdf = async () => {
     setBusy(true); setMsg("");
-    const r = await fetchComposedHtml();
+    if (!isIssued()) { const p = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload()); if (!p.ok) { setBusy(false); setMsg(p.error || "Save failed."); return; } }
+    const { ok, blob, error } = await apiBlob(`/api/carpentry/jobs/${jobId}/whs-pack/pdf`);
     setBusy(false);
-    if (!r.html) { setMsg(r.error); return; }
-    const ref = data?.job?.reference || "pack";
-    const w = window.open("", "_blank");
-    if (!w) { setMsg("Allow pop-ups for this site to download the PDF."); return; }
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Site WHS Pack — ${ref}</title><style>@page{size:A4;margin:14mm}body{font-family:Lato,Arial,sans-serif;margin:0;color:#111}</style></head><body>${r.html}<scr${""}ipt>window.onload=function(){setTimeout(function(){window.print()},300)}</scr${""}ipt></body></html>`);
-    w.document.close();
+    if (!ok) { setMsg(error || "Could not build the PDF."); return; }
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a");
+    el.href = url; el.download = `WHS-Pack-${data?.job?.reference || "pack"}-v${data?.pack?.version || 1}.pdf`;
+    document.body.appendChild(el); el.click(); el.remove(); URL.revokeObjectURL(url);
   };
   const act = async (action) => {
     setBusy(true); setMsg("");

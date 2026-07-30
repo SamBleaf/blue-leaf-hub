@@ -38,6 +38,23 @@ export async function apiFetch(url, options = {}) {
   }
 }
 
+/**
+ * Authenticated binary fetch — for endpoints that stream a file (e.g. a PDF) rather than JSON.
+ * Returns { ok, blob, error }. Use instead of apiFetch when the response is not JSON.
+ */
+export async function apiBlob(url, options = {}) {
+  try {
+    const res = await authFetch(url, options);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      return { ok: false, blob: null, error: j?.error || `Request failed (HTTP ${res.status})` };
+    }
+    return { ok: true, blob: await res.blob(), error: null };
+  } catch (e) {
+    return { ok: false, blob: null, error: e?.message || "Network error" };
+  }
+}
+
 // ─── Convenience methods ──────────────────────────────────────────────────────
 
 /**

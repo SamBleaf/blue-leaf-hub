@@ -8,6 +8,8 @@ import { getServiceSupabase } from "../supabaseService.mjs";
 import { workCategoriesForProjectType } from "./carpentrySwmsMap.mjs";
 import { composeWhsPack } from "./packCompose.mjs";
 import { needsJustification } from "./hierarchyBar.mjs";
+import { buildWhsPackPdfBuffer } from "./packPdfKit.mjs";
+import { getBrandingEmailLogo } from "../brandingAssets.mjs";
 
 const isPart1 = (m) => m.part === 1 || m.is_hrcw === "yes" || m.is_hrcw === "boundary";
 
@@ -131,6 +133,29 @@ export function registerCarpentryWhsPackRoutes(app) {
       return ok(res, { html });
     } catch (e) {
       return err(res, 500, translateDbError(e) || "Could not compose the pack.");
+    }
+  });
+
+  // The printed artefact (Phase 3) — a branded, page-numbered A4 PDF (the Surface-C archival record).
+  app.get("/api/carpentry/jobs/:jobId/whs-pack/pdf", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = String(req.params.jobId);
+    try {
+      const { error, job, pack } = await loadAndComposePack(sb, jobId);
+      if (error) return err(res, 404, error);
+      if (!pack) return err(res, 400, "No pack for this job yet.");
+      const codes = [...(pack.selected_hrcw || []), ...(pack.selected_task || [])];
+      const { data: modules } = codes.length ? await sb.from("swms_templates").select("*").in("module_code", codes) : { data: [] };
+      let company = {};
+      try { const { data: c } = await sb.from("company_profile").select("name, abn, address, phone, email").order("id").limit(1).maybeSingle(); company = c || {}; } catch { /* pre-mig */ }
+      const logoDataUrl = await getBrandingEmailLogo(sb).catch(() => "");
+      const buf = await buildWhsPackPdfBuffer({ job: rowToCamel(job), company, pack, modules: modules || [], logoDataUrl });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="WHS-Pack-${String(job.reference || "pack").replace(/[^\w.-]+/g, "-")}-v${pack.version || 1}.pdf"`);
+      return res.end(buf);
+    } catch (e) {
+      return err(res, 500, translateDbError(e) || "Could not build the PDF.");
     }
   });
 
