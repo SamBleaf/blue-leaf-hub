@@ -8,6 +8,12 @@ import { HOC, TIER_COLOR, hierarchyTier, needsJustification } from "../../lib/wh
 
 const isPart1 = (m) => m.part === 1 || m.isHrcw === "yes" || m.isHrcw === "boundary";
 
+const SITE_FIELDS = [["addressStreet", "Street address"], ["addressSuburb", "Suburb"], ["addressPostcode", "Postcode"], ["supervisor", "Site supervisor (installs/verifies)"], ["principalContractor", "Principal contractor (if not you)"], ["pcPlanRef", "PC's WHS management plan (ref)"], ["otherPcbus", "Other PCBUs on site + coordination"]];
+const EMERG_FIELDS = [["hospital", "Nearest hospital / medical"], ["firstAider", "First aider on site"], ["firstAiderExpiry", "First-aid qual. expiry", "date"], ["firstAidKit", "First-aid kit location"], ["fireExtinguisher", "Fire extinguisher location"], ["musterPoint", "Muster point"]];
+const ARREST_FIELDS = [["rescuer", "Nominated rescuer on site"], ["rescueMethod", "Rescue method"], ["groundClearance", "Ground-clearance calc (calc vs available)"], ["anchorType", "Anchor type + rating"], ["anchorInstaller", "Installed / verified by"], ["harnessInspection", "Harness / lanyard inspection", "date"], ["rescueEquipment", "Rescue equipment + location"]];
+const SITE_CONDITIONS = [["overheadServices", "Overhead services on the frontage"], ["undergroundServices", "Underground services in the work path"], ["tightBoundary", "Adjoining structures / tight boundary"], ["occupiedDwelling", "Occupied dwelling or neighbours affected"], ["tradesAboveBelow", "Other trades working above or below"], ["unusualAccess", "Anything unusual about access, slope or ground"]];
+const ARREST_LABEL = { rescuer: "named rescuer", rescueMethod: "rescue method", groundClearance: "ground-clearance calc" };
+
 // The live hierarchy bar (Design §6.1) — 6 segments, filled at the selected levels, coloured by the tier.
 function HBar({ levels }) {
   const { filled, tier, label } = hierarchyTier(levels);
@@ -35,6 +41,7 @@ export default function WhsPackTab({ jobId }) {
   const [controls, setControls] = useState({}); // { code: Set(control text) }
   const [answers, setAnswers] = useState({});
   const [just, setJust] = useState({}); // { code: justification } for G-2 (admin/PPE-led HRCW)
+  const [rev, setRev] = useState({ reviewDueAt: "", reviewedBy: "", reviewedAt: "" }); // document control (pack columns)
 
   const load = useCallback(async () => {
     const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack`);
@@ -46,6 +53,7 @@ export default function WhsPackTab({ jobId }) {
     setControls(Object.fromEntries(Object.entries(p.selectedControls || {}).map(([k, v]) => [k, new Set(v)])));
     setAnswers(p.answers || {});
     setJust(p.answers?.justifications || {});
+    setRev({ reviewDueAt: p.reviewDueAt || "", reviewedBy: p.reviewedBy || "", reviewedAt: p.reviewedAt || "" });
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -87,6 +95,7 @@ export default function WhsPackTab({ jobId }) {
     selectedHrcw: [...hrcw], selectedTask: [...task],
     selectedControls: Object.fromEntries(Object.entries(controls).map(([k, v]) => [k, [...v]])),
     answers: { ...answers, justifications: just },
+    reviewDueAt: rev.reviewDueAt || null, reviewedBy: rev.reviewedBy || null, reviewedAt: rev.reviewedAt || null,
   });
   const save = async () => {
     setBusy(true); setMsg("");
@@ -132,6 +141,9 @@ export default function WhsPackTab({ jobId }) {
   const crew = data.crew || [];
   const signedVersion = {}; // employeeId → highest signed pack version
   for (const s of (data.signons || [])) { const v = Number(s.packVersion); if (!signedVersion[s.employeeId] || v > signedVersion[s.employeeId]) signedVersion[s.employeeId] = v; }
+  // G-3 (fall-arrest rescue plan) + the combined issue-gate mirroring the server.
+  const arrestGaps = (!issued && answers.fallArrestInUse) ? ["rescuer", "rescueMethod", "groundClearance"].filter((k) => !String(answers[k] || "").trim()) : [];
+  const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0;
 
   const ModuleCard = ({ m, selected, onToggle }) => {
     const opts = m.contentJson?.controlOptions || [];
@@ -172,6 +184,17 @@ export default function WhsPackTab({ jobId }) {
     );
   };
 
+  // Section-3 field render helpers (not components — called as functions, so no unstable-nested-component).
+  const aField = ([k, label, type = "text"]) => (
+    <label key={k} className="block text-xs font-semibold text-muted">{label}
+      <input type={type} value={answers[k] || ""} onChange={(e) => setAnswers((a) => ({ ...a, [k]: e.target.value }))} disabled={issued} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" />
+    </label>
+  );
+  const aChk = (k, label) => (
+    <label key={k} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!answers[k]} onChange={(e) => setAnswers((a) => ({ ...a, [k]: e.target.checked }))} disabled={issued} /> {label}</label>
+  );
+  const setCond = (k, patch) => setAnswers((a) => ({ ...a, conditions: { ...(a.conditions || {}), [k]: { ...((a.conditions || {})[k] || {}), ...patch } } }));
+
   return (
     <div className="space-y-4">
       <div className={`rounded-lg border px-3 py-2 text-sm ${issued ? "border-accent/40 bg-accent/5" : "border-warning/40 bg-warning/5"}`}>
@@ -189,13 +212,72 @@ export default function WhsPackTab({ jobId }) {
       </div>
 
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">3 · Site details</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">3 · Site &amp; parties</h3>
+        <div className="grid gap-2 md:grid-cols-2">{SITE_FIELDS.map(aField)}</div>
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Stop-work limits (shown on the Site Card)</h4>
+        <div className="grid gap-2 md:grid-cols-3">
+          {aField(["stopWind", "Wind over (km/h)"])}
+          {aField(["stopHeat", "Heat over (°C)"])}
+          {aChk("noWetWork", "No roof/joist work when wet or frosted")}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Emergency</h4>
+        <div className="grid gap-2 md:grid-cols-2">{EMERG_FIELDS.map(aField)}</div>
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">On site</h4>
         <div className="grid gap-2 md:grid-cols-2">
-          {[["supervisor", "Site supervisor (installs/verifies controls)"], ["principalContractor", "Principal contractor (if not you)"], ["hospital", "Nearest hospital / medical"], ["firstAider", "First aider on site"], ["musterPoint", "Muster point"], ["rescuer", "Nominated rescuer (if fall-arrest used)"]].map(([k, label]) => (
-            <label key={k} className="block text-xs font-semibold text-muted">{label}<input value={answers[k] || ""} onChange={(e) => setAnswers((a) => ({ ...a, [k]: e.target.value }))} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" /></label>
-          ))}
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!answers.craneOnSite} onChange={(e) => setAnswers((a) => ({ ...a, craneOnSite: e.target.checked }))} /> Crane on site (→ hard hat mandatory)</label>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!answers.plantOnSite} onChange={(e) => setAnswers((a) => ({ ...a, plantOnSite: e.target.checked }))} /> Powered mobile plant on site (→ hi-vis mandatory)</label>
+          {aChk("craneOnSite", "Crane on site (→ hard hat mandatory)")}
+          {aChk("plantOnSite", "Powered mobile plant on site (→ hi-vis mandatory)")}
+          {aChk("fallArrestInUse", "Fall arrest in use (→ rescue plan required, G-3)")}
+        </div>
+        {answers.fallArrestInUse && (
+          <div className="mt-2 rounded-md border border-red-300 bg-red-50 p-2">
+            <div className="text-[11px] font-semibold text-red-800 mb-2">Fall-arrest rescue plan — all required before issue (G-3):</div>
+            <div className="grid gap-2 md:grid-cols-2">{ARREST_FIELDS.map(aField)}</div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Site-specific conditions</h4>
+        <div className="space-y-1">
+          {SITE_CONDITIONS.map(([k, label]) => {
+            const c = (answers.conditions || {})[k] || {};
+            return (
+              <div key={k} className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={!!c.y} onChange={(e) => setCond(k, { y: e.target.checked })} disabled={issued} />
+                <span className="w-52 shrink-0">{label}</span>
+                {c.y && <input value={c.detail || ""} onChange={(e) => setCond(k, { detail: e.target.value })} disabled={issued} placeholder="detail" className="flex-1 rounded border border-hairline px-2 py-1" />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Consultation with the workers</h4>
+        <div className="grid gap-2 md:grid-cols-2">
+          {aField(["consultationNames", "Workers consulted"])}
+          {aField(["consultationDate", "Date / method"])}
+        </div>
+        <label className="block text-xs font-semibold text-muted mt-2">Toolbox discussion
+          <textarea value={answers.consultationSummary || ""} onChange={(e) => setAnswers((a) => ({ ...a, consultationSummary: e.target.value }))} disabled={issued} rows={2} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" />
+        </label>
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Document control</h4>
+        <div className="grid gap-2 md:grid-cols-3">
+          <label className="block text-xs font-semibold text-muted">Reviewer (competent person)<input value={rev.reviewedBy} onChange={(e) => setRev((r) => ({ ...r, reviewedBy: e.target.value }))} disabled={issued} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" /></label>
+          <label className="block text-xs font-semibold text-muted">Reviewer sign-off date<input type="date" value={rev.reviewedAt} onChange={(e) => setRev((r) => ({ ...r, reviewedAt: e.target.value }))} disabled={issued} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" /></label>
+          <label className="block text-xs font-semibold text-muted">Scheduled review due <span className="text-red-600">(required, G-8)</span><input type="date" value={rev.reviewDueAt} onChange={(e) => setRev((r) => ({ ...r, reviewDueAt: e.target.value }))} disabled={issued} className="mt-1 w-full rounded-md border border-hairline px-2 py-1 text-sm" /></label>
         </div>
       </div>
 
@@ -209,13 +291,23 @@ export default function WhsPackTab({ jobId }) {
           <b>Justification needed (G-2).</b> These HRCW modules are relying on admin/PPE as the top control — add a written justification on each before issuing: <b>{needJust.join(", ")}</b>.
         </div>
       )}
+      {!issued && !rev.reviewDueAt && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <b>Review date needed (G-8).</b> Set a scheduled review due date (Document control) before issuing — a pack with no review date is how the last SWMS went four years stale.
+        </div>
+      )}
+      {!issued && arrestGaps.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <b>Rescue plan incomplete (G-3).</b> Fall arrest is in use — complete before issuing: <b>{arrestGaps.map((k) => ARREST_LABEL[k]).join(", ")}</b>.
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 pt-2 border-t border-hairline">
         <button disabled={busy || issued} onClick={save} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={issued ? "Issued — start a new revision to edit" : ""}>Save</button>
         <button disabled={busy} onClick={compose} className="rounded-md border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Generate / preview pack</button>
         <button disabled={busy} onClick={downloadPdf} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink">Download PDF</button>
         {!issued
-          ? <button disabled={busy || needControls.length > 0 || needJust.length > 0} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={needControls.length ? `Tick controls for: ${needControls.join(", ")}` : needJust.length ? `Justify: ${needJust.join(", ")}` : ""}>Approve &amp; issue</button>
+          ? <button disabled={busy || !canIssue} onClick={() => act("approve")} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" title={!canIssue ? "Resolve the red items above before issuing" : ""}>Approve &amp; issue</button>
           : <button disabled={busy} onClick={() => act("revise")} className="rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold">New revision (re-sign)</button>}
       </div>
 

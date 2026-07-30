@@ -106,6 +106,10 @@ export function registerCarpentryWhsPackRoutes(app) {
     if (b.answers && typeof b.answers === "object") patch.answers = b.answers;
     if (b.ppe && typeof b.ppe === "object") patch.ppe = b.ppe;
     if (b.consultation && typeof b.consultation === "object") patch.consultation = b.consultation;
+    // Document control (Phase 2): scheduled review date + the competent reviewer record.
+    if (typeof b.reviewDueAt === "string" || b.reviewDueAt === null) patch.review_due_at = b.reviewDueAt || null;
+    if (typeof b.reviewedBy === "string" || b.reviewedBy === null) patch.reviewed_by = b.reviewedBy || null;
+    if (typeof b.reviewedAt === "string" || b.reviewedAt === null) patch.reviewed_at = b.reviewedAt || null;
     try {
       const { data, error } = await sb.from("carpentry_whs_packs").update(patch).eq("carpentry_job_id", jobId).select("*").single();
       if (error) return err(res, 500, translateDbError(error));
@@ -165,6 +169,14 @@ export function registerCarpentryWhsPackRoutes(app) {
           return needsJustification(levels, isPart1(m)) && !String(just[m.module_code] || "").trim();
         }).map((m) => m.module_code);
         if (needJust.length) return err(res, 409, `These high-risk modules rely on admin/PPE as the top control — add a written justification for: ${needJust.join(", ")}.`);
+        // G-8: a pack must carry a scheduled review date before it issues.
+        if (!pack.review_due_at) return err(res, 409, "Set a scheduled review date (Section 3) before issuing — a pack with no review date is how the last SWMS went four years stale.");
+        // G-3: if fall arrest is in use, the rescue plan must be complete — no arrest without a way down.
+        if (pack.answers?.fallArrestInUse) {
+          const need = [["rescuer", "named rescuer on site"], ["rescueMethod", "rescue method"], ["groundClearance", "ground-clearance calculation"]]
+            .filter(([k]) => !String(pack.answers?.[k] || "").trim()).map(([, l]) => l);
+          if (need.length) return err(res, 409, `Fall arrest is in use — complete the rescue plan before issuing: ${need.join(", ")}.`);
+        }
         const { data, error } = await sb.from("carpentry_whs_packs").update({ review_status: "issued", approved_by: req.caller?.id || null, approved_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("carpentry_job_id", jobId).select("*").single();
         if (error) return err(res, 500, translateDbError(error));
         return ok(res, { pack: rowToCamel(data) });

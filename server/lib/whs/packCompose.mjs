@@ -83,6 +83,58 @@ function resolvePpe(modules, answers = {}) {
 
 const kv = (rows) => `<table style="width:100%;border-collapse:collapse;font-size:12px">${rows.map(([k, v]) => `<tr><td style="border:1px solid #ccc;padding:4px;background:#f4f6f8;font-weight:600;width:38%">${esc(k)}</td><td style="border:1px solid #ccc;padding:4px">${v == null || v === "" ? "—" : esc(v)}</td></tr>`).join("")}</table>`;
 
+function fmtDate(d) {
+  if (!d) return "— not set —";
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// The tag block (Design §6.2) — the pack's scaffold-tag identity: same shape + position every time.
+// Header colour AND word carry the state (never colour alone): green issued+in-date / amber draft /
+// red review-overdue. REVIEW DUE is always shown — a pack with no review date is how a SWMS goes stale.
+function renderTagBlock({ siteAddress, job = {}, pack = {}, company = {}, draft, pastDue }) {
+  const bg = pastDue ? "#B3261E" : draft ? "#C77700" : "#1F7A3D";
+  const word = pastDue ? "REVIEW OVERDUE — NOT FOR SITE USE" : draft ? "DRAFT — NOT FOR SITE USE" : "ISSUED — IN DATE";
+  return `
+  <div style="border:2px solid #10151C;border-radius:6px;margin-bottom:14px;overflow:hidden">
+    <div style="background:${bg};color:#fff;font-weight:800;font-size:14px;letter-spacing:.04em;padding:8px 12px;display:flex;justify-content:space-between">
+      <span>SITE WHS PACK</span><span>${esc(company.name || "Blue Leaf Building")}</span>
+    </div>
+    <div style="padding:10px 12px;font-size:12px">
+      <div style="font-weight:700;font-size:14px">${esc(siteAddress || job.address || "[site address]")}</div>
+      <div style="color:#5A646E;margin-bottom:6px">${esc(job.reference || "")} · ${esc(job.projectType || "")}</div>
+      ${kv([
+        ["Version", `v${pack.version || 1}`],
+        ["Issued", pack.approved_at ? fmtDate(pack.approved_at) : "—"],
+        ["Reviewer (competent person)", pack.reviewed_by || "— pending —"],
+        ["Reviewer sign-off", pack.reviewed_at ? fmtDate(pack.reviewed_at) : "—"],
+        ["Review due", fmtDate(pack.review_due_at)],
+      ])}
+      <div style="margin-top:6px;font-weight:800;color:${bg}">${esc(word)}</div>
+    </div>
+  </div>`;
+}
+
+// The site-specific conditions block (Questionnaire §6) — the short list that makes a pack site-specific
+// rather than a template with an address on it. 6 Y/N rows; a "Yes" carries a one-line detail.
+export const SITE_CONDITIONS = [
+  ["overheadServices", "Overhead services on the frontage"],
+  ["undergroundServices", "Underground services in the work path"],
+  ["tightBoundary", "Adjoining structures / tight boundary"],
+  ["occupiedDwelling", "Occupied dwelling or neighbours affected"],
+  ["tradesAboveBelow", "Other trades working above or below"],
+  ["unusualAccess", "Anything unusual about access, slope or ground"],
+];
+function renderSiteConditions(a = {}) {
+  const c = a.conditions || {};
+  const rows = SITE_CONDITIONS.map(([k, label]) => {
+    const v = c[k] || {};
+    const yes = !!v.y;
+    return `<tr><td style="border:1px solid #ccc;padding:4px;width:52%">${esc(label)}</td><td style="border:1px solid #ccc;padding:4px;font-weight:700;width:12%;color:${yes ? "#7a1616" : "#5A646E"}">${yes ? "YES" : "No"}</td><td style="border:1px solid #ccc;padding:4px">${yes ? (txt(v.detail) || "—") : "—"}</td></tr>`;
+  }).join("");
+  return `<div style="font-weight:700;margin:12px 0 4px">Site-specific conditions</div><table style="width:100%;border-collapse:collapse;font-size:12px">${rows}</table>`;
+}
+
 // The Site Card (Design §7.2) — the one page that actually gets read at pre-start. Max 3 kill risks
 // (the top selected HRCW modules), the stop-work limits, and the emergency block. No module IDs — a
 // carpenter never needs to see "H-01". Renders as the lead block of the pack + (Phase 3) a standalone.
@@ -105,7 +157,7 @@ export function renderSiteCard({ hrcw = [], sel = {}, a = {}, company = {}, draf
     ["Hospital", a.hospital],
     ["First aid", a.firstAider],
     ["Muster point", a.musterPoint],
-    ["Rescue", a.rescuer || (a.rescueRequired ? "" : "No fall-arrest in use on this job")],
+    ["Rescue", a.fallArrestInUse ? (a.rescuer || "[rescuer not set]") : "No fall-arrest in use on this job"],
     ["Call", company.phone],
   ]);
 
@@ -139,6 +191,8 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
   const missing = [...(pack.selected_hrcw || []), ...(pack.selected_task || [])].filter((code) => !byCode[code]);
   const allReviewed = [...hrcw, ...task].every((m) => m.review_status === "reviewed");
   const draft = pack.review_status !== "issued" || !allReviewed || missing.length > 0;
+  const siteAddress = [a.addressStreet, a.addressSuburb, a.addressPostcode].filter(Boolean).join(", ") || job.address;
+  const pastDue = pack.review_status === "issued" && pack.review_due_at && new Date(pack.review_due_at) < new Date();
 
   const draftBanner = draft
     ? `<div style="background:#fff3cd;border:1px solid #ffe08a;color:#5a4500;padding:8px 10px;font-weight:700;margin-bottom:10px">⚠️ DRAFT — NOT FOR SITE USE. Not all modules are reviewed / the pack is not approved. Do not rely on this on site.</div>`
@@ -161,18 +215,21 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
     ${draftBanner}
     ${missingBanner}
 
+    ${renderTagBlock({ siteAddress, job, pack, company, draft, pastDue })}
+
     ${renderSiteCard({ hrcw, sel, a, company, draft })}
 
     ${bar("PART 1 — COMBINED HRCW SAFE WORK METHOD STATEMENT")}
     ${kv([
       ["Company", company.name || "Blue Leaf Building"],
       ["ABN", company.abn],
-      ["Site address", job.address],
+      ["Site address", siteAddress],
       ["Job / reference", `${job.reference || ""} — ${job.projectType || ""}`],
       ["Principal contractor", a.principalContractor || (a.isPrincipalContractor ? "Blue Leaf Building (PC)" : "")],
+      ["PC's WHS management plan (ref)", a.pcPlanRef],
+      ["Other PCBUs on site + coordination (Act s46)", a.otherPcbus],
       ["Site supervisor (installs/verifies controls)", a.supervisor],
       ["Prepared", a.datePrepared],
-      ["WHS reviewer (competent person)", pack.approved_by ? "approved" : (a.reviewer || "[pending — not for issue]")],
     ])}
 
     <div style="font-weight:700;margin:12px 0 4px">HRCW identified for this job</div>
@@ -187,19 +244,42 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
     ${bar("PART 3 — SITE IMPLEMENTATION RECORD")}
     <div style="font-weight:700;margin:8px 0 4px">Site PPE</div>
     ${ppeMatrix}
-    <div style="font-weight:700;margin:12px 0 4px">Emergency &amp; rescue</div>
+    <div style="font-weight:700;margin:12px 0 4px">Emergency</div>
     ${kv([
       ["Nearest hospital / medical", a.hospital],
       ["First aider on site", a.firstAider],
+      ["First-aid qualification expiry", a.firstAiderExpiry],
+      ["First-aid kit location", a.firstAidKit],
+      ["Fire extinguisher location", a.fireExtinguisher],
       ["Muster point", a.musterPoint],
-      ["Suspension rescue required?", a.rescueRequired ? "Yes" : "No"],
-      ["Nominated rescuer (if arrest in use)", a.rescuer],
-      ["Rescue method", a.rescueMethod],
     ])}
+    ${a.fallArrestInUse ? `
+    <div style="font-weight:700;margin:12px 0 4px;color:#7a1616">Fall-arrest rescue plan (arrest in use on this job)</div>
+    ${kv([
+      ["Ground-clearance calculation (calc vs available)", a.groundClearance],
+      ["Anchor type + rating", a.anchorType],
+      ["Installed / verified by (competent person)", a.anchorInstaller],
+      ["Harness / lanyard inspection date", a.harnessInspection],
+      ["Rescue method", a.rescueMethod],
+      ["Nominated rescuer on site", a.rescuer],
+      ["Rescue equipment + location", a.rescueEquipment],
+    ])}` : ""}
+    ${renderSiteConditions(a)}
     <div style="font-weight:700;margin:12px 0 4px">Consultation (prepared with the workers — Act ss47–49)</div>
-    <div style="font-size:12px">${esc((pack.consultation && pack.consultation.summary) || "[record the toolbox discussion + workers consulted before sign-on]")}</div>
+    ${kv([
+      ["Toolbox discussion", (pack.consultation && pack.consultation.summary) || a.consultationSummary],
+      ["Workers consulted", a.consultationNames],
+      ["Date / method", a.consultationDate],
+    ])}
+    <div style="font-weight:700;margin:12px 0 4px">Document control</div>
+    ${kv([
+      ["Version", `v${pack.version || 1}`],
+      ["Reviewer (competent person)", pack.reviewed_by],
+      ["Reviewer sign-off date", pack.reviewed_at ? fmtDate(pack.reviewed_at) : ""],
+      ["Scheduled review due", fmtDate(pack.review_due_at)],
+    ])}
     <div style="font-weight:700;margin:12px 0 4px">Sign-on</div>
     <div style="font-size:11px;color:#444">Workers sign this pack version in the field app, confirming it was discussed and understood. A material change bumps the version and requires re-consultation + re-signature.</div>
-    <div style="font-size:11px;color:#777;margin-top:10px">Pack version ${esc(pack.version || 1)} · generated ${new Date().toISOString().slice(0, 10)} · Blue Leaf Building. DRAFT until a competent WHS reviewer approves.</div>
+    <div style="font-size:11px;color:#777;margin-top:10px">Pack version ${esc(pack.version || 1)} · generated ${fmtDate(new Date())} · Blue Leaf Building${draft ? ". DRAFT until a competent WHS reviewer approves." : ""}</div>
   </div>`;
 }

@@ -129,5 +129,32 @@ const base = { job: { address: "1 Test St", reference: "J1" }, company: { name: 
   ok(html.includes("Why this is acceptable:") && html.includes("elimination not practicable"), "G-2 justification renders when present");
 }
 
+// 13. Tag block: composed address, review-due, and the state word (issued+in-date vs overdue).
+{
+  const future = "2099-01-01", pastD = "2000-01-01";
+  const base2 = { job: { reference: "J1", projectType: "full" }, company: { name: "BLB", abn: "1", phone: "0400" } };
+  const mk = (rd) => ({ version: 3, review_status: "issued", review_due_at: rd, reviewed_by: "J. Reviewer", approved_at: "2026-07-30",
+    selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] },
+    answers: { addressStreet: "25 Mariner Ave", addressSuburb: "Newton", addressPostcode: "5074" } });
+  const inDate = composeWhsPack({ ...base2, pack: mk(future), modules: [H] });
+  const overdue = composeWhsPack({ ...base2, pack: mk(pastD), modules: [H] });
+  ok(inDate.includes("25 Mariner Ave, Newton, 5074"), "tag block shows composed street/suburb/postcode");
+  ok(inDate.includes("J. Reviewer") && inDate.includes("Review due"), "tag block shows reviewer + review-due");
+  ok(inDate.includes("ISSUED — IN DATE"), "in-date issued pack → ISSUED state word");
+  ok(overdue.includes("REVIEW OVERDUE — NOT FOR SITE USE"), "past review-due → REVIEW OVERDUE state word (G-9)");
+}
+
+// 14. Fall-arrest rescue block + site conditions render only when relevant.
+{
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] },
+    answers: { fallArrestInUse: true, rescuer: "Lead hand", rescueMethod: "EWP", groundClearance: "4.2 m calc vs 6 m",
+      conditions: { overheadServices: { y: true, detail: "11kV on frontage, 3.5m clearance" }, tightBoundary: { y: false } } } };
+  const html = composeWhsPack({ ...base, pack, modules: [H] });
+  ok(html.includes("Fall-arrest rescue plan") && html.includes("Ground-clearance"), "fall-arrest rescue block renders when arrest in use");
+  ok(html.includes("Site-specific conditions") && html.includes("11kV on frontage"), "site-conditions block renders the Yes detail");
+  const noArrest = composeWhsPack({ ...base, pack: { ...pack, answers: {} }, modules: [H] });
+  ok(!noArrest.includes("Fall-arrest rescue plan"), "no fall-arrest → rescue block hidden");
+}
+
 console.log(`whs-pack-compose: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
