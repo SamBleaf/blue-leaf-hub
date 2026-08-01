@@ -167,5 +167,15 @@ const base = { job: { address: "1 Test St", reference: "J1" }, company: { name: 
   ok(dueYesterday.includes("REVIEW OVERDUE"), "pack due yesterday IS overdue");
 }
 
+// 16. Job-scope record renders every answer, including the negatives (the "considered, not applicable" artefact).
+{
+  const pack = { version: 1, review_status: "issued", selected_hrcw: ["H-01"], selected_task: [], selected_controls: { "H-01": ["Isolate: edge protection"] },
+    answers: { jScope: { j1Stages: ["first_fix", "roofing"], j2Heights: "yes", j3Openings: "no", j4Loadbearing: "no", j5Pre2004: "no", j6Silica: "yes", j7Road: "no", j8Excavation: "no" } } };
+  const html = composeWhsPack({ ...base, pack, modules: [H] });
+  ok(html.includes("Job scope considered"), "job-scope record present");
+  ok(/before 2004[^<]*<\/td><td[^>]*>No/.test(html), "a negative renders as No (the not-applicable record)");
+  ok(/more than 2 m[^<]*<\/td><td[^>]*>Yes/.test(html), "a positive renders as Yes");
+}
+
 console.log(`whs-pack-compose: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -10,6 +10,7 @@ import { composeWhsPack } from "./packCompose.mjs";
 import { needsJustification } from "./hierarchyBar.mjs";
 import { buildWhsPackPdfBuffer } from "./packPdfKit.mjs";
 import { getBrandingEmailLogo } from "../brandingAssets.mjs";
+import { J_MAP_CODES, jScopeMissing } from "./carpentryScope.mjs";
 
 const isPart1 = (m) => m.part === 1 || m.is_hrcw === "yes" || m.is_hrcw === "boundary";
 
@@ -18,6 +19,21 @@ async function loadApplicableModules(sb, projectType) {
   const { data } = await sb.from("swms_templates").select("*")
     .eq("trade", "Carpentry").eq("is_active", true).overlaps("work_category", cats).order("module_code");
   return data || [];
+}
+
+// Modules SELECTABLE in the builder: the project-type pre-tick set + every module a job-scope question can
+// derive (so ticking "load-bearing? yes" can surface H-08/H-09, which no full-package stage overlaps) +
+// whatever's already selected on the pack. Broader than loadApplicableModules, which drives the pre-tick.
+async function loadSelectableModules(sb, projectType, pack) {
+  const cats = workCategoriesForProjectType(projectType);
+  const selected = [...(pack?.selected_hrcw || []), ...(pack?.selected_task || [])];
+  const [{ data: byCat }, { data: byCode }] = await Promise.all([
+    sb.from("swms_templates").select("*").eq("trade", "Carpentry").eq("is_active", true).overlaps("work_category", cats),
+    sb.from("swms_templates").select("*").eq("trade", "Carpentry").eq("is_active", true).in("module_code", [...new Set([...J_MAP_CODES, ...selected])]),
+  ]);
+  const merged = new Map();
+  for (const m of [...(byCat || []), ...(byCode || [])]) merged.set(m.id, m);
+  return [...merged.values()].sort((a, b) => String(a.module_code).localeCompare(String(b.module_code)));
 }
 
 // Load a job's current pack + its selected modules + company, and compose the 3-part HTML.
@@ -71,7 +87,7 @@ export function registerCarpentryWhsPackRoutes(app) {
       const { data: job } = await sb.from("carpentry_jobs").select("id, reference, address, project_type, client_name").eq("id", jobId).maybeSingle();
       if (!job) return err(res, 404, "Job not found.");
       const pack = await getOrCreatePack(sb, jobId, job.project_type, req.caller?.id);
-      const modules = await loadApplicableModules(sb, job.project_type);
+      const modules = await loadSelectableModules(sb, job.project_type, pack);
       // Crew × current-pack-version sign-on (the field liability shield). Crew = active employees
       // rostered to this job (Planner allocations) — same source as the legacy SWMS matrix.
       const { data: allocs } = await sb.from("workforce_allocations").select("employee_id").eq("carpentry_job_id", jobId);
@@ -206,6 +222,10 @@ export function registerCarpentryWhsPackRoutes(app) {
           return needsJustification(levels, isPart1(m)) && !String(just[m.module_code] || "").trim();
         }).map((m) => m.module_code);
         if (needJust.length) return err(res, 409, `These high-risk modules rely on admin/PPE as the top control — add a written justification for: ${needJust.join(", ")}.`);
+        // G-6: every job-scope question must be answered (a negative is an answer, a blank is not) — this
+        // is what produces the "considered and not applicable" record and stops a module being silently missed.
+        const scopeMissing = jScopeMissing(pack.answers?.jScope || {});
+        if (scopeMissing.length) return err(res, 409, "Answer every job-scope question before issuing (Section 1) — a blank isn't an answer.");
         // G-8: a pack must carry a scheduled review date before it issues.
         if (!pack.review_due_at) return err(res, 409, "Set a scheduled review date (Section 3) before issuing — a pack with no review date is how the last SWMS went four years stale.");
         // G-3: if fall arrest is in use, the rescue plan must be complete — no arrest without a way down.

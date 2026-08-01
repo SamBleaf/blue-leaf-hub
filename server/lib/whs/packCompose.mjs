@@ -5,6 +5,7 @@
 // reviewed. No conditional wording is invented here — only the controls the supervisor actually ticked.
 
 import { renderBarHtml } from "./hierarchyBar.mjs";
+import { J_QUESTIONS, JOB_STAGES } from "./carpentryScope.mjs";
 
 const HOC = { 1: "Eliminate", 2: "Substitute", 3: "Isolate", 4: "Engineering", 5: "Administrative", 6: "PPE" };
 const PPE_FLAG = { R: "mandatory", C: "conditional", S: "recommended", NA: "n/a" };
@@ -113,6 +114,15 @@ function renderTagBlock({ siteAddress, job = {}, pack = {}, company = {}, draft,
       <div style="margin-top:6px;font-weight:800;color:${bg}">${esc(word)}</div>
     </div>
   </div>`;
+}
+
+// The job-scope record (Questionnaire §4) — every question with its answer, INCLUDING the negatives, so
+// the pack shows "H-10 considered, not applicable, post-2004" as a compliance artefact rather than a blank.
+function renderJobScope(jScope = {}) {
+  const stages = (jScope.j1Stages || []).map((k) => (JOB_STAGES.find(([kk]) => kk === k) || [k, k])[1]);
+  const rows = [["Stages on this job", stages.join(", ")]];
+  for (const q of J_QUESTIONS) if (q.type === "yesno") rows.push([q.q, jScope[q.key] === "yes" ? "Yes" : jScope[q.key] === "no" ? "No" : "— not answered —"]);
+  return `<div style="font-weight:700;margin:12px 0 4px">Job scope considered</div>${kv(rows)}`;
 }
 
 // The site-specific conditions block (Questionnaire §6) — the short list that makes a pack site-specific
@@ -234,6 +244,8 @@ export function composeWhsPack({ job = {}, company = {}, pack = {}, modules = []
       ["Site supervisor (installs/verifies controls)", a.supervisor],
       ["Prepared", a.datePrepared],
     ])}
+
+    ${a.jScope ? renderJobScope(a.jScope) : ""}
 
     <div style="font-weight:700;margin:12px 0 4px">HRCW identified for this job</div>
     ${hrcw.length ? hrcw.map((m) => moduleBlock(m, sel[m.module_code], 1, (a.justifications || {})[m.module_code])).join("") : `<div style="font-size:12px;color:#777">No HRCW selected — confirm the questionnaire.</div>`}

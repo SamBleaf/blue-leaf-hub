@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPut, apiPost, apiBlob } from "../../lib/apiFetch.js";
 import { HOC, TIER_COLOR, hierarchyTier, needsJustification } from "../../lib/whsHierarchy.js";
+import { J_QUESTIONS, JOB_STAGES, deriveScopeModules, jScopeMissing } from "../../lib/carpentryScope.js";
 
 const isPart1 = (m) => m.part === 1 || m.isHrcw === "yes" || m.isHrcw === "boundary";
 
@@ -42,6 +43,7 @@ export default function WhsPackTab({ jobId }) {
   const [answers, setAnswers] = useState({});
   const [just, setJust] = useState({}); // { code: justification } for G-2 (admin/PPE-led HRCW)
   const [rev, setRev] = useState({ reviewDueAt: "", reviewedBy: "", reviewedAt: "" }); // document control (pack columns)
+  const [jScope, setJScope] = useState({ j1Stages: [] }); // job-scope questions (§4) — stored in answers.jScope
 
   const load = useCallback(async () => {
     const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack`);
@@ -54,6 +56,7 @@ export default function WhsPackTab({ jobId }) {
     setAnswers(p.answers || {});
     setJust(p.answers?.justifications || {});
     setRev({ reviewDueAt: p.reviewDueAt || "", reviewedBy: p.reviewedBy || "", reviewedAt: p.reviewedAt || "" });
+    setJScope(p.answers?.jScope || { j1Stages: [] });
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -97,9 +100,17 @@ export default function WhsPackTab({ jobId }) {
   const payload = () => ({
     selectedHrcw: [...hrcw], selectedTask: [...task],
     selectedControls: Object.fromEntries(Object.entries(controls).map(([k, v]) => [k, [...v]])),
-    answers: { ...answers, justifications: just },
+    answers: { ...answers, justifications: just, jScope },
     reviewDueAt: rev.reviewDueAt || null, reviewedBy: rev.reviewedBy || null, reviewedAt: rev.reviewedAt || null,
   });
+  // "Apply scope" — union the modules this job-scope pulls in (esp. H-08/09/10/13) into the selection.
+  const applyScope = () => {
+    const codes = deriveScopeModules(jScope);
+    const nH = new Set(hrcw); const nT = new Set(task); let added = 0;
+    for (const c of codes) { const m = byCode[c]; if (!m) continue; const set = isPart1(m) ? nH : nT; if (!set.has(c)) { set.add(c); added++; } }
+    setHrcw(nH); setTask(nT);
+    setMsg(added ? `Added ${added} module(s) from the job scope.` : "Scope already reflected in the selection.");
+  };
   const save = async () => {
     setBusy(true); setMsg("");
     const { ok, error } = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload());
@@ -150,7 +161,8 @@ export default function WhsPackTab({ jobId }) {
   const selectedCodes = [...hrcw, ...task];
   const unreviewedSel = selectedCodes.filter((c) => byCode[c] && byCode[c].reviewStatus !== "reviewed");
   const missingSel = selectedCodes.filter((c) => !byCode[c]);
-  const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0 && unreviewedSel.length === 0 && missingSel.length === 0;
+  const scopeMissing = jScopeMissing(jScope); // G-6
+  const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0 && unreviewedSel.length === 0 && missingSel.length === 0 && scopeMissing.length === 0;
 
   const ModuleCard = ({ m, selected, onToggle }) => {
     const opts = m.contentJson?.controlOptions || [];
@@ -210,16 +222,51 @@ export default function WhsPackTab({ jobId }) {
       {msg && <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-xs">{msg}</div>}
 
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">1 · Which high-risk work applies to this job?</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">1 · What&apos;s on this job? <span className="normal-case font-normal text-[10px]">(every answer is recorded — a &quot;no&quot; is the &quot;considered, not applicable&quot; record)</span></h3>
+        <div className="rounded-lg border border-hairline p-3 space-y-2">
+          <div>
+            <div className="text-xs font-semibold text-muted mb-1">Which stages are on this job?</div>
+            <div className="flex flex-wrap gap-1.5">
+              {JOB_STAGES.map(([k, label]) => {
+                const on = (jScope.j1Stages || []).includes(k);
+                return (
+                  <button key={k} type="button" disabled={issued} onClick={() => setJScope((s) => ({ ...s, j1Stages: on ? (s.j1Stages || []).filter((x) => x !== k) : [...(s.j1Stages || []), k] }))}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${on ? "border-primary bg-primary text-white" : "border-hairline text-ink"}`}>{label}</button>
+                );
+              })}
+            </div>
+          </div>
+          {J_QUESTIONS.filter((q) => q.type === "yesno").map((q) => (
+            <div key={q.key} className="flex items-center justify-between gap-2 text-xs">
+              <span className="flex-1">{q.q}</span>
+              <div className="flex gap-1 shrink-0">
+                {["yes", "no"].map((v) => (
+                  <button key={v} type="button" disabled={issued} onClick={() => setJScope((s) => ({ ...s, [q.key]: v }))}
+                    className={`rounded-md border px-2.5 py-1 font-semibold ${jScope[q.key] === v ? (v === "yes" ? "border-primary bg-primary text-white" : "border-ink bg-ink text-white") : "border-hairline text-ink"}`}>{v === "yes" ? "Yes" : "No"}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!issued && (
+            <div className="flex items-center gap-2 pt-1">
+              <button type="button" onClick={applyScope} className="rounded-md border border-primary px-3 py-1 text-[11px] font-semibold text-primary">Apply scope → add modules</button>
+              <span className="text-[10px] text-muted">Pulls in load-bearing / asbestos / excavation modules the job type doesn&apos;t auto-add.</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">2 · Which high-risk work applies to this job?</h3>
         <div className="space-y-2">{part1.map((m) => <ModuleCard key={m.id} m={m} selected={hrcw.has(m.moduleCode)} onToggle={() => toggleMod(m.moduleCode, hrcw, setHrcw)} />)}</div>
       </div>
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">2 · Task-control modules (not HRCW)</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">3 · Task-control modules (not HRCW)</h3>
         <div className="space-y-2">{part2.map((m) => <ModuleCard key={m.id} m={m} selected={task.has(m.moduleCode)} onToggle={() => toggleMod(m.moduleCode, task, setTask)} />)}</div>
       </div>
 
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">3 · Site &amp; parties</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">4 · Site &amp; parties</h3>
         <div className="grid gap-2 md:grid-cols-2">{SITE_FIELDS.map(aField)}</div>
       </div>
 
@@ -306,6 +353,11 @@ export default function WhsPackTab({ jobId }) {
       {!issued && arrestGaps.length > 0 && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
           <b>Rescue plan incomplete (G-3).</b> Fall arrest is in use — complete before issuing: <b>{arrestGaps.map((k) => ARREST_LABEL[k]).join(", ")}</b>.
+        </div>
+      )}
+      {!issued && scopeMissing.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <b>Answer the job scope (G-6).</b> Every question in section 1 must be answered before issuing — a blank isn&apos;t an answer. {scopeMissing.length} left.
         </div>
       )}
       {!issued && (unreviewedSel.length > 0 || missingSel.length > 0) && (
