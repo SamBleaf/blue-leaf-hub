@@ -13,24 +13,29 @@ for (const levels of CASES) {
   ok(JSON.stringify(s) === JSON.stringify(c), `parity for [${levels}] — server ${JSON.stringify(s)} vs client ${JSON.stringify(c)}`);
 }
 
-// Tier semantics
-ok(srv.hierarchyTier([1, 2, 3, 4]).tier === "green", "L1–L4 → green (engineering or higher)");
-ok(srv.hierarchyTier([3, 5]).tier === "amber", "top L5 → amber (admin)");
-ok(srv.hierarchyTier([2, 6]).tier === "red" && srv.hierarchyTier([2, 6]).ppeOnly, "top L6 → red, ppeOnly");
+// Tier semantics — coloured by the BEST (lowest-number) selected level, not the worst.
+// (Corrected per the Phase-4b remediation brief §6 — the bar was inverted.)
+ok(srv.hierarchyTier([1, 2, 3, 4]).tier === "green", "L1–L4 → green (has engineering-or-higher)");
+ok(srv.hierarchyTier([3, 5]).tier === "green", "best L3 wins over a co-selected L5 → green (was wrongly amber)");
+ok(srv.hierarchyTier([2, 6]).tier === "green" && !srv.hierarchyTier([2, 6]).ppeOnly, "best L2 wins over a co-selected L6 → green (was wrongly red)");
+ok(srv.hierarchyTier([5]).tier === "amber", "best is L5 → amber (admin-led)");
+ok(srv.hierarchyTier([5, 6]).tier === "amber", "best L5 (with L6) → amber");
+ok(srv.hierarchyTier([6]).tier === "red" && srv.hierarchyTier([6]).ppeOnly, "only L6 → red, ppeOnly");
 ok(srv.hierarchyTier([]).tier === "none", "no levels → none");
 ok(srv.hierarchyTier([7, 0]).highest === null, "out-of-range levels ignored");
 
-// G-2: HRCW with admin/PPE top → needs justification; task module does not
-ok(srv.needsJustification([5], true) === true, "HRCW top-L5 needs justification");
-ok(srv.needsJustification([6], true) === true, "HRCW top-L6 needs justification");
-ok(srv.needsJustification([4], true) === false, "HRCW top-L4 does not");
-ok(srv.needsJustification([6], false) === false, "task module top-L6 does not (PPE-led is ok for task)");
+// G-2: HRCW whose BEST control is admin/PPE → needs justification; a co-selected high-order control clears it.
+ok(srv.needsJustification([5], true) === true, "HRCW best-L5 needs justification");
+ok(srv.needsJustification([6], true) === true, "HRCW best-L6 needs justification");
+ok(srv.needsJustification([4], true) === false, "HRCW best-L4 does not");
+ok(srv.needsJustification([3, 5], true) === false, "HRCW with a co-selected L3 does not (best is engineering-or-higher)");
+ok(srv.needsJustification([6], false) === false, "task module best-L6 does not (PPE-led is ok for task)");
 ok(cli.needsJustification([5], true) === true, "client mirror agrees");
 
-// Bar HTML renders 6 segments and the tier label
+// Bar HTML renders 6 segments and the best-control label
 const html = srv.renderBarHtml([1, 2, 3, 4]);
 ok((html.match(/display:inline-block/g) || []).length === 6, "bar renders 6 segments");
-ok(html.includes("Engineering"), "bar shows the top-control label");
+ok(html.includes("Eliminate"), "bar shows the best-control label (L1 Eliminate)");
 
 console.log(`whs-hierarchy-parity: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

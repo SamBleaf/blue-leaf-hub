@@ -10,7 +10,11 @@ const NAVY = "#1B3A5C", INK = "#10151C", INK60 = "#5A646E", RULE = "#C9D1D8";
 const GREEN = "#1F7A3D", AMBER = "#C77700", RED = "#B3261E";
 const M = 40, PW = 595.28, PH = 841.89, CW = PW - 2 * M, TOP = M + 40, BOT = PH - 44;
 
-const clean = (s) => String(s ?? "").replace(/\*\*/g, "").replace(/\*\(/g, "(").replace(/\)\*/g, ")").replace(/\s+/g, " ").trim();
+// pdfkit's built-in fonts (Helvetica/Courier) are WinAnsi-encoded and can't render ≥ ■ ☑ ✓ → etc. —
+// they print as garbage (the ≥1% silica threshold came out "e1%"). Map every non-WinAnsi glyph the
+// register or this renderer uses to a safe equivalent before it reaches doc.text.
+const GLYPH = { "≥": ">=", "≤": "<=", "■": "•", "□": "o", "☑": "[x]", "☐": "[ ]", "✓": "OK", "✗": "x", "→": "->", "▓": "|", "…": "...", " ": " " };
+const clean = (s) => String(s ?? "").replace(/[≥≤■□☑☐✓✗→▓… ]/g, (c) => GLYPH[c] ?? "").replace(/\*\*/g, "").replace(/\*\(/g, "(").replace(/\)\*/g, ")").replace(/\s+/g, " ").trim();
 const fdate = (d) => { if (!d) return "— not set —"; const t = new Date(d); return isNaN(t) ? String(d) : t.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" }); };
 
 export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {}, modules = [], logoDataUrl = "" } = {}) {
