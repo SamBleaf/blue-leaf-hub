@@ -136,7 +136,8 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
   // ---- module card (Part 1 / 2) ----
   const moduleCard = (m, part) => {
     const c = m.content_json || {};
-    const opts = Array.isArray(c.controlOptions) ? c.controlOptions : [];
+    // R-1: hierarchy order, never the register's array order.
+    const opts = (Array.isArray(c.controlOptions) ? c.controlOptions : []).slice().sort((a2, b2) => (a2.level || 0) - (b2.level || 0));
     const keys = Array.isArray(sel[m.module_code]) ? sel[m.module_code] : [];
     const picked = opts.filter((o) => keys.includes(o.text));
     const levels = picked.map((o) => o.level);
@@ -145,8 +146,13 @@ export async function buildWhsPackPdfBuffer({ job = {}, company = {}, pack = {},
     doc.font("Helvetica-Bold").fontSize(11).fillColor(INK).text(clean(m.title || ""), M, y, { width: CW - 60 });
     doc.font("Courier").fontSize(9).fillColor(INK60).text(m.module_code || "", PW - M - 60, y, { width: 60, align: "right" });
     y += doc.font("Helvetica-Bold").fontSize(11).heightOfString(clean(m.title || ""), { width: CW - 60 }) + 2;
-    const barColor = barGlyph(levels, M, y + 1);
-    doc.font("Helvetica-Bold").fontSize(8).fillColor(barColor).text(hierarchyTier(levels).label, M + 6 * 16 + 6, y - 1);
+    // R-3: H-14's levels are all L5 (source states no level) — the real hierarchy lives in T-01. Don't draw a bar.
+    if (m.module_code === "H-14") {
+      doc.font("Helvetica").fontSize(8).fillColor(INK60).text("Hierarchy: see T-01 (records the high-risk-processing assessment, not a hierarchy)", M, y);
+    } else {
+      const barColor = barGlyph(levels, M, y + 1);
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(barColor).text(hierarchyTier(levels).label, M + 6 * 16 + 6, y - 1);
+    }
     y += 12;
     if (c.trigger) para(`Applies when: ${clean(c.trigger)}`, 8.5, INK60, 3);
     const just = (a.justifications || {})[m.module_code];

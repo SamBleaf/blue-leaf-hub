@@ -23,9 +23,13 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 const txt = (s) => esc(stripMd(s));
 const bar = (t) => `<div style="background:#111;color:#fff;font-weight:700;font-size:12px;letter-spacing:.04em;padding:6px 10px;margin:18px 0 8px">${esc(t)}</div>`;
 
+// Responsible fields carry placeholders like "[Site Supervisor]" — render a real label, never a bracket.
+const respTxt = (s) => txt(String(s ?? "").replace(/\[[^\]]*\]/g, "site supervisor"));
+
 function moduleBlock(m, pickedKeys, part, justification = "") {
   const c = m.content_json || {};
-  const controls = Array.isArray(c.controlOptions) ? c.controlOptions : [];
+  // R-1: never trust array order — render in hierarchy order (L1→L6). Some register rows are out of sequence.
+  const controls = (Array.isArray(c.controlOptions) ? c.controlOptions : []).slice().sort((a, b) => (a.level || 0) - (b.level || 0));
   // selected_controls stores each ticked control's TEXT (stable identity) — never a positional index —
   // so reordering/editing the register can't silently remap a tick to a different control. A tick whose
   // text no longer exists simply drops (fails safe → "no controls selected").
@@ -45,7 +49,7 @@ function moduleBlock(m, pickedKeys, part, justification = "") {
   return `
   <div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px">
     <div style="font-weight:700;color:#006c9b">${esc(m.module_code || "")} · ${esc(m.title || "")}</div>
-    <div style="margin:3px 0 2px">${renderBarHtml(levels)}</div>
+    <div style="margin:3px 0 2px">${m.module_code === "H-14" ? `<span style="font-size:10px;color:#5A646E">Hierarchy: see T-01 (this module records the high-risk-processing assessment, not a hierarchy)</span>` : renderBarHtml(levels)}</div>
     ${justRow}
     ${c.activity ? `<div style="font-size:12px"><b>Activity:</b> ${txt(c.activity)}</div>` : ""}
     ${c.hazard ? `<div style="font-size:12px"><b>Hazards:</b> ${txt(c.hazard)}</div>` : ""}
@@ -53,7 +57,7 @@ function moduleBlock(m, pickedKeys, part, justification = "") {
     <ol style="font-size:12px;margin:2px 0 0 16px">${ctrlRows}</ol>
     ${ppeRow}
     ${c.monitorReview ? `<div style="font-size:11px;color:#444;margin-top:4px"><b>Monitor &amp; review:</b> ${txt(c.monitorReview)}</div>` : ""}
-    ${(c.responsibleInstall || c.responsibleUse) ? `<div style="font-size:11px;color:#444"><b>Responsible:</b> ${c.responsibleInstall ? "install/verify " + txt(c.responsibleInstall) : ""}${c.responsibleUse ? " · use " + txt(c.responsibleUse) : ""}</div>` : ""}
+    ${(c.responsibleInstall || c.responsibleUse) ? `<div style="font-size:11px;color:#444"><b>Responsible:</b> ${c.responsibleInstall ? "install/verify " + respTxt(c.responsibleInstall) : ""}${c.responsibleUse ? " · use " + respTxt(c.responsibleUse) : ""}</div>` : ""}
   </div>`;
 }
 

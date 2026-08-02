@@ -135,7 +135,7 @@
         },
         {
           "level": 5,
-          "text": "Stop-work wind limit stated in Part 3 (recommended default: cease standing frames above [X] km/h measured or forecast). Frames left standing overnight must be fully braced."
+          "text": "Stop-work wind limit stated in Part 3; cease standing frames above the stated wind limit (measured or forecast). Frames left standing overnight must be fully braced."
         },
         {
           "level": 5,
@@ -819,11 +819,6 @@
       ],
       "ppeRules": [
         {
-          "item": "Governed by the licensed removalist's control plan; Blue Leaf crew are excluded from the area during removal",
-          "flag": "NA",
-          "condition": ""
-        },
-        {
           "item": "P2 minimum",
           "flag": "R",
           "condition": "(on re-entry only after clearance)"
@@ -838,7 +833,7 @@
         "S-11",
         "S-23"
       ],
-      "note": "review_status: DRAFT · approver: [PENDING]."
+      "note": "review_status: DRAFT · approver: [PENDING]. PPE for asbestos work is governed by the licensed removalists control plan; Blue Leaf crew are excluded from the area during removal."
     },
     {
       "code": "H-11",
@@ -1841,7 +1836,7 @@
       "responsibleInstall": "",
       "responsibleUse": "",
       "sourceRefs": [
-        "S-01 (s19)"
+        "S-01"
       ],
       "note": "review_status: DRAFT. No responsible split line stated in source."
     },
@@ -2036,7 +2031,7 @@
         "S-39",
         "S-40"
       ],
-      "note": "This module is a PPE baseline/conditional matrix table rather than an eliminate→PPE control_options hierarchy, so control_options[] is empty and the matrix rows are captured as ppe_rules. Flags 'C → R' (conditional escalating to required) and 'R / N/A' are preserved verbatim from the source Status column. Rule: PPE is the last control, never the first. Any module where PPE is the only selected control requires written justification in Part 3 and reviewer approval. review_status: DRAFT. No responsible split line stated in source."
+      "note": "This module is a PPE baseline/conditional matrix table rather than an eliminate→PPE control_options hierarchy, so control_options[] is empty and the matrix rows are captured as ppe_rules.Rule: PPE is the last control, never the first. Any module where PPE is the only selected control requires written justification in Part 3 and reviewer approval. review_status: DRAFT. No responsible split line stated in source."
     }
   ],
   "sources": [

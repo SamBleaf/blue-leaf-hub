@@ -28,7 +28,8 @@ export function renderSwmsModuleHtml(content) {
   if (c.hazard) out.push(`<h3>Key hazards</h3><p>${txt(c.hazard)}</p>`);
   if (c.trigger) out.push(`<h3>When this applies</h3><p>${txt(c.trigger)}</p>`);
 
-  const controls = Array.isArray(c.controlOptions) ? c.controlOptions : [];
+  // R-1: render in hierarchy order (L1→L6) — never trust the register's array order.
+  const controls = (Array.isArray(c.controlOptions) ? c.controlOptions : []).slice().sort((a, b) => (a.level || 0) - (b.level || 0));
   if (controls.length) {
     const rows = controls
       .map((x) => `<li><b>L${esc(x.level)} ${esc(HOC[x.level] || "")}:</b> ${txt(x.text)}</li>`)
@@ -46,15 +47,17 @@ export function renderSwmsModuleHtml(content) {
 
   if (c.monitorReview) out.push(`<h3>Monitor &amp; review</h3><p>${txt(c.monitorReview)}</p>`);
 
+  // R-4: responsible fields carry "[Site Supervisor]" placeholders — render a real label.
+  const respTxt = (s) => txt(String(s ?? "").replace(/\[[^\]]*\]/g, "site supervisor"));
   const resp = [
-    c.responsibleInstall ? `<b>Install / verify:</b> ${txt(c.responsibleInstall)}` : "",
-    c.responsibleUse ? `<b>Use:</b> ${txt(c.responsibleUse)}` : "",
+    c.responsibleInstall ? `<b>Install / verify:</b> ${respTxt(c.responsibleInstall)}` : "",
+    c.responsibleUse ? `<b>Use:</b> ${respTxt(c.responsibleUse)}` : "",
   ].filter(Boolean).join(" &nbsp;·&nbsp; ");
   if (resp) out.push(`<h3>Responsible</h3><p>${resp}</p>`);
 
   const refs = Array.isArray(c.sourceRefs) ? c.sourceRefs.filter(Boolean) : [];
   if (refs.length) out.push(`<p><em>Sources: ${refs.map(txt).join(", ")}</em></p>`);
-  if (c.note) out.push(`<p><em>Note: ${txt(c.note)}</em></p>`);
+  // R-6: `note` fields carry reviewer commentary about the 2022 document — never render them in the pack/sheet.
 
   return out.join("\n");
 }
