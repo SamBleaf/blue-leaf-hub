@@ -39,7 +39,8 @@ export default function WhsPackTab({ jobId }) {
   // local editable selection state
   const [hrcw, setHrcw] = useState(() => new Set());
   const [task, setTask] = useState(() => new Set());
-  const [controls, setControls] = useState({}); // { code: Set(control text) }
+  const [controls, setControls] = useState({}); // { code: Set(control text) } — CONFIRMED (the assertion: composes + satisfies G-1)
+  const [suggested, setSuggested] = useState({}); // { code: Set(control text) } — house-standard SUGGESTIONS, unconfirmed (assert nothing)
   const [answers, setAnswers] = useState({});
   const [just, setJust] = useState({}); // { code: justification } for G-2 (admin/PPE-led HRCW)
   const [rev, setRev] = useState({ reviewDueAt: "", reviewedBy: "", reviewedAt: "" }); // document control (pack columns)
@@ -47,6 +48,10 @@ export default function WhsPackTab({ jobId }) {
   // §1→§2: the module set section-1 last derived. Seeded on load so opening a saved pack never re-adds a
   // module the supervisor had removed; the reactive effect adds only what's NEWLY derived since this.
   const prevDerived = useRef(new Set());
+  // Modules already OFFERED the house standard (persisted in answers.seededModules). Each in-scope module is
+  // pre-filled with the standard as suggestions exactly once — so a dismissed suggestion never silently
+  // returns, and it works regardless of the server's project-type scaffold (which makes every pack "non-fresh").
+  const seeded = useRef(new Set());
 
   const load = useCallback(async () => {
     const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack`);
@@ -56,6 +61,7 @@ export default function WhsPackTab({ jobId }) {
     setHrcw(new Set(p.selectedHrcw || []));
     setTask(new Set(p.selectedTask || []));
     setControls(Object.fromEntries(Object.entries(p.selectedControls || {}).map(([k, v]) => [k, new Set(v)])));
+    setSuggested(Object.fromEntries(Object.entries(p.answers?.suggestedControls || {}).map(([k, v]) => [k, new Set(v)])));
     setAnswers(p.answers || {});
     setJust(p.answers?.justifications || {});
     setRev({ reviewDueAt: p.reviewDueAt || "", reviewedBy: p.reviewedBy || "", reviewedAt: p.reviewedAt || "" });
@@ -67,6 +73,7 @@ export default function WhsPackTab({ jobId }) {
     // the reactive effect populates §2 from section-1 the first time — incl. the always-on modules.
     const curated = !!(p.answers?.jScope || p.selectedHrcw?.length || p.selectedTask?.length || p.reviewDueAt || p.reviewedBy);
     prevDerived.current = curated ? new Set(deriveModulesFromScope(loadedScope)) : new Set();
+    seeded.current = new Set(p.answers?.seededModules || []);
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -89,6 +96,22 @@ export default function WhsPackTab({ jobId }) {
     setHrcw((h) => { const n = new Set(h); added.forEach((c) => isPart1(byCode[c]) && n.add(c)); return n; });
     setTask((t) => { const n = new Set(t); added.forEach((c) => !isPart1(byCode[c]) && n.add(c)); return n; });
   }, [derivedSet, modules, byCode, data]);
+
+  // Pre-fill the house standard as SUGGESTIONS (never ticks) the first time each selected module is offered
+  // it — once per module (tracked in `seeded`, persisted in answers.seededModules), so a dismissed suggestion
+  // never returns. Touches ONLY selected modules and skips already-confirmed controls. Skips issued packs.
+  useEffect(() => {
+    const tpl = data?.standardControls || {};
+    if (data?.pack?.reviewStatus === "issued" || !Object.keys(tpl).length) return;
+    const fresh = [...hrcw, ...task].filter((c) => !seeded.current.has(c) && Array.isArray(tpl[c]) && tpl[c].length);
+    if (!fresh.length) return;
+    fresh.forEach((c) => seeded.current.add(c));
+    setSuggested((sg) => {
+      const n = { ...sg };
+      for (const c of fresh) { const conf = controls[c] || new Set(); const s = new Set(n[c] || []); for (const t of tpl[c]) if (!conf.has(t)) s.add(t); n[c] = s; }
+      return n;
+    });
+  }, [hrcw, task, controls, data]);
 
   // G-1: any selected module that HAS control options but none ticked can't be issued (the pack would
   // assert high-risk work with no controls). Surface it up front + block Approve, so the supervisor
@@ -117,15 +140,25 @@ export default function WhsPackTab({ jobId }) {
   const toggleMod = (code, set, setter) => { const n = new Set(set); n.has(code) ? n.delete(code) : n.add(code); setter(n); };
   // Controls are identified by their TEXT (stable), never an array index, so reordering/editing the
   // register can't silently remap a tick to a different control.
-  const toggleCtrl = (code, key) => setControls((c) => {
-    const n = { ...c }; const s = new Set(n[code] || []); s.has(key) ? s.delete(key) : s.add(key); n[code] = s; return n;
-  });
+  // A control has three states: suggested (template-proposed, unconfirmed) → confirmed (supervisor tapped
+  // it: the assertion it's in place) → not used. A tap CONFIRMS a suggested/unused control, or un-confirms
+  // a confirmed one back to "not used" (considered, not selected — a resolved suggestion never returns).
+  const toggleCtrl = (code, key) => {
+    setControls((c) => { const n = { ...c }; const s = new Set(n[code] || []); s.has(key) ? s.delete(key) : s.add(key); n[code] = s; return n; });
+    setSuggested((sg) => { if (!sg[code]?.has(key)) return sg; const n = { ...sg }; const s = new Set(n[code]); s.delete(key); n[code] = s; return n; }); // resolve the suggestion on any tap
+  };
 
   const isIssued = () => data?.pack?.reviewStatus === "issued";
   const payload = () => ({
     selectedHrcw: [...hrcw], selectedTask: [...task],
+    // selected_controls carries ONLY confirmed controls (the assertion that composes + satisfies G-1);
+    // suggestions live in answers.suggestedControls and never reach selected_controls.
     selectedControls: Object.fromEntries(Object.entries(controls).map(([k, v]) => [k, [...v]])),
-    answers: { ...answers, justifications: just, jScope },
+    answers: {
+      ...answers, justifications: just, jScope,
+      suggestedControls: Object.fromEntries(Object.entries(suggested).map(([k, v]) => [k, [...v]]).filter(([, v]) => v.length)),
+      seededModules: [...seeded.current], // modules already offered the house standard — never re-offer
+    },
     reviewDueAt: rev.reviewDueAt || null, reviewedBy: rev.reviewedBy || null, reviewedAt: rev.reviewedAt || null,
   });
   // "Select all from section 1" — union every module section-1 derives into the selection (additive/safe).
@@ -148,6 +181,34 @@ export default function WhsPackTab({ jobId }) {
     setBusy(true); setMsg("");
     const { ok, error } = await apiPut(`/api/carpentry/jobs/${jobId}/whs-pack`, payload());
     setBusy(false); setMsg(ok ? "Saved." : (error || "Save failed.")); if (ok) load();
+  };
+  // House template — SAVE the current CONFIRMED controls as "Blue Leaf standard controls" (never suggestions).
+  const saveStandard = async () => {
+    const controlsObj = Object.fromEntries(Object.entries(controls).map(([k, v]) => [k, [...v]]).filter(([, v]) => v.length));
+    if (!Object.keys(controlsObj).length) { setMsg("No confirmed controls to save as the standard — tick some controls first."); return; }
+    if (!window.confirm("Overwrite the Blue Leaf standard controls with the confirmed controls on this pack? Future jobs will pre-fill these as suggestions (not ticks).")) return;
+    setBusy(true); setMsg("");
+    const { ok, error } = await apiPut("/api/carpentry/whs-control-template", { controls: controlsObj });
+    setBusy(false); setMsg(ok ? "Saved as the Blue Leaf standard — future jobs will suggest these." : (error || "Could not save the standard."));
+    if (ok) load();
+  };
+  // House template — PRE-FILL the standard as SUGGESTIONS for every in-scope selected module (skip already-
+  // confirmed). Touches only selected modules — never out-of-scope ones. Explicit re-apply for saved packs.
+  const prefillStandard = () => {
+    const tpl = data?.standardControls || {};
+    const codes = [...hrcw, ...task];
+    let added = 0;
+    setSuggested((sg) => {
+      const n = { ...sg };
+      for (const c of codes) {
+        const texts = tpl[c]; if (!Array.isArray(texts) || !texts.length) continue;
+        const conf = controls[c] || new Set(); const s = new Set(n[c] || []);
+        for (const t of texts) if (!conf.has(t) && !s.has(t)) { s.add(t); added++; }
+        n[c] = s;
+      }
+      return n;
+    });
+    setMsg(added ? `Pre-filled ${added} standard control(s) as suggestions — confirm each on site.` : "No new standard controls to suggest for the in-scope modules.");
   };
   // Persist current on-screen selections first so the composed doc matches — but never PUT an issued
   // pack (the server rejects that; edits need a revision). Returns { html } or { error }.
@@ -200,13 +261,15 @@ export default function WhsPackTab({ jobId }) {
   const derivedInReg = [...derivedSet].filter((c) => byCode[c]);
   const scopeNotSelected = derivedInReg.filter((c) => !hrcw.has(c) && !task.has(c)); // in section 1, not ticked
   const selectedBeyondScope = [...hrcw, ...task].filter((c) => byCode[c] && !derivedSet.has(c)); // ticked, not in section 1
+  const hasStandard = Object.keys(data.standardControls || {}).length > 0; // a house template exists
 
   // Invoked as a FUNCTION (like aField/aChk below), not rendered as <ModuleCard/> — a nested component
   // would get a new identity each render and remount every card, losing focus in the G-2 textarea.
   const ModuleCard = ({ m, selected, onToggle, fromScope }) => {
     const opts = m.contentJson?.controlOptions || [];
-    const set = controls[m.moduleCode] || new Set();
-    const levels = opts.filter((o) => set.has(o.text)).map((o) => o.level);
+    const set = controls[m.moduleCode] || new Set();       // CONFIRMED
+    const sug = suggested[m.moduleCode] || new Set();       // SUGGESTED (unconfirmed)
+    const levels = opts.filter((o) => set.has(o.text)).map((o) => o.level); // bar + G-2 reflect CONFIRMED only
     const showJust = selected && needsJustification(levels, isPart1(m));
     return (
       <div key={m.id} className={`rounded-lg border ${fromScope && !selected ? "border-primary/40 bg-primary/[0.03]" : "border-hairline"}`}>
@@ -220,14 +283,23 @@ export default function WhsPackTab({ jobId }) {
         </label>
         {selected && (
           <div className="border-t border-hairline px-3 py-2">
-            <div className="text-[11px] font-semibold text-muted mb-1">Tick the controls actually installed on this site (hierarchy order):</div>
+            <div className="text-[11px] font-semibold text-muted mb-1">Tap each control that&apos;s actually in place to confirm it (hierarchy order). <span className="font-normal">Dashed = Blue Leaf suggestion — a suggestion asserts nothing until you confirm it on site.</span>{sug.size > 0 && <span className="text-warning"> · {sug.size} suggested to confirm</span>}</div>
             <div className="space-y-1">
-              {opts.map((x, i) => (
-                <label key={i} className="flex items-start gap-2 text-xs">
-                  <input type="checkbox" checked={set.has(x.text)} onChange={() => toggleCtrl(m.moduleCode, x.text)} disabled={issued} className="mt-0.5 h-4 w-4" />
-                  <span><b className="text-primary">L{x.level} {HOC[x.level]}:</b> {x.text}</span>
-                </label>
-              ))}
+              {opts.map((x, i) => {
+                const isConf = set.has(x.text);
+                const isSugg = !isConf && sug.has(x.text);
+                return (
+                  <button key={i} type="button" disabled={issued} onClick={() => toggleCtrl(m.moduleCode, x.text)}
+                    title={`${x.text} — ${isConf ? "confirmed (in place)" : isSugg ? "suggested — tap to confirm it is in place on site" : "not used"}`}
+                    aria-pressed={isConf} className="flex w-full items-start gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-page disabled:opacity-100 disabled:cursor-default">
+                    <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-[10px] font-bold leading-none ${isConf ? "border border-primary bg-primary text-white" : isSugg ? "border border-dashed border-warning bg-warning/10 text-warning" : "border border-hairline text-transparent"}`}>{isConf ? "✓" : isSugg ? "?" : ""}</span>
+                    <span className={isConf ? "text-ink" : "text-muted"}>
+                      <b className={isConf ? "text-primary" : "text-muted"}>L{x.level} {HOC[x.level]}:</b> {x.text}
+                      {isSugg && <span className="ml-1 rounded bg-warning/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning">suggested · confirm on site</span>}
+                    </span>
+                  </button>
+                );
+              })}
               {opts.length === 0 && <div className="text-[11px] text-muted">No control options (PPE-matrix module).</div>}
             </div>
             {showJust && (
@@ -301,7 +373,18 @@ export default function WhsPackTab({ jobId }) {
               <button type="button" onClick={resetToScope} className="rounded-md border border-hairline px-2.5 py-1 font-semibold text-ink">Reset to section 1</button>
             </span>
           </div>
-          <div className="text-[10px] text-muted mt-1">Answering section 1 ticks the matching modules automatically (marked <span className="font-bold text-primary">§1</span>). Confirm each — add or remove any, and tick the controls actually used by hand. DRAFT until a competent reviewer approves.</div>
+          <div className="text-[10px] text-muted mt-1">Answering section 1 ticks the matching modules automatically (marked <span className="font-bold text-primary">§1</span>). Confirm each — add or remove any. Section 1 never ticks a <b>control</b>: those are set by hand (or pre-filled as suggestions from the house standard). DRAFT until a competent reviewer approves.</div>
+        </div>
+      )}
+
+      {!issued && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline bg-page px-3 py-2 text-xs">
+          <span className="font-semibold text-ink">Blue Leaf standard controls</span>
+          <span className="text-[10px] text-muted">{hasStandard ? "Pre-fill the standard as suggestions (dashed) for the in-scope modules — confirm each on site." : "No house standard saved yet. Select your standard control per module, then save it below."}</span>
+          <span className="ml-auto flex gap-1.5">
+            <button type="button" disabled={!hasStandard} onClick={prefillStandard} className="rounded-md border border-warning px-2.5 py-1 font-semibold text-warning disabled:opacity-40" title={hasStandard ? "" : "No house standard saved yet"}>Pre-fill standard (as suggestions)</button>
+            <button type="button" disabled={busy} onClick={saveStandard} className="rounded-md border border-hairline px-2.5 py-1 font-semibold text-ink">Save confirmed as standard</button>
+          </span>
         </div>
       )}
 

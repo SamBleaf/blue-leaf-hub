@@ -46,16 +46,21 @@ Workers sign **that exact pack version**. The record of **which worker signed wh
 
 **Supervisor — build the pack (WHS tab):**
 3. Open the carpentry job → **WHS** tab. Answer **Section 1 — What's on this job?** (which stages are on the job, and the yes/no scope questions: work over 2 m, openings/voids, load-bearing work, pre-2004 structure, silica cutting, road/footpath, deep excavation, powered mobile plant, overhead/live/buried services). As you answer, the matching HRCW and task modules **tick themselves automatically** in sections 2 and 3 (each marked **§1**). This is a starting point — **confirm every one**: untick what doesn't apply, tick anything the questions didn't reach. The blue banner shows how many modules Section 1 selects and flags any you've removed or added beyond it; **Select all from section 1** / **Reset to section 1** bulk-apply it. A "no" is recorded as a considered-not-applicable answer, and every Section 1 question must be answered before you can issue (G-6).
-4. For each ticked module, tick the **controls actually installed/used** on this site (never state a control you don't use — big penalties). Auto-ticking a module never ticks a control — you always choose those by hand, and a selected module with no ticked control blocks issue (G-1). PPE resolves automatically from the modules + the site-condition toggles (crane → hard hat, plant → hi-vis).
-5. Fill **Site details** (supervisor, hospital, first aider, muster point, rescuer).
-6. Click **Generate / preview pack** to see the finished 3-part document. It is **DRAFT** until approved.
-7. When correct and every selected module is reviewed, click **Approve & issue**. (If a selected module isn't reviewed yet, approval is blocked with a message naming it.)
+4. For each module, **confirm the controls actually in place** on this site. **Section 1 never ticks a control** — control selection is always your act, because a ticked control asserts that control *is in place on this site*. Each control has three states, distinct at a glance and in greyscale:
+   - **Confirmed** (solid box, ✓) — you tapped it: the assertion it is in place. Only confirmed controls compose into the pack and count toward issue.
+   - **Suggested** (dashed box, "confirm on site") — the Blue Leaf standard proposed it, but nobody has confirmed it. It asserts **nothing** and does **not** count. Tap it to confirm once you've checked it on site.
+   - **Not used** (empty box) — considered, not selected.
+   A module with only *suggested* controls (none confirmed) still **blocks issue (G-1)** — every assertion must be a human tap. Never confirm a control you don't use (big penalties). PPE resolves automatically from the modules + the site-condition toggles (crane → hard hat, plant → hi-vis).
+5. **(Optional) House standard.** *Blue Leaf standard controls* bar: **Pre-fill standard (as suggestions)** drops the standard control per hazard onto the in-scope modules as dashed suggestions to confirm — never for out-of-scope modules. Once you've built a good pack, **Save confirmed as standard** stores *your confirmed picks* (never suggestions) as the house standard, so future jobs pre-fill them.
+6. Fill **Site details** (supervisor, hospital, first aider, muster point, rescuer).
+7. Click **Generate / preview pack** to see the finished 3-part document (only **confirmed** controls appear — suggestions never compose). It is **DRAFT** until approved.
+8. When correct and every selected module is reviewed, click **Approve & issue**. (If a selected module isn't reviewed yet, or has only suggested controls, approval is blocked with a message naming it.)
 
 **Worker — sign on (field app):**
-8. App → **Today's site** → **Site WHS pack** → **Read & sign the pack** → read all parts → tick **"I have read and understood"** → sign with a finger → **Sign & confirm**.
+9. App → **Today's site** → **Site WHS pack** → **Read & sign the pack** → read all parts → tick **"I have read and understood"** → sign with a finger → **Sign & confirm**.
 
 **Supervisor — on a change:**
-9. If the work or controls change, click **New revision** — the pack version bumps and returns to DRAFT; everyone must re-sign the new version.
+10. If the work or controls change, click **New revision** — the pack version bumps and returns to DRAFT; everyone must re-sign the new version.
 
 ## 6. What happens next
 - The worker's sign-on is recorded against the job with their signature and the **pack version**.
@@ -90,7 +95,8 @@ Workers sign **that exact pack version**. The record of **which worker signed wh
 
 ## 11. Automation notes
 - Pre-tick: on first WHS-tab load, `getOrCreatePack` scaffolds `carpentry_whs_packs` with `selected_hrcw`/`selected_task` from `workCategoriesForProjectType(project_type)` overlapping `swms_templates.work_category`.
-- §1→§2 wiring (client): answering Section 1 recomputes `deriveModulesFromScope(jScope)` (`carpentryScope.js` — stage lists + per-module gates + always-modules + J-yes/no extras). A non-destructive React effect auto-ticks only the **newly-derived** modules (delta vs a `useRef` seeded on load), so manual unticks and a curated saved pack are never overwritten and nothing is auto-removed. Selection is client-only until **Save**; `deriveModulesFromScope` server-parity is asserted by `scripts/tests/carpentry-scope-parity.test.mjs`, the effect behaviour by `scripts/tests/whs-scope-wiring.test.mjs`.
+- §1→§2 wiring (client): answering Section 1 recomputes `deriveModulesFromScope(jScope)` (`carpentryScope.js` — stage lists + per-module gates + always-modules + J-yes/no extras). A non-destructive React effect auto-ticks only the **newly-derived MODULES** (delta vs a `useRef` seeded on load), so manual unticks and a curated saved pack are never overwritten and nothing is auto-removed. **The questionnaire never ticks a control** — the effect touches `setHrcw`/`setTask` only. Selection is client-only until **Save**; `deriveModulesFromScope` server-parity is asserted by `scripts/tests/carpentry-scope-parity.test.mjs`, the effect behaviour by `scripts/tests/whs-scope-wiring.test.mjs`.
+- Three-state controls + house template: `controls` = **confirmed** (the assertion — persists to `selected_controls`, composes, and is the ONLY thing that satisfies G-1 on client and server); `suggested` = template proposals (persist in `answers.suggestedControls`, never compose, never satisfy G-1). Confirming a control (`toggleCtrl`) resolves its suggestion. The house standard lives in `whs_control_templates` (mig 169, one carpentry row, `{code:[text]}` of confirmed picks); `GET/PUT /api/carpentry/whs-control-template` load/save it, and the pack GET returns `standardControls`. A fresh pack pre-fills the standard as suggestions for scoped-in modules; a saved pack re-applies only on the explicit **Pre-fill standard** button (so a dismissed suggestion never silently returns). Safety invariants proven by `scripts/tests/whs-control-states.test.mjs`.
 - Compose: `composeWhsPack` renders **only the ticked controls** (`selected_controls` indexes); `resolvePpe` unions each module's PPE rules (R>C>S>NA) and applies the crane/plant overrides.
 - Approve: server re-checks that **every** selected module is `review_status='reviewed'` (409 with the offending codes otherwise); Revise bumps `version` → `draft`.
 - Sign-on version is taken **server-side** from the current pack version (never the client); the `(pack_id, pack_version, employee_id)` unique index forces a fresh sign-on after a bump.
@@ -160,6 +166,16 @@ Director owns the library + the review sign-off; site supervisor owns building +
 7. Reload the pack (or reopen the tab).
 8. Expected: opening a saved pack makes no changes — your curated selection (H-01 still unticked) is preserved.
 9. Click **Reset to section 1**, then verify a selected module with no ticked control still blocks **Approve & issue** (G-1).
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Three-state controls + house template (the model correction)**
+1. On an in-scope module, note a **dashed "suggested · confirm on site"** control (if a house standard is saved) — it must **not** look ticked.
+2. With that module having only *suggested* controls (none confirmed), click **Approve & issue**.
+3. Expected: blocked (G-1) naming the module — a suggestion does not count as a control in place.
+4. **Tap** the suggested control → it becomes **confirmed** (solid ✓) and the dashed suggestion is gone.
+5. **Generate / preview pack** → the confirmed control appears; any still-*suggested* control on other modules does **not** appear in the document.
+6. Save the pack, reopen it → confirmed stays confirmed, suggestions persist as suggestions (not re-proposed on top of, and not silently confirmed).
+7. Confirm your standard controls across modules, click **Save confirmed as standard** → confirm the dialog. On a *new* job, the same controls appear as **suggestions** (dashed) on the in-scope modules, and **nothing** on out-of-scope modules.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

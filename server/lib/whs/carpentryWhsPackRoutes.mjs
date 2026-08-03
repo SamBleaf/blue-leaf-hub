@@ -77,6 +77,26 @@ async function getOrCreatePack(sb, jobId, projectType, callerId) {
   return pack;
 }
 
+// The "Blue Leaf standard controls" house template: { module_code: [control text] } of CONFIRMED
+// standard picks, pre-filled on new jobs as SUGGESTIONS (never ticks). Deploy-order net: if migration
+// 169 hasn't been applied the table is absent — return an empty template rather than 500 the pack load.
+async function loadStandardControls(sb, scope = "carpentry") {
+  try {
+    const { data, error } = await sb.from("whs_control_templates").select("controls").eq("scope", scope).maybeSingle();
+    if (error) {
+      // 42P01 = table absent (migration 169 not applied yet). The house standard is OPTIONAL, so NEVER let a
+      // read error break the safety-critical pack load — degrade to "no standard". Log the unexpected ones.
+      const expected = error.code === "42P01" || /relation .* does not exist|whs_control_templates/i.test(String(error.message || ""));
+      if (!expected) console.warn("[whs] loadStandardControls:", error.message || error);
+      return {};
+    }
+    return (data && data.controls && typeof data.controls === "object") ? data.controls : {};
+  } catch (e) {
+    console.warn("[whs] loadStandardControls threw:", e?.message || e);
+    return {};
+  }
+}
+
 export function registerCarpentryWhsPackRoutes(app) {
   // Load (or scaffold) the job's pack + every applicable module (with content_json for the control pickers).
   app.get("/api/carpentry/jobs/:jobId/whs-pack", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -98,7 +118,10 @@ export function registerCarpentryWhsPackRoutes(app) {
         crew = emps || [];
       }
       const { data: sg } = await sb.from("whs_swms_signon").select("employee_id, pack_version, signed_at").eq("pack_id", pack.id);
-      return ok(res, { pack: rowToCamel(pack), modules: rowsToCamel(modules), job: rowToCamel(job), crew: rowsToCamel(crew), signons: rowsToCamel(sg || []) });
+      // The house-standard control template — the client pre-fills these as SUGGESTIONS (never ticks) for
+      // the scoped-in modules. Sent with the pack so no second round-trip is needed.
+      const standardControls = await loadStandardControls(sb, "carpentry");
+      return ok(res, { pack: rowToCamel(pack), modules: rowsToCamel(modules), job: rowToCamel(job), crew: rowsToCamel(crew), signons: rowsToCamel(sg || []), standardControls });
     } catch (e) {
       return err(res, 500, translateDbError(e) || "Could not load the WHS pack.");
     }
@@ -248,6 +271,46 @@ export function registerCarpentryWhsPackRoutes(app) {
       return err(res, 400, "Unknown action.");
     } catch (e) {
       return err(res, 500, translateDbError(e) || "Could not update the pack.");
+    }
+  });
+
+  // ── House "Blue Leaf standard controls" template ─────────────────────────────────────────────────
+  // A saved library of standard control CHOICES per module — pre-filled on new jobs as SUGGESTIONS, never
+  // as ticks. It asserts nothing about any site; only a supervisor's on-site tap confirms a control.
+  app.get("/api/carpentry/whs-control-template", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      return ok(res, { controls: await loadStandardControls(sb, "carpentry") });
+    } catch (e) {
+      return err(res, 500, translateDbError(e) || "Could not load the standard controls.");
+    }
+  });
+
+  // Save the current CONFIRMED control picks as the house standard. Body: { controls: { code: [text] } }.
+  app.put("/api/carpentry/whs-control-template", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const raw = (req.body && typeof req.body.controls === "object" && req.body.controls) || {};
+    // Sanitise to { code: [non-empty string, ...] } with at least one control — never store junk as the standard.
+    const controls = {};
+    for (const [code, texts] of Object.entries(raw)) {
+      if (!Array.isArray(texts)) continue;
+      const clean = [...new Set(texts.filter((t) => typeof t === "string" && t.trim()).map((t) => t.trim()))];
+      if (clean.length) controls[String(code)] = clean;
+    }
+    try {
+      const row = { scope: "carpentry", name: "Blue Leaf standard controls", controls, updated_by: req.caller?.id || null, updated_at: new Date().toISOString() };
+      const { data, error } = await sb.from("whs_control_templates").upsert(row, { onConflict: "scope" }).select("controls").single();
+      if (error) {
+        if (error.code === "42P01" || /relation .* does not exist|whs_control_templates/i.test(String(error.message || ""))) {
+          return err(res, 503, "Apply migration 169 (whs_control_templates) before saving the house standard.");
+        }
+        return err(res, 500, translateDbError(error));
+      }
+      return ok(res, { controls: data.controls || {} });
+    } catch (e) {
+      return err(res, 500, translateDbError(e) || "Could not save the standard controls.");
     }
   });
 }
