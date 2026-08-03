@@ -32,6 +32,27 @@ export const J_MODULE_MAP = {
 
 export const J_MAP_CODES = [...new Set(Object.values(J_MODULE_MAP).flat())];
 
+// Stage → module map (Sam's first pass, 2026-08-03) — drives §1→§2. [code] or [code, gateKey].
+export const STAGE_MODULE_MAP = {
+  first_fix: [["H-01"], ["H-02", "j2Heights"], ["H-03"], ["H-04"], ["H-06"], ["T-02"], ["T-03"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-13"]],
+  cladding: [["H-05"], ["H-14"], ["T-01"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-12"]],
+  second_fix: [["T-02"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"]],
+  roofing: [["T-13"]],
+  demo_propping: [["H-08"], ["H-09"]],
+};
+export const ALWAYS_MODULES = ["T-14"];
+
+export function deriveModulesFromScope(jScope = {}) {
+  const codes = new Set(ALWAYS_MODULES);
+  for (const stage of (jScope.j1Stages || [])) {
+    for (const [code, gate] of (STAGE_MODULE_MAP[stage] || [])) {
+      if (!gate || jScope[gate] === "yes") codes.add(code);
+    }
+  }
+  for (const [k, cs] of Object.entries(J_MODULE_MAP)) if (jScope[k] === "yes") cs.forEach((c) => codes.add(c));
+  return [...codes];
+}
+
 export function deriveScopeModules(jScope = {}) {
   const out = [];
   for (const [k, codes] of Object.entries(J_MODULE_MAP)) if (jScope[k] === "yes") out.push(...codes);

@@ -34,5 +34,22 @@ const full = { j1Stages: ["first_fix"], j2Heights: "no", j3Openings: "no", j4Loa
 ok(srv.jScopeComplete(full) === true, "all answered (incl. all-no) → complete");
 ok(srv.jScopeComplete({ ...full, j3Openings: undefined }) === false, "a blank yesno → incomplete");
 
+// Stage → module derivation (§1→§2) — server + client must agree, and the gate must be honoured.
+ok(JSON.stringify(srv.STAGE_MODULE_MAP) === JSON.stringify(cli.STAGE_MODULE_MAP), "STAGE_MODULE_MAP parity");
+const DCASES = [
+  { j1Stages: ["first_fix"] },
+  { j1Stages: ["first_fix"], j2Heights: "yes" },
+  { j1Stages: ["cladding", "roofing"], j6Silica: "yes" },
+  { j1Stages: ["second_fix"], j5Pre2004: "yes" },
+  {},
+];
+for (const c of DCASES) ok(JSON.stringify(srv.deriveModulesFromScope(c).sort()) === JSON.stringify(cli.deriveModulesFromScope(c).sort()), `deriveModulesFromScope parity ${JSON.stringify(c)}`);
+// H-02 only appears once the >2 m gate is Yes (Sam's rule)
+ok(!srv.deriveModulesFromScope({ j1Stages: ["first_fix"] }).includes("H-02"), "first_fix without >2m → no H-02 (gated)");
+ok(srv.deriveModulesFromScope({ j1Stages: ["first_fix"], j2Heights: "yes" }).includes("H-02"), "first_fix + >2m=yes → H-02 appears");
+ok(srv.deriveModulesFromScope({}).includes("T-14"), "T-14 is always on");
+ok(srv.deriveModulesFromScope({ j1Stages: ["first_fix"] }).includes("H-01"), "first_fix → H-01");
+ok(srv.deriveModulesFromScope({ j1Stages: ["cladding"] }).includes("H-05") && srv.deriveModulesFromScope({ j1Stages: ["cladding"] }).includes("H-14"), "cladding → H-05 + H-14");
+
 console.log(`carpentry-scope-parity: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

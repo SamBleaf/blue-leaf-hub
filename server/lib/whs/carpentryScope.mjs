@@ -36,6 +36,30 @@ export const J_MODULE_MAP = {
 // Every code any J-question can derive — used so these modules are LOADABLE/selectable in the builder.
 export const J_MAP_CODES = [...new Set(Object.values(J_MODULE_MAP).flat())];
 
+// ── Stage → module map (Sam's first pass, 2026-08-03) — drives the §1→§2 selection. ──────────────
+// Each entry is [code] or [code, gateKey]: a gated entry only applies when that yes/no is "yes".
+// DRAFT — the editable dependency matrix lives in docs/whs/registers/10_StageModule_Matrix.csv.
+export const STAGE_MODULE_MAP = {
+  first_fix: [["H-01"], ["H-02", "j2Heights"], ["H-03"], ["H-04"], ["H-06"], ["T-02"], ["T-03"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-13"]],
+  cladding: [["H-05"], ["H-14"], ["T-01"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-12"]],
+  second_fix: [["T-02"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"]],
+  roofing: [["T-13"]],
+  demo_propping: [["H-08"], ["H-09"]], // TBD — awaiting Sam's dependency pass
+};
+export const ALWAYS_MODULES = ["T-14"]; // every carpentry job, regardless of stage
+
+// The full §1 → module derivation: stage modules (gated) ∪ always ∪ J-yes/no extras. This is what §2 reflects.
+export function deriveModulesFromScope(jScope = {}) {
+  const codes = new Set(ALWAYS_MODULES);
+  for (const stage of (jScope.j1Stages || [])) {
+    for (const [code, gate] of (STAGE_MODULE_MAP[stage] || [])) {
+      if (!gate || jScope[gate] === "yes") codes.add(code);
+    }
+  }
+  for (const [k, cs] of Object.entries(J_MODULE_MAP)) if (jScope[k] === "yes") cs.forEach((c) => codes.add(c));
+  return [...codes];
+}
+
 /** Codes a scope pulls in (deduped). Only fires on an explicit "yes". */
 export function deriveScopeModules(jScope = {}) {
   const out = [];
