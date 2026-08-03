@@ -1,29 +1,29 @@
-Code,Title,Type,first_fix,cladding,second_fix,roofing,demo_propping,ALWAYS,gated_by (J-question),notes
-H-01,"Fall from height — floor framing, upper-floor joists and flooring",HRCW,X,,,,,,,
-H-02,"Fall from height — wall frame erection and bracing",HRCW,X,,,,,,j2Heights,
-H-03,"Fall from height — prefabricated roof truss erection",HRCW,X,,,,,,,
-H-04,"Fall from height — roof battens, roof frame, fascia and barge",HRCW,X,,,,,,,
-H-05,"Fall from height — cladding and external sheeting",HRCW,,X,,,,,,
-H-06,"Fall into voids, stair openings, penetrations and excavations at the work level",HRCW,X,,,,,,j3Openings,
-H-07,"Powered mobile plant on site — crane, telehandler, EWP, truck-mounted crane",HRCW,,,,,,,,
-H-08,"Structural alteration or repair requiring temporary support to prevent collapse",HRCW,,,,,X,,j4Loadbearing,
-H-09,"Demolition of a load-bearing element",HRCW,,,,,X,,j4Loadbearing,
-H-10,"Disturbance of asbestos",HRCW,,,,,,,j5Pre2004,
-H-11,"Work on or near energised electrical installations and services",HRCW,,,,,,,,
-H-12,"Work on, in or adjacent to a road, footpath or traffic corridor in use",HRCW,,,,,,,j7Road,
-H-13,"Trench or shaft with excavated depth greater than 1.5 m",HRCW,,,,,,,j8Excavation,
-H-14,"High-risk processing of a crystalline silica substance (boundary module)",HRCW,,X,,,,,j6Silica,
-T-01,"Crystalline silica — cutting and drilling fibre cement, AAC, masonry, tile",Task,,X,,,,,j6Silica,
-T-02,"Timber and MDF dust",Task,X,,X,,,,,
-T-03,"Nail guns and powder-actuated tools",Task,X,,,,,,,
-T-04,"Circular saws, drop saws and portable power tools",Task,X,X,,,,,,
-T-05,"Site electrical safety — leads, RCDs and test and tag",Task,X,X,X,,,,,
-T-06,"Hazardous manual tasks",Task,X,X,X,,,,,
-T-07,"Hazardous noise",Task,X,X,X,,,,,
-T-08,"Ladders and step platforms",Task,X,X,X,,,,,
-T-09,"Deliveries, unloading and material storage",Task,X,X,X,,,,,
-T-10,"Housekeeping, access and egress",Task,X,X,,,,,,
-T-11,"UV, heat and adverse weather",Task,X,X,,,,,,
-T-12,"Hazardous chemicals — adhesives, sealants, foams, primers, treated timber",Task,,X,,,,,,
-T-13,"Scaffold interface — using scaffold erected by others",Task,X,,,X,,,,
-T-14,"Site-wide PPE baseline and conditional matrix",Task,,,,,,X,,
+Code,Title,Type,first_fix,cladding,second_fix,roofing,demo_propping,ALWAYS,gated_by,reviewer_notes
+H-01,"Fall from height — floor framing, upper-floor joists and flooring",HRCW,X,,,,,,j2Heights,"Gate j2Heights — floor framing is only HRCW when the fall is >2m (suspended/upper floor)."
+H-02,"Fall from height — wall frame erection and bracing",HRCW,X,,,,,,j2Heights,"Gate j2Heights — upper-storey frames only."
+H-03,"Fall from height — prefabricated roof truss erection",HRCW,,,,X,,,j2Heights,"roofing (not first_fix) — truss erection IS the roofing stage. Gate j2Heights."
+H-04,"Fall from height — roof battens, roof frame, fascia and barge",HRCW,,,,X,,,j2Heights,"roofing (not first_fix) — batten/fascia/barge IS roofing. Gate j2Heights."
+H-05,"Fall from height — cladding and external sheeting",HRCW,,X,,,,,j2Heights,"Gate j2Heights — single-storey ground-level cladding is not >2m."
+H-06,"Fall into voids, stair openings, penetrations and excavations at the work level",HRCW,X,,,X,,,j3Openings,"first_fix + roofing — voids/penetrations are a live fall-through risk during roofing too."
+H-07,"Powered mobile plant on site — crane, telehandler, EWP, truck-mounted crane",HRCW,,,,,,,j_plant,"GATE-ONLY j_plant (was orphaned). Fires whenever powered mobile plant is on site, any stage — incl. plant brought by others."
+H-08,"Structural alteration or repair requiring temporary support to prevent collapse",HRCW,,,,,X,,j4Loadbearing,"Correct. Gate j4Loadbearing."
+H-09,"Demolition of a load-bearing element",HRCW,,,,,X,,j4Loadbearing,"Correct. R-5: H-09 references H-10 + H-08 — dependency check needed at compose."
+H-10,"Disturbance of asbestos",HRCW,,,,,,,j5Pre2004,"Gate-only j5Pre2004 — asbestos is site-condition-driven."
+H-11,"Work on or near energised electrical installations and services",HRCW,,,,,,,j_services,"GATE-ONLY j_services (was orphaned). Overhead lines / live wiring / buried services. Also auto-fires when sf12Overhead != none."
+H-12,"Work on, in or adjacent to a road, footpath or traffic corridor in use",HRCW,,,,,,,j7Road,"Gate-only j7Road."
+H-13,"Trench or shaft with excavated depth greater than 1.5 m",HRCW,,,,,,,j8Excavation,"Gate-only j8Excavation."
+H-14,"High-risk processing of a crystalline silica substance (boundary module)",HRCW,,X,,X,X,,j6Silica,"cladding + roofing + demo — silica cutting wherever fibre-cement/AAC/masonry is cut. Gate j6Silica."
+T-01,"Crystalline silica — cutting and drilling fibre cement, AAC, masonry, tile",Task,,X,X,X,X,,j6Silica,"cladding + second_fix + roofing + demo — any silica cutting. Gate j6Silica."
+T-02,"Timber and MDF dust",Task,X,,X,,,,,"first_fix + second_fix."
+T-03,"Nail guns and powder-actuated tools",Task,X,,,X,,,,"first_fix + roofing — nail guns fix battens/fascia."
+T-04,"Circular saws, drop saws and portable power tools",Task,X,X,X,X,X,,,"All stages — powered cutting occurs everywhere."
+T-05,"Site electrical safety — leads, RCDs and test and tag",Task,X,X,X,X,X,,,"All stages — 240V tools/leads used everywhere."
+T-06,"Hazardous manual tasks",Task,X,X,X,X,X,,,"All stages — manual handling everywhere."
+T-07,"Hazardous noise",Task,X,X,X,X,X,,,"All stages — noise everywhere."
+T-08,"Ladders and step platforms",Task,X,X,X,X,X,,,"All stages — ladders everywhere."
+T-09,"Deliveries, unloading and material storage",Task,X,X,X,X,X,,,"All stages — deliveries everywhere."
+T-10,"Housekeeping, access and egress",Task,,,,,,X,,"ALWAYS — 'every day, every job'."
+T-11,"UV, heat and adverse weather",Task,X,X,X,X,X,,,"All stages — roofing is the most sun/heat-exposed stage."
+T-12,"Hazardous chemicals — adhesives, sealants, foams, primers, treated timber",Task,X,,X,,X,,,"first_fix + second_fix + demo — treated timber, adhesives, sealants, demo dust."
+T-13,"Scaffold interface — using scaffold erected by others",Task,,X,,X,,,sf01Scaffold,"GATE sf01Scaffold (site fact) — applies whenever scaffold is on site, drops out when it isn't."
+T-14,"Site-wide PPE baseline and conditional matrix",Task,,,,,,X,,"ALWAYS."

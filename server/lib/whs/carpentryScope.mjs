@@ -8,7 +8,7 @@ export const JOB_STAGES = [
   ["first_fix", "First fix / framing"],
   ["cladding", "Cladding"],
   ["second_fix", "Second fix"],
-  ["roofing", "Roofing"],
+  ["roofing", "Roof framing"],
   ["demo_propping", "Demolition / propping"],
 ];
 
@@ -21,9 +21,13 @@ export const J_QUESTIONS = [
   { key: "j6Silica", type: "yesno", q: "Cutting or drilling fibre cement, AAC, masonry or tile on site?" },
   { key: "j7Road", type: "yesno", q: "Any work, plant or exclusion zone extending onto a road or footpath?" },
   { key: "j8Excavation", type: "yesno", q: "Excavation deeper than 1.5 m in the work area?" },
+  { key: "j_plant", type: "yesno", q: "Powered mobile plant on site (crane, telehandler, EWP) — including plant brought by others?" },
+  { key: "j_services", type: "yesno", q: "Overhead powerlines, live wiring or buried services in the work path?" },
 ];
 
 // Modules a Yes answer pulls in that the project-type stage pre-tick may not (esp. the demolition set).
+// j_plant/j_services (Sam's 2-review pass) reach the two HRCW modules — powered mobile plant + energised
+// services — that no stage covers; they are gate-only, like asbestos/road/excavation.
 export const J_MODULE_MAP = {
   j3Openings: ["H-06"],
   j4Loadbearing: ["H-08", "H-09"],
@@ -31,32 +35,63 @@ export const J_MODULE_MAP = {
   j6Silica: ["T-01", "H-14"],
   j7Road: ["H-12"],
   j8Excavation: ["H-13"],
+  j_plant: ["H-07"],
+  j_services: ["H-11"],
 };
 
 // Every code any J-question can derive — used so these modules are LOADABLE/selectable in the builder.
 export const J_MAP_CODES = [...new Set(Object.values(J_MODULE_MAP).flat())];
 
-// ── Stage → module map (Sam's first pass, 2026-08-03) — drives the §1→§2 selection. ──────────────
-// Each entry is [code] or [code, gateKey]: a gated entry only applies when that yes/no is "yes".
-// DRAFT — the editable dependency matrix lives in docs/whs/registers/10_StageModule_Matrix.csv.
-export const STAGE_MODULE_MAP = {
-  first_fix: [["H-01"], ["H-02", "j2Heights"], ["H-03"], ["H-04"], ["H-06"], ["T-02"], ["T-03"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-13"]],
-  cladding: [["H-05"], ["H-14"], ["T-01"], ["T-04"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"], ["T-10"], ["T-11"], ["T-12"]],
-  second_fix: [["T-02"], ["T-05"], ["T-06"], ["T-07"], ["T-08"], ["T-09"]],
-  roofing: [["T-13"]],
-  demo_propping: [["H-08"], ["H-09"]], // TBD — awaiting Sam's dependency pass
+// ── Stage → module map (Sam's 2-review pass, 2026-08-03) — drives the §1→§2 selection. ───────────
+// Authoritative source: docs/whs/registers/10_StageModule_Matrix.csv (edit there; this re-syncs).
+// A stage lists the modules it pulls in; MODULE_GATE then narrows a module to fire only when its gate
+// (a §1 yes/no, or a §2 site fact) is satisfied. Pure data — the live §1→§2 wiring is deferred until
+// the matrix is locked. DRAFT until the WHS reviewer signs the mapping.
+export const STAGE_MODULES = {
+  first_fix: ["H-01", "H-02", "H-06", "T-02", "T-03", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-11", "T-12"],
+  cladding: ["H-05", "H-14", "T-01", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-11", "T-13"],
+  second_fix: ["T-01", "T-02", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-11", "T-12"],
+  roofing: ["H-03", "H-04", "H-06", "H-14", "T-01", "T-03", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-11", "T-13"],
+  demo_propping: ["H-08", "H-09", "H-14", "T-01", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-11", "T-12"],
 };
-export const ALWAYS_MODULES = ["T-14"]; // every carpentry job, regardless of stage
+export const ALWAYS_MODULES = ["T-10", "T-14"]; // every carpentry job, regardless of stage
 
-// The full §1 → module derivation: stage modules (gated) ∪ always ∪ J-yes/no extras. This is what §2 reflects.
-export function deriveModulesFromScope(jScope = {}) {
+// A module that only applies when its gate is satisfied wherever it is selected. J-gates read the §1
+// answers; sf-gates read §2 site facts. H-07/H-10/H-11/H-12/H-13 are NOT stage-tied — they come purely
+// from J_MODULE_MAP (gate-only, like asbestos), so they need no MODULE_GATE entry.
+export const MODULE_GATE = {
+  "H-01": "j2Heights", "H-02": "j2Heights", "H-03": "j2Heights", "H-04": "j2Heights", "H-05": "j2Heights",
+  "H-06": "j3Openings", "H-08": "j4Loadbearing", "H-09": "j4Loadbearing",
+  "H-14": "j6Silica", "T-01": "j6Silica", "T-13": "sf01Scaffold",
+};
+
+// Gate predicates: (jScope, siteFacts) → bool. J-gates are a plain "yes"; sf01Scaffold fires whenever
+// a scaffold is present on site (any tag state other than absent). Keys must match MODULE_GATE values.
+export const GATE_PREDICATES = {
+  j2Heights: (j) => j.j2Heights === "yes",
+  j3Openings: (j) => j.j3Openings === "yes",
+  j4Loadbearing: (j) => j.j4Loadbearing === "yes",
+  j6Silica: (j) => j.j6Silica === "yes",
+  sf01Scaffold: (_j, sf = {}) => !!sf.sf01Scaffold && !["no", "none", ""].includes(sf.sf01Scaffold),
+};
+
+// The full §1 → module derivation: stage modules (each narrowed by its gate) ∪ always ∪ J-yes/no extras
+// ∪ the overhead-services site-fact auto-trigger. This is what §2 reflects. siteFacts is optional (§2,
+// deferred) — pass it once the site-facts layer is wired so sf-gated modules resolve.
+export function deriveModulesFromScope(jScope = {}, siteFacts = {}) {
   const codes = new Set(ALWAYS_MODULES);
-  for (const stage of (jScope.j1Stages || [])) {
-    for (const [code, gate] of (STAGE_MODULE_MAP[stage] || [])) {
-      if (!gate || jScope[gate] === "yes") codes.add(code);
-    }
+  const gateOk = (code) => {
+    const g = MODULE_GATE[code];
+    if (!g) return true;
+    const pred = GATE_PREDICATES[g];
+    return pred ? pred(jScope, siteFacts) : true;
+  };
+  for (const stage of jScope.j1Stages || []) {
+    for (const code of STAGE_MODULES[stage] || []) if (gateOk(code)) codes.add(code);
   }
   for (const [k, cs] of Object.entries(J_MODULE_MAP)) if (jScope[k] === "yes") cs.forEach((c) => codes.add(c));
+  // H-11 (energised services) also auto-fires when the site fact records overhead services present.
+  if (siteFacts.sf12Overhead && siteFacts.sf12Overhead !== "none") codes.add("H-11");
   return [...codes];
 }
 
