@@ -53,6 +53,18 @@ const CATALOGUE = {
 
 const norm = (s) => String(s || "").toLowerCase();
 
+// Stable slug for a labour budget category name — the loggable timesheet key + budget-vs-actual
+// rollup key for a category that doesn't map to one of the built-in workforce streams
+// (e.g. "AAC and foam supply and installation" → "aac_and_foam_supply_and_installation"). Kept
+// identical to carpentryRoutes' catSlug so the value derived here matches the stage/rollup keys.
+export const slugCategory = (s) =>
+  String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "category";
+
+// Effective workforce task_category for a labour budget row: the mapped stream when the import
+// matched one of the 8, else a slug of the category name. This makes EVERY labour budget cost
+// category a loggable area, and reconciles its logged hours back to that budget line.
+export const budgetTaskCategory = (b) => b?.workforce_task_category || slugCategory(b?.category_name);
+
 // Material category name → material group. Only "first fix supply" / "framing supply"
 // gets sub-tasks; everything else returns null (category level).
 function materialGroup(categoryName) {

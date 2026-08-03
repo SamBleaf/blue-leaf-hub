@@ -41,7 +41,7 @@ import { autoLayoutMilestones } from "./carpentryScheduleUtils.mjs";
 import { parseXLSX } from "./buildexactParser.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
-import { mapLineItem, catalogueFor } from "./carpentrySubtaskDictionary.mjs";
+import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./carpentrySubtaskDictionary.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 
@@ -1438,7 +1438,9 @@ export function registerCarpentryRoutes(app) {
         if (!best || tn.length > normaliseName(best.label).length) best = t;
       }
     }
-    return best ? best.key : null;
+    // No built-in stream matched → fall back to a slug of the category name so the line is still a
+    // loggable timesheet area (e.g. "AAC and foam supply and installation"), not dropped as null.
+    return best ? best.key : slugCategory(categoryName);
   }
 
   // ── POST /api/carpentry/jobs/:id/budget/seed ────────────────────────────────
@@ -1965,10 +1967,13 @@ export function registerCarpentryRoutes(app) {
       const lines = (budgets || []).map((b) => {
         const budget = round2(b.budget_ex_gst);
         const isLabour = b.cost_type === "labour";
+        // Effective stream key: the mapped workforce category, else a slug of the name — so hours
+        // logged against an un-mapped labour category (e.g. AAC) reconcile to their budget line.
+        const wtc = budgetTaskCategory(b);
         const actual = isLabour
-          ? round2(labourByTask[b.workforce_task_category] || 0)
+          ? round2(labourByTask[wtc] || 0)
           : round2(materialActualByLine[b.id] || 0); // D5: per-line material actuals from tagged costs
-        const actualHours = isLabour ? (hoursByTask[b.workforce_task_category] || 0) : 0;
+        const actualHours = isLabour ? (hoursByTask[wtc] || 0) : 0;
         // Schedule-driven earned value (labour only — material has no completion signal). % complete
         // comes from the stage schedule (complete/planned, or an in-progress schedule+cost blend);
         // the projection baselines at the 25% target and slides off only as real burn proves it.

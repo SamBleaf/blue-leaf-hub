@@ -3,7 +3,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, buildexactCompleteOrdersEnabled, isPurchaseOrderComplete, createContact, getContacts, beList, beFetch } from "./buildexactClient.mjs";
 import { getCostModel, loadedRate } from "./costModelService.mjs";
-import { catalogueFor } from "./carpentrySubtaskDictionary.mjs";
+import { catalogueFor, budgetTaskCategory } from "./carpentrySubtaskDictionary.mjs";
 import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiResponse.mjs";
@@ -60,7 +60,12 @@ function taskLabelForEntry(e) {
     const opt = catalogueFor({ parentTaskCategory: e.task_category, costType: "labour" }).find((o) => o.key === canon);
     return opt?.label || e?.carpentry_budget_line_items?.description || canon;
   }
-  return TASK_LABELS[e?.task_category] || e?.task_category || "—";
+  // A budget-driven category (e.g. "aac_and_foam_supply_and_installation") has no built-in label —
+  // humanise the slug so the Approvals table reads "Aac and foam supply and installation", not the raw key.
+  const cat = e?.task_category;
+  if (TASK_LABELS[cat]) return TASK_LABELS[cat];
+  if (!cat) return "—";
+  return cat.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 function attachTaskLabels(timesheets) {
   for (const ts of timesheets || []) for (const e of ts.timesheet_entries || []) e.taskLabel = taskLabelForEntry(e);
@@ -2325,8 +2330,16 @@ export function registerWorkforceRoutes(app) {
     if (entries.reduce((s, e) => s + Number(e.hours), 0) > 24) {
       return res.status(400).json({ ok: false, error: "Total hours for one day cannot exceed 24" });
     }
-    // Validate every entry's category against the known set.
-    if (entries.some(e => !TASK_CATEGORIES.includes(e.task_category))) {
+    // Validate every entry's category. Base set = the 8 workforce streams (+ "other"); for a carpentry
+    // job, ALSO accept that job's LABOUR budget cost categories (budgetTaskCategory) so any budgeted
+    // area — e.g. "AAC and foam supply and installation" — is loggable, not just the built-in 8.
+    let allowedCats = new Set(TASK_CATEGORIES);
+    if (carpentry_job_id) {
+      const { data: budgetCats } = await sb.from("carpentry_job_budgets")
+        .select("category_name, workforce_task_category").eq("job_id", carpentry_job_id).eq("cost_type", "labour");
+      for (const b of budgetCats || []) allowedCats.add(budgetTaskCategory(b));
+    }
+    if (entries.some(e => !allowedCats.has(e.task_category))) {
       return res.status(400).json({ ok: false, error: "Invalid task category" });
     }
 
@@ -2613,13 +2626,28 @@ export function registerWorkforceRoutes(app) {
         chargeUpSites = (sites || []).map((s) => ({ id: s.id, label: s.site_label, address: s.address || null }));
       }
 
+      // Loggable parent categories = this job's LABOUR budget cost categories (so any budgeted area
+      // is loggable, e.g. "AAC and foam supply and installation" — not just the built-in 8). value =
+      // the mapped workforce stream, else a slug of the name; label = the actual budget category name.
+      let categories = [];
+      const { data: budgetCats } = await sb.from("carpentry_job_budgets")
+        .select("category_name, workforce_task_category, sort_order")
+        .eq("job_id", jobId).eq("cost_type", "labour").order("sort_order");
+      const seenCat = new Set();
+      for (const b of budgetCats || []) {
+        const value = budgetTaskCategory(b);
+        if (seenCat.has(value)) continue;
+        seenCat.add(value);
+        categories.push({ value, label: b.category_name });
+      }
+
       const { data: rows, error } = await sb
         .from("carpentry_budget_line_items")
         .select("id, task_category, canonical_key, description, sort_order")
         .eq("job_id", jobId).eq("status", "confirmed")
         .not("task_category", "is", null).not("canonical_key", "is", null)
         .order("sort_order");
-      if (error) return ok(res, { subtasks: {}, chargeUpSites }); // line-items table missing → still return sites
+      if (error) return ok(res, { subtasks: {}, chargeUpSites, categories }); // line-items table missing → still return sites + categories
       const byCat = {};
       for (const r of rows || []) {
         const m = (byCat[r.task_category] ||= new Map());
@@ -2630,7 +2658,7 @@ export function registerWorkforceRoutes(app) {
       }
       const subtasks = {};
       for (const [cat, m] of Object.entries(byCat)) subtasks[cat] = [...m.values()];
-      return ok(res, { subtasks, chargeUpSites });
+      return ok(res, { subtasks, chargeUpSites, categories });
     } catch (e) {
       console.error("[worker/jobs subtasks]", e);
       return err(res, 502, translateDbError(e));

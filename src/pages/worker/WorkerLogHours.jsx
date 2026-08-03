@@ -56,6 +56,7 @@ export default function WorkerLogHours() {
   const [entries, setEntries] = useState([]);
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [subtasks, setSubtasks] = useState({});   // P3: { task_category: [{ key, label, budgetLineItemId }] }
+  const [catOptions, setCatOptions] = useState([]); // carpentry: loggable categories from the job's labour budget
   const [activeCat, setActiveCat] = useState(null); // which category's sub-task chooser is open
   const [chargeUpSites, setChargeUpSites] = useState([]); // BLB Charge Up: sites to pick as a Location
   const [chargeUpJobId, setChargeUpJobId] = useState("");
@@ -146,11 +147,11 @@ export default function WorkerLogHours() {
   // P3: load the job's confirmed sub-tasks (carpentry only) for the two-level picker.
   useEffect(() => {
     const proj = projects.find(p => p.id === selectedId);
-    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); setChargeUpSites([]); return; }
+    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); setChargeUpSites([]); setCatOptions([]); return; }
     let stop = false;
     workerFetch(`/api/worker/jobs/${selectedId}/subtasks`)
       .then(r => r.json())
-      .then(j => { if (!stop && j?.ok) { setSubtasks(j.subtasks || {}); setChargeUpSites(j.chargeUpSites || []); } })
+      .then(j => { if (!stop && j?.ok) { setSubtasks(j.subtasks || {}); setChargeUpSites(j.chargeUpSites || []); setCatOptions(j.categories || []); } })
       .catch(() => {});
     return () => { stop = true; };
   }, [selectedId, projects]);
@@ -162,15 +163,26 @@ export default function WorkerLogHours() {
   // category / sub-task pickers. Presence of active charge-up sites is the signal.
   const isChargeUp = selectedProject?.type === "carpentry" && chargeUpSites.length > 0;
   const hasSub = (cat) => (subtasks[cat] || []).length > 0;
+  // Loggable category buttons: a carpentry job drives them from its own labour BUDGET categories (so any
+  // budgeted area is loggable — AAC etc.), keeping the generic base categories (site cleanup, supervision…)
+  // available too. Building projects and un-budgeted carpentry jobs use the fixed set.
+  const taskOptions = (selectedProject?.type === "carpentry" && catOptions.length)
+    ? [...catOptions, ...TASK_OPTIONS.filter(t => !catOptions.some(c => c.value === t.value))]
+    : TASK_OPTIONS;
+  const labelFor = (value) =>
+    taskOptions.find(t => t.value === value)?.label ||
+    TASK_OPTIONS.find(t => t.value === value)?.label ||
+    String(value || "").replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
   // Display label = parent category + sub-task (resolved from the loaded sub-tasks when re-editing).
   const displayLabel = (e) => {
     if (e.chargeUpTask) return e.notes?.trim() || "Charge-up task";
-    if (e.subtaskLabel) return `${e.label} · ${e.subtaskLabel}`;
+    const base = labelFor(e.task_category) || e.label;
+    if (e.subtaskLabel) return `${base} · ${e.subtaskLabel}`;
     if (e.canonical_key) {
       const st = (subtasks[e.task_category] || []).find(s => s.key === e.canonical_key);
-      return st ? `${e.label} · ${st.label}` : e.label;
+      return st ? `${base} · ${st.label}` : base;
     }
-    return e.label;
+    return base;
   };
   const totalHours = entries.reduce((s, e) => s + Number(e.hours || 0), 0);
   const overHrs = totalHours - standardHours;
@@ -409,7 +421,7 @@ export default function WorkerLogHours() {
           </button>
         ) : (
           <div className="grid grid-cols-2 gap-2 mb-3">
-            {TASK_OPTIONS.map(t => {
+            {taskOptions.map(t => {
               const added = entries.some(e => e.task_category === t.value);
               const sub = hasSub(t.value);
               const isActive = activeCat === t.value;
@@ -431,11 +443,11 @@ export default function WorkerLogHours() {
         {/* Sub-task chooser for the active category (two-level picker) */}
         {activeCat && hasSub(activeCat) && (
           <div className="mb-6 rounded-lg border border-primary/30 bg-primary/5 p-3">
-            <p className="text-xs font-semibold text-primary mb-2">{TASK_OPTIONS.find(t => t.value === activeCat)?.label} — pick the task</p>
+            <p className="text-xs font-semibold text-primary mb-2">{labelFor(activeCat)} — pick the task</p>
             <div className="grid grid-cols-2 gap-2">
               {subtasks[activeCat].map(st => {
                 const on = entries.some(e => e.task_category === activeCat && e.canonical_key === st.key);
-                const catLabel = TASK_OPTIONS.find(t => t.value === activeCat)?.label || activeCat;
+                const catLabel = labelFor(activeCat);
                 return (
                   <button key={st.key} type="button" onClick={() => addSubtask(activeCat, catLabel, st)}
                     className={`min-h-11 px-3 rounded-lg border text-sm text-left ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-white text-ink"}`}>
