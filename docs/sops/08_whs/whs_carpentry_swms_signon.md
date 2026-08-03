@@ -45,8 +45,8 @@ Workers sign **that exact pack version**. The record of **which worker signed wh
 2. After your consultant reviews a module, mark it **reviewed**. Only reviewed modules can go into an issued pack.
 
 **Supervisor — build the pack (WHS tab):**
-3. Open the carpentry job → **WHS** tab. The HRCW and task modules are **pre-ticked** from the job type — untick what doesn't apply, tick what does.
-4. For each ticked module, tick the **controls actually installed/used** on this site (never state a control you don't use — big penalties). PPE resolves automatically from the modules + the site-condition toggles (crane → hard hat, plant → hi-vis).
+3. Open the carpentry job → **WHS** tab. Answer **Section 1 — What's on this job?** (which stages are on the job, and the yes/no scope questions: work over 2 m, openings/voids, load-bearing work, pre-2004 structure, silica cutting, road/footpath, deep excavation, powered mobile plant, overhead/live/buried services). As you answer, the matching HRCW and task modules **tick themselves automatically** in sections 2 and 3 (each marked **§1**). This is a starting point — **confirm every one**: untick what doesn't apply, tick anything the questions didn't reach. The blue banner shows how many modules Section 1 selects and flags any you've removed or added beyond it; **Select all from section 1** / **Reset to section 1** bulk-apply it. A "no" is recorded as a considered-not-applicable answer, and every Section 1 question must be answered before you can issue (G-6).
+4. For each ticked module, tick the **controls actually installed/used** on this site (never state a control you don't use — big penalties). Auto-ticking a module never ticks a control — you always choose those by hand, and a selected module with no ticked control blocks issue (G-1). PPE resolves automatically from the modules + the site-condition toggles (crane → hard hat, plant → hi-vis).
 5. Fill **Site details** (supervisor, hospital, first aider, muster point, rescuer).
 6. Click **Generate / preview pack** to see the finished 3-part document. It is **DRAFT** until approved.
 7. When correct and every selected module is reviewed, click **Approve & issue**. (If a selected module isn't reviewed yet, approval is blocked with a message naming it.)
@@ -90,6 +90,7 @@ Workers sign **that exact pack version**. The record of **which worker signed wh
 
 ## 11. Automation notes
 - Pre-tick: on first WHS-tab load, `getOrCreatePack` scaffolds `carpentry_whs_packs` with `selected_hrcw`/`selected_task` from `workCategoriesForProjectType(project_type)` overlapping `swms_templates.work_category`.
+- §1→§2 wiring (client): answering Section 1 recomputes `deriveModulesFromScope(jScope)` (`carpentryScope.js` — stage lists + per-module gates + always-modules + J-yes/no extras). A non-destructive React effect auto-ticks only the **newly-derived** modules (delta vs a `useRef` seeded on load), so manual unticks and a curated saved pack are never overwritten and nothing is auto-removed. Selection is client-only until **Save**; `deriveModulesFromScope` server-parity is asserted by `scripts/tests/carpentry-scope-parity.test.mjs`, the effect behaviour by `scripts/tests/whs-scope-wiring.test.mjs`.
 - Compose: `composeWhsPack` renders **only the ticked controls** (`selected_controls` indexes); `resolvePpe` unions each module's PPE rules (R>C>S>NA) and applies the crane/plant overrides.
 - Approve: server re-checks that **every** selected module is `review_status='reviewed'` (409 with the offending codes otherwise); Revise bumps `version` → `draft`.
 - Sign-on version is taken **server-side** from the current pack version (never the client); the `(pack_id, pack_version, employee_id)` unique index forces a fresh sign-on after a bump.
@@ -147,6 +148,18 @@ Director owns the library + the review sign-off; site supervisor owns building +
 1. `GET /api/carpentry/jobs/:jobId/whs-pack` unauthenticated → HTTP 401
 2. Worker requests the pack for a job they're not rostered to → HTTP 403
 3. Admin "preview as worker" attempts a sign-on → HTTP 403 (read-only preview); no `whs_swms_signon` row
+- [ ] Pass  [ ] Fail
+
+**TC-07 — Section 1 drives module selection (§1→§2 wiring)**
+1. On a fresh pack, in **Section 1** select the **First fix** stage.
+2. Expected: task modules for first fix auto-tick in section 3 (each showing a **§1** badge); the fall HRCW **H-01/H-02** stay unticked.
+3. Answer **"Any work more than 2 m…" = Yes**.
+4. Expected: **H-01** and **H-02** now auto-tick in section 2 (this is the previously-broken case — answering Section 1 must visibly change section 2).
+5. Untick H-01 by hand, then answer an unrelated question (e.g. road/footpath = No).
+6. Expected: H-01 stays unticked — an unrelated Section 1 change does **not** re-add a module you removed.
+7. Reload the pack (or reopen the tab).
+8. Expected: opening a saved pack makes no changes — your curated selection (H-01 still unticked) is preserved.
+9. Click **Reset to section 1**, then verify a selected module with no ticked control still blocks **Approve & issue** (G-1).
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

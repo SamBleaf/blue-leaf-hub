@@ -2,10 +2,10 @@
 // pre-ticked from the job type) → the supervisor selects the controls ACTUALLY used per module (from
 // the reviewed register — never free text) → generates ONE composed 3-part site WHS pack. A competent
 // reviewer approves it; the crew then signs that version in the field app (Phase C).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost, apiBlob } from "../../lib/apiFetch.js";
 import { HOC, TIER_COLOR, hierarchyTier, needsJustification } from "../../lib/whsHierarchy.js";
-import { J_QUESTIONS, JOB_STAGES, deriveScopeModules, jScopeMissing } from "../../lib/carpentryScope.js";
+import { J_QUESTIONS, JOB_STAGES, deriveModulesFromScope, jScopeMissing } from "../../lib/carpentryScope.js";
 
 const isPart1 = (m) => m.part === 1 || m.isHrcw === "yes" || m.isHrcw === "boundary";
 
@@ -44,6 +44,9 @@ export default function WhsPackTab({ jobId }) {
   const [just, setJust] = useState({}); // { code: justification } for G-2 (admin/PPE-led HRCW)
   const [rev, setRev] = useState({ reviewDueAt: "", reviewedBy: "", reviewedAt: "" }); // document control (pack columns)
   const [jScope, setJScope] = useState({ j1Stages: [] }); // job-scope questions (§4) — stored in answers.jScope
+  // §1→§2: the module set section-1 last derived. Seeded on load so opening a saved pack never re-adds a
+  // module the supervisor had removed; the reactive effect adds only what's NEWLY derived since this.
+  const prevDerived = useRef(new Set());
 
   const load = useCallback(async () => {
     const { ok, data, error } = await apiFetch(`/api/carpentry/jobs/${jobId}/whs-pack`);
@@ -56,7 +59,14 @@ export default function WhsPackTab({ jobId }) {
     setAnswers(p.answers || {});
     setJust(p.answers?.justifications || {});
     setRev({ reviewDueAt: p.reviewDueAt || "", reviewedBy: p.reviewedBy || "", reviewedAt: p.reviewedAt || "" });
-    setJScope(p.answers?.jScope || { j1Stages: [] });
+    const loadedScope = p.answers?.jScope || { j1Stages: [] };
+    setJScope(loadedScope);
+    // Seed the §1→§2 baseline. Any pack that has EVER been saved (payload() always writes answers.jScope)
+    // seeds with what section-1 currently derives, so opening it makes no changes and respects manual unticks
+    // — including a pack deliberately curated down to zero modules. Only a never-saved pack seeds empty, so
+    // the reactive effect populates §2 from section-1 the first time — incl. the always-on modules.
+    const curated = !!(p.answers?.jScope || p.selectedHrcw?.length || p.selectedTask?.length || p.reviewDueAt || p.reviewedBy);
+    prevDerived.current = curated ? new Set(deriveModulesFromScope(loadedScope)) : new Set();
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -64,6 +74,21 @@ export default function WhsPackTab({ jobId }) {
   const byCode = useMemo(() => Object.fromEntries(modules.map((m) => [m.moduleCode, m])), [modules]);
   const part1 = modules.filter(isPart1);
   const part2 = modules.filter((m) => !isPart1(m));
+
+  // The module set section-1 currently derives (full stage + gate + always + J-yes/no logic).
+  const derivedSet = useMemo(() => new Set(deriveModulesFromScope(jScope)), [jScope]);
+  // Reactive §1→§2: auto-tick modules NEWLY derived since the last section-1 change. Non-destructive —
+  // manual unticks and prior curation survive, nothing is auto-removed. Skips issued (immutable) packs.
+  useEffect(() => {
+    if (!modules.length || data?.pack?.reviewStatus === "issued") return;
+    const added = [...derivedSet].filter((c) => byCode[c] && !prevDerived.current.has(c));
+    // Grow-only: a module that leaves scope (e.g. a gate toggled off) stays remembered, so toggling the
+    // gate back on doesn't count it as "newly derived" and re-add a module the supervisor had unticked.
+    for (const c of derivedSet) prevDerived.current.add(c);
+    if (!added.length) return;
+    setHrcw((h) => { const n = new Set(h); added.forEach((c) => isPart1(byCode[c]) && n.add(c)); return n; });
+    setTask((t) => { const n = new Set(t); added.forEach((c) => !isPart1(byCode[c]) && n.add(c)); return n; });
+  }, [derivedSet, modules, byCode, data]);
 
   // G-1: any selected module that HAS control options but none ticked can't be issued (the pack would
   // assert high-risk work with no controls). Surface it up front + block Approve, so the supervisor
@@ -103,13 +128,21 @@ export default function WhsPackTab({ jobId }) {
     answers: { ...answers, justifications: just, jScope },
     reviewDueAt: rev.reviewDueAt || null, reviewedBy: rev.reviewedBy || null, reviewedAt: rev.reviewedAt || null,
   });
-  // "Apply scope" — union the modules this job-scope pulls in (esp. H-08/09/10/13) into the selection.
+  // "Select all from section 1" — union every module section-1 derives into the selection (additive/safe).
   const applyScope = () => {
-    const codes = deriveScopeModules(jScope);
     const nH = new Set(hrcw); const nT = new Set(task); let added = 0;
-    for (const c of codes) { const m = byCode[c]; if (!m) continue; const set = isPart1(m) ? nH : nT; if (!set.has(c)) { set.add(c); added++; } }
+    for (const c of derivedSet) { const m = byCode[c]; if (!m) continue; const set = isPart1(m) ? nH : nT; if (!set.has(c)) { set.add(c); added++; } }
+    prevDerived.current = new Set(derivedSet);
     setHrcw(nH); setTask(nT);
-    setMsg(added ? `Added ${added} module(s) from the job scope.` : "Scope already reflected in the selection.");
+    setMsg(added ? `Added ${added} module(s) from section 1.` : "Section 1 is already reflected in the selection.");
+  };
+  // "Reset to section 1" — make the selection exactly what section-1 derives (drops manual extras).
+  const resetToScope = () => {
+    const nH = new Set(); const nT = new Set();
+    for (const c of derivedSet) { const m = byCode[c]; if (!m) continue; (isPart1(m) ? nH : nT).add(c); }
+    prevDerived.current = new Set(derivedSet);
+    setHrcw(nH); setTask(nT);
+    setMsg("Selection reset to exactly what section 1 derives.");
   };
   const save = async () => {
     setBusy(true); setMsg("");
@@ -163,18 +196,24 @@ export default function WhsPackTab({ jobId }) {
   const missingSel = selectedCodes.filter((c) => !byCode[c]);
   const scopeMissing = jScopeMissing(jScope); // G-6
   const canIssue = needControls.length === 0 && needJust.length === 0 && !!rev.reviewDueAt && arrestGaps.length === 0 && unreviewedSel.length === 0 && missingSel.length === 0 && scopeMissing.length === 0;
+  // §1→§2 relationship, for the scope banner + card badges.
+  const derivedInReg = [...derivedSet].filter((c) => byCode[c]);
+  const scopeNotSelected = derivedInReg.filter((c) => !hrcw.has(c) && !task.has(c)); // in section 1, not ticked
+  const selectedBeyondScope = [...hrcw, ...task].filter((c) => byCode[c] && !derivedSet.has(c)); // ticked, not in section 1
 
-  const ModuleCard = ({ m, selected, onToggle }) => {
+  // Invoked as a FUNCTION (like aField/aChk below), not rendered as <ModuleCard/> — a nested component
+  // would get a new identity each render and remount every card, losing focus in the G-2 textarea.
+  const ModuleCard = ({ m, selected, onToggle, fromScope }) => {
     const opts = m.contentJson?.controlOptions || [];
     const set = controls[m.moduleCode] || new Set();
     const levels = opts.filter((o) => set.has(o.text)).map((o) => o.level);
     const showJust = selected && needsJustification(levels, isPart1(m));
     return (
-      <div className="rounded-lg border border-hairline">
+      <div key={m.id} className={`rounded-lg border ${fromScope && !selected ? "border-primary/40 bg-primary/[0.03]" : "border-hairline"}`}>
         <label className="flex items-start gap-2 px-3 py-2 cursor-pointer">
           <input type="checkbox" checked={selected} onChange={onToggle} disabled={issued} className="mt-1 h-4 w-4" />
           <div className="flex-1">
-            <div className="text-sm font-medium text-ink">{m.moduleCode} · {m.title} {m.reviewStatus !== "reviewed" && <span className="text-[10px] font-bold text-warning">DRAFT</span>}</div>
+            <div className="text-sm font-medium text-ink">{m.moduleCode} · {m.title} {fromScope && <span className="ml-0.5 rounded bg-primary/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary align-middle">§1</span>} {m.reviewStatus !== "reviewed" && <span className="text-[10px] font-bold text-warning">DRAFT</span>}</div>
             {selected && <div className="mt-1"><HBar levels={levels} /></div>}
             {selected && m.trigger && <div className="text-[11px] text-muted mt-0.5">{m.trigger}</div>}
           </div>
@@ -247,22 +286,32 @@ export default function WhsPackTab({ jobId }) {
               </div>
             </div>
           ))}
-          {!issued && (
-            <div className="flex items-center gap-2 pt-1">
-              <button type="button" onClick={applyScope} className="rounded-md border border-primary px-3 py-1 text-[11px] font-semibold text-primary">Apply scope → add modules</button>
-              <span className="text-[10px] text-muted">Pulls in load-bearing / asbestos / excavation modules the job type doesn&apos;t auto-add.</span>
-            </div>
-          )}
         </div>
       </div>
 
+      {!issued && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-semibold text-ink">Section 1 selects {derivedInReg.length} module{derivedInReg.length === 1 ? "" : "s"}.</span>
+            {scopeNotSelected.length > 0 && <span className="text-warning">· {scopeNotSelected.length} not ticked ({scopeNotSelected.join(", ")})</span>}
+            {selectedBeyondScope.length > 0 && <span className="text-muted">· {selectedBeyondScope.length} added beyond section 1 ({selectedBeyondScope.join(", ")})</span>}
+            {scopeNotSelected.length === 0 && selectedBeyondScope.length === 0 && derivedInReg.length > 0 && <span className="text-accent">· all applied ✓</span>}
+            <span className="ml-auto flex gap-1.5">
+              <button type="button" onClick={applyScope} className="rounded-md border border-primary px-2.5 py-1 font-semibold text-primary">Select all from section 1</button>
+              <button type="button" onClick={resetToScope} className="rounded-md border border-hairline px-2.5 py-1 font-semibold text-ink">Reset to section 1</button>
+            </span>
+          </div>
+          <div className="text-[10px] text-muted mt-1">Answering section 1 ticks the matching modules automatically (marked <span className="font-bold text-primary">§1</span>). Confirm each — add or remove any, and tick the controls actually used by hand. DRAFT until a competent reviewer approves.</div>
+        </div>
+      )}
+
       <div>
         <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">2 · Which high-risk work applies to this job?</h3>
-        <div className="space-y-2">{part1.map((m) => <ModuleCard key={m.id} m={m} selected={hrcw.has(m.moduleCode)} onToggle={() => toggleMod(m.moduleCode, hrcw, setHrcw)} />)}</div>
+        <div className="space-y-2">{part1.map((m) => ModuleCard({ m, selected: hrcw.has(m.moduleCode), fromScope: derivedSet.has(m.moduleCode), onToggle: () => toggleMod(m.moduleCode, hrcw, setHrcw) }))}</div>
       </div>
       <div>
         <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2">3 · Task-control modules (not HRCW)</h3>
-        <div className="space-y-2">{part2.map((m) => <ModuleCard key={m.id} m={m} selected={task.has(m.moduleCode)} onToggle={() => toggleMod(m.moduleCode, task, setTask)} />)}</div>
+        <div className="space-y-2">{part2.map((m) => ModuleCard({ m, selected: task.has(m.moduleCode), fromScope: derivedSet.has(m.moduleCode), onToggle: () => toggleMod(m.moduleCode, task, setTask) }))}</div>
       </div>
 
       <div>
