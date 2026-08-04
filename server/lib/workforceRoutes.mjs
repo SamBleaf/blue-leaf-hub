@@ -2269,20 +2269,34 @@ export function registerWorkforceRoutes(app) {
     return vis.projectIds.has(jobId) || vis.carpentryIds.has(jobId);
   }
 
+  // A charge-up SITE (charge_up_jobs) owns its own tasks/plans but is not itself a visible job — it is
+  // authorised via its parent BL-CHARGEUP carpentry job. Returns that parent carpentry_job_id when the
+  // site is active and the worker may see the parent, else null.
+  async function workerChargeUpSiteParent(sb, vis, chargeUpJobId) {
+    if (!chargeUpJobId || !isUuid(chargeUpJobId)) return null;
+    const { data: site } = await sb.from("charge_up_jobs").select("carpentry_job_id, status").eq("id", chargeUpJobId).maybeSingle();
+    if (!site || site.status !== "active") return null;
+    return workerMaySeeJob(vis, site.carpentry_job_id, "carpentry") ? site.carpentry_job_id : null;
+  }
+
   // Worker WRITE-guard: may this worker act on (complete/photo/edit) THIS task? The list/preview
   // paths are job-gated (workerVisibleJobs), but the write endpoints previously authorised on
   // assignee-visibility alone — so a shared (unassigned) task on a job the worker isn't on could
   // be actioned by id. Resolve the task's job and gate on membership, matching the list paths.
-  // Site-owned tasks (charge-up: no project_id AND no carpentry_job_id) are not a worker-PWA
-  // write path → denied here. { found, allowed }.
+  // A charge-up site task (owned by charge_up_job_id) is authorised via its parent job. { found, allowed }.
   async function workerMayActOnTask(sb, empId, taskId) {
-    const { data: t } = await sb.from("site_tasks").select("project_id, carpentry_job_id").eq("id", taskId).maybeSingle();
+    const { data: t } = await sb.from("site_tasks").select("project_id, carpentry_job_id, charge_up_job_id").eq("id", taskId).maybeSingle();
     if (!t) return { found: false, allowed: false };
+    const vis = await workerVisibleJobs(sb, empId);
+    if (vis.error) return { found: true, allowed: false };
+    if (t.charge_up_job_id) {
+      const parent = await workerChargeUpSiteParent(sb, vis, t.charge_up_job_id);
+      return { found: true, allowed: !!parent };
+    }
     const jobId = t.carpentry_job_id || t.project_id || null;
     const jobType = t.carpentry_job_id ? "carpentry" : "project";
     if (!jobId) return { found: true, allowed: false };
-    const vis = await workerVisibleJobs(sb, empId);
-    return { found: true, allowed: !vis.error && workerMaySeeJob(vis, jobId, jobType) };
+    return { found: true, allowed: workerMaySeeJob(vis, jobId, jobType) };
   }
 
   app.get("/api/worker/jobs", workerAuth, async (req, res) => {
@@ -2923,22 +2937,30 @@ export function registerWorkforceRoutes(app) {
     const jobId = (req.query.jobId || "").trim();
     const jobType = (req.query.jobType || "").trim();
     const category = (req.query.category || "").trim();
+    // Charge Up: the worker picks a SITE (charge_up_jobs) under the BL-CHARGEUP parent; its tasks are
+    // owned by the site (charge_up_job_id), not the parent job.
+    const chargeUpJobId = (req.query.chargeUpJobId || "").trim();
 
     if (!jobId) return res.json({ ok: true, tasks: [], needsJobSelection: true });
     if (!isUuid(jobId)) return err(res, 400, "Invalid job id.", "BAD_JOB_ID");
     if (jobType && !WORKER_JOB_TYPES.includes(jobType)) return err(res, 400, "Invalid job type.", "BAD_JOB_TYPE");
     if (category && !SITE_TASK_CATEGORIES.includes(category)) return err(res, 400, "Invalid category.", "BAD_CATEGORY");
+    if (chargeUpJobId && !isUuid(chargeUpJobId)) return err(res, 400, "Invalid site id.", "BAD_SITE_ID");
 
     // Authorise: the worker may only read tasks for a job in their visible set.
     const vis = await workerVisibleJobs(sb, emp.id);
     if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "You don't have access to this job.", "JOB_FORBIDDEN");
+    if (chargeUpJobId && !(await workerChargeUpSiteParent(sb, vis, chargeUpJobId))) {
+      return err(res, 403, "You don't have access to this site.", "SITE_FORBIDDEN");
+    }
 
     let q = sb
       .from("site_tasks")
       .select("*, employees!assigned_to(id, name), completer:employees!completed_by(id, name)")
       .neq("status", "wont_do");
     // jobId is validated as a UUID above, so the .or() interpolation is injection-safe.
-    if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
+    if (chargeUpJobId) q = q.eq("charge_up_job_id", chargeUpJobId);
+    else if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
     else if (jobType === "project") q = q.eq("project_id", jobId);
     else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
     if (category) q = q.eq("category", category);
@@ -3092,12 +3114,24 @@ export function registerWorkforceRoutes(app) {
     if (!emp.is_leading_hand) return err(res, 403, "Only a leading hand can add tasks onsite.");
     const jobId = String(req.body?.jobId || "").trim();
     const title = String(req.body?.title || "").trim();
+    const chargeUpJobId = String(req.body?.chargeUpJobId || "").trim();
     if (!isUuid(jobId) || !title) return err(res, 400, "jobId and title are required.");
+    if (chargeUpJobId && !isUuid(chargeUpJobId)) return err(res, 400, "Invalid site id.");
     const category = String(req.body?.category || "general").trim() || "general";
     const priority = ["urgent", "normal", "when_time_permits"].includes(req.body?.priority) ? req.body.priority : "normal";
     const description = String(req.body?.description || "").trim() || null;
+    // Charge Up: own the task by the SITE (charge_up_job_id; carpentry_job_id stays null per the 3-way
+    // owner rule, mig 151), authorised via the site's parent job. Otherwise own by the carpentry job.
+    let owner;
+    if (chargeUpJobId) {
+      const vis = await workerVisibleJobs(sb, emp.id);
+      if (!(await workerChargeUpSiteParent(sb, vis, chargeUpJobId))) return err(res, 403, "You don't have access to this site.");
+      owner = { charge_up_job_id: chargeUpJobId };
+    } else {
+      owner = { carpentry_job_id: jobId };
+    }
     const { data, error } = await sb.from("site_tasks").insert({
-      carpentry_job_id: jobId, title, description, category, priority, status: "open",
+      ...owner, title, description, category, priority, status: "open",
       created_via: "manual", task_audience: "worker"
     }).select("*").single();
     if (error) return err(res, 500, translateDbError(error));
@@ -3353,9 +3387,11 @@ export function registerWorkforceRoutes(app) {
     }
     const jobId = String(req.body?.jobId || "").trim();
     const jobType = String(req.body?.jobType || "").trim();
+    const chargeUpJobId = String(req.body?.chargeUpJobId || "").trim();
     const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
     if (!isUuid(jobId)) return err(res, 400, "Invalid job id.", "BAD_JOB_ID");
     if (jobType && !WORKER_JOB_TYPES.includes(jobType)) return err(res, 400, "Invalid job type.", "BAD_JOB_TYPE");
+    if (chargeUpJobId && !isUuid(chargeUpJobId)) return err(res, 400, "Invalid site id.", "BAD_SITE_ID");
     if (!orderedIds || !orderedIds.length) return err(res, 400, "orderedIds is required.");
     if (!orderedIds.every(isUuid)) return err(res, 400, "orderedIds must all be task ids.");
     if (orderedIds.length > 500) return err(res, 413, "Too many tasks in one reorder.");
@@ -3364,6 +3400,7 @@ export function registerWorkforceRoutes(app) {
     if (!req.workerPreview) {
       const vis = await workerVisibleJobs(sb, emp.id);
       if (!workerMaySeeJob(vis, jobId, jobType)) return err(res, 403, "You don't have access to this job.", "JOB_FORBIDDEN");
+      if (chargeUpJobId && !(await workerChargeUpSiteParent(sb, vis, chargeUpJobId))) return err(res, 403, "You don't have access to this site.", "SITE_FORBIDDEN");
     }
 
     // sort_order = position in the submitted order. jobId is a validated UUID, so the
@@ -3372,7 +3409,8 @@ export function registerWorkforceRoutes(app) {
     let updated = 0;
     for (let i = 0; i < orderedIds.length; i++) {
       let q = sb.from("site_tasks").update({ sort_order: i, updated_at: now }).eq("id", orderedIds[i]);
-      if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
+      if (chargeUpJobId) q = q.eq("charge_up_job_id", chargeUpJobId);
+      else if (jobType === "carpentry") q = q.eq("carpentry_job_id", jobId);
       else if (jobType === "project") q = q.eq("project_id", jobId);
       else q = q.or(`project_id.eq.${jobId},carpentry_job_id.eq.${jobId}`);
       const { data, error } = await q.select("id");

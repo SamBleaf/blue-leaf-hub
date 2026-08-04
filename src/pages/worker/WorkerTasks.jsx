@@ -325,6 +325,8 @@ export default function WorkerTasks() {
   const [me, setMe] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [job, setJob] = useState(getSelectedJob());
+  const [chargeUpSites, setChargeUpSites] = useState([]);   // Charge Up: sub-sites under the BL-CHARGEUP job
+  const [chargeUpJobId, setChargeUpJobId] = useState("");   // the picked site — it OWNS the tasks
   const [plansOpen, setPlansOpen] = useState(false);
   const [showJobPicker, setShowJobPicker] = useState(false);
   const [authError, setAuthError] = useState(false);
@@ -392,18 +394,34 @@ export default function WorkerTasks() {
     return () => { stop = true; };
   }, []);
 
-  // Load tasks when job changes.
+  // Charge Up jobs hold sub-sites; load them so the worker can pick a location (same as Log Hours).
+  // A charge-up site OWNS its tasks, so tasks are scoped to the picked site, not the parent job.
+  useEffect(() => {
+    setChargeUpSites([]); setChargeUpJobId("");
+    if (!job?.id || job.type !== "carpentry") return;
+    let stop = false;
+    workerFetch(`/api/worker/jobs/${encodeURIComponent(job.id)}/subtasks`)
+      .then(r => r.json())
+      .then(j => { if (!stop && j?.ok && (j.chargeUpSites || []).length) setChargeUpSites(j.chargeUpSites); })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [job?.id, job?.type]);
+
+  // Load tasks when job (or the picked charge-up site) changes.
   useEffect(() => {
     if (!job?.id) { setTasks([]); return; }
+    const chargeUp = chargeUpSites.length > 0;
+    if (chargeUp && !chargeUpJobId) { setTasks([]); return; }   // wait for a location pick
     let stop = false;
     setTasksLoading(true);
-    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type || "")}`)
+    const cu = chargeUpJobId ? `&chargeUpJobId=${encodeURIComponent(chargeUpJobId)}` : "";
+    workerFetch(`/api/worker/tasks?jobId=${encodeURIComponent(job.id)}&jobType=${encodeURIComponent(job.type || "")}${cu}`)
       .then(r => r.json())
       .then(j => { if (!stop && j.ok) setTasks(j.tasks || []); })
       .catch(() => {})
       .finally(() => { if (!stop) setTasksLoading(false); });
     return () => { stop = true; };
-  }, [job?.id, job?.type]);
+  }, [job?.id, job?.type, chargeUpSites.length, chargeUpJobId]);
 
   function pickJob(j) {
     const next = { id: j.id, type: j.type, address: j.address };
@@ -546,13 +564,14 @@ export default function WorkerTasks() {
 
   async function addTask() {
     if (!addTitle.trim() || !job?.id) return;
+    if (chargeUpSites.length > 0 && !chargeUpJobId) return;   // charge-up needs a location
     setAddBusy(true);
     setAddError(null);
     // Worker-token endpoint — a leading hand can add tasks onsite via magic link (no admin session).
     const res = await workerFetch(`/api/worker/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: job.id, title: addTitle.trim(), category: addCategory, priority: addPriority }),
+      body: JSON.stringify({ jobId: job.id, chargeUpJobId: chargeUpJobId || undefined, title: addTitle.trim(), category: addCategory, priority: addPriority }),
     });
     const j = await res.json().catch(() => ({}));
     setAddBusy(false);
@@ -655,7 +674,7 @@ export default function WorkerTasks() {
         const res = await workerFetch("/api/worker/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jobId: job.id, title: draft.title, description: draft.description || undefined, category: draft.category || "general", priority: draft.priority || "normal" }),
+          body: JSON.stringify({ jobId: job.id, chargeUpJobId: chargeUpJobId || undefined, title: draft.title, description: draft.description || undefined, category: draft.category || "general", priority: draft.priority || "normal" }),
         });
         const j = await res.json().catch(() => ({}));
         if (j.ok && j.task) {
@@ -739,6 +758,8 @@ export default function WorkerTasks() {
 
   const totalActive = tasks.filter(t => t.status !== "wont_do").length;
   const totalDone   = doneTasks.length;
+  const isChargeUp  = chargeUpSites.length > 0;                 // selected job is a Charge Up job
+  const needsSite   = isChargeUp && !chargeUpJobId;            // …but no location picked yet
 
   // ── Drag-to-reorder (supervisors / admins) ─────────────────────────────────────
   // A leading hand on their worker link, or an admin previewing, can hold-drag the ⠿
@@ -757,7 +778,7 @@ export default function WorkerTasks() {
       const res = await workerFetch("/api/worker/tasks/reorder", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id, jobType: job.type || "", orderedIds: nextTasks.map(t => t.id) }),
+        body: JSON.stringify({ jobId: job.id, jobType: job.type || "", chargeUpJobId: chargeUpJobId || undefined, orderedIds: nextTasks.map(t => t.id) }),
       });
       if (!res.ok) throw new Error("reorder failed");
     } catch {
@@ -856,8 +877,23 @@ export default function WorkerTasks() {
           <span className="text-primary text-sm font-semibold shrink-0">Change ▾</span>
         </button>
 
+        {/* Charge Up: pick the sub-site — it owns the tasks (a normal-job experience, within the charge-up job) */}
+        {isChargeUp && (
+          <div className="mb-4">
+            <label className="text-[10px] font-semibold text-muted uppercase tracking-wide block mb-1">Location</label>
+            <select
+              value={chargeUpJobId}
+              onChange={e => setChargeUpJobId(e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="" disabled>Pick the site…</option>
+              {chargeUpSites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Plans for this job (opens a sheet — no new route) */}
-        {job && (
+        {job && !needsSite && (
           <button
             type="button"
             onClick={() => setPlansOpen(true)}
@@ -872,7 +908,7 @@ export default function WorkerTasks() {
         )}
 
         {/* Supervisor add task buttons */}
-        {job && isSupervisor && (
+        {job && isSupervisor && !needsSite && (
           <div className="flex gap-2 mb-4">
             <button
               type="button"
@@ -896,6 +932,8 @@ export default function WorkerTasks() {
             <p className="text-sm text-muted">Select a job to see its tasks.</p>
             <button type="button" onClick={() => setShowJobPicker(true)} className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold">Choose a job</button>
           </div>
+        ) : needsSite ? (
+          <p className="text-sm text-muted text-center mt-10">Pick a location above to see and add its tasks.</p>
         ) : tasksLoading ? (
           <p className="text-sm text-muted text-center mt-10">Loading tasks…</p>
         ) : totalActive === 0 && totalDone === 0 ? (
