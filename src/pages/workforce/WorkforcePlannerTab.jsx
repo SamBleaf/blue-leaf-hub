@@ -86,12 +86,15 @@ const ShiftChip = memo(function ShiftChip({ alloc, label, color, onClick, onLong
       <span className="text-[11px] leading-tight truncate" style={{ color: color.text }}><span className="sm:hidden">{abbrevLabel(label)}</span><span className="hidden sm:inline">{label}</span></span>
       {alloc.notes ? <span className="w-1 h-1 rounded-full bg-black/30 shrink-0" title={alloc.notes} /> : null}
       {!IS_TOUCH && (<>
-        <span onPointerDown={(e) => { e.stopPropagation(); onFillStart(alloc, e); }}
+        <span onPointerDown={(e) => { e.stopPropagation(); onFillStart(alloc, e); }} onMouseDown={(e) => e.stopPropagation()}
           className="absolute right-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover:opacity-100"
           style={{ touchAction: "none" }} title="Drag across days to fill / deduct" aria-hidden="true">
           <span className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-3 rounded-sm" style={{ background: color.dot }} />
         </span>
-        <span onPointerDown={(e) => { e.stopPropagation(); onFillDownStart(alloc, e); }}
+        {/* onMouseDown stopPropagation is REQUIRED: the chip's dnd-kit drag uses MouseSensor (mousedown),
+            so stopping only pointerdown lets the move-drag hijack this handle → it moved instead of
+            duplicating (regression from the Pointer→Mouse sensor swap, ee5545a). */}
+        <span onPointerDown={(e) => { e.stopPropagation(); onFillDownStart(alloc, e); }} onMouseDown={(e) => e.stopPropagation()}
           className="absolute left-0 bottom-0 w-full h-2 cursor-ns-resize opacity-0 group-hover:opacity-100"
           style={{ touchAction: "none" }} title="Drag down to duplicate to other workers / deduct" aria-hidden="true">
           <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-3 rounded-sm" style={{ background: color.dot }} />
