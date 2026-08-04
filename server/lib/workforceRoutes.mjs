@@ -1164,11 +1164,11 @@ export function registerWorkforceRoutes(app) {
   // cost_amount may already be synced to Buildexact, so edits are blocked (unapprove reopens it).
   app.patch("/api/workforce/timesheet-entries/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
-    const { hours, taskCategory, overtimeHours, notes } = req.body;
+    const { hours, taskCategory, overtimeHours, notes, canonicalKey, budgetLineItemId } = req.body;
 
     const { data: entry, error: entryErr } = await sb
       .from("timesheet_entries")
-      .select("*, timesheets!inner(id, status, employee_id, employees(*))")
+      .select("*, timesheets!inner(id, status, employee_id, carpentry_job_id, employees(*))")
       .eq("id", req.params.id)
       .maybeSingle();
     if (entryErr) return err(res, 500, translateDbError(entryErr));
@@ -1198,6 +1198,28 @@ export function registerWorkforceRoutes(app) {
       }
       update.task_category = taskCategory;
       update.phase = TASK_PHASE_MAP[taskCategory] || "general";
+    }
+    // Sub-task attribution (canonical_key, mig 147): the office can re-attribute an entry to a budget
+    // sub-task (e.g. Wall framing) or clear it. Only when the column exists and the entry is on a
+    // carpentry job. If the category changed and no sub-task is supplied, drop the now-stale sub-task.
+    const hasCanonicalCol = "canonical_key" in entry;
+    if (hasCanonicalCol && (canonicalKey !== undefined || update.task_category !== undefined)) {
+      const effCat = update.task_category !== undefined ? update.task_category : entry.task_category;
+      if (canonicalKey) {
+        const carpentryJobId = entry.timesheets?.carpentry_job_id || null;
+        if (!carpentryJobId) return err(res, 400, "Only carpentry-job entries can have a sub-task.", "NO_JOB");
+        // A sub-task can span SEVERAL line items (e.g. many cladding lines → "battening"), so fetch all
+        // matches — never .maybeSingle() (which returns null on >1 and would reject a valid sub-task).
+        const { data: lis } = await sb.from("carpentry_budget_line_items")
+          .select("id").eq("job_id", carpentryJobId).eq("task_category", effCat)
+          .eq("canonical_key", canonicalKey).eq("status", "confirmed");
+        if (!lis || !lis.length) return err(res, 400, "That sub-task isn't part of this job's budget.", "BAD_SUBTASK");
+        update.canonical_key = canonicalKey;
+        update.budget_line_item_id = lis.some((l) => l.id === budgetLineItemId) ? budgetLineItemId : lis[0].id;
+      } else {
+        update.canonical_key = null;
+        update.budget_line_item_id = null;
+      }
     }
     if (overtimeHours !== undefined) {
       const ot = Number(overtimeHours);
@@ -1230,7 +1252,7 @@ export function registerWorkforceRoutes(app) {
       .single();
     if (updateErr) return err(res, 500, translateDbError(updateErr));
 
-    ok(res, { entry: rowToCamel(updated) });
+    ok(res, { entry: { ...rowToCamel(updated), taskLabel: taskLabelForEntry(updated) } });
   });
 
   // Add an extra entry (task category + hours) to a submitted timesheet from the detail modal.
@@ -2699,6 +2721,38 @@ export function registerWorkforceRoutes(app) {
       return ok(res, { subtasks, chargeUpSites, categories });
     } catch (e) {
       console.error("[worker/jobs subtasks]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // Office sibling of the worker /subtasks map — a carpentry job's confirmed budget SUB-TASKS per
+  // category (canonical_key → label), so Approvals can show + edit an entry's sub-task (e.g. Wall framing).
+  app.get("/api/carpentry/jobs/:id/subtasks", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const jobId = String(req.params.id || "");
+    if (!isUuid(jobId)) return err(res, 400, "Invalid job id.");
+    try {
+      const { data: rows, error } = await sb
+        .from("carpentry_budget_line_items")
+        .select("id, task_category, canonical_key, description, sort_order")
+        .eq("job_id", jobId).eq("status", "confirmed")
+        .not("task_category", "is", null).not("canonical_key", "is", null)
+        .order("sort_order");
+      if (error) return ok(res, { subtasks: {} }); // line-items table missing → no sub-tasks
+      const byCat = {};
+      for (const r of rows || []) {
+        const m = (byCat[r.task_category] ||= new Map());
+        if (!m.has(r.canonical_key)) {
+          const opt = catalogueFor({ parentTaskCategory: r.task_category, costType: "labour" }).find((o) => o.key === r.canonical_key);
+          m.set(r.canonical_key, { key: r.canonical_key, label: opt?.label || r.description || r.canonical_key, budgetLineItemId: r.id });
+        }
+      }
+      const subtasks = {};
+      for (const [cat, m] of Object.entries(byCat)) subtasks[cat] = [...m.values()];
+      return ok(res, { subtasks });
+    } catch (e) {
+      console.error("[carpentry/jobs subtasks]", e);
       return err(res, 502, translateDbError(e));
     }
   });

@@ -40,7 +40,8 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [drafts, setDrafts] = useState({});          // { [entryId]: { hours, taskCategory } }
+  const [drafts, setDrafts] = useState({});          // { [entryId]: { hours, taskCategory, canonicalKey, budgetLineItemId } }
+  const [subtasksByCat, setSubtasksByCat] = useState({});   // { [task_category]: [{ key, label, budgetLineItemId }] } for this job
   const [savingEntry, setSavingEntry] = useState(null);
   const [adding, setAdding] = useState(false);       // add-a-category row open
   const [newCat, setNewCat] = useState(TASK_OPTIONS[0].value);
@@ -63,6 +64,16 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
     });
     return () => { cancelled = true; };
   }, [timesheetId]);
+
+  // Load this carpentry job's confirmed budget sub-tasks (per category) so an entry's sub-task
+  // (e.g. Wall framing) can be shown + edited alongside the main category.
+  useEffect(() => {
+    const jobId = ts?.carpentry_job_id;
+    if (!jobId) { setSubtasksByCat({}); return; }
+    let cancelled = false;
+    apiFetch(`/api/carpentry/jobs/${jobId}/subtasks`).then(({ ok, data }) => { if (!cancelled && ok) setSubtasksByCat(data?.subtasks || {}); });
+    return () => { cancelled = true; };
+  }, [ts?.carpentry_job_id]);
 
   const entries = ts?.timesheet_entries || [];
   const totalHours = entries.reduce((n, e) => n + Number(e.hours || 0), 0);
@@ -102,7 +113,7 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
 
   function startEdit() {
     const d = {};
-    for (const e of entries) d[e.id] = { hours: String(Number(e.hours)), taskCategory: e.task_category };
+    for (const e of entries) d[e.id] = { hours: String(Number(e.hours)), taskCategory: e.task_category, canonicalKey: e.canonical_key || "", budgetLineItemId: e.budget_line_item_id || null };
     setDrafts(d);
     setEditing(true);
   }
@@ -115,13 +126,14 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
     setSavingEntry(entry.id); setError("");
     const { ok, data, error: e } = await apiPatch(`/api/workforce/timesheet-entries/${entry.id}`, {
       hours, taskCategory: draft.taskCategory,
+      canonicalKey: draft.canonicalKey || null, budgetLineItemId: draft.budgetLineItemId || null,
     });
     setSavingEntry(null);
     if (!ok) { setError(e || "Could not save this entry."); return; }
     setTs((prev) => ({
       ...prev,
       timesheet_entries: (prev.timesheet_entries || []).map((x) =>
-        x.id === entry.id ? { ...x, hours: data.entry.hours, task_category: data.entry.taskCategory, cost_amount: data.entry.costAmount } : x),
+        x.id === entry.id ? { ...x, hours: data.entry.hours, task_category: data.entry.taskCategory, canonical_key: data.entry.canonicalKey ?? null, budget_line_item_id: data.entry.budgetLineItemId ?? null, taskLabel: data.entry.taskLabel, cost_amount: data.entry.costAmount } : x),
     }));
     onChanged?.();
   }
@@ -191,14 +203,28 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                     return (
                       <div key={e.id} className="rounded-lg border border-hairline p-3">
                         {editing && draft ? (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <select
                               value={draft.taskCategory}
-                              onChange={(ev) => setDrafts((p) => ({ ...p, [e.id]: { ...p[e.id], taskCategory: ev.target.value } }))}
-                              className="flex-1 border border-hairline rounded-lg px-2 py-1.5 text-sm bg-white focus-ring"
+                              onChange={(ev) => setDrafts((p) => ({ ...p, [e.id]: { ...p[e.id], taskCategory: ev.target.value, canonicalKey: "", budgetLineItemId: null } }))}
+                              className="flex-1 min-w-[120px] border border-hairline rounded-lg px-2 py-1.5 text-sm bg-white focus-ring"
                             >
                               {TASK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                             </select>
+                            {(() => {
+                              const subs = subtasksByCat[draft.taskCategory] || [];
+                              return subs.length > 0 ? (
+                                <select
+                                  value={draft.canonicalKey || ""}
+                                  onChange={(ev) => { const k = ev.target.value; const st = subs.find(s => s.key === k); setDrafts((p) => ({ ...p, [e.id]: { ...p[e.id], canonicalKey: k, budgetLineItemId: st?.budgetLineItemId || null } })); }}
+                                  className="flex-1 min-w-[120px] border border-hairline rounded-lg px-2 py-1.5 text-sm bg-white focus-ring"
+                                  title="Sub-task"
+                                >
+                                  <option value="">— sub-task —</option>
+                                  {subs.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                                </select>
+                              ) : null;
+                            })()}
                             <input
                               type="number" step="0.5" min="0" max="24" value={draft.hours}
                               onChange={(ev) => setDrafts((p) => ({ ...p, [e.id]: { ...p[e.id], hours: ev.target.value } }))}

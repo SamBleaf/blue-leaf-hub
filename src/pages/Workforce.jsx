@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authFetch } from "../lib/authFetch.js";
-import { apiPatch } from "../lib/apiFetch.js";
+import { apiFetch, apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
@@ -42,8 +42,9 @@ function ApprovalsTab({ role }) {
   // Inline entry edit (Approvals) — editingEntryId is the timesheet_entries.id currently
   // in edit mode; entryDraft holds its in-progress form values until Saved or Cancelled.
   const [editingEntryId, setEditingEntryId] = useState(null);
-  const [entryDraft, setEntryDraft] = useState({ hours: "", taskCategory: "", overtimeHours: "" });
+  const [entryDraft, setEntryDraft] = useState({ hours: "", taskCategory: "", overtimeHours: "", canonicalKey: "", budgetLineItemId: null });
   const [entrySaving, setEntrySaving] = useState(false);
+  const [subtasksByJob, setSubtasksByJob] = useState({});   // { [carpentryJobId]: { [task_category]: [{ key, label, budgetLineItemId }] } }
   // Carpentry job attribution
   const [carpentryJobs, setCarpentryJobs] = useState([]);
   const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
@@ -121,18 +122,28 @@ function ApprovalsTab({ role }) {
     }
   }
 
-  function startEditEntry(entry) {
+  // Load a carpentry job's confirmed budget sub-tasks (per category) so the edit row can offer them.
+  async function loadSubtasksForJob(jobId) {
+    if (!jobId || subtasksByJob[jobId]) return;
+    const { ok, data } = await apiFetch(`/api/carpentry/jobs/${jobId}/subtasks`);
+    if (ok) setSubtasksByJob(prev => ({ ...prev, [jobId]: data?.subtasks || {} }));
+  }
+
+  function startEditEntry(entry, ts) {
     setEditingEntryId(entry.id);
     setEntryDraft({
       hours: String(Number(entry.hours)),
       taskCategory: entry.task_category,
       overtimeHours: String(Number(entry.overtime_hours) || 0),
+      canonicalKey: entry.canonical_key || "",
+      budgetLineItemId: entry.budget_line_item_id || null,
     });
+    if (ts?.carpentry_job_id) loadSubtasksForJob(ts.carpentry_job_id);
   }
 
   function cancelEditEntry() {
     setEditingEntryId(null);
-    setEntryDraft({ hours: "", taskCategory: "", overtimeHours: "" });
+    setEntryDraft({ hours: "", taskCategory: "", overtimeHours: "", canonicalKey: "", budgetLineItemId: null });
   }
 
   async function saveEditEntry(timesheetId, entryId) {
@@ -152,6 +163,8 @@ function ApprovalsTab({ role }) {
         hours,
         taskCategory: entryDraft.taskCategory,
         overtimeHours,
+        canonicalKey: entryDraft.canonicalKey || null,
+        budgetLineItemId: entryDraft.budgetLineItemId || null,
       });
       if (ok) {
         // Server returns camelCase (apiResponse.mjs law); this page reads the pending-timesheets
@@ -159,6 +172,9 @@ function ApprovalsTab({ role }) {
         // render below), so map the patched fields back to match before merging into local state.
         const patched = {
           task_category: data.entry.taskCategory,
+          canonical_key: data.entry.canonicalKey ?? null,
+          budget_line_item_id: data.entry.budgetLineItemId ?? null,
+          taskLabel: data.entry.taskLabel,
           hours: data.entry.hours,
           overtime_hours: data.entry.overtimeHours,
           cost_amount: data.entry.costAmount,
@@ -389,11 +405,25 @@ function ApprovalsTab({ role }) {
                               <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs bg-white border border-primary/30 rounded-lg px-2 py-1.5">
                                 <select
                                   value={entryDraft.taskCategory}
-                                  onChange={ev => setEntryDraft(prev => ({ ...prev, taskCategory: ev.target.value }))}
+                                  onChange={ev => setEntryDraft(prev => ({ ...prev, taskCategory: ev.target.value, canonicalKey: "", budgetLineItemId: null }))}
                                   className="border border-hairline rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white"
                                 >
                                   {TASK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                                 </select>
+                                {(() => {
+                                  const subs = subtasksByJob[ts.carpentry_job_id]?.[entryDraft.taskCategory] || [];
+                                  return subs.length > 0 ? (
+                                    <select
+                                      value={entryDraft.canonicalKey || ""}
+                                      onChange={ev => { const k = ev.target.value; const st = subs.find(s => s.key === k); setEntryDraft(prev => ({ ...prev, canonicalKey: k, budgetLineItemId: st?.budgetLineItemId || null })); }}
+                                      className="border border-hairline rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white"
+                                      title="Sub-task"
+                                    >
+                                      <option value="">— sub-task —</option>
+                                      {subs.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                                    </select>
+                                  ) : null;
+                                })()}
                                 <input
                                   type="number"
                                   step="0.5"
@@ -435,7 +465,8 @@ function ApprovalsTab({ role }) {
                               </div>
                             ) : (
                               <div key={e.id} className="flex items-center gap-3 text-xs text-muted">
-                                <span className="font-medium text-ink">{TASK_LABELS[e.task_category] || e.task_category}</span>
+                                <span className="font-medium text-ink">{e.taskLabel || TASK_LABELS[e.task_category] || e.task_category}</span>
+                                {e.taskLabel && e.taskLabel !== (TASK_LABELS[e.task_category] || e.task_category) && <span className="text-[10px] text-muted">({TASK_LABELS[e.task_category] || e.task_category})</span>}
                                 <span>{Number(e.hours)}h</span>
                                 {e.overtime_hours > 0 && <span className="text-amber-600">+{Number(e.overtime_hours)}h OT</span>}
                                 {isDirector && e.cost_amount != null && <span className="text-green-700">${Number(e.cost_amount).toFixed(2)}</span>}
@@ -443,8 +474,8 @@ function ApprovalsTab({ role }) {
                                 {canReject && (
                                   <button
                                     type="button"
-                                    onClick={() => startEditEntry(e)}
-                                    title="Edit hours / category"
+                                    onClick={() => startEditEntry(e, ts)}
+                                    title="Edit hours / category / sub-task"
                                     className="ml-auto text-primary hover:text-primary/70 px-1"
                                   >
                                     ✎
