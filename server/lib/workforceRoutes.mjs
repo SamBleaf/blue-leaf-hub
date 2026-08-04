@@ -740,29 +740,31 @@ export function registerWorkforceRoutes(app) {
       .order("name", { ascending: true });
     if (empErr) return res.status(500).json({ ok: false, error: empErr.message });
 
+    // Pull the job + entry breakdown too, so the hover tooltip can show which job and which sub-tasks
+    // (e.g. J1171 · Wall framing) a day's hours were logged against.
     const { data: ts } = await sb.from("timesheets")
-      .select("id, employee_id, date, status")
+      .select("id, employee_id, date, status, carpentry_jobs(reference, address, client_name), projects(address), timesheet_entries(hours, task_category, canonical_key, budget_line_item_id, carpentry_budget_line_items(canonical_key, description))")
       .gte("date", week_start).lte("date", week_end);
     const statusByKey = {};
     const idByKey = {};
-    const tsIdToKey = {};
+    const hoursByKey = {};   // W17-P2: hours per employee/day = sum of that day's timesheet_entries.hours
+    const jobByKey = {};     // employee|date -> job label (carpentry reference/address, else project address)
+    const tasksByKey = {};   // employee|date -> [distinct sub-task / category labels]
     for (const t of ts || []) {
       const k = `${t.employee_id}|${t.date}`;
       statusByKey[k] = t.status;
       idByKey[k] = t.id;
-      tsIdToKey[t.id] = k;
-    }
-    // W17-P2: hours per employee/day = sum of that day's timesheet_entries.hours (read-only).
-    const hoursByKey = {};
-    const tsIds = (ts || []).map((t) => t.id);
-    if (tsIds.length) {
-      const { data: entries } = await sb.from("timesheet_entries")
-        .select("timesheet_id, hours")
-        .in("timesheet_id", tsIds);
-      for (const en of entries || []) {
-        const k = tsIdToKey[en.timesheet_id];
-        if (k) hoursByKey[k] = (hoursByKey[k] || 0) + Number(en.hours || 0);
+      const cj = t.carpentry_jobs;
+      jobByKey[k] = cj ? (cj.reference || cj.address || cj.client_name || null) : (t.projects?.address || null);
+      let h = 0;
+      const labels = [];
+      for (const en of t.timesheet_entries || []) {
+        h += Number(en.hours || 0);
+        const label = taskLabelForEntry(en);
+        if (label && label !== "—" && !labels.includes(label)) labels.push(label);
       }
+      hoursByKey[k] = h;
+      tasksByKey[k] = labels;
     }
 
     const DONE = ["submitted", "approved"];
@@ -785,7 +787,7 @@ export function registerWorkforceRoutes(app) {
         else if (st === "rejected") { state = "rejected"; if (expectsAllDays) missing++; }
         else if (st) { state = "missing"; if (expectsAllDays) missing++; }
         else { state = expectsAllDays ? "missing" : "na"; if (expectsAllDays) missing++; }
-        days[d] = { state, status: st, hours, id: idByKey[k] || null };
+        days[d] = { state, status: st, hours, id: idByKey[k] || null, job: jobByKey[k] || null, tasks: tasksByKey[k] || [] };
       }
       return { id: e.id, name: e.name, employment_type: e.employment_type, expects_all_days: expectsAllDays, days, done, missing };
     });

@@ -1109,7 +1109,13 @@ function SnapshotTab({ role }) {
       : { state: value === "done" ? "approved" : value === "returned" ? "rejected" : value, status: typeof value === "string" ? value : null, hours: null };
     const state = obj.state || "na";
     const hrs = (obj.hours != null && Number(obj.hours) > 0) ? Number(obj.hours).toFixed(1) : null;
-    const title = [obj.status || state, hrs ? `${hrs}h` : null].filter(Boolean).join(" · ");
+    // Tooltip: status · hours · job · sub-task(s) — e.g. "approved · 8.0h · J1171 · Wall framing, Roof framing".
+    const title = [
+      obj.status || state,
+      hrs ? `${hrs}h` : null,
+      obj.job || null,
+      (obj.tasks && obj.tasks.length) ? obj.tasks.join(", ") : null,
+    ].filter(Boolean).join(" · ");
     const cls = GLYPH_CLS[state] || "bg-slate-100 text-slate-500";
     const ch = GLYPH_CH[state] || String(state)[0];
     return (
