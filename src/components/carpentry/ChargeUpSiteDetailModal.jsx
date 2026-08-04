@@ -15,6 +15,7 @@ import KpiCard from "../ui/KpiCard.jsx";
 import MobileTabs from "../ui/MobileTabs.jsx";
 import CarpentrySiteDiary from "./CarpentrySiteDiary.jsx";
 import ChargeUpTasksPanel from "./ChargeUpTasksPanel.jsx";
+import JobPlansCard from "../JobPlansCard.jsx";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 
@@ -61,6 +62,7 @@ export default function ChargeUpSiteDetailModal({ site, showCost, canModerate = 
     { value: "shifts", label: "Shifts", badge: shifts.length || undefined },
     { value: "tasks", label: "Tasks" },
     { value: "diary", label: "Diary" },
+    { value: "plans", label: "Plans" },
   ];
 
   return (
@@ -159,6 +161,8 @@ export default function ChargeUpSiteDetailModal({ site, showCost, canModerate = 
             {tab === "tasks" && <ChargeUpTasksPanel siteId={site.id} canModerate={canModerate} />}
 
             {tab === "diary" && <CarpentrySiteDiary diaryBase={`/api/carpentry/charge-up-jobs/${site.id}`} address={address} />}
+
+            {tab === "plans" && <div className="mt-3"><JobPlansCard base={`/api/charge-up/sites/${site.id}`} /></div>}
           </div>
         )}
 

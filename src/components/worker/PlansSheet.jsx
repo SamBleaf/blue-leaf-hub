@@ -11,19 +11,21 @@ const TYPE_LABEL = {
   survey: "Survey", specification: "Specification", plan: "Plan",
 };
 
-export default function PlansSheet({ jobId, jobType = "carpentry", jobLabel, onClose }) {
+export default function PlansSheet({ jobId, jobType = "carpentry", chargeUpJobId, jobLabel, onClose }) {
   const [plans, setPlans] = useState(null);
   const [error, setError] = useState(null);
   const [openingId, setOpeningId] = useState(null);
 
   useEffect(() => {
     let stop = false;
-    workerFetch(`/api/worker/jobs/${jobId}/plans?jobType=${jobType}`)
+    // Charge Up: a picked site owns its own plans — scope the fetch to the site.
+    const cu = chargeUpJobId ? `&chargeUpJobId=${encodeURIComponent(chargeUpJobId)}` : "";
+    workerFetch(`/api/worker/jobs/${jobId}/plans?jobType=${jobType}${cu}`)
       .then((r) => r.json())
       .then((j) => { if (stop) return; if (j.ok) setPlans(j.plans || []); else setError(j.error || "Couldn't load plans."); })
       .catch(() => { if (!stop) setError("Network error — try again."); });
     return () => { stop = true; };
-  }, [jobId, jobType]);
+  }, [jobId, jobType, chargeUpJobId]);
 
   async function openPlan(docId) {
     setOpeningId(docId); setError(null);

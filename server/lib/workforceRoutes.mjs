@@ -2487,7 +2487,7 @@ export function registerWorkforceRoutes(app) {
   const PLANS_BUCKET = "job-plans";
   // Only a genuinely-missing mig-152 spine (carpentry_job_id) / table / bucket counts as "not enabled".
   // A different missing column must surface as a real error, not be masked as migrationPending.
-  const isMissingPlanCol = (e) => /carpentry_job_id.*does not exist|schema cache|relation .* does not exist|bucket .* not found|Bucket not found/i.test(String(e?.message || e || ""));
+  const isMissingPlanCol = (e) => /carpentry_job_id.*does not exist|charge_up_job_id.*does not exist|schema cache|relation .* does not exist|bucket .* not found|Bucket not found/i.test(String(e?.message || e || ""));
   const sanitizePlanName = (n) => (String(n || "plan.pdf").toLowerCase().replace(/[^a-z0-9.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "plan.pdf");
 
   async function listCurrentPlans(sb, spine) {
@@ -2495,7 +2495,9 @@ export function registerWorkforceRoutes(app) {
     let q = sb.from("job_documents")
       .select("id, document_type, title, version, uploaded_at")
       .eq("status", "current").eq("storage_provider", "supabase").in("document_type", PLAN_DOC_TYPES);
-    q = spine.carpentryJobId ? q.eq("carpentry_job_id", spine.carpentryJobId) : q.eq("job_id", spine.jobId);
+    q = spine.chargeUpJobId ? q.eq("charge_up_job_id", spine.chargeUpJobId)
+      : spine.carpentryJobId ? q.eq("carpentry_job_id", spine.carpentryJobId)
+      : q.eq("job_id", spine.jobId);
     const { data, error } = await q.order("document_type").order("uploaded_at", { ascending: false });
     if (error) throw error;
     return (data || []).map((r) => ({ docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at }));
@@ -2506,7 +2508,9 @@ export function registerWorkforceRoutes(app) {
     if (!b64) throw new Error("No file provided");
     const buffer = Buffer.from(b64, "base64");
     const documentType = PLAN_DOC_TYPES.includes(body.documentType) ? body.documentType : "plan";
-    const dir = spine.carpentryJobId ? `carpentry/${spine.carpentryJobId}` : `job/${spine.jobId}`;
+    const dir = spine.chargeUpJobId ? `charge-up/${spine.chargeUpJobId}`
+      : spine.carpentryJobId ? `carpentry/${spine.carpentryJobId}`
+      : `job/${spine.jobId}`;
     const path = `${dir}/${todayYmd()}-${crypto.randomUUID().slice(0, 8)}-${fileName}`;
     const { error: upErr } = await sb.storage.from(PLANS_BUCKET).upload(path, buffer, { contentType: "application/pdf", upsert: false });
     if (upErr) throw upErr;
@@ -2514,7 +2518,7 @@ export function registerWorkforceRoutes(app) {
     if (supersedes) await sb.from("job_documents").update({ status: "superseded" }).eq("id", supersedes);
     const rev = String(body.revision || "").trim();
     const row = {
-      job_id: spine.jobId || null, carpentry_job_id: spine.carpentryJobId || null,
+      job_id: spine.jobId || null, carpentry_job_id: spine.carpentryJobId || null, charge_up_job_id: spine.chargeUpJobId || null,
       document_type: documentType, title: rev ? `${fileName} — ${rev}` : fileName,
       storage_provider: "supabase", storage_path: `${PLANS_BUCKET}/${path}`, audience_layer: "worker",
       status: "current", supersedes_document_id: supersedes, uploaded_by: callerId || null, uploaded_at: new Date().toISOString(),
@@ -2564,6 +2568,20 @@ export function registerWorkforceRoutes(app) {
     try { return ok(res, await uploadPlan(sb, { jobId }, req.body || {}, req.caller?.id)); }
     catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Plans aren't enabled yet — apply migration 152", "MIGRATION_PENDING"); console.error("[plans POST proj]", e?.message || e); return err(res, 500, translateDbError(e)); }
   });
+  // Admin/supervisor — BLB Charge Up SITE plans (per-site, mig 172). A site owns its own plans just
+  // like a normal job — same uploadPlan/listCurrentPlans, scoped by charge_up_job_id.
+  app.get("/api/charge-up/sites/:siteId/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.siteId)) return err(res, 400, "Invalid site id");
+    try { return ok(res, { plans: await listCurrentPlans(sb, { chargeUpJobId: req.params.siteId }) }); }
+    catch (e) { if (isMissingPlanCol(e)) return ok(res, { plans: [], migrationPending: true }); console.error("[plans GET charge-up]", e?.message || e); return err(res, 500, "Could not load plans"); }
+  });
+  app.post("/api/charge-up/sites/:siteId/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
+    if (!isUuid(req.params.siteId)) return err(res, 400, "Invalid site id");
+    try { return ok(res, await uploadPlan(sb, { chargeUpJobId: req.params.siteId }, req.body || {}, req.caller?.id)); }
+    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Charge-up plans aren't enabled yet — apply migration 172", "MIGRATION_PENDING"); console.error("[plans POST charge-up]", e?.message || e); return err(res, 500, translateDbError(e)); }
+  });
   // Admin/supervisor — remove a plan (storage object + row) and view (signed URL)
   app.delete("/api/job-plans/:docId", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
@@ -2590,12 +2608,17 @@ export function registerWorkforceRoutes(app) {
     if (!emp) return err(res, 403, "No employee record found.");
     if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id");
     const jobType = req.query.jobType === "carpentry" ? "carpentry" : "project";
+    // Charge Up: a picked site (charge_up_job_id) owns its own plans — authorised via its parent job.
+    const chargeUpJobId = String(req.query.chargeUpJobId || "").trim();
+    if (chargeUpJobId && !isUuid(chargeUpJobId)) return err(res, 400, "Invalid site id");
     const vis = await workerVisibleJobs(sb, emp.id);
     if (vis.error) return err(res, 500, translateDbError(vis.error));
     if (!workerMaySeeJob(vis, req.params.id, jobType)) return err(res, 403, "You don't have access to this job.");
+    if (chargeUpJobId && !(await workerChargeUpSiteParent(sb, vis, chargeUpJobId))) return err(res, 403, "You don't have access to this site.");
     try {
       let spine;
-      if (jobType === "carpentry") spine = { carpentryJobId: req.params.id };
+      if (chargeUpJobId) spine = { chargeUpJobId };
+      else if (jobType === "carpentry") spine = { carpentryJobId: req.params.id };
       else { const jobId = await resolveProjectJobId(sb, req.params.id); if (!jobId) return ok(res, { plans: [] }); spine = { jobId }; }
       return ok(res, { plans: await listCurrentPlans(sb, spine) });
     } catch (e) { if (isMissingPlanCol(e)) return ok(res, { plans: [], migrationPending: true }); console.error("[worker plans GET]", e?.message || e); return err(res, 500, "Could not load plans"); }
@@ -2604,12 +2627,13 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return err(res, 403, "No employee record found.");
-    const { data: doc } = await sb.from("job_documents").select("job_id, carpentry_job_id, storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
+    const { data: doc } = await sb.from("job_documents").select("*").eq("id", req.params.docId).maybeSingle();
     if (!doc || doc.storage_provider !== "supabase" || !doc.storage_path) return err(res, 404, "Plan not available");
     const vis = await workerVisibleJobs(sb, emp.id);
     if (vis.error) return err(res, 500, translateDbError(vis.error));
     let allowed = false;
-    if (doc.carpentry_job_id) allowed = workerMaySeeJob(vis, doc.carpentry_job_id, "carpentry");
+    if (doc.charge_up_job_id) allowed = !!(await workerChargeUpSiteParent(sb, vis, doc.charge_up_job_id));
+    else if (doc.carpentry_job_id) allowed = workerMaySeeJob(vis, doc.carpentry_job_id, "carpentry");
     else if (doc.job_id && vis.projectIds?.size) {
       const { data: ps } = await sb.from("projects").select("id").eq("job_id", doc.job_id).in("id", [...vis.projectIds]);
       allowed = (ps || []).length > 0;

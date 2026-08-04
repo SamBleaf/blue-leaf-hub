@@ -1337,7 +1337,15 @@ export default function WorkerTasks() {
           </div>
         </div>
       )}
-      {plansOpen && job && <PlansSheet jobId={job.id} jobType={job.type} jobLabel={job.address} onClose={() => setPlansOpen(false)} />}
+      {plansOpen && job && (
+        <PlansSheet
+          jobId={job.id}
+          jobType={job.type}
+          chargeUpJobId={chargeUpJobId || undefined}
+          jobLabel={chargeUpJobId ? (chargeUpSites.find(s => s.id === chargeUpJobId)?.label || job.address) : job.address}
+          onClose={() => setPlansOpen(false)}
+        />
+      )}
 
       {/* Edit a draft (tap) before adding — saves to local state only */}
       {editDraftIndex != null && draftTasks[editDraftIndex] && (
