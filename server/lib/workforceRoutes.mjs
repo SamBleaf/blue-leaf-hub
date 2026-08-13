@@ -963,6 +963,17 @@ export function registerWorkforceRoutes(app) {
         if (!chargeUpJobId) return res.status(400).json({ ok: false, error: "Pick a location before submitting charge-up work." });
       }
     }
+    // Sub-task attribution: map (task_category, canonical_key) → a representative budget_line_item_id for
+    // this carpentry job, so a mass-fill row can allocate hours to a sub-task (e.g. First fix framing →
+    // Wall framing). Fetched once for the whole batch; rows with an unknown sub-task log at category level.
+    const subtaskLineByKey = new Map();
+    if (carpentry_job_id) {
+      const { data: liRows } = await sb.from("carpentry_budget_line_items")
+        .select("id, task_category, canonical_key").eq("job_id", carpentry_job_id).eq("status", "confirmed")
+        .not("task_category", "is", null).not("canonical_key", "is", null);
+      for (const r of liRows || []) { const k = `${r.task_category}|${r.canonical_key}`; if (!subtaskLineByKey.has(k)) subtaskLineByKey.set(k, r.id); }
+    }
+
     const results = [];
     for (const e of entries) {
       try {
@@ -997,6 +1008,12 @@ export function registerWorkforceRoutes(app) {
           overtime_hours: 0,
           notes: notes || null,
         };
+        // Attribute to a budget sub-task when the row picked one that belongs to this job's budget.
+        const canonKey = e.canonical_key ? `${task_category}|${e.canonical_key}` : null;
+        if (canonKey && subtaskLineByKey.has(canonKey)) {
+          entryRow.canonical_key = e.canonical_key;
+          entryRow.budget_line_item_id = subtaskLineByKey.get(canonKey);
+        }
         // Only reference the charge-up site column when a site was picked — chargeUpJobId is only
         // non-null when mig 145 is applied + active sites exist, so this never hits a missing column.
         if (chargeUpJobId) entryRow.charge_up_job_id = chargeUpJobId;
@@ -2591,9 +2608,13 @@ export function registerWorkforceRoutes(app) {
     if (error) throw error;
     return { docId: data?.id, title: data?.title };
   }
+  // 1-hour signed URL (matches completion photos). A short 60s expiry died mid-view: zooming/panning a
+  // detailed plan re-fetches byte ranges from Supabase storage, which 403'd after a minute → repeated
+  // viewer errors on the PWA. An hour covers a viewing session; re-open gets a fresh URL.
+  const PLAN_URL_TTL = 3600;
   async function signPlan(sb, storagePath) {
     const [bucket, ...rest] = String(storagePath).split("/");
-    const { data, error } = await sb.storage.from(bucket).createSignedUrl(rest.join("/"), 60);
+    const { data, error } = await sb.storage.from(bucket).createSignedUrl(rest.join("/"), PLAN_URL_TTL);
     if (error) throw error;
     return data.signedUrl;
   }
@@ -2662,7 +2683,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
     const { data: doc } = await sb.from("job_documents").select("storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
     if (!doc?.storage_path || doc.storage_provider !== "supabase") return err(res, 404, "Plan not available");
-    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: 60 }); }
+    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: PLAN_URL_TTL }); }
     catch { return err(res, 500, "Could not generate a download link"); }
   });
   // Worker — current plans for a job they can see, + a signed download (access-gated)
@@ -2703,7 +2724,7 @@ export function registerWorkforceRoutes(app) {
       allowed = (ps || []).length > 0;
     }
     if (!allowed) return err(res, 403, "You don't have access to this plan.");
-    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: 60 }); }
+    try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: PLAN_URL_TTL }); }
     catch { return err(res, 500, "Could not generate a download link"); }
   });
 

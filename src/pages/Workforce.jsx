@@ -621,6 +621,7 @@ function MassFillTab() {
   const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>"
   const [chargeUpSites, setChargeUpSites] = useState([]);   // active sites for the BL-CHARGEUP job
   const [chargeUpJobId, setChargeUpJobId] = useState("");   // selected charge-up site
+  const [subtasksByCat, setSubtasksByCat] = useState({});   // { [task_category]: [{ key, label, budgetLineItemId }] } for the job
   const [rows, setRows] = useState(() => {
     const today = new Date().toISOString().slice(0, 10);
     return [{ employee_id: "", task_category: "", hours: "8", notes: "", date: today }];
@@ -654,6 +655,17 @@ function MassFillTab() {
     return () => { cancelled = true; };
   }, [isChargeUp, selectedCarpJob?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load the carpentry job's confirmed budget sub-tasks so each row can allocate hours to a sub-task
+  // (e.g. First fix framing → Wall framing), matching the worker Log-hours + Approvals pickers.
+  useEffect(() => {
+    if (!selectedCarpJob?.id) { setSubtasksByCat({}); return; }
+    let cancelled = false;
+    authFetch(`/api/carpentry/jobs/${selectedCarpJob.id}/subtasks`).then(r => r.json())
+      .then(j => { if (!cancelled && j.ok) setSubtasksByCat(j.subtasks || {}); })
+      .catch(() => { if (!cancelled) setSubtasksByCat({}); });
+    return () => { cancelled = true; };
+  }, [selectedCarpJob?.id]);
+
   function addRow() {
     setRows(prev => [...prev, { employee_id: "", task_category: "", hours: "8", notes: "", date }]);
   }
@@ -670,6 +682,8 @@ function MassFillTab() {
       const entries = rows.filter(r => r.employee_id && r.task_category && r.hours).map(r => ({
         employee_id: r.employee_id,
         task_category: r.task_category,
+        canonical_key: r.canonical_key || undefined,
+        budget_line_item_id: r.budget_line_item_id || undefined,
         hours: parseFloat(r.hours),
         notes: r.notes || undefined,
         date: r.date || date,   // per-row date (falls back to the default)
@@ -753,10 +767,21 @@ function MassFillTab() {
                   </select>
                 </td>
                 <td className="px-2 py-2">
-                  <select value={r.task_category} onChange={e => updateRow(i, "task_category", e.target.value)} className="w-full border border-hairline rounded px-2 py-1.5 text-sm">
+                  <select value={r.task_category} onChange={e => setRows(prev => prev.map((row, idx) => idx === i ? { ...row, task_category: e.target.value, canonical_key: "", budget_line_item_id: null } : row))} className="w-full border border-hairline rounded px-2 py-1.5 text-sm">
                     <option value="">Task</option>
                     {TASK_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
+                  {(subtasksByCat[r.task_category] || []).length > 0 && (
+                    <select
+                      value={r.canonical_key || ""}
+                      onChange={e => { const k = e.target.value; const st = (subtasksByCat[r.task_category] || []).find(s => s.key === k); setRows(prev => prev.map((row, idx) => idx === i ? { ...row, canonical_key: k, budget_line_item_id: st?.budgetLineItemId || null } : row)); }}
+                      className="w-full mt-1 border border-hairline rounded px-2 py-1.5 text-sm bg-white"
+                      title="Sub-task"
+                    >
+                      <option value="">— sub-task —</option>
+                      {(subtasksByCat[r.task_category] || []).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  )}
                 </td>
                 <td className="px-2 py-2">
                   <input type="number" min="0.5" max="24" step="0.5" value={r.hours} onChange={e => updateRow(i, "hours", e.target.value)} className="w-full border border-hairline rounded px-2 py-1.5 text-sm" />
