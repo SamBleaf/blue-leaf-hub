@@ -3054,7 +3054,10 @@ export function registerWorkforceRoutes(app) {
 
     // Filter (multi-assign dual-read): done tasks (history) + SHARED (no assignees) + tasks I'm on.
     const withAssignees = await attachAssigneesFromDb(sb, tasks || []);
-    const visible = withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
+    // A leading hand runs the crew, so they see EVERY task on the job (shared + assigned to any crew
+    // member) — otherwise handing work out makes it vanish from their own list (looked like deletion).
+    // A plain worker keeps the focused view: done + shared + assigned-to-them.
+    const visible = emp.is_leading_hand ? withAssignees : withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
     // Who-signed-off (completer name) is supervisor/admin-only info in the field app: strip it
@@ -3103,7 +3106,10 @@ export function registerWorkforceRoutes(app) {
     const { data: tasks, error } = await q;
     if (error) return err(res, 500, error.message);
     const withAssignees = await attachAssigneesFromDb(sb, tasks || []);
-    const visible = withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
+    // A leading hand runs the crew, so they see EVERY task on the job (shared + assigned to any crew
+    // member) — otherwise handing work out makes it vanish from their own list (looked like deletion).
+    // A plain worker keeps the focused view: done + shared + assigned-to-them.
+    const visible = emp.is_leading_hand ? withAssignees : withAssignees.filter(t => t.status === "done" || visibleToWorker(t.assignees, emp.id));
     const sorted = visible.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
     await signSiteTaskPhotos(sb, sorted);
     ok(res, { preview: true, employee: emp, tasks: sorted, jobId, jobType: jobType || null });
