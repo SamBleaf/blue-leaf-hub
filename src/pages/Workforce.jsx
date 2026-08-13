@@ -332,8 +332,11 @@ function ApprovalsTab({ role }) {
                     className={`cursor-pointer hover:bg-gray-50 ${selected.has(ts.id) ? "bg-blue-50" : ""}`}
                     onClick={() => { setExpanded(prev => { const n = new Set(prev); n.has(ts.id) ? n.delete(ts.id) : n.add(ts.id); return n; }); }}
                   >
-                    <td className="px-3 py-3" onClick={e => { e.stopPropagation(); toggleSelect(ts.id); }}>
-                      <input type="checkbox" checked={selected.has(ts.id)} onChange={() => toggleSelect(ts.id)} className="accent-primary" />
+                    <td className="px-3 py-3 cursor-pointer" onClick={e => { e.stopPropagation(); toggleSelect(ts.id); }}>
+                      {/* readOnly + pointer-events-none makes the WHOLE cell the toggle target with ONE
+                          handler. Before, the input's onChange AND the td onClick both fired on a centre
+                          click → two toggles cancelled out, so only the cell edge worked. */}
+                      <input type="checkbox" readOnly checked={selected.has(ts.id)} className="accent-primary pointer-events-none" />
                     </td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-ink">{ts.employees?.name}</p>
