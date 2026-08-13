@@ -10,6 +10,7 @@ import ChargeUpJobDetail from "./ChargeUpJobDetail.jsx";
 import CarpentrySiteDiary from "../components/carpentry/CarpentrySiteDiary.jsx";
 import WhsPackTab from "../components/carpentry/WhsPackTab.jsx";
 import JobPlansCard from "../components/JobPlansCard.jsx";
+import TaskDeleteLog from "../components/carpentry/TaskDeleteLog.jsx";
 import AssigneeStack from "../components/AssigneeStack.jsx";
 import AssigneePickerSheet from "../components/AssigneePickerSheet.jsx";
 import {
@@ -1137,6 +1138,8 @@ function TasksPanel({ jobId }) {
           </button>
         </div>
       </div>
+
+      <TaskDeleteLog jobId={jobId} />
 
       {showTranscript && (
         <div className="mb-4 p-4 bg-slate-50 rounded-card border border-hairline space-y-3">

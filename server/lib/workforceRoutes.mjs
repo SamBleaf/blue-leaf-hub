@@ -12,6 +12,7 @@ import { buildPhotoPath, signSiteTaskPhotos, SITE_MEDIA_BUCKET, PHOTO_ENTITY_DIR
 import { todayYmd, mondayOf, addDaysYmd } from "./dateYmd.mjs";
 import { validateChargeUpSite } from "./chargeUpService.mjs";
 import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker } from "./taskAssignments.mjs";
+import { recordTaskDeletion } from "./taskAudit.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
 
@@ -1521,9 +1522,48 @@ export function registerWorkforceRoutes(app) {
 
   app.delete("/api/site-tasks/:id", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
+    await recordTaskDeletion(sb, { taskId: req.params.id, actorId: req.caller?.id || null, actorLabel: req.caller?.email || req.caller?.role || null, source: "site-task-delete" });
     const { error } = await sb.from("site_tasks").update({ status: "wont_do", updated_at: new Date().toISOString() }).eq("id", req.params.id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true });
+  });
+
+  // ── Task-delete AUDIT LOG (mig 173) ─────────────────────────────────────────
+  // A "delete" is a soft delete (status → wont_do); recordTaskDeletion logs who/when/what on every
+  // delete path. List recent deletions (optionally for one job), and RESTORE a soft-deleted task.
+  app.get("/api/workforce/task-deletions", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    try {
+      let q = sb.from("site_task_deletions").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (req.query.jobId && isUuid(req.query.jobId)) q = q.eq("carpentry_job_id", req.query.jobId);
+      if (req.query.projectId && isUuid(req.query.projectId)) q = q.eq("project_id", req.query.projectId);
+      const { data, error } = await q;
+      if (error) { if (/site_task_deletions.*does not exist|schema cache/i.test(error.message || "")) return ok(res, { deletions: [], migrationPending: true }); throw error; }
+      // Flag which deleted tasks are still restorable (row still present + still wont_do).
+      const ids = [...new Set((data || []).map((d) => d.site_task_id).filter(Boolean))];
+      const { data: live } = ids.length ? await sb.from("site_tasks").select("id, status").in("id", ids) : { data: [] };
+      const statusById = Object.fromEntries((live || []).map((t) => [t.id, t.status]));
+      const deletions = (data || []).map((d) => ({ ...rowToCamel(d), restorable: statusById[d.site_task_id] === "wont_do" }));
+      return ok(res, { deletions });
+    } catch (e) { console.error("[task-deletions GET]", e?.message || e); return err(res, 500, "Could not load the delete log."); }
+  });
+  app.post("/api/workforce/task-deletions/:auditId/restore", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    if (!isUuid(req.params.auditId)) return err(res, 400, "Invalid id.");
+    try {
+      const { data: log } = await sb.from("site_task_deletions").select("site_task_id, prior_status").eq("id", req.params.auditId).maybeSingle();
+      if (!log?.site_task_id) return err(res, 404, "Delete record not found.", "NOT_FOUND");
+      const restoreTo = ["open", "in_progress", "blocked", "done"].includes(log.prior_status) ? log.prior_status : "open";
+      const { data: t } = await sb.from("site_tasks").select("id, status").eq("id", log.site_task_id).maybeSingle();
+      if (!t) return err(res, 410, "That task no longer exists and can't be restored.", "GONE");
+      if (t.status !== "wont_do") return err(res, 409, "That task isn't deleted — nothing to restore.", "NOT_DELETED");
+      const { error } = await sb.from("site_tasks").update({ status: restoreTo, updated_at: new Date().toISOString() }).eq("id", log.site_task_id);
+      if (error) return err(res, 500, translateDbError(error));
+      return ok(res, { restoredTo: restoreTo });
+    } catch (e) { console.error("[task-deletions restore]", e?.message || e); return err(res, 500, "Could not restore the task."); }
   });
 
   // ── Workforce crews (W16-A1) ────────────────────────────────────────────────

@@ -42,6 +42,7 @@ import { parseXLSX } from "./buildexactParser.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./carpentrySubtaskDictionary.mjs";
+import { recordTaskDeletion } from "./taskAudit.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 
@@ -1234,6 +1235,7 @@ export function registerCarpentryRoutes(app) {
       if (status !== undefined) {
         const VALID = ["open", "in_progress", "done", "wont_do", "blocked"];
         if (!VALID.includes(status)) return err(res, 400, "Invalid status.");
+        if (status === "wont_do") await recordTaskDeletion(sb, { taskId: req.params.id, actorId: req.caller?.id || null, actorLabel: req.caller?.email || req.caller?.role || null, source: "carpentry-patch" });
         patch.status = status;
         if (status === "done") {
           patch.completed_at = new Date().toISOString();
@@ -1314,6 +1316,7 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
+      await recordTaskDeletion(sb, { taskId: req.params.id, actorId: req.caller?.id || null, actorLabel: req.caller?.email || req.caller?.role || null, source: "carpentry-delete" });
       const { error } = await sb
         .from("site_tasks")
         .update({ status: "wont_do", updated_at: new Date().toISOString() })
