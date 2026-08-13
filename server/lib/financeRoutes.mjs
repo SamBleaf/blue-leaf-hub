@@ -29,6 +29,21 @@ import {
 } from "./dropboxClient.mjs";
 
 const MODEL_FAST = "claude-haiku-4-5-20251001";   // Tier 2: OCR + gaps
+// Guardrail #4: skip vision-OCR on PDFs bigger than this — invoices are small; large PDFs are
+// catalogs/brochures/bundled scans that just burn tokens.
+const MAX_OCR_BYTES = 12 * 1024 * 1024;
+// Guardrail #1: only vision-OCR a PDF when the email plausibly carries a PAYABLE invoice. This runs
+// BEFORE the Haiku call and skips the clear non-invoices (marketing/newsletters, account statements,
+// quotes — handled by the RFQ poller — POs, remittances). Most of the token spend was OCR'ing docs
+// that were then classified non-invoice and thrown away. Default is INCLUSIVE (OCR) so a plain PDF
+// with a generic name isn't missed — it only excludes the obvious non-invoices.
+function looksLikeInvoiceEmail({ subject = "", from = "", filename = "" }) {
+  const s = `${subject} ${filename}`.toLowerCase();
+  const f = String(from || "").toLowerCase();
+  if (/no-?reply|do-?not-?reply|noreply|newsletter|marketing|mailchimp|mailerlite|campaign-monitor|notification/.test(f)) return false;
+  if (/newsletter|unsubscribe|webinar|e-?news|promotion|% off|survey|statement of account|monthly statement|quotation\b|purchase order|remittance advice/.test(s)) return false;
+  return true;
+}
 const MODEL_SLOW = process.env.CLAUDE_MODEL || "claude-sonnet-4-6"; // Tier 3: ambiguous only
 const FINANCE_INBOX_PATH = `${DROPBOX_PRIVATE_INTERNAL_BASE}/FINANCE INBOX`;
 const AUTO_APPROVE_THRESHOLD = Number(process.env.FINANCE_AUTO_APPROVE_BELOW ?? 0);
@@ -1203,12 +1218,13 @@ export function registerFinanceRoutes(app) {
     const overheadJob = jobs.find(j => (j.address || "").toLowerCase() === "blue leaf building");
     const overheadTrade = tradeCategories.find(t => /prelim/i.test(t.name || ""));
     const client = new ImapFlow(cfg);
-    let processed = 0, skipped = 0, failed = 0;
+    let processed = 0, skipped = 0, failed = 0, ocrCalls = 0;
+    let lastUid = null, highestUid = null;
     try {
       await client.connect();
       await client.mailboxOpen("INBOX");
 
-      let lastUid = await loadInvoiceUid(sb, cfg.cursorKey);
+      lastUid = await loadInvoiceUid(sb, cfg.cursorKey);
       if (lastUid == null) {
         const uidNext = Number(client.mailbox?.uidNext || 0);
         await saveInvoiceUid(sb, cfg.cursorKey, uidNext > 0 ? uidNext - 1 : Number(client.mailbox?.exists || 0));
@@ -1227,12 +1243,16 @@ export function registerFinanceRoutes(app) {
       }
       const msgs = [];
       for (const r of rawMsgs) {
-        msgs.push({ uid: r.uid, parsed: await simpleParser(r.source) });
+        // Guardrail #3: one unparseable message must not abort the whole batch (that would leave the
+        // cursor un-advanced → the next poll re-fetches + re-OCRs everything). Skip it, advance past it.
+        try { msgs.push({ uid: r.uid, parsed: await simpleParser(r.source) }); }
+        catch (e) { console.error("[invoice-imap] parse failed uid", r.uid, e?.message); msgs.push({ uid: r.uid, parsed: null }); }
       }
 
-      let highestUid = lastUid;
+      highestUid = lastUid;
       for (const msg of msgs) {
         highestUid = Math.max(highestUid, Number(msg.uid) || 0);
+        if (!msg.parsed) { skipped++; continue; }   // unparseable — already logged; cursor advances past it
         try {
           const parsed = msg.parsed;
           const subject = parsed.subject || "";
@@ -1260,7 +1280,19 @@ export function registerFinanceRoutes(app) {
               .select("id").eq("email_message_id", messageId).eq("original_filename", filename).maybeSingle();
             if (existing) { skipped++; continue; }
 
+            // Guardrail #1: skip the vision-OCR entirely when the email isn't invoice-like (marketing,
+            // statements, quotes…) — this pre-Haiku check is where most of the token spend is saved.
+            if (!looksLikeInvoiceEmail({ subject, from, filename })) {
+              console.log(`[invoice-imap] pre-filter: NO OCR (not invoice-like): ${filename} — "${subject}" from ${from}`);
+              skipped++; continue;
+            }
+            // Guardrail #4: don't OCR oversized PDFs (catalogs/brochures) — real invoices are small.
+            if (att.content.length > MAX_OCR_BYTES) {
+              console.log(`[invoice-imap] pre-filter: NO OCR (too large ${Math.round(att.content.length / 1024 / 1024)}MB): ${filename}`);
+              skipped++; continue;
+            }
             const base64 = att.content.toString("base64");
+            ocrCalls++;
             const extracted = await extractDocument(base64, mime);
 
             // Quotes + statements are NOT payables. The admin inbox receives tender QUOTES (RFQ
@@ -1356,11 +1388,9 @@ export function registerFinanceRoutes(app) {
         }
       }
 
-      if (highestUid > lastUid) await saveInvoiceUid(sb, cfg.cursorKey, highestUid);
-      await client.logout();
-      return { account: cfg.auth.user, ok: true, processed, skipped, failed, at: new Date().toISOString() };
+      if (ocrCalls) console.log(`[invoice-imap] poll done [${cfg.auth.user}]: ${ocrCalls} OCR call(s), ${processed} stored, ${skipped} skipped, ${failed} failed`);
+      return { account: cfg.auth.user, ok: true, processed, skipped, failed, ocrCalls, at: new Date().toISOString() };
     } catch (err) {
-      try { await client.logout(); } catch { /* ignore */ }
       // Surface the real IMAP failure (ImapFlow buries the server response under a generic
       // "Command failed" .message) so a recurring poll error is diagnosable from the logs.
       const detail = [
@@ -1370,7 +1400,12 @@ export function registerFinanceRoutes(app) {
         err?.command && `cmd=${err.command}`,
       ].filter(Boolean).join(" | ");
       console.error(`[invoice-imap] poll error [${cfg.auth.user}]:`, detail);
-      return { account: cfg.auth.user, ok: false, error: detail || "poll failed", at: new Date().toISOString() };
+      return { account: cfg.auth.user, ok: false, error: detail || "poll failed", ocrCalls, at: new Date().toISOString() };
+    } finally {
+      // Guardrail #3: advance the cursor past everything processed even if the poll threw later — else
+      // the next poll re-fetches (and re-OCRs the skipped non-invoices in) the same batch. Best-effort.
+      try { if (highestUid != null && lastUid != null && highestUid > lastUid) await saveInvoiceUid(sb, cfg.cursorKey, highestUid); } catch { /* ignore */ }
+      try { await client.logout(); } catch { /* ignore */ }
     }
   }
 
