@@ -12,6 +12,7 @@ import AICostWidget from "../../components/settings/AICostWidget.jsx";
 import DataCleanup from "../DataCleanup.jsx";
 import ProfilePane from "./ProfilePane.jsx";
 import EnquiryAckSettings from "../../components/settings/EnquiryAckSettings.jsx";
+import QualifyEmailSettings from "../../components/settings/QualifyEmailSettings.jsx";
 import SwmsLibrarySettings from "../../components/settings/SwmsLibrarySettings.jsx";
 
 // Maps a "component" kind sub.id → the element it renders. Kept here (rather than
@@ -29,6 +30,7 @@ const COMPONENT_MAP = {
   "data-cleanup": () => <DataCleanup />,
   profile: () => <ProfilePane />,
   "enquiry-ack": () => <EnquiryAckSettings />,
+  "qualify-email": () => <QualifyEmailSettings />,
 };
 
 // Renders one Settings-hub category: all of its role-permitted sub-sections,

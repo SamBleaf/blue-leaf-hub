@@ -9,11 +9,12 @@ import LeadActivityTimeline from "./LeadActivityTimeline.jsx";
 
 const KIND_ICONS = {
   activity: "📝", note: "🗒️", conversation: "💬", interaction: "🤝",
-  email_open: "📧", email_click: "🔗",
+  email_open: "📧", email_click: "🔗", correspondence: "✉️",
 };
 const KIND_LABELS = {
   activity: "Activity", note: "Note", conversation: "Conversation",
   interaction: "CRM", email_open: "Email opened", email_click: "Link clicked",
+  correspondence: "Email",
 };
 
 function relativeTime(iso) {

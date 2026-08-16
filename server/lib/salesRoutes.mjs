@@ -16,6 +16,7 @@ import { recomputeReferralRollup } from "./crmRoutes.mjs";
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
+import { sendQualifyIntro } from "./qualifyEmail.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { enrichSite } from "./siteEnrichmentService.mjs";
 import {
@@ -49,6 +50,17 @@ const STAGE_GATES = {
 function evaluateStageGate(targetStage, mergedLead) {
   const gates = STAGE_GATES[targetStage] || [];
   return gates.filter(g => !g.check(mergedLead)).map(g => g.label);
+}
+
+// Sales OS Slice 1 — advisory nurture recommendation (Lost stays a manual choice, never automatic).
+// A qualify-stage lead scoring below 5 should be nurtured, not lost. Returns null when not applicable.
+function nurtureRecommendation(lead) {
+  if (!lead) return null;
+  if (["nurture", "lost", "won", "accepted", "tender", "fee_proposal", "winning_offer", "discovery"].includes(lead.stage)) return null;
+  const score = lead.qualify_score || 0;
+  if (score >= 5) return null;
+  const band = score >= 3 ? "3–4" : "0–2";
+  return { recommend: "nurture", score, reason: `Qualifying score ${score} (${band}) is below the 5 needed to advance — move to Nurture, not Lost.` };
 }
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -554,7 +566,7 @@ export function registerSalesRoutes(app) {
       .select("*")
       .eq("lead_id", req.params.id)
       .order("created_at", { ascending: false });
-    res.json({ ok: true, lead, activities: activities || [] });
+    res.json({ ok: true, lead, activities: activities || [], nurtureRecommendation: nurtureRecommendation(lead) });
   });
 
   // ── Batch 1B: unified timeline (read-only v_lead_timeline) ─────────────────
@@ -577,6 +589,25 @@ export function registerSalesRoutes(app) {
       return err(res, 400, translateDbError(error));
     }
     ok(res, { timeline: (data || []).map(rowToCamel) });
+  });
+
+  // ── Sales OS Slice 1: Qualify email (assembled preview → send) ─────────────
+  // POST { preview:true } returns the assembled email WITHOUT sending (always allowed, so the
+  // salesperson eyeballs it first). POST {} sends the intro + attaches the company profile + logs
+  // correspondence — gated by QUALIFY_EMAIL_ENABLED. Copy/booking-link assembly lives in qualifyEmail.mjs.
+  app.post("/api/sales/leads/:id/qualify-email/send", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const dryRun = req.body?.preview === true;
+    if (!dryRun && process.env.QUALIFY_EMAIL_ENABLED !== "true") {
+      return err(res, 503, "Qualify email sending is turned off. Set QUALIFY_EMAIL_ENABLED to send — preview still works.");
+    }
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const result = await sendQualifyIntro(sb, lead, { userId: req.caller?.id || null, dryRun });
+    if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the qualify email.");
+    if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html, bookingLink: result.bookingLink } });
+    return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });
   });
 
   // ── Batch 1B: lead_signals (objections / fears / priorities) ───────────────
@@ -719,6 +750,22 @@ export function registerSalesRoutes(app) {
       .single();
     let gateWarnings = [];
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
+      // Sales OS Slice 1 — the ONE deliberate HARD gate (a documented exception to the advisory-gate
+      // policy, W01-DRIFT-003): advancing INTO Discovery requires a qualifying score ≥ 5 AND a booked
+      // build conversation. Enforced only once migration 174 is applied (the meeting column exists),
+      // so deploying ahead of the paste never blocks the pipeline. Every OTHER gate stays advisory.
+      if (updates.stage === "discovery") {
+        const { data: m, error: mErr } = await sb.from("leads")
+          .select("discovery_meeting_booked_at").eq("id", req.params.id).maybeSingle();
+        if (!mErr) {
+          const missing = [];
+          if ((current?.qualify_score || 0) < 5) missing.push("a qualifying score of at least 5");
+          if (!m?.discovery_meeting_booked_at) missing.push("a booked build conversation");
+          if (missing.length) {
+            return err(res, 422, `Can't advance to Discovery yet — needs ${missing.join(" and ")}.`, "GATE_BLOCKED");
+          }
+        }
+      }
       const outcomeDate = new Date().toISOString().slice(0, 10);
       updates.stage_entered_at = new Date().toISOString();
       updates.last_activity_at = new Date().toISOString();

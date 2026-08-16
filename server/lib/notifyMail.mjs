@@ -41,7 +41,7 @@ export function mailTransportName() {
   return null;
 }
 
-async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, headers }) {
+async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, headers, messageId, inReplyTo, references }) {
   const transport = getSmtpTransporter();
   const from = smtpFromAddress();
   if (!transport || !from) return null;
@@ -50,6 +50,12 @@ async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, head
   if (bcc) mail.bcc = bcc;
   if (html && String(html).trim()) mail.html = String(html).trim();
   if (headers && typeof headers === "object" && Object.keys(headers).length) mail.headers = headers;
+  // Threading (additive; existing callers pass none). A caller-supplied Message-ID lets us persist
+  // the exact id we sent under (correspondence.message_id) so an inbound reply's In-Reply-To can be
+  // matched back to it. inReplyTo/references thread our replies onto the client's message.
+  if (messageId) mail.messageId = messageId;
+  if (inReplyTo) mail.inReplyTo = inReplyTo;
+  if (references) mail.references = references;
   if (Array.isArray(attachments) && attachments.length) {
     mail.attachments = attachments.map((a) => ({
       filename: a.filename || "attachment.bin",

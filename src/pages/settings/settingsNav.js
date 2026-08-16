@@ -18,6 +18,7 @@ export const SETTINGS_NAV = [
       { id: "email-signature", label: "Email signature", kind: "section" },
       { id: "notifications", label: "Notifications", kind: "section" },
       { id: "enquiry-ack", label: "Enquiry auto-reply", kind: "component" },
+      { id: "qualify-email", label: "Qualify emails", kind: "component" },
     ],
   },
   {

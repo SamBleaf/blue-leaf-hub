@@ -143,6 +143,94 @@ export const LEAD_SOURCE_CATEGORY_LABELS = {
   other:       "Other",
 };
 
+/* ── Sales OS Slice 1: Enquiry/Qualify dropdown vocab ──────────────────────────
+   Controlled answers for the tight call-script. Stored as these slug values on the
+   leads row (land_status / finance_status / documents_on_hand) or in lead_signals
+   (priority / concern). Enforced app-side — migration 174 leaves the columns free of a
+   CHECK on purpose. Labels are what the UI shows and the client-facing snippet maps key off. */
+
+/** leads.land_status — do they have a site? Also drives qualify_site. (migration 174) */
+export const LEAD_LAND_STATUS = {
+  OWN_HOME:  "own_home",
+  OWN_LAND:  "own_land",
+  BUYING:    "buying",
+  SEARCHING: "searching",
+};
+export const LEAD_LAND_STATUS_LABELS = {
+  own_home:  "Own our home",
+  own_land:  "Own the land",
+  buying:    "Buying now",
+  searching: "Still searching",
+};
+
+/** leads.finance_status — how the project is funded. (migration 174) */
+export const LEAD_FINANCE_STATUS = {
+  CASH:          "cash",
+  NEEDS_FINANCE: "needs_finance",
+  PREAPPROVED:   "preapproved",
+  UNSURE:        "unsure",
+};
+export const LEAD_FINANCE_STATUS_LABELS = {
+  cash:          "Cash",
+  needs_finance: "Need finance",
+  preapproved:   "Pre-approved",
+  unsure:        "Unsure",
+};
+
+/** leads.documents_on_hand — furthest documentation milestone they hold. (migration 174) */
+export const LEAD_DOCUMENTS_ON_HAND = {
+  NONE:        "none",
+  SKETCH:      "sketch",
+  CONCEPT:     "concept",
+  DETAILED:    "detailed",
+  ENGINEERING: "engineering",
+  APPROVALS:   "approvals",
+};
+export const LEAD_DOCUMENTS_ON_HAND_LABELS = {
+  none:        "None",
+  sketch:      "Sketch ideas",
+  concept:     "Concept plans",
+  detailed:    "Detailed plans",
+  engineering: "Engineering",
+  approvals:   "Approvals",
+};
+
+/** lead_signals kind='priority' — what matters most in choosing a builder. */
+export const LEAD_PRIORITY = {
+  LOWEST_PRICE:          "lowest_price",
+  BUDGET_CERTAINTY:      "budget_certainty",
+  QUALITY:               "quality",
+  COMMUNICATION:         "communication",
+  DESIGN_OUTCOME:        "design_outcome",
+  LONG_TERM_PERFORMANCE: "long_term_performance",
+};
+export const LEAD_PRIORITY_LABELS = {
+  lowest_price:          "Lowest price",
+  budget_certainty:      "Budget certainty",
+  quality:               "Quality",
+  communication:         "Communication",
+  design_outcome:        "Design outcome",
+  long_term_performance: "Long-term performance",
+};
+
+/** lead_signals kind='fear' — the client's biggest worry about building. */
+export const LEAD_CONCERN = {
+  BUDGET_BLOWOUT: "budget_blowout",
+  BUILDER_TRUST:  "builder_trust",
+  DELAYS:         "delays",
+  QUALITY:        "quality",
+  DESIGN_OUTCOME: "design_outcome",
+  LOCK_IN:        "lock_in",
+};
+export const LEAD_CONCERN_LABELS = {
+  budget_blowout: "Budget blowout",
+  builder_trust:  "Trusting the builder",
+  delays:         "Delays",
+  quality:        "Quality",
+  design_outcome: "Design outcome",
+  lock_in:        "Being locked in",
+};
+
 export const CRM_CONTACT_TYPES = {
   PROSPECT:    "prospect",
   REFERRER:    "referrer",

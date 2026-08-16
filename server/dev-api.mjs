@@ -26,6 +26,7 @@ import { driveConfigured, uploadCsvToSheet } from "./lib/googleDriveClient.mjs";
 import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
 import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQUIRY_ACK_TEMPLATE_KEY } from "./lib/leadReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
+import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
@@ -33,6 +34,7 @@ import { buildexactConfigured } from "./lib/buildexactClient.mjs";
 import { sendReminderForRfqId } from "./lib/sendOneReminder.mjs";
 import { attachSuggestions } from "./lib/quoteInboxSuggest.mjs";
 import { handleBuildexactWebhook } from "./lib/buildexactWebhook.mjs";
+import { handleCalcomWebhook } from "./lib/calcomWebhook.mjs";
 import { registerModule4Routes } from "./lib/module4Routes.mjs";
 import { registerModule5Routes } from "./lib/module5Routes.mjs";
 import { registerModule6Routes } from "./lib/module6Routes.mjs";
@@ -926,6 +928,21 @@ app.post(
   }
 );
 
+// Sales OS Slice 1 — cal.com "build conversation" webhook. RAW + HMAC-verified before the JSON
+// parser (same shape as buildexact) so a Qualify-stage booking marks the discovery meeting on the
+// existing lead (via metadata.leadId) with no manual tick.
+app.post(
+  "/api/webhooks/calcom",
+  express.raw({ type: "*/*", limit: "2mb" }),
+  (req, res, next) => {
+    handleCalcomWebhook(req, res).catch((err) => {
+      console.error("[calcom webhook]", err);
+      if (!res.headersSent) res.status(200).json({ ok: false, error: "handler_error" });
+      else next();
+    });
+  }
+);
+
 const JSON_BODY_LIMIT = process.env.BLUEPRINT_BODY_LIMIT || "100mb";
 app.use(express.json({
   limit: JSON_BODY_LIMIT,
@@ -1783,6 +1800,47 @@ app.post("/api/sales/enquiry-ack-template", requireAuth, requireRole("admin"), a
     return res.json({ ok: true });
   } catch (err) {
     console.error("[sales/enquiry-ack-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Sales OS Slice 1 — the admin-editable Qualify email templates (intro + follow-up), user_settings
+// key crm_qualify_email. GET returns the saved templates (or the approved defaults) + defaults +
+// placeholders. POST saves { intro:{subject,body}, followup:{subject,body} }.
+app.get("/api/sales/qualify-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const templates = sb ? await loadQualifyEmailTemplates(sb) : QUALIFY_EMAIL_DEFAULTS;
+    return res.json({
+      ok: true,
+      template: templates,
+      defaults: QUALIFY_EMAIL_DEFAULTS,
+      placeholders: QUALIFY_EMAIL_PLACEHOLDERS,
+    });
+  } catch (err) {
+    console.error("[sales/qualify-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/sales/qualify-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const clean = (t) => ({ subject: String(t?.subject || "").trim(), body: String(t?.body || "").trim() });
+    const intro = clean(req.body?.intro);
+    const followup = clean(req.body?.followup);
+    if (!intro.subject || !intro.body || !followup.subject || !followup.body) {
+      return res.status(400).json({ ok: false, error: "Both templates need a subject and a message." });
+    }
+    const { error } = await sb.from("user_settings").upsert(
+      { key: QUALIFY_EMAIL_TEMPLATE_KEY, value: JSON.stringify({ intro, followup }), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/qualify-email-template POST]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
@@ -2779,6 +2837,22 @@ if (envBool(process.env.LEAD_DIGEST_ENABLED, false)) {
   setInterval(digestTick, digestDayMs);
   setTimeout(digestTick, 90_000);
   console.log("[blue-leaf-api] LEAD_DIGEST_ENABLED: daily internal lead action digest.");
+}
+
+// Sales OS Slice 1 — the Qualify 7-day follow-up cadence on its OWN timer, gated by
+// QUALIFY_FOLLOWUP_ENABLED (default OFF). Client-facing, so it stays dormant on deploy until Sam
+// reviews the copy + turns it on. Mirrors the trade ghost-check: one client-facing follow-up per
+// qualify-stage lead that hasn't booked/replied 7 days after the intro (per-record sent_at guard).
+if (envBool(process.env.QUALIFY_FOLLOWUP_ENABLED, false)) {
+  const qfDayMs = 24 * 60 * 60 * 1000;
+  const qfTick = () => {
+    runQualifyFollowups(getServiceSupabase())
+      .then((r) => console.log("[qualify-followup]", r))
+      .catch((e) => console.error("[qualify-followup]", e));
+  };
+  setInterval(qfTick, qfDayMs);
+  setTimeout(qfTick, 120_000);
+  console.log("[blue-leaf-api] QUALIFY_FOLLOWUP_ENABLED: daily qualify 7-day follow-up cadence.");
 }
 
 // Portal nightly sync on its OWN daily timer, DECOUPLED from REMINDER_CRON — so the

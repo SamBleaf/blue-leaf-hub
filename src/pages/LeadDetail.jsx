@@ -23,6 +23,9 @@ import LeadSummaryPanel from "../components/sales/lead-detail/LeadSummaryPanel.j
 import LeadUnifiedTimeline from "../components/sales/lead-detail/LeadUnifiedTimeline.jsx";
 import LeadStageSection from "../components/sales/lead-detail/LeadStageSection.jsx";
 import LeadAccordion from "../components/sales/lead-detail/LeadAccordion.jsx";
+import EnquiryCallScript from "../components/sales/lead-detail/EnquiryCallScript.jsx";
+import QualificationDropdowns from "../components/sales/lead-detail/QualificationDropdowns.jsx";
+import QualifyActions from "../components/sales/lead-detail/QualifyActions.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -80,7 +83,12 @@ const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 
 const GATE_REQUIREMENTS = {
   qualify:       [],
-  discovery:     [{ field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5 }],
+  discovery:     [
+    { field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5 },
+    // Sales OS Slice 1 hard gate — a booked build conversation. Only enforced once migration 174 is
+    // applied (the column is present on the lead); pre-migration it passes so nothing is blocked early.
+    { field: "discovery_meeting_booked_at", label: "Build conversation booked", check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at },
+  ],
   winning_offer: [
     { field: "discovery_notes",   label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim() },
     { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage },
@@ -1637,11 +1645,15 @@ export default function LeadDetail() {
   async function advanceStage() {
     const next = nextStage(lead.stage);
     if (!next) return;
-    const updated = await patch({ stage: next });
-    if (updated) {
-      bpFetchedFor.current = null;
-      setBpInsight("");
-    }
+    // Surface the server hard gate (e.g. Discovery needs score ≥ 5 AND a booked build conversation).
+    const r = await authFetch(`/api/sales/leads/${leadId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: next }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || "Couldn't advance the stage yet."); return; }
+    setLead(j.lead);
+    bpFetchedFor.current = null;
+    setBpInsight("");
     await load();
   }
 
@@ -2472,8 +2484,19 @@ export default function LeadDetail() {
   // ── "Do this now" focus — pick block(s) by stage ────────────────────
   let focusContent = null;
   let focusShown = true;
-  if (lead.stage === "enquiry" || lead.stage === "qualify") {
-    focusContent = qualifyingBlock;
+  if (lead.stage === "enquiry") {
+    // Sales OS Slice 1 — Enquiry is a guided call-script (scorecard + client details + dispositions).
+    focusContent = <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />;
+  } else if (lead.stage === "qualify") {
+    // Qualify — scorecard + the controlled-vocab client details + the Qualify action panel
+    // (confirm web score, send the qualify email, build-conversation status, nurture prompt).
+    focusContent = (
+      <div className="space-y-4">
+        {qualifyingBlock}
+        <QualificationDropdowns lead={lead} patch={patch} />
+        <QualifyActions lead={lead} patch={patch} reload={load} />
+      </div>
+    );
   } else if (lead.stage === "discovery") {
     // Pass 4A: keep conversation/transcript prominent in the Discovery workspace
     // (excluded from the Activity group below to avoid a within-tree double).

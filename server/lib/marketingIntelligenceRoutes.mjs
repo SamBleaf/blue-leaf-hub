@@ -39,6 +39,7 @@ import { ok, err, rowToCamel, rowsToCamel, translateDbError } from "./apiRespons
 import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { sendEnquiryAck } from "./leadReminders.mjs";
 import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
+import { preScoreEnquiry } from "./enquiryPreScore.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
@@ -272,6 +273,8 @@ export function registerMarketingIntelligenceRoutes(app) {
     const {
       // Lead fields
       name, email, phone, project_type, suburb, project_description,
+      // Qualification (website two-step form — all optional)
+      project_stage, budget_range, timeframe, designer_status, priority, referral_source,
       // Attribution
       session_id, utm_source, utm_medium, utm_campaign,
       // W01-SEC-003 honeypot — a hidden field real users never fill.
@@ -296,8 +299,33 @@ export function registerMarketingIntelligenceRoutes(app) {
     if (!name || !email) return err(res, 400, "name and email are required");
 
     // CRM Control Spine (migration 127) — every lead needs a lead_source_category. The public
-    // enquiry form is (almost) always 'website' unless the utm_source signals a specific channel.
-    const leadSourceCategory = normalizeLeadSourceCategory(utm_source) || "website";
+    // enquiry form is (almost) always 'website' unless the utm_source (or the visitor's stated
+    // "how did you hear about us") signals a specific channel.
+    const leadSourceCategory = normalizeLeadSourceCategory(utm_source || referral_source) || "website";
+
+    // Fold the two-step form's qualification answers into the description so nothing is lost.
+    // NOTE: qualify_budget / qualify_timeframe are INTEGER scoring columns (summed into the
+    // generated qualify_score), not free text — so the raw answers go in the description and the
+    // sales team sets the numeric qualifying scores in the Hub. "Heard via" also seeds lead_source
+    // when there's no UTM.
+    const qualExtras = [
+      project_stage   ? `Stage: ${project_stage}` : null,
+      budget_range    ? `Budget: ${budget_range}` : null,
+      timeframe       ? `Timeframe: ${timeframe}` : null,
+      designer_status ? `Design: ${designer_status}` : null,
+      priority        ? `Priority: ${priority}` : null,
+      referral_source ? `Heard via: ${referral_source}` : null,
+    ].filter(Boolean);
+    const composedDescription = [
+      project_description || null,
+      qualExtras.length ? `— From enquiry form —\n${qualExtras.join("\n")}` : null,
+    ].filter(Boolean).join("\n\n") || null;
+
+    // Sales OS pre-score (workstream A): map the form's budget/timeframe into the integer qualify_*
+    // components (never qualify_score — it's GENERATED), map project_stage → design_stage, and route
+    // a complete-enough enquiry straight into Qualify. site/decision-maker stay null (form doesn't
+    // ask) → the salesperson confirms in Qualify. See enquiryPreScore.mjs.
+    const pre = preScoreEnquiry(req.body);
 
     // Create the lead
     const { data: lead, error: leadErr } = await sb.from("leads").insert({
@@ -306,15 +334,27 @@ export function registerMarketingIntelligenceRoutes(app) {
       phone:               phone || null,
       project_type:        project_type || null,
       suburb:              suburb || null,
-      project_description: project_description || null,
-      lead_source:         utm_source || "website",
+      project_description: composedDescription,
+      lead_source:         utm_source || referral_source || "website",
       lead_source_category: leadSourceCategory,
       utm_campaign:        utm_campaign || null,
+      // pre-score (columns predate migration 174)
+      qualify_budget:      pre.qualify_budget,
+      qualify_timeframe:   pre.qualify_timeframe,
+      design_stage:        pre.design_stage,
+      stage:               pre.stage,
     }).select().single();
 
     if (leadErr) return err(res, 500, translateDbError(leadErr));
 
     await insertLeadCreatedActivity(sb, lead.id);
+
+    // web_prescored is migration-174 only; set it fail-soft (decoupled from the insert) so the
+    // enquiry never breaks if 174 isn't applied yet. Only stamp it when we actually skipped Enquiry
+    // (that's what drives the Qualify "confirm web score" banner). Default is false.
+    if (pre.web_prescored) {
+      sb.from("leads").update({ web_prescored: true }).eq("id", lead.id).then(() => {}, () => {});
+    }
 
     // 1B — one safe client-facing acknowledgement (CRM Phase 1). Gated OFF until the template +
     // sending are reviewed (ENQUIRY_AUTOACK_ENABLED). Fire-and-forget + fail-soft: it must never
