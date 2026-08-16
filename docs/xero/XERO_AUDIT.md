@@ -16,7 +16,7 @@ Xero is the Blue Leaf Hub's accounting integration, added as an **accounts-recei
 | Aspect | Detail |
 |---|---|
 | Symptom | `XeroPane` "Connect" hands off to Xero's authorize URL (`XeroPane.jsx:35-41`); Xero rejects the consent with `invalid_scope`. |
-| **Cause (confirmed via the authorize URL)** | Our request is correct (`scope=offline_access accounting.transactions accounting.contacts accounting.settings`, `%20`-encoded, valid redirect). Xero rejects it → the app (client_id `65FD30C5…`) is a **Custom Connection** (M2M) with no consent/redirect flow, not an Auth Code **Web app**. |
+| **Cause (RESOLVED — two sequential issues)** | (1) The first app (`65FD30C5…`) was a **Custom Connection** (M2M, no consent flow) → fixed by creating an Auth Code **Web app**. (2) The Web app then still failed because our scope string used the **broad legacy `accounting.transactions`**, which Xero apps created on/after **2 Mar 2026** (granular-scopes rollout) no longer grant → fixed by switching to the granular **`accounting.invoices`** scope. Final scope set: `offline_access accounting.contacts accounting.settings accounting.invoices`. |
 | Already fixed (not the cause) | Scope `%20`-encoding bug (commit `04f5b62`); `openid profile email` dropped from `DEFAULT_SCOPES` (`xeroClient.mjs:32-33`, commit `e812e3b`). |
 | Secondary trap (fixed) | `.env.example` stale commented `XERO_SCOPES` with `openid profile email` — corrected so it can't re-introduce `invalid_scope`. |
 
