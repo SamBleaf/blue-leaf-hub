@@ -35,6 +35,7 @@ import { sendReminderForRfqId } from "./lib/sendOneReminder.mjs";
 import { attachSuggestions } from "./lib/quoteInboxSuggest.mjs";
 import { handleBuildexactWebhook } from "./lib/buildexactWebhook.mjs";
 import { handleCalcomWebhook } from "./lib/calcomWebhook.mjs";
+import { pollLeadReplies } from "./lib/leadInboundMatch.mjs";
 import { registerModule4Routes } from "./lib/module4Routes.mjs";
 import { registerModule5Routes } from "./lib/module5Routes.mjs";
 import { registerModule6Routes } from "./lib/module6Routes.mjs";
@@ -1845,6 +1846,18 @@ app.post("/api/sales/qualify-email-template", requireAuth, requireRole("admin"),
   }
 });
 
+// Sales OS Slice 1 — on-demand trigger for the lead-reply poll (D2), so it can be run from an
+// external scheduler (cron-job.org + CRON_SECRET) or by an admin without waiting for the tick.
+app.post("/api/cron/lead-replies", requireCronSecretOrAdmin, async (_req, res) => {
+  try {
+    const r = await pollLeadReplies(getServiceSupabase());
+    return res.json(r);
+  } catch (err) {
+    console.error("[cron/lead-replies]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 app.post("/api/cron/lead-time-notifications", requireCronSecretOrAdmin, async (req, res) => {
   const sb = getServiceSupabase();
   if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
@@ -2853,6 +2866,21 @@ if (envBool(process.env.QUALIFY_FOLLOWUP_ENABLED, false)) {
   setInterval(qfTick, qfDayMs);
   setTimeout(qfTick, 120_000);
   console.log("[blue-leaf-api] QUALIFY_FOLLOWUP_ENABLED: daily qualify 7-day follow-up cadence.");
+}
+
+// Sales OS Slice 1 — poll the mailbox for client replies and thread them onto the matching lead
+// (D2). Gated by LEAD_MAILBOX_ENABLED (default OFF — same flag as outbound compose). Own cursor, so
+// it never conflicts with the invoice poller. ~10-minute cadence so the lead mailbox feels live.
+if (envBool(process.env.LEAD_MAILBOX_ENABLED, false)) {
+  const leadPollMs = Number(process.env.LEAD_MAILBOX_POLL_INTERVAL_MS) || 10 * 60 * 1000;
+  const leadTick = () => {
+    pollLeadReplies(getServiceSupabase())
+      .then((r) => console.log("[lead-imap]", JSON.stringify(r)))
+      .catch((e) => console.error("[lead-imap]", e));
+  };
+  setInterval(leadTick, leadPollMs);
+  setTimeout(leadTick, 150_000);
+  console.log("[blue-leaf-api] LEAD_MAILBOX_ENABLED: polling the mailbox for lead replies.");
 }
 
 // Portal nightly sync on its OWN daily timer, DECOUPLED from REMINDER_CRON — so the

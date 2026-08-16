@@ -26,6 +26,7 @@ import LeadAccordion from "../components/sales/lead-detail/LeadAccordion.jsx";
 import EnquiryCallScript from "../components/sales/lead-detail/EnquiryCallScript.jsx";
 import QualificationDropdowns from "../components/sales/lead-detail/QualificationDropdowns.jsx";
 import QualifyActions from "../components/sales/lead-detail/QualifyActions.jsx";
+import LeadMailbox from "../components/sales/lead-detail/LeadMailbox.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -2486,15 +2487,21 @@ export default function LeadDetail() {
   let focusShown = true;
   if (lead.stage === "enquiry") {
     // Sales OS Slice 1 — Enquiry is a guided call-script (scorecard + client details + dispositions).
-    focusContent = <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />;
+    focusContent = (
+      <div className="space-y-4">
+        <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />
+        <LeadMailbox lead={lead} />
+      </div>
+    );
   } else if (lead.stage === "qualify") {
     // Qualify — scorecard + the controlled-vocab client details + the Qualify action panel
-    // (confirm web score, send the qualify email, build-conversation status, nurture prompt).
+    // (confirm web score, send the qualify email, build-conversation status, nurture prompt) + mailbox.
     focusContent = (
       <div className="space-y-4">
         {qualifyingBlock}
         <QualificationDropdowns lead={lead} patch={patch} />
         <QualifyActions lead={lead} patch={patch} reload={load} />
+        <LeadMailbox lead={lead} />
       </div>
     );
   } else if (lead.stage === "discovery") {

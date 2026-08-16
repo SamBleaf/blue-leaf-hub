@@ -17,6 +17,8 @@ import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
 import { sendQualifyIntro } from "./qualifyEmail.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { enrichSite } from "./siteEnrichmentService.mjs";
 import {
@@ -608,6 +610,56 @@ export function registerSalesRoutes(app) {
     if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the qualify email.");
     if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html, bookingLink: result.bookingLink } });
     return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });
+  });
+
+  // ── Sales OS Slice 1: two-way lead mailbox (Mail-app parity) ───────────────
+  // Thread view of the lead's correspondence (inbound + outbound). Degrades softly pre-migration-175.
+  app.get("/api/sales/leads/:id/mailbox", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data, error } = await sb.from("correspondence")
+      .select("id, direction, subject, body, email_from, email_to, message_id, sent_at")
+      .eq("lead_id", req.params.id).order("sent_at", { ascending: true });
+    if (error) {
+      if (error.code === "42703") return ok(res, { messages: [], columnMissing: true }); // correspondence.lead_id pre-mig
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { messages: (data || []).map(rowToCamel) });
+  });
+
+  // Compose / reply — sends real SMTP (mirrors to the Sent mailbox) + logs an outbound
+  // correspondence row. inReplyTo threads a reply onto the client's message. Behind LEAD_MAILBOX_ENABLED.
+  app.post("/api/sales/leads/:id/email", requireAuth, async (req, res) => {
+    if (process.env.LEAD_MAILBOX_ENABLED !== "true") {
+      return err(res, 503, "Lead mailbox sending is turned off. Set LEAD_MAILBOX_ENABLED to send.");
+    }
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const subject = String(req.body?.subject || "").trim();
+    const bodyText = String(req.body?.body || "").trim();
+    const inReplyTo = req.body?.inReplyTo ? String(req.body.inReplyTo).trim() : null;
+    if (!subject || !bodyText) return err(res, 400, "Subject and message are both required.");
+    const { data: lead, error } = await sb.from("leads").select("id, name, first_name, email").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const to = String(lead.email || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "This lead has no valid email address.");
+    const sig = await getUserSignature(sb, req.caller?.id || null);
+    const fullText = `${bodyText}\n\n${formatSignatureFooter(sig)}`;
+    const messageId = `<lead-${lead.id}-${Date.now()}@blueleafbuilding.com.au>`;
+    try {
+      const r = await sendPlainMail({ to, subject, text: fullText, messageId, inReplyTo: inReplyTo || undefined, references: inReplyTo || undefined });
+      try {
+        await sb.from("correspondence").insert({
+          lead_id: lead.id, direction: "outbound", subject, body: fullText,
+          email_from: (process.env.SMTP_FROM || "admin@blueleafbuilding.com.au").trim(), email_to: to,
+          message_id: messageId, in_reply_to: inReplyTo || null,
+        });
+      } catch { /* pre-migration-175 — non-blocking */ }
+      try { await sb.from("lead_activities").insert({ lead_id: lead.id, activity_type: "email", summary: `Email sent: ${subject}` }); } catch { /* best-effort */ }
+      return ok(res, { sent: true, transport: r?.transport, messageId });
+    } catch (e) {
+      return err(res, 400, e?.message || "Could not send the email.");
+    }
   });
 
   // ── Batch 1B: lead_signals (objections / fears / priorities) ───────────────
