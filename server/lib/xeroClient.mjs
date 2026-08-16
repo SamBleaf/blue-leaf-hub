@@ -94,13 +94,20 @@ export function verifyState(state) {
 export function buildAuthorizeUrl(state) {
   const env = xeroEnv();
   if (!env) throw new XeroNotConnectedError("Xero is not configured");
-  const u = new URL(AUTHORIZE_URL);
-  u.searchParams.set("response_type", "code");
-  u.searchParams.set("client_id", env.clientId);
-  u.searchParams.set("redirect_uri", env.redirectUri);
-  u.searchParams.set("scope", env.scopes);
-  u.searchParams.set("state", state);
-  return u.toString();
+  // Build the query with encodeURIComponent so the spaces in `scope` become %20.
+  // URLSearchParams emits `+` for spaces, which Xero's authorize endpoint rejects as an
+  // invalid scope token (→ error invalid_scope / 500). Xero requires %20-delimited scopes.
+  const params = {
+    response_type: "code",
+    client_id: env.clientId,
+    redirect_uri: env.redirectUri,
+    scope: env.scopes,
+    state,
+  };
+  const qs = Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+  return `${AUTHORIZE_URL}?${qs}`;
 }
 
 /**
