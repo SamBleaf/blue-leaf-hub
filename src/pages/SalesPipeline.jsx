@@ -476,6 +476,15 @@ export default function SalesPipeline() {
 
   function openLead(id) { nav(`/sales/${id}`); }
 
+  // Test/dev harness — spawn a throwaway test lead and open it (bounce it across any stage). Admin
+  // only server-side. Requires migration 178 (leads.is_test).
+  async function createTestLead() {
+    const r = await authFetch("/api/sales/test-lead", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || "Couldn't create a test lead (is migration 178 applied?)."); return; }
+    nav(`/sales/${j.lead.id}`);
+  }
+
   // Active pipeline excludes won (a job now) + nurture/lost — matches the server scorecard.
   const activeLeads = leads.filter((l) => !["nurture", "lost", "won"].includes(l.stage));
   const wonLeads = leads.filter((l) => l.stage === "won");
@@ -505,6 +514,7 @@ export default function SalesPipeline() {
         onView={setView}
         onAddLead={() => setAddOpen(true)}
         onArchTender={() => setArchTenderOpen(true)}
+        onTestLead={createTestLead}
       />
 
       {err && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">{err}</div>}

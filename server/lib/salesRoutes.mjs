@@ -54,6 +54,14 @@ function evaluateStageGate(targetStage, mergedLead) {
   return gates.filter(g => !g.check(mergedLead)).map(g => g.label);
 }
 
+// APB pipeline order (off-pipeline nurture/lost excluded). Used to tell a FORWARD advance from a
+// corrective BACKWARD move: hard gates apply only to forward moves on real (non-test) leads.
+const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "accepted", "tender", "won"];
+function isForwardMove(from, to) {
+  const fi = STAGE_ORDER.indexOf(from), ti = STAGE_ORDER.indexOf(to);
+  return fi >= 0 && ti >= 0 && ti > fi;
+}
+
 // Sales OS Slice 1 — advisory nurture recommendation (Lost stays a manual choice, never automatic).
 // A qualify-stage lead scoring below 5 should be nurtured, not lost. Returns null when not applicable.
 function nurtureRecommendation(lead) {
@@ -571,6 +579,58 @@ export function registerSalesRoutes(app) {
     res.json({ ok: true, lead, activities: activities || [], nurtureRecommendation: nurtureRecommendation(lead) });
   });
 
+  // ── Test/dev harness: create + reset a TEST lead (admin only) ──────────────
+  // A test lead (leads.is_test) bounces freely across every stage (hard gates bypassed) and is kept
+  // out of the automatic cadences + internal digest. Its email defaults to a safe address so any
+  // manual send you fire to check an email goes to you, not a client. Requires migration 178.
+  app.post("/api/sales/test-lead", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const email = (process.env.TEST_LEAD_EMAIL || req.caller?.email || "test@blueleafbuilding.com.au").trim();
+    const insert = {
+      name: `TEST — ${stamp}`, first_name: "Test", last_name: "Lead", email, phone: "0400 000 000",
+      project_type: "renovation", suburb: "Malvern", site_address: "1 Test Street, Malvern",
+      project_description: "Test lead for walking the pipeline — safe to bounce across stages.",
+      lead_source: "internal_test", lead_source_category: "other", stage: "enquiry", is_test: true,
+    };
+    const { data, error } = await sb.from("leads").insert(insert).select().single();
+    if (error) return err(res, 400, translateDbError(error));
+    insertLeadCreatedActivity(sb, data.id).catch(() => {});
+    ok(res, { lead: rowToCamel(data) });
+  });
+
+  // Reset a test lead to a clean Enquiry state. Core reset (columns ≤ mig 174) must succeed; the
+  // discovery/agreement stamps (mig 179) are cleared best-effort so this works before Phase 1 lands.
+  app.post("/api/sales/leads/:id/test-reset", requireAuth, requireRole("admin"), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("id, is_test").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    if (!lead.is_test) return err(res, 400, "Reset is only available for test leads.");
+    const coreReset = {
+      stage: "enquiry", stage_entered_at: new Date().toISOString(), won_at: null, lost_at: null,
+      qualify_confirmed_at: null, qualify_confirmed_by: null, qualify_email_sent_at: null,
+      qualify_intro_sent_at: null, qualify_followup_sent_at: null, web_prescored: false,
+      discovery_meeting_at: null, discovery_meeting_booked_at: null, discovery_meeting_source: null,
+      calcom_booking_uid: null, calcom_reschedule_url: null, calcom_cancel_url: null,
+      client_folder_path: null, client_folder_link: null, client_folder_created_at: null,
+    };
+    const { data: updated, error: uErr } = await sb.from("leads").update(coreReset).eq("id", req.params.id).select().single();
+    if (uErr) return err(res, 400, translateDbError(uErr));
+    // mig-179 discovery/agreement columns (best-effort — ignored before Phase 1 is applied).
+    sb.from("leads").update({
+      discovery_email_sent_at: null, discovery_followup_sent_at: null, discovery_meeting_attendees: null,
+      concept_agreement_status: null, concept_agreement_generated_at: null,
+      concept_agreement_accepted_at: null, concept_agreement_document_path: null,
+      selected_designer_contact_id: null, concept_fee: null, design_package_fee: null,
+    }).eq("id", req.params.id).then(() => {}, () => {});
+    // Best-effort wipe of the timeline artifacts so it's a truly clean slate.
+    sb.from("correspondence").delete().eq("lead_id", req.params.id).then(() => {}, () => {});
+    sb.from("lead_activities").delete().eq("lead_id", req.params.id).then(() => {}, () => {});
+    ok(res, { lead: rowToCamel(updated) });
+  });
+
   // ── Batch 1B: unified timeline (read-only v_lead_timeline) ─────────────────
   // One stream across activities, notes, conversations, CRM interactions and email
   // opens/clicks. Degrades softly to an empty stream if migration 128 isn't applied
@@ -802,11 +862,22 @@ export function registerSalesRoutes(app) {
       .single();
     let gateWarnings = [];
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
-      // Sales OS Slice 1 — the ONE deliberate HARD gate (a documented exception to the advisory-gate
+      // Test/dev harness (mig 178): a TEST lead bypasses every hard gate and can jump to any stage in
+      // any direction; and for ANY lead a BACKWARD move is corrective and never gated. So hard gates
+      // apply only to a FORWARD advance on a real lead. Defensive fetch keeps it deploy-ahead-safe —
+      // pre-migration-178 is_test reads as false, preserving today's behaviour.
+      let isTestLead = false;
+      try {
+        const { data: t, error: tErr } = await sb.from("leads").select("is_test").eq("id", req.params.id).maybeSingle();
+        if (!tErr && t) isTestLead = !!t.is_test;
+      } catch { /* pre-migration-178 */ }
+      const enforceHardGates = !isTestLead && isForwardMove(current.stage, updates.stage);
+
+      // Sales OS Slice 1 — the deliberate HARD gate (a documented exception to the advisory-gate
       // policy, W01-DRIFT-003): advancing INTO Discovery requires a qualifying score ≥ 5 AND a booked
       // build conversation. Enforced only once migration 174 is applied (the meeting column exists),
       // so deploying ahead of the paste never blocks the pipeline. Every OTHER gate stays advisory.
-      if (updates.stage === "discovery") {
+      if (enforceHardGates && updates.stage === "discovery") {
         const { data: m, error: mErr } = await sb.from("leads")
           .select("discovery_meeting_booked_at").eq("id", req.params.id).maybeSingle();
         if (!mErr) {

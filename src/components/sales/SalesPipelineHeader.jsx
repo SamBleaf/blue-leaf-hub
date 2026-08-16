@@ -35,7 +35,7 @@ const VIEWS = [
   { id: "scorecard", title: "APB Scorecard" },
 ];
 
-export default function SalesPipelineHeader({ activeCount, totalValue, wonCount, view, onView, onAddLead, onArchTender }) {
+export default function SalesPipelineHeader({ activeCount, totalValue, wonCount, view, onView, onAddLead, onArchTender, onTestLead }) {
   const valueLabel = formatValue(totalValue);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -60,6 +60,15 @@ export default function SalesPipelineHeader({ activeCount, totalValue, wonCount,
             </button>
           ))}
         </div>
+        {onTestLead && (
+          <button
+            onClick={onTestLead}
+            title="Create a throwaway test lead you can bounce across every stage"
+            className="flex items-center gap-1.5 rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-700 shadow-sm transition-colors hover:bg-amber-500 hover:text-white hover:border-amber-500"
+          >
+            <span className="text-lg leading-none">+</span> Test lead
+          </button>
+        )}
         <button
           onClick={onArchTender}
           className="flex items-center gap-1.5 rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary shadow-sm transition-colors hover:bg-primary hover:text-white"

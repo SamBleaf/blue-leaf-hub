@@ -1,6 +1,7 @@
 import { authFetch } from "../lib/authFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
 import { apiFetch, apiPost } from "../lib/apiFetch.js";
+import { useAuth } from "../lib/useAuth.js";
 import {
   LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS,
   LEAD_ACTION_TYPE_LABELS,
@@ -1374,6 +1375,8 @@ export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
   const { setScreenContext } = useBlueprintContext() || {};
+  const { role } = useAuth() || {};
+  const isAdmin = role === "admin";
 
   const [lead, setLead] = useState(null);
   const [activities, setActivities] = useState([]);
@@ -1658,6 +1661,32 @@ export default function LeadDetail() {
     await load();
   }
 
+  // Test/dev harness — jump to any stage from the stepper. Test leads move any direction; real leads
+  // may only jump BACKWARD (corrective, with a confirm). The server bypasses hard gates for test
+  // leads + backward moves; a blocked forward move surfaces its 422 via the alert.
+  async function jumpToStage(stageId) {
+    if (!stageId || stageId === lead.stage) return;
+    const goingBack = STAGE_ORDER.indexOf(stageId) < STAGE_ORDER.indexOf(lead.stage);
+    if (!lead.is_test && goingBack && !window.confirm(`Move this lead back to ${STAGES.find(s => s.id === stageId)?.label || stageId}?`)) return;
+    const r = await authFetch(`/api/sales/leads/${leadId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: stageId }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || "Couldn't change the stage."); return; }
+    setLead(j.lead);
+    bpFetchedFor.current = null;
+    setBpInsight("");
+    await load();
+  }
+
+  async function resetTestLead() {
+    if (!window.confirm("Reset this test lead back to a clean Enquiry state?")) return;
+    const { ok, data, error } = await apiPost(`/api/sales/leads/${leadId}/test-reset`, {});
+    if (!ok) { alert(error || "Couldn't reset the test lead."); return; }
+    if (data?.lead) setLead(data.lead);
+    await load();
+  }
+
   if (loading) return <div className="flex items-center justify-center h-64 text-muted text-sm">Loading…</div>;
   if (err) return <div className="p-8 text-red-600 text-sm">{err}</div>;
   if (!lead) return null;
@@ -1690,6 +1719,9 @@ export default function LeadDetail() {
 
   const headerActionsBlock = (
     <div className="flex gap-2 flex-shrink-0">
+      {lead.is_test && isAdmin && (
+        <button onClick={resetTestLead} className="text-xs text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded border border-amber-300 hover:border-amber-500">↺ Reset test lead</button>
+      )}
       <button onClick={() => patch({ stage: "nurture" }).then(() => load())} className="text-xs text-muted hover:text-ink px-3 py-1.5 rounded border border-hairline">→ Nurture</button>
       <button onClick={() => patch({ stage: "lost" }).then(() => nav("/sales"))} className="text-xs text-red-500 hover:text-red-700 px-3 py-1.5 rounded border border-red-200 hover:border-red-400">Mark Lost</button>
     </div>
@@ -2633,7 +2665,7 @@ export default function LeadDetail() {
     <div>
       <LeadDetailHeader
         breadcrumb={breadcrumbBlock}
-        stepper={<LeadStageStepper stageOrder={STAGE_ORDER} stages={STAGES} current={lead.stage} isArchTender={isArchTender} />}
+        stepper={<LeadStageStepper stageOrder={STAGE_ORDER} stages={STAGES} current={lead.stage} isArchTender={isArchTender} onJump={isAdmin ? jumpToStage : undefined} isTest={!!lead.is_test} canManage={isAdmin} />}
         keyFacts={keyFactsBlock}
         primaryAction={primaryAction}
         secondaryActions={headerActionsBlock}

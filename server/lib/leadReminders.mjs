@@ -120,6 +120,7 @@ async function gatherDigest(sb, now) {
     .not("stage", "in", `(${TERMINAL_STAGES.join(",")})`)
     .not("action_due_at", "is", null)
     .lte("action_due_at", endOfToday.toISOString())
+    .not("is_test", "is", true) // keep test leads out of the internal digest
     .order("action_due_at", { ascending: true });
   if (dueErr) throw dueErr;
 
@@ -132,6 +133,7 @@ async function gatherDigest(sb, now) {
     .not("stage", "in", `(${TERMINAL_STAGES.join(",")})`)
     .is("action_due_at", null)
     .lt("last_activity_at", idleCutoff.toISOString())
+    .not("is_test", "is", true) // keep test leads out of the reactivation sweep
     .order("last_activity_at", { ascending: true });
   if (idleErr) throw idleErr;
 

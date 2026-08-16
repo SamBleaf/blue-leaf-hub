@@ -224,7 +224,8 @@ export async function runQualifyFollowups(sb) {
     .not("qualify_intro_sent_at", "is", null)
     .lte("qualify_intro_sent_at", cutoff)
     .is("qualify_followup_sent_at", null)
-    .is("discovery_meeting_booked_at", null);
+    .is("discovery_meeting_booked_at", null)
+    .not("is_test", "is", true); // never auto-email a test lead
 
   if (error) {
     // pre-mig-174 the columns don't exist (42703) → nothing to do; not an error worth alarming on.

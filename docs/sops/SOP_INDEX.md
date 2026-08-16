@@ -36,6 +36,7 @@
 | 02-10 | Run the Enquiry call & decide the next step | [02-10_enquiry_call_script.md](02_sales/02-10_enquiry_call_script.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-11 | Send the Qualify email & book the build conversation | [02-11_qualify_email_and_booking.md](02_sales/02-11_qualify_email_and_booking.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-12 | Use the lead mailbox (two-way email) | [02-12_lead_mailbox.md](02_sales/02-12_lead_mailbox.md) | Sales | Admin, Supervisor | Draft | untested | Yes | Medium |
+| 02-13 | Use a test lead to walk the pipeline | [02-13_test_lead_walk_the_pipeline.md](02_sales/02-13_test_lead_walk_the_pipeline.md) | Sales | Admin | Draft | untested | Yes | Medium |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
