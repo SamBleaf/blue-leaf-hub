@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
-import { requireAuth } from "./requireAuth.mjs";
+import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { normaliseAddress } from "./addressNormalise.mjs";
 import { setFact } from "./factsService.mjs";
