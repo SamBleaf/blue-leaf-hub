@@ -26,8 +26,11 @@ const AUTHORIZE_URL = "https://login.xero.com/identity/connect/authorize";
 const TOKEN_URL = "https://identity.xero.com/connect/token";
 const CONNECTIONS_URL = "https://api.xero.com/connections";
 const API_BASE = "https://api.xero.com/api.xro/2.0";
+// Minimal scopes we actually use: a rotating refresh token + accounting read/write.
+// (We deliberately DON'T request openid/profile/email — those are OIDC user-identity
+// scopes we never use, and requesting a scope the app doesn't grant → invalid_scope.)
 const DEFAULT_SCOPES =
-  "openid profile email offline_access accounting.transactions accounting.contacts accounting.settings";
+  "offline_access accounting.transactions accounting.contacts accounting.settings";
 const ACCESS_SKEW_MS = 60_000; // treat a token as stale 60s before its real expiry
 
 export class XeroNotConnectedError extends Error {
