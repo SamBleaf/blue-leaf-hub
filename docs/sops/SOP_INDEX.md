@@ -91,6 +91,7 @@
 | 09-10 | Create and send a variation | [finance_create_variation.md](09_finance/finance_create_variation.md) | Finance | Admin | Draft | untested | Yes | High |
 | 09-11 | Complete a WIPAA review | [finance_wipaa_review.md](09_finance/finance_wipaa_review.md) | Finance | Admin, Director | Draft | untested | Yes | High |
 | 09-12 | View and interpret the cashflow forecast | [finance_cashflow_forecast.md](09_finance/finance_cashflow_forecast.md) | Finance | Admin, Director | Draft | untested | Yes | Medium |
+| 09-13 | Connect Xero (client invoices) | [finance_connect_xero.md](09_finance/finance_connect_xero.md) | Finance | Admin, Director | Draft | untested | Yes | High |
 | 10-01 | Workforce overview | [workforce_overview.md](10_workforce/workforce_overview.md) | Workforce | Admin, Supervisor | Draft | untested | No | Low |
 | 10-02 | Install the Worker app on iPhone home screen | [worker_pwa_ios_install.md](10_workforce/worker_pwa_ios_install.md) | Workforce | Field worker, Admin | Draft | untested | Yes | Medium |
 | 10-03 | Add a photo when completing a site task | [add_completion_photo.md](10_workforce/add_completion_photo.md) | Workforce | Field worker, Admin, Supervisor | Draft | untested | Yes | Medium |

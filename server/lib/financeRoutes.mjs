@@ -1168,12 +1168,9 @@ export function registerFinanceRoutes(app) {
 
   // ── WIPAA: served by GET /api/finance/jobs/:jobId/wipaa/current in financeCCRoutes.mjs ──
 
-  // ── Xero status (Phase 2 stub) ────────────────────────────────────────────
-  app.get("/api/finance/xero/status", requireAuth, async (req, res) => {
-    const sb = getServiceSupabase();
-    const { data } = await sb.from("xero_credentials").select("tenant_name, expires_at").limit(1).single();
-    res.json({ ok: true, connected: !!data, tenant: data?.tenant_name || null });
-  });
+  // ── Xero status/connect/disconnect + OAuth callback live in xeroRoutes.mjs ──
+  //    (registered in dev-api.mjs right after this module). The old Phase-2 stub
+  //    was retired when the real AR integration landed.
 
   // ── Invoice email poller ──────────────────────────────────────────────────
   const INVOICE_SUBJECT_RE = /invoice|receipt|statement|remittance|bill|tax\s+invoice/i;
