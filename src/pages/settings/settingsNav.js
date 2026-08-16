@@ -19,6 +19,7 @@ export const SETTINGS_NAV = [
       { id: "notifications", label: "Notifications", kind: "section" },
       { id: "enquiry-ack", label: "Enquiry auto-reply", kind: "component" },
       { id: "qualify-email", label: "Qualify emails", kind: "component" },
+      { id: "discovery-email", label: "Discovery emails", kind: "component" },
     ],
   },
   {

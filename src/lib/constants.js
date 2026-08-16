@@ -231,6 +231,22 @@ export const LEAD_CONCERN_LABELS = {
   lock_in:        "Being locked in",
 };
 
+/** leads.concept_agreement_status — the Discovery concept-agreement lifecycle (migration 179) */
+export const CONCEPT_AGREEMENT_STATUS = {
+  DRAFT:     "draft",
+  GENERATED: "generated",
+  SENT:      "sent",
+  ACCEPTED:  "accepted",
+  DECLINED:  "declined",
+};
+export const CONCEPT_AGREEMENT_STATUS_LABELS = {
+  draft:     "Draft",
+  generated: "Generated",
+  sent:      "Sent to client",
+  accepted:  "Accepted",
+  declined:  "Declined",
+};
+
 export const CRM_CONTACT_TYPES = {
   PROSPECT:    "prospect",
   REFERRER:    "referrer",

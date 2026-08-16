@@ -28,6 +28,9 @@ import EnquiryCallScript from "../components/sales/lead-detail/EnquiryCallScript
 import QualificationDropdowns from "../components/sales/lead-detail/QualificationDropdowns.jsx";
 import QualifyActions from "../components/sales/lead-detail/QualifyActions.jsx";
 import LeadMailbox from "../components/sales/lead-detail/LeadMailbox.jsx";
+import DiscoveryMeetingScript from "../components/sales/lead-detail/DiscoveryMeetingScript.jsx";
+import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
+import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -92,6 +95,8 @@ const GATE_REQUIREMENTS = {
     { field: "discovery_meeting_booked_at", label: "Build conversation booked", check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at },
   ],
   winning_offer: [
+    // Sales OS Discovery hard gate — only enforced once mig 179 is applied (column present); pre-mig it passes.
+    { field: "concept_agreement_status", label: "Concept agreement accepted", check: l => !("concept_agreement_status" in l) || l.concept_agreement_status === "accepted" },
     { field: "discovery_notes",   label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim() },
     { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage },
     { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date },
@@ -2537,9 +2542,18 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "discovery") {
-    // Pass 4A: keep conversation/transcript prominent in the Discovery workspace
-    // (excluded from the Activity group below to avoid a within-tree double).
-    focusContent = <>{discoveryBlock}{conversationsBlock}</>;
+    // Sales OS Discovery — the meeting script + designer/fees + the discovery actions (email,
+    // concept agreement, accept → client folder), then the notes/transcript workspace + mailbox.
+    focusContent = (
+      <div className="space-y-4">
+        <DiscoveryMeetingScript />
+        <DesignerSelect lead={lead} patch={patch} reload={load} />
+        <DiscoveryActions lead={lead} reload={load} />
+        {discoveryBlock}
+        {conversationsBlock}
+        <LeadMailbox lead={lead} />
+      </div>
+    );
   } else if (lead.stage === "winning_offer") {
     focusContent = winningOfferBlock;
   } else if (lead.stage === "fee_proposal") {

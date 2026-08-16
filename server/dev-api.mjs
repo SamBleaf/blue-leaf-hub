@@ -27,6 +27,7 @@ import { runDeadlineReminders } from "./lib/rfqReminders.mjs";
 import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQUIRY_ACK_TEMPLATE_KEY } from "./lib/leadReminders.mjs";
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
+import { loadDiscoveryEmailTemplates, DISCOVERY_EMAIL_DEFAULTS, DISCOVERY_EMAIL_TEMPLATE_KEY, DISCOVERY_EMAIL_PLACEHOLDERS, runDiscoveryFollowups } from "./lib/discoveryEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
@@ -1846,6 +1847,41 @@ app.post("/api/sales/qualify-email-template", requireAuth, requireRole("admin"),
   }
 });
 
+// Sales OS Discovery — the admin-editable Discovery email templates (intro + follow-up), user_settings
+// key crm_discovery_email. Mirrors the qualify-email-template routes.
+app.get("/api/sales/discovery-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const template = sb ? await loadDiscoveryEmailTemplates(sb) : DISCOVERY_EMAIL_DEFAULTS;
+    return res.json({ ok: true, template, defaults: DISCOVERY_EMAIL_DEFAULTS, placeholders: DISCOVERY_EMAIL_PLACEHOLDERS });
+  } catch (err) {
+    console.error("[sales/discovery-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/sales/discovery-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const clean = (t) => ({ subject: String(t?.subject || "").trim(), body: String(t?.body || "").trim() });
+    const intro = clean(req.body?.intro);
+    const followup = clean(req.body?.followup);
+    if (!intro.subject || !intro.body || !followup.subject || !followup.body) {
+      return res.status(400).json({ ok: false, error: "Both templates need a subject and a message." });
+    }
+    const { error } = await sb.from("user_settings").upsert(
+      { key: DISCOVERY_EMAIL_TEMPLATE_KEY, value: JSON.stringify({ intro, followup }), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/discovery-email-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 // Sales OS Slice 1 — on-demand trigger for the lead-reply poll (D2), so it can be run from an
 // external scheduler (cron-job.org + CRON_SECRET) or by an admin without waiting for the tick.
 app.post("/api/cron/lead-replies", requireCronSecretOrAdmin, async (_req, res) => {
@@ -2866,6 +2902,20 @@ if (envBool(process.env.QUALIFY_FOLLOWUP_ENABLED, false)) {
   setInterval(qfTick, qfDayMs);
   setTimeout(qfTick, 120_000);
   console.log("[blue-leaf-api] QUALIFY_FOLLOWUP_ENABLED: daily qualify 7-day follow-up cadence.");
+}
+
+// Sales OS Discovery — the 7-day discovery follow-up cadence, gated by DISCOVERY_FOLLOWUP_ENABLED
+// (default OFF, client-facing). Mirrors the qualify cadence.
+if (envBool(process.env.DISCOVERY_FOLLOWUP_ENABLED, false)) {
+  const dfDayMs = 24 * 60 * 60 * 1000;
+  const dfTick = () => {
+    runDiscoveryFollowups(getServiceSupabase())
+      .then((r) => console.log("[discovery-followup]", r))
+      .catch((e) => console.error("[discovery-followup]", e));
+  };
+  setInterval(dfTick, dfDayMs);
+  setTimeout(dfTick, 130_000);
+  console.log("[blue-leaf-api] DISCOVERY_FOLLOWUP_ENABLED: daily discovery 7-day follow-up cadence.");
 }
 
 // Sales OS Slice 1 — poll the mailbox for client replies and thread them onto the matching lead

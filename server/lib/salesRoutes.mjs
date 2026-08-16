@@ -17,6 +17,7 @@ import { insertLeadCreatedActivity } from "./leadActivities.mjs";
 import { normalizeLeadSourceCategory, isValidLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
 import { sendQualifyIntro } from "./qualifyEmail.mjs";
+import { sendDiscoveryIntro } from "./discoveryEmail.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -25,7 +26,10 @@ import {
   dropboxConfigured,
   ensureJobFolderStructure,
   backfillLeadDataToJobFolder,
+  ensureLeadClientFolder,
+  backfillLeadDocsToClientFolder,
 } from "./dropboxClient.mjs";
+import { buildConceptAgreementPdfBuffer } from "./conceptAgreementPdf.mjs";
 
 // Stages at qualify or beyond where a lead justifies a full address geocode.
 const _GEO_QUALIFY_PLUS = new Set([
@@ -66,7 +70,18 @@ function isForwardMove(from, to) {
 // A qualify-stage lead scoring below 5 should be nurtured, not lost. Returns null when not applicable.
 function nurtureRecommendation(lead) {
   if (!lead) return null;
-  if (["nurture", "lost", "won", "accepted", "tender", "fee_proposal", "winning_offer", "discovery"].includes(lead.stage)) return null;
+  // Discovery — no concept-agreement acceptance after two contacts (intro + follow-up) over ~3 weeks
+  // → recommend Nurture. Lost always stays a manual choice.
+  if (lead.stage === "discovery") {
+    if (lead.concept_agreement_status === "accepted") return null;
+    const sentAt = lead.discovery_email_sent_at ? new Date(lead.discovery_email_sent_at).getTime() : null;
+    const weeks = sentAt ? (Date.now() - sentAt) / (7 * 24 * 60 * 60 * 1000) : 0;
+    if (lead.discovery_followup_sent_at && weeks >= 3) {
+      return { recommend: "nurture", reason: "No concept-agreement acceptance after two contacts over ~3 weeks — move to Nurture (or Lost)." };
+    }
+    return null;
+  }
+  if (["nurture", "lost", "won", "accepted", "tender", "fee_proposal", "winning_offer"].includes(lead.stage)) return null;
   const score = lead.qualify_score || 0;
   if (score >= 5) return null;
   const band = score >= 3 ? "3–4" : "0–2";
@@ -672,6 +687,126 @@ export function registerSalesRoutes(app) {
     return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });
   });
 
+  // ── Sales OS Discovery: designer/consultant selection + fee autofill ───────
+  // Reuses crm_contacts (typed architect/designer) + job_contact_roles (lead-aware). Never exposes
+  // job_contact_roles.fee_amount (the admin-only COST we pay). The client-facing concept + design
+  // fees are per-designer DEFAULTS (crm_contacts, EX-GST) autofilled onto the lead, editable per lead.
+  app.get("/api/sales/designers", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data, error } = await sb.from("crm_contacts")
+      .select("id, first_name, last_name, company, default_concept_fee, default_design_fee, contact_type")
+      .in("contact_type", ["architect", "designer"])
+      .order("company", { ascending: true });
+    if (error) {
+      if (error.code === "42703") return ok(res, { designers: [], columnsMissing: true }); // pre-migration-180
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { designers: (data || []).map(rowToCamel) });
+  });
+
+  app.post("/api/sales/leads/:id/designer", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const contactId = req.body?.contactId;
+    const overwrite = req.body?.overwrite === true;
+    if (!contactId) return err(res, 400, "contactId is required.");
+    const { data: designer, error: dErr } = await sb.from("crm_contacts")
+      .select("id, first_name, last_name, company, default_concept_fee, default_design_fee")
+      .eq("id", contactId).maybeSingle();
+    if (dErr || !designer) return err(res, 404, "Designer contact not found.");
+    // Fill-if-empty; overwrite hand-edited fees only when the caller confirms (overwrite:true).
+    const { data: leadFees } = await sb.from("leads").select("concept_fee, design_package_fee").eq("id", req.params.id).maybeSingle();
+    const updates = { selected_designer_contact_id: contactId };
+    if (overwrite || leadFees?.concept_fee == null) updates.concept_fee = designer.default_concept_fee ?? null;
+    if (overwrite || leadFees?.design_package_fee == null) updates.design_package_fee = designer.default_design_fee ?? null;
+    const { data: updated, error: uErr } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
+    if (uErr) return err(res, 400, translateDbError(uErr));
+    // Record the selection as a lead-scoped job_contact_roles row (best-effort; never blocks the lead update).
+    try {
+      const { data: existing } = await sb.from("job_contact_roles")
+        .select("id").eq("lead_id", req.params.id).eq("role", "designer").is("job_id", null).maybeSingle();
+      if (existing) await sb.from("job_contact_roles").update({ contact_id: contactId }).eq("id", existing.id);
+      else await sb.from("job_contact_roles").insert({ lead_id: req.params.id, contact_id: contactId, role: "designer", status: "active", created_by: req.caller?.id || null });
+    } catch { /* job_contact_roles best-effort */ }
+    ok(res, { lead: rowToCamel(updated), designer: rowToCamel(designer) });
+  });
+
+  // Discovery email — assembled preview (always allowed) → send (gated by DISCOVERY_EMAIL_ENABLED).
+  // attachAgreement optionally attaches the generated concept-agreement docx (the "email it after" path).
+  app.post("/api/sales/leads/:id/discovery-email/send", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const dryRun = req.body?.preview === true;
+    if (!dryRun && process.env.DISCOVERY_EMAIL_ENABLED !== "true") {
+      return err(res, 503, "Discovery email sending is turned off. Set DISCOVERY_EMAIL_ENABLED to send — preview still works.");
+    }
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const result = await sendDiscoveryIntro(sb, lead, { userId: req.caller?.id || null, dryRun, attachAgreement: req.body?.attachAgreement === true });
+    if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the discovery email.");
+    if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
+    return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });
+  });
+
+  // ── Sales OS Discovery: concept agreement — generate + SAVE to the client's documents ──────────
+  // Mirrors the PTSA docx generator, but produces a PDF and SAVES it to lead-documents (the PTSA
+  // generator is download-only). The client folder is NOT created here — only at acceptance.
+  app.post("/api/sales/leads/:id/concept-agreement/generate", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    let designer = null;
+    if (lead.selected_designer_contact_id) {
+      const { data: d } = await sb.from("crm_contacts").select("first_name, last_name, company").eq("id", lead.selected_designer_contact_id).maybeSingle();
+      designer = d || null;
+    }
+    let pdf;
+    try { pdf = await buildConceptAgreementPdfBuffer({ lead, designer }); }
+    catch (e) { return err(res, 500, `Could not build the concept agreement: ${e?.message || e}`); }
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `${date}-concept-agreement.pdf`;
+    const storagePath = `leads/${req.params.id}/${filename}`;
+    const { error: upErr } = await sb.storage.from("lead-documents").upload(storagePath, pdf, { contentType: "application/pdf", upsert: true });
+    if (upErr) return err(res, 502, `Could not store the concept agreement: ${translateDbError(upErr)}`);
+    // lead_documents row (best-effort; document_type 'concept_agreement' needs mig 181).
+    try { await sb.from("lead_documents").insert({ lead_id: req.params.id, filename, storage_path: storagePath, mime_type: "application/pdf", document_type: "concept_agreement", uploaded_by: req.caller?.id || null }); } catch { /* pre-mig-181 */ }
+    // stamp the lead (needs mig 179 — degrades to null lead if not yet applied).
+    const { data: updated } = await sb.from("leads").update({ concept_agreement_status: "generated", concept_agreement_generated_at: new Date().toISOString(), concept_agreement_document_path: storagePath }).eq("id", req.params.id).select().single();
+    const { data: signed } = await sb.storage.from("lead-documents").createSignedUrl(storagePath, 3600);
+    ok(res, { lead: updated ? rowToCamel(updated) : null, documentPath: storagePath, downloadUrl: signed?.signedUrl || null });
+  });
+
+  // Concept agreement ACCEPTED — the ONLY writer of concept_agreement_status='accepted' (the blanket
+  // PATCH rejects it). On acceptance (and only then) create the client folder + backfill the lead's
+  // docs into it. Supabase-primary: the status persists even if Dropbox fails. Idempotent re-accept.
+  app.post("/api/sales/leads/:id/concept-agreement/accept", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const { data: updated, error: uErr } = await sb.from("leads")
+      .update({ concept_agreement_status: "accepted", concept_agreement_accepted_at: new Date().toISOString() })
+      .eq("id", req.params.id).select().single();
+    if (uErr) return err(res, 400, translateDbError(uErr));
+    try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: "Concept agreement accepted" }); } catch { /* best-effort */ }
+    let provisioning = { folder: false };
+    if (dropboxConfigured() && !updated?.client_folder_created_at) {
+      try {
+        const clientName = updated?.name || [updated?.first_name, updated?.last_name].filter(Boolean).join(" ");
+        const { path, link } = await ensureLeadClientFolder({ clientName, leadId: req.params.id, suburb: updated?.suburb });
+        await sb.from("leads").update({ client_folder_path: path, client_folder_link: link, client_folder_created_at: new Date().toISOString() }).eq("id", req.params.id);
+        await backfillLeadDocsToClientFolder({ sb, leadId: req.params.id, clientFolderPath: path });
+        provisioning = { folder: true, path, link };
+      } catch (e) {
+        console.warn("[concept-agreement/accept] folder provisioning failed:", e?.message || e);
+      }
+    }
+    const { data: fresh } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    ok(res, { lead: rowToCamel(fresh || updated), provisioning });
+  });
+
   // ── Sales OS Slice 1: two-way lead mailbox (Mail-app parity) ───────────────
   // Thread view of the lead's correspondence (inbound + outbound). Degrades softly pre-migration-175.
   app.get("/api/sales/leads/:id/mailbox", requireAuth, async (req, res) => {
@@ -831,6 +966,11 @@ export function registerSalesRoutes(app) {
     if (body.ptsa_status === "signed") {
       return err(res, 400, "Use POST /api/sales/leads/:id/ptsa/mark-signed to mark a PTSA signed (it stores the signed PDF and provisions the job folder).");
     }
+    // Same protection for the concept agreement — its acceptance provisions the client folder, so it
+    // must go through POST …/concept-agreement/accept (never the blanket PATCH).
+    if (body.concept_agreement_status === "accepted") {
+      return err(res, 400, "Use POST /api/sales/leads/:id/concept-agreement/accept to accept the concept agreement (it creates the client folder).");
+    }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
 
@@ -887,6 +1027,16 @@ export function registerSalesRoutes(app) {
           if (missing.length) {
             return err(res, 422, `Can't advance to Discovery yet — needs ${missing.join(" and ")}.`, "GATE_BLOCKED");
           }
+        }
+      }
+      // Sales OS Discovery — the winning_offer HARD gate: the concept agreement must be accepted.
+      // Enforced only once mig 179 is applied (column present) + only on a forward advance of a real
+      // lead (enforceHardGates); bypassed for test leads. Every other winning_offer gate stays advisory.
+      if (enforceHardGates && updates.stage === "winning_offer") {
+        const { data: ca, error: caErr } = await sb.from("leads")
+          .select("concept_agreement_status").eq("id", req.params.id).maybeSingle();
+        if (!caErr && ca && ca.concept_agreement_status !== "accepted") {
+          return err(res, 422, "Can't advance to Winning Offer yet — the concept agreement must be accepted.", "GATE_BLOCKED");
         }
       }
       const outcomeDate = new Date().toISOString().slice(0, 10);

@@ -11,6 +11,9 @@ export const DROPBOX_PRIVATE_INTERNAL_BASE = "/BLUE LEAF BUILDING/INTERNAL";
 /** Documents & Templates registry tree — editable masters, organised per software module. */
 export const DROPBOX_TEMPLATES_BASE = "/BLUE LEAF BUILDING/ADMINISTRATION/TEMPLATES";
 
+/** Sales client folders — created at Discovery when a lead accepts the concept agreement (pre-job). */
+export const DROPBOX_SALES_CLIENTS_BASE = "/BLUE LEAF BUILDING/SALES/CLIENTS";
+
 const QUOTES = "QUOTES";
 
 function dropboxEnv() {
@@ -922,6 +925,73 @@ export async function backfillLeadDataToJobFolder({ sb, leadId, jobAddress }) {
     console.warn("[backfillLeadDataToJobFolder] conversations skipped:", e?.message || e);
   }
 
+  return { copied, failed };
+}
+
+// ── Sales OS Discovery: the client folder (created at concept-agreement acceptance) ──────────────
+
+/** A collision-safe folder name for a lead: "<client> — <suburb-or-short-id>". */
+function leadClientFolderName({ clientName, leadId, suburb }) {
+  const base = sanitizeJobFolderDisplayName(String(clientName || "Client").trim()) || "Client";
+  const suffix = (suburb && String(suburb).trim()) || String(leadId || "").slice(0, 6);
+  return suffix ? `${base} — ${sanitizeJobFolderDisplayName(String(suffix))}` : base;
+}
+
+/**
+ * Create the client folder under SALES/CLIENTS (idempotent) + a shared link. Returns { path, link }.
+ * Keyed off the client name (+ a suffix) so it lives before any job/address exists. Never throws
+ * fatally — the caller (accept route) treats folder creation as a non-fatal side effect.
+ */
+export async function ensureLeadClientFolder({ clientName, leadId, suburb } = {}) {
+  const token = await getDropboxAccessToken();
+  const folderName = leadClientFolderName({ clientName, leadId, suburb });
+  const path = `${DROPBOX_SALES_CLIENTS_BASE}/${folderName}`;
+  await createFolderIfNotExists(token, DROPBOX_SALES_CLIENTS_BASE);
+  await createFolderIfNotExists(token, path);
+  // Minimal subtree.
+  await createFolderIfNotExists(token, `${path}/CONCEPT`);
+  await createFolderIfNotExists(token, `${path}/CORRESPONDENCE`);
+  let link = null;
+  try { link = await getOrCreateSharedLinkForPath(token, path); } catch { /* link is best-effort */ }
+  return { path, link };
+}
+
+/**
+ * Copy the lead's Supabase 'lead-documents' files into the client folder's CONCEPT subfolder.
+ * Sequential (never Promise.all for Dropbox reads), idempotent via pathExists, non-fatal.
+ */
+export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderPath }) {
+  let copied = 0, failed = 0;
+  if (!sb || !leadId || !clientFolderPath) return { copied, failed };
+  let token, conceptRoot;
+  try {
+    token = await getDropboxAccessToken();
+    conceptRoot = `${clientFolderPath}/CONCEPT`;
+    await createFolderIfNotExists(token, conceptRoot);
+  } catch (e) {
+    console.warn("[backfillLeadDocsToClientFolder] setup skipped:", e?.message || e);
+    return { copied, failed };
+  }
+  try {
+    const { data: docs } = await sb.from("lead_documents").select("filename, storage_path").eq("lead_id", leadId);
+    for (const doc of docs || []) {
+      const fileName = String(doc.filename || "").trim() || "document";
+      const destPath = `${conceptRoot}/${fileName}`;
+      try {
+        if (await pathExists(token, destPath)) continue;
+        const { data: blob, error: dlErr } = await sb.storage.from("lead-documents").download(doc.storage_path);
+        if (dlErr || !blob) { failed += 1; continue; }
+        const buffer = Buffer.from(await blob.arrayBuffer());
+        await dropboxUploadBuffer(token, destPath, buffer, { autorename: false });
+        copied += 1;
+      } catch (e) {
+        failed += 1;
+        console.warn(`[backfillLeadDocsToClientFolder] doc ${fileName} skipped:`, e?.message || e);
+      }
+    }
+  } catch (e) {
+    console.warn("[backfillLeadDocsToClientFolder] documents skipped:", e?.message || e);
+  }
   return { copied, failed };
 }
 
