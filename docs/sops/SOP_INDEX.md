@@ -33,6 +33,9 @@
 | 02-07 | View and manage conversation history | [02-07_conversations.md](02_sales/02-07_conversations.md) | Sales | Admin, Supervisor | Draft | untested | No | Medium |
 | 02-08 | Classify lead fit & work the action queue | [02-08_classify_fit_and_action_queue.md](02_sales/02-08_classify_fit_and_action_queue.md) | Sales | Admin, Staff | Draft | untested | No | High |
 | 02-09 | Lead trust rail & unified timeline | [02-09_trust_rail_and_timeline.md](02_sales/02-09_trust_rail_and_timeline.md) | Sales | Admin, Staff | Draft | untested | No | Medium |
+| 02-10 | Run the Enquiry call & decide the next step | [02-10_enquiry_call_script.md](02_sales/02-10_enquiry_call_script.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-11 | Send the Qualify email & book the build conversation | [02-11_qualify_email_and_booking.md](02_sales/02-11_qualify_email_and_booking.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-12 | Use the lead mailbox (two-way email) | [02-12_lead_mailbox.md](02_sales/02-12_lead_mailbox.md) | Sales | Admin, Supervisor | Draft | untested | Yes | Medium |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
