@@ -247,6 +247,34 @@ export const CONCEPT_AGREEMENT_STATUS_LABELS = {
   declined:  "Declined",
 };
 
+// Xero accounts-receivable invoices (see migration 182 / xeroInvoices.mjs).
+// Hub-side status vocab — deliberately NOT a DB CHECK (deploy-ahead pattern).
+export const XERO_INVOICE_STATUSES = {
+  DRAFT:      "draft",       // row created, not yet in Xero
+  AUTHORISED: "authorised",  // created in Xero as AUTHORISED (pay link + PDF live)
+  SENT:       "sent",        // Hub emailed the official PDF to the client
+  PART_PAID:  "part_paid",   // Xero AmountPaid > 0, AmountDue > 0
+  PAID:       "paid",        // Xero PAID, AmountDue = 0
+  VOID:       "void",        // voided in Xero
+  ERROR:      "error",       // create/sync failed — see error_message
+};
+export const XERO_INVOICE_STATUS_LABELS = {
+  draft:      "Draft",
+  authorised: "Authorised",
+  sent:       "Sent",
+  part_paid:  "Part paid",
+  paid:       "Paid",
+  void:       "Void",
+  error:      "Error",
+};
+export const XERO_INVOICE_TYPES = {
+  CONCEPT_FEE:     "concept_fee",
+  DESIGN_PACKAGE:  "design_package",
+  PROGRESS_CLAIM:  "progress_claim",
+  JOB_VARIATION:   "job_variation",
+  DEPOSIT:         "deposit",
+};
+
 export const CRM_CONTACT_TYPES = {
   PROSPECT:    "prospect",
   REFERRER:    "referrer",

@@ -31,6 +31,7 @@ import LeadMailbox from "../components/sales/lead-detail/LeadMailbox.jsx";
 import DiscoveryMeetingScript from "../components/sales/lead-detail/DiscoveryMeetingScript.jsx";
 import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
 import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
+import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -2549,6 +2550,7 @@ export default function LeadDetail() {
         <DiscoveryMeetingScript />
         <DesignerSelect lead={lead} patch={patch} reload={load} />
         <DiscoveryActions lead={lead} reload={load} />
+        <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
         {conversationsBlock}
         <LeadMailbox lead={lead} />

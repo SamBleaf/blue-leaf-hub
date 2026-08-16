@@ -13,12 +13,15 @@
  * Everything is fail-soft: with XERO_* unset, status reports configured:false and nothing
  * throws. Registered by dev-api.mjs after the finance registrations.
  */
-import { ok, err } from "./apiResponse.mjs";
+import { ok, err, rowToCamel, rowsToCamel } from "./apiResponse.mjs";
 import { appBaseUrl } from "./appUrl.mjs";
+import { getServiceSupabase } from "./supabaseService.mjs";
 import {
   xeroConfigured, signState, verifyState, buildAuthorizeUrl,
   exchangeCodeForTokens, getConnectedTenant, disconnectXero, xeroRedirectUri,
+  XeroNotConnectedError,
 } from "./xeroClient.mjs";
+import { createXeroInvoice, syncXeroInvoice, listXeroInvoices } from "./xeroInvoices.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
 
@@ -57,6 +60,66 @@ export function registerXeroRoutes(app) {
   app.post("/api/finance/xero/disconnect", async (_req, res) => {
     try { await disconnectXero(); return ok(res); }
     catch (e) { return err(res, 500, e?.message || "Could not disconnect Xero."); }
+  });
+
+  // ── Invoices (P1: concept fee) ──────────────────────────────────────────────
+  // List a lead's Xero invoices (read-only — drives the lead-detail card).
+  app.get("/api/finance/leads/:leadId/xero-invoices", async (req, res) => {
+    try {
+      const rows = await listXeroInvoices({ leadId: req.params.leadId });
+      return ok(res, { invoices: rowsToCamel(rows) });
+    } catch (e) {
+      return err(res, 500, e?.message || "Could not load invoices.");
+    }
+  });
+
+  // Create the concept-fee invoice in Xero (AUTHORISED). Gated by XERO_ENABLED; requires
+  // the concept agreement accepted + a concept fee set. Idempotent (no duplicate on re-click).
+  app.post("/api/finance/leads/:leadId/concept-fee/invoice", async (req, res) => {
+    if (!xeroEnabled()) return err(res, 400, "Xero invoicing is off — set XERO_ENABLED=1 on the server.");
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database is not configured.");
+    try {
+      const { data: lead, error: lErr } = await sb.from("leads")
+        .select("id, name, email, phone, address, concept_fee, concept_agreement_status")
+        .eq("id", req.params.leadId).maybeSingle();
+      if (lErr || !lead) return err(res, 404, "Lead not found.");
+      if (lead.concept_agreement_status !== "accepted") {
+        return err(res, 422, "The concept agreement must be accepted before invoicing the concept fee.", "GATE_BLOCKED");
+      }
+      const amount = Number(req.body?.amount ?? lead.concept_fee);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return err(res, 400, "Set a concept fee on the lead before creating the invoice.");
+      }
+      const row = await createXeroInvoice({
+        invoiceType: "concept_fee",
+        sourceType: "lead",
+        sourceId: lead.id,
+        leadId: lead.id,
+        client: { name: lead.name, email: lead.email },
+        amountExGst: amount,
+        reference: lead.name || undefined,
+        address: lead.address || undefined,
+        createdBy: req.caller?.id || null,
+      });
+      return ok(res, { invoice: rowToCamel(row) });
+    } catch (e) {
+      if (e instanceof XeroNotConnectedError) {
+        return err(res, 400, e.message || "Connect Xero first (Settings → Integrations → Xero).", e.needsReconnect ? "XERO_RECONNECT" : "XERO_NOT_CONNECTED");
+      }
+      return err(res, 400, e?.message || "Could not create the invoice in Xero.");
+    }
+  });
+
+  // Manually re-sync one invoice from Xero (until the webhook lands in P3).
+  app.post("/api/finance/xero-invoices/:id/sync", async (req, res) => {
+    try {
+      const row = await syncXeroInvoice(req.params.id);
+      return ok(res, { invoice: rowToCamel(row) });
+    } catch (e) {
+      if (e instanceof XeroNotConnectedError) return err(res, 400, e.message, "XERO_NOT_CONNECTED");
+      return err(res, 400, e?.message || "Could not sync the invoice.");
+    }
   });
 
   // PUBLIC — Xero redirects here after the user approves (no bearer token). Validate the
