@@ -29,7 +29,10 @@ import {
   ensureLeadClientFolder,
   backfillLeadDocsToClientFolder,
 } from "./dropboxClient.mjs";
-import { buildConceptAgreementPdfBuffer } from "./conceptAgreementPdf.mjs";
+import { renderSalesDoc } from "./salesDocuments.mjs";
+import { driveConfigured, uploadDocxToDrive } from "./googleDriveClient.mjs";
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 // Stages at qualify or beyond where a lead justifies a full address geocode.
 const _GEO_QUALIFY_PLUS = new Set([
@@ -762,20 +765,30 @@ export function registerSalesRoutes(app) {
       const { data: d } = await sb.from("crm_contacts").select("first_name, last_name, company").eq("id", lead.selected_designer_contact_id).maybeSingle();
       designer = d || null;
     }
-    let pdf;
-    try { pdf = await buildConceptAgreementPdfBuffer({ lead, designer }); }
-    catch (e) { return err(res, 500, `Could not build the concept agreement: ${e?.message || e}`); }
+    // Render from the DOCX template (the canonical document method — salesDocuments.mjs). Falls back
+    // to the bundled starter template until Sam uploads his high-quality concept-agreement.docx.
+    let docx, docFilename;
+    try {
+      const r = await renderSalesDoc(sb, "concept_agreement", lead, { designer });
+      docx = r.buffer; docFilename = r.filename;
+    } catch (e) { return err(res, 500, `Could not build the concept agreement: ${e?.message || e}`); }
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `${date}-concept-agreement.pdf`;
+    const filename = `${date}-${docFilename}`;
     const storagePath = `leads/${req.params.id}/${filename}`;
-    const { error: upErr } = await sb.storage.from("lead-documents").upload(storagePath, pdf, { contentType: "application/pdf", upsert: true });
+    const { error: upErr } = await sb.storage.from("lead-documents").upload(storagePath, docx, { contentType: DOCX_MIME, upsert: true });
     if (upErr) return err(res, 502, `Could not store the concept agreement: ${translateDbError(upErr)}`);
     // lead_documents row (best-effort; document_type 'concept_agreement' needs mig 181).
-    try { await sb.from("lead_documents").insert({ lead_id: req.params.id, filename, storage_path: storagePath, mime_type: "application/pdf", document_type: "concept_agreement", uploaded_by: req.caller?.id || null }); } catch { /* pre-mig-181 */ }
+    try { await sb.from("lead_documents").insert({ lead_id: req.params.id, filename, storage_path: storagePath, mime_type: DOCX_MIME, document_type: "concept_agreement", uploaded_by: req.caller?.id || null }); } catch { /* pre-mig-181 */ }
     // stamp the lead (needs mig 179 — degrades to null lead if not yet applied).
     const { data: updated } = await sb.from("leads").update({ concept_agreement_status: "generated", concept_agreement_generated_at: new Date().toISOString(), concept_agreement_document_path: storagePath }).eq("id", req.params.id).select().single();
     const { data: signed } = await sb.storage.from("lead-documents").createSignedUrl(storagePath, 3600);
-    ok(res, { lead: updated ? rowToCamel(updated) : null, documentPath: storagePath, downloadUrl: signed?.signedUrl || null });
+    // Open in Google Docs for final edits (like the fee proposal), when Drive is configured.
+    let editUrl = null;
+    if (driveConfigured()) {
+      try { editUrl = (await uploadDocxToDrive(docFilename, docx))?.editUrl || null; }
+      catch (e) { console.warn("[concept-agreement] Google Docs upload failed:", e?.message || e); }
+    }
+    ok(res, { lead: updated ? rowToCamel(updated) : null, documentPath: storagePath, downloadUrl: signed?.signedUrl || null, editUrl });
   });
 
   // Concept agreement ACCEPTED — the ONLY writer of concept_agreement_status='accepted' (the blanket

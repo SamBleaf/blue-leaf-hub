@@ -23,14 +23,16 @@ Admin, Supervisor.
 At Discovery, once the designer + fees are set — to produce the concept agreement (process, benefits, what to expect, fees) and record the client's acceptance, which is the blocker to advance past Discovery.
 
 ## 3. What this does
-Generates a client-ready **concept agreement PDF** saved to the client's documents (download it to show in the meeting, or attach it to the discovery email). When the client accepts, you mark it accepted — which creates the client's Dropbox folder and files their documents into it, and unlocks advancing to the next stage.
+Generates a client-ready **concept agreement** from a DOCX template (the app's canonical document method), saved to the client's documents — **open it in Google Docs** for final edits, download it, or attach it to the discovery email. When the client accepts, you mark it accepted — which creates the client's Dropbox folder and files their documents into it, and unlocks advancing to the next stage.
+
+> The layout comes from a DOCX **template** in the `templates` bucket (`concept-agreement-template.docx`). Design it once in Word/Docs; the merge fields (`{CLIENT_NAME}`, `{DESIGNER_NAME}`, `{CONCEPT_FEE}`, `{DESIGN_PACKAGE_FEE}`, …) fill automatically. A bundled starter template is used until yours is uploaded.
 
 ## 4. Before you start
 - The lead is at **Discovery** with a designer + fees set.
 - Migrations **179 + 181** applied. Dropbox configured (for the folder).
 
 ## 5. Step-by-step process
-1. Open the Discovery lead → **Discovery — next steps** → **Generate** (concept agreement). It saves a PDF to the lead's Documents; use **Download PDF** to show or print it.
+1. Open the Discovery lead → **Discovery — next steps** → **Generate** (concept agreement). It renders the DOCX from the template and saves it to the lead's Documents; use **Open in Google Docs** to tweak, or **Download DOCX**.
 2. Share it as you prefer — show it in the meeting, or tick "Attach the concept agreement PDF" when sending the discovery email.
 3. When the client confirms (email reply / verbal), click **Mark accepted** → confirm.
 4. The **client folder** is created and their documents filed in; "Open client folder" appears.
@@ -65,7 +67,7 @@ On acceptance the lead's `concept_agreement_status` becomes `accepted`, the clie
 [insert screenshot: Generate + Download] [insert screenshot: Accepted + Open client folder]
 
 ## 11. Automation notes
-- Generate → `POST …/concept-agreement/generate` builds a PDF, uploads to `lead-documents` (`leads/<id>/<date>-concept-agreement.pdf`), inserts a `lead_documents` row (`concept_agreement`), stamps `concept_agreement_status='generated'` + path. No folder yet.
+- Generate → `POST …/concept-agreement/generate` renders the DOCX via the canonical `salesDocuments`/`docTemplates` engine (template: `concept-agreement-template.docx`), uploads to `lead-documents`, inserts a `lead_documents` row (`concept_agreement`, DOCX), stamps `concept_agreement_status='generated'` + path, and (if Drive is configured) uploads to Google Docs and returns the edit URL. No folder yet.
 - Accept → `POST …/concept-agreement/accept` (the only writer of `accepted`) stamps `accepted`, then creates the client folder (`ensureLeadClientFolder`) + backfills docs — non-fatal if Dropbox is down.
 - Advance to Winning Offer → 422 `GATE_BLOCKED` unless accepted.
 

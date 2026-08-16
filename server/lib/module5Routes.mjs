@@ -1,9 +1,7 @@
 import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
-import Docxtemplater from "docxtemplater";
-import PizZip from "pizzip";
-import expressions from "angular-expressions";
+import { renderDocxTemplate } from "./docTemplates.mjs";
 import { exec } from "child_process";
 import { mkdtemp, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
@@ -83,38 +81,10 @@ function safeFilePart(s) {
     || "QUOTE";
 }
 
-function makeAngularParser(tag) {
-  if (tag === ".") return { get: (s) => s };
-  const expr = expressions.compile(tag.replace(/('|')/g, "'").replace(/("|")/g, '"'));
-  return {
-    get(scope, context) {
-      let obj = {};
-      const list = context.scopeList;
-      for (let i = 0; i <= context.num; i++) Object.assign(obj, list[i]);
-      return expr(scope, obj);
-    }
-  };
-}
-
-/**
- * Normalises a DOCX template so docxtemplater can parse it reliably.
- * - Converts {{VAR}} (double-brace) → {VAR} (single-brace) in all XML parts.
- * - Replaces hardcoded "Quote NNNN" in page headers with {QUOTE_NUMBER}.
- */
-function normaliseDocxTemplate(zip) {
-  const xmlFiles = Object.keys(zip.files).filter(
-    (n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n) && !zip.files[n].dir
-  );
-  for (const name of xmlFiles) {
-    let text = zip.files[name].asText();
-    text = text.replace(/\{\{([A-Z_][A-Z_0-9]*)\}\}/g, "{$1}");
-    if (name.includes("header")) {
-      text = text.replace(/>Quote\s+\d+</g, ">{QUOTE_NUMBER}<");
-    }
-    zip.file(name, text);
-  }
-  return zip;
-}
+// Fee-proposal-specific header rewrite passed to the shared renderer (docTemplates.renderDocxTemplate):
+// replaces a hardcoded "Quote NNNN" in the page header with {QUOTE_NUMBER}. The generic
+// {{VAR}}→{VAR} normalisation + docxtemplater render now live in docTemplates.mjs.
+const quoteHeaderRewrite = (t) => t.replace(/>Quote\s+\d+</g, ">{QUOTE_NUMBER}<");
 
 /**
  * @param {import('express').Express} app
@@ -567,20 +537,12 @@ export function registerModule5Routes(app) {
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData object required." });
       }
-      const zip = normaliseDocxTemplate(new PizZip(Buffer.from(templateBase64, "base64")));
-      const doc = new Docxtemplater(zip, {
-        paragraphLoop: true,
-        linebreaks: true,
-        parser: makeAngularParser,
-        nullGetter: () => ""
-      });
       const renderData = renderDataForStyle(style, proposalData);
       if (style === "apb") {
         const ph = findApbPlaceholders(renderData);
         if (ph.length) return res.status(400).json({ ok: false, error: `APB version has unfilled placeholders — fill these first: ${ph.join(", ")}` });
       }
-      doc.render(renderData);
-      const out = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+      const out = renderDocxTemplate(templateBase64, renderData, { transformHeaderXml: quoteHeaderRewrite });
       const fn = String(req.body?.filename || "Fee-Proposal.docx").replace(/[^\w.\- ]+/g, "") || "Fee-Proposal.docx";
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${fn}"`);
@@ -615,21 +577,13 @@ export function registerModule5Routes(app) {
       if (!proposalData || typeof proposalData !== "object") {
         return res.status(400).json({ ok: false, error: "proposalData required." });
       }
-      // Generate DOCX
-      const zip = normaliseDocxTemplate(new PizZip(Buffer.from(templateBase64, "base64")));
-      const doc = new Docxtemplater(zip, {
-        paragraphLoop: true,
-        linebreaks: true,
-        parser: makeAngularParser,
-        nullGetter: () => ""
-      });
+      // Generate DOCX (shared renderer)
       const renderData = renderDataForStyle(style, proposalData);
       if (style === "apb") {
         const ph = findApbPlaceholders(renderData);
         if (ph.length) return res.status(400).json({ ok: false, error: `APB version has unfilled placeholders — fill these first: ${ph.join(", ")}` });
       }
-      doc.render(renderData);
-      const docxBuffer = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+      const docxBuffer = renderDocxTemplate(templateBase64, renderData, { transformHeaderXml: quoteHeaderRewrite });
       // Upload to Google Drive as a Google Doc (editable)
       const filename = `${safeFilePart(quoteNumber)}-Fee-Proposal.docx`;
       const { fileId, editUrl } = await uploadDocxToDrive(filename, docxBuffer);

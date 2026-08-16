@@ -153,10 +153,11 @@ async function loadConceptAgreementAttachment(sb, lead) {
     const { data, error } = await sb.storage.from("lead-documents").download(path);
     if (error || !data) return null;
     const buf = Buffer.from(await data.arrayBuffer());
+    const isDocx = /\.docx$/i.test(path);
     return {
-      filename: path.split("/").pop() || "Concept-Agreement.pdf",
+      filename: path.split("/").pop() || (isDocx ? "Concept-Agreement.docx" : "Concept-Agreement.pdf"),
       content: buf,
-      mimeType: "application/pdf",
+      mimeType: isDocx ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf",
     };
   } catch { return null; }
 }

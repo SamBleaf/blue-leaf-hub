@@ -19,6 +19,7 @@ export default function DiscoveryActions({ lead, reload }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [docUrl, setDocUrl] = useState(null);
+  const [editUrl, setEditUrl] = useState(null);
 
   const hasDesigner = !!lead.selected_designer_contact_id;
   const hasAgreement = !!lead.concept_agreement_document_path;
@@ -43,7 +44,8 @@ export default function DiscoveryActions({ lead, reload }) {
     const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-agreement/generate`, {});
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not generate the agreement." }); return; }
-    setDocUrl(data?.downloadUrl || null); setMsg({ type: "success", text: "Concept agreement generated." }); await reload();
+    setDocUrl(data?.downloadUrl || null); setEditUrl(data?.editUrl || null);
+    setMsg({ type: "success", text: "Concept agreement generated." }); await reload();
   }
   async function markAccepted() {
     if (!window.confirm("Mark the concept agreement as accepted? This creates the client folder.")) return;
@@ -81,7 +83,8 @@ export default function DiscoveryActions({ lead, reload }) {
           <button type="button" onClick={generate} disabled={busy} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface">
             {hasAgreement ? "Re-generate" : "Generate"}
           </button>
-          {docUrl && <a href={docUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-primary hover:bg-surface">Download PDF</a>}
+          {editUrl && <a href={editUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary hover:bg-surface">Open in Google Docs</a>}
+          {docUrl && <a href={docUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-primary hover:bg-surface">Download DOCX</a>}
           {!accepted && <button type="button" onClick={markAccepted} disabled={busy || !hasAgreement} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">Mark accepted</button>}
           {accepted && <span className="text-xs font-medium text-green-700">✓ Accepted</span>}
         </div>
