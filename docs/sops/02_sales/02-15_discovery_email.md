@@ -64,7 +64,7 @@ The email logs to the lead mailbox/timeline; `discovery_email_sent_at` is stampe
 [insert screenshot: Discovery actions panel] [insert screenshot: sent confirmation]
 
 ## 11. Automation notes
-- Send → `POST /api/sales/leads/:id/discovery-email/send` → SMTP (mirrors to Sent), stamps `discovery_email_sent_at`, logs outbound `correspondence` + `lead_activities`. Optional attach = the generated concept-agreement PDF.
+- Send → `POST /api/sales/leads/:id/discovery-email/send` → SMTP (mirrors to Sent), stamps `discovery_email_sent_at`, logs outbound `correspondence` + `lead_activities`. Optional attach = the generated concept agreement, **converted to PDF before sending** (the DOCX is uploaded to Google Docs and exported as PDF via `exportDriveFileAsPdf`, so the client never receives an editable DOCX; falls back to the DOCX only if Drive is unconfigured or the conversion fails).
 - Follow-up (`DISCOVERY_FOLLOWUP_ENABLED`) → `runDiscoveryFollowups` sends once at intro+7d when still discovery / not accepted / no reply; stamps `discovery_followup_sent_at`.
 - Test leads are excluded from the follow-up cadence.
 

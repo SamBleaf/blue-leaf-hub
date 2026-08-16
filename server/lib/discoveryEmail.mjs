@@ -9,6 +9,7 @@
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
 import { incGst } from "./constants.mjs";
+import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf, deleteDriveFile } from "./googleDriveClient.mjs";
 
 export const DISCOVERY_EMAIL_TEMPLATE_KEY = "crm_discovery_email";
 export const DISCOVERY_EMAIL_PLACEHOLDERS = [
@@ -145,7 +146,10 @@ async function loadDesigner(sb, lead) {
   } catch { return null; }
 }
 
-// Optional attachment: the generated concept-agreement docx (for the "email it after" path).
+// Optional attachment: the generated concept agreement. Clients should receive a PDF, not
+// an editable DOCX — so when the stored doc is a DOCX and Google Drive is configured, convert
+// it to PDF via Google Docs (upload → export → cleanup). Falls back to the DOCX if Drive is
+// unavailable or the conversion fails, so the email still goes out.
 async function loadConceptAgreementAttachment(sb, lead) {
   const path = String(lead?.concept_agreement_document_path || "").trim();
   if (!path) return null;
@@ -154,6 +158,21 @@ async function loadConceptAgreementAttachment(sb, lead) {
     if (error || !data) return null;
     const buf = Buffer.from(await data.arrayBuffer());
     const isDocx = /\.docx$/i.test(path);
+    const baseName = (path.split("/").pop() || "Concept-Agreement.docx").replace(/\.docx$/i, "");
+
+    if (isDocx && driveConfigured()) {
+      let fileId = null;
+      try {
+        ({ fileId } = await uploadDocxToDrive(`${baseName}.docx`, buf));
+        const pdf = await exportDriveFileAsPdf(fileId);
+        return { filename: `${baseName}.pdf`, content: pdf, mimeType: "application/pdf" };
+      } catch {
+        /* conversion failed — fall through to the DOCX below so the email still sends */
+      } finally {
+        if (fileId) { try { await deleteDriveFile(fileId); } catch { /* best-effort cleanup */ } }
+      }
+    }
+
     return {
       filename: path.split("/").pop() || (isDocx ? "Concept-Agreement.docx" : "Concept-Agreement.pdf"),
       content: buf,
