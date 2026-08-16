@@ -207,25 +207,27 @@ export async function getXeroAccessToken(tenantId) {
   if (row.access_token && isFresh(row.expires_at)) return { accessToken: row.access_token, tenantId: row.tenant_id };
 
   const key = row.tenant_id;
-  // If a refresh for this tenant is already in flight in this process, wait for it, then re-read.
-  if (_refreshLocks.has(key)) {
-    await _refreshLocks.get(key).catch(() => {});
-    const fresh = (await sb.from("xero_credentials").select("access_token, expires_at").eq("tenant_id", key).maybeSingle()).data;
-    if (fresh?.access_token && isFresh(fresh.expires_at)) return { accessToken: fresh.access_token, tenantId: key };
-  }
 
-  const p = (async () => {
+  // The actual refresh. Re-reads the CURRENT stored row itself so that (a) if another
+  // process already rotated, we return its fresh token without spending ours, and (b) the
+  // compare-and-swap uses the row's real current refresh_token.
+  const doRefresh = async () => {
+    const current = (await sb.from("xero_credentials").select("*").eq("tenant_id", key).maybeSingle()).data;
+    if (!current?.refresh_token) throw new XeroNotConnectedError("Xero is not connected", { needsReconnect: true });
+    if (current.access_token && isFresh(current.expires_at)) {
+      return { accessToken: current.access_token, tenantId: current.tenant_id };
+    }
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: basicAuthHeader(env) },
-      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: row.refresh_token }),
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refresh_token }),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (json.error === "invalid_grant") {
         // Another worker may have already consumed + rotated the token — re-read once.
         const fresh = (await sb.from("xero_credentials").select("*").eq("tenant_id", key).maybeSingle()).data;
-        if (fresh?.refresh_token && fresh.refresh_token !== row.refresh_token && fresh.access_token && isFresh(fresh.expires_at)) {
+        if (fresh?.refresh_token && fresh.refresh_token !== current.refresh_token && fresh.access_token && isFresh(fresh.expires_at)) {
           return { accessToken: fresh.access_token, tenantId: key };
         }
         throw new XeroNotConnectedError("Xero session expired — reconnect Xero.", { needsReconnect: true });
@@ -233,12 +235,12 @@ export async function getXeroAccessToken(tenantId) {
       throw new Error(json.error_description || json.error || `Xero token refresh failed (${res.status})`);
     }
     const newAccess = json.access_token;
-    const newRefresh = json.refresh_token || row.refresh_token;
+    const newRefresh = json.refresh_token || current.refresh_token;
     const newExpiry = new Date(Date.now() + (json.expires_in || 1800) * 1000).toISOString();
     const { data: updated } = await sb.from("xero_credentials")
       .update({ access_token: newAccess, refresh_token: newRefresh, expires_at: newExpiry, updated_at: new Date().toISOString() })
       .eq("tenant_id", key)
-      .eq("refresh_token", row.refresh_token) // compare-and-swap: only if unchanged
+      .eq("refresh_token", current.refresh_token) // compare-and-swap: only if unchanged
       .select("access_token")
       .maybeSingle();
     if (!updated) {
@@ -246,8 +248,16 @@ export async function getXeroAccessToken(tenantId) {
       if (fresh?.access_token) return { accessToken: fresh.access_token, tenantId: key };
     }
     return { accessToken: newAccess, tenantId: key };
-  })();
+  };
 
+  // Single-flight per tenant: at most one refresh POST in-flight in this process. Concurrent
+  // callers SHARE the in-flight promise's outcome (success OR failure) rather than each firing
+  // their own POST — which would double-spend the single-use refresh token. The get→set below
+  // is synchronous (doRefresh yields only at its first await, AFTER the set runs), so there is
+  // never more than one leader for a key.
+  const inflight = _refreshLocks.get(key);
+  if (inflight) return await inflight;
+  const p = doRefresh();
   _refreshLocks.set(key, p);
   try {
     return await p;

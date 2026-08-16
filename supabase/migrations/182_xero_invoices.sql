@@ -32,8 +32,12 @@ CREATE TABLE IF NOT EXISTS public.xero_invoices (
   invoice_type        text        NOT NULL,                 -- XERO_INVOICE_TYPES (concept_fee, design_package, progress_claim, job_variation, deposit)
   source_type         text        NOT NULL,                 -- lead | progress_claim | job_variation
   source_id           uuid        NOT NULL,                 -- the row in that source table (for a lead-scoped fee, the lead id)
-  lead_id             uuid        NULL REFERENCES public.leads(id) ON DELETE SET NULL,
-  job_id              uuid        NULL REFERENCES public.jobs(id)  ON DELETE SET NULL,
+  -- ON DELETE CASCADE (not SET NULL): SET NULL would null the only populated scope
+  -- column and violate xero_invoices_scope_chk, aborting the parent delete. These are
+  -- MIRROR rows (Xero is the source of truth), so a deleted lead/job takes its mirror
+  -- rows with it — and admin/test-lead cleanup can delete an invoiced lead cleanly.
+  lead_id             uuid        NULL REFERENCES public.leads(id) ON DELETE CASCADE,
+  job_id              uuid        NULL REFERENCES public.jobs(id)  ON DELETE CASCADE,
 
   -- ── Hub-side money + status (status vocab in constants.js; no DB CHECK) ────
   status              text        NOT NULL DEFAULT 'draft',  -- draft -> authorised -> sent -> part_paid -> paid (+ void, error)
@@ -99,8 +103,14 @@ CREATE TABLE IF NOT EXISTS public.xero_contacts (
 );
 CREATE INDEX IF NOT EXISTS xero_contacts_email_idx ON public.xero_contacts (lower(email)) WHERE email IS NOT NULL;
 
--- ── RLS — match the finance-table house style (service role bypasses; the app
---    reads these only through the admin-gated API, never the browser directly) ─
+-- ── RLS — finance-table house style + the migration-104 client lockdown ───────
+-- The permissive auth_users policy alone is NOT enough: portal CLIENTS have real
+-- Supabase `authenticated` accounts and the anon key ships in the browser, so a
+-- permissive USING(true) would let a client read/write EVERY invoice's financials +
+-- PII via PostgREST. Migration 104 closes this with a RESTRICTIVE `deny_clients`
+-- policy (requires public.auth_is_staff()), but 104 is a ONE-TIME loop over the
+-- tables that existed then — every table created AFTER it must re-add deny_clients
+-- itself (migration 121 did the same for site_diary). These tables are new, so we do.
 ALTER TABLE public.xero_invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.xero_contacts ENABLE ROW LEVEL SECURITY;
 
@@ -108,8 +118,16 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'xero_invoices' AND policyname = 'auth_users') THEN
     CREATE POLICY "auth_users" ON public.xero_invoices FOR ALL TO authenticated USING (true) WITH CHECK (true);
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'xero_invoices' AND policyname = 'deny_clients') THEN
+    CREATE POLICY deny_clients ON public.xero_invoices AS RESTRICTIVE FOR ALL TO authenticated
+      USING (public.auth_is_staff()) WITH CHECK (public.auth_is_staff());
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'xero_contacts' AND policyname = 'auth_users') THEN
     CREATE POLICY "auth_users" ON public.xero_contacts FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'xero_contacts' AND policyname = 'deny_clients') THEN
+    CREATE POLICY deny_clients ON public.xero_contacts AS RESTRICTIVE FOR ALL TO authenticated
+      USING (public.auth_is_staff()) WITH CHECK (public.auth_is_staff());
   END IF;
 END $$;
 

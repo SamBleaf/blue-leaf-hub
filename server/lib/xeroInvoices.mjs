@@ -70,14 +70,18 @@ export async function ensureXeroContact({ tenantId, name, email, leadId = null, 
   const sb = getServiceSupabase();
   if (!sb) throw new Error("Database is not configured.");
   const cleanEmail = (email || "").trim();
+  const emailKey = cleanEmail.toLowerCase(); // cache is keyed on the lowercased email
   const displayName = (name || "").trim() || cleanEmail || "Client";
 
-  // 1) Local cache by email (per tenant).
-  if (cleanEmail) {
+  // 1) Local cache by EXACT email (per tenant). Must be an exact eq, not ilike — an
+  // ilike pattern treats '_' and '%' in the address as wildcards and could return a
+  // DIFFERENT client's cached contact (e.g. john_smith matching johnbsmith), billing
+  // the wrong customer. The email is stored lowercased so eq is case-insensitive.
+  if (emailKey) {
     const { data: cached } = await sb.from("xero_contacts")
       .select("xero_contact_id")
       .eq("xero_tenant_id", tenantId)
-      .ilike("email", cleanEmail)
+      .eq("email", emailKey)
       .limit(1)
       .maybeSingle();
     if (cached?.xero_contact_id) return cached.xero_contact_id;
@@ -110,7 +114,7 @@ export async function ensureXeroContact({ tenantId, name, email, leadId = null, 
     lead_id: leadId,
     job_id: jobId,
     name: displayName,
-    email: cleanEmail || null,
+    email: emailKey || null, // stored lowercased to match the exact-eq cache lookup
     updated_at: new Date().toISOString(),
   }, { onConflict: "xero_tenant_id,xero_contact_id" });
 
@@ -219,7 +223,7 @@ export async function createXeroInvoice({
     throw e;
   }
 
-  const { data: updated } = await sb.from("xero_invoices").update({
+  const persistPayload = {
     xero_tenant_id: tenantId,
     xero_invoice_id: inv.InvoiceID,
     xero_invoice_number: inv.InvoiceNumber || null,
@@ -227,13 +231,29 @@ export async function createXeroInvoice({
     xero_total: inv.Total ?? null,
     amount_due: inv.AmountDue ?? null,
     amount_paid: inv.AmountPaid ?? null,
+    amount_ex_gst: amount, // keep in sync with what we actually billed (fee may have changed on an error-retry)
     xero_contact_id: contactId,
     status: hubStatusFromXero(inv),
     error_message: null,
     last_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq("id", row.id).select("*").maybeSingle();
-
+  };
+  // The invoice now EXISTS in Xero. If we fail to persist its id, a later retry (after
+  // Xero's ~24h Idempotency-Key window) would create a DUPLICATE. So retry the persist
+  // once, then surface loudly with the Xero number — never leave it silently 'draft'.
+  let { data: updated, error: upErr } =
+    await sb.from("xero_invoices").update(persistPayload).eq("id", row.id).select("*").maybeSingle();
+  if (upErr) {
+    ({ data: updated, error: upErr } =
+      await sb.from("xero_invoices").update(persistPayload).eq("id", row.id).select("*").maybeSingle());
+    if (upErr) {
+      const e = new Error(
+        `Xero invoice ${inv.InvoiceNumber || inv.InvoiceID} was created but could not be saved to the Hub — do NOT re-create it; use Sync to reconcile. (${upErr.message})`
+      );
+      e.xeroInvoiceId = inv.InvoiceID;
+      throw e;
+    }
+  }
   return updated || row;
 }
 
