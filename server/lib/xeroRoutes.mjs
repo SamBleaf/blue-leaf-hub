@@ -81,9 +81,10 @@ export function registerXeroRoutes(app) {
     if (!sb) return err(res, 503, "Database is not configured.");
     try {
       const { data: lead, error: lErr } = await sb.from("leads")
-        .select("id, name, email, phone, address, concept_fee, concept_agreement_status")
+        .select("*")
         .eq("id", req.params.leadId).maybeSingle();
-      if (lErr || !lead) return err(res, 404, "Lead not found.");
+      if (lErr) return err(res, 500, "Could not load the lead."); // don't mislabel a query error as "not found"
+      if (!lead) return err(res, 404, "Lead not found.");
       if (lead.concept_agreement_status !== "accepted") {
         return err(res, 422, "The concept agreement must be accepted before invoicing the concept fee.", "GATE_BLOCKED");
       }
@@ -99,7 +100,7 @@ export function registerXeroRoutes(app) {
         client: { name: lead.name, email: lead.email },
         amountExGst: amount,
         reference: lead.name || undefined,
-        address: lead.address || undefined,
+        address: lead.site_address || lead.suburb || undefined,
         createdBy: req.caller?.id || null,
       });
       return ok(res, { invoice: rowToCamel(row) });
