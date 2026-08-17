@@ -1492,6 +1492,7 @@ export default function LeadDetail() {
   }, [leadId, lead?.ptsa_status, lead?.ptsa_signed_document_path]);
 
   async function patch(updates) {
+    const prevLead = lead; // snapshot for rollback if the save fails
     // Optimistic: reflect the change instantly so dropdowns/fields don't lag on the round-trip.
     setLead((prev) => (prev ? { ...prev, ...updates } : prev));
     const r = await authFetch(`/api/sales/leads/${leadId}`, {
@@ -1499,9 +1500,13 @@ export default function LeadDetail() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates)
     });
-    const j = await r.json();
-    if (j.ok) setLead(j.lead); // reconcile with server truth
-    return j.lead;
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) { setLead(j.lead); return j.lead; } // reconcile with server truth
+    // Save FAILED (e.g. a missing column / unapplied migration) — roll back the optimistic change
+    // so a field that didn't persist never *looks* saved (the control visibly reverts).
+    setLead(prevLead);
+    console.warn("[lead patch] save failed:", j.error || `HTTP ${r.status}`);
+    return null;
   }
 
   async function logActivity(e) {
