@@ -16,7 +16,7 @@
  */
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { xeroRequest, getConnectedTenant, XeroNotConnectedError } from "./xeroClient.mjs";
-import { backfillLeadDocsToClientFolder } from "./dropboxClient.mjs";
+import { fileInvoicePdfToClientFolder } from "./dropboxClient.mjs";
 
 // ── Invoice-type registry ─────────────────────────────────────────────────────
 export const INVOICE_TYPES = {
@@ -361,10 +361,11 @@ export async function fileXeroInvoicePdf({ sb, row } = {}) {
       const { data: existingDoc } = await sb.from("lead_documents").select("id").eq("storage_path", storagePath).maybeSingle();
       if (!existingDoc) await sb.from("lead_documents").insert({ lead_id: row.lead_id, filename, storage_path: storagePath, mime_type: "application/pdf", document_type: "invoice", uploaded_by: row.created_by || null });
     } catch { /* pre-mig-183 or dup */ }
-    // Copy into the Dropbox client folder if one exists (created at concept-agreement acceptance).
+    // File the official PDF directly into the Dropbox client folder's INVOICES subfolder
+    // (independent of the lead_documents row / mig 183), so the invoice always lands as a PDF.
     try {
       const { data: lead } = await sb.from("leads").select("client_folder_path").eq("id", row.lead_id).maybeSingle();
-      if (lead?.client_folder_path) await backfillLeadDocsToClientFolder({ sb, leadId: row.lead_id, clientFolderPath: lead.client_folder_path });
+      if (lead?.client_folder_path) await fileInvoicePdfToClientFolder({ clientFolderPath: lead.client_folder_path, filename, buffer: pdf });
     } catch { /* Dropbox best-effort */ }
     await sb.from("xero_invoices").update({ pdf_storage_path: storagePath, online_invoice_url: onlineUrl || row.online_invoice_url, updated_at: new Date().toISOString() }).eq("id", row.id);
   } catch { /* filing best-effort */ }

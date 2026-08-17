@@ -26,7 +26,8 @@ import {
   fileXeroInvoicePdf, fetchXeroInvoicePdf, getOnlineInvoiceUrl,
 } from "./xeroInvoices.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
-import { incGst } from "./constants.mjs";
+import { getUserSignature } from "./emailSignature.mjs";
+import { loadInvoiceEmailTemplate, buildInvoiceEmail } from "./invoiceEmail.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
 
@@ -151,10 +152,13 @@ export function registerXeroRoutes(app) {
 
   // Hub-send the official invoice (branded PDF + pay link) to the client via our SMTP.
   // Atomic anti-double-send: the send_source lock is claimed before any email is sent.
+  // POST { preview:true } returns the assembled email WITHOUT claiming the lock or sending
+  // (so the card can show a template preview, like the qualify/discovery emails).
   app.post("/api/finance/xero-invoices/:id/send", async (req, res) => {
     if (!xeroEnabled()) return err(res, 400, "Xero invoicing is off — set XERO_ENABLED=1.");
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database is not configured.");
+    const dryRun = req.body?.preview === true;
     try {
       const row0 = await getInvoiceRow(sb, req.params.id);
       if (!row0) return err(res, 404, "Invoice not found.");
@@ -163,7 +167,15 @@ export function registerXeroRoutes(app) {
 
       const { data: lead } = await sb.from("leads").select("id, name, email").eq("id", row0.lead_id).maybeSingle();
       const to = String(req.body?.to || lead?.email || row0.sent_to_email || "").trim();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "No valid client email to send to.");
+      if (!dryRun && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "No valid client email to send to.");
+
+      // Assemble the email from the admin-editable template (autofilled + escaped in the module).
+      const payUrl = row0.online_invoice_url || (await getOnlineInvoiceUrl(row0));
+      const template = await loadInvoiceEmailTemplate(sb);
+      const signature = await getUserSignature(sb, req.caller?.id || null);
+      const email = buildInvoiceEmail(lead, row0, { template, signature, payUrl });
+
+      if (dryRun) return ok(res, { preview: { subject: email.subject, text: email.text, html: email.html, to } });
 
       // Claim the send lock atomically (0 rows ⇒ already sent).
       const { data: claimed } = await sb.from("xero_invoices")
@@ -174,22 +186,11 @@ export function registerXeroRoutes(app) {
       const row = await fileXeroInvoicePdf({ sb, row: claimed }); // ensure filed + pay link
       let pdf = null;
       try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
-      const payUrl = row.online_invoice_url || (await getOnlineInvoiceUrl(row));
-
-      const number = row.xero_invoice_number || "";
-      const incTotal = row.xero_total != null ? Number(row.xero_total) : incGst(Number(row.amount_ex_gst));
-      const money = (n) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(Number(n));
-      // lead.name comes from the public enquiry form (untrusted) — HTML-escape it (and the
-      // number, defensively) before interpolating into the email HTML. The plaintext body is safe.
-      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-      const greeting = lead?.name ? `Hi ${String(lead.name).split(/\s+/)[0]},` : "Hi,";
-      const subject = `Invoice ${number} from Blue Leaf Building`.trim();
-      const text = `${greeting}\n\nPlease find attached invoice ${number} for ${money(incTotal)} (inc GST).${payUrl ? `\n\nView and pay online:\n${payUrl}` : ""}\n\nThank you,\nBlue Leaf Building`;
-      const html = `<p>${esc(greeting)}</p><p>Please find attached invoice <strong>${esc(number)}</strong> for <strong>${money(incTotal)}</strong> (inc GST).</p>${payUrl ? `<p><a href="${esc(payUrl)}">View &amp; pay online</a></p>` : ""}<p>Thank you,<br/>Blue Leaf Building</p>`;
-      const attachments = pdf ? [{ filename: `Invoice-${number || row.xero_invoice_id}.pdf`, content: pdf, mimeType: "application/pdf" }] : [];
+      const number = row.xero_invoice_number || row.xero_invoice_id;
+      const attachments = pdf ? [{ filename: `Invoice-${number}.pdf`, content: pdf, mimeType: "application/pdf" }] : [];
 
       try {
-        await sendPlainMail({ to, subject, text, html, attachments });
+        await sendPlainMail({ to, subject: email.subject, text: email.text, html: email.html, attachments });
       } catch (e) {
         // Release the lock so the send can be retried.
         await sb.from("xero_invoices").update({ send_source: null, sent_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
@@ -198,7 +199,7 @@ export function registerXeroRoutes(app) {
 
       const nextStatus = ["part_paid", "paid", "void"].includes(row.status) ? row.status : "sent";
       const { data: finalRow } = await sb.from("xero_invoices").update({ status: nextStatus, updated_at: new Date().toISOString() }).eq("id", row.id).select("*").maybeSingle();
-      try { await sb.from("correspondence").insert({ lead_id: row.lead_id, direction: "outbound", subject, body: text, email_to: to }); } catch { /* best-effort */ }
+      try { await sb.from("correspondence").insert({ lead_id: row.lead_id, direction: "outbound", subject: email.subject, body: email.text, email_to: to }); } catch { /* best-effort */ }
       try { await sb.from("lead_activities").insert({ lead_id: row.lead_id, activity_type: "email", summary: `Invoice ${number} sent to client` }); } catch { /* best-effort */ }
 
       return ok(res, { invoice: rowToCamel(finalRow || row) });

@@ -35,8 +35,10 @@ Fetches the invoice's official PDF (rendered by Xero's Branding Theme) and its o
 ## 5. Step-by-step process
 1. On the Discovery lead → **Concept fee invoice (Xero)** card, find the invoice row.
 2. **Download PDF** opens the official Xero PDF (to check it) · **Pay link** opens the client pay page.
-3. Click **Send to client** → confirm the recipient + amount.
-4. The client receives the branded PDF + pay link; the row shows **✓ Sent {date}**, and the PDF is filed to the lead's documents + the Dropbox client folder.
+3. Click **Send to client** → a **preview of the email loads** (from your editable template, autofilled with the client, invoice number, amount + pay link) → review it → **Send email**.
+4. The client receives the branded PDF + pay link; the row shows **✓ Sent {date}**, and the PDF is filed to the lead's documents + the Dropbox client folder's **INVOICES** subfolder.
+
+> Edit the email copy in **Settings → General → Invoice email** (like the qualify/discovery emails). The concept agreement is also filed to Dropbox as a **PDF** (converted from the DOCX), not the editable Word file.
 
 [insert screenshot: invoice row — Download PDF / Pay link / Send to client]
 [insert screenshot: Sent state]
@@ -70,7 +72,9 @@ The client can pay via the Xero link. When they do, click **Sync status** (or wa
 
 ## 11. Automation notes
 - PDF link → `GET /api/finance/xero-invoices/:id/pdf-url` (admin) — files the official PDF on demand if not yet filed (`fileXeroInvoicePdf`), returns a 1-hour signed URL from the `lead-documents` bucket.
-- Send → `POST /api/finance/xero-invoices/:id/send` (admin; gated by `XERO_ENABLED`). **Atomic anti-double-send:** claims `send_source='hub_smtp', sent_at=now(), sent_to_email` with `WHERE send_source IS NULL` before any SMTP — 0 rows ⇒ 409 `ALREADY_SENT`. Then `fileXeroInvoicePdf` (upload the official PDF to `lead-documents` storage → `lead_documents` row `type='invoice'` → copy into the Dropbox client folder), `fetchXeroInvoicePdf` + `getOnlineInvoiceUrl`, `sendPlainMail` (PDF attachment + pay link), sets Hub status `sent` (unless already part_paid/paid/void), logs `correspondence` + `lead_activities`. On an SMTP failure the send lock is released so it can be retried.
+- Preview → `POST …/send { preview:true }` assembles the email from the admin-editable template (`invoiceEmail.buildInvoiceEmail`, tokens `{{client_salutation}}`/`{{invoice_number}}`/`{{amount_inc}}`/`{{pay_link}}`/`{{user_signature}}`, HTML-escaped) **without** claiming the lock or sending — the card shows it before Send. Template stored in `user_settings/crm_invoice_email`, edited at Settings → General → Invoice email (`GET/POST /api/sales/invoice-email-template`).
+- Send → `POST …/send` (admin; gated by `XERO_ENABLED`). **Atomic anti-double-send:** claims `send_source='hub_smtp', sent_at=now(), sent_to_email` with `WHERE send_source IS NULL` before any SMTP — 0 rows ⇒ 409 `ALREADY_SENT`. Then `fileXeroInvoicePdf` (upload the official PDF to `lead-documents` storage → `lead_documents` row `type='invoice'` → **file the PDF directly into `{clientFolder}/INVOICES`** via `fileInvoicePdfToClientFolder`, independent of the row/mig 183), `fetchXeroInvoicePdf`, `sendPlainMail` (template email + PDF attachment + pay link), sets Hub status `sent` (unless already part_paid/paid/void), logs `correspondence` + `lead_activities`. On an SMTP failure the send lock is released so it can be retried.
+- Concept agreement filing → `backfillLeadDocsToClientFolder` now **converts any DOCX to PDF** (via Google Docs export) before uploading, so the client folder gets PDFs, not editable Word files.
 - `syncXeroInvoice` preserves the `sent` marker (never downgrades sent→authorised) — it only moves off `sent` when Xero shows part_paid / paid / void.
 - All filing is best-effort (fail-soft): a Dropbox/storage failure never blocks the email or the invoice.
 

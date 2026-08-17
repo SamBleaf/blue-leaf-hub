@@ -31,6 +31,8 @@ export default function XeroInvoiceCard({ lead, reload }) {
   const [invoices, setInvoices] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState(null); // { invId, number, subject, text, to }
 
   const accepted = lead.concept_agreement_status === "accepted";
   const fee = Number(lead.concept_fee) || 0;
@@ -78,13 +80,21 @@ export default function XeroInvoiceCard({ lead, reload }) {
     window.open(data.url, "_blank", "noopener");
   }
 
-  async function sendInvoice(inv) {
-    if (!window.confirm(`Email invoice ${inv.xeroInvoiceNumber || ""} (with the PDF + pay link) to the client?`)) return;
+  async function openSendPreview(inv) {
     setBusy(true); setMsg(null);
-    const { ok, error } = await apiPost(`/api/finance/xero-invoices/${inv.id}/send`, {});
+    const { ok, data, error } = await apiPost(`/api/finance/xero-invoices/${inv.id}/send`, { preview: true });
+    setBusy(false);
+    if (!ok) { setMsg({ type: "error", text: error || "Could not build the email preview." }); return; }
+    setPreview({ invId: inv.id, number: inv.xeroInvoiceNumber, ...(data?.preview || {}) });
+    setPreviewOpen(true);
+  }
+  async function confirmSend() {
+    if (!preview?.invId) return;
+    setBusy(true); setMsg(null);
+    const { ok, error } = await apiPost(`/api/finance/xero-invoices/${preview.invId}/send`, {});
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not send the invoice." }); return; }
-    setMsg({ type: "success", text: "Invoice emailed to the client." });
+    setPreviewOpen(false); setMsg({ type: "success", text: "Invoice emailed to the client." });
     await loadAll();
   }
 
@@ -152,7 +162,7 @@ export default function XeroInvoiceCard({ lead, reload }) {
                 {inv.xeroInvoiceId && inv.status !== "void" && (
                   inv.sentAt
                     ? <span className="text-[11px] text-green-700">✓ Sent {fmtDate(inv.sentAt)}</span>
-                    : <button type="button" onClick={() => sendInvoice(inv)} disabled={busy} className="text-xs font-medium text-accent hover:underline disabled:opacity-50">Send to client</button>
+                    : <button type="button" onClick={() => openSendPreview(inv)} disabled={busy} className="text-xs font-medium text-accent hover:underline disabled:opacity-50">Send to client</button>
                 )}
                 {inv.xeroInvoiceId && (
                   <button type="button" onClick={() => sync(inv.id)} disabled={busy} className="text-xs text-muted hover:text-ink disabled:opacity-50">Sync status</button>
@@ -165,6 +175,22 @@ export default function XeroInvoiceCard({ lead, reload }) {
       )}
 
       {msg && <p className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
+
+      {previewOpen && preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewOpen(false)}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-card bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-semibold text-ink mb-1">Send invoice {preview.number || ""} to the client</h4>
+            <p className="text-xs text-muted mb-3">To: {preview.to || "—"} · the official Xero PDF is attached automatically</p>
+            <p className="text-xs font-semibold text-ink">{preview.subject}</p>
+            <pre className="mt-2 whitespace-pre-wrap text-xs text-ink bg-page rounded-lg p-3 border border-hairline font-sans leading-relaxed">{preview.text}</pre>
+            <p className="text-[11px] text-muted mt-2">Edit this template in Settings → General → Invoice email.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
+              <button type="button" onClick={confirmSend} disabled={busy} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{busy ? "Sending…" : "Send email"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

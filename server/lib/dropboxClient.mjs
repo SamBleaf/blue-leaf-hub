@@ -976,12 +976,27 @@ export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderP
     const { data: docs } = await sb.from("lead_documents").select("filename, storage_path").eq("lead_id", leadId);
     for (const doc of docs || []) {
       const fileName = String(doc.filename || "").trim() || "document";
-      const destPath = `${conceptRoot}/${fileName}`;
       try {
-        if (await pathExists(token, destPath)) continue;
         const { data: blob, error: dlErr } = await sb.storage.from("lead-documents").download(doc.storage_path);
         if (dlErr || !blob) { failed += 1; continue; }
-        const buffer = Buffer.from(await blob.arrayBuffer());
+        let buffer = Buffer.from(await blob.arrayBuffer());
+        let outName = fileName;
+        // Clients should get a PDF in their folder, not an editable DOCX — convert via Google Docs.
+        if (/\.docx$/i.test(fileName)) {
+          try {
+            const drive = await import("./googleDriveClient.mjs");
+            if (drive.driveConfigured()) {
+              let fileId = null;
+              try {
+                ({ fileId } = await drive.uploadDocxToDrive(fileName, buffer));
+                buffer = await drive.exportDriveFileAsPdf(fileId);
+                outName = fileName.replace(/\.docx$/i, ".pdf");
+              } finally { if (fileId) { try { await drive.deleteDriveFile(fileId); } catch { /* ignore */ } } }
+            }
+          } catch { /* conversion unavailable/failed — upload the DOCX as-is */ }
+        }
+        const destPath = `${conceptRoot}/${outName}`;
+        if (await pathExists(token, destPath)) continue;
         await dropboxUploadBuffer(token, destPath, buffer, { autorename: false });
         copied += 1;
       } catch (e) {
@@ -993,6 +1008,22 @@ export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderP
     console.warn("[backfillLeadDocsToClientFolder] documents skipped:", e?.message || e);
   }
   return { copied, failed };
+}
+
+/**
+ * File an invoice PDF directly into the lead's client folder under an INVOICES subfolder.
+ * Direct upload (does NOT depend on a lead_documents row or backfill), so the official Xero
+ * PDF always lands in Dropbox. Idempotent (skips if the same path exists). Best-effort caller-side.
+ */
+export async function fileInvoicePdfToClientFolder({ clientFolderPath, filename, buffer } = {}) {
+  if (!clientFolderPath || !buffer || !filename) return { filed: false };
+  const token = await getDropboxAccessToken();
+  const dir = `${clientFolderPath}/INVOICES`;
+  await createFolderIfNotExists(token, dir);
+  const destPath = `${dir}/${filename}`;
+  if (await pathExists(token, destPath)) return { filed: true, path: destPath, existed: true };
+  await dropboxUploadBuffer(token, destPath, buffer, { autorename: false });
+  return { filed: true, path: destPath };
 }
 
 export async function uploadTenderDocumentToJob(opts) {

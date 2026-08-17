@@ -28,6 +28,7 @@ import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQU
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
 import { loadDiscoveryEmailTemplates, DISCOVERY_EMAIL_DEFAULTS, DISCOVERY_EMAIL_TEMPLATE_KEY, DISCOVERY_EMAIL_PLACEHOLDERS, runDiscoveryFollowups } from "./lib/discoveryEmail.mjs";
+import { loadInvoiceEmailTemplate, INVOICE_EMAIL_DEFAULT, INVOICE_EMAIL_TEMPLATE_KEY, INVOICE_EMAIL_PLACEHOLDERS } from "./lib/invoiceEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
 import { getServiceSupabase } from "./lib/supabaseService.mjs";
@@ -1880,6 +1881,38 @@ app.post("/api/sales/discovery-email-template", requireAuth, requireRole("admin"
     return res.json({ ok: true });
   } catch (err) {
     console.error("[sales/discovery-email-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Xero AR P2 — the admin-editable invoice email template (single), user_settings key
+// crm_invoice_email. Mirrors the discovery-email-template routes.
+app.get("/api/sales/invoice-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const template = sb ? await loadInvoiceEmailTemplate(sb) : INVOICE_EMAIL_DEFAULT;
+    return res.json({ ok: true, template, defaults: INVOICE_EMAIL_DEFAULT, placeholders: INVOICE_EMAIL_PLACEHOLDERS });
+  } catch (err) {
+    console.error("[sales/invoice-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/sales/invoice-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const subject = String(req.body?.subject || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!subject || !body) return res.status(400).json({ ok: false, error: "The template needs a subject and a message." });
+    const { error } = await sb.from("user_settings").upsert(
+      { key: INVOICE_EMAIL_TEMPLATE_KEY, value: JSON.stringify({ subject, body }), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/invoice-email-template POST]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });

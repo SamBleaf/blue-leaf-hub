@@ -14,6 +14,7 @@ import ProfilePane from "./ProfilePane.jsx";
 import EnquiryAckSettings from "../../components/settings/EnquiryAckSettings.jsx";
 import QualifyEmailSettings from "../../components/settings/QualifyEmailSettings.jsx";
 import DiscoveryEmailSettings from "../../components/settings/DiscoveryEmailSettings.jsx";
+import InvoiceEmailSettings from "../../components/settings/InvoiceEmailSettings.jsx";
 import SwmsLibrarySettings from "../../components/settings/SwmsLibrarySettings.jsx";
 
 // Maps a "component" kind sub.id → the element it renders. Kept here (rather than
@@ -33,6 +34,7 @@ const COMPONENT_MAP = {
   "enquiry-ack": () => <EnquiryAckSettings />,
   "qualify-email": () => <QualifyEmailSettings />,
   "discovery-email": () => <DiscoveryEmailSettings />,
+  "invoice-email": () => <InvoiceEmailSettings />,
 };
 
 // Renders one Settings-hub category: all of its role-permitted sub-sections,
