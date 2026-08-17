@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { apiFetch, apiPost } from "../../lib/apiFetch.js";
 import {
   CRM_STATUS, CRM_STATUS_LABELS, CRM_CONTACT_TYPES,
+  CRM_CONTACT_TYPE_LABELS, CRM_CONSULTANT_TYPES,
 } from "../../lib/constants.js";
 import ContactDrawer from "./ContactDrawer.jsx";
 import StatusBadge from "../ui/StatusBadge.jsx";
@@ -14,11 +15,7 @@ function fullName(c) {
 }
 
 function typeLabel(t) {
-  return {
-    prospect: "Prospect", referrer: "Referrer", past_client: "Past Client",
-    architect: "Architect", designer: "Designer", developer: "Developer",
-    agent: "Agent", supplier: "Supplier", other: "Other",
-  }[t] || t;
+  return CRM_CONTACT_TYPE_LABELS[t] || t;
 }
 
 function dueDateColor(d) {
@@ -41,7 +38,9 @@ function NewContactModal({ onClose, onCreated }) {
     suburb: "", status: "new", budgetRange: "", interestTimeline: "",
     notes: "",
     referredByContactId: "",
+    company: "", defaultConceptFee: "", defaultDesignFee: "",
   });
+  const isConsultant = CRM_CONSULTANT_TYPES.includes(form.contactType);
   const [smartListDefs, setSmartListDefs] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -160,34 +159,60 @@ function NewContactModal({ onClose, onCreated }) {
               <strong>{willJoin.map(l => l.name).join(", ")}</strong>
             </p>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Suburb</label>
-              <input className="input w-full" value={form.suburb} onChange={e => f("suburb", e.target.value)} />
+          {/* Consultant / design-partner details — company + default fees. Shown for architects,
+              designers, interior designers + engineers (the prospect fields don't apply to them). */}
+          {isConsultant && (
+            <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-3">
+              <p className="text-xs font-semibold text-primary">Consultant details</p>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">Company</label>
+                <input className="input w-full" placeholder="e.g. Colton Architecture" value={form.company} onChange={e => f("company", e.target.value)} />
+                <p className="text-[11px] text-muted mt-1">Autofills into pipeline emails (e.g. “…introduce you to Mark from <em>Colton Architecture</em>”).</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Default concept fee <span className="font-normal text-muted/70">(ex GST)</span></label>
+                  <input type="number" min="0" step="1" className="input w-full" placeholder="e.g. 3500" value={form.defaultConceptFee} onChange={e => f("defaultConceptFee", e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Default full-design fee <span className="font-normal text-muted/70">(ex GST)</span></label>
+                  <input type="number" min="0" step="1" className="input w-full" placeholder="e.g. 18000" value={form.defaultDesignFee} onChange={e => f("defaultDesignFee", e.target.value)} />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted">Defaults only — these autofill onto a lead when you select this partner, and stay editable per deal.</p>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Budget range</label>
-              <select className="input w-full" value={form.budgetRange} onChange={e => f("budgetRange", e.target.value)}>
-                <option value="">— select —</option>
-                <option value="under_500k">Under $500k</option>
-                <option value="500k_1m">$500k–$1M</option>
-                <option value="1m_1.5m">$1M–$1.5M</option>
-                <option value="1.5m_2m">$1.5M–$2M</option>
-                <option value="over_2m">Over $2M</option>
-              </select>
-            </div>
-          </div>
+          )}
+
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">Interest timeline</label>
-            <select className="input w-full" value={form.interestTimeline} onChange={e => f("interestTimeline", e.target.value)}>
-              <option value="">— select —</option>
-              <option value="now">Now</option>
-              <option value="6_months">6 months</option>
-              <option value="1_year">1 year</option>
-              <option value="2_years">2 years</option>
-              <option value="just_researching">Just researching</option>
-            </select>
+            <label className="block text-xs font-medium text-muted mb-1">Suburb</label>
+            <input className="input w-full" value={form.suburb} onChange={e => f("suburb", e.target.value)} />
           </div>
+          {!isConsultant && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">Budget range</label>
+                <select className="input w-full" value={form.budgetRange} onChange={e => f("budgetRange", e.target.value)}>
+                  <option value="">— select —</option>
+                  <option value="under_500k">Under $500k</option>
+                  <option value="500k_1m">$500k–$1M</option>
+                  <option value="1m_1.5m">$1M–$1.5M</option>
+                  <option value="1.5m_2m">$1.5M–$2M</option>
+                  <option value="over_2m">Over $2M</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">Interest timeline</label>
+                <select className="input w-full" value={form.interestTimeline} onChange={e => f("interestTimeline", e.target.value)}>
+                  <option value="">— select —</option>
+                  <option value="now">Now</option>
+                  <option value="6_months">6 months</option>
+                  <option value="1_year">1 year</option>
+                  <option value="2_years">2 years</option>
+                  <option value="just_researching">Just researching</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-muted mb-1">Referred by</label>

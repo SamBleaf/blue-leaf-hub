@@ -276,16 +276,41 @@ export const XERO_INVOICE_TYPES = {
 };
 
 export const CRM_CONTACT_TYPES = {
-  PROSPECT:    "prospect",
-  REFERRER:    "referrer",
-  PAST_CLIENT: "past_client",
-  ARCHITECT:   "architect",
-  DESIGNER:    "designer",
-  DEVELOPER:   "developer",
-  AGENT:       "agent",
-  SUPPLIER:    "supplier",
-  OTHER:       "other",
+  PROSPECT:          "prospect",
+  REFERRER:          "referrer",
+  PAST_CLIENT:       "past_client",
+  ARCHITECT:         "architect",
+  DESIGNER:          "designer",
+  INTERIOR_DESIGNER: "interior_designer",
+  ENGINEER:          "engineer",
+  DEVELOPER:         "developer",
+  AGENT:             "agent",
+  SUPPLIER:          "supplier",
+  OTHER:             "other",
 };
+
+/** Display labels for contact types — single source shared by the CRM list, drawer + forms. */
+export const CRM_CONTACT_TYPE_LABELS = {
+  prospect:          "Prospect",
+  referrer:          "Referrer",
+  past_client:       "Past Client",
+  architect:         "Architect",
+  designer:          "Designer",
+  interior_designer: "Interior Designer",
+  engineer:          "Engineer",
+  developer:         "Developer",
+  agent:             "Agent",
+  supplier:          "Supplier",
+  other:             "Other",
+};
+
+/**
+ * Consultant / design-partner disciplines. These carry a company + default concept + full-design
+ * fees (crm_contacts.company / default_concept_fee / default_design_fee). The contact form shows
+ * the "Consultant details" block for these types and hides the prospect-only fields (budget range,
+ * interest timeline). The company autofills into pipeline emails via the {{designer_company}} token.
+ */
+export const CRM_CONSULTANT_TYPES = ["architect", "designer", "interior_designer", "engineer"];
 
 /** CRM contact lifecycle status — replaces the old CRM_WARMTH enum */
 export const CRM_STATUS = {

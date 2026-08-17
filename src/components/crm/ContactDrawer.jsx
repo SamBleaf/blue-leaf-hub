@@ -5,9 +5,10 @@ import { useAuth } from "../../lib/useAuth.js";
 import {
   CRM_STATUS_LABELS, CRM_NEXT_ACTION_TYPES,
   CRM_INTERACTION_TYPES, CRM_CONSENT_SOURCES,
+  CRM_CONTACT_TYPE_LABELS, CRM_CONSULTANT_TYPES,
 } from "../../lib/constants.js";
 
-const CONTACT_ROLE_TYPES = ["referrer", "consultant", "architect", "designer", "agent", "engineer", "other"];
+const CONTACT_ROLE_TYPES = ["referrer", "consultant", "architect", "designer", "interior_designer", "agent", "engineer", "other"];
 const CONTACT_ROLE_STATUSES = ["active", "completed", "inactive"];
 
 function fmtMoney(n) {
@@ -25,11 +26,7 @@ const STATUS_COLORS = {
 };
 
 function typeLabel(t) {
-  return {
-    prospect: "Prospect", referrer: "Referrer", past_client: "Past Client",
-    architect: "Architect", designer: "Designer", developer: "Developer",
-    agent: "Agent", supplier: "Supplier", other: "Other",
-  }[t] || t;
+  return CRM_CONTACT_TYPE_LABELS[t] || t;
 }
 
 function fullName(c) {
@@ -418,6 +415,67 @@ function JobsAndReferralsSection({ contactId, onChanged }) {
   );
 }
 
+// Editable consultant/design-partner details — company + client-facing default fees. Lets Sam set
+// (or update) the defaults on an EXISTING architect/designer/etc. Company feeds the {{designer_company}}
+// email token; the fees autofill onto a lead when this partner is selected (still editable per deal).
+function ConsultantDetailsSection({ contact, onSaved }) {
+  const [company, setCompany] = useState(contact.company || "");
+  const [conceptFee, setConceptFee] = useState(contact.defaultConceptFee ?? "");
+  const [designFee, setDesignFee] = useState(contact.defaultDesignFee ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  const norm = (v) => (v == null ? "" : String(v));
+  const dirty =
+    (company || "") !== (contact.company || "") ||
+    norm(conceptFee) !== norm(contact.defaultConceptFee) ||
+    norm(designFee) !== norm(contact.defaultDesignFee);
+
+  async function save() {
+    setSaving(true); setError(""); setSaved(false);
+    const { ok, error: e } = await apiPut(`/api/crm/contacts/${contact.id}`, {
+      company: company.trim() || null,
+      defaultConceptFee: conceptFee === "" ? null : conceptFee,
+      defaultDesignFee: designFee === "" ? null : designFee,
+    });
+    setSaving(false);
+    if (!ok) return setError(e || "Failed to save");
+    setSaved(true);
+    onSaved?.();
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Consultant details</p>
+      <div className="space-y-2 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-3">
+        <div>
+          <label className="block text-xs text-muted mb-1">Company <span className="text-muted/70">(shows in pipeline emails)</span></label>
+          <input className="input w-full text-sm" placeholder="e.g. Colton Architecture" value={company} onChange={e => { setCompany(e.target.value); setSaved(false); }} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-muted mb-1">Default concept fee <span className="text-muted/70">(ex GST)</span></label>
+            <input type="number" min="0" step="1" className="input w-full text-sm" placeholder="e.g. 3500" value={conceptFee} onChange={e => { setConceptFee(e.target.value); setSaved(false); }} />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Default full-design fee <span className="text-muted/70">(ex GST)</span></label>
+            <input type="number" min="0" step="1" className="input w-full text-sm" placeholder="e.g. 18000" value={designFee} onChange={e => { setDesignFee(e.target.value); setSaved(false); }} />
+          </div>
+        </div>
+        <p className="text-[11px] text-muted">Defaults autofill onto a lead when this partner is selected, and stay editable per deal.</p>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-2">
+          {saved && !dirty && <span className="text-xs text-emerald-600">Saved ✓</span>}
+          <button type="button" disabled={saving || !dirty} onClick={save} className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded-lg disabled:opacity-50">
+            {saving ? "Saving…" : "Save details"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ContactDrawer({ contactId, onClose, onSaved }) {
   const [contact, setContact] = useState(null);
   const [interactions, setInteractions] = useState([]);
@@ -593,6 +651,11 @@ export default function ContactDrawer({ contactId, onClose, onSaved }) {
               onDone={() => { setLogOpen(false); load(); onSaved?.(); }}
               onCancel={() => setLogOpen(false)}
             />
+          )}
+
+          {/* Consultant / design-partner details — editable, for design-partner types only */}
+          {CRM_CONSULTANT_TYPES.includes(contact.contactType) && (
+            <ConsultantDetailsSection contact={contact} onSaved={() => { load(); onSaved?.(); }} />
           )}
 
           {/* Project interest */}

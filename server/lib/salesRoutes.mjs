@@ -706,7 +706,7 @@ export function registerSalesRoutes(app) {
     if (!sb) return err(res, 503, "Supabase not configured");
     const { data, error } = await sb.from("crm_contacts")
       .select("id, first_name, last_name, company, default_concept_fee, default_design_fee, contact_type")
-      .in("contact_type", ["architect", "designer"])
+      .in("contact_type", ["architect", "designer", "interior_designer"])
       .order("company", { ascending: true });
     if (error) {
       if (error.code === "42703") return ok(res, { designers: [], columnsMissing: true }); // pre-migration-180

@@ -448,12 +448,21 @@ export function registerCrmRoutes(app) {
 
   // ─── Create contact ───────────────────────────────────────────────────────
 
+  // Parse a money-ish form value (string/number) to a number, or null when blank/invalid — used for
+  // the per-consultant default fees (crm_contacts.default_concept_fee / default_design_fee, EX-GST).
+  const feeOrNull = (v) => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   app.post("/api/crm/contacts", requireAuth, async (req, res) => {
     const {
       firstName, lastName, email, phone, contactType = "prospect",
       leadSource, referredByContactId, projectType, budgetRange, suburb, state,
       interestTimeline, status = "new", notes,
       nextActionType = "call", nextActionDueDate, nextActionNotes,
+      company, defaultConceptFee, defaultDesignFee,
     } = req.body;
 
     if (!firstName) return err(res, 400, "First name is required");
@@ -461,7 +470,7 @@ export function registerCrmRoutes(app) {
     // Default next action: new contacts get "call" due tomorrow
     const defaultDueDate = nextActionDueDate || new Date(Date.now() + 86400000).toISOString().split("T")[0];
 
-    const { data, error } = await sb().from("crm_contacts").insert({
+    const baseRow = {
       first_name: firstName,
       last_name: lastName || null,
       email: email || null,
@@ -480,8 +489,20 @@ export function registerCrmRoutes(app) {
       next_action_notes: nextActionNotes || null,
       notes: notes || null,
       created_by: req.user?.id || null,
-    }).select().single();
+    };
+    // Consultant/design-partner fields (mig 180 columns) — company feeds the {{designer_company}}
+    // email token; the two default fees autofill onto a lead when this partner is selected.
+    const consultantRow = {
+      company: company || null,
+      default_concept_fee: feeOrNull(defaultConceptFee),
+      default_design_fee: feeOrNull(defaultDesignFee),
+    };
 
+    let { data, error } = await sb().from("crm_contacts").insert({ ...baseRow, ...consultantRow }).select().single();
+    // Pre-mig-180 DBs lack the consultant columns — still create the contact without them.
+    if (error && (error.code === "42703" || error.code === "PGRST204")) {
+      ({ data, error } = await sb().from("crm_contacts").insert(baseRow).select().single());
+    }
     // Surface the real cause (e.g. an out-of-range status/contact_type/budget_range enum)
     // instead of a generic 500 the user can't act on.
     if (error) return err(res, 400, translateDbError(error));
@@ -528,6 +549,7 @@ export function registerCrmRoutes(app) {
       firstName, lastName, email, phone, contactType, leadSource,
       projectType, budgetRange, suburb, state, interestTimeline, status,
       nextActionType, nextActionDueDate, nextActionNotes, lastContactDate, notes,
+      company, defaultConceptFee, defaultDesignFee,
     } = req.body;
 
     const updates = { updated_at: new Date().toISOString() };
@@ -548,6 +570,10 @@ export function registerCrmRoutes(app) {
     if (nextActionNotes !== undefined) updates.next_action_notes = nextActionNotes;
     if (lastContactDate !== undefined) updates.last_contact_date = lastContactDate;
     if (notes !== undefined) updates.notes = notes;
+    // Consultant/design-partner fields (mig 180) — company + client-facing default fees (EX-GST).
+    if (company !== undefined) updates.company = company || null;
+    if (defaultConceptFee !== undefined) updates.default_concept_fee = feeOrNull(defaultConceptFee);
+    if (defaultDesignFee !== undefined) updates.default_design_fee = feeOrNull(defaultDesignFee);
 
     const { data, error } = await sb().from("crm_contacts")
       .update(updates).eq("id", id).select().single();
