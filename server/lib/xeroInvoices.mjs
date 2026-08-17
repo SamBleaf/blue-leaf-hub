@@ -16,6 +16,7 @@
  */
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { xeroRequest, getConnectedTenant, XeroNotConnectedError } from "./xeroClient.mjs";
+import { backfillLeadDocsToClientFolder } from "./dropboxClient.mjs";
 
 // ── Invoice-type registry ─────────────────────────────────────────────────────
 export const INVOICE_TYPES = {
@@ -274,16 +275,23 @@ export async function syncXeroInvoice(rowId) {
   const inv = resp?.Invoices?.[0];
   if (!inv) return row;
 
+  // Preserve the Hub 'sent' marker: emailing the client doesn't change Xero's status (still
+  // AUTHORISED), so a plain derive would downgrade sent→authorised. Only move off 'sent' when
+  // Xero shows real progress (part_paid/paid/void).
+  const derived = hubStatusFromXero(inv);
+  const nextStatus = (derived === "authorised" && row.status === "sent") ? "sent" : derived;
   const { data: updated } = await sb.from("xero_invoices").update({
     xero_status: inv.Status || null,
     xero_total: inv.Total ?? null,
     amount_due: inv.AmountDue ?? null,
     amount_paid: inv.AmountPaid ?? null,
-    status: hubStatusFromXero(inv),
+    status: nextStatus,
     last_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }).eq("id", row.id).select("*").maybeSingle();
-  return updated || row;
+  // Refresh the pay link (best-effort; persists onto the row) so the card stays current.
+  try { await getOnlineInvoiceUrl(updated || row); } catch { /* best-effort */ }
+  return (await getInvoiceRow(sb, row.id)) || updated || row;
 }
 
 /** List invoice rows for a lead or job (newest first) — drives the lead-detail card. */
@@ -295,4 +303,68 @@ export async function listXeroInvoices({ leadId = null, jobId = null } = {}) {
   if (jobId) q = q.eq("job_id", jobId);
   const { data } = await q;
   return data || [];
+}
+
+export async function getInvoiceRow(sb, id) {
+  const { data } = await (sb || getServiceSupabase()).from("xero_invoices").select("*").eq("id", id).maybeSingle();
+  return data || null;
+}
+
+// ── P2: the official Xero PDF, the pay link, and filing ───────────────────────
+
+/** The official branded invoice PDF (rendered by Xero's Branding Theme). Returns a Buffer. */
+export async function fetchXeroInvoicePdf(row) {
+  if (!row?.xero_invoice_id) throw new Error("Invoice not yet created in Xero.");
+  return xeroRequest(`/Invoices/${row.xero_invoice_id}`, { tenantId: row.xero_tenant_id, accept: "application/pdf" });
+}
+
+/** The Xero online-invoice pay link (AUTHORISED only). Persists it on the row; null if unavailable. */
+export async function getOnlineInvoiceUrl(row) {
+  if (!row?.xero_invoice_id) return null;
+  try {
+    const resp = await xeroRequest(`/Invoices/${row.xero_invoice_id}/OnlineInvoice`, { tenantId: row.xero_tenant_id });
+    const url = resp?.OnlineInvoices?.[0]?.OnlineInvoiceUrl || null;
+    if (url && url !== row.online_invoice_url) {
+      const sb = getServiceSupabase();
+      if (sb) await sb.from("xero_invoices").update({ online_invoice_url: url, updated_at: new Date().toISOString() }).eq("id", row.id);
+    }
+    return url;
+  } catch { return null; } // OnlineInvoice exists only for AUTHORISED invoices — ignore failures
+}
+
+/**
+ * Fetch the official PDF + pay link and FILE them: upload the PDF to lead-documents storage,
+ * record a lead_documents row (type 'invoice'), copy into the lead's Dropbox client folder, and
+ * store pdf_storage_path + online_invoice_url on the invoice row. All best-effort (fail-soft) — a
+ * filing failure never breaks invoice creation. Returns the (reloaded) invoice row.
+ */
+export async function fileXeroInvoicePdf({ sb, row } = {}) {
+  sb = sb || getServiceSupabase();
+  if (!sb || !row?.xero_invoice_id) return row;
+
+  const onlineUrl = await getOnlineInvoiceUrl(row); // also persists it
+  let pdf = null;
+  try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
+  if (!pdf || !row.lead_id) return (await getInvoiceRow(sb, row.id)) || row;
+
+  const num = String(row.xero_invoice_number || row.xero_invoice_id || "invoice").replace(/[^a-z0-9._-]+/gi, "-").toLowerCase();
+  const filename = `${new Date().toISOString().slice(0, 10)}-invoice-${num}.pdf`;
+  const storagePath = `leads/${row.lead_id}/${filename}`;
+  try {
+    const { error: upErr } = await sb.storage.from("lead-documents").upload(storagePath, pdf, { contentType: "application/pdf", upsert: true });
+    if (upErr) return (await getInvoiceRow(sb, row.id)) || row;
+    // lead_documents row (best-effort; type 'invoice' needs mig 183). Dedup on storage_path so
+    // re-filing (e.g. on send) doesn't create duplicate document rows.
+    try {
+      const { data: existingDoc } = await sb.from("lead_documents").select("id").eq("storage_path", storagePath).maybeSingle();
+      if (!existingDoc) await sb.from("lead_documents").insert({ lead_id: row.lead_id, filename, storage_path: storagePath, mime_type: "application/pdf", document_type: "invoice", uploaded_by: row.created_by || null });
+    } catch { /* pre-mig-183 or dup */ }
+    // Copy into the Dropbox client folder if one exists (created at concept-agreement acceptance).
+    try {
+      const { data: lead } = await sb.from("leads").select("client_folder_path").eq("id", row.lead_id).maybeSingle();
+      if (lead?.client_folder_path) await backfillLeadDocsToClientFolder({ sb, leadId: row.lead_id, clientFolderPath: lead.client_folder_path });
+    } catch { /* Dropbox best-effort */ }
+    await sb.from("xero_invoices").update({ pdf_storage_path: storagePath, online_invoice_url: onlineUrl || row.online_invoice_url, updated_at: new Date().toISOString() }).eq("id", row.id);
+  } catch { /* filing best-effort */ }
+  return (await getInvoiceRow(sb, row.id)) || row;
 }

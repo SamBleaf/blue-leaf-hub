@@ -21,7 +21,12 @@ import {
   exchangeCodeForTokens, getConnectedTenant, disconnectXero, xeroRedirectUri,
   XeroNotConnectedError,
 } from "./xeroClient.mjs";
-import { createXeroInvoice, syncXeroInvoice, listXeroInvoices } from "./xeroInvoices.mjs";
+import {
+  createXeroInvoice, syncXeroInvoice, listXeroInvoices, getInvoiceRow,
+  fileXeroInvoicePdf, fetchXeroInvoicePdf, getOnlineInvoiceUrl,
+} from "./xeroInvoices.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { incGst } from "./constants.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
 
@@ -92,7 +97,7 @@ export function registerXeroRoutes(app) {
       if (!Number.isFinite(amount) || amount <= 0) {
         return err(res, 400, "Set a concept fee on the lead before creating the invoice.");
       }
-      const row = await createXeroInvoice({
+      let row = await createXeroInvoice({
         invoiceType: "concept_fee",
         sourceType: "lead",
         sourceId: lead.id,
@@ -103,6 +108,8 @@ export function registerXeroRoutes(app) {
         address: lead.site_address || lead.suburb || undefined,
         createdBy: req.caller?.id || null,
       });
+      // File the official PDF + fetch the pay link (best-effort — never fails the create).
+      try { row = await fileXeroInvoicePdf({ sb, row }); } catch { /* filing best-effort */ }
       return ok(res, { invoice: rowToCamel(row) });
     } catch (e) {
       if (e instanceof XeroNotConnectedError) {
@@ -120,6 +127,81 @@ export function registerXeroRoutes(app) {
     } catch (e) {
       if (e instanceof XeroNotConnectedError) return err(res, 400, e.message, "XERO_NOT_CONNECTED");
       return err(res, 400, e?.message || "Could not sync the invoice.");
+    }
+  });
+
+  // ── P2: official PDF link + Hub-send ────────────────────────────────────────
+  // A short-lived signed URL to the official Xero PDF (files it on demand if not yet filed).
+  app.get("/api/finance/xero-invoices/:id/pdf-url", async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database is not configured.");
+    try {
+      let row = await getInvoiceRow(sb, req.params.id);
+      if (!row) return err(res, 404, "Invoice not found.");
+      if (!row.pdf_storage_path) { try { row = await fileXeroInvoicePdf({ sb, row }); } catch { /* fall through */ } }
+      if (!row?.pdf_storage_path) return err(res, 502, "Could not retrieve the invoice PDF from Xero.");
+      const { data: signed, error: sErr } = await sb.storage.from("lead-documents").createSignedUrl(row.pdf_storage_path, 3600);
+      if (sErr || !signed?.signedUrl) return err(res, 502, "Could not build the PDF link.");
+      return ok(res, { url: signed.signedUrl });
+    } catch (e) {
+      if (e instanceof XeroNotConnectedError) return err(res, 400, e.message, "XERO_NOT_CONNECTED");
+      return err(res, 400, e?.message || "Could not get the invoice PDF.");
+    }
+  });
+
+  // Hub-send the official invoice (branded PDF + pay link) to the client via our SMTP.
+  // Atomic anti-double-send: the send_source lock is claimed before any email is sent.
+  app.post("/api/finance/xero-invoices/:id/send", async (req, res) => {
+    if (!xeroEnabled()) return err(res, 400, "Xero invoicing is off — set XERO_ENABLED=1.");
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database is not configured.");
+    try {
+      const row0 = await getInvoiceRow(sb, req.params.id);
+      if (!row0) return err(res, 404, "Invoice not found.");
+      if (!row0.xero_invoice_id) return err(res, 422, "Create the invoice in Xero before sending.");
+      if (!row0.lead_id) return err(res, 422, "Sending is wired for lead-scoped invoices; job invoices arrive in P4.");
+
+      const { data: lead } = await sb.from("leads").select("id, name, email").eq("id", row0.lead_id).maybeSingle();
+      const to = String(req.body?.to || lead?.email || row0.sent_to_email || "").trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "No valid client email to send to.");
+
+      // Claim the send lock atomically (0 rows ⇒ already sent).
+      const { data: claimed } = await sb.from("xero_invoices")
+        .update({ send_source: "hub_smtp", sent_at: new Date().toISOString(), sent_to_email: to, updated_at: new Date().toISOString() })
+        .eq("id", row0.id).is("send_source", null).select("*").maybeSingle();
+      if (!claimed) return err(res, 409, "This invoice has already been sent.", "ALREADY_SENT");
+
+      const row = await fileXeroInvoicePdf({ sb, row: claimed }); // ensure filed + pay link
+      let pdf = null;
+      try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
+      const payUrl = row.online_invoice_url || (await getOnlineInvoiceUrl(row));
+
+      const number = row.xero_invoice_number || "";
+      const incTotal = row.xero_total != null ? Number(row.xero_total) : incGst(Number(row.amount_ex_gst));
+      const money = (n) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(Number(n));
+      const greeting = lead?.name ? `Hi ${String(lead.name).split(/\s+/)[0]},` : "Hi,";
+      const subject = `Invoice ${number} from Blue Leaf Building`.trim();
+      const text = `${greeting}\n\nPlease find attached invoice ${number} for ${money(incTotal)} (inc GST).${payUrl ? `\n\nView and pay online:\n${payUrl}` : ""}\n\nThank you,\nBlue Leaf Building`;
+      const html = `<p>${greeting}</p><p>Please find attached invoice <strong>${number}</strong> for <strong>${money(incTotal)}</strong> (inc GST).</p>${payUrl ? `<p><a href="${payUrl}">View &amp; pay online</a></p>` : ""}<p>Thank you,<br/>Blue Leaf Building</p>`;
+      const attachments = pdf ? [{ filename: `Invoice-${number || row.xero_invoice_id}.pdf`, content: pdf, mimeType: "application/pdf" }] : [];
+
+      try {
+        await sendPlainMail({ to, subject, text, html, attachments });
+      } catch (e) {
+        // Release the lock so the send can be retried.
+        await sb.from("xero_invoices").update({ send_source: null, sent_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
+        return err(res, 502, `Could not send the invoice email: ${e?.message || e}`);
+      }
+
+      const nextStatus = ["part_paid", "paid", "void"].includes(row.status) ? row.status : "sent";
+      const { data: finalRow } = await sb.from("xero_invoices").update({ status: nextStatus, updated_at: new Date().toISOString() }).eq("id", row.id).select("*").maybeSingle();
+      try { await sb.from("correspondence").insert({ lead_id: row.lead_id, direction: "outbound", subject, body: text, email_to: to }); } catch { /* best-effort */ }
+      try { await sb.from("lead_activities").insert({ lead_id: row.lead_id, activity_type: "email", summary: `Invoice ${number} sent to client` }); } catch { /* best-effort */ }
+
+      return ok(res, { invoice: rowToCamel(finalRow || row) });
+    } catch (e) {
+      if (e instanceof XeroNotConnectedError) return err(res, 400, e.message, "XERO_NOT_CONNECTED");
+      return err(res, 400, e?.message || "Could not send the invoice.");
     }
   });
 

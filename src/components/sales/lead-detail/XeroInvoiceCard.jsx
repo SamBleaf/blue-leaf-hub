@@ -11,6 +11,7 @@ import { incGst, XERO_INVOICE_STATUS_LABELS } from "../../../lib/constants.js";
 
 const money = (n) =>
   n == null || n === "" ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(Number(n));
+const fmtDate = (x) => { try { return new Date(x).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return ""; } };
 
 function StatusBadge({ status }) {
   const tone = {
@@ -69,6 +70,24 @@ export default function XeroInvoiceCard({ lead, reload }) {
     await loadAll();
   }
 
+  async function downloadPdf(id) {
+    setBusy(true); setMsg(null);
+    const { ok, data, error } = await apiFetch(`/api/finance/xero-invoices/${id}/pdf-url`);
+    setBusy(false);
+    if (!ok || !data?.url) { setMsg({ type: "error", text: error || "Could not get the invoice PDF." }); return; }
+    window.open(data.url, "_blank", "noopener");
+  }
+
+  async function sendInvoice(inv) {
+    if (!window.confirm(`Email invoice ${inv.xeroInvoiceNumber || ""} (with the PDF + pay link) to the client?`)) return;
+    setBusy(true); setMsg(null);
+    const { ok, error } = await apiPost(`/api/finance/xero-invoices/${inv.id}/send`, {});
+    setBusy(false);
+    if (!ok) { setMsg({ type: "error", text: error || "Could not send the invoice." }); return; }
+    setMsg({ type: "success", text: "Invoice emailed to the client." });
+    await loadAll();
+  }
+
   return (
     <div className="rounded-card border border-hairline bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -123,14 +142,22 @@ export default function XeroInvoiceCard({ lead, reload }) {
                 </div>
                 <StatusBadge status={inv.status} />
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {inv.xeroInvoiceId && (
+                  <button type="button" onClick={() => downloadPdf(inv.id)} disabled={busy} className="text-xs text-primary hover:underline disabled:opacity-50">Download PDF</button>
+                )}
                 {inv.onlineInvoiceUrl && (
                   <a href={inv.onlineInvoiceUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">Pay link ↗</a>
+                )}
+                {inv.xeroInvoiceId && inv.status !== "void" && (
+                  inv.sentAt
+                    ? <span className="text-[11px] text-green-700">✓ Sent {fmtDate(inv.sentAt)}</span>
+                    : <button type="button" onClick={() => sendInvoice(inv)} disabled={busy} className="text-xs font-medium text-accent hover:underline disabled:opacity-50">Send to client</button>
                 )}
                 {inv.xeroInvoiceId && (
                   <button type="button" onClick={() => sync(inv.id)} disabled={busy} className="text-xs text-muted hover:text-ink disabled:opacity-50">Sync status</button>
                 )}
-                {inv.errorMessage && <span className="text-[11px] text-red-600">{inv.errorMessage}</span>}
+                {inv.errorMessage && <span className="text-[11px] text-red-600 w-full">{inv.errorMessage}</span>}
               </div>
             </div>
           ))}
