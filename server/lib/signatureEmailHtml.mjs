@@ -1,15 +1,4 @@
-/** Build optional HTML wrapper with inline logo + footer (matches RFQ-style emails). */
-import fs from "node:fs";
-import path from "node:path";
-
-// The full Blue Leaf Building logo (same asset the PO PDFs use), read once from disk + cached.
-let _emailLogoBuf; // undefined = not tried; Buffer = loaded; null = unavailable
-function loadEmailLogoBuffer() {
-  if (_emailLogoBuf !== undefined) return _emailLogoBuf;
-  try { _emailLogoBuf = fs.readFileSync(path.resolve("public/brand/logo-black.png")); }
-  catch { _emailLogoBuf = null; }
-  return _emailLogoBuf;
-}
+/** Build optional HTML wrapper for plain-text emails (footer + optional data-URI logo). */
 
 function escapeHtml(s) {
   return String(s || "")
@@ -25,25 +14,6 @@ function isSafeInlineImageDataUrl(url) {
   if (!m?.[2]) return false;
   if (m[2].length > 4_500_000) return false;
   return /^[A-Za-z0-9+/=_-]*$/.test(m[2]);
-}
-
-export const EMAIL_LOGO_CID = "blb-logo";
-
-/**
- * The company logo for sales emails, as a CID-embedded inline attachment. Data-URIs get stripped by
- * Apple Mail/Gmail and hosted images depend on the client loading remote content — a CID attachment
- * travels WITH the email and renders in every client (we send via SMTP/nodemailer, which supports it).
- * Returns { imgHtml, attachment }; imgHtml is "" and attachment null if the logo file is unavailable.
- */
-export function emailLogoInline() {
-  const buf = loadEmailLogoBuffer();
-  if (!buf) return { imgHtml: "", attachment: null };
-  // Cap the size with a PIXEL max-width — Apple Mail ignores width:Npx but honours max-width, so a
-  // % max-width blew the (3320px-wide) logo up to full width. 200px keeps it a tidy signature logo.
-  return {
-    imgHtml: `<div style="margin:14px 0 4px;"><img src="cid:${EMAIL_LOGO_CID}" alt="Blue Leaf Building" width="200" style="width:200px;max-width:200px;height:auto;border:0;display:block;" /></div>`,
-    attachment: { filename: "blue-leaf-building.png", content: buf, cid: EMAIL_LOGO_CID, mimeType: "image/png" },
-  };
 }
 
 /**

@@ -28,7 +28,6 @@ import {
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature } from "./emailSignature.mjs";
 import { loadInvoiceEmailTemplate, buildInvoiceEmail, renderInvoiceEmail } from "./invoiceEmail.mjs";
-import { emailLogoInline } from "./signatureEmailHtml.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
 
@@ -193,16 +192,12 @@ export function registerXeroRoutes(app) {
       let pdf = null;
       try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
       const number = row.xero_invoice_number || row.xero_invoice_id;
-      // Company logo (CID inline image) in the HTML signature.
-      const logo = emailLogoInline();
-      const html = email.html + logo.imgHtml;
       const attachments = [
         pdf ? { filename: `Invoice-${number}.pdf`, content: pdf, mimeType: "application/pdf" } : null,
-        logo.attachment,
       ].filter(Boolean);
 
       try {
-        await sendPlainMail({ to, subject: email.subject, text: email.text, html, attachments });
+        await sendPlainMail({ to, subject: email.subject, text: email.text, html: email.html, attachments });
       } catch (e) {
         // Release the lock so the send can be retried.
         await sb.from("xero_invoices").update({ send_source: null, sent_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);

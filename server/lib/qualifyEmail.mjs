@@ -16,7 +16,6 @@
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
 import { buildLeadBookingLink } from "./calcom.mjs";
-import { emailLogoInline } from "./signatureEmailHtml.mjs";
 
 export const QUALIFY_EMAIL_TEMPLATE_KEY = "crm_qualify_email";
 export const QUALIFY_EMAIL_PLACEHOLDERS = [
@@ -195,15 +194,11 @@ export async function sendQualifyIntro(sb, lead, { userId = null, dryRun = false
   if (override?.subject && override?.text) {
     email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: qualifyTextToHtml(String(override.text)) };
   }
-  // Company logo (CID inline image) in the HTML signature.
-  const logo = emailLogoInline();
-  email.html = email.html + logo.imgHtml;
-
   const attachment = await loadCompanyProfilePdf(sb);
   try {
     const r = await sendPlainMail({
       to: email.to, subject: email.subject, text: email.text, html: email.html,
-      attachments: [attachment, logo.attachment].filter(Boolean), messageId: email.messageId,
+      attachments: attachment ? [attachment] : [], messageId: email.messageId,
     });
     const now = new Date().toISOString();
     // stamp (fail-soft: the .update just errors + is ignored if mig 174 isn't applied)
