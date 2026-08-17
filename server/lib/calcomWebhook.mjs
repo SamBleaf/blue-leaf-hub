@@ -30,7 +30,14 @@ function timingSafeEqualHex(a, b) {
 }
 
 function verifyCalSignature(rawBody, headerValue, secret) {
-  if (!secret) return { ok: true, skipped: true }; // unconfigured secret → accept (dev/first-wire)
+  if (!secret) {
+    // Fail CLOSED in production (mirrors requireCronSecretOrAdmin) — an unset secret must never let a
+    // public caller forge bookings against the service-role handler. A first-wire escape hatch keeps
+    // dev + initial wire-up testable: CAL_WEBHOOK_ALLOW_UNVERIFIED=true.
+    const allowUnverified = process.env.NODE_ENV !== "production"
+      || String(process.env.CAL_WEBHOOK_ALLOW_UNVERIFIED || "").trim() === "true";
+    return allowUnverified ? { ok: true, skipped: true } : { ok: false, reason: "secret_unconfigured" };
+  }
   if (!headerValue || typeof headerValue !== "string") return { ok: false, reason: "missing_signature_header" };
   const hmac = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
   const sig = headerValue.trim().toLowerCase().startsWith("sha256=") ? headerValue.trim().slice(7) : headerValue.trim();
@@ -48,17 +55,25 @@ function responseValue(responses, key) {
   return r;
 }
 
-// Which meeting this booking is. The hidden `meetingType` question is authoritative; default to the
-// build conversation so the original single-event bookings (no such question yet) still resolve.
+// Which meeting this booking is. The hidden `meetingType` question is authoritative; if it's absent
+// (a misconfigured event, or a cancel/reschedule payload without responses) disambiguate by the
+// event slug the payload already carries BEFORE falling back — so a non-build meeting is never
+// silently mislabeled as the build conversation (which would clobber that row + toggle the gate).
+// Only the genuine build-conversation slug keeps the legacy default; anything else → "unknown".
 function resolveMeetingType(payload) {
   const fromResponse = responseValue(payload?.responses, "meetingType");
   const fromMeta = payload?.metadata?.meetingType || payload?.metadata?.meetingtype;
   const t = String(fromResponse || fromMeta || "").trim();
-  return Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, t) ? t : "build_conversation";
+  if (Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, t)) return t;
+  const slug = String(payload?.type || "").trim();
+  const bySlug = Object.entries(MEETING_REGISTRY).find(([, e]) => e.slug === slug);
+  if (bySlug) return bySlug[0];
+  return MEETING_REGISTRY.build_conversation.slug === slug ? "build_conversation" : "unknown";
 }
 
 // Find the lead this booking belongs to. The hidden leadId question is authoritative; then the
-// metadata param (buggy fallback); then the attendee email → most-recent qualify-stage lead.
+// metadata param (fallback); then the attendee email → most-recent NON-terminal lead with that email
+// (any stage, so discovery/build bookings still match — but never an old lost/won deal).
 async function correlateLead(sb, payload) {
   const fromResponse = responseValue(payload?.responses, "leadId");
   const meta = payload?.metadata || {};
@@ -71,6 +86,7 @@ async function correlateLead(sb, payload) {
   if (email) {
     const { data } = await sb.from("leads")
       .select("id, stage, email").ilike("email", String(email).trim())
+      .not("stage", "in", "(lost,won)")
       .order("created_at", { ascending: false }).limit(1);
     if (data && data.length) return data[0];
   }
@@ -169,6 +185,12 @@ export async function handleCalcomWebhook(req, res) {
   }
 
   const meetingType = resolveMeetingType(payload);
+  if (meetingType === "unknown") {
+    // We know the lead but not which meeting (unrecognised event slug + no meetingType question).
+    // Ack without projecting — never mislabel it as the build conversation.
+    console.warn("[calcom webhook]", trigger, "— unmappable meeting (event slug:", payload?.type, ") — acked, not projected.");
+    return res.status(200).json({ ok: true, matched: true, meetingType: "unknown" });
+  }
   const entry = meetingRegistryEntry(meetingType);
   const uid = payload?.uid || payload?.bookingUid || null;
   const startTime = payload?.startTime || payload?.start || null;

@@ -326,8 +326,8 @@ export const MEETING_TYPES = {
 export const MEETING_TYPE_LABELS = {
   enquiry_call:               "Enquiry call",
   build_conversation:         "Build conversation",
-  designer_meeting:           "Designer concept meeting",
-  winning_offer_presentation: "Winning Offer presentation",
+  designer_meeting:           "Design meeting",
+  winning_offer_presentation: "Concept presentation",
 };
 
 export const MEETING_STATUSES = {

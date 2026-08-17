@@ -27,12 +27,12 @@ export const MEETING_REGISTRY = {
     stage: "qualify", label: "Build conversation", mode: "self",
   },
   designer_meeting: {
-    slug: (process.env.CAL_DESIGNER_SLUG || "designer-meeting").trim(),
-    stage: "discovery", label: "Designer concept meeting", mode: "self",
+    slug: (process.env.CAL_DESIGNER_SLUG || "design-meeting").trim(), // Sam's "Design Meeting" event
+    stage: "discovery", label: "Design meeting", mode: "self",
   },
   winning_offer_presentation: {
-    slug: (process.env.CAL_PRESENTATION_SLUG || "winning-offer-presentation").trim(),
-    stage: "winning_offer", label: "Winning Offer presentation", mode: "both",
+    slug: (process.env.CAL_PRESENTATION_SLUG || "concept-presentation").trim(), // Sam's "Concept Presentation" event
+    stage: "winning_offer", label: "Concept presentation", mode: "both",
   },
 };
 

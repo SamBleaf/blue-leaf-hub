@@ -24,6 +24,7 @@ async function calGet(path, apiVersion) {
   const { apiKey } = calcomConfig();
   const r = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${apiKey}`, "cal-api-version": apiVersion },
+    signal: AbortSignal.timeout(10000), // a hung cal.com must throw, not stall the request
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`cal.com GET ${path} → ${r.status} ${j?.error?.message || ""}`.trim());
@@ -52,13 +53,15 @@ function attendeeName(lead) {
  * Create a booking on the client's behalf. Returns { uid, rescheduleUrl, cancelUrl }.
  * Throws on any failure — the caller degrades to a Hub-recorded manual meeting.
  */
-export async function createCalcomBooking({ lead, meetingType, startAt, durationMins, location }) {
+export async function createCalcomBooking({ lead, meetingType, startAt, durationMins }) {
   if (!calcomApiConfigured()) throw new Error("cal.com API not configured");
   if (!lead?.email) throw new Error("lead has no email to invite");
   const entry = meetingRegistryEntry(meetingType);
   const eventTypeId = await resolveEventTypeId(entry.slug);
   const { apiKey } = calcomConfig();
 
+  // NB: we don't send a location — cal.com applies the event type's own configured location
+  // (phone/video/in-person). Forcing one here would fail bookings for events not set up for it.
   const body = {
     start: startAt,
     eventTypeId,
@@ -67,7 +70,6 @@ export async function createCalcomBooking({ lead, meetingType, startAt, duration
     bookingFieldsResponses: { leadId: String(lead.id || ""), meetingType },
   };
   if (durationMins) body.lengthInMinutes = durationMins;
-  if (location) body.location = { type: "attendeePhoneNumber" }; // conservative default; refined per event type
 
   const r = await fetch(`${API_BASE}/bookings`, {
     method: "POST",
@@ -77,13 +79,17 @@ export async function createCalcomBooking({ lead, meetingType, startAt, duration
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`cal.com booking failed → ${r.status} ${j?.error?.message || JSON.stringify(j?.error || {})}`.trim());
   const uid = j?.data?.uid || j?.data?.booking?.uid || null;
+  // A 200 with no extractable uid means we can't track/reschedule it — throw so the caller degrades
+  // to a Hub-recorded manual meeting rather than persisting a phantom "booked" row it can never manage.
+  if (!uid) throw new Error(`cal.com booking returned ${r.status} but no booking uid: ${JSON.stringify(j?.data ?? j).slice(0, 300)}`);
   return {
     uid,
-    rescheduleUrl: uid ? `https://cal.com/reschedule/${uid}` : null,
-    cancelUrl: uid ? `https://cal.com/booking/${uid}?cancel=true` : null,
+    rescheduleUrl: `https://cal.com/reschedule/${uid}`,
+    cancelUrl: `https://cal.com/booking/${uid}?cancel=true`,
   };
 }

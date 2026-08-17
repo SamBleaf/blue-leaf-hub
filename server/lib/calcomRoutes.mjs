@@ -9,6 +9,7 @@ import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry } from "./
 import { calcomApiConfigured, createCalcomBooking } from "./calcomApi.mjs";
 
 const TABLE_MISSING = new Set(["42P01", "42703", "PGRST205"]); // table/column absent (pre-mig-185)
+const CAL_TIMEZONE = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim(); // for human-readable log notes
 
 export function registerCalcomRoutes(app) {
   const sb = () => getServiceSupabase();
@@ -82,15 +83,28 @@ export function registerCalcomRoutes(app) {
       .select("id, name, first_name, last_name, email").eq("id", req.params.id).maybeSingle();
     if (lErr || !lead) return err(res, 404, "Lead not found");
 
+    // Don't silently clobber a client's LIVE self-booked cal.com meeting. If one exists and we won't
+    // be creating a replacement cal.com booking (no API key), block + point staff at the client's
+    // reschedule link instead of overwriting its cal identity to null.
+    const { data: existing } = await db.from("lead_meetings")
+      .select("cal_booking_uid, cal_reschedule_url, booking_source, status")
+      .eq("lead_id", lead.id).eq("meeting_type", meetingType).maybeSingle();
+    const hasLiveSelfBooking = existing && existing.status !== "cancelled" && existing.cal_booking_uid && existing.booking_source === "self";
+
     // Try a real cal.com booking first (best-effort); fall back to a Hub-recorded 'manual' meeting.
     let cal = null, bookingSource = "manual";
     if (calcomApiConfigured()) {
       try {
-        cal = await createCalcomBooking({ lead, meetingType, startAt: startAt.toISOString(), durationMins, location });
+        cal = await createCalcomBooking({ lead, meetingType, startAt: startAt.toISOString(), durationMins });
         bookingSource = "on_behalf";
       } catch (e) {
         console.warn("[calcom schedule] API booking failed, recording manual meeting:", e?.message || e);
       }
+    }
+
+    // Would this overwrite a live client self-booking with a Hub record (losing the cal.com link)? Block it.
+    if (hasLiveSelfBooking && !cal) {
+      return err(res, 409, "The client has already booked this meeting via cal.com — use their reschedule/cancel link to change it.", "SELF_BOOKED");
     }
 
     const row = {
@@ -115,7 +129,7 @@ export function registerCalcomRoutes(app) {
       if (TABLE_MISSING.has(error.code)) return err(res, 400, "Meeting scheduling isn't available yet — migration 185 needs to be applied.");
       return err(res, 400, translateDbError(error));
     }
-    try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: `${entry.label} scheduled for ${startAt.toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })}` }); } catch { /* best-effort */ }
+    try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: `${entry.label} scheduled for ${startAt.toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: CAL_TIMEZONE })}` }); } catch { /* best-effort */ }
     ok(res, { meeting: rowToCamel(data), bookedViaCalcom: bookingSource === "on_behalf" });
   });
 }
