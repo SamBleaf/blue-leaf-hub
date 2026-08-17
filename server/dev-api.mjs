@@ -58,6 +58,7 @@ import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
 import { registerFinanceCCRoutes } from "./lib/financeCCRoutes.mjs";
 import { registerXeroRoutes } from "./lib/xeroRoutes.mjs";
+import { registerCalcomRoutes } from "./lib/calcomRoutes.mjs";
 import { registerCompanyCostModelRoutes } from "./lib/companyCostModelRoutes.mjs";
 // DEREGISTERED (Phase -1 cleanup): jobFinanceRoutes was fully shadowed by financeRoutes +
 // financeCCRoutes (Express ignores param names, so its :id routes duplicated existing paths).
@@ -1000,6 +1001,7 @@ registerBlueprintRoutes(app);
 registerInductionRoutes(app);
 registerJobsApiRoutes(app);
 registerSalesRoutes(app);
+registerCalcomRoutes(app); // Sales meetings: lead_meetings read/link/agenda + book-on-behalf (cal.com). Webhook is mounted RAW above.
 registerFinanceRoutes(app);
 registerFinanceCCRoutes(app);
 registerXeroRoutes(app); // Xero AR/invoice connection (P0). /api/finance/xero/* is admin-gated by the blanket guard above; the OAuth callback is public under /api/public/xero/callback.
