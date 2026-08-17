@@ -179,10 +179,13 @@ export function registerXeroRoutes(app) {
       const number = row.xero_invoice_number || "";
       const incTotal = row.xero_total != null ? Number(row.xero_total) : incGst(Number(row.amount_ex_gst));
       const money = (n) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(Number(n));
+      // lead.name comes from the public enquiry form (untrusted) — HTML-escape it (and the
+      // number, defensively) before interpolating into the email HTML. The plaintext body is safe.
+      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
       const greeting = lead?.name ? `Hi ${String(lead.name).split(/\s+/)[0]},` : "Hi,";
       const subject = `Invoice ${number} from Blue Leaf Building`.trim();
       const text = `${greeting}\n\nPlease find attached invoice ${number} for ${money(incTotal)} (inc GST).${payUrl ? `\n\nView and pay online:\n${payUrl}` : ""}\n\nThank you,\nBlue Leaf Building`;
-      const html = `<p>${greeting}</p><p>Please find attached invoice <strong>${number}</strong> for <strong>${money(incTotal)}</strong> (inc GST).</p>${payUrl ? `<p><a href="${payUrl}">View &amp; pay online</a></p>` : ""}<p>Thank you,<br/>Blue Leaf Building</p>`;
+      const html = `<p>${esc(greeting)}</p><p>Please find attached invoice <strong>${esc(number)}</strong> for <strong>${money(incTotal)}</strong> (inc GST).</p>${payUrl ? `<p><a href="${esc(payUrl)}">View &amp; pay online</a></p>` : ""}<p>Thank you,<br/>Blue Leaf Building</p>`;
       const attachments = pdf ? [{ filename: `Invoice-${number || row.xero_invoice_id}.pdf`, content: pdf, mimeType: "application/pdf" }] : [];
 
       try {

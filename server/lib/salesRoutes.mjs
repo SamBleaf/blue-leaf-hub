@@ -635,7 +635,11 @@ export function registerSalesRoutes(app) {
       client_folder_path: null, client_folder_link: null, client_folder_created_at: null,
     };
     const { data: updated, error: uErr } = await sb.from("leads").update(coreReset).eq("id", req.params.id).select().single();
-    if (uErr) return err(res, 400, translateDbError(uErr));
+    if (uErr) {
+      console.error("[test-reset] coreReset failed:", uErr);
+      // Surface the real error (admin-only test tool) so column/constraint issues are diagnosable.
+      return err(res, 400, `Reset failed: ${uErr.message || ""}${uErr.code ? ` [${uErr.code}]` : ""}` || translateDbError(uErr));
+    }
     // mig-179 discovery/agreement columns (best-effort — ignored before Phase 1 is applied).
     sb.from("leads").update({
       discovery_email_sent_at: null, discovery_followup_sent_at: null, discovery_meeting_attendees: null,

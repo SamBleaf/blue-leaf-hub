@@ -347,8 +347,10 @@ export async function fileXeroInvoicePdf({ sb, row } = {}) {
   try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
   if (!pdf || !row.lead_id) return (await getInvoiceRow(sb, row.id)) || row;
 
+  // Stable filename (NO filing date) keyed on the Xero invoice number, so re-filing (e.g. on
+  // send) collapses onto the same storage object + lead_documents row instead of duplicating.
   const num = String(row.xero_invoice_number || row.xero_invoice_id || "invoice").replace(/[^a-z0-9._-]+/gi, "-").toLowerCase();
-  const filename = `${new Date().toISOString().slice(0, 10)}-invoice-${num}.pdf`;
+  const filename = `invoice-${num}.pdf`;
   const storagePath = `leads/${row.lead_id}/${filename}`;
   try {
     const { error: upErr } = await sb.storage.from("lead-documents").upload(storagePath, pdf, { contentType: "application/pdf", upsert: true });
