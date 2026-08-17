@@ -1,5 +1,15 @@
 /** Build optional HTML wrapper with inline logo + footer (matches RFQ-style emails). */
-import { appBaseUrl } from "./appUrl.mjs";
+import fs from "node:fs";
+import path from "node:path";
+
+// The full Blue Leaf Building logo (same asset the PO PDFs use), read once from disk + cached.
+let _emailLogoBuf; // undefined = not tried; Buffer = loaded; null = unavailable
+function loadEmailLogoBuffer() {
+  if (_emailLogoBuf !== undefined) return _emailLogoBuf;
+  try { _emailLogoBuf = fs.readFileSync(path.resolve("public/brand/logo-black.png")); }
+  catch { _emailLogoBuf = null; }
+  return _emailLogoBuf;
+}
 
 function escapeHtml(s) {
   return String(s || "")
@@ -17,14 +27,21 @@ function isSafeInlineImageDataUrl(url) {
   return /^[A-Za-z0-9+/=_-]*$/.test(m[2]);
 }
 
+export const EMAIL_LOGO_CID = "blb-logo";
+
 /**
- * A standalone logo block for emails that build their OWN HTML (sales qualify/discovery/invoice).
- * Uses a HOSTED https URL (blueleafhub.com.au/brand/…) rather than a base64 data-URI — Apple Mail
- * and Gmail strip inline data-URI images, but a hosted https image renders in every client.
+ * The company logo for sales emails, as a CID-embedded inline attachment. Data-URIs get stripped by
+ * Apple Mail/Gmail and hosted images depend on the client loading remote content — a CID attachment
+ * travels WITH the email and renders in every client (we send via SMTP/nodemailer, which supports it).
+ * Returns { imgHtml, attachment }; imgHtml is "" and attachment null if the logo file is unavailable.
  */
-export function emailLogoBlockHtml() {
-  const src = `${appBaseUrl()}/brand/BLB_Icon_Blue.png`;
-  return `<div style="margin:16px 0 4px;"><img src="${src}" alt="Blue Leaf Building" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`;
+export function emailLogoInline() {
+  const buf = loadEmailLogoBuffer();
+  if (!buf) return { imgHtml: "", attachment: null };
+  return {
+    imgHtml: `<div style="margin:16px 0 6px;"><img src="cid:${EMAIL_LOGO_CID}" alt="Blue Leaf Building" width="180" style="width:180px;max-width:60%;height:auto;border:0;display:block;" /></div>`,
+    attachment: { filename: "blue-leaf-building.png", content: buf, cid: EMAIL_LOGO_CID, mimeType: "image/png" },
+  };
 }
 
 /**

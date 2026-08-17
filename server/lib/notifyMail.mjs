@@ -60,7 +60,9 @@ async function sendViaSmtp({ to, cc, bcc, subject, text, html, attachments, head
     mail.attachments = attachments.map((a) => ({
       filename: a.filename || "attachment.bin",
       content: Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content || ""),
-      contentType: a.mimeType || undefined
+      contentType: a.mimeType || a.contentType || undefined,
+      // Inline (CID) images — e.g. the signature logo — are referenced from the HTML as cid:<id>.
+      ...(a.cid ? { cid: a.cid, contentDisposition: "inline" } : {}),
     }));
   }
   await transport.sendMail(mail);

@@ -10,7 +10,7 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
 import { incGst } from "./constants.mjs";
 import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf, deleteDriveFile } from "./googleDriveClient.mjs";
-import { emailLogoBlockHtml } from "./signatureEmailHtml.mjs";
+import { emailLogoInline } from "./signatureEmailHtml.mjs";
 
 export const DISCOVERY_EMAIL_TEMPLATE_KEY = "crm_discovery_email";
 export const DISCOVERY_EMAIL_PLACEHOLDERS = [
@@ -203,14 +203,15 @@ export async function sendDiscoveryIntro(sb, lead, { userId = null, dryRun = fal
   if (override?.subject && override?.text) {
     email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: discoveryTextToHtml(String(override.text)) };
   }
-  // Company logo (hosted https image) in the HTML signature.
-  email.html = email.html + emailLogoBlockHtml();
+  // Company logo (CID inline image) in the HTML signature.
+  const logo = emailLogoInline();
+  email.html = email.html + logo.imgHtml;
 
   const attachment = attachAgreement ? await loadConceptAgreementAttachment(sb, lead) : null;
   try {
     const r = await sendPlainMail({
       to: email.to, subject: email.subject, text: email.text, html: email.html,
-      attachments: attachment ? [attachment] : [], messageId: email.messageId,
+      attachments: [attachment, logo.attachment].filter(Boolean), messageId: email.messageId,
     });
     await sb.from("leads").update({ discovery_email_sent_at: new Date().toISOString() }).eq("id", lead.id);
     await logLeadCorrespondence(sb, { leadId: lead.id, direction: "outbound", subject: email.subject, body: email.text, from: smtpFrom(), to: email.to, messageId: email.messageId });
