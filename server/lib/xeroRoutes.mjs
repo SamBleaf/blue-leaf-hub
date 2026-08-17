@@ -28,7 +28,6 @@ import {
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature } from "./emailSignature.mjs";
 import { loadInvoiceEmailTemplate, buildInvoiceEmail, renderInvoiceEmail } from "./invoiceEmail.mjs";
-import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { emailLogoBlockHtml } from "./signatureEmailHtml.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
@@ -195,9 +194,8 @@ export function registerXeroRoutes(app) {
       try { pdf = await fetchXeroInvoicePdf(row); } catch { pdf = null; }
       const number = row.xero_invoice_number || row.xero_invoice_id;
       const attachments = pdf ? [{ filename: `Invoice-${number}.pdf`, content: pdf, mimeType: "application/pdf" }] : [];
-      // Company logo in the HTML signature (branding-bucket data-URL; "" if unavailable → no-op).
-      const logo = await getBrandingEmailLogo(sb).catch(() => "");
-      const html = email.html + emailLogoBlockHtml(logo);
+      // Company logo (hosted https image) in the HTML signature.
+      const html = email.html + emailLogoBlockHtml();
 
       try {
         await sendPlainMail({ to, subject: email.subject, text: email.text, html, attachments });

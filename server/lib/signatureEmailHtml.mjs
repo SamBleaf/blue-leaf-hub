@@ -1,4 +1,5 @@
 /** Build optional HTML wrapper with inline logo + footer (matches RFQ-style emails). */
+import { appBaseUrl } from "./appUrl.mjs";
 
 function escapeHtml(s) {
   return String(s || "")
@@ -17,14 +18,13 @@ function isSafeInlineImageDataUrl(url) {
 }
 
 /**
- * A standalone inline-logo block for emails that build their OWN HTML (sales qualify/discovery/
- * invoice). Returns "" when the data-URL is missing or fails validation, so it's always safe to
- * append. Matches the RFQ-style logo styling.
+ * A standalone logo block for emails that build their OWN HTML (sales qualify/discovery/invoice).
+ * Uses a HOSTED https URL (blueleafhub.com.au/brand/…) rather than a base64 data-URI — Apple Mail
+ * and Gmail strip inline data-URI images, but a hosted https image renders in every client.
  */
-export function emailLogoBlockHtml(logoDataUrl) {
-  const logo = String(logoDataUrl || "").trim();
-  if (!logo || !isSafeInlineImageDataUrl(logo)) return "";
-  return `<div style="margin:16px 0 4px;"><img src="${logo}" alt="Blue Leaf Building" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`;
+export function emailLogoBlockHtml() {
+  const src = `${appBaseUrl()}/brand/BLB_Icon_Blue.png`;
+  return `<div style="margin:16px 0 4px;"><img src="${src}" alt="Blue Leaf Building" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`;
 }
 
 /**

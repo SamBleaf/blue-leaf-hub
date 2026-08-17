@@ -1166,7 +1166,7 @@ function SnapshotTab({ role }) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => shiftWeek(-7)} className="px-2.5 py-1 rounded border border-hairline text-sm">←</button>
-          <span className="text-sm font-medium text-ink">Week of {data.week_start}</span>
+          <span className="text-sm font-medium text-ink">Week of {data.week_start ? data.week_start.split("-").reverse().join("-") : ""}</span>
           <button type="button" onClick={() => shiftWeek(7)} className="px-2.5 py-1 rounded border border-hairline text-sm">→</button>
           {weekStart && <button type="button" onClick={() => setWeekStart("")} className="text-xs text-primary underline ml-1">This week</button>}
         </div>
