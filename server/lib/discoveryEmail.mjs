@@ -10,6 +10,8 @@ import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
 import { incGst } from "./constants.mjs";
 import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf, deleteDriveFile } from "./googleDriveClient.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
+import { emailLogoBlockHtml } from "./signatureEmailHtml.mjs";
 
 export const DISCOVERY_EMAIL_TEMPLATE_KEY = "crm_discovery_email";
 export const DISCOVERY_EMAIL_PLACEHOLDERS = [
@@ -202,6 +204,9 @@ export async function sendDiscoveryIntro(sb, lead, { userId = null, dryRun = fal
   if (override?.subject && override?.text) {
     email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: discoveryTextToHtml(String(override.text)) };
   }
+  // Company logo in the HTML signature (branding-bucket data-URL; "" if unavailable → no-op).
+  const logo = await getBrandingEmailLogo(sb).catch(() => "");
+  email.html = email.html + emailLogoBlockHtml(logo);
 
   const attachment = attachAgreement ? await loadConceptAgreementAttachment(sb, lead) : null;
   try {

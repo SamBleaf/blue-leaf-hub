@@ -16,6 +16,8 @@
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
 import { buildLeadBookingLink } from "./calcom.mjs";
+import { getBrandingEmailLogo } from "./brandingAssets.mjs";
+import { emailLogoBlockHtml } from "./signatureEmailHtml.mjs";
 
 export const QUALIFY_EMAIL_TEMPLATE_KEY = "crm_qualify_email";
 export const QUALIFY_EMAIL_PLACEHOLDERS = [
@@ -194,6 +196,9 @@ export async function sendQualifyIntro(sb, lead, { userId = null, dryRun = false
   if (override?.subject && override?.text) {
     email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: qualifyTextToHtml(String(override.text)) };
   }
+  // Company logo in the HTML signature (branding-bucket data-URL; "" if unavailable → no-op).
+  const logo = await getBrandingEmailLogo(sb).catch(() => "");
+  email.html = email.html + emailLogoBlockHtml(logo);
 
   const attachment = await loadCompanyProfilePdf(sb);
   try {

@@ -17,6 +17,17 @@ function isSafeInlineImageDataUrl(url) {
 }
 
 /**
+ * A standalone inline-logo block for emails that build their OWN HTML (sales qualify/discovery/
+ * invoice). Returns "" when the data-URL is missing or fails validation, so it's always safe to
+ * append. Matches the RFQ-style logo styling.
+ */
+export function emailLogoBlockHtml(logoDataUrl) {
+  const logo = String(logoDataUrl || "").trim();
+  if (!logo || !isSafeInlineImageDataUrl(logo)) return "";
+  return `<div style="margin:16px 0 4px;"><img src="${logo}" alt="Blue Leaf Building" width="160" style="max-width:200px;height:auto;border:0;display:block;" /></div>`;
+}
+
+/**
  * @param {string} bodyText — main message (plain)
  * @param {{ footerText?: string, logoDataUrl?: string, hiddenPreheader?: string }} sig
  *   hiddenPreheader — text emitted in a visually-hidden div (e.g. the RFQ Ref token) so it never
