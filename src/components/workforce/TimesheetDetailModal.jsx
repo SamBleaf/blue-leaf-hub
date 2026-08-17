@@ -78,6 +78,9 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
   const entries = ts?.timesheet_entries || [];
   const totalHours = entries.reduce((n, e) => n + Number(e.hours || 0), 0);
   const isSubmitted = ts?.status === "submitted";
+  // Rejected timesheets are editable + approvable on the desktop too (editing re-opens them
+  // server-side; approve un-rejects) — so the office can fix them without a PWA redo.
+  const isEditable = isSubmitted || ts?.status === "rejected";
   const jobLabel = ts?.carpentry_jobs
     ? `${ts.carpentry_jobs.reference || ""} ${ts.carpentry_jobs.address || ts.carpentry_jobs.client_name || ""}`.trim()
     : (ts?.projects?.address || null);
@@ -336,7 +339,7 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2 justify-end">
-                  {canModerate && isSubmitted && (
+                  {canModerate && isEditable && (
                     <button onClick={() => { if (editing) { setEditing(false); setAdding(false); } else { startEdit(); } }} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium text-ink">
                       {editing ? "Done editing" : "Edit"}
                     </button>
@@ -344,13 +347,13 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                   {canModerate && isSubmitted && !editing && (
                     <button onClick={() => setDeclining(true)} disabled={busy} className="px-4 py-2 rounded-lg border border-red-300 text-red-700 text-sm font-medium disabled:opacity-50">Decline</button>
                   )}
-                  {canApprove && isSubmitted && !editing && (
-                    <button onClick={approve} disabled={busy} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-50">{busy ? "…" : "Approve"}</button>
+                  {canApprove && isEditable && !editing && (
+                    <button onClick={approve} disabled={busy} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-50">{busy ? "…" : (ts.status === "rejected" ? "Approve (un-reject)" : "Approve")}</button>
                   )}
                   {canApprove && ts.status === "approved" && !editing && (
                     <button onClick={unapprove} disabled={busy} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium disabled:opacity-50" title="Revert to pending so you can edit, then re-approve">{busy ? "…" : "Un-approve to edit"}</button>
                   )}
-                  {(!isSubmitted || !canModerate) && !editing && (
+                  {(!isEditable || !canModerate) && !editing && (
                     <button onClick={onClose} className="px-4 py-2 rounded-lg border border-hairline text-sm font-medium text-muted">Close</button>
                   )}
                 </div>

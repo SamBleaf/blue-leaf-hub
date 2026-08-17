@@ -143,6 +143,18 @@ function weekStart(dateStr) {
   return mondayOf(dateStr || todayYmd());
 }
 
+// Re-open a REJECTED timesheet back to "submitted" when the office edits/re-fills it on the desktop,
+// so it returns to the approval queue and can be re-approved — the worker doesn't have to redo it in
+// the PWA. Best-effort; clears the rejection note and re-stamps submitted_at.
+async function reopenRejectedTimesheet(sb, timesheetId) {
+  try {
+    await sb.from("timesheets").update({
+      status: "submitted", rejection_notes: null,
+      submitted_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq("id", timesheetId).eq("status", "rejected");
+  } catch { /* best-effort */ }
+}
+
 // ── Buildexact sync ───────────────────────────────────────────────────────────
 
 // Match a site address to a Buildexact job id — via the buildexact_job_sync mirror first
@@ -503,6 +515,7 @@ async function approveSingleTimesheet(timesheetId, callerId, sb) {
     status: "approved",
     approved_by: callerId,
     approved_at: new Date().toISOString(),
+    rejection_notes: null, // clear any stale rejection note (a rejected timesheet can be fixed + approved)
     updated_at: new Date().toISOString(),
   }).eq("id", timesheetId);
 
@@ -864,7 +877,9 @@ export function registerWorkforceRoutes(app) {
     const { data, error } = await sb
       .from("timesheets")
       .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description))")
-      .eq("status", "submitted")
+      // Include rejected timesheets so the office can fix + re-approve them here (they show a red
+      // "rejected" badge) instead of waiting for the worker to redo it in the PWA.
+      .in("status", ["submitted", "rejected"])
       .order("submitted_at", { ascending: false });
     if (error) return res.status(500).json({ ok: false, error: error.message });
     res.json({ ok: true, timesheets: attachTaskLabels(data) });
@@ -985,7 +1000,7 @@ export function registerWorkforceRoutes(app) {
           continue;
         }
         // Upsert timesheet for this employee+date
-        let { data: ts } = await sb.from("timesheets").select("id").eq("employee_id", employee_id).eq("date", rowDate).maybeSingle();
+        let { data: ts } = await sb.from("timesheets").select("id, status").eq("employee_id", employee_id).eq("date", rowDate).maybeSingle();
         if (!ts) {
           const ins = await sb.from("timesheets").insert({
             employee_id, date: rowDate,
@@ -996,6 +1011,9 @@ export function registerWorkforceRoutes(app) {
             submitted_at: new Date().toISOString(),
           }).select("id").single();
           ts = ins.data;
+        } else if (ts.status === "rejected") {
+          // Re-filling a rejected day on the desktop re-opens it for approval (no PWA redo needed).
+          await reopenRejectedTimesheet(sb, ts.id);
         }
         if (!ts?.id) { results.push({ employee_id, ok: false, error: "Could not create timesheet" }); continue; }
 
@@ -1198,8 +1216,10 @@ export function registerWorkforceRoutes(app) {
     if (ts.status === "approved") {
       return err(res, 409, "Approved timesheets can't be edited — reject to reopen.", "ALREADY_APPROVED");
     }
-    if (ts.status !== "submitted") {
-      return err(res, 409, "Only submitted (pending approval) timesheets can be edited here.", "NOT_SUBMITTED");
+    // Rejected timesheets ARE editable on the desktop — fixing one re-opens it for approval below,
+    // so the office can correct + re-approve without the worker redoing it in the PWA.
+    if (ts.status !== "submitted" && ts.status !== "rejected") {
+      return err(res, 409, "Only pending or rejected timesheets can be edited here.", "NOT_EDITABLE");
     }
 
     // Validate inputs — same bounds as the worker edit path / DB check constraints.
@@ -1272,6 +1292,8 @@ export function registerWorkforceRoutes(app) {
       .single();
     if (updateErr) return err(res, 500, translateDbError(updateErr));
 
+    if (ts.status === "rejected") await reopenRejectedTimesheet(sb, ts.id);
+
     ok(res, { entry: { ...rowToCamel(updated), taskLabel: taskLabelForEntry(updated) } });
   });
 
@@ -1290,7 +1312,7 @@ export function registerWorkforceRoutes(app) {
     if (tsErr) return err(res, 500, translateDbError(tsErr));
     if (!ts) return err(res, 404, "Timesheet not found.", "NOT_FOUND");
     if (ts.status === "approved") return err(res, 409, "Approved timesheets can't be edited — reject to reopen.", "ALREADY_APPROVED");
-    if (ts.status !== "submitted") return err(res, 409, "Only submitted (pending approval) timesheets can be edited here.", "NOT_SUBMITTED");
+    if (ts.status !== "submitted" && ts.status !== "rejected") return err(res, 409, "Only pending or rejected timesheets can be edited here.", "NOT_EDITABLE");
 
     const h = Number(hours);
     if (!Number.isFinite(h) || h <= 0 || h > MAX_ENTRY_HOURS) {
@@ -1320,6 +1342,8 @@ export function registerWorkforceRoutes(app) {
       .select()
       .single();
     if (insErr) return err(res, 500, translateDbError(insErr));
+
+    if (ts.status === "rejected") await reopenRejectedTimesheet(sb, ts.id);
 
     ok(res, { entry: rowToCamel(created) });
   });
