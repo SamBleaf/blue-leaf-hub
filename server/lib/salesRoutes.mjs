@@ -604,7 +604,10 @@ export function registerSalesRoutes(app) {
   app.post("/api/sales/test-lead", requireAuth, requireRole("admin"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
-    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    // AU date format for the test-lead label: DD-MM-YYYY HH:MM.
+    const [_d, _t] = new Date().toISOString().split("T");
+    const [_y, _m, _day] = _d.split("-");
+    const stamp = `${_day}-${_m}-${_y} ${_t.slice(0, 5)}`;
     const email = (process.env.TEST_LEAD_EMAIL || req.caller?.email || "test@blueleafbuilding.com.au").trim();
     const insert = {
       name: `TEST — ${stamp}`, first_name: "Test", last_name: "Lead", email, phone: "0400 000 000",

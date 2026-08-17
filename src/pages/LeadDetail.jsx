@@ -1492,13 +1492,15 @@ export default function LeadDetail() {
   }, [leadId, lead?.ptsa_status, lead?.ptsa_signed_document_path]);
 
   async function patch(updates) {
+    // Optimistic: reflect the change instantly so dropdowns/fields don't lag on the round-trip.
+    setLead((prev) => (prev ? { ...prev, ...updates } : prev));
     const r = await authFetch(`/api/sales/leads/${leadId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates)
     });
     const j = await r.json();
-    if (j.ok) setLead(j.lead);
+    if (j.ok) setLead(j.lead); // reconcile with server truth
     return j.lead;
   }
 

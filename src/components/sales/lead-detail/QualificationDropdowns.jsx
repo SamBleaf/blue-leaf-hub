@@ -54,14 +54,22 @@ export default function QualificationDropdowns({ lead, patch, showPostalAddress 
   const signalOf = (kind) => signals.find((s) => s.kind === kind);
   async function upsertSignal(kind, label) {
     const existing = signalOf(kind);
-    if (!label) {
-      if (existing) await apiDelete(`/api/sales/leads/${lead.id}/signals/${existing.id}`);
-    } else if (existing) {
-      await apiPatch(`/api/sales/leads/${lead.id}/signals/${existing.id}`, { label });
-    } else {
-      await apiPost(`/api/sales/leads/${lead.id}/signals`, { kind, label });
+    // Optimistic: reflect the selection instantly, then reconcile with the server (real ids etc.).
+    setSignals((prev) => {
+      const others = prev.filter((s) => s.kind !== kind);
+      return label ? [...others, { ...(existing || {}), kind, label }] : others;
+    });
+    try {
+      if (!label) {
+        if (existing) await apiDelete(`/api/sales/leads/${lead.id}/signals/${existing.id}`);
+      } else if (existing) {
+        await apiPatch(`/api/sales/leads/${lead.id}/signals/${existing.id}`, { label });
+      } else {
+        await apiPost(`/api/sales/leads/${lead.id}/signals`, { kind, label });
+      }
+    } finally {
+      reloadSignals();
     }
-    await reloadSignals();
   }
 
   return (
