@@ -15,6 +15,7 @@ import PipelineFilterBar from "../components/sales/PipelineFilterBar.jsx";
 import SalesKanbanBoard from "../components/sales/SalesKanbanBoard.jsx";
 import SalesMobileLeadList from "../components/sales/SalesMobileLeadList.jsx";
 import SalesActionQueue from "../components/sales/SalesActionQueue.jsx";
+import SalesAgenda from "../components/sales/SalesAgenda.jsx";
 import SalesIntelMap from "../components/sales/SalesIntelMap.jsx";
 import KpiCard from "../components/ui/KpiCard.jsx";
 import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
@@ -392,7 +393,7 @@ export default function SalesPipeline() {
   const [quickNoteLead, setQuickNoteLead] = useState(null);
   const initialView = (() => {
     const v = new URLSearchParams(location.search).get("view");
-    return ["board", "actions", "list", "scorecard"].includes(v) ? v : "board";
+    return ["board", "actions", "agenda", "list", "scorecard"].includes(v) ? v : "board";
   })();
   const [view, setView] = useState(initialView); // "board" | "actions" | "list" | "scorecard"
   const [filter, setFilter] = useState("all");
@@ -606,6 +607,10 @@ export default function SalesPipeline() {
             mode={queueMode}
           />
         </div>
+      )}
+
+      {view === "agenda" && (
+        <SalesAgenda onOpen={openLead} />
       )}
 
       {view === "list" && (

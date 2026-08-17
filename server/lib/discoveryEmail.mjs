@@ -8,13 +8,15 @@
 
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter, DEFAULT_EMAIL_SIGNATURE } from "./emailSignature.mjs";
+import { buildLeadBookingLink } from "./calcom.mjs";
 import { incGst } from "./constants.mjs";
 import { driveConfigured, uploadDocxToDrive, exportDriveFileAsPdf, deleteDriveFile } from "./googleDriveClient.mjs";
 
 export const DISCOVERY_EMAIL_TEMPLATE_KEY = "crm_discovery_email";
 export const DISCOVERY_EMAIL_PLACEHOLDERS = [
   "{{client_salutation}}", "{{designer_name}}", "{{designer_company}}",
-  "{{concept_fee}}", "{{design_package_fee}}", "{{meeting_attendees}}", "{{user_signature}}",
+  "{{concept_fee}}", "{{design_package_fee}}", "{{meeting_attendees}}",
+  "{{designer_meeting_link}}", "{{user_signature}}",
 ];
 
 export const DISCOVERY_EMAIL_DEFAULTS = {
@@ -39,7 +41,7 @@ export const DISCOVERY_EMAIL_DEFAULTS = {
       "**3. Fixed Price Building Proposal**",
       "Once your plans are approved and all documentation is finalised, we will prepare a Fixed Price Building Proposal. If accepted, we can then move into a building contract — and from there, the next step is breaking ground and starting the build.",
       "",
-      "We know this is a lot to take in, but we prefer to give you a clear picture of the process early on so there are no surprises later. We will be in touch in a few days to hear your thoughts, and if you're ready, we can book an introductory meeting with {{designer_name}} to begin the concept design stage.",
+      "We know this is a lot to take in, but we prefer to give you a clear picture of the process early on so there are no surprises later. We will be in touch in a few days to hear your thoughts, and if you're ready, you can grab a time that suits to meet {{designer_name}} and begin the concept design stage here: {{designer_meeting_link}}",
       "",
       "In the meantime, if you have any inspiration, mood boards, or design ideas, please feel free to send them through at any time — the more we understand your style, the better.",
       "",
@@ -53,7 +55,7 @@ export const DISCOVERY_EMAIL_DEFAULTS = {
       "",
       "Just following up on the next steps we sent through last week for your project. Whenever you're ready, the best place to start is the concept design stage with {{designer_name}} — a short follow-up meeting to run through your ideas, then two concept drawings prepared for you.",
       "",
-      "If you have any questions about the process or the fees, or you'd like to book that intro meeting with {{designer_name}}, just let us know a few times that suit you next week onwards and we'll organise it.",
+      "If you have any questions about the process or the fees, just let us know. And whenever you're ready to book that intro meeting with {{designer_name}}, you can pick a time that suits here: {{designer_meeting_link}}",
       "",
       "No pressure either way — we just want to make sure you have a clear next step whenever the timing feels right.",
       "",
@@ -124,6 +126,7 @@ export function buildDiscoveryEmail(lead, which, { template, signature = null, d
     "{{concept_fee}}": feeIncGst(lead?.concept_fee),
     "{{design_package_fee}}": feeIncGst(lead?.design_package_fee),
     "{{meeting_attendees}}": attendees,
+    "{{designer_meeting_link}}": buildLeadBookingLink(lead || {}, "designer_meeting"),
     "{{user_signature}}": formatSignatureFooter(sig),
   };
   const sub = (s) => Object.entries(tokens).reduce((acc, [k, v]) => acc.split(k).join(v), String(s || ""));

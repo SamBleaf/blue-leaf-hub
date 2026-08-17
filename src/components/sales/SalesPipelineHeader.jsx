@@ -27,10 +27,16 @@ const VIEW_ICONS = {
       <rect x="1" y="9" width="3" height="6" rx="1" /><rect x="6" y="6" width="3" height="9" rx="1" /><rect x="11" y="2" width="3" height="13" rx="1" />
     </svg>
   ),
+  agenda: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <rect x="1.5" y="3" width="13" height="11.5" rx="2" /><path d="M1.5 6.5h13" /><path d="M5 1.5v3M11 1.5v3" strokeLinecap="round" />
+    </svg>
+  ),
 };
 const VIEWS = [
   { id: "board", title: "Board (kanban)" },
   { id: "actions", title: "Action queue" },
+  { id: "agenda", title: "Agenda (upcoming meetings)" },
   { id: "list", title: "List view" },
   { id: "scorecard", title: "APB Scorecard" },
 ];

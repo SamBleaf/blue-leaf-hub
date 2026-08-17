@@ -31,6 +31,7 @@ import LeadMailbox from "../components/sales/lead-detail/LeadMailbox.jsx";
 import DiscoveryMeetingScript from "../components/sales/lead-detail/DiscoveryMeetingScript.jsx";
 import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
 import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
+import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 
 const STAGES = [
@@ -2535,6 +2536,7 @@ export default function LeadDetail() {
     focusContent = (
       <div className="space-y-4">
         <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />
+        <MeetingScheduler lead={lead} meetingType="enquiry_call" reload={load} />
         <LeadMailbox lead={lead} />
       </div>
     );
@@ -2557,6 +2559,7 @@ export default function LeadDetail() {
         <DiscoveryMeetingScript />
         <DesignerSelect lead={lead} patch={patch} reload={load} />
         <DiscoveryActions lead={lead} reload={load} />
+        <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
         <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
         {conversationsBlock}
@@ -2564,7 +2567,12 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "winning_offer") {
-    focusContent = winningOfferBlock;
+    focusContent = (
+      <div className="space-y-4">
+        {winningOfferBlock}
+        <MeetingScheduler lead={lead} meetingType="winning_offer_presentation" reload={load} />
+      </div>
+    );
   } else if (lead.stage === "fee_proposal") {
     // advanceBlock moved to the single next-action slot (rail / Action tab).
     focusContent = ptsaBlock;
