@@ -27,7 +27,7 @@ import {
 } from "./xeroInvoices.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature } from "./emailSignature.mjs";
-import { loadInvoiceEmailTemplate, buildInvoiceEmail } from "./invoiceEmail.mjs";
+import { loadInvoiceEmailTemplate, buildInvoiceEmail, renderInvoiceEmail } from "./invoiceEmail.mjs";
 
 const xeroEnabled = () => process.env.XERO_ENABLED === "1" || process.env.XERO_ENABLED === "true";
 
@@ -173,9 +173,14 @@ export function registerXeroRoutes(app) {
       const payUrl = row0.online_invoice_url || (await getOnlineInvoiceUrl(row0));
       const template = await loadInvoiceEmailTemplate(sb);
       const signature = await getUserSignature(sb, req.caller?.id || null);
-      const email = buildInvoiceEmail(lead, row0, { template, signature, payUrl });
+      const assembled = buildInvoiceEmail(lead, row0, { template, signature, payUrl });
 
-      if (dryRun) return ok(res, { preview: { subject: email.subject, text: email.text, html: email.html, to } });
+      if (dryRun) return ok(res, { preview: { subject: assembled.subject, text: assembled.text, html: assembled.html, to } });
+
+      // Actual send — use the operator's EDITED copy from the preview if provided, else the template.
+      const editSubject = typeof req.body?.subject === "string" ? req.body.subject.trim() : "";
+      const editText = typeof req.body?.text === "string" ? req.body.text : "";
+      const email = (editSubject && editText) ? renderInvoiceEmail({ subject: editSubject, text: editText }) : assembled;
 
       // Claim the send lock atomically (0 rows ⇒ already sent).
       const { data: claimed } = await sb.from("xero_invoices")

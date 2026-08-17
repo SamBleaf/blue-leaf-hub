@@ -40,7 +40,7 @@ export default function QualifyActions({ lead, patch, reload }) {
   }
   async function sendNow() {
     setBusy(true); setMsg(null);
-    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/qualify-email/send`, {});
+    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/qualify-email/send`, { subject: preview?.subject, text: preview?.text });
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not send the email." }); return; }
     setPreviewOpen(false);
@@ -115,8 +115,13 @@ export default function QualifyActions({ lead, patch, reload }) {
           <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-card bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h4 className="text-sm font-semibold text-ink mb-1">Qualify email preview</h4>
             <p className="text-xs text-muted mb-3">To: {lead.email || "—"} · Company profile attached on send</p>
-            <p className="text-xs font-semibold text-ink">{preview.subject}</p>
-            <pre className="mt-2 whitespace-pre-wrap text-xs text-ink bg-page rounded-lg p-3 border border-hairline font-sans leading-relaxed">{preview.text}</pre>
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Subject</label>
+            <input value={preview.subject || ""} onChange={(e) => setPreview((p) => ({ ...p, subject: e.target.value }))}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink mb-3 focus-ring" />
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Message</label>
+            <textarea value={preview.text || ""} onChange={(e) => setPreview((p) => ({ ...p, text: e.target.value }))} rows={12}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page leading-relaxed focus-ring" />
+            <p className="text-[11px] text-muted mt-1">Edits apply to this send only. Change the default at Settings → General → Qualify emails.</p>
             {preview.bookingLink && <p className="mt-2 text-[11px] text-muted break-all">Booking link: {preview.bookingLink}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Close</button>

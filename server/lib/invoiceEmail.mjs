@@ -94,3 +94,9 @@ export function buildInvoiceEmail(lead, invoice, { template, signature = null, p
     html: invoiceTextToHtml(text),
   };
 }
+
+/** Render an operator-EDITED invoice email (already token-filled) → { subject, text, html }. */
+export function renderInvoiceEmail({ subject, text }) {
+  const t = String(text || "");
+  return { subject: String(subject || "").trim(), text: t, html: invoiceTextToHtml(t) };
+}

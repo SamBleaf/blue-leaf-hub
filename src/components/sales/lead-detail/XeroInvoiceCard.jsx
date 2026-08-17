@@ -85,13 +85,14 @@ export default function XeroInvoiceCard({ lead, reload }) {
     const { ok, data, error } = await apiPost(`/api/finance/xero-invoices/${inv.id}/send`, { preview: true });
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not build the email preview." }); return; }
-    setPreview({ invId: inv.id, number: inv.xeroInvoiceNumber, ...(data?.preview || {}) });
+    setPreview({ invId: inv.id, number: inv.xeroInvoiceNumber, to: data?.preview?.to || "", subject: data?.preview?.subject || "", text: data?.preview?.text || "" });
     setPreviewOpen(true);
   }
   async function confirmSend() {
     if (!preview?.invId) return;
     setBusy(true); setMsg(null);
-    const { ok, error } = await apiPost(`/api/finance/xero-invoices/${preview.invId}/send`, {});
+    // Send the EDITED subject + body (the preview is editable).
+    const { ok, error } = await apiPost(`/api/finance/xero-invoices/${preview.invId}/send`, { subject: preview.subject, text: preview.text });
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not send the invoice." }); return; }
     setPreviewOpen(false); setMsg({ type: "success", text: "Invoice emailed to the client." });
@@ -181,9 +182,13 @@ export default function XeroInvoiceCard({ lead, reload }) {
           <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-card bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h4 className="text-sm font-semibold text-ink mb-1">Send invoice {preview.number || ""} to the client</h4>
             <p className="text-xs text-muted mb-3">To: {preview.to || "—"} · the official Xero PDF is attached automatically</p>
-            <p className="text-xs font-semibold text-ink">{preview.subject}</p>
-            <pre className="mt-2 whitespace-pre-wrap text-xs text-ink bg-page rounded-lg p-3 border border-hairline font-sans leading-relaxed">{preview.text}</pre>
-            <p className="text-[11px] text-muted mt-2">Edit this template in Settings → General → Invoice email.</p>
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Subject</label>
+            <input value={preview.subject} onChange={(e) => setPreview((p) => ({ ...p, subject: e.target.value }))}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink mb-3 focus-ring" />
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Message</label>
+            <textarea value={preview.text} onChange={(e) => setPreview((p) => ({ ...p, text: e.target.value }))} rows={12}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page leading-relaxed focus-ring" />
+            <p className="text-[11px] text-muted mt-2">Edits here apply to this send only. Change the default template at Settings → General → Invoice email.</p>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
               <button type="button" onClick={confirmSend} disabled={busy} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{busy ? "Sending…" : "Send email"}</button>

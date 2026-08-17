@@ -183,13 +183,17 @@ async function logLeadCorrespondence(sb, { leadId, direction, subject, body, fro
  * Send the Qualify INTRODUCTION email (or return an assembled preview when dryRun).
  * Fail-soft on the mig-174 stamps + correspondence log; never throws to the caller beyond a send error.
  */
-export async function sendQualifyIntro(sb, lead, { userId = null, dryRun = false } = {}) {
+export async function sendQualifyIntro(sb, lead, { userId = null, dryRun = false, override = null } = {}) {
   const templates = await loadQualifyEmailTemplates(sb);
   const signature = await getUserSignature(sb, userId);
   const bookingLink = buildLeadBookingLink(lead);
-  const email = buildQualifyEmail(lead, "intro", { template: templates.intro, signature, bookingLink });
+  let email = buildQualifyEmail(lead, "intro", { template: templates.intro, signature, bookingLink });
   if (!isEmail(email.to)) return { ok: false, skipped: true, reason: "no valid email on lead" };
   if (dryRun) return { ok: true, dryRun: true, ...email, bookingLink };
+  // Operator's EDITED copy from the preview (already token-filled).
+  if (override?.subject && override?.text) {
+    email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: qualifyTextToHtml(String(override.text)) };
+  }
 
   const attachment = await loadCompanyProfilePdf(sb);
   try {

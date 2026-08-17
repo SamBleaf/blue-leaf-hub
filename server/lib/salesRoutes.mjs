@@ -690,7 +690,8 @@ export function registerSalesRoutes(app) {
     }
     const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
     if (error || !lead) return err(res, 404, "Lead not found");
-    const result = await sendQualifyIntro(sb, lead, { userId: req.caller?.id || null, dryRun });
+    const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
+    const result = await sendQualifyIntro(sb, lead, { userId: req.caller?.id || null, dryRun, override });
     if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the qualify email.");
     if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html, bookingLink: result.bookingLink } });
     return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });
@@ -752,7 +753,8 @@ export function registerSalesRoutes(app) {
     }
     const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
     if (error || !lead) return err(res, 404, "Lead not found");
-    const result = await sendDiscoveryIntro(sb, lead, { userId: req.caller?.id || null, dryRun, attachAgreement: req.body?.attachAgreement === true });
+    const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
+    const result = await sendDiscoveryIntro(sb, lead, { userId: req.caller?.id || null, dryRun, attachAgreement: req.body?.attachAgreement === true, override });
     if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the discovery email.");
     if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
     return ok(res, { sent: true, transport: result.transport, attached: !!result.attached });

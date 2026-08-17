@@ -190,14 +190,18 @@ async function logLeadCorrespondence(sb, { leadId, direction, subject, body, fro
 }
 
 /** Send the discovery INTRODUCTION email (or a preview when dryRun). Requires a selected designer. */
-export async function sendDiscoveryIntro(sb, lead, { userId = null, dryRun = false, attachAgreement = false } = {}) {
+export async function sendDiscoveryIntro(sb, lead, { userId = null, dryRun = false, attachAgreement = false, override = null } = {}) {
   const templates = await loadDiscoveryEmailTemplates(sb);
   const designer = await loadDesigner(sb, lead);
   if (!designer) return { ok: false, skipped: true, reason: "no designer selected for this lead" };
   const signature = await getUserSignature(sb, userId);
-  const email = buildDiscoveryEmail(lead, "intro", { template: templates.intro, signature, designer });
+  let email = buildDiscoveryEmail(lead, "intro", { template: templates.intro, signature, designer });
   if (!isEmail(email.to)) return { ok: false, skipped: true, reason: "no valid email on lead" };
   if (dryRun) return { ok: true, dryRun: true, ...email };
+  // Operator's EDITED copy from the preview (already token-filled).
+  if (override?.subject && override?.text) {
+    email = { ...email, subject: String(override.subject).trim(), text: String(override.text), html: discoveryTextToHtml(String(override.text)) };
+  }
 
   const attachment = attachAgreement ? await loadConceptAgreementAttachment(sb, lead) : null;
   try {
