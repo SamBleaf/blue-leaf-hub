@@ -41,6 +41,7 @@
 | 02-15 | Send the Discovery email & follow-up | [02-15_discovery_email.md](02_sales/02-15_discovery_email.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-16 | Generate & accept the concept agreement | [02-16_concept_agreement.md](02_sales/02-16_concept_agreement.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-17 | Edit the Discovery email templates | [02-17_discovery_email_templates.md](02_sales/02-17_discovery_email_templates.md) | Sales | Admin | Draft | untested | Yes | Medium |
+| 02-18 | Schedule pipeline meetings with Cal.com (setup + use) | [02-18_pipeline_meeting_scheduling.md](02_sales/02-18_pipeline_meeting_scheduling.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
