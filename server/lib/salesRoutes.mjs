@@ -626,22 +626,21 @@ export function registerSalesRoutes(app) {
     const { data: lead, error } = await sb.from("leads").select("id, is_test").eq("id", req.params.id).single();
     if (error || !lead) return err(res, 404, "Lead not found");
     if (!lead.is_test) return err(res, 400, "Reset is only available for test leads.");
+    // Essential reset — old, always-cached columns; awaited so a genuine failure surfaces.
     const coreReset = {
       stage: "enquiry", stage_entered_at: new Date().toISOString(), won_at: null, lost_at: null,
+    };
+    const { data: updated, error: uErr } = await sb.from("leads").update(coreReset).eq("id", req.params.id).select().single();
+    if (uErr) { console.error("[test-reset] coreReset failed:", uErr); return err(res, 400, translateDbError(uErr)); }
+    // Newer columns (migs 174–179) — best-effort. A stale PostgREST schema cache (PGRST204) right
+    // after a migration then degrades gracefully instead of hard-failing the whole reset. If a
+    // column can't be found, run `NOTIFY pgrst, 'reload schema';` in Supabase to refresh the cache.
+    sb.from("leads").update({
       qualify_confirmed_at: null, qualify_confirmed_by: null, qualify_email_sent_at: null,
       qualify_intro_sent_at: null, qualify_followup_sent_at: null, web_prescored: false,
       discovery_meeting_at: null, discovery_meeting_booked_at: null, discovery_meeting_source: null,
       calcom_booking_uid: null, calcom_reschedule_url: null, calcom_cancel_url: null,
       client_folder_path: null, client_folder_link: null, client_folder_created_at: null,
-    };
-    const { data: updated, error: uErr } = await sb.from("leads").update(coreReset).eq("id", req.params.id).select().single();
-    if (uErr) {
-      console.error("[test-reset] coreReset failed:", uErr);
-      // Surface the real error (admin-only test tool) so column/constraint issues are diagnosable.
-      return err(res, 400, `Reset failed: ${uErr.message || ""}${uErr.code ? ` [${uErr.code}]` : ""}` || translateDbError(uErr));
-    }
-    // mig-179 discovery/agreement columns (best-effort — ignored before Phase 1 is applied).
-    sb.from("leads").update({
       discovery_email_sent_at: null, discovery_followup_sent_at: null, discovery_meeting_attendees: null,
       concept_agreement_status: null, concept_agreement_generated_at: null,
       concept_agreement_accepted_at: null, concept_agreement_document_path: null,
