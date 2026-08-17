@@ -38,8 +38,10 @@ export const EMAIL_LOGO_CID = "blb-logo";
 export function emailLogoInline() {
   const buf = loadEmailLogoBuffer();
   if (!buf) return { imgHtml: "", attachment: null };
+  // Cap the size with a PIXEL max-width — Apple Mail ignores width:Npx but honours max-width, so a
+  // % max-width blew the (3320px-wide) logo up to full width. 200px keeps it a tidy signature logo.
   return {
-    imgHtml: `<div style="margin:16px 0 6px;"><img src="cid:${EMAIL_LOGO_CID}" alt="Blue Leaf Building" width="180" style="width:180px;max-width:60%;height:auto;border:0;display:block;" /></div>`,
+    imgHtml: `<div style="margin:14px 0 4px;"><img src="cid:${EMAIL_LOGO_CID}" alt="Blue Leaf Building" width="200" style="width:200px;max-width:200px;height:auto;border:0;display:block;" /></div>`,
     attachment: { filename: "blue-leaf-building.png", content: buf, cid: EMAIL_LOGO_CID, mimeType: "image/png" },
   };
 }
