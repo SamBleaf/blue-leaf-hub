@@ -6,7 +6,7 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry } from "./calcom.mjs";
-import { calcomApiConfigured, createCalcomBooking } from "./calcomApi.mjs";
+import { calcomApiConfigured, createCalcomBooking, getAvailableSlots } from "./calcomApi.mjs";
 
 const TABLE_MISSING = new Set(["42P01", "42703", "PGRST205"]); // table/column absent (pre-mig-185)
 const CAL_TIMEZONE = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim(); // for human-readable log notes
@@ -20,6 +20,23 @@ export function registerCalcomRoutes(app) {
       key, label: e.label, stage: e.stage, mode: e.mode, slug: e.slug,
     }));
     ok(res, { meetingTypes, bookOnBehalf: calcomApiConfigured() });
+  });
+
+  // Live open slots for a meeting type (for the on-call slot picker). Lead-independent — availability
+  // is the same for every client. { configured:false } when there's no CAL_API_KEY → the UI falls
+  // back to manual time entry. A cal.com error degrades to configured:true + empty slots + a message.
+  app.get("/api/sales/meeting-slots", requireAuth, async (req, res) => {
+    const meetingType = String(req.query.meetingType || "").trim();
+    if (!Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, meetingType)) return err(res, 400, "Unknown meeting type.");
+    if (!calcomApiConfigured()) return ok(res, { configured: false, slots: [] });
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 1), 60);
+    try {
+      const slots = await getAvailableSlots({ meetingType, days });
+      ok(res, { configured: true, slots });
+    } catch (e) {
+      console.warn("[calcom slots] load failed:", e?.message || e);
+      ok(res, { configured: true, slots: [], error: "Couldn't load live times right now." });
+    }
   });
 
   // A lead's meetings — the per-lead Meetings card.

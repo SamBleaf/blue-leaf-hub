@@ -16,6 +16,7 @@ import SalesKanbanBoard from "../components/sales/SalesKanbanBoard.jsx";
 import SalesMobileLeadList from "../components/sales/SalesMobileLeadList.jsx";
 import SalesActionQueue from "../components/sales/SalesActionQueue.jsx";
 import SalesAgenda from "../components/sales/SalesAgenda.jsx";
+import BookMeetingModal from "../components/sales/BookMeetingModal.jsx";
 import SalesIntelMap from "../components/sales/SalesIntelMap.jsx";
 import KpiCard from "../components/ui/KpiCard.jsx";
 import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
@@ -389,6 +390,7 @@ export default function SalesPipeline() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [bookOpen, setBookOpen] = useState(false);
   const [archTenderOpen, setArchTenderOpen] = useState(false);
   const [quickNoteLead, setQuickNoteLead] = useState(null);
   const initialView = (() => {
@@ -516,6 +518,7 @@ export default function SalesPipeline() {
         onAddLead={() => setAddOpen(true)}
         onArchTender={() => setArchTenderOpen(true)}
         onTestLead={createTestLead}
+        onBookMeeting={() => setBookOpen(true)}
       />
 
       {err && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">{err}</div>}
@@ -630,6 +633,7 @@ export default function SalesPipeline() {
       <AddLeadDrawer open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); load(); }} />
       <AddArchitectTenderDrawer open={archTenderOpen} onClose={() => setArchTenderOpen(false)} onCreated={() => { setArchTenderOpen(false); load(); }} />
       <QuickNoteModal lead={quickNoteLead} onClose={() => setQuickNoteLead(null)} onSaved={() => { setQuickNoteLead(null); load(); }} />
+      {bookOpen && <BookMeetingModal leads={leads} onClose={() => setBookOpen(false)} onBooked={() => { setBookOpen(false); load(); }} />}
 
       <div className="lg:hidden"><SafeBottomSpacer /></div>
     </div>

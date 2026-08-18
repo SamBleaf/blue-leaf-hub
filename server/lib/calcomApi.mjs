@@ -12,6 +12,7 @@ import { calcomConfig, meetingRegistryEntry } from "./calcom.mjs";
 const API_BASE = "https://api.cal.com/v2";
 const EVENT_TYPES_API_VERSION = "2024-06-14";
 const BOOKINGS_API_VERSION = "2024-08-13";
+const SLOTS_API_VERSION = "2024-09-04";
 const DEFAULT_TZ = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim();
 
 const _eventTypeIdCache = new Map(); // slug -> numeric id
@@ -47,6 +48,32 @@ export async function resolveEventTypeId(slug) {
 
 function attendeeName(lead) {
   return (lead.name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Client").trim();
+}
+
+/**
+ * Available booking slots for a meeting type over the next `days`, grouped by date, in DEFAULT_TZ.
+ * Returns [{ date: 'YYYY-MM-DD', times: [iso, ...] }] (only days with openings). Throws if not
+ * configured or the call fails — the caller (endpoint) turns that into a graceful "no live times".
+ */
+export async function getAvailableSlots({ meetingType, days = 14 }) {
+  if (!calcomApiConfigured()) throw new Error("cal.com API not configured");
+  const entry = meetingRegistryEntry(meetingType);
+  const eventTypeId = await resolveEventTypeId(entry.slug);
+  const q = new URLSearchParams({
+    eventTypeId: String(eventTypeId),
+    start: new Date().toISOString(),
+    end: new Date(Date.now() + days * 86400000).toISOString(),
+    timeZone: DEFAULT_TZ,
+  });
+  const j = await calGet(`/slots?${q.toString()}`, SLOTS_API_VERSION);
+  const data = j?.data || {};
+  return Object.entries(data)
+    .map(([date, arr]) => ({
+      date,
+      times: (Array.isArray(arr) ? arr : []).map((s) => (typeof s === "string" ? s : s?.start || s?.time)).filter(Boolean),
+    }))
+    .filter((d) => d.times.length)
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

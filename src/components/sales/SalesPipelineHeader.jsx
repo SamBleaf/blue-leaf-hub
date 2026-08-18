@@ -41,7 +41,7 @@ const VIEWS = [
   { id: "scorecard", title: "APB Scorecard" },
 ];
 
-export default function SalesPipelineHeader({ activeCount, totalValue, wonCount, view, onView, onAddLead, onArchTender, onTestLead }) {
+export default function SalesPipelineHeader({ activeCount, totalValue, wonCount, view, onView, onAddLead, onArchTender, onTestLead, onBookMeeting }) {
   const valueLabel = formatValue(totalValue);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -66,6 +66,15 @@ export default function SalesPipelineHeader({ activeCount, totalValue, wonCount,
             </button>
           ))}
         </div>
+        {onBookMeeting && (
+          <button
+            onClick={onBookMeeting}
+            title="Book a meeting for a lead — pick a live time (great while on a call)"
+            className="flex items-center gap-1.5 rounded-lg border border-accent px-3 py-2 text-sm font-semibold text-accent shadow-sm transition-colors hover:bg-accent hover:text-white"
+          >
+            <span className="text-base leading-none">📅</span> Book meeting
+          </button>
+        )}
         {onTestLead && (
           <button
             onClick={onTestLead}
