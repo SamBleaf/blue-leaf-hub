@@ -317,14 +317,12 @@ export const CRM_CONSULTANT_TYPES = ["architect", "designer", "interior_designer
  * calcom.mjs) and to lead_meetings.meeting_type. Deploy-ahead: no DB CHECK on the column.
  */
 export const MEETING_TYPES = {
-  ENQUIRY_CALL:               "enquiry_call",
   BUILD_CONVERSATION:         "build_conversation",
   DESIGNER_MEETING:           "designer_meeting",
   WINNING_OFFER_PRESENTATION: "winning_offer_presentation",
 };
 
 export const MEETING_TYPE_LABELS = {
-  enquiry_call:               "Enquiry call",
   build_conversation:         "Build conversation",
   designer_meeting:           "Design meeting",
   winning_offer_presentation: "Concept presentation",

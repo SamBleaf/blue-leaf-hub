@@ -31,10 +31,9 @@ Every pipeline meeting becomes bookable two ways: the client **self-books** from
 
    | Meeting | Event slug | Typical length / location |
    |---|---|---|
-   | Enquiry callback | `enquiry-call` | 15 min · phone |
    | Build conversation | `build-conversation` *(already exists)* | 30 min · phone/video |
-   | Designer concept meeting | `designer-meeting` | 60 min · in person/site |
-   | Winning-offer presentation | `winning-offer-presentation` | 60 min · in person/video |
+   | Design meeting | `design-meeting` | 60 min · in person/site |
+   | Concept presentation | `concept-presentation` | 60–90 min · in person/video |
 
 3. **On EVERY event type, add two hidden booking questions** (Event type → Advanced → Booking questions → Add):
    - Identifier `leadId` — type "Short text", **Hidden**, not required.
@@ -42,7 +41,7 @@ Every pipeline meeting becomes bookable two ways: the client **self-books** from
 
    These let the webhook map each booking to the exact lead + meeting. (They fix a Cal.com quirk where the older `metadata` channel can be dropped.)
 4. **Point one webhook** at `https://blueleafhub.com.au/api/webhooks/calcom`, subscribed to **Booking Created, Booking Rescheduled, Booking Cancelled**, and set its **secret** into `CAL_WEBHOOK_SECRET` on the API host.
-5. **Set the env slugs** on the API host: `CAL_USERNAME`, `CAL_EVENT_SLUG`, `CAL_ENQUIRY_SLUG`, `CAL_DESIGNER_SLUG`, `CAL_PRESENTATION_SLUG` (defaults already match the slugs above).
+5. **Set the env slugs** on the API host: `CAL_USERNAME`, `CAL_EVENT_SLUG`, `CAL_DESIGNER_SLUG`, `CAL_PRESENTATION_SLUG` (defaults already match the slugs above).
 6. **Optional — book-on-behalf:** set `CAL_API_KEY` (a Cal.com API key). With it, "set a time yourself" creates a real Cal.com booking (invite goes out). Without it, that action still records the meeting in the Hub so it shows on the agenda — it just doesn't send an invite.
 
 ## 5. Step-by-step process (day-to-day)
@@ -120,7 +119,7 @@ Next review date: 2027-02-17
 
 **TC-01 — Happy path (self-book link)**
 1. Open the Discovery lead → "Designer concept meeting" card → **Copy client booking link**.
-2. Expected result: a `cal.com/blue-leaf-build/designer-meeting?...` URL is copied; it contains `leadId=<the lead id>` and `meetingType=designer_meeting`.
+2. Expected result: a `cal.com/blue-leaf-build/design-meeting?...` URL is copied; it contains `leadId=<the lead id>` and `meetingType=designer_meeting`.
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Empty required field**

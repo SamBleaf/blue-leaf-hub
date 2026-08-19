@@ -2536,7 +2536,6 @@ export default function LeadDetail() {
     focusContent = (
       <div className="space-y-4">
         <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />
-        <MeetingScheduler lead={lead} meetingType="enquiry_call" reload={load} />
         <LeadMailbox lead={lead} />
       </div>
     );

@@ -18,10 +18,6 @@ export function calcomConfig() {
 }
 
 export const MEETING_REGISTRY = {
-  enquiry_call: {
-    slug: (process.env.CAL_ENQUIRY_SLUG || "enquiry-call").trim(),
-    stage: "enquiry", label: "Enquiry call", mode: "on_behalf",
-  },
   build_conversation: {
     slug: (process.env.CAL_EVENT_SLUG || "build-conversation").trim(),
     stage: "qualify", label: "Build conversation", mode: "self",
