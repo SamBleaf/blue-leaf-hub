@@ -602,35 +602,60 @@ async function attachChargeUpSites(sb, allocations) {
 
 // Planner palette keys, in the same order as src/lib/plannerColors.js PLANNER_PALETTE.
 const PLANNER_COLOR_KEYS = ["blue", "teal", "amber", "purple", "coral", "pink", "green", "red", "slate", "indigo"];
-function plannerAutoColorKey(key, orderedKeys) {
-  const i = orderedKeys.indexOf(key);
-  let idx = i;
-  if (i < 0) { let h = 0; const s = String(key); for (let c = 0; c < s.length; c++) h = (h * 31 + s.charCodeAt(c)) | 0; idx = Math.abs(h); }
-  return PLANNER_COLOR_KEYS[idx % PLANNER_COLOR_KEYS.length];
+const plannerKeyOf = (r) => (r.project_id ? `project:${r.project_id}` : `carpentry:${r.carpentry_job_id}`);
+// Stable, position-INDEPENDENT fallback (hash of the job key) — only for a job with no saved colour
+// (e.g. allocated but not on the board). Never reshuffles when other jobs are added/removed.
+function stablePlannerColorKey(key) {
+  let h = 0; const s = String(key);
+  for (let c = 0; c < s.length; c++) h = (h * 31 + s.charCodeAt(c)) | 0;
+  return PLANNER_COLOR_KEYS[Math.abs(h) % PLANNER_COLOR_KEYS.length];
 }
+function nextFreePlannerColor(taken) {
+  const t = taken instanceof Set ? taken : new Set(taken || []);
+  const free = PLANNER_COLOR_KEYS.find((k) => !t.has(k));
+  return free || PLANNER_COLOR_KEYS[t.size % PLANNER_COLOR_KEYS.length]; // >10 concurrent → deterministic wrap
+}
+
+// THE colour source of truth. Self-healing lock: every ON-BOARD planner job gets a UNIQUE, persisted
+// colour. Existing non-colliding colours are never changed (created_at order → earlier jobs keep
+// theirs, so a colour can't change on a job); a missing or colliding colour is (re)assigned the next
+// free colour and persisted. A removed job frees its colour (cleared on remove). Both the Planner and
+// the Worker PWA read this map, so their colours always match. Idempotent (no writes once healed);
+// fail-soft to {} if migration 118 is absent. Returns { jobKey: colorKey } for on-board jobs.
+async function ensurePlannerColors(sb) {
+  const { data: rows, error } = await sb.from("workforce_planner_jobs")
+    .select("id, project_id, carpentry_job_id, color, on_board, created_at")
+    .order("created_at", { ascending: true });
+  if (error || !rows) return {};
+  const used = new Set();
+  const updates = [];
+  for (const r of rows) {
+    if (!r.on_board) continue;
+    const valid = r.color && PLANNER_COLOR_KEYS.includes(r.color) && !used.has(r.color);
+    if (!valid) {
+      const ck = nextFreePlannerColor(used);
+      if (ck !== r.color) updates.push({ id: r.id, color: ck });
+      r.color = ck;
+    }
+    used.add(r.color);
+  }
+  for (const u of updates) {
+    try { await sb.from("workforce_planner_jobs").update({ color: u.color }).eq("id", u.id); } catch { /* best-effort */ }
+  }
+  const map = {};
+  for (const r of rows) if (r.on_board && r.color) map[plannerKeyOf(r)] = r.color;
+  return map;
+}
+
 // Attach each allocation's Planner colourKey so the worker's shift widget matches the Workforce
-// Planner exactly. Mirrors WorkforcePlannerTab: a saved colour wins, else auto-colour by the
-// job's position in the *board* — i.e. the active jobs (projects, then carpentry by created_at
-// DESC) filtered to those on-board or allocated in the CURRENT week. Resolved server-side because
-// workers can't call the admin planner-jobs endpoint.
+// Planner EXACTLY — both read the same persisted, self-healed lock (ensurePlannerColors). Off-board
+// allocated jobs (no lock row) get a stable hash colour that never reshuffles.
 async function attachAllocationColors(sb, allocations) {
   if (!allocations.length) return allocations;
-  const weekFrom = mondayOf(todayYmd());
-  const weekTo = addDaysYmd(weekFrom, 6);
-  const [{ data: pj }, { data: wk }, { data: projs }, { data: carps }] = await Promise.all([
-    sb.from("workforce_planner_jobs").select("project_id, carpentry_job_id, color, on_board"),
-    sb.from("workforce_allocations").select("project_id, carpentry_job_id").gte("allocation_date", weekFrom).lte("allocation_date", weekTo),
-    sb.from("projects").select("id, created_at").order("created_at", { ascending: true }),
-    sb.from("carpentry_jobs").select("id").order("created_at", { ascending: false }),
-  ]);
-  const savedMap = {}; const onBoard = new Set(); const allocKeys = new Set();
-  for (const r of pj || []) { const k = r.project_id ? `project:${r.project_id}` : `carpentry:${r.carpentry_job_id}`; if (r.color) savedMap[k] = r.color; if (r.on_board) onBoard.add(k); }
-  for (const a of wk || []) allocKeys.add(a.project_id ? `project:${a.project_id}` : `carpentry:${a.carpentry_job_id}`);
-  const universe = [...(projs || []).map((p) => `project:${p.id}`), ...(carps || []).map((c) => `carpentry:${c.id}`)];
-  const orderedKeys = universe.filter((k) => onBoard.has(k) || allocKeys.has(k));
+  const savedMap = await ensurePlannerColors(sb);
   for (const a of allocations) {
     const key = a.projectId ? `project:${a.projectId}` : a.carpentryJobId ? `carpentry:${a.carpentryJobId}` : null;
-    a.colorKey = key ? (savedMap[key] || plannerAutoColorKey(key, orderedKeys)) : "slate";
+    a.colorKey = key ? (savedMap[key] || stablePlannerColorKey(key)) : "slate";
   }
   return allocations;
 }
@@ -1924,6 +1949,7 @@ export function registerWorkforceRoutes(app) {
 
   app.get("/api/workforce/planner-jobs", requireAuth, requireRole("admin", "supervisor"), async (_req, res) => {
     const sb = getServiceSupabase();
+    try { await ensurePlannerColors(sb); } catch { /* fail-soft: self-heal the colour lock before reading */ }
     const { data, error } = await sb.from("workforce_planner_jobs").select("project_id, carpentry_job_id, color, on_board");
     if (error) {
       if (plannerTableMissing(error)) return ok(res, { jobs: [] }); // table not present yet
@@ -1946,6 +1972,9 @@ export function registerWorkforceRoutes(app) {
     const patch = { updated_at: new Date().toISOString() };
     if (hasColor) patch.color = req.body.color.trim();
     if (hasBoard) patch.on_board = req.body.onBoard;
+    // Removing a job from the board frees its colour back into the pool (Sam's rule: a removed job's
+    // colour re-enters rotation; it can never be shared by two on-board jobs).
+    if (hasBoard && req.body.onBoard === false) patch.color = null;
     const result = existing
       ? await sb.from("workforce_planner_jobs").update(patch).eq("id", existing.id).select("id").single()
       : await sb.from("workforce_planner_jobs").insert({ project_id: spine.projectId, carpentry_job_id: spine.carpentryJobId, color: hasColor ? req.body.color.trim() : null, on_board: hasBoard ? req.body.onBoard : false, created_by: req.caller.id }).select("id").single();
@@ -1953,7 +1982,13 @@ export function registerWorkforceRoutes(app) {
       if (plannerTableMissing(result.error)) return err(res, 503, "Planner settings need migration 118 applied", "MIGRATION_PENDING");
       return err(res, 500, translateDbError(result.error));
     }
-    ok(res, { job: { projectId: spine.projectId, carpentryJobId: spine.carpentryJobId, ...(hasColor ? { color: req.body.color.trim() } : {}), ...(hasBoard ? { onBoard: req.body.onBoard } : {}) } });
+    // Adding to the board without an explicit colour → allocate + persist the locked colour now, and
+    // return it so the client shows the final colour immediately (no flash / no client-side guess).
+    let resolvedColor = hasColor ? req.body.color.trim() : undefined;
+    if (hasBoard && req.body.onBoard === true && !hasColor) {
+      try { const map = await ensurePlannerColors(sb); resolvedColor = map[spine.projectId ? `project:${spine.projectId}` : `carpentry:${spine.carpentryJobId}`]; } catch { /* fail-soft */ }
+    }
+    ok(res, { job: { projectId: spine.projectId, carpentryJobId: spine.carpentryJobId, ...(resolvedColor !== undefined ? { color: resolvedColor } : {}), ...(hasBoard && req.body.onBoard === false ? { color: null } : {}), ...(hasBoard ? { onBoard: req.body.onBoard } : {}) } });
   });
 
   // ── W17-P5: RDO + public-holiday DISPLAY model (advisory/UI only) ──────────

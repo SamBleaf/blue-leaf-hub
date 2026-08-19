@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
-import { PLANNER_PALETTE, paletteByKey, nextFreeColorKey } from "../../lib/plannerColors.js";
+import { PLANNER_PALETTE, paletteByKey, autoColorKey } from "../../lib/plannerColors.js";
 import { CHARGE_UP_REFERENCE } from "../../lib/constants.js";
 
 // W17-P4b — Planner drag-drop + colour redesign.
@@ -236,33 +236,16 @@ export default function WorkforcePlannerTab() {
   const boardJobs = useMemo(() => jobs.filter((j) => settings[j.jKey]?.onBoard || allocKeys.has(j.jKey)), [jobs, settings, allocKeys]);
   const orderedKeys = useMemo(() => boardJobs.map((j) => j.jKey), [boardJobs]);
   const colorMap = useMemo(() => { const m = {}; for (const k of Object.keys(settings)) if (settings[k]?.color) m[k] = settings[k].color; return m; }, [settings]);
-  // Colours are LOCKED to a job (not derived from its position). Greedy pool allocation: a saved
-  // colour wins; an unsaved board job takes the next colour NOT already used ON THE BOARD (so a
-  // removed job's colour returns to the pool). The auto colour is then persisted (below), so adding
-  // a job never recolours the existing ones. O(1) per-cell lookup via colorByKey.
-  const { colorByKey, autoAssigned } = useMemo(() => {
-    const taken = new Set(orderedKeys.map((k) => colorMap[k]).filter(Boolean));
-    const byKey = {}; const auto = {};
-    for (const k of orderedKeys) {
-      if (colorMap[k]) { byKey[k] = paletteByKey(colorMap[k]); continue; }
-      const ck = nextFreeColorKey(taken); taken.add(ck);
-      byKey[k] = paletteByKey(ck); auto[k] = ck;
-    }
-    return { colorByKey: byKey, autoAssigned: auto };
+  // Colours are LOCKED to a job by the SERVER (workforce_planner_jobs.color, self-healed on read so
+  // every on-board job has a unique, persisted colour that matches the Worker PWA). The client just
+  // renders the saved colour; a brand-new board job shows a stable hash colour for the instant before
+  // the add-response returns its locked colour (never a position-based value → no reshuffle on add/remove).
+  const colorByKey = useMemo(() => {
+    const byKey = {};
+    for (const k of orderedKeys) byKey[k] = paletteByKey(colorMap[k] || autoColorKey(k));
+    return byKey;
   }, [orderedKeys, colorMap]);
-  const colorFor = useCallback((jKey) => colorByKey[jKey] || paletteByKey(colorMap[jKey]), [colorByKey, colorMap]);
-  // Persist each auto-allocated colour ONCE so it sticks (and shows the same everywhere). Guarded by a
-  // ref so this fires only for a job's first-ever allocation; setSettings then moves it into colorMap.
-  const autoColorPersisted = useRef(new Set());
-  useEffect(() => {
-    for (const [k, ck] of Object.entries(autoAssigned)) {
-      if (autoColorPersisted.current.has(k)) continue;
-      autoColorPersisted.current.add(k);
-      saveColor(k, ck);
-    }
-    // saveColor is a stable hoisted handler; the ref guard prevents repeat writes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoAssigned]);
+  const colorFor = useCallback((jKey) => colorByKey[jKey] || paletteByKey(colorMap[jKey] || autoColorKey(jKey)), [colorByKey, colorMap]);
   const labelMap = useMemo(() => { const m = {}; for (const j of jobs) m[j.jKey] = j.label; return m; }, [jobs]);
   const labelFor = useCallback((jKey) => labelMap[jKey] || "Job", [labelMap]);
   const holidayMap = useMemo(() => { const m = {}; for (const h of nonWorking.holidays) m[h.date] = h.name; return m; }, [nonWorking]);
@@ -381,9 +364,12 @@ export default function WorkforcePlannerTab() {
     if (!r.ok) flash("error", r.code === "MIGRATION_PENDING" ? "Colour shown but not saved — migration 118 not applied yet." : (r.error || "Colour not saved."));
   }
   async function toggleBoard(jKey, onBoard) {
-    setSettings((m) => ({ ...m, [jKey]: { ...(m[jKey] || {}), onBoard } })); // optimistic
+    // Optimistic: removing frees the colour (null) so it re-enters the pool immediately.
+    setSettings((m) => ({ ...m, [jKey]: { ...(m[jKey] || {}), onBoard, ...(onBoard ? {} : { color: null }) } }));
     const r = await authFetch("/api/workforce/planner-jobs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...jobBodyFromKey(jKey), onBoard }) }).then(json).catch(() => ({}));
-    if (!r.ok) flash("error", r.code === "MIGRATION_PENDING" ? "Board change shown but not saved — migration 118 not applied yet." : (r.error || "Board change not saved."));
+    if (!r.ok) { flash("error", r.code === "MIGRATION_PENDING" ? "Board change shown but not saved — migration 118 not applied yet." : (r.error || "Board change not saved.")); return; }
+    // Adopt the server's locked colour (assigned on add) so the Planner matches the PWA exactly.
+    if (r.job && "color" in r.job) setSettings((m) => ({ ...m, [jKey]: { ...(m[jKey] || {}), onBoard, color: r.job.color } }));
   }
 
   // ── W17-P5: days off (public holidays + RDO) management ────────────────────
