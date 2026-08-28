@@ -35,6 +35,7 @@ import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.j
 import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
+import ConceptEmailButton from "../components/sales/lead-detail/ConceptEmailButton.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -807,11 +808,13 @@ function MarginPanel({ lead, onSave }) {
 
 const DOCUMENT_TYPE_LABELS = {
   brief: "Brief", blueprint: "Blueprint", survey: "Survey",
+  concept_drawings: "Concept drawings", working_drawings: "Working drawings",
   quote: "Quote", contract: "Contract", other: "Other",
 };
 const DOCUMENT_TYPE_COLORS = {
   brief: "bg-blue-50 text-blue-700", blueprint: "bg-violet-50 text-violet-700",
   survey: "bg-amber-50 text-amber-700", quote: "bg-green-50 text-green-700",
+  concept_drawings: "bg-indigo-50 text-indigo-700", working_drawings: "bg-orange-50 text-orange-700",
   contract: "bg-teal-50 text-teal-700", other: "bg-slate-100 text-slate-600",
 };
 
@@ -2580,10 +2583,26 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "fee_proposal") {
-    // PTSA / Plans stage: the PTSA sign-off block + the Plan presentation meeting.
+    // PTSA / Plans stage: acknowledge the approved concept, sign the PTSA, invoice the design &
+    // pre-construction fee, produce the working drawings, then present the plans before engineering.
     focusContent = (
       <div className="space-y-4">
+        {/* Concept→PTSA acknowledgement email */}
+        <div className="rounded-card border border-hairline bg-surface p-4">
+          <h3 className="section-label mb-2">Client email</h3>
+          <ConceptEmailButton lead={lead} which="accepted_concepts" label="Accepted-concepts acknowledgement" title="Concept approved — next steps" reload={load} />
+          <p className="mt-2 text-[11px] text-muted">Confirms the approved concept and sets up the PTSA + working-drawings stage.</p>
+        </div>
         {ptsaBlock}
+        {/* Design & pre-construction fee invoice (raised once the PTSA is signed) */}
+        <XeroInvoiceCard lead={lead} reload={load} variant="design" />
+        {/* Working drawings deliverables */}
+        <div className="rounded-card border border-hairline bg-surface p-4">
+          <h3 className="section-label mb-1">Working drawings</h3>
+          <p className="text-xs text-muted">
+            Upload the working drawings, elevations &amp; 3D render in the <span className="font-medium text-ink">Documents</span> tab (type &ldquo;Working drawings&rdquo;). They carry to the job&rsquo;s <span className="font-medium text-ink">PLANS</span> folder and feed the plan presentation below.
+          </p>
+        </div>
         <MeetingScheduler lead={lead} meetingType="plan_presentation" reload={load} />
       </div>
     );

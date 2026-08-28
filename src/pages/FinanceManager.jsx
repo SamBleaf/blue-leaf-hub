@@ -1,6 +1,6 @@
 import { authFetch } from "../lib/authFetch.js";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import FinancialInbox from "../components/finance/FinancialInbox.jsx";
 import ApprovalQueue from "../components/finance/ApprovalQueue.jsx";
 import FinanceKpiStrip from "../components/finance/FinanceKpiStrip.jsx";
@@ -17,34 +17,24 @@ function fmtCurrency(n) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
 }
 
-function XeroSettings({ xeroStatus }) {
+function FinanceSettings() {
+  // Finance settings (Xero connection + approval thresholds) live in the canonical
+  // Settings → Integrations → Xero pane. This tab just points there to avoid a second,
+  // drifting copy.
   return (
-    <div className="space-y-6 max-w-lg">
-      <div>
-        <h3 className="text-sm font-bold text-ink mb-1">Xero Integration</h3>
-        <p className="text-xs text-muted mb-4">Connect Xero to automatically create draft bills when invoices are approved and track progress claims for WIP calculations.</p>
-        <div className="rounded-card border border-hairline bg-surface p-4 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold text-ink">
-              {xeroStatus?.connected ? `Connected — ${xeroStatus.tenant}` : "Not connected"}
-            </div>
-            <div className="text-xs text-muted mt-0.5">
-              {xeroStatus?.connected ? "Bills will be created automatically on approval" : "Phase 2 — coming soon"}
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={!xeroStatus?.connected}
-            className="rounded-lg border border-hairline bg-page px-4 py-2 text-sm font-semibold text-muted cursor-not-allowed opacity-50"
-          >
-            {xeroStatus?.connected ? "Disconnect" : "Connect Xero"}
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-sm font-bold text-ink mb-1">Approval thresholds</h3>
-        <p className="text-xs text-muted">Set <code>FINANCE_AUTO_APPROVE_BELOW</code> on the server to auto-approve exact-matched invoices under a dollar amount. Currently disabled — all invoices go to the approval queue.</p>
+    <div className="space-y-4 max-w-lg">
+      <div className="rounded-card border border-hairline bg-surface p-4">
+        <h3 className="text-sm font-bold text-ink mb-1">Finance settings have moved</h3>
+        <p className="text-xs text-muted mb-3">
+          The Xero connection and invoice approval thresholds are now managed in one place under
+          Settings → Integrations → Xero.
+        </p>
+        <Link
+          to="/settings/integrations#xero"
+          className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+        >
+          Open Settings → Integrations → Xero
+        </Link>
       </div>
     </div>
   );
@@ -56,16 +46,11 @@ export default function FinanceManager() {
   const tab = TABS.find(t => t.id === tabParam)?.id || "inbox";
   const setTab = (id) => navigate(id === "inbox" ? "/finance" : `/finance/${id}`, { replace: true });
   const [stats, setStats] = useState(null);
-  const [xeroStatus, setXeroStatus] = useState(null);
 
   const loadStats = useCallback(async () => {
     try {
-      const [sr, xr] = await Promise.all([
-        authFetch("/api/finance/stats").then(r => r.json()),
-        authFetch("/api/finance/xero/status").then(r => r.json())
-      ]);
+      const sr = await authFetch("/api/finance/stats").then(r => r.json());
       if (sr.ok) setStats(sr);
-      if (xr.ok) setXeroStatus(xr);
     } catch { /* non-fatal */ }
   }, []);
 
@@ -118,7 +103,7 @@ export default function FinanceManager() {
       {tab === "approvals" && <ApprovalQueue onAction={loadStats} />}
       {/* "Job View" tab navigates to /finance/jobs (JobDashboardSelector — Director Portfolio);
           the legacy inline JobFinancials render was unreachable dead code (removed). */}
-      {tab === "settings" && <XeroSettings xeroStatus={xeroStatus} />}
+      {tab === "settings" && <FinanceSettings />}
     </div>
   );
 }

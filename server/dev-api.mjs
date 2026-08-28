@@ -28,6 +28,7 @@ import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQU
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
 import { loadDiscoveryEmailTemplates, DISCOVERY_EMAIL_DEFAULTS, DISCOVERY_EMAIL_TEMPLATE_KEY, DISCOVERY_EMAIL_PLACEHOLDERS, runDiscoveryFollowups } from "./lib/discoveryEmail.mjs";
+import { runConceptFollowups } from "./lib/conceptEmails.mjs";
 import { loadInvoiceEmailTemplate, INVOICE_EMAIL_DEFAULT, INVOICE_EMAIL_TEMPLATE_KEY, INVOICE_EMAIL_PLACEHOLDERS } from "./lib/invoiceEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
 import { assertJobReadyForRfqHandoff } from "./lib/jobGuards.mjs";
@@ -2953,6 +2954,20 @@ if (envBool(process.env.DISCOVERY_FOLLOWUP_ENABLED, false)) {
   setInterval(dfTick, dfDayMs);
   setTimeout(dfTick, 130_000);
   console.log("[blue-leaf-api] DISCOVERY_FOLLOWUP_ENABLED: daily discovery 7-day follow-up cadence.");
+}
+
+// Sales Pipeline Concept — the 7-day concept follow-up cadence, gated by CONCEPT_EMAIL_FOLLOWUP_ENABLED
+// (default OFF, client-facing). Mirrors the qualify/discovery cadences; own timer offset.
+if (envBool(process.env.CONCEPT_EMAIL_FOLLOWUP_ENABLED, false)) {
+  const cfDayMs = 24 * 60 * 60 * 1000;
+  const cfTick = () => {
+    runConceptFollowups(getServiceSupabase())
+      .then((r) => console.log("[concept-followup]", r))
+      .catch((e) => console.error("[concept-followup]", e));
+  };
+  setInterval(cfTick, cfDayMs);
+  setTimeout(cfTick, 140_000);
+  console.log("[blue-leaf-api] CONCEPT_EMAIL_FOLLOWUP_ENABLED: daily concept 7-day follow-up cadence.");
 }
 
 // Sales OS Slice 1 — poll the mailbox for client replies and thread them onto the matching lead

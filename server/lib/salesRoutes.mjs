@@ -771,7 +771,7 @@ export function registerSalesRoutes(app) {
   app.post("/api/sales/leads/:id/concept-email/send", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
-    const which = req.body?.which === "interim" ? "interim" : "brief_questions";
+    const which = ["interim", "accepted_concepts", "followup"].includes(req.body?.which) ? req.body.which : "brief_questions";
     const dryRun = req.body?.preview === true;
     if (!dryRun && process.env.CONCEPT_EMAIL_ENABLED !== "true") {
       return err(res, 503, "Concept email sending is turned off. Set CONCEPT_EMAIL_ENABLED to send — preview still works.");
