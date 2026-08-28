@@ -39,6 +39,27 @@ export default function ConceptStage({ lead, patch, reload }) {
   const editRow = (i, k, v) => saveRows(rows.map((r, ix) => (ix === i ? { ...r, [k]: v } : r)));
   const delRow = (i) => saveRows(rows.filter((_, ix) => ix !== i));
 
+  // Concept client emails (brief-questions + interim) — preview then send.
+  const [preview, setPreview] = useState(null); // { subject, text, which }
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailMsg, setEmailMsg] = useState(null);
+  async function openEmail(which) {
+    setEmailBusy(true); setEmailMsg(null);
+    const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-email/send`, { which, preview: true });
+    setEmailBusy(false);
+    if (!ok) { setEmailMsg({ type: "error", text: error || "Could not build the preview." }); return; }
+    setPreview({ ...(data?.preview || {}), which });
+  }
+  async function sendEmail() {
+    setEmailBusy(true); setEmailMsg(null);
+    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-email/send`, { which: preview.which, subject: preview.subject, text: preview.text });
+    setEmailBusy(false);
+    if (!ok) { setEmailMsg({ type: "error", text: error || "Could not send." }); return; }
+    setPreview(null);
+    setEmailMsg({ type: "success", text: "Email sent." });
+    reload?.();
+  }
+
   return (
     <div className="space-y-4">
       {/* Design-lock */}
@@ -81,6 +102,20 @@ export default function ConceptStage({ lead, patch, reload }) {
         </p>
       </div>
 
+      {/* Client emails */}
+      <div className="rounded-card border border-hairline bg-surface p-4">
+        <h3 className="section-label mb-2">Client emails</h3>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => openEmail("brief_questions")} disabled={emailBusy} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-50">
+            Brief questions (pre-meeting)
+          </button>
+          <button type="button" onClick={() => openEmail("interim")} disabled={emailBusy} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-50">
+            Interim update
+          </button>
+        </div>
+        {emailMsg && <p className={`mt-2 text-xs ${emailMsg.type === "error" ? "text-red-600" : "text-green-600"}`}>{emailMsg.text}</p>}
+      </div>
+
       {/* Finishes schedule v1 */}
       <div className="rounded-card border border-hairline bg-surface p-4">
         <div className="flex items-center justify-between mb-2">
@@ -121,6 +156,25 @@ export default function ConceptStage({ lead, patch, reload }) {
           PTSA / Plans pathway explained to the client
         </label>
       </div>
+
+      {/* Email preview modal */}
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreview(null)}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-card bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-semibold text-ink mb-1">{preview.which === "interim" ? "Interim update" : "Brief questions"} — preview</h4>
+            <p className="text-xs text-muted mb-3">To: {lead.email || "—"}</p>
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Subject</label>
+            <input value={preview.subject || ""} onChange={(e) => setPreview((p) => ({ ...p, subject: e.target.value }))} className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink mb-3 focus-ring" />
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Message</label>
+            <textarea value={preview.text || ""} onChange={(e) => setPreview((p) => ({ ...p, text: e.target.value }))} rows={12} className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page leading-relaxed focus-ring" />
+            <p className="text-[11px] text-muted mt-1">Edits apply to this send only.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setPreview(null)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Close</button>
+              <button type="button" onClick={sendEmail} disabled={emailBusy} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{emailBusy ? "Sending…" : "Send email"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
