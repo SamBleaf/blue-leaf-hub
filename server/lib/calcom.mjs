@@ -30,6 +30,22 @@ export const MEETING_REGISTRY = {
     slug: (process.env.CAL_PRESENTATION_SLUG || "concept-presentation").trim(), // Sam's "Concept Presentation" event
     stage: "winning_offer", label: "Concept presentation", mode: "both",
   },
+  discovery_meeting: {
+    slug: (process.env.CAL_DISCOVERY_SLUG || "discovery-meeting").trim(),
+    stage: "discovery", label: "Discovery meeting", mode: "self",
+  },
+  plan_presentation: {
+    slug: (process.env.CAL_PLAN_PRESENTATION_SLUG || "plan-presentation").trim(),
+    stage: "fee_proposal", label: "Plan presentation", mode: "both",
+  },
+  proposal_presentation: {
+    slug: (process.env.CAL_FEE_PROPOSAL_SLUG || "fee-proposal").trim(),
+    stage: "tender", label: "Proposal presentation", mode: "both",
+  },
+  contract_presentation: {
+    slug: (process.env.CAL_CONTRACT_SLUG || "contract-presentation").trim(),
+    stage: "won", label: "Contract signing", mode: "both",
+  },
 };
 
 /** Registry entry for a meeting type; falls back to the build conversation (the original event). */

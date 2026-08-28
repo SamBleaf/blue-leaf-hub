@@ -2580,8 +2580,13 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "fee_proposal") {
-    // advanceBlock moved to the single next-action slot (rail / Action tab).
-    focusContent = ptsaBlock;
+    // PTSA / Plans stage: the PTSA sign-off block + the Plan presentation meeting.
+    focusContent = (
+      <div className="space-y-4">
+        {ptsaBlock}
+        <MeetingScheduler lead={lead} meetingType="plan_presentation" reload={load} />
+      </div>
+    );
   } else if (lead.stage === "consultants") {
     focusContent = (
       <div className="rounded-card border border-indigo-200 bg-indigo-50/40 p-4">

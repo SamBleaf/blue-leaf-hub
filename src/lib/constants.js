@@ -358,14 +358,22 @@ export const CRM_CONSULTANT_TYPES = ["architect", "designer", "interior_designer
  */
 export const MEETING_TYPES = {
   BUILD_CONVERSATION:         "build_conversation",
+  DISCOVERY_MEETING:          "discovery_meeting",
   DESIGNER_MEETING:           "designer_meeting",
   WINNING_OFFER_PRESENTATION: "winning_offer_presentation",
+  PLAN_PRESENTATION:          "plan_presentation",
+  PROPOSAL_PRESENTATION:      "proposal_presentation",
+  CONTRACT_PRESENTATION:      "contract_presentation",
 };
 
 export const MEETING_TYPE_LABELS = {
   build_conversation:         "Build conversation",
+  discovery_meeting:          "Discovery meeting",
   designer_meeting:           "Design meeting",
   winning_offer_presentation: "Concept presentation",
+  plan_presentation:          "Plan presentation",
+  proposal_presentation:      "Proposal presentation",
+  contract_presentation:      "Contract signing",
 };
 
 export const MEETING_STATUSES = {

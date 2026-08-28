@@ -29,7 +29,17 @@ export const INVOICE_TYPES = {
     label: "Concept design fee",
     describe: ({ address } = {}) => `Concept design fee${address ? ` — ${address}` : ""}`,
   },
-  // design_package / progress_claim / job_variation / deposit — added in P4.
+  // Design & Pre-Construction fee (the PTSA fee = design_package_fee ≡ preconstruction_fee).
+  design_package: {
+    scope: "lead",
+    sourceType: "lead",
+    accountCodeEnv: "XERO_ACCOUNT_CODE_DESIGN",
+    brandingThemeEnv: "XERO_BRANDING_THEME_DESIGN",
+    dueDays: 14,
+    label: "Design & Pre-Construction fee",
+    describe: ({ address } = {}) => `Design & pre-construction fee${address ? ` — ${address}` : ""}`,
+  },
+  // progress_claim / job_variation / deposit — added later.
 };
 
 function taxType() {
@@ -122,9 +132,11 @@ export async function ensureXeroContact({ tenantId, name, email, leadId = null, 
   return contactId;
 }
 
-async function findInvoiceRow(sb, sourceType, sourceId) {
+async function findInvoiceRow(sb, invoiceType, sourceType, sourceId) {
+  // Keyed by (invoice_type, source_type, source_id): a lead can carry several invoice types
+  // (concept_fee, design_package, deposit) — they must NOT collide on the same source row.
   const { data } = await sb.from("xero_invoices").select("*")
-    .eq("source_type", sourceType).eq("source_id", sourceId).maybeSingle();
+    .eq("invoice_type", invoiceType).eq("source_type", sourceType).eq("source_id", sourceId).maybeSingle();
   return data || null;
 }
 
@@ -150,7 +162,7 @@ export async function createXeroInvoice({
   const tenantId = tenant.tenant_id;
 
   // ── App-guard anti-double-create: reuse the row for this source ──────────────
-  let row = await findInvoiceRow(sb, sourceType, sourceId);
+  let row = await findInvoiceRow(sb, invoiceType, sourceType, sourceId);
   if (row?.xero_invoice_id) return syncXeroInvoice(row.id); // already in Xero → just refresh
 
   if (!row) {
@@ -168,7 +180,7 @@ export async function createXeroInvoice({
     }).select("*").maybeSingle();
     if (error || !inserted) {
       // Lost a race on UNIQUE(source_type,source_id) — re-read the winner.
-      row = await findInvoiceRow(sb, sourceType, sourceId);
+      row = await findInvoiceRow(sb, invoiceType, sourceType, sourceId);
       if (row?.xero_invoice_id) return syncXeroInvoice(row.id);
       if (!row) throw new Error(error?.message || "Could not create the invoice row.");
     } else {

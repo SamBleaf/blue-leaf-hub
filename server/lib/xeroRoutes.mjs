@@ -79,6 +79,44 @@ export function registerXeroRoutes(app) {
     }
   });
 
+  // Create the design & pre-construction fee invoice (the PTSA fee) in Xero. Gated by XERO_ENABLED;
+  // requires the PTSA signed + a pre-construction fee set. Idempotent. Mirrors the concept-fee route.
+  app.post("/api/finance/leads/:leadId/design-fee/invoice", async (req, res) => {
+    if (!xeroEnabled()) return err(res, 400, "Xero invoicing is off — set XERO_ENABLED=1 on the server.");
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database is not configured.");
+    try {
+      const { data: lead, error: lErr } = await sb.from("leads").select("*").eq("id", req.params.leadId).maybeSingle();
+      if (lErr) return err(res, 500, "Could not load the lead.");
+      if (!lead) return err(res, 404, "Lead not found.");
+      if (lead.ptsa_status !== "signed") {
+        return err(res, 422, "The PTSA must be signed before invoicing the design & pre-construction fee.", "GATE_BLOCKED");
+      }
+      const amount = Number(req.body?.amount ?? lead.preconstruction_fee);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return err(res, 400, "Set a pre-construction fee on the lead before creating the invoice.");
+      }
+      let row = await createXeroInvoice({
+        invoiceType: "design_package",
+        sourceType: "lead",
+        sourceId: lead.id,
+        leadId: lead.id,
+        client: { name: lead.name, email: lead.email },
+        amountExGst: amount,
+        reference: lead.name || undefined,
+        address: lead.site_address || lead.suburb || undefined,
+        createdBy: req.caller?.id || null,
+      });
+      try { row = await fileXeroInvoicePdf({ sb, row }); } catch { /* filing best-effort */ }
+      return ok(res, { invoice: rowToCamel(row) });
+    } catch (e) {
+      if (e instanceof XeroNotConnectedError) {
+        return err(res, 400, e.message || "Connect Xero first (Settings → Integrations → Xero).", e.needsReconnect ? "XERO_RECONNECT" : "XERO_NOT_CONNECTED");
+      }
+      return err(res, 400, e?.message || "Could not create the invoice in Xero.");
+    }
+  });
+
   // Create the concept-fee invoice in Xero (AUTHORISED). Gated by XERO_ENABLED; requires
   // the concept agreement accepted + a concept fee set. Idempotent (no duplicate on re-click).
   app.post("/api/finance/leads/:leadId/concept-fee/invoice", async (req, res) => {
