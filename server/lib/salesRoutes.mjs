@@ -452,6 +452,60 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
   return { job: fresh || job, stampedFacts: stamped };
 }
 
+/**
+ * Finalise a WON lead's linked job — the Sales→Operations handoff moment (Phase 6). Idempotent.
+ *  1. Flip the job to status='won' → DB trigger 096 creates the live Operations `projects` row.
+ *  2. Stamp `original_contract_value` on the job (the authoritative WIN value) — from the job's own
+ *     value if already set, else the SINGLE accepted job-keyed fee proposal (verified exactly one).
+ *  3. Propagate that value to the project row so Finance/Portal read the right number.
+ * The estimating `job` (created at PTSA-signed) becomes a live project ONLY here — the hard boundary.
+ * Non-fatal throughout: a failure never blocks the win (the stage move already succeeded).
+ */
+export async function finalizeWonJob(sb, lead) {
+  if (!sb || !lead?.job_id) return { ok: false, reason: "no job" };
+  const jobId = lead.job_id;
+  try {
+    const { data: job } = await sb.from("jobs").select("id, status, original_contract_value, contract_value").eq("id", jobId).maybeSingle();
+    if (!job) return { ok: false, reason: "job missing" };
+
+    // 2. Resolve the contract value (prefer what's already recorded).
+    let value = job.original_contract_value != null ? Number(job.original_contract_value)
+      : job.contract_value != null ? Number(job.contract_value) : null;
+    if (value == null) {
+      const { data: props } = await sb.from("fee_proposals")
+        .select("total_inc_gst, tax_amount, net_total, markup_amount, status").eq("job_id", jobId).eq("status", "accepted");
+      if (props && props.length === 1) {
+        const p = props[0];
+        const inc = Number(p.total_inc_gst || 0), tax = Number(p.tax_amount || 0);
+        value = inc > 0 ? (tax > 0 ? Math.round((inc - tax) * 100) / 100 : Math.round((inc / 1.1) * 100) / 100)
+          : Number(p.net_total || 0) + Number(p.markup_amount || 0);
+        if (!(value > 0)) value = null;
+      } else if (props && props.length > 1) {
+        console.warn(`[finalize-won] job ${jobId} has ${props.length} accepted proposals — value not auto-stamped`);
+      }
+    }
+
+    // 1. Flip the job to won (→ trigger 096 creates the project) + stamp the value.
+    const jobUpdate = { status: "won" };
+    if (value != null) { jobUpdate.original_contract_value = value; jobUpdate.contract_value = value; }
+    if (job.status !== "won" || (value != null && job.original_contract_value == null)) {
+      await sb.from("jobs").update(jobUpdate).eq("id", jobId);
+    }
+
+    // 3. Propagate the value to the project (trigger 096 makes a minimal row; enrich it).
+    if (value != null) {
+      try {
+        const { data: proj } = await sb.from("projects").select("id, contract_value").eq("job_id", jobId).maybeSingle();
+        if (proj && proj.contract_value == null) await sb.from("projects").update({ contract_value: value }).eq("id", proj.id);
+      } catch { /* projects.contract_value may be absent — non-fatal */ }
+    }
+    return { ok: true, jobId, contractValue: value };
+  } catch (e) {
+    console.warn("[finalize-won]", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 export function registerSalesRoutes(app) {
 
   // ── Sales Scorecard ─────────────────────────────────────────────────────────
@@ -1148,11 +1202,22 @@ export function registerSalesRoutes(app) {
           return err(res, 422, "Can't advance to Winning Offer yet — the concept agreement must be accepted.", "GATE_BLOCKED");
         }
       }
+      // Sales Pipeline Phase 6 — the WON HARD gate: the building contract must be signed. Enforced
+      // only once mig 194 is applied (contract_status present); pre-mig it passes so nothing blocks.
+      if (enforceHardGates && updates.stage === "won") {
+        const { data: cc, error: ccErr } = await sb.from("leads")
+          .select("contract_status").eq("id", req.params.id).maybeSingle();
+        if (!ccErr && cc && "contract_status" in cc && cc.contract_status !== "signed") {
+          return err(res, 422, "Can't move to Won yet — the building contract must be signed.", "GATE_BLOCKED");
+        }
+      }
       const outcomeDate = new Date().toISOString().slice(0, 10);
       updates.stage_entered_at = new Date().toISOString();
       updates.last_activity_at = new Date().toISOString();
       if (updates.stage === "won" && !current.won_at) {
         updates.won_at = outcomeDate;
+        // won_substatus is set fail-soft AFTER the main update (below) — adding a possibly-unmigrated
+        // column to `updates` here would reject the whole write pre-mig-195.
       }
       if (updates.stage === "lost" && !current.lost_at) {
         updates.lost_at = outcomeDate;
@@ -1193,6 +1258,15 @@ export function registerSalesRoutes(app) {
           { onConflict: "lead_id" }
         );
       } catch { /* migration 130 not applied — non-fatal */ }
+
+      // Sales Pipeline Phase 6 — the Ops handoff: flip the linked job to won (→ trigger 096 creates
+      // the live project) + stamp original_contract_value; then enter the Contract-Secured sub-state.
+      // Both fail-soft so a plumbing hiccup never un-wins a lead.
+      try { await finalizeWonJob(sb, data); } catch (e) { console.warn("[stage→won] finalizeWonJob:", e?.message || e); }
+      if (data?.won_substatus == null) {
+        try { await sb.from("leads").update({ won_substatus: "contract_secured" }).eq("id", req.params.id); }
+        catch { /* pre-migration-195 — non-blocking */ }
+      }
     }
     // Auto-retry: a signed PTSA blocked only by a missing site address should now create the job +
     // Dropbox folder once the address is filled in — so the "job not created" warning clears itself.

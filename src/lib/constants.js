@@ -150,6 +150,27 @@ export const PROPOSAL_CHECKLIST_ITEMS = [
 ];
 export const PROPOSAL_READY_THRESHOLD = 0.8;
 
+/** Won dual-state — Contract Secured → Ops Ready (the clean handoff to Operations). */
+export const WON_SUBSTATUS = { contract_secured: "Contract secured", ops_ready: "Ops ready" };
+export const WON_SUBSTATUS_ORDER = ["contract_secured", "ops_ready"];
+
+/**
+ * Ops Ready handoff checklist — every item a real check before a won lead becomes a live build.
+ * `auto` items are derived from the lead (read-only ticks); the rest are operator confirmations
+ * stored in leads.ops_ready_checklist. A live Ops project is created by trigger 096 at win; the
+ * job (estimating record from PTSA-signed) is a hard boundary away from that live project.
+ */
+export const OPS_READY_ITEMS = [
+  { key: "job_created",        label: "Job & Ops project created",            auto: "job_created" },
+  { key: "contract_signed",    label: "Signed building contract captured",    auto: "contract_signed" },
+  { key: "proposal_uploaded",  label: "Accepted proposal uploaded" },
+  { key: "final_docs",         label: "Final documents uploaded" },
+  { key: "selections_transfer",label: "Selections / schedules transferred to Operations" },
+  { key: "value_to_finance",   label: "Contract value pushed to Finance" },
+  { key: "start_to_scheduler", label: "Start assumptions pushed to the Scheduler" },
+  { key: "details_confirmed",  label: "Client & project details confirmed" },
+];
+
 export const LEAD_RISK_FLAGS = {
   budget:                "Budget risk",
   scope_gap:             "Scope gap",

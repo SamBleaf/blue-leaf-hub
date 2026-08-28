@@ -38,6 +38,7 @@ import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx
 import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.jsx";
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
 import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
+import WonStage from "../components/sales/lead-detail/WonStage.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -2609,8 +2610,15 @@ export default function LeadDetail() {
         <p className="text-sm font-medium text-ink">Offer accepted — proceed to tender.</p>
       </div>
     );
+  } else if (lead.stage === "won") {
+    // Won: the dual-state Ops-Ready handoff panel (the hand-off CTAs stay in wonCard below).
+    focusContent = (
+      <div className="space-y-4">
+        <WonStage lead={lead} patch={patch} />
+      </div>
+    );
   } else {
-    // won / nurture / lost — no focus panel
+    // nurture / lost — no focus panel
     focusShown = false;
   }
 
