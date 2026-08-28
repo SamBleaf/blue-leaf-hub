@@ -33,6 +33,7 @@ import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
 import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
 import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.jsx";
 import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
+import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 
 const STAGES = [
@@ -104,7 +105,12 @@ const GATE_REQUIREMENTS = {
     { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage },
     { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date },
   ],
-  fee_proposal:  [{ field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null }],
+  fee_proposal:  [
+    // Concept exit → PTSA / Plans: design approved + pathway explained + the pre-con fee set.
+    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved" },
+    { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained },
+    { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null },
+  ],
   consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed" }],
   tender:        [
     { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
@@ -2569,8 +2575,8 @@ export default function LeadDetail() {
   } else if (lead.stage === "winning_offer") {
     focusContent = (
       <div className="space-y-4">
+        <ConceptStage lead={lead} patch={patch} reload={load} />
         {winningOfferBlock}
-        <MeetingScheduler lead={lead} meetingType="winning_offer_presentation" reload={load} />
       </div>
     );
   } else if (lead.stage === "fee_proposal") {

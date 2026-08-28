@@ -49,7 +49,11 @@ const STAGE_GATES = {
     { label: "Design stage set",        check: l => !!l.design_stage },
     { label: "Desired start date set",  check: l => !!l.desired_start_date },
   ],
-  fee_proposal:  [{ label: "Pre-construction fee set",  check: l => l.preconstruction_fee != null }],
+  fee_proposal:  [
+    { label: "Concept design approved",           check: l => !("concept_design_status" in l) || l.concept_design_status === "approved" },
+    { label: "PTSA / Plans pathway explained",    check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained },
+    { label: "Pre-construction fee set",          check: l => l.preconstruction_fee != null },
+  ],
   tender:        [
     { label: "Site address set",        check: l => !!l.site_address?.trim() },
     { label: "Job created from lead",   check: l => !!l.job_id },
@@ -837,6 +841,19 @@ export function registerSalesRoutes(app) {
     }
     const { data: fresh } = await sb.from("leads").select("*").eq("id", req.params.id).single();
     ok(res, { lead: rowToCamel(fresh || updated), provisioning });
+  });
+
+  // Concept design-lock override (mig 188) — Sam/Josh let active concept design start BEFORE the
+  // concept fee is paid. Logged. The UI keeps design actions locked until the fee shows paid OR this.
+  app.post("/api/sales/leads/:id/concept-fee/override", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data, error } = await sb.from("leads")
+      .update({ concept_fee_override_at: new Date().toISOString(), concept_fee_override_by: req.caller?.id || null })
+      .eq("id", req.params.id).select().single();
+    if (error) return err(res, 400, translateDbError(error));
+    try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: "Concept design unlocked before payment (manual override)" }); } catch { /* best-effort */ }
+    ok(res, { lead: rowToCamel(data) });
   });
 
   // ── Sales OS Slice 1: two-way lead mailbox (Mail-app parity) ───────────────

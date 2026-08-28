@@ -74,6 +74,14 @@ export const LEAD_STUCK_REASONS = {
   scope_unclear:             "Scope unclear",
   other:                     "Other",
 };
+/** Concept-stage design state machine (migration 188). */
+export const CONCEPT_DESIGN_STATUS = {
+  with_designer:  "With designer",
+  sent_to_client: "Sent to client",
+  approved:       "Approved",
+};
+export const CONCEPT_DESIGN_STEPS = ["with_designer", "sent_to_client", "approved"];
+
 export const LEAD_RISK_FLAGS = {
   budget:                "Budget risk",
   scope_gap:             "Scope gap",
