@@ -38,7 +38,7 @@ const VIEWS = [
   { id: "actions", title: "Action queue" },
   { id: "agenda", title: "Agenda (upcoming meetings)" },
   { id: "list", title: "List view" },
-  { id: "scorecard", title: "Scorecard" },
+  { id: "scorecard", title: "APB Scorecard" },
 ];
 
 export default function SalesPipelineHeader({ activeCount, totalValue, wonCount, view, onView, onAddLead, onArchTender, onTestLead, onBookMeeting }) {

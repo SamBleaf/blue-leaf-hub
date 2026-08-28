@@ -149,4 +149,22 @@ export function registerCalcomRoutes(app) {
     try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: `${entry.label} scheduled for ${startAt.toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: CAL_TIMEZONE })}` }); } catch { /* best-effort */ }
     ok(res, { meeting: rowToCamel(data), bookedViaCalcom: bookingSource === "on_behalf" });
   });
+
+  // Structured meeting notes (mig 189) — priorities/decisions/changes/risks/followups/owner/next_step.
+  // Attaches to a real (booked/recorded) meeting of this type; won't create a phantom meeting.
+  app.put("/api/sales/leads/:id/meetings/:meetingType/notes", requireAuth, async (req, res) => {
+    const db = sb(); if (!db) return err(res, 503, "Supabase not configured");
+    const meetingType = String(req.params.meetingType || "").trim();
+    if (!Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, meetingType)) return err(res, 400, "Unknown meeting type.");
+    const notes = (req.body?.notes && typeof req.body.notes === "object") ? req.body.notes : {};
+    const { data, error } = await db.from("lead_meetings")
+      .update({ structured_notes: notes, updated_at: new Date().toISOString() })
+      .eq("lead_id", req.params.id).eq("meeting_type", meetingType).select().maybeSingle();
+    if (error) {
+      if (TABLE_MISSING.has(error.code)) return err(res, 400, "Meeting notes need migrations 185 + 189 applied.");
+      return err(res, 400, translateDbError(error));
+    }
+    if (!data) return err(res, 404, "Book or record this meeting before adding notes.");
+    ok(res, { meeting: rowToCamel(data) });
+  });
 }

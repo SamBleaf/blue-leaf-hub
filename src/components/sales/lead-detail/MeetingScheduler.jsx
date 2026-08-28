@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../../../lib/apiFetch.js";
 import { MEETING_TYPE_LABELS } from "../../../lib/constants.js";
 import SlotPicker from "../SlotPicker.jsx";
+import MeetingNotes from "./MeetingNotes.jsx";
 
 function fmtDateTime(x) {
   if (!x) return "";
@@ -78,6 +79,7 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
                 {meeting.calCancelUrl && <a href={meeting.calCancelUrl} target="_blank" rel="noreferrer" className="text-red-500 hover:underline">Cancel</a>}
               </div>
             )}
+            <MeetingNotes leadId={lead.id} meetingType={meetingType} meeting={meeting} reload={load} />
           </div>
         ) : (
           <p className="text-muted">Not scheduled yet — send the client a booking link, or set a time yourself.</p>
