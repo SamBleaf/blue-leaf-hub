@@ -1,7 +1,7 @@
 /** UI Review fixtures — Sales pipeline + lead detail (review-only). */
 import { route } from "../registry.js";
 
-const STAGES = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "accepted", "tender", "won"];
+const STAGES = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won"];
 
 // One lead per stage so the pipeline shows a populated column at every APB stage.
 const LEADS = STAGES.map((stage, i) => ({

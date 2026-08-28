@@ -23,6 +23,7 @@ const STAGE_DEFAULTS = {
   discovery:     { actionType: "plans_requested",      dueInDays: 3 },
   winning_offer: { actionType: "proposal_follow_up",   dueInDays: 3 },
   fee_proposal:  { actionType: "proposal_follow_up",   dueInDays: 3 },
+  consultants:   { actionType: "response_due",        dueInDays: 5 },
   accepted:      { actionType: "response_due",        dueInDays: 1 },
   tender:        { actionType: "response_due",        dueInDays: 2 },
   won:           null,

@@ -36,7 +36,7 @@ const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingm
 
 // Stages at qualify or beyond where a lead justifies a full address geocode.
 const _GEO_QUALIFY_PLUS = new Set([
-  "qualify", "discovery", "winning_offer", "fee_proposal", "accepted", "tender", "won",
+  "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won", "accepted",
 ]);
 
 // W01-DRIFT-003 (SAM-W02-002): stage gates are ADVISORY during hardening — never
@@ -63,7 +63,7 @@ function evaluateStageGate(targetStage, mergedLead) {
 
 // APB pipeline order (off-pipeline nurture/lost excluded). Used to tell a FORWARD advance from a
 // corrective BACKWARD move: hard gates apply only to forward moves on real (non-test) leads.
-const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "accepted", "tender", "won"];
+const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won"];
 function isForwardMove(from, to) {
   const fi = STAGE_ORDER.indexOf(from), ti = STAGE_ORDER.indexOf(to);
   return fi >= 0 && ti >= 0 && ti > fi;
@@ -84,7 +84,7 @@ function nurtureRecommendation(lead) {
     }
     return null;
   }
-  if (["nurture", "lost", "won", "accepted", "tender", "fee_proposal", "winning_offer"].includes(lead.stage)) return null;
+  if (["nurture", "lost", "won", "accepted", "tender", "consultants", "fee_proposal", "winning_offer"].includes(lead.stage)) return null;
   const score = lead.qualify_score || 0;
   if (score >= 5) return null;
   const band = score >= 3 ? "3–4" : "0–2";
@@ -219,7 +219,8 @@ APB objection-handling principles to apply when relevant:
 const STAGE_PROB = {
   enquiry: 0.05, qualify: 0.10, discovery: 0.20,
   winning_offer: 0.35, fee_proposal: 0.50,
-  accepted: 0.65, tender: 0.80, won: 1.00
+  consultants: 0.65, tender: 0.80, won: 1.00,
+  accepted: 0.65, // retired stage — legacy rows only
 };
 
 // ── APB benchmarks (from Pricing 4 Profit + presales knowledge) ──────────────
@@ -807,6 +808,16 @@ export function registerSalesRoutes(app) {
     if (!sb) return err(res, 503, "Supabase not configured");
     const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
     if (error || !lead) return err(res, 404, "Lead not found");
+    // Precondition: a concept agreement must have been GENERATED before it can be accepted — accepting
+    // provisions the client folder + unlocks concept-fee invoicing, so it can't fire on a lead with no
+    // agreement. Idempotent re-accept still passes; pre-migration (no status column) also passes.
+    const alreadyAccepted = lead.concept_agreement_status === "accepted";
+    const hasAgreement = !("concept_agreement_status" in lead)
+      || lead.concept_agreement_status === "generated"
+      || !!lead.concept_agreement_document_path;
+    if (!alreadyAccepted && !hasAgreement) {
+      return err(res, 422, "Generate the concept agreement before accepting it.", "GATE_BLOCKED");
+    }
     const { data: updated, error: uErr } = await sb.from("leads")
       .update({ concept_agreement_status: "accepted", concept_agreement_accepted_at: new Date().toISOString() })
       .eq("id", req.params.id).select().single();

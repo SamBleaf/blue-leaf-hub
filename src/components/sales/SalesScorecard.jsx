@@ -3,14 +3,14 @@ import { useEffect, useState } from "react";
 
 const STAGE_LABELS = {
   enquiry: "Enquiry", qualify: "Qualify", discovery: "Discovery",
-  winning_offer: "Winning Offer", fee_proposal: "Fee Proposal",
-  accepted: "Accepted", tender: "Tender",
+  winning_offer: "Concept", fee_proposal: "PTSA / Plans",
+  consultants: "Consultants", tender: "Tender",
 };
 
 const STAGE_COLORS = {
   enquiry: "bg-slate-400", qualify: "bg-blue-500", discovery: "bg-violet-500",
   winning_offer: "bg-amber-500", fee_proposal: "bg-orange-500",
-  accepted: "bg-emerald-500", tender: "bg-teal-500",
+  consultants: "bg-indigo-500", tender: "bg-teal-500",
 };
 
 function fmt$(n) {

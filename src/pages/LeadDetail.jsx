@@ -32,15 +32,16 @@ import DiscoveryMeetingScript from "../components/sales/lead-detail/DiscoveryMee
 import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
 import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
 import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.jsx";
+import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
   { id: "qualify",       label: "Qualify",       color: "bg-blue-50 text-blue-800" },
   { id: "discovery",     label: "Discovery",     color: "bg-violet-50 text-violet-800" },
-  { id: "winning_offer", label: "Winning Offer", color: "bg-amber-50 text-amber-800" },
-  { id: "fee_proposal",  label: "Fee Proposal",  color: "bg-orange-50 text-orange-800" },
-  { id: "accepted",      label: "Accepted",      color: "bg-emerald-50 text-emerald-800" },
+  { id: "winning_offer", label: "Concept",       color: "bg-amber-50 text-amber-800" },
+  { id: "fee_proposal",  label: "PTSA / Plans",  color: "bg-orange-50 text-orange-800" },
+  { id: "consultants",   label: "Consultants",   color: "bg-indigo-50 text-indigo-800" },
   { id: "tender",        label: "Tender",        color: "bg-teal-50 text-teal-800" },
   { id: "won",           label: "Won",           color: "bg-green-100 text-green-800" },
   { id: "nurture",       label: "Nurture",       color: "bg-slate-100 text-slate-600" },
@@ -62,7 +63,7 @@ const DESIGN_STAGES = [
 
 // ACTIVITY_ICONS relocated into LeadActivityTimeline (Pass 3A).
 
-const STAGE_ORDER = ["enquiry","qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"];
+const STAGE_ORDER = ["enquiry","qualify","discovery","winning_offer","fee_proposal","consultants","tender","won"];
 
 const PTSA_SERVICES = [
   { value: "site_analysis",       label: "Site Analysis and Survey Review" },
@@ -104,7 +105,7 @@ const GATE_REQUIREMENTS = {
     { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date },
   ],
   fee_proposal:  [{ field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null }],
-  accepted:      [],
+  consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed" }],
   tender:        [
     { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
     { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id },
@@ -2575,9 +2576,17 @@ export default function LeadDetail() {
   } else if (lead.stage === "fee_proposal") {
     // advanceBlock moved to the single next-action slot (rail / Action tab).
     focusContent = ptsaBlock;
+  } else if (lead.stage === "consultants") {
+    focusContent = (
+      <div className="rounded-card border border-indigo-200 bg-indigo-50/40 p-4">
+        <p className="text-sm font-medium text-ink">Consultants — engineering, private certification &amp; the schedules.</p>
+        <p className="mt-1 text-xs text-muted">Coordinate the engineer, certifier, lighting &amp; sanitary suppliers and issue the provisional fittings &amp; fixtures schedule before final tendering. Full tooling lands here in the Consultants build.</p>
+      </div>
+    );
   } else if (lead.stage === "tender") {
     focusContent = tenderBlock;
   } else if (lead.stage === "accepted") {
+    // Retired stage — kept only so any legacy `accepted` lead still renders a panel.
     focusContent = (
       <div className="rounded-card border border-emerald-200 bg-emerald-50/40 p-4">
         <p className="text-sm font-medium text-ink">Offer accepted — proceed to tender.</p>
@@ -2625,7 +2634,7 @@ export default function LeadDetail() {
   const focusBlockId = { enquiry: "qualifying", qualify: "qualifying", discovery: "discovery", winning_offer: "winning_offer", fee_proposal: "ptsa" }[lead.stage] || null;
   const conversationsInFocus = lead.stage === "discovery"; // conversations live in the Discovery focus, not the Activity group
   const focusEl = focusShown ? (
-    <LeadNextActionCard stageLabel={stageMeta?.label}>{archTenderBlock}{focusContent}</LeadNextActionCard>
+    <LeadNextActionCard stageLabel={stageMeta?.label}><LeadManagementStrip lead={lead} patch={patch} />{archTenderBlock}{focusContent}</LeadNextActionCard>
   ) : null;
   const nextActionEl = lead.stage === "won" ? wonCard : advanceBlock;
 

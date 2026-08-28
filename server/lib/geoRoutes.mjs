@@ -33,6 +33,7 @@ const QUALIFY_PLUS_STAGES = new Set([
   "discovery",
   "winning_offer",
   "fee_proposal",
+  "consultants",
   "accepted",
   "tender",
   "won",

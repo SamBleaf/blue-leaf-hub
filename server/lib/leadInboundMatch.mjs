@@ -18,7 +18,7 @@ import { collectInboundMessageIds } from "./imapQuoteMatch.mjs";
 
 const norm = (id) => String(id || "").replace(/^<|>$/g, "").trim().toLowerCase();
 const normEmail = (v) => String(v || "").trim().toLowerCase();
-const ACTIVE_STAGES = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "nurture"];
+const ACTIVE_STAGES = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "nurture"];
 
 function leadImapConfigs() {
   const host = process.env.IMAP_HOST?.trim();

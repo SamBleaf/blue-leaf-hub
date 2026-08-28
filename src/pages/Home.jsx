@@ -8,7 +8,7 @@ const PIPELINE_STAGES = [
   "discovery",
   "winning_offer",
   "fee_proposal",
-  "accepted",
+  "consultants",
   "tender"
 ];
 
@@ -16,9 +16,9 @@ const STAGE_LABELS = {
   enquiry: "Enquiry",
   qualify: "Qualify",
   discovery: "Discovery",
-  winning_offer: "Winning Offer",
-  fee_proposal: "Fee Proposal",
-  accepted: "Accepted",
+  winning_offer: "Concept",
+  fee_proposal: "PTSA / Plans",
+  consultants: "Consultants",
   tender: "Tender"
 };
 
@@ -28,7 +28,7 @@ const STAGE_BAR_COLORS = {
   discovery: "bg-violet-500",
   winning_offer: "bg-amber-500",
   fee_proposal: "bg-orange-500",
-  accepted: "bg-emerald-500",
+  consultants: "bg-indigo-500",
   tender: "bg-teal-500"
 };
 

@@ -555,7 +555,7 @@ export function registerMarketingIntelligenceRoutes(app) {
 
     const kpis = {
       enquiries:      mktLeads.length,
-      qualified:      mktLeads.filter(l => ["qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(l.stage)).length,
+      qualified:      mktLeads.filter(l => ["qualify","discovery","winning_offer","fee_proposal","consultants","tender","won"].includes(l.stage)).length,
       tenders:        mktLeads.filter(l => ["tender","won"].includes(l.stage)).length,
       signed:         mktLeads.filter(l => l.stage === "won").length,
       won_value:      wonValue,
@@ -624,7 +624,7 @@ export function registerMarketingIntelligenceRoutes(app) {
       if (!suburbMap[s]) suburbMap[s] = { suburb: lead.suburb, enquiries: 0, marketing: 0, qualified: 0 };
       suburbMap[s].enquiries++;
       if (lead.first_touch_source && lead.first_touch_source !== "direct") suburbMap[s].marketing++;
-      if (["qualify","discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage)) suburbMap[s].qualified++;
+      if (["qualify","discovery","winning_offer","fee_proposal","consultants","tender","won"].includes(lead.stage)) suburbMap[s].qualified++;
     }
     const suburbEngagement = Object.values(suburbMap)
       .sort((a, b) => b.enquiries - a.enquiries)

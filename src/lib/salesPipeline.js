@@ -9,9 +9,9 @@ export const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700",    dot: "bg-slate-400" },
   { id: "qualify",       label: "Qualify",       color: "bg-blue-50 text-blue-800",       dot: "bg-blue-500" },
   { id: "discovery",     label: "Discovery",     color: "bg-violet-50 text-violet-800",   dot: "bg-violet-500" },
-  { id: "winning_offer", label: "Winning Offer", color: "bg-amber-50 text-amber-800",     dot: "bg-amber-500" },
-  { id: "fee_proposal",  label: "Fee Proposal",  color: "bg-orange-50 text-orange-800",   dot: "bg-orange-500" },
-  { id: "accepted",      label: "Accepted",      color: "bg-emerald-50 text-emerald-800", dot: "bg-emerald-500" },
+  { id: "winning_offer", label: "Concept",       color: "bg-amber-50 text-amber-800",     dot: "bg-amber-500" },
+  { id: "fee_proposal",  label: "PTSA / Plans",  color: "bg-orange-50 text-orange-800",   dot: "bg-orange-500" },
+  { id: "consultants",   label: "Consultants",   color: "bg-indigo-50 text-indigo-800",   dot: "bg-indigo-500" },
   { id: "tender",        label: "Tender",        color: "bg-teal-50 text-teal-800",       dot: "bg-teal-500" },
   { id: "won",           label: "Won",           color: "bg-green-100 text-green-800",    dot: "bg-green-600" },
 ];
@@ -35,7 +35,8 @@ export const LEAD_SOURCES = [
 // Stage → win probability, used only for the weighted-value KPI (display-only).
 export const STAGE_PROBABILITY = {
   enquiry: 0.1, qualify: 0.2, discovery: 0.35, winning_offer: 0.5,
-  fee_proposal: 0.65, accepted: 0.8, tender: 0.9, won: 1,
+  fee_proposal: 0.6, consultants: 0.72, tender: 0.88, won: 1,
+  accepted: 0.8, // retired stage — kept for any legacy row still in `accepted`
 };
 
 export function formatValue(v) {

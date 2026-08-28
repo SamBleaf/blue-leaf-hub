@@ -21,23 +21,24 @@ export const LEAD_STAGES = {
   ENQUIRY:       "enquiry",
   QUALIFY:       "qualify",
   DISCOVERY:     "discovery",
-  WINNING_OFFER: "winning_offer",
-  FEE_PROPOSAL:  "fee_proposal",
-  ACCEPTED:      "accepted",
+  WINNING_OFFER: "winning_offer",   // visible label: "Concept" (key kept for compatibility)
+  FEE_PROPOSAL:  "fee_proposal",    // visible label: "PTSA / Plans" (key kept for compatibility)
+  CONSULTANTS:   "consultants",     // new stage: engineering/certification + F&F/finishes schedules
+  ACCEPTED:      "accepted",        // RETIRED as a visible stage — kept only for back-compat / migration
   TENDER:        "tender",
   WON:           "won",
   NURTURE:       "nurture",
   LOST:          "lost",
 };
 
-/** Ordered APB pipeline stages (excludes nurture/lost — off-pipeline) */
+/** Ordered pipeline stages shown on the board (excludes nurture/lost + the retired `accepted`). */
 export const LEAD_STAGE_ORDER = [
   LEAD_STAGES.ENQUIRY,
   LEAD_STAGES.QUALIFY,
   LEAD_STAGES.DISCOVERY,
-  LEAD_STAGES.WINNING_OFFER,
-  LEAD_STAGES.FEE_PROPOSAL,
-  LEAD_STAGES.ACCEPTED,
+  LEAD_STAGES.WINNING_OFFER,   // Concept
+  LEAD_STAGES.FEE_PROPOSAL,    // PTSA / Plans
+  LEAD_STAGES.CONSULTANTS,
   LEAD_STAGES.TENDER,
   LEAD_STAGES.WON,
 ];
@@ -46,13 +47,44 @@ export const LEAD_STAGE_LABELS = {
   enquiry:       "Enquiry",
   qualify:       "Qualifying",
   discovery:     "Discovery",
-  winning_offer: "Winning Offer",
-  fee_proposal:  "Fee Proposal",
-  accepted:      "Accepted",
+  winning_offer: "Concept",
+  fee_proposal:  "PTSA / Plans",
+  consultants:   "Consultants",
+  accepted:      "Accepted",   // retired stage — never shown on the board; label kept for legacy rows
   tender:        "Tender",
   won:           "Won",
   nurture:       "Nurture",
   lost:          "Lost",
+};
+
+/** Operator management fields shown as chips in the lead focus panel (migration 187). */
+export const LEAD_TEMPERATURE = {
+  hot: "Hot", warm: "Warm", cooling: "Cooling", ghosting: "Ghosting", nurture: "Nurture",
+};
+export const LEAD_STUCK_REASONS = {
+  waiting_on_client:         "Waiting on client",
+  waiting_on_designer:       "Waiting on designer",
+  waiting_on_consultant:     "Waiting on consultant",
+  waiting_on_pricing:        "Waiting on pricing",
+  waiting_on_internal_review:"Waiting on internal review",
+  waiting_on_signature:      "Waiting on signature",
+  waiting_on_payment:        "Waiting on payment",
+  waiting_on_approval:       "Waiting on approval",
+  budget_mismatch:           "Budget mismatch",
+  scope_unclear:             "Scope unclear",
+  other:                     "Other",
+};
+export const LEAD_RISK_FLAGS = {
+  budget:                "Budget risk",
+  scope_gap:             "Scope gap",
+  design_creep:          "Design creep",
+  client_indecision:     "Client indecision",
+  approval:              "Approval risk",
+  consultant_delay:      "Consultant delay",
+  selection_uncertainty: "Selection uncertainty",
+  pricing:               "Pricing risk",
+  start_date:            "Start-date risk",
+  communication:         "Communication risk",
 };
 
 /** leads.fit_quality — are they the right kind of client? (migration 127) */
