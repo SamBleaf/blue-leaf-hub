@@ -8,6 +8,7 @@ import { useState } from "react";
 import { displayLeadName } from "../../lib/leadUtils.js";
 import { STAGES, daysInStage, projectTypeLabel } from "../../lib/salesPipeline.js";
 import { RotDot, ScoreBadge, MoneyBadge } from "./SalesBits.jsx";
+import { APPROVAL_RISK, APPROVAL_RISK_COLORS } from "../../lib/constants.js";
 
 function CardActions({ lead, onMoveStage, onQuickNote }) {
   const [moveOpen, setMoveOpen] = useState(false);
@@ -76,6 +77,11 @@ export default function SalesLeadCard({ lead, onMoveStage, onQuickNote, onClick 
           </span>
         )}
         <MoneyBadge value={lead.estimated_value} />
+        {lead.stage === "consultants" && ["medium", "high"].includes(lead.approval_risk) && (
+          <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${APPROVAL_RISK_COLORS[lead.approval_risk]}`}>
+            {APPROVAL_RISK[lead.approval_risk]} approval risk
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-muted">{days}d in stage</span>
       </div>
 

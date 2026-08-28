@@ -82,6 +82,33 @@ export const CONCEPT_DESIGN_STATUS = {
 };
 export const CONCEPT_DESIGN_STEPS = ["with_designer", "sent_to_client", "approved"];
 
+/** Consultants stage — the councils/certifier approval-risk chip (default unknown). */
+export const APPROVAL_RISK = {
+  unknown: "Unknown", low: "Low", medium: "Medium", high: "High",
+};
+export const APPROVAL_RISK_STEPS = ["unknown", "low", "medium", "high"];
+export const APPROVAL_RISK_COLORS = {
+  unknown: "bg-slate-100 text-slate-600",
+  low:     "bg-green-100 text-green-700",
+  medium:  "bg-amber-100 text-amber-800",
+  high:    "bg-red-100 text-red-700",
+};
+
+/** Consultants stage — the disciplines coordinated on the roster (role, not CRM contact type). */
+export const CONSULTANT_ROLES = {
+  engineer:          "Structural engineer",
+  private_certifier: "Private certifier",
+  interior_designer: "Interior designer",
+  lighting:          "Lighting",
+  sanitary:          "Sanitary / tapware",
+  energy:            "Energy / NatHERS",
+  land_surveyor:     "Land surveyor",
+  other:             "Other consultant",
+};
+export const CONSULTANT_ROLE_ORDER = [
+  "engineer", "private_certifier", "interior_designer", "lighting", "sanitary", "energy", "land_surveyor", "other",
+];
+
 export const LEAD_RISK_FLAGS = {
   budget:                "Budget risk",
   scope_gap:             "Scope gap",

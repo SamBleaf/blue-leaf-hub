@@ -36,6 +36,7 @@ import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementS
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 import ConceptEmailButton from "../components/sales/lead-detail/ConceptEmailButton.jsx";
+import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -114,6 +115,10 @@ const GATE_REQUIREMENTS = {
   ],
   consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed" }],
   tender:        [
+    // Consultants exit → Tender. Pre-migration-193 the columns are absent → the check passes.
+    { field: "consultants_engineering_ready", label: "Engineering complete enough for tender", check: l => !("consultants_engineering_ready" in l) || !!l.consultants_engineering_ready },
+    { field: "consultants_cert_pathway_confirmed", label: "Certification pathway confirmed", check: l => !("consultants_cert_pathway_confirmed" in l) || !!l.consultants_cert_pathway_confirmed },
+    { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
     { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
     { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id },
   ],
@@ -2608,9 +2613,8 @@ export default function LeadDetail() {
     );
   } else if (lead.stage === "consultants") {
     focusContent = (
-      <div className="rounded-card border border-indigo-200 bg-indigo-50/40 p-4">
-        <p className="text-sm font-medium text-ink">Consultants — engineering, private certification &amp; the schedules.</p>
-        <p className="mt-1 text-xs text-muted">Coordinate the engineer, certifier, lighting &amp; sanitary suppliers and issue the provisional fittings &amp; fixtures schedule before final tendering. Full tooling lands here in the Consultants build.</p>
+      <div className="space-y-4">
+        <ConsultantsStage lead={lead} patch={patch} />
       </div>
     );
   } else if (lead.stage === "tender") {

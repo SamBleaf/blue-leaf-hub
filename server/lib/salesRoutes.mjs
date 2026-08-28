@@ -56,6 +56,9 @@ const STAGE_GATES = {
     { label: "Pre-construction fee set",          check: l => l.preconstruction_fee != null },
   ],
   tender:        [
+    { label: "Engineering complete enough for tender",  check: l => !("consultants_engineering_ready" in l) || !!l.consultants_engineering_ready },
+    { label: "Certification pathway confirmed",         check: l => !("consultants_cert_pathway_confirmed" in l) || !!l.consultants_cert_pathway_confirmed },
+    { label: "Provisional F&F schedule issued",         check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
     { label: "Site address set",        check: l => !!l.site_address?.trim() },
     { label: "Job created from lead",   check: l => !!l.job_id },
   ],
@@ -719,6 +722,23 @@ export function registerSalesRoutes(app) {
       return err(res, 400, translateDbError(error));
     }
     ok(res, { designers: (data || []).map(rowToCamel) });
+  });
+
+  // Consultants stage — the pool of contacts assignable to a roster role (engineer, certifier,
+  // lighting, sanitary, …). Broader than designers: any consultant/supplier-type CRM contact. The
+  // roster's ROLE (not the CRM contact_type) is what names the discipline, so we return a wide set.
+  app.get("/api/sales/consultants", requireAuth, async (_req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data, error } = await sb.from("crm_contacts")
+      .select("id, first_name, last_name, company, contact_type")
+      .in("contact_type", ["architect", "designer", "interior_designer", "engineer", "supplier", "other"])
+      .order("company", { ascending: true });
+    if (error) {
+      if (error.code === "42703") return ok(res, { consultants: [], columnsMissing: true });
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { consultants: (data || []).map(rowToCamel) });
   });
 
   app.post("/api/sales/leads/:id/designer", requireAuth, async (req, res) => {
