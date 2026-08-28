@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
 > Last updated: 2026-07-02 (SOP-DOCS-WAVE-02B — portal v2-canonical + matrix, site-diary §14/view-only; then CRM Batches 1A–1C)
-> Total SOPs: 125 (+ 1 reference: portal stack matrix)  
+> Total SOPs: 130 (+ 1 reference: portal stack matrix)  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -42,6 +42,11 @@
 | 02-16 | Generate & accept the concept agreement | [02-16_concept_agreement.md](02_sales/02-16_concept_agreement.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-17 | Edit the Discovery email templates | [02-17_discovery_email_templates.md](02_sales/02-17_discovery_email_templates.md) | Sales | Admin | Draft | untested | Yes | Medium |
 | 02-18 | Schedule pipeline meetings with Cal.com (setup + use) | [02-18_pipeline_meeting_scheduling.md](02_sales/02-18_pipeline_meeting_scheduling.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-19 | Run the Concept stage (design-lock, concept design, client emails) | [02-19_concept_stage.md](02_sales/02-19_concept_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-20 | Run the PTSA / Plans stage (sign PTSA, design fee, working drawings) | [02-20_ptsa_plans_stage.md](02_sales/02-20_ptsa_plans_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-21 | Run the Consultants stage (coordination, approval risk, provisional F&F) | [02-21_consultants_stage.md](02_sales/02-21_consultants_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-22 | Run the Tender stage (sub-status, proposal checklist, named actions, contract) | [02-22_tender_stage.md](02_sales/02-22_tender_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-23 | Complete a Won lead and hand off to Operations (Ops Ready) | [02-23_won_ops_handoff.md](02_sales/02-23_won_ops_handoff.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
@@ -175,4 +180,4 @@
 
 ---
 
-*Last updated: 2026-06-21. Total SOPs: 120. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+*Last updated: 2026-08-29. Total SOPs: 125. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
