@@ -35,8 +35,9 @@ import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.j
 import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
-import ConceptEmailButton from "../components/sales/lead-detail/ConceptEmailButton.jsx";
+import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.jsx";
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
+import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -2013,28 +2014,6 @@ export default function LeadDetail() {
               </div>
   );
 
-  const tenderBlock = lead.stage === "tender" && (
-              <div className="rounded-card border border-primary bg-primary/[0.06] p-4">
-                <h3 className="section-label mb-1 text-primary">Tendering</h3>
-                <p className="text-xs text-muted mb-3 leading-relaxed">
-                  Open the RFQ Engine for this lead — it pre-fills the project, trades and documents from this lead&apos;s details.
-                </p>
-                <button
-                  type="button"
-                  onClick={startTenderRfq}
-                  disabled={creatingJob || !lead.site_address?.trim()}
-                  className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors disabled:opacity-50"
-                >
-                  {creatingJob ? "Setting up…" : "Proceed to RFQ Engine & Estimate →"}
-                </button>
-                {!lead.site_address?.trim() && (
-                  <p className="text-[11px] text-orange-600 text-center mt-2 font-medium">Add site address before starting tender.</p>
-                )}
-                {lead.site_address?.trim() && !lead.job_id && (
-                  <p className="text-[11px] text-muted text-center mt-2">A job will be created from this lead first.</p>
-                )}
-              </div>
-  );
 
   const discoveryBlock = showDiscovery && (
               <div className="rounded-card border border-hairline bg-surface p-4">
@@ -2595,7 +2574,7 @@ export default function LeadDetail() {
         {/* Concept→PTSA acknowledgement email */}
         <div className="rounded-card border border-hairline bg-surface p-4">
           <h3 className="section-label mb-2">Client email</h3>
-          <ConceptEmailButton lead={lead} which="accepted_concepts" label="Accepted-concepts acknowledgement" title="Concept approved — next steps" reload={load} />
+          <StageEmailButton lead={lead} endpoint="concept-email" which="accepted_concepts" label="Accepted-concepts acknowledgement" title="Concept approved — next steps" reload={load} />
           <p className="mt-2 text-[11px] text-muted">Confirms the approved concept and sets up the PTSA + working-drawings stage.</p>
         </div>
         {ptsaBlock}
@@ -2618,7 +2597,11 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "tender") {
-    focusContent = tenderBlock;
+    focusContent = (
+      <div className="space-y-4">
+        <TenderStage lead={lead} patch={patch} reload={load} onStartRfq={startTenderRfq} creatingJob={creatingJob} />
+      </div>
+    );
   } else if (lead.stage === "accepted") {
     // Retired stage — kept only so any legacy `accepted` lead still renders a panel.
     focusContent = (

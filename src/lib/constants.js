@@ -109,6 +109,47 @@ export const CONSULTANT_ROLE_ORDER = [
   "engineer", "private_certifier", "interior_designer", "lighting", "sanitary", "energy", "land_surveyor", "other",
 ];
 
+/** Tender stage — the sub-status strip (so Tender never becomes a dumping ground). */
+export const TENDER_SUBSTATUS = {
+  pack_prep:          "Tender pack being prepared",
+  rfqs_issued:        "RFQs issued",
+  awaiting_pricing:   "Awaiting supplier / trade pricing",
+  estimate_review:    "Estimate review",
+  proposal_generated: "Proposal generated",
+  proposal_presented: "Proposal presented",
+  client_reviewing:   "Client reviewing",
+  contract_prep:      "Contract being prepared",
+  contract_sent:      "Contract sent",
+  contract_signed:    "Contract signed",
+};
+export const TENDER_SUBSTATUS_ORDER = [
+  "pack_prep", "rfqs_issued", "awaiting_pricing", "estimate_review", "proposal_generated",
+  "proposal_presented", "client_reviewing", "contract_prep", "contract_sent", "contract_signed",
+];
+
+/** The building contract lifecycle (captured in the Tender stage; consumed by the Won gate). */
+export const CONTRACT_STATUS = { prepared: "Prepared", sent: "Sent", signed: "Signed" };
+export const CONTRACT_STATUS_ORDER = ["prepared", "sent", "signed"];
+
+/**
+ * Blue Leaf Proposal Checklist — the client-facing QC gate on the Fixed-Price Proposal.
+ * Blue-Leaf-branded (never "APB" on anything the client sees). A proposal under 80% complete
+ * is flagged "not ready to present". Keyed items → boolean in leads.proposal_checklist.
+ */
+export const PROPOSAL_CHECKLIST_ITEMS = [
+  { key: "scope",          label: "Scope of works complete" },
+  { key: "inclusions",     label: "Inclusions list finalised" },
+  { key: "specifications", label: "Specifications + allowances set" },
+  { key: "ff_schedule",    label: "Specified F&F schedule attached" },
+  { key: "fixed_price",    label: "Fixed price calculated with margin" },
+  { key: "exclusions",     label: "Exclusions clearly stated" },
+  { key: "payment_terms",  label: "Payment schedule set" },
+  { key: "timeline",       label: "Build timeline / weeks stated" },
+  { key: "testimonials",   label: "Testimonials + past work included" },
+  { key: "terms",          label: "Terms + validity period set" },
+];
+export const PROPOSAL_READY_THRESHOLD = 0.8;
+
 export const LEAD_RISK_FLAGS = {
   budget:                "Budget risk",
   scope_gap:             "Scope gap",

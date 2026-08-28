@@ -1,31 +1,35 @@
 /**
- * ConceptEmailButton — a single self-contained "preview then send" button for a concept-family
- * email (brief_questions | interim | followup | accepted_concepts). Uses the shared
- * /api/sales/leads/:id/concept-email/send endpoint (preview always works; sending is gated by
- * CONCEPT_EMAIL_ENABLED on the server). Edited copy in the preview is honoured for that send only.
+ * StageEmailButton — a self-contained "preview then send" button for a stage-family email. Endpoint
+ * is parameterised so it drives any of the sales email endpoints (concept-email, tender-email, …).
+ * Preview always works; sending is gated server-side by that family's *_EMAIL_ENABLED flag. Edited
+ * copy in the preview is honoured for that send only.
+ *
+ *   endpoint  e.g. "concept-email" | "tender-email"  →  POST /api/sales/leads/:id/<endpoint>/send
+ *   which     the template key within that family
  */
 import { useState } from "react";
 import { apiPost } from "../../../lib/apiFetch.js";
 
-export default function ConceptEmailButton({ lead, which, label, title, reload }) {
+export default function StageEmailButton({ lead, endpoint, which, label, title, reload, onSent }) {
   const [preview, setPreview] = useState(null); // { subject, text }
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const url = `/api/sales/leads/${lead.id}/${endpoint}/send`;
 
   async function open() {
     setBusy(true); setMsg(null);
-    const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-email/send`, { which, preview: true });
+    const { ok, data, error } = await apiPost(url, { which, preview: true });
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not build the preview." }); return; }
     setPreview({ subject: data?.preview?.subject || "", text: data?.preview?.text || "" });
   }
   async function send() {
     setBusy(true); setMsg(null);
-    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-email/send`, { which, subject: preview.subject, text: preview.text });
+    const { ok, error } = await apiPost(url, { which, subject: preview.subject, text: preview.text });
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not send." }); return; }
     setPreview(null); setMsg({ type: "success", text: "Email sent." });
-    reload?.();
+    onSent?.(); reload?.();
   }
 
   return (

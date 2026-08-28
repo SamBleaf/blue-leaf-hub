@@ -19,6 +19,7 @@ import { deriveActionForStage, isValidActionType } from "./leadActionQueue.mjs";
 import { sendQualifyIntro } from "./qualifyEmail.mjs";
 import { sendDiscoveryIntro } from "./discoveryEmail.mjs";
 import { sendConceptEmail } from "./conceptEmails.mjs";
+import { sendTenderEmail } from "./tenderEmails.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -801,6 +802,25 @@ export function registerSalesRoutes(app) {
     const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
     const result = await sendConceptEmail(sb, lead, { which, userId: req.caller?.id || null, dryRun, override });
     if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the concept email.");
+    if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
+    return ok(res, { sent: true, transport: result.transport });
+  });
+
+  // Tender-stage named emails — proposal_followup | review_followup | contract_sent |
+  // contract_followup. Preview always; send gated by TENDER_EMAIL_ENABLED. Edited copy honoured.
+  app.post("/api/sales/leads/:id/tender-email/send", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const which = req.body?.which || "proposal_followup";
+    const dryRun = req.body?.preview === true;
+    if (!dryRun && process.env.TENDER_EMAIL_ENABLED !== "true") {
+      return err(res, 503, "Tender email sending is turned off. Set TENDER_EMAIL_ENABLED to send — preview still works.");
+    }
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
+    const result = await sendTenderEmail(sb, lead, { which, userId: req.caller?.id || null, dryRun, override });
+    if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the tender email.");
     if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
     return ok(res, { sent: true, transport: result.transport });
   });
