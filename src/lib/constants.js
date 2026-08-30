@@ -94,20 +94,50 @@ export const APPROVAL_RISK_COLORS = {
   high:    "bg-red-100 text-red-700",
 };
 
-/** Consultants stage — the disciplines coordinated on the roster (role, not CRM contact type). */
+/** Consultants stage — the disciplines coordinated on the roster (role, not CRM contact type).
+ *  Private certification is NOT here — it lives in the Won stage (lodged after design-lock). */
 export const CONSULTANT_ROLES = {
+  architect:         "Architect / Designer",
+  land_surveyor:     "Land surveyor",
+  soil_geotech:      "Soil / Geotech",
   engineer:          "Structural engineer",
-  private_certifier: "Private certifier",
+  energy:            "NatHERS / energy",
   interior_designer: "Interior designer",
   lighting:          "Lighting",
   sanitary:          "Sanitary / tapware",
-  energy:            "Energy / NatHERS",
-  land_surveyor:     "Land surveyor",
   other:             "Other consultant",
 };
 export const CONSULTANT_ROLE_ORDER = [
-  "engineer", "private_certifier", "interior_designer", "lighting", "sanitary", "energy", "land_surveyor", "other",
+  "architect", "land_surveyor", "soil_geotech", "engineer", "energy",
+  "interior_designer", "lighting", "sanitary", "other",
 ];
+/** Disciplines that talk to the CLIENT (through the Hub); the rest are Blue Leaf ↔ consultant. */
+export const CONSULTANT_CLIENT_FACING = ["architect", "interior_designer", "lighting", "sanitary"];
+
+/** Per-consultant deliverable templates — auto-seeded when a consultant is added to the roster.
+ *  `feeds` routes the finished document to a sink: consent = Building Consent pack, proposal =
+ *  Fixed-Price Proposal, both, or none (internal-only, e.g. set-out). */
+export const CONSULTANT_DELIVERABLES = {
+  architect:         [{ key: "working_drawings", label: "Working drawings", feeds: "both" }, { key: "site_plan", label: "Site plan + elevations", feeds: "consent" }],
+  land_surveyor:     [{ key: "feature_survey", label: "Feature & contour survey", feeds: "consent" }, { key: "setout", label: "Construction set-out", feeds: "none" }],
+  soil_geotech:      [{ key: "soil_report", label: "Soil report (AS2870)", feeds: "consent" }],
+  engineer:          [{ key: "structural_drawings", label: "Structural drawings", feeds: "consent" }, { key: "engineer_certificate", label: "Engineer's certificate", feeds: "consent" }, { key: "quantities", label: "Earthworks / structural quantities", feeds: "proposal" }],
+  energy:            [{ key: "nathers_certificate", label: "NatHERS 7-star certificate", feeds: "consent" }],
+  interior_designer: [{ key: "finishes_schedule", label: "Finishes & selections schedule", feeds: "proposal" }, { key: "joinery", label: "Joinery drawings", feeds: "proposal" }],
+  lighting:          [{ key: "lighting_plan", label: "Lighting + electrical plan", feeds: "proposal" }, { key: "luminaire_schedule", label: "Luminaire schedule", feeds: "proposal" }],
+  sanitary:          [{ key: "fixture_schedule", label: "Fixture & tapware schedule (WELS)", feeds: "proposal" }],
+  other:             [],
+};
+/** Deliverable status machine: pending → requested → received → issued (to the next party). */
+export const DELIVERABLE_STATUS = { pending: "Pending", requested: "Requested", received: "Received", issued: "Issued" };
+export const DELIVERABLE_STATUS_ORDER = ["pending", "requested", "received", "issued"];
+export const DELIVERABLE_STATUS_COLORS = {
+  pending:   "bg-slate-100 text-slate-600",
+  requested: "bg-amber-100 text-amber-800",
+  received:  "bg-sky-100 text-sky-700",
+  issued:    "bg-green-100 text-green-700",
+};
+export const DELIVERABLE_FEEDS_LABELS = { consent: "→ Consent", proposal: "→ Proposal", both: "→ Consent + Proposal", none: "" };
 
 /** Tender stage — the sub-status strip (so Tender never becomes a dumping ground). */
 export const TENDER_SUBSTATUS = {

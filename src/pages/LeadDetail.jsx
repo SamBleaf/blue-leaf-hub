@@ -816,13 +816,15 @@ function MarginPanel({ lead, onSave }) {
 const DOCUMENT_TYPE_LABELS = {
   brief: "Brief", blueprint: "Blueprint", survey: "Survey",
   concept_drawings: "Concept drawings", working_drawings: "Working drawings",
-  quote: "Quote", contract: "Contract", other: "Other",
+  quote: "Quote", contract: "Contract", construction_contract: "Construction contract",
+  other: "Other",
 };
 const DOCUMENT_TYPE_COLORS = {
   brief: "bg-blue-50 text-blue-700", blueprint: "bg-violet-50 text-violet-700",
   survey: "bg-amber-50 text-amber-700", quote: "bg-green-50 text-green-700",
   concept_drawings: "bg-indigo-50 text-indigo-700", working_drawings: "bg-orange-50 text-orange-700",
-  contract: "bg-teal-50 text-teal-700", other: "bg-slate-100 text-slate-600",
+  contract: "bg-teal-50 text-teal-700", construction_contract: "bg-emerald-50 text-emerald-700",
+  other: "bg-slate-100 text-slate-600",
 };
 
 function formatFileSize(bytes) {
