@@ -138,6 +138,25 @@ export const DELIVERABLE_STATUS_COLORS = {
   issued:    "bg-green-100 text-green-700",
 };
 export const DELIVERABLE_FEEDS_LABELS = { consent: "→ Consent", proposal: "→ Proposal", both: "→ Consent + Proposal", none: "" };
+/** Advisory dependency graph between deliverables (by key). A deliverable is "waiting" while any
+ *  upstream deliverable that is ALSO on the roster isn't yet received/issued — never a hard block.
+ *  Changing an upstream (footing class, glazing) flags every downstream done doc as re-issue. */
+export const DELIVERABLE_DEPENDENCIES = {
+  site_plan:            [],
+  working_drawings:     [],
+  feature_survey:       [],
+  setout:               ["feature_survey"],
+  soil_report:          [],
+  structural_drawings:  ["soil_report", "feature_survey", "working_drawings"],
+  engineer_certificate: ["structural_drawings"],
+  quantities:           ["structural_drawings"],
+  nathers_certificate:  ["working_drawings"],
+  finishes_schedule:    ["working_drawings"],
+  joinery:              ["finishes_schedule"],
+  lighting_plan:        ["finishes_schedule"],
+  luminaire_schedule:   ["lighting_plan"],
+  fixture_schedule:     ["finishes_schedule"],
+};
 
 /** Tender stage — the sub-status strip (so Tender never becomes a dumping ground). */
 export const TENDER_SUBSTATUS = {
