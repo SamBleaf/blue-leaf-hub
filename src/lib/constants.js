@@ -220,6 +220,43 @@ export const OPS_READY_ITEMS = [
   { key: "details_confirmed",  label: "Client & project details confirmed" },
 ];
 
+/**
+ * The SA consent spine (job-keyed, mig 196). Statutory order: Planning Consent → Building Consent →
+ * Development Approval. A private certifier grants Building Consent ONLY; Development Approval is the
+ * final authorisation and no build may start before it. PlanSA has no lodgement API — track-and-prompt.
+ */
+export const CONSENT_STATUS = {
+  not_started:      "Not started",
+  lodged:           "Lodged",
+  under_assessment: "Under assessment",
+  granted:          "Granted",
+  refused:          "Refused",
+};
+export const CONSENT_STATUS_ORDER = ["not_started", "lodged", "under_assessment", "granted", "refused"];
+export const CONSENT_STATUS_COLORS = {
+  not_started:      "bg-slate-100 text-slate-600",
+  lodged:           "bg-amber-100 text-amber-800",
+  under_assessment: "bg-sky-100 text-sky-700",
+  granted:          "bg-green-100 text-green-700",
+  refused:          "bg-red-100 text-red-700",
+};
+export const BUILDING_CONSENT_ROUTE = { private_certifier: "Private certifier", council: "Council" };
+/** The Building Consent pack — the pre-lodgement checklist (must be complete before lodging). */
+export const CONSENT_PRELODGEMENT_ITEMS = [
+  { key: "working_drawings", label: "Architectural working drawings" },
+  { key: "structural",       label: "Structural drawings + engineer's certificate" },
+  { key: "soil",             label: "Soil report (AS2870 site classification)" },
+  { key: "nathers",          label: "NatHERS 7-star energy certificate" },
+  { key: "siting",           label: "Site / siting plan + setbacks" },
+  { key: "specifications",   label: "Specifications + Statement of Compliance" },
+];
+/** PlanSA deep-links (no API — the operator lodges/tracks in these). */
+export const PLANSA_LINKS = {
+  lodge:    { label: "PlanSA — lodge / track (DAP)", url: "https://plan.sa.gov.au/development_applications/lodge_an_application" },
+  register: { label: "Development Application Register", url: "https://plan.sa.gov.au/development_application_register" },
+  sappa:    { label: "SAPPA — property + planning atlas", url: "https://sappa.plan.sa.gov.au/" },
+};
+
 export const LEAD_RISK_FLAGS = {
   budget:                "Budget risk",
   scope_gap:             "Scope gap",

@@ -39,6 +39,7 @@ import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.j
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
 import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 import WonStage from "../components/sales/lead-detail/WonStage.jsx";
+import ConsentSpine from "../components/sales/lead-detail/ConsentSpine.jsx";
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -2613,10 +2614,12 @@ export default function LeadDetail() {
       </div>
     );
   } else if (lead.stage === "won") {
-    // Won: the dual-state Ops-Ready handoff panel (the hand-off CTAs stay in wonCard below).
+    // Won: the dual-state Ops-Ready handoff panel + the SA consent spine (Building Consent →
+    // Development Approval lodged here; Planning was lodged at Consultants entry).
     focusContent = (
       <div className="space-y-4">
         <WonStage lead={lead} patch={patch} />
+        <ConsentSpine lead={lead} />
       </div>
     );
   } else {

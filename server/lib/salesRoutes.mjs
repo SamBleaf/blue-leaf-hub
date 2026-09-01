@@ -796,6 +796,38 @@ export function registerSalesRoutes(app) {
     ok(res, { consultants: (data || []).map(rowToCamel) });
   });
 
+  // ── Consent spine (CW-1) — job-keyed (mig 196). Resolve lead.job_id → job_consents. The consent
+  // facts are snake_case throughout, matching how the sales module reads the lead object. ──────────
+  const CONSENT_FIELDS = [
+    "planning_consent_status", "planning_consent_ref", "planning_consent_lodged_at",
+    "building_consent_route", "building_consent_status", "building_consent_ref", "building_consent_lodged_at",
+    "development_approval_status", "development_approval_number", "development_approval_at",
+    "dap_application_number", "prelodgement_checklist", "consent_notes",
+  ];
+  app.get("/api/sales/leads/:id/consent", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("id, job_id").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return ok(res, { consent: null, noJob: true });
+    const { data: row, error: cErr } = await sb.from("job_consents").select("*").eq("job_id", lead.job_id).maybeSingle();
+    if (cErr && cErr.code !== "PGRST116") return err(res, 400, translateDbError(cErr));
+    ok(res, { consent: row || { job_id: lead.job_id }, jobId: lead.job_id });
+  });
+  app.put("/api/sales/leads/:id/consent", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("id, job_id").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return err(res, 409, "Create the job first (at PTSA signing) — consent tracking is job-level.");
+    const patch = { job_id: lead.job_id, updated_at: new Date().toISOString() };
+    for (const f of CONSENT_FIELDS) if (f in (req.body || {})) patch[f] = req.body[f];
+    const { data: row, error: uErr } = await sb.from("job_consents")
+      .upsert(patch, { onConflict: "job_id" }).select("*").single();
+    if (uErr) return err(res, 400, translateDbError(uErr));
+    ok(res, { consent: row });
+  });
+
   app.post("/api/sales/leads/:id/designer", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
