@@ -40,6 +40,14 @@ import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.j
 import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 import WonStage from "../components/sales/lead-detail/WonStage.jsx";
 import ConsentSpine from "../components/sales/lead-detail/ConsentSpine.jsx";
+import ApprovalRiskChip from "../components/sales/lead-detail/ApprovalRiskChip.jsx";
+
+// CW-2: the Consultants→Tender exit needs the full consultant document set in (every roster
+// deliverable received/issued). Empty roster = not ready.
+function consultantDocsReady(roster) {
+  const r = Array.isArray(roster) ? roster : [];
+  return r.length > 0 && r.every((e) => (Array.isArray(e.deliverables) ? e.deliverables : []).every((d) => d.status === "received" || d.status === "issued"));
+}
 
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
@@ -118,9 +126,10 @@ const GATE_REQUIREMENTS = {
   ],
   consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed" }],
   tender:        [
-    // Consultants exit → Tender. Pre-migration-193 the columns are absent → the check passes.
-    { field: "consultants_engineering_ready", label: "Engineering complete enough for tender", check: l => !("consultants_engineering_ready" in l) || !!l.consultants_engineering_ready },
-    { field: "consultants_cert_pathway_confirmed", label: "Certification pathway confirmed", check: l => !("consultants_cert_pathway_confirmed" in l) || !!l.consultants_cert_pathway_confirmed },
+    // Consultants exit → Tender (CW-2): full document set in + Fixed-Price proposal generated
+    // (+ final presentation booked, surfaced advisorily in the stage). Certification moved to Won.
+    { field: "consultant_roster", label: "Consultant documents complete", check: l => consultantDocsReady(l.consultant_roster) },
+    { field: "fee_proposal_id", label: "Fixed-Price proposal generated", check: l => !!l.fee_proposal_id },
     { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
     { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
     { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id },
@@ -2597,7 +2606,7 @@ export default function LeadDetail() {
   } else if (lead.stage === "consultants") {
     focusContent = (
       <div className="space-y-4">
-        <ConsultantsStage lead={lead} patch={patch} />
+        <ConsultantsStage lead={lead} patch={patch} reload={load} />
       </div>
     );
   } else if (lead.stage === "tender") {
@@ -2620,6 +2629,7 @@ export default function LeadDetail() {
       <div className="space-y-4">
         <WonStage lead={lead} patch={patch} />
         <ConsentSpine lead={lead} />
+        <ApprovalRiskChip lead={lead} patch={patch} />
       </div>
     );
   } else {

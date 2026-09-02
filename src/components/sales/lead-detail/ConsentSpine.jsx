@@ -11,8 +11,14 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPut } from "../../../lib/apiFetch.js";
 import {
   CONSENT_STATUS, CONSENT_STATUS_ORDER, CONSENT_STATUS_COLORS,
-  BUILDING_CONSENT_ROUTE, CONSENT_PRELODGEMENT_ITEMS, PLANSA_LINKS,
+  BUILDING_CONSENT_ROUTE, CONSENT_PRELODGEMENT_ITEMS, PLANSA_LINKS, CONSULTANT_DELIVERABLES,
 } from "../../../lib/constants.js";
+
+// A consent doc "feeds" the Building Consent pack when its deliverable routes to consent/both.
+const feedsConsent = (role, key) => {
+  const m = (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key);
+  return !!m && (m.feeds === "consent" || m.feeds === "both");
+};
 
 function StatusSelect({ value, onChange }) {
   const v = value || "not_started";
@@ -24,7 +30,8 @@ function StatusSelect({ value, onChange }) {
   );
 }
 
-export default function ConsentSpine({ lead }) {
+export default function ConsentSpine({ lead, scope = "full" }) {
+  const planningOnly = scope === "planning";
   const [consent, setConsent] = useState(null);
   const [noJob, setNoJob] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -44,6 +51,12 @@ export default function ConsentSpine({ lead }) {
   const checklist = c.prelodgement_checklist && typeof c.prelodgement_checklist === "object" ? c.prelodgement_checklist : {};
   const checklistDone = CONSENT_PRELODGEMENT_ITEMS.filter((it) => checklist[it.key]).length;
   const toggleItem = (key) => save({ prelodgement_checklist: { ...checklist, [key]: !checklist[key] } });
+
+  // Variation warning (CW-2): a consent-feeding document flagged "re-issue" AFTER Building Consent
+  // was granted means the granted design no longer matches — a PlanSA variation is required.
+  const roster = Array.isArray(lead.consultant_roster) ? lead.consultant_roster : [];
+  const consentDocChanged = roster.some((r) => (r.deliverables || []).some((d) => d.reissue && feedsConsent(r.role, d.key)));
+  const variationNeeded = c.building_consent_status === "granted" && consentDocChanged;
 
   if (!loaded) return null;
   if (noJob) {
@@ -67,9 +80,10 @@ export default function ConsentSpine({ lead }) {
   return (
     <div className="rounded-card border border-hairline bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="section-label">Planning &amp; building consent (PlanSA)</h3>
+        <h3 className="section-label">{planningOnly ? "Planning consent (PlanSA)" : "Planning &amp; building consent (PlanSA)"}</h3>
         <span className="text-[10px] text-muted">no API — track &amp; lodge in the portal</span>
       </div>
+      {planningOnly && <p className="text-[11px] text-muted -mt-1">Lodge Planning Consent now (pre-contract) — you have the architect&rsquo;s minimums. Building Consent + Development Approval are lodged later, in Won.</p>}
 
       {/* Deep-links */}
       <div className="flex flex-wrap gap-1.5">
@@ -95,6 +109,15 @@ export default function ConsentSpine({ lead }) {
         </div>
       </div>
 
+      {/* Variation warning (Won) — a consent doc changed after Building Consent was granted */}
+      {!planningOnly && variationNeeded && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2">
+          <p className="text-xs font-semibold text-red-700">⚠ PlanSA variation required</p>
+          <p className="text-[11px] text-red-700 mt-0.5">A consent document was flagged changed after Building Consent was granted — the approved design no longer matches. Lodge a variation (fee + delay) before building on the changed design.</p>
+        </div>
+      )}
+
+      {!planningOnly && (<>
       {/* 2 · Building Consent */}
       <div className="rounded-lg border border-hairline bg-page/60 p-3">
         <div className="flex items-center justify-between mb-1.5">
@@ -124,6 +147,7 @@ export default function ConsentSpine({ lead }) {
           {dateField("development_approval_at")}
         </div>
       </div>
+      </>)}
 
       {/* Pre-lodgement checklist (Building Consent pack) */}
       <div>

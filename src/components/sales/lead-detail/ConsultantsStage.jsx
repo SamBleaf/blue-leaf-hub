@@ -11,11 +11,12 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../../lib/apiFetch.js";
 import {
-  APPROVAL_RISK, APPROVAL_RISK_STEPS, APPROVAL_RISK_COLORS,
   CONSULTANT_ROLES, CONSULTANT_ROLE_ORDER, CONSULTANT_CLIENT_FACING,
   CONSULTANT_DELIVERABLES, DELIVERABLE_STATUS, DELIVERABLE_STATUS_ORDER,
   DELIVERABLE_STATUS_COLORS, DELIVERABLE_FEEDS_LABELS, DELIVERABLE_DEPENDENCIES,
 } from "../../../lib/constants.js";
+import ConsentSpine from "./ConsentSpine.jsx";
+import MeetingScheduler from "./MeetingScheduler.jsx";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
 const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key) || { label: key, feeds: "none" };
@@ -25,14 +26,13 @@ const isDoneStatus = (s) => s === "received" || s === "issued";
 const DELIVERABLE_LABELS = {};
 Object.values(CONSULTANT_DELIVERABLES).flat().forEach((d) => { DELIVERABLE_LABELS[d.key] = d.label; });
 
-export default function ConsultantsStage({ lead, patch }) {
+export default function ConsultantsStage({ lead, patch, reload }) {
   const [contacts, setContacts] = useState([]);
   const [roster, setRoster] = useState(Array.isArray(lead.consultant_roster) ? lead.consultant_roster : []);
   const [ff, setFf] = useState(Array.isArray(lead.selections_schedule) ? lead.selections_schedule : []);
 
   useEffect(() => { apiFetch("/api/sales/consultants").then(({ ok, data }) => { if (ok) setContacts(data?.consultants || []); }); }, []);
 
-  const risk = lead.approval_risk || "unknown";
   const delsOf = (r) => (r.deliverables && r.deliverables.length ? r.deliverables : seedDeliverables(r.role));
 
   // ── Dependency state: a flat map of every deliverable currently on the roster ──────────────
@@ -54,6 +54,8 @@ export default function ConsultantsStage({ lead, patch }) {
   const doneCount = allDelStates.filter((d) => isDoneStatus(d.status)).length;
   const blockedCount = Object.keys(rosterDeliverables).filter((k) => waitingOn(k).length).length;
   const reissueCount = allDelStates.filter((d) => d.reissue).length;
+  // Exit-gate signal (CW-2): every consultant on the roster has all deliverables received/issued.
+  const docsReady = roster.length > 0 && roster.every((r) => delsOf(r).every((d) => isDoneStatus(d.status || "pending")));
 
   // ── Consultant roster + deliverables ──────────────────────────────────────
   function saveRoster(next) { setRoster(next); patch({ consultant_roster: next }); }
@@ -80,23 +82,6 @@ export default function ConsultantsStage({ lead, patch }) {
 
   return (
     <div className="space-y-4">
-      {/* Approval risk (advisory chip) */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="section-label">Council / certifier approval risk</h3>
-          <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${APPROVAL_RISK_COLORS[risk]}`}>{APPROVAL_RISK[risk]}</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {APPROVAL_RISK_STEPS.map((r) => (
-            <button key={r} type="button" onClick={() => patch({ approval_risk: r })}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${risk === r ? "bg-primary text-white" : "border border-hairline text-ink hover:bg-page"}`}>
-              {APPROVAL_RISK[r]}
-            </button>
-          ))}
-        </div>
-        {risk === "high" && <p className="mt-2 text-[11px] text-red-600">High approval risk — flag it in the proposal and manage the client&rsquo;s expectations on timing.</p>}
-      </div>
-
       {/* Consultant roster + deliverables */}
       <div className="rounded-card border border-hairline bg-surface p-4">
         <div className="flex items-center justify-between mb-1">
@@ -183,6 +168,9 @@ export default function ConsultantsStage({ lead, patch }) {
         {contacts.length === 0 && <p className="mt-1 text-[11px] text-muted">No consultant contacts yet — add engineers/suppliers in the CRM.</p>}
       </div>
 
+      {/* Planning Consent — lodged here (pre-contract), while Building Consent + DA wait for Won */}
+      <ConsentSpine lead={lead} scope="planning" />
+
       {/* Provisional F&F schedule (schedule thread v2) */}
       <div className="rounded-card border border-hairline bg-surface p-4">
         <div className="flex items-center justify-between mb-2">
@@ -209,19 +197,23 @@ export default function ConsultantsStage({ lead, patch }) {
         </label>
       </div>
 
-      {/* Exit-gate flags */}
+      {/* Exit → Tender: documents in · proposal generated · final presentation booked */}
       <div className="rounded-card border border-hairline bg-surface p-4 space-y-2">
         <h3 className="section-label mb-1">Ready for tender</h3>
-        <label className="flex items-center gap-2 text-sm text-ink">
-          <input type="checkbox" className="w-4 h-4 accent-primary" checked={!!lead.consultants_engineering_ready} onChange={(e) => patch({ consultants_engineering_ready: e.target.checked })} />
-          Engineering complete enough for tender
-        </label>
-        <label className="flex items-center gap-2 text-sm text-ink">
-          <input type="checkbox" className="w-4 h-4 accent-primary" checked={!!lead.consultants_cert_pathway_confirmed} onChange={(e) => patch({ consultants_cert_pathway_confirmed: e.target.checked })} />
-          Certification pathway confirmed
-        </label>
-        <p className="text-[11px] text-muted">Certification <span className="font-medium">approval</span> isn&rsquo;t required to tender — it&rsquo;s lodged later in Won.</p>
+        <ul className="space-y-1 text-sm">
+          <li className={`flex items-center gap-2 ${docsReady ? "text-green-700" : "text-muted"}`}>
+            <span>{docsReady ? "✓" : "○"}</span> Full consultant document set received / issued
+          </li>
+          <li className={`flex items-center gap-2 ${lead.fee_proposal_id ? "text-green-700" : "text-muted"}`}>
+            <span>{lead.fee_proposal_id ? "✓" : "○"}</span> Fixed-Price proposal generated
+          </li>
+          <li className="flex items-center gap-2 text-muted"><span>○</span> Final presentation booked (below)</li>
+        </ul>
+        <p className="text-[11px] text-muted">Certification &amp; approval risk aren&rsquo;t here — they&rsquo;re lodged/tracked later in Won.</p>
       </div>
+
+      {/* Final presentation — booked here, before advancing to Tender */}
+      <MeetingScheduler lead={lead} meetingType="proposal_presentation" reload={reload} />
     </div>
   );
 }

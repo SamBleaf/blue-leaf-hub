@@ -57,8 +57,8 @@ const STAGE_GATES = {
     { label: "Pre-construction fee set",          check: l => l.preconstruction_fee != null },
   ],
   tender:        [
-    { label: "Engineering complete enough for tender",  check: l => !("consultants_engineering_ready" in l) || !!l.consultants_engineering_ready },
-    { label: "Certification pathway confirmed",         check: l => !("consultants_cert_pathway_confirmed" in l) || !!l.consultants_cert_pathway_confirmed },
+    { label: "Consultant documents complete", check: l => { const r = Array.isArray(l.consultant_roster) ? l.consultant_roster : []; return r.length > 0 && r.every(e => (Array.isArray(e.deliverables) ? e.deliverables : []).every(d => d.status === "received" || d.status === "issued")); } },
+    { label: "Fixed-Price proposal generated",          check: l => !!l.fee_proposal_id },
     { label: "Provisional F&F schedule issued",         check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
     { label: "Site address set",        check: l => !!l.site_address?.trim() },
     { label: "Job created from lead",   check: l => !!l.job_id },
