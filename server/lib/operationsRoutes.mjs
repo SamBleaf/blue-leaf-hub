@@ -18,14 +18,25 @@ export function registerOperationsRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured." });
     try {
-      const { data: projects, error: pe } = await sb
+      // CV-3b: hide pre-construction-portal projects (is_preconstruction=true) — they exist to give
+      // the client a portal during design, before the job is a live Ops project. Soft-degrades on a
+      // pre-migration-199 DB (42703 → the column is absent → run the original unfiltered query).
+      const PROJ_COLS = "id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)";
+      let { data: projects, error: pe } = await sb
         .from("projects")
-        .select("id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)")
+        .select(`${PROJ_COLS}, is_preconstruction`)
         // BLH-E2E-001: hide decommissioned/anonymised projects from the active Operations board.
         // Cleanup scripts "soft-delete" by renaming address → "…_DELETED" (projects has no deleted_at
         // column), so that suffix is the exclusion convention. Mirrors the /global-tasks filter below.
         .not("address", "ilike", "%_DELETED")
+        .eq("is_preconstruction", false)
         .order("created_at", { ascending: false });
+      if (pe && pe.code === "42703") {
+        ({ data: projects, error: pe } = await sb
+          .from("projects").select(PROJ_COLS)
+          .not("address", "ilike", "%_DELETED")
+          .order("created_at", { ascending: false }));
+      }
       if (pe) throw pe;
 
       const projectIds = (projects || []).map((p) => p.id);

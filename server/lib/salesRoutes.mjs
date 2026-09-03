@@ -503,6 +503,13 @@ export async function finalizeWonJob(sb, lead) {
         if (proj && proj.contract_value == null) await sb.from("projects").update({ contract_value: value }).eq("id", proj.id);
       } catch { /* projects.contract_value may be absent — non-fatal */ }
     }
+
+    // 4. CV-3b: a pre-construction-portal project graduates to a live Ops project on win. Trigger 096
+    //    already skips creating a duplicate (an existing project for the job), so flipping the flag off
+    //    turns the SAME row into the live project — the portal, comms + client login all carry over.
+    try { await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true); }
+    catch { /* pre-migration-199 — column absent, non-fatal */ }
+
     return { ok: true, jobId, contractValue: value };
   } catch (e) {
     console.warn("[finalize-won]", e?.message || e);
@@ -1060,6 +1067,62 @@ export function registerSalesRoutes(app) {
     const { error } = await sb.from("consultant_messages").delete().eq("id", req.params.msgId).eq("lead_id", req.params.leadId);
     if (error) return err(res, 400, translateDbError(error));
     ok(res);
+  });
+
+  // ── Pre-construction portal (CV-3b) — induct the client into the portal EARLY (at PTSA-signed /
+  //    during Consultants) so the client<->consultant comms (CV-3a) have a home before the build. The
+  //    portal is project-keyed, so this creates the project now but marks it is_preconstruction=true;
+  //    Ops/field lists hide it and the Won transition (finalizeWonJob) flips the flag so the same row
+  //    graduates into the live Ops project (trigger 096 adopts it — no duplicate). Client invite +
+  //    magic link reuse the existing portal admin. Soft-degrades pre-migration-199. ──────────────────
+  app.get("/api/sales/leads/:id/preconstruction-portal", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead } = await sb.from("leads").select("id, job_id").eq("id", req.params.id).maybeSingle();
+    if (!lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return ok(res, { project: null, noJob: true });
+    const COLS = "id, address, portal_v2_enabled, build_phase, portal_client_email, portal_client_name";
+    let { data: proj, error } = await sb.from("projects").select(`${COLS}, is_preconstruction`).eq("job_id", lead.job_id).maybeSingle();
+    if (error && error.code === "42703") {
+      ({ data: proj, error } = await sb.from("projects").select(COLS).eq("job_id", lead.job_id).maybeSingle());
+      if (!error) return ok(res, { project: proj ? rowToCamel(proj) : null, columnMissing: true });
+    }
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res, { project: proj ? rowToCamel(proj) : null });
+  });
+
+  app.post("/api/sales/leads/:id/preconstruction-portal", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead } = await sb.from("leads").select("id, job_id, site_address").eq("id", req.params.id).maybeSingle();
+    if (!lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return err(res, 409, "Create the job first (at PTSA signing) — the pre-construction portal is keyed to it.");
+    const { data: job } = await sb.from("jobs").select("id, address").eq("id", lead.job_id).maybeSingle();
+    if (!job) return err(res, 409, "The linked job is missing.");
+
+    // Already has a project (pre-con OR already-live)? Make sure the portal is enabled + return it.
+    let { data: existing, error: exErr } = await sb.from("projects")
+      .select("id, address, portal_v2_enabled, build_phase, is_preconstruction").eq("job_id", lead.job_id).maybeSingle();
+    if (exErr && exErr.code === "42703") return err(res, 503, "Apply migration 199 first (pre-construction portal).");
+    if (exErr) return err(res, 400, translateDbError(exErr));
+    if (existing) {
+      if (!existing.portal_v2_enabled) {
+        await sb.from("projects").update({ portal_v2_enabled: true }).eq("id", existing.id);
+        existing = { ...existing, portal_v2_enabled: true };
+      }
+      return ok(res, { project: rowToCamel(existing), created: false });
+    }
+
+    const address = String(job.address || lead.site_address || "Unknown").trim() || "Unknown";
+    const { data: created, error: cErr } = await sb.from("projects")
+      .insert({ job_id: lead.job_id, address, status: "active", is_preconstruction: true, build_phase: "pre_construction", portal_v2_enabled: true })
+      .select("id, address, portal_v2_enabled, build_phase, is_preconstruction").single();
+    if (cErr) {
+      if (cErr.code === "42703") return err(res, 503, "Apply migration 199 first (pre-construction portal).");
+      return err(res, 400, translateDbError(cErr));
+    }
+    try { await sb.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: "Pre-construction client portal set up" }); } catch { /* best-effort */ }
+    ok(res, { project: rowToCamel(created), created: true });
   });
 
   app.post("/api/sales/leads/:id/designer", requireAuth, async (req, res) => {

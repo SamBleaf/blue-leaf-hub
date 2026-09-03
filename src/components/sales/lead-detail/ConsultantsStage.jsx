@@ -17,6 +17,7 @@ import {
 } from "../../../lib/constants.js";
 import ConsentSpine from "./ConsentSpine.jsx";
 import ConsultantComms from "./ConsultantComms.jsx";
+import PreconstructionPortalCard from "./PreconstructionPortalCard.jsx";
 import MeetingScheduler from "./MeetingScheduler.jsx";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
@@ -87,6 +88,9 @@ export default function ConsultantsStage({ lead, patch, reload }) {
 
   return (
     <div className="space-y-4">
+      {/* CV-3b — induct the client into the portal early (their home for the design team + comms) */}
+      <PreconstructionPortalCard lead={lead} />
+
       {/* Consultant roster + deliverables */}
       <div className="rounded-card border border-hairline bg-surface p-4">
         <div className="flex items-center justify-between mb-1">
