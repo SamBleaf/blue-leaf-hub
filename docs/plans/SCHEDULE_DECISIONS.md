@@ -1,0 +1,27 @@
+# Schedule Continuity — Decisions Log (come back to AFTER the sales-pipeline build)
+
+*Recorded 2026-08-30. Companion to `SCHEDULE_CONTINUITY_MAP.md` (the full investigation) + the `project_blueleafhub_schedule_continuity` memory. Sam has PARKED this whole program to finish the sales pipeline first — this is the resume point.*
+
+## Status: BUILDING (unparked 2026-08-30) — sequential
+Sam reversed the park: build the whole workload sequentially — schedule + Won + handover + continuity + CW-3 + CV-3 — since they interlock. **Two blockers routed around, not ignored:** (a) the PBSA proposal template is still **WIP** → build the schedule ENGINE + Gantt render + a standalone preview now; wire the template tokens once the PBSA is finalised; (b) the **carpentry money model is undecided** → carpentry auto-extraction waits on Sam's call. **No external pen test** (Sam won't spend the ~few-$k) — the portal (CV-3) is built as planned; his own tech guy reviews portal security later ("when the wounds have healed since the website debacle"); business partner agreed the custom portal is the way forward.
+
+**BUILD SEQUENCE:** SC-1 schedule engine (SCHED parse + buffer scheme + stage grouping → canonical schedule) → SC-2 schedule-in-proposal (Gantt image + table + sign-off gate; template tokens stubbed till PBSA final) → SC-3 Won schedule-seed + handover enrichment (auto-draft Ops schedule from canonical; unify win paths; Ops=source of truth at Won) → CW-3 DNF→construction schedule (notification hold-points, curated SA template) → SC-4 portal-light schedule version → CV-3 portal-as-consultant-comms → carpentry extraction (BLOCKED on money model).
+
+## Decisions locked (Sam)
+1. **Duration source of truth = the estimator's `SCHED` line items** in the uploaded Buildxact estimate (NOT a costed labour$÷charge-up model). The data exists at proposal time (estimate is uploaded before/at proposal). SCHED lines already drive the Ops schedule on upload.
+2. **Buffers on top of SCHED**, configurable in settings — per-stage contingency %, whole-programme contingency %, and a calendar allowance (weather / public holidays / Christmas shutdown), then round up. Conservative defaults; Sam tunes the "say 10 when we think 8" dial. **"Under-promise / over-deliver" is an INTERNAL motto — the buffers are invisible to the client; the client page never advertises padding.**
+3. **Time-based, not date-based.** No start date exists until Won, so the proposal programme is in Months/Weeks from *site commencement*, never calendar dates.
+4. **Hard-gated human sign-off** before any timeline renders into a client document. The machine drafts; a person owns the number. (Client-facing durations must never auto-fabricate.)
+5. **One connected spine across three surfaces** — Fee Proposal (detailed) → **Client Portal (lighter, client-friendly version)** → Operations. **At Won, Operations becomes the source of truth.**
+6. **Render approach = Option B**: the visual Gantt is rendered server-side (SVG→PNG) from SCHED+buffers into **one fixed image field** in the strict-layout DOCX (`{%schedule_gantt}`), with the detail table beneath as fillable `{#stages}` rows. Keeps the visual + the strict "identical layout" guarantee. Needs a docxtemplater **image module** + an SVG→PNG step added to the fee-proposal generator (module5).
+7. **Home in the doc** = the PBSA "**Process and Timeline**" page (page 6 — currently an empty placeholder). Mockup (design-of-record): artifact a3f16f8e / `scratchpad/proposal-schedule-page.html` — teal band + serif title + Gantt + detail table + a neutral "About this programme" note (NO under-promise language).
+8. **SCHED lines → client stages**: SCHED items are more granular than the ~9 client-facing stages; group/map them into readable stages (grouping is presentation; durations stay real = SCHED+buffer). Grouping is adjustable.
+
+## Deferred / still open (decide when we resume)
+- **Ops scheduler needs real work** (separate track): its durations were unrealistic (built to the *optimal* path, not a realistic construction sequence) and the **dependency map needs work**. The proposal Gantt should show realistic overlaps, not the optimal single-file path.
+- **Carpentry money model — DEFERRED (Sam unsure).** The carpentry categories appear in the Buildxact estimate with the same wording/line-items, but margin differs; sometimes Sam marks carpentry categories "not required" in the estimate and inputs section totals into the carpentry module with an additional margin on top. Fold-into-project vs standalone sub-view + an in-house/external flag → map later. Dormant double-count guard (`labourAttribution.excludeDoubleCounted`) must be resolved before folding.
+- **Commencement-date origin** — the single anchor the proposal (relative), the Ops schedule, and the carpentry calendar all need; today it has **no upstream source**. Where does the real start come from — contract / handover / scheduler? (Proposal stays relative regardless.)
+- **Carpentry auto-extraction at Won** (the hard build) + **schedule-seeding at Won** + **estimate→Ops one-spine** + **DNF→carpentry-calendar** (the old "CW-3") — all part of this deferred program; see the 6-phase plan in `SCHEDULE_CONTINUITY_MAP.md`.
+
+## When we resume — first ship
+Phase 1–2: SCHED lines from the uploaded estimate → apply buffer scheme → group into stages → render the Option-B page (Gantt image + detail table) into the (finalised) PBSA → behind the hard-gated sign-off. Then the portal-light version, then the Won→Ops continuity, then carpentry.

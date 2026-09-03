@@ -20,6 +20,7 @@ import { sendQualifyIntro } from "./qualifyEmail.mjs";
 import { sendDiscoveryIntro } from "./discoveryEmail.mjs";
 import { sendConceptEmail } from "./conceptEmails.mjs";
 import { sendTenderEmail } from "./tenderEmails.mjs";
+import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -777,6 +778,30 @@ export function registerSalesRoutes(app) {
       return err(res, 400, translateDbError(error));
     }
     ok(res, { designers: (data || []).map(rowToCamel) });
+  });
+
+  // SC-1 — the canonical build schedule for a lead, derived from the estimate's SCHED lines + the
+  // buffer scheme. Time-based (weeks/months from site start). Feeds the proposal timeline (SC-2).
+  app.get("/api/sales/leads/:id/schedule", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error } = await sb.from("leads").select("id, fee_proposal_id, job_id").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const asCategories = (v) => { if (!v) return null; if (Array.isArray(v)) return v; try { const p = JSON.parse(v); return Array.isArray(p) ? p : p?.categories || null; } catch { return null; } };
+    let categories = null;
+    if (lead.fee_proposal_id) {
+      const { data: fp } = await sb.from("fee_proposals").select("categories").eq("id", lead.fee_proposal_id).maybeSingle();
+      categories = asCategories(fp?.categories);
+    }
+    if (!categories && lead.job_id) {
+      try {
+        const { data: est } = await sb.from("buildexact_estimates").select("categories").eq("job_id", lead.job_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        categories = asCategories(est?.categories);
+      } catch { /* table/col may be absent — fail soft */ }
+    }
+    const buffers = await loadScheduleBuffers(sb);
+    const schedule = buildCanonicalSchedule(categories || [], buffers);
+    return ok(res, { schedule, hasEstimate: !!(categories && categories.length), buffers });
   });
 
   // Consultants stage — the pool of contacts assignable to a roster role (engineer, certifier,
