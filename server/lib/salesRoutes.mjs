@@ -23,6 +23,7 @@ import { sendTenderEmail } from "./tenderEmails.mjs";
 import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mjs";
 import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
+import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -861,8 +862,27 @@ export function registerSalesRoutes(app) {
     const { error: insErr } = await sb.from("schedule_tasks").insert(rows);
     if (insErr) return err(res, 400, translateDbError(insErr));
     try { await sb.from("projects").update({ tentative_start_date: startDate }).eq("id", project.id); } catch { /* col may be absent */ }
+    // SC-4 — auto-feed the client portal timeline from the same schedule (one source of truth).
+    let portalSynced = 0;
+    try { const sync = await syncPortalMilestonesFromSchedule(sb, project.id); portalSynced = sync.synced || 0; } catch { /* non-fatal */ }
     try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: `Draft Ops schedule seeded from the estimate (${rows.length} stages, start ${startDate})` }); } catch { /* best-effort */ }
-    return ok(res, { seeded: true, count: rows.length, projectId: project.id });
+    return ok(res, { seeded: true, count: rows.length, projectId: project.id, portalSynced });
+  });
+
+  // SC-4 — re-sync the client portal timeline from the (Ops-refined) schedule. Preserves any achieved
+  // dates + hero photos on the milestones; drops the internal hold-points. Ops owns the schedule; this
+  // keeps the client's light timeline in step without double-entry.
+  app.post("/api/sales/leads/:id/sync-portal-timeline", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead } = await sb.from("leads").select("job_id").eq("id", req.params.id).maybeSingle();
+    if (!lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return err(res, 422, "No job/project yet.");
+    const { data: project } = await sb.from("projects").select("id").eq("job_id", lead.job_id).maybeSingle();
+    if (!project) return err(res, 422, "No Operations project yet.");
+    const r = await syncPortalMilestonesFromSchedule(sb, project.id);
+    if (!r.ok) return err(res, 400, r.error || "Could not sync the client timeline.");
+    return ok(res, { synced: r.synced });
   });
 
   // CW-3 — drop the SA mandatory building-notification stages (from the Building Consent / DNF) onto

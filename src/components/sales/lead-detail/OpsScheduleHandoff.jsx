@@ -25,7 +25,14 @@ export default function OpsScheduleHandoff({ lead }) {
     setBusy("");
     if (!ok) { setMsg({ type: "error", text: error || "Could not seed the schedule." }); return; }
     setSeeded(true);
-    setMsg({ type: "success", text: `Draft Ops schedule created — ${data?.count || 0} stages from ${startDate}. Refine it in Operations.` });
+    setMsg({ type: "success", text: `Draft Ops schedule created — ${data?.count || 0} stages from ${startDate}${data?.portalSynced ? `; client timeline auto-fed (${data.portalSynced} milestones)` : ""}. Refine it in Operations.` });
+  }
+  async function syncPortal() {
+    setBusy("sync"); setMsg(null);
+    const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/sync-portal-timeline`, {});
+    setBusy("");
+    if (!ok) { setMsg({ type: "error", text: error || "Could not sync the client timeline." }); return; }
+    setMsg({ type: "success", text: `Client portal timeline synced from the schedule — ${data?.synced || 0} milestones.` });
   }
   async function addNotifications() {
     setBusy("notify"); setMsg(null);
@@ -55,8 +62,12 @@ export default function OpsScheduleHandoff({ lead }) {
           className="rounded-lg border border-hairline px-3 py-2 text-xs font-semibold text-ink hover:bg-page disabled:opacity-50">
           {busy === "notify" ? "Adding…" : notified ? "✓ Notifications added" : "Add building-notification hold-points"}
         </button>
+        <button type="button" onClick={syncPortal} disabled={busy === "sync"}
+          className="rounded-lg border border-hairline px-3 py-2 text-xs font-semibold text-primary hover:bg-page disabled:opacity-50">
+          {busy === "sync" ? "Syncing…" : "↻ Re-sync client timeline"}
+        </button>
       </div>
-      <p className="mt-2 text-[10px] text-muted">Add the notification hold-points once Building Consent is granted (from the DNF above). Each is a pinned inspection the leading hand must give notice for.</p>
+      <p className="mt-2 text-[10px] text-muted">The client portal timeline auto-feeds from this schedule (one source). Add the notification hold-points once Building Consent is granted — each is a pinned inspection the leading hand must give notice for; those stay internal, off the client view. Re-sync after Operations refines the dates.</p>
       {msg && <p className={`mt-2 text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
     </div>
   );
