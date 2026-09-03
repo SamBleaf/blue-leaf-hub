@@ -5,17 +5,25 @@
  * Internal view — the buffers ("under-promise") are visible to staff here, never to the client.
  */
 import { useEffect, useState } from "react";
-import { apiFetch } from "../../../lib/apiFetch.js";
+import { apiFetch, apiPost } from "../../../lib/apiFetch.js";
 
 export default function ScheduleProgramme({ lead }) {
   const [state, setState] = useState({ loading: true });
-  useEffect(() => {
-    apiFetch(`/api/sales/leads/${lead.id}/schedule`).then(({ data }) => {
-      setState({ loading: false, schedule: data?.schedule || null, hasEstimate: !!data?.hasEstimate, buffers: data?.buffers });
-    });
-  }, [lead.id]);
+  const [busy, setBusy] = useState(false);
+  const load = () => apiFetch(`/api/sales/leads/${lead.id}/schedule`).then(({ data }) => {
+    setState({ loading: false, schedule: data?.schedule || null, hasEstimate: !!data?.hasEstimate, buffers: data?.buffers, signedOffAt: data?.signedOffAt || null });
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [lead.id]);
 
-  const { loading, schedule, hasEstimate, buffers } = state;
+  async function signOff(revoke) {
+    setBusy(true);
+    await apiPost(`/api/sales/leads/${lead.id}/schedule/sign-off`, revoke ? { revoke: true } : {});
+    await load();
+    setBusy(false);
+  }
+
+  const { loading, schedule, hasEstimate, buffers, signedOffAt } = state;
   const maxWeek = schedule ? Math.max(...schedule.stages.map((s) => s.endWeek), 1) : 1;
 
   return (
@@ -56,7 +64,22 @@ export default function ScheduleProgramme({ lead }) {
               {buffers ? ` (stage +${Math.round(buffers.per_stage_pct * 100)}% · programme +${Math.round(buffers.programme_pct * 100)}% · +${buffers.calendar_weeks}w calendar)` : ""}
             </span>
           </div>
-          <p className="mt-1.5 text-[10px] text-muted">Buffers are internal — the client sees only the final rounded programme. Renders into the proposal at SC-2, behind sign-off.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 pt-2 border-t border-hairline">
+            <a href={`/api/sales/leads/${lead.id}/schedule/gantt.svg`} target="_blank" rel="noreferrer"
+              className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-primary hover:bg-page">Preview client page ↗</a>
+            {signedOffAt ? (
+              <>
+                <span className="text-[11px] font-semibold text-green-700">✓ Signed off</span>
+                <button type="button" onClick={() => signOff(true)} disabled={busy} className="text-[11px] text-muted hover:text-red-600 underline underline-offset-2 disabled:opacity-50">revoke</button>
+              </>
+            ) : (
+              <button type="button" onClick={() => signOff(false)} disabled={busy}
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                {busy ? "…" : "Sign off programme"}
+              </button>
+            )}
+          </div>
+          <p className="mt-2 text-[10px] text-muted">Buffers are internal — the client sees only the final rounded programme. It must be signed off before it renders into a client document.</p>
         </>
       )}
     </div>

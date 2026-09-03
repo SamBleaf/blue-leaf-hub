@@ -21,6 +21,7 @@ import { sendDiscoveryIntro } from "./discoveryEmail.mjs";
 import { sendConceptEmail } from "./conceptEmails.mjs";
 import { sendTenderEmail } from "./tenderEmails.mjs";
 import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mjs";
+import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -780,13 +781,11 @@ export function registerSalesRoutes(app) {
     ok(res, { designers: (data || []).map(rowToCamel) });
   });
 
-  // SC-1 — the canonical build schedule for a lead, derived from the estimate's SCHED lines + the
-  // buffer scheme. Time-based (weeks/months from site start). Feeds the proposal timeline (SC-2).
-  app.get("/api/sales/leads/:id/schedule", requireAuth, async (req, res) => {
-    const sb = getServiceSupabase();
-    if (!sb) return err(res, 503, "Supabase not configured");
-    const { data: lead, error } = await sb.from("leads").select("id, fee_proposal_id, job_id").eq("id", req.params.id).single();
-    if (error || !lead) return err(res, 404, "Lead not found");
+  // SC-1/SC-2 — resolve a lead's canonical build schedule (estimate SCHED lines + buffer scheme).
+  // Shared by the JSON, SVG-preview and sign-off routes. schedule_signed_off_at may be absent pre-mig-197.
+  async function resolveLeadSchedule(sb, leadId) {
+    const { data: lead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+    if (!lead) return null;
     const asCategories = (v) => { if (!v) return null; if (Array.isArray(v)) return v; try { const p = JSON.parse(v); return Array.isArray(p) ? p : p?.categories || null; } catch { return null; } };
     let categories = null;
     if (lead.fee_proposal_id) {
@@ -800,8 +799,45 @@ export function registerSalesRoutes(app) {
       } catch { /* table/col may be absent — fail soft */ }
     }
     const buffers = await loadScheduleBuffers(sb);
-    const schedule = buildCanonicalSchedule(categories || [], buffers);
-    return ok(res, { schedule, hasEstimate: !!(categories && categories.length), buffers });
+    return { lead, schedule: buildCanonicalSchedule(categories || [], buffers), hasEstimate: !!(categories && categories.length), buffers };
+  }
+
+  // The canonical build schedule (JSON). Time-based (weeks/months from site start).
+  app.get("/api/sales/leads/:id/schedule", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const r = await resolveLeadSchedule(sb, req.params.id);
+    if (!r) return err(res, 404, "Lead not found");
+    return ok(res, { schedule: r.schedule, hasEstimate: r.hasEstimate, buffers: r.buffers, signedOffAt: r.lead.schedule_signed_off_at || null });
+  });
+
+  // SC-2 — the programme as an SVG image (preview of what renders into the proposal's "Process and
+  // Timeline" page). Served inline so staff can eyeball the exact client-facing visual.
+  app.get("/api/sales/leads/:id/schedule/gantt.svg", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const r = await resolveLeadSchedule(sb, req.params.id);
+    if (!r) return err(res, 404, "Lead not found");
+    const svg = buildScheduleGanttSvg(r.schedule);
+    if (!svg) return err(res, 404, "No schedule to render — add SCHED lines to the estimate.");
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    return res.send(svg);
+  });
+
+  // SC-2 — the hard-gated sign-off. The programme must be approved before it renders into a client
+  // document. Set stamps the approval; { revoke:true } clears it (e.g. after the estimate changes).
+  app.post("/api/sales/leads/:id/schedule/sign-off", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const revoke = req.body?.revoke === true;
+    const updates = revoke
+      ? { schedule_signed_off_at: null, schedule_signed_off_by: null }
+      : { schedule_signed_off_at: new Date().toISOString(), schedule_signed_off_by: req.caller?.id || null };
+    const { error } = await sb.from("leads").update(updates).eq("id", req.params.id);
+    if (error) return err(res, 400, translateDbError(error));
+    try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: revoke ? "Construction programme sign-off revoked" : "Construction programme signed off" }); } catch { /* best-effort */ }
+    return ok(res, { signedOffAt: updates.schedule_signed_off_at });
   });
 
   // Consultants stage — the pool of contacts assignable to a roster role (engineer, certifier,
