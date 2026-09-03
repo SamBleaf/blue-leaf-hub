@@ -161,7 +161,12 @@ export async function handleCalcomWebhook(req, res) {
   const secret = (process.env.CAL_WEBHOOK_SECRET || "").trim();
   const sigHeader = req.headers["x-cal-signature-256"] || req.headers["x-cal-signature"] || "";
 
-  if (!secret) console.warn("[calcom webhook] no CAL_WEBHOOK_SECRET set — accepting unverified (configure before go-live).");
+  // Fail CLOSED (finding M1): reject when no secret is configured rather than accepting unverified
+  // payloads — a public webhook that trusts unsigned bodies lets anyone inject bookings/leads.
+  if (!secret) {
+    console.warn("[calcom webhook] CAL_WEBHOOK_SECRET not set — rejecting (fail-closed). Set it in this environment.");
+    return res.status(503).json({ ok: false, error: "webhook_not_configured" });
+  }
 
   const verify = verifyCalSignature(raw, sigHeader, secret);
   if (!verify.ok) {

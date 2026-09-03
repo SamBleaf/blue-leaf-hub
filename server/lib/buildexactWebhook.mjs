@@ -17,7 +17,10 @@ function timingSafeEqualBase64(a, b) {
 }
 
 function verifyBuildexactSignature(rawBody, headerValue, secret) {
-  if (!secret) return { ok: true, skipped: true };
+  // Fail CLOSED (finding M1): an unset secret must reject, not wave the payload through — a public
+  // webhook that accepts unsigned bodies lets anyone inject leads/estimates. Set
+  // BUILDEXACT_WEBHOOK_SECRET in every environment before this endpoint is relied on.
+  if (!secret) return { ok: false, reason: "no_secret_configured" };
   if (!headerValue || typeof headerValue !== "string") return { ok: false, reason: "missing_signature_header" };
   // Buildxact serialises using camelCase + signs with HMAC-SHA256, output = Base64 string (not hex).
   const hmac = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");

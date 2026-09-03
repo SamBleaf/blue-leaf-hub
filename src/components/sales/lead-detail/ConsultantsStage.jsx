@@ -16,6 +16,7 @@ import {
   DELIVERABLE_STATUS_COLORS, DELIVERABLE_FEEDS_LABELS, DELIVERABLE_DEPENDENCIES,
 } from "../../../lib/constants.js";
 import ConsentSpine from "./ConsentSpine.jsx";
+import ConsultantComms from "./ConsultantComms.jsx";
 import MeetingScheduler from "./MeetingScheduler.jsx";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
@@ -30,8 +31,12 @@ export default function ConsultantsStage({ lead, patch, reload }) {
   const [contacts, setContacts] = useState([]);
   const [roster, setRoster] = useState(Array.isArray(lead.consultant_roster) ? lead.consultant_roster : []);
   const [ff, setFf] = useState(Array.isArray(lead.selections_schedule) ? lead.selections_schedule : []);
+  const [comms, setComms] = useState([]);
 
   useEffect(() => { apiFetch("/api/sales/consultants").then(({ ok, data }) => { if (ok) setContacts(data?.consultants || []); }); }, []);
+  // CV-3a: the consultant-comms thread (every client↔consultant message, logged in the Hub).
+  const loadComms = () => apiFetch(`/api/sales/leads/${lead.id}/consultant-comms`).then(({ ok, data }) => { if (ok) setComms(data?.messages || []); });
+  useEffect(() => { loadComms(); }, [lead.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const delsOf = (r) => (r.deliverables && r.deliverables.length ? r.deliverables : seedDeliverables(r.role));
 
@@ -159,6 +164,9 @@ export default function ConsultantsStage({ lead, patch, reload }) {
                     </button>
                     <input value={r.notes || ""} onChange={(e) => editConsultant(i, "notes", e.target.value)} placeholder="Notes" className="flex-1 min-w-[8rem] rounded-lg border border-hairline px-2 py-1 text-[11px] bg-surface" />
                   </div>
+                  {/* CV-3a — per-consultant comms thread (Hub is the source of truth; BL brokers the client) */}
+                  <ConsultantComms leadId={lead.id} role={r.role} contactId={r.contactId}
+                    messages={comms.filter((m) => m.consultantRole === r.role)} onChange={loadComms} />
                 </div>
               );
             })}

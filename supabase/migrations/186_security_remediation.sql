@@ -83,6 +83,14 @@ BEGIN
     'marketing_library','drone_shot_plans','schedule_eot','trade_master_library'
   ] LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    -- ⚠ FIX (2026-08-30): 11 of these 17 are NOT rls-off — they are rls-ON with a pre-existing
+    -- PERMISSIVE policy (mig 154 tender tables carry "auth_users" USING(true); mig 122 marketing
+    -- tables carry "<t>_authenticated" USING(auth.uid() IS NOT NULL)). Postgres OR-combines
+    -- permissive policies, so adding a permissive staff_all leaves (true OR auth_is_staff()) = true
+    -- → the lock is a NO-OP and a logged-in client keeps full CRUD. Drop the permissive policies
+    -- first so staff_all is the only policy. DROP IF EXISTS is a no-op on the 6 genuinely rls-off.
+    EXECUTE format('DROP POLICY IF EXISTS "auth_users" ON public.%I', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_authenticated', t);
     -- guard against re-run: only create if absent
     IF NOT EXISTS (
       SELECT 1 FROM pg_policies

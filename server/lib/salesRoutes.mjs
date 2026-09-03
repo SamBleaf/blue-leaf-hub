@@ -915,7 +915,7 @@ export function registerSalesRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
     const { data, error } = await sb.from("crm_contacts")
-      .select("id, first_name, last_name, company, contact_type")
+      .select("id, first_name, last_name, company, contact_type, email")
       .in("contact_type", ["architect", "designer", "interior_designer", "engineer", "supplier", "other"])
       .order("company", { ascending: true });
     if (error) {
@@ -955,6 +955,111 @@ export function registerSalesRoutes(app) {
       .upsert(patch, { onConflict: "job_id" }).select("*").single();
     if (uErr) return err(res, 400, translateDbError(uErr));
     ok(res, { consent: row });
+  });
+
+  // ── Consultant comms spine (CV-3a) — every client<->consultant message logged + threaded in the
+  //    Hub (Sam's rule: the Hub is the source of truth; Blue Leaf brokers each consultant). A message
+  //    is authored by client|blue_leaf|consultant, travels by note|email|portal|phone, and carries a
+  //    client_visible broker flag the portal (CV-3c) will read. Actually emailing a consultant is
+  //    gated OFF by default (CONSULTANT_EMAIL_ENABLED) — logging a note always works. ────────────────
+  const CONSULTANT_MSG_COLS = "id, lead_id, consultant_role, consultant_contact_id, participant, channel, direction, subject, body, author_name, author_user_id, client_visible, message_id, in_reply_to, created_at";
+
+  app.get("/api/sales/leads/:id/consultant-comms", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data, error } = await sb.from("consultant_messages")
+      .select(CONSULTANT_MSG_COLS)
+      .eq("lead_id", req.params.id)
+      .order("created_at", { ascending: true });
+    if (error) {
+      if (error.code === "42P01") return ok(res, { messages: [], tableMissing: true }); // pre-mig-198
+      return err(res, 400, translateDbError(error));
+    }
+    ok(res, { messages: (data || []).map(rowToCamel) });
+  });
+
+  app.post("/api/sales/leads/:id/consultant-comms", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const leadId = req.params.id;
+    const role = String(req.body?.role || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!role) return err(res, 400, "Which consultant is this about? (role required)");
+    if (!body) return err(res, 400, "Message body is required.");
+    const kind = req.body?.kind === "email" ? "email" : "note";
+    const contactId = req.body?.contactId ? String(req.body.contactId) : null;
+    const clientVisible = !!req.body?.clientVisible;
+    const subject = String(req.body?.subject || "").trim() || null;
+    // Who authored it: an email is always from us; a logged note is whoever the operator relayed.
+    const participant = kind === "email" ? "blue_leaf"
+      : (["client", "blue_leaf", "consultant"].includes(req.body?.participant) ? req.body.participant : "blue_leaf");
+    const channel = kind === "email" ? "email"
+      : (["note", "phone", "portal"].includes(req.body?.channel) ? req.body.channel : "note");
+    const row = {
+      lead_id: leadId, consultant_role: role, consultant_contact_id: contactId,
+      participant, channel,
+      direction: kind === "email" ? "outbound" : (participant === "blue_leaf" ? "internal" : "inbound"),
+      subject, body, author_name: req.caller?.email || null, author_user_id: req.caller?.id || null,
+      client_visible: clientVisible, message_id: null, in_reply_to: null,
+    };
+
+    // Email path — actually send to the consultant. Gated OFF by default (no live emails during build).
+    if (kind === "email") {
+      if (process.env.CONSULTANT_EMAIL_ENABLED !== "true") {
+        return err(res, 503, "Consultant email sending is turned off. Set CONSULTANT_EMAIL_ENABLED to send — or log it as a note instead.");
+      }
+      if (!contactId) return err(res, 400, "Pick the consultant contact to email.");
+      if (!subject) return err(res, 400, "An email needs a subject.");
+      const { data: contact } = await sb.from("crm_contacts").select("id, email").eq("id", contactId).single();
+      const to = String(contact?.email || "").trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "That consultant contact has no valid email address — add one in the CRM.");
+      const sig = await getUserSignature(sb, req.caller?.id || null);
+      const fullText = `${body}\n\n${formatSignatureFooter(sig)}`;
+      const messageId = `<consult-${leadId}-${role}-${Date.now()}@blueleafbuilding.com.au>`;
+      try {
+        const r = await sendPlainMail({ to, subject, text: fullText, messageId });
+        row.body = fullText; row.message_id = messageId;
+        const { data: saved, error: sErr } = await sb.from("consultant_messages").insert(row).select(CONSULTANT_MSG_COLS).single();
+        if (sErr) {
+          if (sErr.code === "42P01") return ok(res, { sent: true, transport: r?.transport, messageId, saved: false, tableMissing: true });
+          return err(res, 400, translateDbError(sErr));
+        }
+        try { await sb.from("lead_activities").insert({ lead_id: leadId, activity_type: "email", summary: `Consultant email sent (${role}): ${subject}` }); } catch { /* best-effort */ }
+        return ok(res, { sent: true, transport: r?.transport, message: rowToCamel(saved) });
+      } catch (e) {
+        return err(res, 400, e?.message || "Could not send the email to the consultant.");
+      }
+    }
+
+    // Note path — record a relayed client remark, a consultant reply taken by phone, or an internal note.
+    const { data: saved, error: sErr } = await sb.from("consultant_messages").insert(row).select(CONSULTANT_MSG_COLS).single();
+    if (sErr) {
+      if (sErr.code === "42P01") return err(res, 503, "Consultant comms need migration 198 — apply it in Supabase first.");
+      return err(res, 400, translateDbError(sErr));
+    }
+    ok(res, { message: rowToCamel(saved) });
+  });
+
+  // Broker control — toggle whether the client sees this message in the portal (read by CV-3c).
+  app.patch("/api/sales/leads/:leadId/consultant-comms/:msgId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const patch = {};
+    if (typeof req.body?.clientVisible === "boolean") patch.client_visible = req.body.clientVisible;
+    if (!Object.keys(patch).length) return err(res, 400, "Nothing to update.");
+    const { data, error } = await sb.from("consultant_messages")
+      .update(patch).eq("id", req.params.msgId).eq("lead_id", req.params.leadId)
+      .select(CONSULTANT_MSG_COLS).single();
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res, { message: rowToCamel(data) });
+  });
+
+  app.delete("/api/sales/leads/:leadId/consultant-comms/:msgId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { error } = await sb.from("consultant_messages").delete().eq("id", req.params.msgId).eq("lead_id", req.params.leadId);
+    if (error) return err(res, 400, translateDbError(error));
+    ok(res);
   });
 
   app.post("/api/sales/leads/:id/designer", requireAuth, async (req, res) => {
