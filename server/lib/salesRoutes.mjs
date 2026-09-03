@@ -22,6 +22,7 @@ import { sendConceptEmail } from "./conceptEmails.mjs";
 import { sendTenderEmail } from "./tenderEmails.mjs";
 import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mjs";
 import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
+import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -838,6 +839,53 @@ export function registerSalesRoutes(app) {
     if (error) return err(res, 400, translateDbError(error));
     try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: revoke ? "Construction programme sign-off revoked" : "Construction programme signed off" }); } catch { /* best-effort */ }
     return ok(res, { signedOffAt: updates.schedule_signed_off_at });
+  });
+
+  // SC-3 — at Won, seed a DRAFT Ops schedule from the canonical estimate programme + the operator's
+  // target start date. Ops owns + refines it from there (source of truth). Never clobbers an existing
+  // schedule. This is the "start assumptions → Scheduler" Ops-Ready handoff, made real.
+  app.post("/api/sales/leads/:id/seed-ops-schedule", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const startDate = String(req.body?.startDate || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return err(res, 400, "A target start date (YYYY-MM-DD) is required.");
+    const r = await resolveLeadSchedule(sb, req.params.id);
+    if (!r) return err(res, 404, "Lead not found");
+    if (!r.schedule) return err(res, 422, "No schedule to seed — add SCHED lines to the estimate first.");
+    if (!r.lead.job_id) return err(res, 422, "No job/project yet — win the lead first.");
+    const { data: project } = await sb.from("projects").select("id").eq("job_id", r.lead.job_id).maybeSingle();
+    if (!project) return err(res, 422, "No Operations project yet — the job must be won.");
+    const { data: existing } = await sb.from("schedule_tasks").select("id").eq("project_id", project.id).is("deleted_at", null).limit(1);
+    if (existing && existing.length) return err(res, 409, "This project already has a schedule — edit it in Operations.");
+    const rows = buildDraftScheduleRows(project.id, startDate, r.schedule);
+    const { error: insErr } = await sb.from("schedule_tasks").insert(rows);
+    if (insErr) return err(res, 400, translateDbError(insErr));
+    try { await sb.from("projects").update({ tentative_start_date: startDate }).eq("id", project.id); } catch { /* col may be absent */ }
+    try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: `Draft Ops schedule seeded from the estimate (${rows.length} stages, start ${startDate})` }); } catch { /* best-effort */ }
+    return ok(res, { seeded: true, count: rows.length, projectId: project.id });
+  });
+
+  // CW-3 — drop the SA mandatory building-notification stages (from the Building Consent / DNF) onto
+  // the project's construction schedule as pinned hold-points. Curated statutory template (no PlanSA
+  // API), anchored to the seeded stages. Idempotent-ish (skips if already added).
+  app.post("/api/sales/leads/:id/building-notifications", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead } = await sb.from("leads").select("job_id").eq("id", req.params.id).maybeSingle();
+    if (!lead) return err(res, 404, "Lead not found");
+    if (!lead.job_id) return err(res, 422, "No job/project yet.");
+    const { data: project } = await sb.from("projects").select("id").eq("job_id", lead.job_id).maybeSingle();
+    if (!project) return err(res, 422, "No Operations project yet.");
+    const { data: tasks } = await sb.from("schedule_tasks").select("phase, start_date, end_date").eq("project_id", project.id).is("deleted_at", null);
+    if (!tasks || !tasks.length) return err(res, 422, "Seed the build schedule first, then add the notifications.");
+    const { data: existing } = await sb.from("schedule_tasks").select("id").eq("project_id", project.id).eq("task_type", "inspection").is("deleted_at", null).limit(1);
+    if (existing && existing.length) return err(res, 409, "Building-notification hold-points are already on the schedule.");
+    const rows = buildNotificationRows(project.id, tasks);
+    if (!rows.length) return err(res, 422, "Could not anchor the notifications to the schedule.");
+    const { error: insErr } = await sb.from("schedule_tasks").insert(rows);
+    if (insErr) return err(res, 400, translateDbError(insErr));
+    try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: `Added ${rows.length} building-notification hold-points to the schedule (DNF)` }); } catch { /* best-effort */ }
+    return ok(res, { added: rows.length });
   });
 
   // Consultants stage — the pool of contacts assignable to a roster role (engineer, certifier,

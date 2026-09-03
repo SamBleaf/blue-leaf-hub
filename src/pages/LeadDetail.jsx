@@ -41,6 +41,7 @@ import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 import WonStage from "../components/sales/lead-detail/WonStage.jsx";
 import ConsentSpine from "../components/sales/lead-detail/ConsentSpine.jsx";
 import ApprovalRiskChip from "../components/sales/lead-detail/ApprovalRiskChip.jsx";
+import OpsScheduleHandoff from "../components/sales/lead-detail/OpsScheduleHandoff.jsx";
 
 // CW-2: the Consultants→Tender exit needs the full consultant document set in (every roster
 // deliverable received/issued). Empty roster = not ready.
@@ -2630,6 +2631,7 @@ export default function LeadDetail() {
         <WonStage lead={lead} patch={patch} />
         <ConsentSpine lead={lead} />
         <ApprovalRiskChip lead={lead} patch={patch} />
+        <OpsScheduleHandoff lead={lead} />
       </div>
     );
   } else {
