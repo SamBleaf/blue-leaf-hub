@@ -29,6 +29,8 @@ import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
 import { loadDiscoveryEmailTemplates, DISCOVERY_EMAIL_DEFAULTS, DISCOVERY_EMAIL_TEMPLATE_KEY, DISCOVERY_EMAIL_PLACEHOLDERS, runDiscoveryFollowups } from "./lib/discoveryEmail.mjs";
 import { loadPipelineEmailTemplates, PIPELINE_EMAIL_DEFAULTS, PIPELINE_EMAIL_TEMPLATE_KEY, PIPELINE_EMAIL_PLACEHOLDERS, PIPELINE_EMAIL_KEYS } from "./lib/pipelineGapEmails.mjs";
+import { loadConceptEmailTemplates, CONCEPT_EMAIL_DEFAULTS, CONCEPT_EMAIL_TEMPLATE_KEY, CONCEPT_EMAIL_PLACEHOLDERS } from "./lib/conceptEmails.mjs";
+import { loadTenderEmailTemplates, TENDER_EMAIL_DEFAULTS, TENDER_EMAIL_TEMPLATE_KEY, TENDER_EMAIL_PLACEHOLDERS, TENDER_EMAIL_KEYS } from "./lib/tenderEmails.mjs";
 import { runConceptFollowups } from "./lib/conceptEmails.mjs";
 import { loadInvoiceEmailTemplate, INVOICE_EMAIL_DEFAULT, INVOICE_EMAIL_TEMPLATE_KEY, INVOICE_EMAIL_PLACEHOLDERS } from "./lib/invoiceEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
@@ -1924,6 +1926,70 @@ app.post("/api/sales/pipeline-email-template", requireAuth, requireRole("admin")
     return res.json({ ok: true });
   } catch (err) {
     console.error("[sales/pipeline-email-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Concept-stage emails editor (crm_concept_email): brief_questions, interim, followup, accepted_concepts.
+app.get("/api/sales/concept-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const template = sb ? await loadConceptEmailTemplates(sb) : CONCEPT_EMAIL_DEFAULTS;
+    return res.json({ ok: true, template, defaults: CONCEPT_EMAIL_DEFAULTS, placeholders: CONCEPT_EMAIL_PLACEHOLDERS, keys: Object.keys(CONCEPT_EMAIL_DEFAULTS) });
+  } catch (err) {
+    console.error("[sales/concept-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+app.post("/api/sales/concept-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const clean = (t) => ({ subject: String(t?.subject || "").trim(), body: String(t?.body || "").trim() });
+    const out = {};
+    for (const k of Object.keys(CONCEPT_EMAIL_DEFAULTS)) {
+      const c = clean(req.body?.[k]);
+      if (!c.subject || !c.body) return res.status(400).json({ ok: false, error: `Every template needs a subject and a message (missing: ${k}).` });
+      out[k] = c;
+    }
+    const { error } = await sb.from("user_settings").upsert(
+      { key: CONCEPT_EMAIL_TEMPLATE_KEY, value: JSON.stringify(out), updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/concept-email-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Tender-stage emails editor (crm_tender_email): proposal_followup, review_followup, contract_sent, contract_followup.
+app.get("/api/sales/tender-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const template = sb ? await loadTenderEmailTemplates(sb) : TENDER_EMAIL_DEFAULTS;
+    return res.json({ ok: true, template, defaults: TENDER_EMAIL_DEFAULTS, placeholders: TENDER_EMAIL_PLACEHOLDERS, keys: TENDER_EMAIL_KEYS });
+  } catch (err) {
+    console.error("[sales/tender-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+app.post("/api/sales/tender-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const clean = (t) => ({ subject: String(t?.subject || "").trim(), body: String(t?.body || "").trim() });
+    const out = {};
+    for (const k of TENDER_EMAIL_KEYS) {
+      const c = clean(req.body?.[k]);
+      if (!c.subject || !c.body) return res.status(400).json({ ok: false, error: `Every template needs a subject and a message (missing: ${k}).` });
+      out[k] = c;
+    }
+    const { error } = await sb.from("user_settings").upsert(
+      { key: TENDER_EMAIL_TEMPLATE_KEY, value: JSON.stringify(out), updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/tender-email-template POST]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });

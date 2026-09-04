@@ -16,6 +16,8 @@ import QualifyEmailSettings from "../../components/settings/QualifyEmailSettings
 import DiscoveryEmailSettings from "../../components/settings/DiscoveryEmailSettings.jsx";
 import InvoiceEmailSettings from "../../components/settings/InvoiceEmailSettings.jsx";
 import PipelineEmailSettings from "../../components/settings/PipelineEmailSettings.jsx";
+import ConceptEmailSettings from "../../components/settings/ConceptEmailSettings.jsx";
+import TenderEmailSettings from "../../components/settings/TenderEmailSettings.jsx";
 import SwmsLibrarySettings from "../../components/settings/SwmsLibrarySettings.jsx";
 
 // Maps a "component" kind sub.id → the element it renders. Kept here (rather than
@@ -36,6 +38,8 @@ const COMPONENT_MAP = {
   "qualify-email": () => <QualifyEmailSettings />,
   "discovery-email": () => <DiscoveryEmailSettings />,
   "invoice-email": () => <InvoiceEmailSettings />,
+  "concept-email": () => <ConceptEmailSettings />,
+  "tender-email": () => <TenderEmailSettings />,
   "pipeline-email": () => <PipelineEmailSettings />,
 };
 
