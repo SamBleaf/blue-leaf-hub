@@ -158,7 +158,7 @@ export function registerCalcomRoutes(app) {
     const entry = meetingRegistryEntry(meetingType);
 
     const { data: lead, error: lErr } = await db.from("leads")
-      .select("id, name, first_name, last_name, email").eq("id", req.params.id).maybeSingle();
+      .select("id, name, first_name, last_name, email, site_address, suburb").eq("id", req.params.id).maybeSingle();
     if (lErr || !lead) return err(res, 404, "Lead not found");
 
     // Don't silently clobber a client's LIVE self-booked cal.com meeting. If one exists and we won't
@@ -175,7 +175,7 @@ export function registerCalcomRoutes(app) {
     let cal = null, bookingSource = "manual", calError = null;
     if (calcomApiConfigured()) {
       try {
-        cal = await createCalcomBooking({ lead, meetingType, startAt: startAt.toISOString(), durationMins });
+        cal = await createCalcomBooking({ lead, meetingType, startAt: startAt.toISOString(), durationMins, location });
         bookingSource = "on_behalf";
       } catch (e) {
         calError = e?.message || String(e);

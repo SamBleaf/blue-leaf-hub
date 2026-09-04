@@ -117,15 +117,14 @@ export async function getLeadBookings({ email, take = 50 }) {
  * Create a booking on the client's behalf. Returns { uid, rescheduleUrl, cancelUrl }.
  * Throws on any failure — the caller degrades to a Hub-recorded manual meeting.
  */
-export async function createCalcomBooking({ lead, meetingType, startAt, durationMins }) {
+export async function createCalcomBooking({ lead, meetingType, startAt, durationMins, location = null }) {
   if (!calcomApiConfigured()) throw new Error("cal.com API not configured");
   if (!lead?.email) throw new Error("lead has no email to invite");
   const entry = meetingRegistryEntry(meetingType);
   const eventTypeId = await resolveEventTypeId(entry.slug);
   const { apiKey } = calcomConfig();
 
-  // NB: we don't send a location — cal.com applies the event type's own configured location
-  // (phone/video/in-person). Forcing one here would fail bookings for events not set up for it.
+  const fields = { leadId: String(lead.id || ""), meetingType };
   const base = {
     start: startAt,
     eventTypeId,
@@ -145,14 +144,25 @@ export async function createCalcomBooking({ lead, meetingType, startAt, duration
     return { r, j };
   }
 
-  // First try WITH the leadId/meetingType hidden booking fields (the reliable webhook round-trip).
-  // If the event type doesn't have those custom fields configured yet, cal.com rejects with a 4xx —
-  // retry once WITHOUT them (metadata[leadId] still carries the correlation) so book-on-behalf works
-  // before the event types are fully set up, instead of silently falling back to a Hub-only record.
-  let { r, j } = await postBooking({ ...base, bookingFieldsResponses: { leadId: String(lead.id || ""), meetingType } });
-  if (!r.ok && r.status >= 400 && r.status < 500) {
-    const retry = await postBooking(base);
-    if (retry.r.ok) ({ r, j } = retry);
+  // cal.com rejects a booking that doesn't match the event type's config. Two common mismatches for
+  // book-on-behalf: (a) the event has no leadId/meetingType custom fields → drop them; (b) the event's
+  // location is "at the attendee's address" (an in-person site visit — how Sam's design meeting is set
+  // up) → the booking MUST carry a location. Try the combinations in order of likelihood, stopping at
+  // the first that takes. metadata[leadId] always carries the correlation, so dropping the hidden
+  // fields never loses the lead link. (A fixed-location event books on attempt 1 with no extra calls.)
+  const addr = String(location || lead.site_address || lead.address || "To be confirmed").trim();
+  const atAttendeeAddress = { type: "attendeeAddress", address: addr };
+  const attempts = [
+    { ...base, bookingFieldsResponses: fields },                              // fixed-location event, fields present
+    { ...base, bookingFieldsResponses: fields, location: atAttendeeAddress }, // attendee-address event, fields present
+    { ...base, location: atAttendeeAddress },                                 // attendee-address event, no fields
+    base,                                                                     // fixed-location event, no fields
+  ];
+  let r, j;
+  for (const body of attempts) {
+    ({ r, j } = await postBooking(body));
+    if (r.ok) break;
+    if (r.status < 400 || r.status >= 500) break; // a 5xx / network issue won't be fixed by a different body
   }
   if (!r.ok) throw new Error(`cal.com booking failed → ${r.status} ${j?.error?.message || JSON.stringify(j?.error || {})}`.trim());
   const uid = j?.data?.uid || j?.data?.booking?.uid || null;
