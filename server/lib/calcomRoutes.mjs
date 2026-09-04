@@ -170,14 +170,19 @@ export function registerCalcomRoutes(app) {
     const hasLiveSelfBooking = existing && existing.status !== "cancelled" && existing.cal_booking_uid && existing.booking_source === "self";
 
     // Try a real cal.com booking first (best-effort); fall back to a Hub-recorded 'manual' meeting.
-    let cal = null, bookingSource = "manual";
+    // The failure reason is surfaced to the operator (calError) — a book-on-behalf that silently
+    // becomes a Hub-only record sends NO calendar invite, so staff must know it didn't take.
+    let cal = null, bookingSource = "manual", calError = null;
     if (calcomApiConfigured()) {
       try {
         cal = await createCalcomBooking({ lead, meetingType, startAt: startAt.toISOString(), durationMins });
         bookingSource = "on_behalf";
       } catch (e) {
-        console.warn("[calcom schedule] API booking failed, recording manual meeting:", e?.message || e);
+        calError = e?.message || String(e);
+        console.warn("[calcom schedule] API booking failed, recording manual meeting:", calError);
       }
+    } else {
+      calError = "cal.com API isn't connected (CAL_API_KEY) — recorded a Hub-only meeting, no invite sent.";
     }
 
     // Would this overwrite a live client self-booking with a Hub record (losing the cal.com link)? Block it.
@@ -208,7 +213,7 @@ export function registerCalcomRoutes(app) {
       return err(res, 400, translateDbError(error));
     }
     try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: `${entry.label} scheduled for ${startAt.toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: CAL_TIMEZONE })}` }); } catch { /* best-effort */ }
-    ok(res, { meeting: rowToCamel(data), bookedViaCalcom: bookingSource === "on_behalf" });
+    ok(res, { meeting: rowToCamel(data), bookedViaCalcom: bookingSource === "on_behalf", calError: bookingSource === "on_behalf" ? null : calError });
   });
 
   // Poll cal.com for a lead's bookings and project any that match a pipeline meeting — the robust

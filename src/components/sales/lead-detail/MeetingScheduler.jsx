@@ -93,7 +93,12 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Couldn't schedule the meeting." }); return; }
     setSchedOpen(false); setLocation("");
-    setMsg({ type: "success", text: data?.bookedViaCalcom ? "Booked — cal.com invite sent." : "Meeting time recorded." });
+    if (data?.bookedViaCalcom) {
+      setMsg({ type: "success", text: "Booked — cal.com invite sent." });
+    } else {
+      // No real cal.com booking was created → no invite went out. Show WHY, don't pretend it's booked.
+      setMsg({ type: "error", text: data?.calError ? `Time saved in the Hub, but the cal.com invite didn’t send: ${data.calError}` : "Saved in the Hub only — no cal.com invite sent." });
+    }
     await load();
     reload?.();
   }
