@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-07-02 (SOP-DOCS-WAVE-02B — portal v2-canonical + matrix, site-diary §14/view-only; then CRM Batches 1A–1C)
-> Total SOPs: 130 (+ 1 reference: portal stack matrix)  
+> Last updated: 2026-09-03 (SOP 10-07 — BL-INTERNAL internal cost categories)
+> Total SOPs: 131 (+ 1 reference: portal stack matrix)  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -106,6 +106,7 @@
 | 10-04 | Workforce Pipeline — capacity & schedule intelligence | [workforce_pipeline.md](10_workforce/workforce_pipeline.md) | Workforce | Admin, Supervisor | Draft | untested | No | High |
 | 10-05 | BLB Charge Up — site-level charge-up tracking | [charge_up_sites.md](10_workforce/charge_up_sites.md) | Workforce | Admin, Supervisor, Field worker | Draft | untested | Yes | Medium |
 | 10-06 | Worker PWA — plans, crew view, multi-assign & timesheet autofill | [worker_pwa_updates.md](10_workforce/worker_pwa_updates.md) | Workforce | Field worker, Leading hand, Admin, Supervisor | Draft | untested | No | High |
+| 10-07 | BL-INTERNAL — internal cost categories (cost-by-category by FY/quarter) | [internal_cost_categories.md](10_workforce/internal_cost_categories.md) | Workforce | Admin, Supervisor, Field worker | Draft | untested | No | High |
 | 11-00 | Portal stack matrix (v1↔v2, v2 canonical) | [00_PORTAL_STACK_MATRIX.md](11_client_portal/00_PORTAL_STACK_MATRIX.md) | Client Portal | Admin | Reference | n/a | No | High |
 | 11-01 | Enable the client portal for a project (legacy v1) | [portal_enable_for_client.md](11_client_portal/portal_enable_for_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
 | 11-02 | View the portal as the client | [portal_view_as_client.md](11_client_portal/portal_view_as_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
