@@ -47,6 +47,10 @@
 | 02-21 | Run the Consultants stage (coordination, approval risk, provisional F&F) | [02-21_consultants_stage.md](02_sales/02-21_consultants_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-22 | Run the Tender stage (sub-status, proposal checklist, named actions, contract) | [02-22_tender_stage.md](02_sales/02-22_tender_stage.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 02-23 | Complete a Won lead and hand off to Operations (Ops Ready) | [02-23_won_ops_handoff.md](02_sales/02-23_won_ops_handoff.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-24 | Run the Consultants stage — roster, deliverables & dependency schedule | [02-24_consultants_stage_roster_deliverables.md](02_sales/02-24_consultants_stage_roster_deliverables.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-25 | Track planning & building consent (the PlanSA consent spine) | [02-25_consent_spine.md](02_sales/02-25_consent_spine.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-26 | The construction programme — proposal, Won schedule handoff & client timeline | [02-26_construction_programme.md](02_sales/02-26_construction_programme.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
+| 02-27 | Consultant comms & the client’s pre-construction portal | [02-27_consultant_comms_and_portal.md](02_sales/02-27_consultant_comms_and_portal.md) | Sales | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-01 | Create a fee proposal | [tendering_fee_proposal_create.md](03_tendering/tendering_fee_proposal_create.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-02 | Send a fee proposal to a client | [tendering_fee_proposal_send.md](03_tendering/tendering_fee_proposal_send.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
 | 03-03 | Use the tender board | [tendering_tender_board.md](03_tendering/tendering_tender_board.md) | Tendering | Admin, Supervisor | Draft | untested | Yes | High |
