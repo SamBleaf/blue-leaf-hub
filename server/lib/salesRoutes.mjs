@@ -20,6 +20,7 @@ import { sendQualifyIntro } from "./qualifyEmail.mjs";
 import { sendDiscoveryIntro } from "./discoveryEmail.mjs";
 import { sendConceptEmail } from "./conceptEmails.mjs";
 import { sendTenderEmail } from "./tenderEmails.mjs";
+import { sendPipelineEmail, PIPELINE_EMAIL_KEYS } from "./pipelineGapEmails.mjs";
 import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mjs";
 import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
@@ -1210,6 +1211,25 @@ export function registerSalesRoutes(app) {
     const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
     const result = await sendTenderEmail(sb, lead, { which, userId: req.caller?.id || null, dryRun, override });
     if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the tender email.");
+    if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
+    return ok(res, { sent: true, transport: result.transport });
+  });
+
+  // Pipeline gap emails (PTSA covering, contract-signed, ops-handoff, nurture, lost, tender-started).
+  // Same shape as the other families — preview always works; sending gated by PIPELINE_EMAIL_ENABLED.
+  app.post("/api/sales/leads/:id/pipeline-email/send", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const which = PIPELINE_EMAIL_KEYS.includes(req.body?.which) ? req.body.which : "contract_signed";
+    const dryRun = req.body?.preview === true;
+    if (!dryRun && process.env.PIPELINE_EMAIL_ENABLED !== "true") {
+      return err(res, 503, "Pipeline email sending is turned off. Set PIPELINE_EMAIL_ENABLED to send — preview still works.");
+    }
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const override = (!dryRun && typeof req.body?.subject === "string" && typeof req.body?.text === "string") ? { subject: req.body.subject, text: req.body.text } : null;
+    const result = await sendPipelineEmail(sb, lead, { which, userId: req.caller?.id || null, dryRun, override });
+    if (!result.ok) return err(res, 400, result.error || result.reason || "Could not build or send the email.");
     if (dryRun) return ok(res, { preview: { subject: result.subject, text: result.text, html: result.html } });
     return ok(res, { sent: true, transport: result.transport });
   });

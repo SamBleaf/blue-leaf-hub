@@ -40,6 +40,7 @@ import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.j
 import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 import WonStage from "../components/sales/lead-detail/WonStage.jsx";
 import ConsentSpine from "../components/sales/lead-detail/ConsentSpine.jsx";
+import StageEmailBox from "../components/sales/lead-detail/StageEmailBox.jsx";
 import ApprovalRiskChip from "../components/sales/lead-detail/ApprovalRiskChip.jsx";
 import OpsScheduleHandoff from "../components/sales/lead-detail/OpsScheduleHandoff.jsx";
 
@@ -2635,8 +2636,8 @@ export default function LeadDetail() {
       </div>
     );
   } else {
-    // nurture / lost — no focus panel
-    focusShown = false;
+    // nurture / lost — no stage panel, but the Stage email box (nurture / lost close-off) still shows.
+    focusContent = null;
   }
 
   // ── Pass 3A: one obvious primary action (reuses existing handlers) ──────────
@@ -2676,7 +2677,7 @@ export default function LeadDetail() {
   const focusBlockId = { enquiry: "qualifying", qualify: "qualifying", discovery: "discovery", winning_offer: "winning_offer", fee_proposal: "ptsa" }[lead.stage] || null;
   const conversationsInFocus = lead.stage === "discovery"; // conversations live in the Discovery focus, not the Activity group
   const focusEl = focusShown ? (
-    <LeadNextActionCard stageLabel={stageMeta?.label}><LeadManagementStrip lead={lead} patch={patch} />{archTenderBlock}{focusContent}</LeadNextActionCard>
+    <LeadNextActionCard stageLabel={stageMeta?.label}><LeadManagementStrip lead={lead} patch={patch} />{archTenderBlock}{focusContent}<StageEmailBox lead={lead} /></LeadNextActionCard>
   ) : null;
   const nextActionEl = lead.stage === "won" ? wonCard : advanceBlock;
 
