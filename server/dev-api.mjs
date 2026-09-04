@@ -28,6 +28,7 @@ import { runLeadActionDigest, loadEnquiryAckTemplate, ENQUIRY_ACK_DEFAULTS, ENQU
 import { runGhostCheck } from "./lib/tradeCommitment.mjs";
 import { loadQualifyEmailTemplates, QUALIFY_EMAIL_DEFAULTS, QUALIFY_EMAIL_TEMPLATE_KEY, QUALIFY_EMAIL_PLACEHOLDERS, runQualifyFollowups } from "./lib/qualifyEmail.mjs";
 import { loadDiscoveryEmailTemplates, DISCOVERY_EMAIL_DEFAULTS, DISCOVERY_EMAIL_TEMPLATE_KEY, DISCOVERY_EMAIL_PLACEHOLDERS, runDiscoveryFollowups } from "./lib/discoveryEmail.mjs";
+import { loadPipelineEmailTemplates, PIPELINE_EMAIL_DEFAULTS, PIPELINE_EMAIL_TEMPLATE_KEY, PIPELINE_EMAIL_PLACEHOLDERS, PIPELINE_EMAIL_KEYS } from "./lib/pipelineGapEmails.mjs";
 import { runConceptFollowups } from "./lib/conceptEmails.mjs";
 import { loadInvoiceEmailTemplate, INVOICE_EMAIL_DEFAULT, INVOICE_EMAIL_TEMPLATE_KEY, INVOICE_EMAIL_PLACEHOLDERS } from "./lib/invoiceEmail.mjs";
 import { runLeadTimeNotifications } from "./lib/scheduleReminders.mjs";
@@ -1886,6 +1887,43 @@ app.post("/api/sales/discovery-email-template", requireAuth, requireRole("admin"
     return res.json({ ok: true });
   } catch (err) {
     console.error("[sales/discovery-email-template POST]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Pipeline gap emails — the admin-editable copy for the new family (PTSA covering, contract-signed,
+// ops-handoff, nurture, lost, tender-started), user_settings key crm_pipeline_email. Multi-template,
+// generic over PIPELINE_EMAIL_KEYS. Mirrors the discovery-email-template routes.
+app.get("/api/sales/pipeline-email-template", requireAuth, requireRole("admin"), async (_req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    const template = sb ? await loadPipelineEmailTemplates(sb) : PIPELINE_EMAIL_DEFAULTS;
+    return res.json({ ok: true, template, defaults: PIPELINE_EMAIL_DEFAULTS, placeholders: PIPELINE_EMAIL_PLACEHOLDERS, keys: PIPELINE_EMAIL_KEYS });
+  } catch (err) {
+    console.error("[sales/pipeline-email-template GET]", err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/sales/pipeline-email-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const sb = getServiceSupabase();
+    if (!sb) return res.status(503).json({ ok: false, error: "DB not configured" });
+    const clean = (t) => ({ subject: String(t?.subject || "").trim(), body: String(t?.body || "").trim() });
+    const out = {};
+    for (const k of PIPELINE_EMAIL_KEYS) {
+      const c = clean(req.body?.[k]);
+      if (!c.subject || !c.body) return res.status(400).json({ ok: false, error: `Every template needs a subject and a message (missing: ${k}).` });
+      out[k] = c;
+    }
+    const { error } = await sb.from("user_settings").upsert(
+      { key: PIPELINE_EMAIL_TEMPLATE_KEY, value: JSON.stringify(out), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[sales/pipeline-email-template POST]", err);
     return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });

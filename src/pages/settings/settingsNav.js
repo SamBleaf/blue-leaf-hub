@@ -21,6 +21,7 @@ export const SETTINGS_NAV = [
       { id: "qualify-email", label: "Qualify emails", kind: "component" },
       { id: "discovery-email", label: "Discovery emails", kind: "component" },
       { id: "invoice-email", label: "Invoice email", kind: "component" },
+      { id: "pipeline-email", label: "Pipeline emails (PTSA, Won, nurture)", kind: "component" },
     ],
   },
   {
