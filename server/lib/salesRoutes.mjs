@@ -34,6 +34,7 @@ import {
   backfillLeadDataToJobFolder,
   ensureLeadClientFolder,
   backfillLeadDocsToClientFolder,
+  carryConsultantCorrespondenceToJob,
 } from "./dropboxClient.mjs";
 import { renderSalesDoc } from "./salesDocuments.mjs";
 import { driveConfigured, uploadDocxToDrive } from "./googleDriveClient.mjs";
@@ -509,6 +510,11 @@ export async function finalizeWonJob(sb, lead) {
     //    turns the SAME row into the live project — the portal, comms + client login all carry over.
     try { await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true); }
     catch { /* pre-migration-199 — column absent, non-fatal */ }
+
+    // 5. Handover: carry consultant correspondence (files consultants emailed in, filed per-consultant
+    //    under the client folder) into the job folder → CONSULTANTS/<Consultant>/. Best-effort.
+    try { await carryConsultantCorrespondenceToJob({ sb, leadId: lead.id, jobId }); }
+    catch (e) { console.warn("[finalize-won] consultant correspondence carry:", e?.message || e); }
 
     return { ok: true, jobId, contractValue: value };
   } catch (e) {

@@ -1018,6 +1018,40 @@ export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderP
  * Direct upload (does NOT depend on a lead_documents row or backfill), so the official Xero
  * PDF always lands in Dropbox. Idempotent (skips if the same path exists). Best-effort caller-side.
  */
+// Carry the consultant CORRESPONDENCE (files consultants emailed in, saved per-consultant under the
+// SALES client folder) into the job folder at handover → CONSULTANTS/<Consultant>/<file>. Idempotent
+// (skips files already copied). Best-effort. Called at Won (finalizeWonJob) — the "reaches Won" step.
+export async function carryConsultantCorrespondenceToJob({ sb, leadId, jobId } = {}) {
+  let copied = 0;
+  if (!sb || !leadId || !jobId || !dropboxConfigured()) return { copied };
+  try {
+    const { data: lead } = await sb.from("leads").select("client_folder_path").eq("id", leadId).maybeSingle();
+    const { data: job } = await sb.from("jobs").select("address").eq("id", jobId).maybeSingle();
+    const src = lead?.client_folder_path ? `${lead.client_folder_path}/CORRESPONDENCE` : null;
+    const jobAddress = job?.address;
+    if (!src || !jobAddress) return { copied };
+    const token = await getDropboxAccessToken();
+    if (!(await pathExists(token, src))) return { copied };
+    const destRoot = `${sharedJobRootPath(jobAddress)}/CONSULTANTS`;
+    await createFolderIfNotExists(token, destRoot);
+    const entries = await listFolderAllEntries(token, src, { recursive: true });
+    for (const e of entries) {
+      if (e[".tag"] !== "file" || !e.path_display) continue;
+      const rel = e.path_display.slice(src.length); // "/<Consultant>/<file>"
+      const dest = `${destRoot}${rel}`;
+      try {
+        if (await pathExists(token, dest)) continue; // idempotent
+        await ensureParentFoldersForFile(token, dest);
+        await copyDropboxFile(token, e.path_display, dest);
+        copied += 1;
+      } catch (err) { console.warn("[carryConsultantCorrespondence] copy failed:", err?.message || err); }
+    }
+  } catch (e) {
+    console.warn("[carryConsultantCorrespondence] skipped:", e?.message || e);
+  }
+  return { copied };
+}
+
 export async function fileInvoicePdfToClientFolder({ clientFolderPath, filename, buffer } = {}) {
   if (!clientFolderPath || !buffer || !filename) return { filed: false };
   const token = await getDropboxAccessToken();

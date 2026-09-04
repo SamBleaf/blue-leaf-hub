@@ -15,6 +15,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { collectInboundMessageIds } from "./imapQuoteMatch.mjs";
+import { dropboxConfigured, getDropboxAccessToken, createFolderIfNotExists, dropboxUploadBuffer } from "./dropboxClient.mjs";
 
 const norm = (id) => String(id || "").replace(/^<|>$/g, "").trim().toLowerCase();
 const normEmail = (v) => String(v || "").trim().toLowerCase();
@@ -65,6 +66,91 @@ async function matchLead(sb, parsed) {
   return null;
 }
 
+const sanitiseAttName = (name) =>
+  String(name || "attachment").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "attachment";
+
+// Match an inbound email to a CONSULTANT on a lead's roster (CV-3 inbound capture). In-Reply-To to a
+// Hub-sent consultant email is authoritative; else the sender's CRM contact → the lead whose roster
+// lists them. Returns { leadId, role, contactId, contactName } or null. Fail-soft pre-migration-198.
+async function matchConsultant(sb, parsed) {
+  try {
+    const ids = collectInboundMessageIds(parsed).map(norm).filter(Boolean);
+    for (const rid of ids) {
+      const { data } = await sb.from("consultant_messages")
+        .select("lead_id, consultant_role, consultant_contact_id")
+        .or(`message_id.eq.<${rid}>,message_id.eq.${rid}`).limit(1);
+      if (data && data.length) {
+        return { leadId: data[0].lead_id, role: data[0].consultant_role, contactId: data[0].consultant_contact_id, contactName: null };
+      }
+    }
+  } catch { return null; } // consultant_messages absent pre-mig-198
+  const from = normEmail(parsed?.from?.value?.[0]?.address || parsed?.from?.text);
+  if (!from) return null;
+  const { data: contact } = await sb.from("crm_contacts").select("id, first_name, last_name, company").ilike("email", from).maybeSingle();
+  if (!contact) return null;
+  try {
+    const { data: leads } = await sb.from("leads")
+      .select("id, consultant_roster")
+      .contains("consultant_roster", [{ contactId: contact.id }])
+      .not("stage", "in", "(lost,won)")
+      .order("created_at", { ascending: false }).limit(1);
+    if (leads && leads.length) {
+      const roster = Array.isArray(leads[0].consultant_roster) ? leads[0].consultant_roster : [];
+      const hit = roster.find((r) => String(r.contactId) === String(contact.id));
+      return { leadId: leads[0].id, role: hit?.role || "other", contactId: contact.id,
+        contactName: [contact.first_name, contact.last_name].filter(Boolean).join(" ") || contact.company || null };
+    }
+  } catch { /* .contains unsupported / roster absent — In-Reply-To path only */ }
+  return null;
+}
+
+// Save a consultant email's attachments (plans, engineering, etc.) to the lead's SALES client folder
+// under CORRESPONDENCE/<Consultant>/ — a folder per consultant. Best-effort. Won carries these across.
+async function saveConsultantAttachments(sb, c, parsed) {
+  const atts = (parsed.attachments || []).filter((a) => a?.content && a?.filename);
+  if (!atts.length || !dropboxConfigured()) return 0;
+  const { data: lead } = await sb.from("leads").select("client_folder_path").eq("id", c.leadId).maybeSingle();
+  if (!lead?.client_folder_path) return 0;
+  const token = await getDropboxAccessToken();
+  const who = String(c.contactName || c.role || "consultant").replace(/[^\w .-]+/g, "").trim() || "consultant";
+  const folder = `${lead.client_folder_path}/CORRESPONDENCE/${who}`;
+  await createFolderIfNotExists(token, folder);
+  const date = new Date().toISOString().slice(0, 10);
+  let saved = 0;
+  for (const a of atts) {
+    try { await dropboxUploadBuffer(token, `${folder}/${date}-${sanitiseAttName(a.filename)}`, a.content, { autorename: true }); saved += 1; }
+    catch (e) { console.warn("[lead-imap] consultant attachment save failed:", e?.message || e); }
+  }
+  return saved;
+}
+
+// Handle an inbound email that matched no client lead: is it from a consultant? Log it to the thread
+// (CV-3) + file its attachments. Returns true if handled (so the poller counts it as matched).
+async function handleConsultantInbound(sb, parsed, messageId) {
+  const c = await matchConsultant(sb, parsed);
+  if (!c) return false;
+  // dedup against consultant_messages (this email is not stored in correspondence).
+  try {
+    const { data: dup } = await sb.from("consultant_messages").select("id")
+      .or(`message_id.eq.<${messageId}>,message_id.eq.${messageId}`).limit(1);
+    if (dup && dup.length) return true; // already captured — count as handled, not a fresh insert
+  } catch { /* pre-mig-198 — can't dedup, proceed (insert will also fail-soft) */ }
+  const inReplyTo = collectInboundMessageIds(parsed).map(norm)[0] || null;
+  const body = (parsed.text || parsed.html || "").toString().slice(0, 20000);
+  try {
+    await sb.from("consultant_messages").insert({
+      lead_id: c.leadId, consultant_role: c.role || "other", consultant_contact_id: c.contactId || null,
+      participant: "consultant", channel: "email", direction: "inbound",
+      subject: parsed.subject || null, body,
+      author_name: c.contactName || parsed.from?.text || null,
+      client_visible: false, message_id: `<${messageId}>`, in_reply_to: inReplyTo ? `<${inReplyTo}>` : null,
+    });
+  } catch (e) { console.warn("[lead-imap] consultant_messages insert failed (mig 198?):", e?.message || e); return false; }
+  try { await saveConsultantAttachments(sb, c, parsed); } catch (e) { console.warn("[lead-imap] consultant attachments:", e?.message || e); }
+  try { await sb.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", c.leadId); } catch { /* best-effort */ }
+  return true;
+}
+
 async function pollOne(cfg, sb) {
   const client = new ImapFlow(cfg);
   let matched = 0, skipped = 0, lastUid = null, highestUid = null;
@@ -103,7 +189,12 @@ async function pollOne(cfg, sb) {
         if (existing && existing.length) { skipped++; continue; }
 
         const leadId = await matchLead(sb, parsed);
-        if (!leadId) { skipped++; continue; }
+        if (!leadId) {
+          // Not a client reply — is it a consultant emailing in (CV-3)? Capture it + file attachments.
+          const handled = await handleConsultantInbound(sb, parsed, messageId);
+          if (handled) matched++; else skipped++;
+          continue;
+        }
 
         const inReplyTo = collectInboundMessageIds(parsed).map(norm)[0] || null;
         const body = (parsed.text || parsed.html || "").toString().slice(0, 20000);
