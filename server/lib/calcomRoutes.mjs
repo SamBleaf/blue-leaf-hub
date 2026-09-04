@@ -6,8 +6,9 @@ import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
 import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry, meetingTypeForSlug } from "./calcom.mjs";
-import { calcomApiConfigured, createCalcomBooking, getAvailableSlots, getLeadBookings } from "./calcomApi.mjs";
+import { calcomApiConfigured, createCalcomBooking, getAvailableSlots, getLeadBookings, listEventTypes } from "./calcomApi.mjs";
 import { projectLeadMeeting } from "./calcomProjection.mjs";
+import { calcomConfig } from "./calcom.mjs";
 
 const TABLE_MISSING = new Set(["42P01", "42703", "PGRST205"]); // table/column absent (pre-mig-185)
 const CAL_TIMEZONE = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim(); // for human-readable log notes
@@ -21,6 +22,24 @@ export function registerCalcomRoutes(app) {
       key, label: e.label, stage: e.stage, mode: e.mode, slug: e.slug,
     }));
     ok(res, { meetingTypes, bookOnBehalf: calcomApiConfigured() });
+  });
+
+  // Diagnostics — reconcile the Hub's meeting registry against the ACTUAL cal.com account, so a wrong
+  // CAL_USERNAME or an event-slug mismatch is obvious at a glance. Admin/staff-only; no secrets returned.
+  app.get("/api/sales/meeting-diagnostics", requireAuth, async (_req, res) => {
+    const { username } = calcomConfig();
+    const timezone = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim();
+    if (!calcomApiConfigured()) {
+      return ok(res, { configured: false, username, timezone, message: "CAL_API_KEY is not set — the slot picker, book-on-behalf and booking poll all need it." });
+    }
+    let events = [], error = null;
+    try { events = await listEventTypes(); }
+    catch (e) { error = e?.message || "cal.com error"; }
+    const slugs = new Set(events.map((e) => e.slug));
+    const registry = Object.entries(MEETING_REGISTRY).map(([key, e]) => ({
+      key, label: e.label, expectedSlug: e.slug, matched: slugs.has(e.slug),
+    }));
+    ok(res, { configured: true, username, timezone, error, events, registry, unmatched: registry.filter((r) => !r.matched).map((r) => r.expectedSlug) });
   });
 
   // Live open slots for a meeting type (for the on-call slot picker). Lead-independent — availability

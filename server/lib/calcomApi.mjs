@@ -32,6 +32,15 @@ async function calGet(path, apiVersion) {
   return j;
 }
 
+/** List every event type on the connected cal.com account (for diagnostics). [{slug,id,title}]. */
+export async function listEventTypes() {
+  if (!calcomApiConfigured()) throw new Error("cal.com API not configured");
+  const { username } = calcomConfig();
+  const j = await calGet(`/event-types?username=${encodeURIComponent(username)}`, EVENT_TYPES_API_VERSION);
+  const list = Array.isArray(j?.data) ? j.data : [];
+  return list.map((et) => ({ slug: et?.slug || null, id: et?.id ?? null, title: et?.title || null })).filter((e) => e.slug);
+}
+
 /** Resolve a cal.com event-type slug to its numeric id (cached). Throws if not found. */
 export async function resolveEventTypeId(slug) {
   if (_eventTypeIdCache.has(slug)) return _eventTypeIdCache.get(slug);
