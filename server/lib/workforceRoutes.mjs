@@ -18,10 +18,22 @@ import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
 
 // BLB Charge Up category — an allocation to this carpentry job must name a site (address).
 const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
+// BL-INTERNAL cost-category job (mig 125 / mig 200) — the cost-only sibling of BL-CHARGEUP.
+// Worked internal hours (ATEC / Logistics / Personal work) are tagged internal_category_id on
+// the timesheet; the leave categories are DERIVED at report time and never logged here.
+const INTERNAL_REFERENCE = "BL-INTERNAL";
+// Leave classifications shared by mig 201 (workforce_employee_rdo_dates.leave_type +
+// workforce_day_off_requests.leave_type). Kept in sync with internal_categories.leave_type (mig 200).
+const LEAVE_TYPES = ["annual", "sick", "rdo", "unpaid"];
 // PostgREST reports a missing table/column via a schema-cache error, not the raw PG code.
 const chargeUpColMissing = (e) =>
   !!e && (e.code === "42703" || e.code === "42P01" || e.code === "PGRST204" || e.code === "PGRST205" ||
     /charge_up|could not find|schema cache|does not exist/i.test(e.message || ""));
+// Same shape for the internal_categories table / internal_category_id column (mig 200) so every
+// internal write path fails soft (logs untagged) rather than 500ing before the migration is applied.
+const internalColMissing = (e) =>
+  !!e && (e.code === "42703" || e.code === "42P01" || e.code === "PGRST204" || e.code === "PGRST205" ||
+    /internal_categor|could not find|schema cache|does not exist/i.test(e.message || ""));
 
 // ── Task metadata ─────────────────────────────────────────────────────────────
 
@@ -572,9 +584,39 @@ async function isChargeUpJob(sb, carpentryJobId) {
   return data?.reference === CHARGE_UP_REFERENCE;
 }
 
+// Is this carpentry job the BL-INTERNAL cost-category job? Sibling of isChargeUpJob (mig 125).
+async function isInternalJob(sb, carpentryJobId) {
+  if (!carpentryJobId) return false;
+  const { data } = await sb.from("carpentry_jobs").select("reference").eq("id", carpentryJobId).maybeSingle();
+  return data?.reference === INTERNAL_REFERENCE;
+}
+
+// Validate + resolve the internal cost category to tag on a timesheet entry. Sibling of
+// resolveAllocChargeUpSite; fails soft (allows untagged) before mig 200 so worker submits never
+// break. A category is only a valid tag target when it belongs to THIS carpentry job AND is
+// cost_source='timesheet' — the SERVER guard for critique D1 (a leave category, or a stale/crafted
+// id from another job, is rejected, never written to the timesheet ledger). Returns:
+//   { required:false, internalCategoryId:null }  — not an internal job (or pre-mig): no tag
+//   { required:true,  internalCategoryId:<id> }  — valid worked category picked → tag it
+//   { required:true,  internalCategoryId:null }  — worked categories exist but none (validly) picked
+//   { error }                                    — unexpected DB error
+async function resolveInternalCategory(sb, carpentryJobId, internalCategoryId) {
+  if (!carpentryJobId) return { required: false, internalCategoryId: null };
+  if (!(await isInternalJob(sb, carpentryJobId))) return { required: false, internalCategoryId: null };
+  const { data: cats, error } = await sb.from("internal_categories")
+    .select("id").eq("carpentry_job_id", carpentryJobId).eq("status", "active").eq("cost_source", "timesheet");
+  if (error) return internalColMissing(error) ? { required: false, internalCategoryId: null } : { error: translateDbError(error) };
+  const activeIds = (cats || []).map((c) => c.id);
+  if (!activeIds.length) return { required: false, internalCategoryId: null };
+  if (internalCategoryId && activeIds.includes(internalCategoryId)) return { required: true, internalCategoryId };
+  return { required: true, internalCategoryId: null };
+}
+
 // Validate + resolve the site to store on a charge-up allocation. Fails soft (allows
 // untagged) before mig 145/146 is applied so the Planner never breaks. Delegates the
 // required/belongs-to rule to the pure validateChargeUpSite so there's no rule in the route.
+// BL-INTERNAL is verified-inert here (critique B7): the isChargeUpJob gate below is false for it,
+// so validateChargeUpSite never fires for an internal allocation — no cross-contamination.
 async function resolveAllocChargeUpSite(sb, carpentryJobId, chargeUpJobId) {
   if (!(await isChargeUpJob(sb, carpentryJobId))) return { chargeUpJobId: null };
   const { data: sites, error } = await sb.from("charge_up_jobs")
@@ -987,7 +1029,7 @@ export function registerWorkforceRoutes(app) {
 
   app.post("/api/workforce/timesheets/mass-fill", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
-    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, internal_category_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] are required" });
     }
@@ -1002,6 +1044,16 @@ export function registerWorkforceRoutes(app) {
         if (charge_up_job_id && siteRows.some((s) => s.id === charge_up_job_id)) chargeUpJobId = charge_up_job_id;
         if (!chargeUpJobId) return res.status(400).json({ ok: false, error: "Pick a location before submitting charge-up work." });
       }
+    }
+    // BL-INTERNAL: office-entered internal hours must name a worked (cost_source='timesheet') category
+    // for the whole batch, else they'd fall to the __untagged bucket. Sibling of the charge-up block;
+    // server-validates the id belongs to this job AND is timesheet-sourced (critique D1/B4). Fail-soft.
+    let internalCategoryId = null;
+    {
+      const ic = await resolveInternalCategory(sb, carpentry_job_id, internal_category_id);
+      if (ic.error) return res.status(500).json({ ok: false, error: ic.error });
+      if (ic.required && !ic.internalCategoryId) return res.status(400).json({ ok: false, error: "Pick an internal category before submitting." });
+      internalCategoryId = ic.internalCategoryId;
     }
     // Sub-task attribution: map (task_category, canonical_key) → a representative budget_line_item_id for
     // this carpentry job, so a mass-fill row can allocate hours to a sub-task (e.g. First fix framing →
@@ -1060,6 +1112,8 @@ export function registerWorkforceRoutes(app) {
         // Only reference the charge-up site column when a site was picked — chargeUpJobId is only
         // non-null when mig 145 is applied + active sites exist, so this never hits a missing column.
         if (chargeUpJobId) entryRow.charge_up_job_id = chargeUpJobId;
+        // Same for the internal category tag (mig 200) — only set when a valid worked category resolved.
+        if (internalCategoryId) entryRow.internal_category_id = internalCategoryId;
         const { error: entryErr } = await sb.from("timesheet_entries").insert(entryRow);
         results.push({ employee_id, date: rowDate, timesheet_id: ts.id, ok: !entryErr, error: entryErr?.message });
       } catch (err) {
@@ -2463,7 +2517,7 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
 
-    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, entries } = req.body;
+    const { date, project_id, job_id, carpentry_job_id, charge_up_job_id, internal_category_id, entries } = req.body;
     if (!date || !Array.isArray(entries) || !entries.length) {
       return res.status(400).json({ ok: false, error: "date and entries[] required" });
     }
@@ -2519,6 +2573,18 @@ export function registerWorkforceRoutes(app) {
         if (charge_up_job_id && siteRows.some((s) => s.id === charge_up_job_id)) chargeUpJobId = charge_up_job_id;
         if (!chargeUpJobId) return res.status(400).json({ ok: false, error: "Pick a location before submitting charge-up work." });
       }
+    }
+
+    // BL-INTERNAL: if the carpentry job HAS active worked (cost_source='timesheet') internal categories,
+    // the worker must pick one, and it must belong to this job + be timesheet-sourced (SERVER guard,
+    // critique D1 — a leave category id can never be tagged). Jobs without categories (or pre-mig 200)
+    // log untagged as before. Mirrors the charge-up required-location block above.
+    let internalCategoryId = null;
+    {
+      const ic = await resolveInternalCategory(sb, carpentry_job_id, internal_category_id);
+      if (ic.error) return res.status(500).json({ ok: false, error: ic.error });
+      if (ic.required && !ic.internalCategoryId) return res.status(400).json({ ok: false, error: "Pick an internal category before submitting." });
+      internalCategoryId = ic.internalCategoryId;
     }
 
     // Sub-task spine (Phase 1, mig 147): a carpentry labour entry attributes to a budget SUB-TASK
@@ -2603,6 +2669,8 @@ export function registerWorkforceRoutes(app) {
       // Only include the charge-up site column when a site was picked — chargeUpJobId is only
       // non-null when mig 145 is applied + sites exist, so this never references a missing column.
       if (chargeUpJobId) row.charge_up_job_id = chargeUpJobId;
+      // Internal category tag (mig 200) — only when a valid worked category resolved above.
+      if (internalCategoryId) row.internal_category_id = internalCategoryId;
       // Sub-task attribution — only written when mig 147 is applied AND the picked key belongs to
       // this job's category (so the column is never referenced pre-migration).
       if (hasCanonicalCol && e.canonical_key && subtaskKeysByCat?.get(e.task_category)?.has(e.canonical_key)) {
@@ -2802,10 +2870,23 @@ export function registerWorkforceRoutes(app) {
       // which the worker picks as a Location instead of a budget sub-task.
       let chargeUpSites = [];
       const { data: jobRow } = await sb.from("carpentry_jobs").select("reference").eq("id", jobId).maybeSingle();
-      if (jobRow?.reference === "BL-CHARGEUP") {
+      if (jobRow?.reference === CHARGE_UP_REFERENCE) {
         const { data: sites } = await sb.from("charge_up_jobs").select("id, site_label, address")
           .eq("carpentry_job_id", jobId).eq("status", "active").order("sort_order").order("site_label");
         chargeUpSites = (sites || []).map((s) => ({ id: s.id, label: s.site_label, address: s.address || null }));
+      }
+
+      // BL-INTERNAL (reference BL-INTERNAL): the picker offers ONLY the worked categories
+      // (cost_source='timesheet' — ATEC / Logistics / Personal work). Leave categories are derived at
+      // report time and must never be selectable for logging. Fail-soft: pre-mig 200 the probe errors
+      // and we simply return no internal categories, so the PWA behaves as it did before.
+      let internalCategories = [];
+      if (jobRow?.reference === INTERNAL_REFERENCE) {
+        const { data: cats, error: catErr } = await sb.from("internal_categories")
+          .select("id, category_label")
+          .eq("carpentry_job_id", jobId).eq("status", "active").eq("cost_source", "timesheet")
+          .order("sort_order").order("category_label");
+        if (!catErr) internalCategories = (cats || []).map((c) => ({ id: c.id, label: c.category_label }));
       }
 
       // Loggable parent categories = this job's LABOUR budget cost categories (so any budgeted area
@@ -2829,7 +2910,7 @@ export function registerWorkforceRoutes(app) {
         .eq("job_id", jobId).eq("status", "confirmed")
         .not("task_category", "is", null).not("canonical_key", "is", null)
         .order("sort_order");
-      if (error) return ok(res, { subtasks: {}, chargeUpSites, categories }); // line-items table missing → still return sites + categories
+      if (error) return ok(res, { subtasks: {}, chargeUpSites, internalCategories, categories }); // line-items table missing → still return sites + categories
       const byCat = {};
       for (const r of rows || []) {
         const m = (byCat[r.task_category] ||= new Map());
@@ -2840,7 +2921,7 @@ export function registerWorkforceRoutes(app) {
       }
       const subtasks = {};
       for (const [cat, m] of Object.entries(byCat)) subtasks[cat] = [...m.values()];
-      return ok(res, { subtasks, chargeUpSites, categories });
+      return ok(res, { subtasks, chargeUpSites, internalCategories, categories });
     } catch (e) {
       console.error("[worker/jobs subtasks]", e);
       return err(res, 502, translateDbError(e));
@@ -3042,9 +3123,11 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return res.status(403).json({ ok: false, error: "No employee record found" });
-    // Echo the sub-task (canonical_key, mig 147) + charge-up site (charge_up_job_id, mig 145) so
-    // re-editing a day restores the picks. Fall back to the base select if a column isn't there yet.
-    const sel = (withNew) => `*, timesheet_entries(id, task_category, budget_line_item_id, ${withNew ? "canonical_key, charge_up_job_id, " : ""}phase, hours, notes, completion_photo_url)`;
+    // Echo the sub-task (canonical_key, mig 147) + charge-up site (charge_up_job_id, mig 145) +
+    // internal category (internal_category_id, mig 200) so re-editing a day restores the picks
+    // (the PWA prefill reads THIS path — without the column the required-category guard would block a
+    // resubmit of an existing internal timesheet). Fall back to the base select if a column isn't there yet.
+    const sel = (withNew) => `*, timesheet_entries(id, task_category, budget_line_item_id, ${withNew ? "canonical_key, charge_up_job_id, internal_category_id, " : ""}phase, hours, notes, completion_photo_url)`;
     let { data, error } = await sb.from("timesheets").select(sel(true)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle();
     if (error) ({ data } = await sb.from("timesheets").select(sel(false)).eq("employee_id", emp.id).eq("date", req.params.date).maybeSingle());
     res.json({ ok: true, timesheet: data || null });
@@ -3110,17 +3193,32 @@ export function registerWorkforceRoutes(app) {
       update.carpentry_job_id = effCarpentryId;
     }
 
+    // BL-INTERNAL: keep the internal category tag round-tripping on this worker update path too
+    // (create/update/mass-fill all tag). Resolved against the effective carpentry job + server-guarded
+    // to a worked (cost_source='timesheet') category (critique D1). Fail-soft/untagged pre-mig 200.
+    let internalCategoryId = null;
+    {
+      const ic = await resolveInternalCategory(sb, effCarpentryId, req.body.internal_category_id);
+      if (ic.error) return res.status(500).json({ ok: false, error: ic.error });
+      if (ic.required && !ic.internalCategoryId) return res.status(400).json({ ok: false, error: "Pick an internal category before submitting." });
+      internalCategoryId = ic.internalCategoryId;
+    }
+
     await sb.from("timesheets").update(update).eq("id", ts.id);
     if (Array.isArray(entries)) {
       await sb.from("timesheet_entries").delete().eq("timesheet_id", ts.id);
-      const rows = entries.map(e => ({
-        timesheet_id: ts.id, employee_id: emp.id,
-        task_category: e.task_category,
-        phase: TASK_PHASE_MAP[e.task_category] || "general",
-        hours: Number(e.hours), overtime_hours: 0,
-        notes: e.notes || null,
-        completion_photo_url: e.completion_photo_url || null,
-      }));
+      const rows = entries.map(e => {
+        const row = {
+          timesheet_id: ts.id, employee_id: emp.id,
+          task_category: e.task_category,
+          phase: TASK_PHASE_MAP[e.task_category] || "general",
+          hours: Number(e.hours), overtime_hours: 0,
+          notes: e.notes || null,
+          completion_photo_url: e.completion_photo_url || null,
+        };
+        if (internalCategoryId) row.internal_category_id = internalCategoryId;
+        return row;
+      });
       await sb.from("timesheet_entries").insert(rows);
     }
     res.json({ ok: true });
@@ -3823,30 +3921,74 @@ export function registerWorkforceRoutes(app) {
     if (!reqRow) return err(res, 404, "Time-off request not found.", "NOT_FOUND");
     if (reqRow.status !== "submitted") return err(res, 409, "Only pending requests can be approved.", "NOT_SUBMITTED");
 
+    // Leave capture (mig 201): the "Time off" approvals selector types the leave (annual/sick/rdo/unpaid)
+    // and optionally sets per-day hours (half-days). Both are stamped onto the generated RDO rows so the
+    // internal-cost report can bucket + cost them. Optional/back-compatible: an un-upgraded UI that omits
+    // leaveType leaves rows untyped, which the report reads as 'rdo' (§5.4 backfill parity).
+    const leaveType = req.body.leaveType != null ? String(req.body.leaveType).trim() : null;
+    if (leaveType && !LEAVE_TYPES.includes(leaveType)) return err(res, 400, "Invalid leave type.", "BAD_LEAVE_TYPE");
+    let hours = null;
+    if (req.body.hours != null && req.body.hours !== "") {
+      hours = Number(req.body.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return err(res, 400, "Hours must be greater than 0 and no more than 24.", "BAD_HOURS");
+    }
+    // Probe once whether mig 201 is applied — only reference the new columns when they exist, so an
+    // approval still succeeds (untyped, as before) on a DB where 201 hasn't run yet.
+    const rdoHasLeaveCols = !(await sb.from("workforce_employee_rdo_dates").select("leave_type, hours").limit(1)).error;
+
     const dates = enumerateDateRange(reqRow.date_from, reqRow.date_to);
     const appliedIds = [];
     for (const rdoDate of dates) {
-      const { data: rdoRow, error: rdoErr } = await sb.from("workforce_employee_rdo_dates").insert({
+      const insRow = {
         employee_id: reqRow.employee_id,
         rdo_date: rdoDate,
         note: "Approved leave",
         created_by: req.caller.id,
-      }).select("id").single();
+      };
+      if (rdoHasLeaveCols) {
+        if (leaveType) insRow.leave_type = leaveType;
+        if (hours != null) insRow.hours = hours;
+      }
+      const { data: rdoRow, error: rdoErr } = await sb.from("workforce_employee_rdo_dates").insert(insRow).select("id").single();
       if (rdoErr) {
-        if (rdoErr.code === "23505") continue; // that date is already an RDO for this employee — skip, don't fail
+        if (rdoErr.code === "23505") {
+          // That date already has an RDO row for this employee (UNIQUE employee_id, rdo_date).
+          // Don't silently skip: the approved leave type/hours would be lost and the day would
+          // stay typed as its old value (or untyped → read as 'rdo'), mis-costing the leave.
+          // Fall through to UPDATE the existing row's leave_type/hours to what was approved,
+          // and record its id so a later reject still reverts this date.
+          if (rdoHasLeaveCols && (leaveType || hours != null)) {
+            const patch = {};
+            if (leaveType) patch.leave_type = leaveType;
+            if (hours != null) patch.hours = hours;
+            const { data: existing, error: updRowErr } = await sb.from("workforce_employee_rdo_dates")
+              .update(patch)
+              .eq("employee_id", reqRow.employee_id)
+              .eq("rdo_date", rdoDate)
+              .select("id")
+              .single();
+            if (updRowErr) return err(res, 500, translateDbError(updRowErr));
+            if (existing?.id) appliedIds.push(existing.id);
+          }
+          continue;
+        }
         if (plannerTableMissing(rdoErr)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING");
         return err(res, 500, translateDbError(rdoErr));
       }
       if (rdoRow?.id) appliedIds.push(rdoRow.id);
     }
 
-    const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update({
+    const reqUpdate = {
       status: "approved",
       applied_rdo_ids: appliedIds,
       reviewed_by: req.caller.id,
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }).eq("id", req.params.id).select().single();
+    };
+    // Mirror the leave type onto the request row too (mig 201). Same probe gate as the RDO rows.
+    if (rdoHasLeaveCols && leaveType) reqUpdate.leave_type = leaveType;
+    const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update(reqUpdate)
+      .eq("id", req.params.id).select().single();
     if (updErr) return err(res, 500, translateDbError(updErr));
     ok(res, { request: rowToCamel(updated) });
   });
@@ -3902,6 +4044,43 @@ export function registerWorkforceRoutes(app) {
     const { data: updated, error: updErr } = await sb.from("workforce_day_off_requests").update(update).eq("id", req.params.id).select().single();
     if (updErr) return err(res, 500, translateDbError(updErr));
     ok(res, { request: rowToCamel(updated) });
+  });
+
+  // Admin/supervisor: record a sick day directly (mig 201). Sick leave isn't pre-requested through the
+  // day-off flow, so this writes a typed workforce_employee_rdo_dates row (leave_type='sick', optional
+  // hours) straight to the leave spine — the same rows the internal-cost report derives sick cost from
+  // and the same rows the planner already shades. No timesheet row is ever written (no double-count).
+  app.post("/api/workforce/record-sick-day", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
+    const sb = getServiceSupabase();
+    const employeeId = req.body.employeeId;
+    const rdoDate = req.body.date || req.body.rdoDate;
+    if (!isUuid(employeeId) || !rdoDate) return err(res, 400, "employeeId and date are required");
+    if (!isValidYmd(String(rdoDate))) return err(res, 400, "date must be a valid date (YYYY-MM-DD).");
+    let hours = null;
+    if (req.body.hours != null && req.body.hours !== "") {
+      hours = Number(req.body.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return err(res, 400, "Hours must be greater than 0 and no more than 24.", "BAD_HOURS");
+    }
+    // Probe once whether mig 201's leave columns exist — a sick day is only meaningful once they do
+    // (an untyped row would read as 'rdo'), so require the migration rather than silently mis-typing.
+    const rdoHasLeaveCols = !(await sb.from("workforce_employee_rdo_dates").select("leave_type, hours").limit(1)).error;
+    if (!rdoHasLeaveCols) return err(res, 503, "Sick-day capture needs migration 201 applied", "MIGRATION_PENDING");
+
+    const insRow = {
+      employee_id: employeeId,
+      rdo_date: rdoDate,
+      leave_type: "sick",
+      note: req.body.note ? String(req.body.note).trim() : "Sick day",
+      created_by: req.caller.id,
+    };
+    if (hours != null) insRow.hours = hours;
+    const { data, error } = await sb.from("workforce_employee_rdo_dates").insert(insRow).select("id").single();
+    if (error) {
+      if (plannerTableMissing(error)) return err(res, 503, "Needs migration 119 applied", "MIGRATION_PENDING");
+      if (/duplicate|unique/i.test(error.message || "") || error.code === "23505") return err(res, 409, "That date already has leave/RDO for this employee", "DUPLICATE");
+      return err(res, 500, translateDbError(error));
+    }
+    ok(res, { rdo: { id: data.id, employeeId, date: rdoDate, leaveType: "sick", hours } });
   });
 
   console.log("[workforce] routes registered");

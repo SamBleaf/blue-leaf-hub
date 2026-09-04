@@ -60,6 +60,8 @@ export default function WorkerLogHours() {
   const [activeCat, setActiveCat] = useState(null); // which category's sub-task chooser is open
   const [chargeUpSites, setChargeUpSites] = useState([]); // BLB Charge Up: sites to pick as a Location
   const [chargeUpJobId, setChargeUpJobId] = useState("");
+  const [internalCategories, setInternalCategories] = useState([]); // BL-INTERNAL: worked cost categories (ATEC / Logistics / Personal)
+  const [internalCategoryId, setInternalCategoryId] = useState("");
   const [scheduledId, setScheduledId] = useState(null);  // F4: the site prefilled from the roster
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -106,7 +108,8 @@ export default function WorkerLogHours() {
             canonical_key: e.canonical_key || null,
             budget_line_item_id: e.budget_line_item_id || null,
             chargeUpTask: !!e.charge_up_job_id,   // free-text charge-up line (description lives in notes)
-            uid: e.charge_up_job_id ? `cu-p${i}` : undefined,
+            internalTask: !!e.internal_category_id,   // BL-INTERNAL cost line (category picked at the top)
+            uid: e.charge_up_job_id ? `cu-p${i}` : e.internal_category_id ? `int-p${i}` : undefined,
             label: TASK_OPTIONS.find(t => t.value === e.task_category)?.label || e.task_category,
             hours: Number(e.hours) || 8,
             notes: e.notes || "",
@@ -116,11 +119,13 @@ export default function WorkerLogHours() {
           if (ts.project_id) setSelectedId(ts.project_id);
           else if (ts.carpentry_job_id) setSelectedId(ts.carpentry_job_id);
           setChargeUpJobId(ts.timesheet_entries?.[0]?.charge_up_job_id || "");   // restore the picked location
+          setInternalCategoryId(ts.timesheet_entries?.[0]?.internal_category_id || "");   // restore the picked internal category
         } else {
           setExistingId(null);
           setApproved(false);
           setEntries([]);
           setChargeUpJobId("");
+          setInternalCategoryId("");
           // F4: autofill the site from the day's roster (editable default). Keyed to the entry's
           // date, so back-filling a past day pulls that day's scheduled site.
           workerFetch(`/api/worker/allocations/week?from=${date}&to=${date}`)
@@ -147,11 +152,11 @@ export default function WorkerLogHours() {
   // P3: load the job's confirmed sub-tasks (carpentry only) for the two-level picker.
   useEffect(() => {
     const proj = projects.find(p => p.id === selectedId);
-    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); setChargeUpSites([]); setCatOptions([]); return; }
+    if (!selectedId || proj?.type !== "carpentry") { setSubtasks({}); setActiveCat(null); setChargeUpSites([]); setInternalCategories([]); setCatOptions([]); return; }
     let stop = false;
     workerFetch(`/api/worker/jobs/${selectedId}/subtasks`)
       .then(r => r.json())
-      .then(j => { if (!stop && j?.ok) { setSubtasks(j.subtasks || {}); setChargeUpSites(j.chargeUpSites || []); setCatOptions(j.categories || []); } })
+      .then(j => { if (!stop && j?.ok) { setSubtasks(j.subtasks || {}); setChargeUpSites(j.chargeUpSites || []); setInternalCategories(j.internalCategories || []); setCatOptions(j.categories || []); } })
       .catch(() => {});
     return () => { stop = true; };
   }, [selectedId, projects]);
@@ -162,6 +167,10 @@ export default function WorkerLogHours() {
   // BLB Charge Up: this job logs free-text tasks + hours against a Location instead of the fixed
   // category / sub-task pickers. Presence of active charge-up sites is the signal.
   const isChargeUp = selectedProject?.type === "carpentry" && chargeUpSites.length > 0;
+  // BL-INTERNAL: this job logs hours against a cost category (ATEC / Logistics / Personal work) picked
+  // once at the top, instead of the fixed category / sub-task pickers. Presence of active worked
+  // categories is the signal (leave categories are derived server-side, never logged here).
+  const isInternal = selectedProject?.type === "carpentry" && internalCategories.length > 0;
   const hasSub = (cat) => (subtasks[cat] || []).length > 0;
   // Loggable category buttons: a carpentry job drives them from its own labour BUDGET categories (so any
   // budgeted area is loggable — AAC etc.), keeping the generic base categories (site cleanup, supervision…)
@@ -176,6 +185,7 @@ export default function WorkerLogHours() {
   // Display label = parent category + sub-task (resolved from the loaded sub-tasks when re-editing).
   const displayLabel = (e) => {
     if (e.chargeUpTask) return e.notes?.trim() || "Charge-up task";
+    if (e.internalTask) return internalCategories.find(c => c.id === internalCategoryId)?.label || "Internal work";
     const base = labelFor(e.task_category) || e.label;
     if (e.subtaskLabel) return `${base} · ${e.subtaskLabel}`;
     if (e.canonical_key) {
@@ -231,6 +241,16 @@ export default function WorkerLogHours() {
       return [...prev, { uid: `cu-${++uidRef.current}`, task_category: "other", chargeUpTask: true, canonical_key: null, budget_line_item_id: null, label: "Charge-up task", hours: firstCu ? standardHours : 1, notes: "", completion_photo_url: "", manuallyEdited: true }];
     });
   }
+  // BL-INTERNAL: add a plain hours line against the category chosen at the top (no per-line
+  // description — the category IS the classification). task_category "other" satisfies the server
+  // category check; a stable uid keeps rows distinct since they'd collide on task_category.
+  // First line seeds a full day, extras seed 1h (mirror of addChargeUpTask).
+  function addInternalTask() {
+    setEntries(prev => {
+      const firstInternal = !prev.some(e => e.internalTask);
+      return [...prev, { uid: `int-${++uidRef.current}`, task_category: "other", internalTask: true, canonical_key: null, budget_line_item_id: null, label: "Internal hours", hours: firstInternal ? standardHours : 1, notes: "", completion_photo_url: "", manuallyEdited: true }];
+    });
+  }
   function patchEntry(idx, patch) {
     setEntries(prev => prev.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
   }
@@ -268,6 +288,7 @@ export default function WorkerLogHours() {
   async function submit() {
     if (approved || !entries.length || !selectedProject) return;
     if (chargeUpSites.length > 0 && !chargeUpJobId) { alert("Pick a location before submitting charge-up work."); return; }
+    if (internalCategories.length > 0 && !internalCategoryId) { alert("Pick an internal category before submitting."); return; }
     setSubmitting(true);
     try {
       const payload = entries.map(e => ({
@@ -283,7 +304,7 @@ export default function WorkerLogHours() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           selectedProject.type === "carpentry"
-            ? { date, carpentry_job_id: selectedProject.id, charge_up_job_id: chargeUpJobId || null, entries: payload }
+            ? { date, carpentry_job_id: selectedProject.id, charge_up_job_id: chargeUpJobId || null, internal_category_id: internalCategoryId || null, entries: payload }
             : { date, project_id: selectedProject.id, job_id: selectedProject.job_id || null, entries: payload }
         ),
       });
@@ -372,7 +393,7 @@ export default function WorkerLogHours() {
             <label className="text-xs text-muted uppercase tracking-wide block mb-1">Site</label>
             <select
               value={selectedId}
-              onChange={e => { setSelectedId(e.target.value); setChargeUpJobId(""); setScheduledId(null); }}
+              onChange={e => { setSelectedId(e.target.value); setChargeUpJobId(""); setInternalCategoryId(""); setScheduledId(null); }}
               className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="" disabled>Select…</option>
@@ -403,13 +424,28 @@ export default function WorkerLogHours() {
             )}
           </div>
         )}
+
+        {/* BL-INTERNAL: pick the internal cost category the hours belong to (required) */}
+        {internalCategories.length > 0 && (
+          <div className="mb-4">
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Internal category <span className="text-red-500">*</span></label>
+            <select
+              value={internalCategoryId}
+              onChange={e => setInternalCategoryId(e.target.value)}
+              className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="" disabled>Pick a category…</option>
+              {internalCategories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
+        )}
         {date !== todayStr() && <p className="text-xs text-amber-600 mb-4">Backdating to {date}</p>}
         {date === todayStr() && <div className="mb-4" />}
 
         {/* Add task — charge-up jobs get a free-text add; normal jobs get the category grid
             (categories with sub-tasks open a chooser). */}
         <label className="text-xs text-muted uppercase tracking-wide block mb-2">
-          {isChargeUp ? "Tasks & hours" : "Add what you worked on"}
+          {isChargeUp ? "Tasks & hours" : isInternal ? "Hours" : "Add what you worked on"}
         </label>
         {isChargeUp ? (
           <button
@@ -418,6 +454,14 @@ export default function WorkerLogHours() {
             className="w-full min-h-12 mb-3 rounded-lg border border-dashed border-primary bg-primary/5 text-primary text-sm font-semibold flex items-center justify-center gap-1.5"
           >
             + Add task
+          </button>
+        ) : isInternal ? (
+          <button
+            type="button"
+            onClick={addInternalTask}
+            className="w-full min-h-12 mb-3 rounded-lg border border-dashed border-primary bg-primary/5 text-primary text-sm font-semibold flex items-center justify-center gap-1.5"
+          >
+            + Add hours
           </button>
         ) : (
           <div className="grid grid-cols-2 gap-2 mb-3">
@@ -493,7 +537,7 @@ export default function WorkerLogHours() {
                         className="w-12 shrink-0 text-center text-sm font-semibold text-ink border-b border-hairline bg-transparent outline-none"
                       />
                       <button type="button" onClick={() => bumpHours(idx, 0.5)} aria-label="More hours" className="w-9 h-9 shrink-0 rounded-full border border-hairline text-ink text-lg leading-none flex items-center justify-center">+</button>
-                      {!e.chargeUpTask && (
+                      {!e.chargeUpTask && !e.internalTask && (
                         <button type="button" onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)} aria-label="Notes and photo" className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-lg leading-none ${hasDetail ? "text-primary" : "text-muted"}`}>⋯</button>
                       )}
                       {e.chargeUpTask && isLeadingHand && (
@@ -512,7 +556,7 @@ export default function WorkerLogHours() {
                       )}
                       <button type="button" onClick={() => removeEntry(idx)} aria-label="Remove" className="w-7 h-8 shrink-0 text-muted text-xl leading-none flex items-center justify-center">×</button>
                     </div>
-                    {!e.chargeUpTask && expandedIdx === idx && (
+                    {!e.chargeUpTask && !e.internalTask && expandedIdx === idx && (
                       <div className="px-3 pb-3 pt-1 border-t border-hairline space-y-3">
                         <textarea
                           placeholder="Notes (optional)"
