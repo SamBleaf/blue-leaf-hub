@@ -151,12 +151,18 @@ export async function createCalcomBooking({ lead, meetingType, startAt, duration
   // the first that takes. metadata[leadId] always carries the correlation, so dropping the hidden
   // fields never loses the lead link. (A fixed-location event books on attempt 1 with no extra calls.)
   const addr = String(location || lead.site_address || lead.address || "To be confirmed").trim();
-  const atAttendeeAddress = { type: "attendeeAddress", address: addr };
+  // cal.com accepts the attendee's address two ways (per the 400's own hint): as the location
+  // booking-FIELD response (bookingFieldsResponses.location = {value:"attendeeAddress", optionValue})
+  // OR as a top-level location object ({type:"attendeeAddress", address}). Try both shapes.
+  const locField = { value: "attendeeAddress", optionValue: addr };
+  const locTop = { type: "attendeeAddress", address: addr };
   const attempts = [
-    { ...base, bookingFieldsResponses: fields },                              // fixed-location event, fields present
-    { ...base, bookingFieldsResponses: fields, location: atAttendeeAddress }, // attendee-address event, fields present
-    { ...base, location: atAttendeeAddress },                                 // attendee-address event, no fields
-    base,                                                                     // fixed-location event, no fields
+    { ...base, bookingFieldsResponses: fields },                                   // fixed-location, fields present
+    { ...base, bookingFieldsResponses: { ...fields, location: locField } },        // attendee-address via booking field
+    { ...base, bookingFieldsResponses: fields, location: locTop },                 // attendee-address via top-level location
+    { ...base, bookingFieldsResponses: { location: locField } },                   // attendee-address booking field, no hidden fields
+    { ...base, location: locTop },                                                 // attendee-address top-level, no fields
+    base,                                                                          // fixed-location, no fields
   ];
   let r, j;
   for (const body of attempts) {
