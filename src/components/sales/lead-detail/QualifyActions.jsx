@@ -6,7 +6,7 @@
  *   • Build-conversation status (booked via the emailed cal.com link → webhook; no manual tick).
  *   • Nurture prompt when the score is below 5 (Lost stays a manual choice).
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiPost } from "../../../lib/apiFetch.js";
 
 function fmtDate(x) {
@@ -22,11 +22,29 @@ export default function QualifyActions({ lead, patch, reload }) {
   const [preview, setPreview] = useState(null);      // { subject, text, bookingLink }
   const [previewOpen, setPreviewOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState(null);              // { type, text }
 
   const score = lead.qualify_score || 0;
   const booked = !!lead.discovery_meeting_booked_at;
   const introSent = !!lead.qualify_intro_sent_at;
+
+  // Auto-detect a self-booked build conversation by polling cal.com (the robust path — the client
+  // books via the emailed link and the Hub FETCHES the booking rather than waiting on a webhook).
+  async function checkBooking(silent) {
+    setSyncing(true); if (!silent) setMsg(null);
+    const { ok, data } = await apiPost(`/api/sales/leads/${lead.id}/meetings/sync`, { meetingType: "build_conversation" });
+    setSyncing(false);
+    if (ok && data?.synced > 0) { await reload(); return; }
+    if (silent) return;
+    if (ok && data?.configured === false) setMsg({ type: "error", text: data.message });
+    else if (ok && data?.error) setMsg({ type: "error", text: data.error });
+    else setMsg({ type: "success", text: "No booking found yet — try again once the client has booked." });
+  }
+  useEffect(() => {
+    if (introSent && !booked) checkBooking(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, introSent, booked]);
   const needsConfirm = lead.web_prescored && !lead.qualify_confirmed_at;
   const recommendNurture = lead.stage === "qualify" && score < 5;
 
@@ -79,7 +97,13 @@ export default function QualifyActions({ lead, patch, reload }) {
             </div>
           </div>
         ) : introSent ? (
-          <p className="text-muted">Qualify email sent {fmtDate(lead.qualify_intro_sent_at)} — waiting on the client to book their build conversation.</p>
+          <div>
+            <p className="text-muted">Qualify email sent {fmtDate(lead.qualify_intro_sent_at)} — waiting on the client to book their build conversation.</p>
+            <button type="button" onClick={() => checkBooking(false)} disabled={syncing}
+              className="mt-1 text-xs font-semibold text-primary hover:underline disabled:opacity-50">
+              {syncing ? "Checking cal.com…" : "↻ Check for booking"}
+            </button>
+          </div>
         ) : (
           <p className="text-muted">Send the qualify email to invite them to book a build conversation.</p>
         )}

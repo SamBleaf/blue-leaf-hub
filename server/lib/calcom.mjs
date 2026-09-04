@@ -53,6 +53,14 @@ export function meetingRegistryEntry(meetingType) {
   return MEETING_REGISTRY[meetingType] || MEETING_REGISTRY.build_conversation;
 }
 
+/** Meeting-type key for a cal.com event slug (the reverse of the registry). null if unrecognised. */
+export function meetingTypeForSlug(slug) {
+  const s = String(slug || "").trim();
+  if (!s) return null;
+  const hit = Object.entries(MEETING_REGISTRY).find(([, e]) => e.slug === s);
+  return hit ? hit[0] : null;
+}
+
 /**
  * Prefilled public cal.com booking link for a lead + a specific meeting type. Carries leadId +
  * meetingType as booking-question params (the reliable webhook round-trip) plus metadata[leadId] as

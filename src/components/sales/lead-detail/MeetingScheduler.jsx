@@ -28,13 +28,36 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
 
   const label = MEETING_TYPE_LABELS[meetingType] || "Meeting";
 
+  const [syncing, setSyncing] = useState(false);
+  const pick = (rows) => (rows || []).find((m) => m.meetingType === meetingType && m.status !== "cancelled") || null;
+
   const load = useCallback(async () => {
     setLoading(true);
     const { ok, data } = await apiFetch(`/api/sales/leads/${lead.id}/meetings`);
-    if (ok) setMeeting((data.meetings || []).find((m) => m.meetingType === meetingType && m.status !== "cancelled") || null);
+    let m = ok ? pick(data.meetings) : null;
+    // Nothing booked yet? Poll cal.com once to catch a client self-booking the webhook may have missed.
+    if (!m) {
+      const s = await apiPost(`/api/sales/leads/${lead.id}/meetings/sync`, { meetingType });
+      if (s.ok && s.data?.synced > 0) {
+        const re = await apiFetch(`/api/sales/leads/${lead.id}/meetings`);
+        if (re.ok) m = pick(re.data.meetings);
+      }
+    }
+    setMeeting(m);
     setLoading(false);
-  }, [lead.id, meetingType]);
+  }, [lead.id, meetingType]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
+
+  // Manual re-poll (the client just booked while you're on the phone).
+  async function checkBooking() {
+    setSyncing(true); setMsg(null);
+    const { ok, data } = await apiPost(`/api/sales/leads/${lead.id}/meetings/sync`, { meetingType });
+    setSyncing(false);
+    if (ok && data?.synced > 0) { await load(); reload?.(); return; }
+    if (ok && data?.configured === false) setMsg({ type: "error", text: data.message });
+    else if (ok && data?.error) setMsg({ type: "error", text: data.error });
+    else setMsg({ type: "success", text: "No booking found yet — try again once the client has booked." });
+  }
 
   async function copyLink() {
     const { ok, data, error } = await apiFetch(`/api/sales/leads/${lead.id}/booking-link?meetingType=${meetingType}`);
@@ -82,7 +105,13 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
             <MeetingNotes leadId={lead.id} meetingType={meetingType} meeting={meeting} reload={load} />
           </div>
         ) : (
-          <p className="text-muted">Not scheduled yet — send the client a booking link, or set a time yourself.</p>
+          <div>
+            <p className="text-muted">Not scheduled yet — send the client a booking link, or set a time yourself.</p>
+            <button type="button" onClick={checkBooking} disabled={syncing}
+              className="mt-1 text-xs font-semibold text-primary hover:underline disabled:opacity-50">
+              {syncing ? "Checking cal.com…" : "↻ Check for booking"}
+            </button>
+          </div>
         )}
       </div>
 

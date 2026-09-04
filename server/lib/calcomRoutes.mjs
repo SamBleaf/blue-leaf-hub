@@ -5,8 +5,9 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { ok, err, rowToCamel, translateDbError } from "./apiResponse.mjs";
-import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry } from "./calcom.mjs";
-import { calcomApiConfigured, createCalcomBooking, getAvailableSlots } from "./calcomApi.mjs";
+import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry, meetingTypeForSlug } from "./calcom.mjs";
+import { calcomApiConfigured, createCalcomBooking, getAvailableSlots, getLeadBookings } from "./calcomApi.mjs";
+import { projectLeadMeeting } from "./calcomProjection.mjs";
 
 const TABLE_MISSING = new Set(["42P01", "42703", "PGRST205"]); // table/column absent (pre-mig-185)
 const CAL_TIMEZONE = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim(); // for human-readable log notes
@@ -34,8 +35,10 @@ export function registerCalcomRoutes(app) {
       const slots = await getAvailableSlots({ meetingType, days });
       ok(res, { configured: true, slots });
     } catch (e) {
+      // Surface the ACTUAL cause (e.g. "event type 'design-meeting' not found for user X") so a
+      // misconfigured CAL_USERNAME / event slug is diagnosable, not hidden behind a generic message.
       console.warn("[calcom slots] load failed:", e?.message || e);
-      ok(res, { configured: true, slots: [], error: "Couldn't load live times right now." });
+      ok(res, { configured: true, slots: [], error: `Couldn't load live times: ${e?.message || "cal.com error"}` });
     }
   });
 
@@ -148,6 +151,45 @@ export function registerCalcomRoutes(app) {
     }
     try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: `${entry.label} scheduled for ${startAt.toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: CAL_TIMEZONE })}` }); } catch { /* best-effort */ }
     ok(res, { meeting: rowToCamel(data), bookedViaCalcom: bookingSource === "on_behalf" });
+  });
+
+  // Poll cal.com for a lead's bookings and project any that match a pipeline meeting — the robust
+  // path when the inbound webhook isn't wired (client books via the emailed link, the Hub fetches it).
+  // Matches by attendee email; maps the event slug → meeting type; projects each (which unblocks the
+  // pipeline exactly like the webhook). Returns what was synced so the UI can refresh. Never 500s.
+  app.post("/api/sales/leads/:id/meetings/sync", requireAuth, async (req, res) => {
+    const db = sb(); if (!db) return err(res, 503, "Supabase not configured");
+    if (!calcomApiConfigured()) {
+      return ok(res, { configured: false, synced: 0, message: "cal.com API isn't connected yet — set CAL_API_KEY to auto-detect bookings." });
+    }
+    const { data: lead } = await db.from("leads").select("id, email").eq("id", req.params.id).maybeSingle();
+    if (!lead) return err(res, 404, "Lead not found");
+    if (!lead.email) return ok(res, { configured: true, synced: 0, message: "This lead has no email to match a cal.com booking." });
+
+    const wanted = req.body?.meetingType ? String(req.body.meetingType).trim() : null; // optionally scope to one
+    let bookings;
+    try { bookings = await getLeadBookings({ email: lead.email }); }
+    catch (e) { return ok(res, { configured: true, synced: 0, error: e?.message || "Couldn't reach cal.com right now." }); }
+
+    const found = [];
+    for (const b of bookings) {
+      // Skip cancelled/rejected — the projection only records live bookings (a cancel comes via webhook).
+      if (b.status && !["accepted", "pending", "confirmed"].includes(String(b.status).toLowerCase())) continue;
+      // The booking's own leadId response (if present) must match — never project another lead's booking.
+      const bookedLeadId = b.responses?.leadId?.value || b.responses?.leadId || b.metadata?.leadId;
+      if (bookedLeadId && String(bookedLeadId) !== String(lead.id)) continue;
+      const mt = meetingTypeForSlug(b.eventSlug)
+        || (b.responses?.meetingType?.value || b.responses?.meetingType) || null;
+      if (!mt || !Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, mt)) continue;
+      if (wanted && mt !== wanted) continue;
+      await projectLeadMeeting(db, {
+        leadId: lead.id, meetingType: mt, trigger: "BOOKING_CREATED",
+        uid: b.uid, startTime: b.start, title: b.title, durationMins: b.durationMins,
+        eventTypeId: b.eventTypeId, eventSlug: b.eventSlug,
+      });
+      found.push({ meetingType: mt, start: b.start, uid: b.uid });
+    }
+    ok(res, { configured: true, synced: found.length, found });
   });
 
   // Structured meeting notes (mig 189) — priorities/decisions/changes/risks/followups/owner/next_step.

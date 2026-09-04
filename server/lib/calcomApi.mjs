@@ -77,6 +77,34 @@ export async function getAvailableSlots({ meetingType, days = 14 }) {
 }
 
 /**
+ * All of a lead's cal.com bookings, matched by attendee email — the API poll behind /meetings/sync.
+ * The self-book flow (client books via the emailed link) normally round-trips through the webhook;
+ * this lets the Hub FETCH the booking directly instead of waiting on a webhook that may not be wired.
+ * Returns a normalised list [{ uid, start, title, status, durationMins, eventSlug, eventTypeId,
+ * responses, metadata }]. Throws if not configured or the call fails — the caller degrades gracefully.
+ */
+export async function getLeadBookings({ email, take = 50 }) {
+  if (!calcomApiConfigured()) throw new Error("cal.com API not configured");
+  if (!email) return [];
+  const q = new URLSearchParams({ attendeeEmail: String(email).trim(), take: String(take), sortStart: "desc" });
+  const j = await calGet(`/bookings?${q.toString()}`, BOOKINGS_API_VERSION);
+  const list = Array.isArray(j?.data) ? j.data
+    : Array.isArray(j?.data?.bookings) ? j.data.bookings
+    : Array.isArray(j?.bookings) ? j.bookings : [];
+  return list.map((b) => ({
+    uid: b?.uid || b?.bookingUid || null,
+    start: b?.start || b?.startTime || null,
+    title: b?.title || null,
+    status: b?.status || null,                       // 'accepted' | 'cancelled' | 'pending' | 'rejected'
+    durationMins: b?.duration ?? b?.length ?? null,
+    eventSlug: b?.eventType?.slug || b?.eventTypeSlug || b?.type || null,
+    eventTypeId: b?.eventTypeId ?? b?.eventType?.id ?? null,
+    responses: b?.bookingFieldsResponses || b?.responses || {},
+    metadata: b?.metadata || {},
+  })).filter((b) => b.uid);
+}
+
+/**
  * Create a booking on the client's behalf. Returns { uid, rescheduleUrl, cancelUrl }.
  * Throws on any failure — the caller degrades to a Hub-recorded manual meeting.
  */
@@ -89,26 +117,34 @@ export async function createCalcomBooking({ lead, meetingType, startAt, duration
 
   // NB: we don't send a location — cal.com applies the event type's own configured location
   // (phone/video/in-person). Forcing one here would fail bookings for events not set up for it.
-  const body = {
+  const base = {
     start: startAt,
     eventTypeId,
     attendee: { name: attendeeName(lead), email: String(lead.email), timeZone: DEFAULT_TZ, language: "en" },
     metadata: { leadId: String(lead.id || "") },
-    bookingFieldsResponses: { leadId: String(lead.id || ""), meetingType },
   };
-  if (durationMins) body.lengthInMinutes = durationMins;
+  if (durationMins) base.lengthInMinutes = durationMins;
 
-  const r = await fetch(`${API_BASE}/bookings`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "cal-api-version": BOOKINGS_API_VERSION,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10000),
-  });
-  const j = await r.json().catch(() => ({}));
+  async function postBooking(body) {
+    const r = await fetch(`${API_BASE}/bookings`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "cal-api-version": BOOKINGS_API_VERSION, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json().catch(() => ({}));
+    return { r, j };
+  }
+
+  // First try WITH the leadId/meetingType hidden booking fields (the reliable webhook round-trip).
+  // If the event type doesn't have those custom fields configured yet, cal.com rejects with a 4xx —
+  // retry once WITHOUT them (metadata[leadId] still carries the correlation) so book-on-behalf works
+  // before the event types are fully set up, instead of silently falling back to a Hub-only record.
+  let { r, j } = await postBooking({ ...base, bookingFieldsResponses: { leadId: String(lead.id || ""), meetingType } });
+  if (!r.ok && r.status >= 400 && r.status < 500) {
+    const retry = await postBooking(base);
+    if (retry.r.ok) ({ r, j } = retry);
+  }
   if (!r.ok) throw new Error(`cal.com booking failed → ${r.status} ${j?.error?.message || JSON.stringify(j?.error || {})}`.trim());
   const uid = j?.data?.uid || j?.data?.booking?.uid || null;
   // A 200 with no extractable uid means we can't track/reschedule it — throw so the caller degrades
