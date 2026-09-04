@@ -45,6 +45,8 @@ import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./c
 import { recordTaskDeletion } from "./taskAudit.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
+import { auFyQuarter } from "./financialYear.mjs";
+import { INTERNAL_REFERENCE, deriveLeaveCost, listCategories, isMissingTable as isInternalMissingTable } from "./internalCategoryService.mjs";
 
 // Projected-margin targets — labour 25% / material 20% (matches the frontend MARGIN_TARGET).
 const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
@@ -1688,27 +1690,30 @@ export function registerCarpentryRoutes(app) {
   });
 
   // ── GET /api/carpentry/jobs/:id/budget ──────────────────────────────────────
-  // AU financial year (Jul–Jun) + quarter for a YYYY-MM-DD date. FY label e.g. "2025-26".
-  // Quarters within the FY: Q1 Jul–Sep, Q2 Oct–Dec, Q3 Jan–Mar, Q4 Apr–Jun.
-  function auFyQuarter(dateStr) {
-    const d = new Date(`${dateStr}T12:00:00Z`);
-    const m = d.getUTCMonth(), y = d.getUTCFullYear();
-    const fyStart = m >= 6 ? y : y - 1;
-    const fy = `${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}`;
-    const q = m >= 6 ? Math.floor((m - 6) / 3) + 1 : Math.floor((m + 6) / 3) + 1;
-    return { fy, q };
-  }
+  // auFyQuarter (AU FY Jul–Jun + quarter, label "2025-26") now lives in the shared
+  // server/lib/financialYear.mjs so carpentry, chargeUp, and the internal-category
+  // service all use one canonical implementation. Imported at the top of this file.
 
   // FY/quarter labour-cost rollup for the two standing internal jobs (BL-INTERNAL, BL-CHARGEUP) —
   // the cost of internal downtime / charge-up per period. Labour = approved-timesheet cost_amount,
   // mirroring the per-job budget view. Advisory reporting; touches nothing else.
+  //
+  // BL-CHARGEUP element: BYTE-IDENTICAL to the original — { reference, address, fyTotals, periods }.
+  // BL-INTERNAL element: the same job-level fyTotals/periods (worked hours booked to the job) PLUS a
+  // new `categories` axis (mig 200 internal_categories registry) that MERGES two cost sources onto
+  // one category × FY × quarter grid: (a) worked categories from approved timesheet_entries.cost_amount
+  // grouped by internal_category_id, and (b) the derived leave block (Annual/Sick/RDO) from
+  // internalCategoryService.deriveLeaveCost. Worked rows are booked (estimated:false); leave rows are
+  // modelled (estimated:true) and may carry rateMissing. Category cost is director-gated (stripCost).
   app.get("/api/carpentry/internal-cost-summary", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
+    const isDirector = req.caller?.role === "admin"; // cost is pay-derived → directors only (hours stay visible)
     try {
       const { data: jobs } = await sb.from("carpentry_jobs").select("id, reference, address").in("reference", ["BL-INTERNAL", "BL-CHARGEUP"]);
       const out = [];
       for (const job of jobs || []) {
+        // ── Job-level FY/quarter totals — UNCHANGED path (drives BL-CHARGEUP byte-for-byte) ──
         const { data: entries } = await sb
           .from("timesheet_entries")
           .select("cost_amount, hours, timesheets!inner(carpentry_job_id, status, date)")
@@ -1728,7 +1733,132 @@ export function registerCarpentryRoutes(app) {
         const fyMap = {};
         for (const p of periods) { (fyMap[p.fy] ||= { fy: p.fy, cost: 0, hours: 0 }); fyMap[p.fy].cost += p.cost; fyMap[p.fy].hours += p.hours; }
         const fyTotals = Object.values(fyMap).map(x => ({ ...x, cost: round2(x.cost), hours: round2(x.hours) }));
-        out.push({ reference: job.reference, address: job.address, fyTotals, periods });
+
+        // BL-CHARGEUP (and any non-internal standing job): original shape only. Do NOT touch.
+        if (job.reference !== INTERNAL_REFERENCE) {
+          out.push({ reference: job.reference, address: job.address, fyTotals, periods });
+          continue;
+        }
+
+        // ── BL-INTERNAL only: the category axis (worked + derived leave), merged & director-gated ──
+        // Fails soft (categories: []) pre-migration so the endpoint still returns job-level totals.
+        let categories = [];
+        let categoriesAvailable = true;
+        try {
+          const cats = await listCategories(sb, job.id, { includeArchived: true }); // registry = unified axis
+
+          // catMap keyed by category id (or a synthetic key for untagged / off-registry rows).
+          const catMap = new Map();
+          const ensureCat = (key, seed) => {
+            if (!catMap.has(key)) catMap.set(key, { ...seed, _periods: new Map() });
+            return catMap.get(key);
+          };
+          const addPeriod = (key, fy, q, hours, cost, { estimated = false, rateMissing = false } = {}) => {
+            const cat = catMap.get(key); if (!cat) return;
+            const pk = `${fy}|${q}`;
+            if (!cat._periods.has(pk)) cat._periods.set(pk, { fy, quarter: q, hours: 0, cost: 0, estimated, rateMissing: false });
+            const p = cat._periods.get(pk);
+            p.hours += Number(hours) || 0; p.cost += Number(cost) || 0;
+            if (rateMissing) { p.rateMissing = true; cat.rateMissing = true; }
+          };
+          // Seed the six seeded (+ any ad-hoc) registry categories so every category shows a row even at $0.
+          for (const c of cats) {
+            ensureCat(c.id, {
+              internalCategoryId: c.id, categoryLabel: c.category_label, slug: c.slug,
+              costSource: c.cost_source, leaveType: c.leave_type || null,
+              status: c.status, sortOrder: c.sort_order ?? 0,
+              estimated: c.cost_source === "leave", rateMissing: false,
+            });
+          }
+
+          // (a) Worked — approved timesheet_entries.cost_amount grouped by internal_category_id × FY × quarter.
+          const { data: catEntries, error: ceErr } = await sb
+            .from("timesheet_entries")
+            .select("cost_amount, hours, internal_category_id, timesheets!inner(carpentry_job_id, status, date)")
+            .eq("timesheets.carpentry_job_id", job.id)
+            .eq("timesheets.status", "approved");
+          if (ceErr) throw ceErr; // internal_category_id column absent pre-mig → caught → categoriesAvailable=false
+          for (const e of catEntries || []) {
+            const d = e.timesheets?.date; if (!d) continue;
+            const { fy, q } = auFyQuarter(d);
+            const catId = e.internal_category_id || null;
+            const key = catId || "__untagged";
+            if (!catMap.has(key)) {
+              ensureCat(key, {
+                internalCategoryId: catId, categoryLabel: catId ? "(unknown category)" : "Untagged",
+                slug: null, costSource: "timesheet", leaveType: null, status: "active",
+                sortOrder: 9000, estimated: false, rateMissing: false,
+              });
+            }
+            addPeriod(key, fy, q, e.hours, e.cost_amount, { estimated: false });
+          }
+
+          // (b) Derived leave — Annual/Sick/RDO on the same category × FY × quarter axis (never a timesheet row).
+          // Window: caller override ?from=&to=, else earliest of (worked, per-employee leave, team RDO) → today.
+          const today = new Date().toISOString().slice(0, 10);
+          let from = typeof req.query.from === "string" && req.query.from ? req.query.from : null;
+          let to = typeof req.query.to === "string" && req.query.to ? req.query.to : today;
+          if (!from) {
+            const mins = [];
+            for (const e of catEntries || []) { const d = e.timesheets?.date; if (d) mins.push(d); }
+            const [minEmp, minTeam] = await Promise.all([
+              sb.from("workforce_employee_rdo_dates").select("rdo_date").order("rdo_date", { ascending: true }).limit(1).maybeSingle(),
+              sb.from("workforce_team_rdo_dates").select("rdo_date").order("rdo_date", { ascending: true }).limit(1).maybeSingle(),
+            ]);
+            if (minEmp?.data?.rdo_date) mins.push(minEmp.data.rdo_date);
+            if (minTeam?.data?.rdo_date) mins.push(minTeam.data.rdo_date);
+            from = mins.length ? mins.sort()[0] : today;
+          }
+          const costModel = await getCostModel(sb);
+          const leave = await deriveLeaveCost(sb, { from, to, costModel, categories: cats });
+          for (const r of leave.rows || []) {
+            const key = r.internalCategoryId || `leave:${r.leaveType}`;
+            if (!catMap.has(key)) {
+              // Leave category missing from the registry (e.g. hard-deleted) — keep history via fallback label.
+              ensureCat(key, {
+                internalCategoryId: r.internalCategoryId || null, categoryLabel: r.categoryLabel,
+                slug: null, costSource: "leave", leaveType: r.leaveType, status: "archived",
+                sortOrder: 8000, estimated: true, rateMissing: false,
+              });
+            }
+            addPeriod(key, r.fy, r.quarter, r.hours, r.cost, { estimated: true, rateMissing: r.rateMissing });
+          }
+
+          // Finalise each category: sorted periods + per-FY totals + grand totals.
+          categories = [...catMap.values()].map((c) => {
+            const prds = [...c._periods.values()]
+              .map((p) => ({ fy: p.fy, quarter: p.quarter, hours: round2(p.hours), cost: round2(p.cost), estimated: p.estimated, rateMissing: p.rateMissing }))
+              .sort((a, b) => a.fy.localeCompare(b.fy) || a.quarter - b.quarter);
+            const fm = {};
+            for (const p of prds) {
+              (fm[p.fy] ||= { fy: p.fy, hours: 0, cost: 0, rateMissing: false });
+              fm[p.fy].hours += p.hours; fm[p.fy].cost += p.cost; fm[p.fy].rateMissing = fm[p.fy].rateMissing || p.rateMissing;
+            }
+            const catFyTotals = Object.values(fm).map((x) => ({ ...x, hours: round2(x.hours), cost: round2(x.cost) })).sort((a, b) => a.fy.localeCompare(b.fy));
+            const { _periods, ...rest } = c;
+            return {
+              ...rest,
+              hours: round2(prds.reduce((s, p) => s + p.hours, 0)),
+              cost: round2(prds.reduce((s, p) => s + p.cost, 0)),
+              fyTotals: catFyTotals,
+              periods: prds,
+            };
+          }).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.categoryLabel).localeCompare(String(b.categoryLabel)));
+
+          // Director-gate cost (hours stay visible to supervisors). Mirrors chargeUpService.stripCost intent.
+          if (!isDirector) {
+            categories = categories.map((c) => ({
+              ...c, cost: null,
+              fyTotals: c.fyTotals.map((f) => ({ ...f, cost: null })),
+              periods: c.periods.map((p) => ({ ...p, cost: null })),
+            }));
+          }
+        } catch (e) {
+          if (isInternalMissingTable(e)) { categories = []; categoriesAvailable = false; }
+          else throw e;
+        }
+
+        out.push({ reference: job.reference, address: job.address, fyTotals, periods, categories, categoriesAvailable, canViewCost: isDirector });
       }
       return ok(res, { jobs: out });
     } catch (e) {
