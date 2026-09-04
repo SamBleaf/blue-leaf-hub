@@ -70,6 +70,7 @@ const ClientJourney = React.lazy(() => import("./pages/clientportal/ClientJourne
 const ClientSelections = React.lazy(() => import("./pages/clientportal/ClientSelections.jsx"));
 const ClientDocuments = React.lazy(() => import("./pages/clientportal/ClientDocuments.jsx"));
 const ClientMessages = React.lazy(() => import("./pages/clientportal/ClientMessages.jsx"));
+const ClientDesignTeam = React.lazy(() => import("./pages/clientportal/ClientDesignTeam.jsx"));
 const ClientMyHome = React.lazy(() => import("./pages/clientportal/ClientMyHome.jsx"));
 // Review-only index at /ui-review — gated so production tree-shakes it out entirely.
 const UiReviewIndex =
@@ -220,6 +221,14 @@ export default function App() {
                   element={
                     <Suspense fallback={<div className="min-h-[40vh]" />}>
                       <ClientMessages />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="design-team"
+                  element={
+                    <Suspense fallback={<div className="min-h-[40vh]" />}>
+                      <ClientDesignTeam />
                     </Suspense>
                   }
                 />

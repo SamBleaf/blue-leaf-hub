@@ -37,6 +37,7 @@ const ICONS = {
     "M11 4a1 1 0 011-1h0a1 1 0 011 1v2.5M5 12l7-7 7 7M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7M9 21v-6h6v6",
   documents: "M4 4a2 2 0 012-2h7l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4zM13 2v5h5",
   messages: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z",
+  team: "M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-4-4 4 4 0 004 4zm7-4a3 3 0 11-3-3 3 3 0 013 3z",
   myhome:
     "M3 12l9-9 9 9M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10M9 21v-6a1 1 0 011-1h4a1 1 0 011 1v6",
 };
@@ -46,6 +47,7 @@ const BUILD_NAV = [
   { to: "", label: "Home", short: "Home", icon: ICONS.home, end: true },
   { to: "actions", label: "My Actions", short: "Actions", icon: ICONS.actions },
   { to: "journey", label: "Project Journey", short: "Journey", icon: ICONS.journey },
+  { to: "design-team", label: "Design Team", short: "Team", icon: ICONS.team },
   { to: "selections", label: "Selections", short: "Select", icon: ICONS.selections },
   { to: "documents", label: "Documents", short: "Docs", icon: ICONS.documents },
   { to: "messages", label: "Messages", short: "Messages", icon: ICONS.messages },

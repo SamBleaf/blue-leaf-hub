@@ -1075,6 +1075,71 @@ export function registerPortalV2Routes(app) {
     }
   });
 
+  // ── Design team (CV-3c) — the client's BROKERED view of the consultant comms. Blue Leaf relays
+  //    between the client (here, in the portal) and the consultants (on email/Hub); only messages the
+  //    operator marked client_visible cross over. Resolves the project's job → lead → consultant_messages
+  //    (CV-3a). Client replies land back in the same Hub thread as a client-authored, portal-channel
+  //    message and email the office. Degrades soft if the lead/comms don't exist yet. ────────────────
+  const DT_ROLE_LABELS = {
+    architect: "Architect", interior_designer: "Interior Designer", lighting: "Lighting Designer",
+    sanitary: "Bathroom & Sanitary", engineer: "Structural Engineer", energy: "Energy / NatHERS",
+    land_surveyor: "Land Surveyor", soil_geotech: "Soil / Geotech", other: "Consultant",
+  };
+  const DT_CLIENT_FACING = ["architect", "interior_designer", "lighting", "sanitary"];
+  async function resolveLeadForProject(sb, projectId) {
+    const { data: proj } = await sb.from("projects").select("job_id").eq("id", projectId).maybeSingle();
+    if (!proj?.job_id) return null;
+    const { data: lead } = await sb.from("leads").select("id, consultant_roster").eq("job_id", proj.job_id).maybeSingle();
+    return lead || null;
+  }
+
+  app.get(`${base}/design-team`, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const lead = await resolveLeadForProject(sb, req.portalSession.projectId);
+      if (!lead) return ok(res, { disciplines: [], messages: [] });
+      const roster = Array.isArray(lead.consultant_roster) ? lead.consultant_roster : [];
+      const disciplines = roster
+        .filter((r) => DT_CLIENT_FACING.includes(r.role))
+        .map((r) => ({ role: r.role, label: DT_ROLE_LABELS[r.role] || "Consultant" }));
+      let out = [];
+      const { data, error } = await sb.from("consultant_messages")
+        .select("id, consultant_role, participant, subject, body, created_at")
+        .eq("lead_id", lead.id).eq("client_visible", true)
+        .order("created_at", { ascending: true });
+      if (!error) out = (data || []).map((m) => ({ ...m, role_label: DT_ROLE_LABELS[m.consultant_role] || "Design team" }));
+      return ok(res, { disciplines, messages: rowsToCamel(out) });
+    } catch (e) { return err(res, 500, e.message || "Failed to load the design team"); }
+  });
+
+  app.post(`${base}/design-team/messages`, requirePortalLogin, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const { project } = req.portalSession;
+      const body = req.body?.body ? String(req.body.body).trim() : "";
+      const role = req.body?.role ? String(req.body.role).trim() : "other";
+      if (!body) return err(res, 400, "Message body required");
+      const lead = await resolveLeadForProject(sb, project.id);
+      if (!lead) return err(res, 409, "Your design team isn't set up yet.");
+      const { data, error } = await sb.from("consultant_messages").insert({
+        lead_id: lead.id, consultant_role: role || "other", participant: "client",
+        channel: "portal", direction: "inbound", body, client_visible: true,
+        author_name: project.portal_client_name || "Client",
+      }).select("id, consultant_role, participant, subject, body, created_at").maybeSingle();
+      if (error) return err(res, 500, translateDbError(error));
+      try {
+        await sendPlainMail({
+          to: "admin@blueleafbuilding.com.au",
+          subject: `Portal — client message to the design team — ${project.address || project.id}`,
+          text: `${project.portal_client_name || "The client"} sent a message about ${DT_ROLE_LABELS[role] || "the design team"}:\n\n${body}\n\nReply in the Hub (Consultants → Comms).`,
+        });
+      } catch (_) { /* non-fatal */ }
+      return ok(res, { message: rowToCamel(data) });
+    } catch (e) { return err(res, 500, e.message || "Failed to send"); }
+  });
+
   // ── My Home (post-handover) ────────────────────────────────────────────────
   app.get(`${base}/my-home`, async (req, res) => {
     try {
