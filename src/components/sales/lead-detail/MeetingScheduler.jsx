@@ -25,6 +25,9 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
   const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invitePreview, setInvitePreview] = useState(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
 
   const label = MEETING_TYPE_LABELS[meetingType] || "Meeting";
 
@@ -65,6 +68,21 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
     try { await navigator.clipboard.writeText(data.url); setCopyMsg("Booking link copied ✓"); }
     catch { setCopyMsg(data.url); }
     setTimeout(() => setCopyMsg(""), 5000);
+  }
+
+  async function openInvite() {
+    setInviteBusy(true); setMsg(null);
+    const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/meetings/${meetingType}/invite-email`, { preview: true });
+    setInviteBusy(false);
+    if (!ok) { setMsg({ type: "error", text: error || "Couldn't build the email." }); return; }
+    setInvitePreview(data?.preview || null); setInviteOpen(true);
+  }
+  async function sendInvite() {
+    setInviteBusy(true); setMsg(null);
+    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/meetings/${meetingType}/invite-email`, { subject: invitePreview?.subject, text: invitePreview?.text });
+    setInviteBusy(false);
+    if (!ok) { setMsg({ type: "error", text: error || "Couldn't send the email." }); return; }
+    setInviteOpen(false); setMsg({ type: "success", text: "Booking email sent." });
   }
 
   async function schedule(iso) {
@@ -116,6 +134,9 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={openInvite} disabled={inviteBusy} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+          {inviteBusy ? "…" : "Email booking link"}
+        </button>
         <button type="button" onClick={copyLink} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page">
           Copy client booking link
         </button>
@@ -135,6 +156,26 @@ export default function MeetingScheduler({ lead, meetingType, reload }) {
         </div>
       )}
       {msg && <p className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
+
+      {inviteOpen && invitePreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setInviteOpen(false)}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-card bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-semibold text-ink mb-1">{label} — booking email</h4>
+            <p className="text-xs text-muted mb-3">To: {lead.email || "—"}</p>
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Subject</label>
+            <input value={invitePreview.subject || ""} onChange={(e) => setInvitePreview((p) => ({ ...p, subject: e.target.value }))}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink mb-3 focus-ring" />
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">Message</label>
+            <textarea value={invitePreview.text || ""} onChange={(e) => setInvitePreview((p) => ({ ...p, text: e.target.value }))} rows={10}
+              className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page leading-relaxed focus-ring" />
+            <p className="text-[11px] text-muted mt-1">Edits apply to this send only. Behind LEAD_MAILBOX_ENABLED.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setInviteOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Close</button>
+              <button type="button" onClick={sendInvite} disabled={inviteBusy} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{inviteBusy ? "Sending…" : "Send email"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,9 @@ import { buildLeadBookingLink, MEETING_REGISTRY, meetingRegistryEntry, meetingTy
 import { calcomApiConfigured, createCalcomBooking, getAvailableSlots, getLeadBookings, listEventTypes } from "./calcomApi.mjs";
 import { projectLeadMeeting } from "./calcomProjection.mjs";
 import { calcomConfig } from "./calcom.mjs";
+import { sendPlainMail } from "./notifyMail.mjs";
+import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
+import { buildMeetingInviteEmail } from "./meetingInviteEmail.mjs";
 
 const TABLE_MISSING = new Set(["42P01", "42703", "PGRST205"]); // table/column absent (pre-mig-185)
 const CAL_TIMEZONE = (process.env.CAL_TIMEZONE || "Australia/Adelaide").trim(); // for human-readable log notes
@@ -82,6 +85,42 @@ export function registerCalcomRoutes(app) {
       .select("id, name, first_name, last_name, email").eq("id", req.params.id).maybeSingle();
     if (error || !lead) return err(res, 404, "Lead not found");
     ok(res, { url: buildLeadBookingLink(lead, meetingType), meetingType, label: meetingRegistryEntry(meetingType).label });
+  });
+
+  // Email the client the booking link for a meeting — a warm templated invite (preview → send, the
+  // operator can edit the copy). Preview always works; sending is gated by LEAD_MAILBOX_ENABLED.
+  app.post("/api/sales/leads/:id/meetings/:meetingType/invite-email", requireAuth, async (req, res) => {
+    const db = sb(); if (!db) return err(res, 503, "Supabase not configured");
+    const meetingType = req.params.meetingType;
+    if (!Object.prototype.hasOwnProperty.call(MEETING_REGISTRY, meetingType)) return err(res, 400, "Unknown meeting type.");
+    const dryRun = req.body?.preview === true;
+    if (!dryRun && process.env.LEAD_MAILBOX_ENABLED !== "true") {
+      return err(res, 503, "Client email sending is turned off. Set LEAD_MAILBOX_ENABLED to send — preview still works.");
+    }
+    const { data: lead, error } = await db.from("leads").select("*").eq("id", req.params.id).maybeSingle();
+    if (error || !lead) return err(res, 404, "Lead not found");
+    const to = String(lead.email || "").trim();
+    if (!dryRun && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err(res, 400, "This lead has no valid email address.");
+    // The design meeting names the selected designer if there is one.
+    let designerName = null;
+    if (meetingType === "designer_meeting" && lead.selected_designer_contact_id) {
+      const { data: d } = await db.from("crm_contacts").select("first_name, last_name, company").eq("id", lead.selected_designer_contact_id).maybeSingle();
+      designerName = d ? ([d.first_name, d.last_name].filter(Boolean).join(" ") || d.company || null) : null;
+    }
+    const sig = await getUserSignature(db, req.caller?.id || null);
+    const built = buildMeetingInviteEmail(lead, meetingType, { signatureFooter: formatSignatureFooter(sig), designerName });
+    if (dryRun) return ok(res, { preview: { subject: built.subject, text: built.text, bookingLink: built.bookingLink } });
+    const subject = typeof req.body?.subject === "string" && req.body.subject.trim() ? req.body.subject : built.subject;
+    const text = typeof req.body?.text === "string" && req.body.text.trim() ? req.body.text : built.text;
+    const messageId = `<meeting-${lead.id}-${meetingType}-${Date.now()}@blueleafbuilding.com.au>`;
+    try {
+      const r = await sendPlainMail({ to, subject, text, messageId });
+      try { await db.from("correspondence").insert({ lead_id: lead.id, direction: "outbound", subject, body: text, email_from: (process.env.SMTP_FROM || "admin@blueleafbuilding.com.au").trim(), email_to: to, message_id: messageId }); } catch { /* pre-mig-175 */ }
+      try { await db.from("lead_activities").insert({ lead_id: lead.id, activity_type: "email", summary: `Booking email sent: ${built.subject}` }); } catch { /* best-effort */ }
+      return ok(res, { sent: true, transport: r?.transport });
+    } catch (e) {
+      return err(res, 400, e?.message || "Could not send the email.");
+    }
   });
 
   // Upcoming meetings across all leads — the Sales agenda (Phase 2 UI). days window (default 21).
