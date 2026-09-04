@@ -875,9 +875,31 @@ export const CARPENTRY_PROJECT_TYPES = {
 };
 
 // Permanent internal carpentry-job references (mig 125). BL-CHARGEUP holds site-level
-// charge-up sub-jobs (mig 145) and gets its own detail layout; BL-INTERNAL keeps the
-// standard tabs even though both are project_type='other'.
+// charge-up sub-jobs (mig 145); BL-INTERNAL holds cost-only internal categories (mig 200).
+// Both are project_type='other' and each gets its own detail layout instead of the standard tabs.
 export const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
+
+// BL-INTERNAL swallows every non-site hour, split into six cost-only categories (mig 200):
+// worker-logged ATEC / Logistics / Personal work + derived Annual / Sick / RDO leave. It gets a
+// bespoke cost-by-category-by-FY/quarter report layout (InternalJobDetail), no charge-out/margin.
+export const INTERNAL_REFERENCE = "BL-INTERNAL";
+
+/** Leave types on the internal-category leave spine (migs 200/201). Annual / Sick / RDO are the
+ *  three derived (non-worked) categories costed from the leave/RDO spine; unpaid days show at $0.
+ *  LEAVE_TYPE_LABELS double as archive-safe fallbacks so a leave category's historical report line
+ *  survives even if the category is removed from the registry (plan §10 / archive semantics). */
+export const LEAVE_TYPES = {
+  ANNUAL: "annual",
+  SICK:   "sick",
+  RDO:    "rdo",
+  UNPAID: "unpaid",
+};
+export const LEAVE_TYPE_LABELS = {
+  annual: "Annual leave",
+  sick:   "Sick leave",
+  rdo:    "RDO",
+  unpaid: "Unpaid leave",
+};
 
 export const CARPENTRY_PROJECT_TYPE_LABELS = {
   frame:        "Frame Only",

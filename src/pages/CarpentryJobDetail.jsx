@@ -7,6 +7,7 @@ import { apiFetch, apiPatch, apiPost, apiDelete } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import ChargeUpJobDetail from "./ChargeUpJobDetail.jsx";
+import InternalJobDetail from "./InternalJobDetail.jsx";
 import CarpentrySiteDiary from "../components/carpentry/CarpentrySiteDiary.jsx";
 import WhsPackTab from "../components/carpentry/WhsPackTab.jsx";
 import JobPlansCard from "../components/JobPlansCard.jsx";
@@ -20,6 +21,7 @@ import {
   CARPENTRY_COST_TYPES,
   CARPENTRY_COST_TYPE_LABELS,
   CHARGE_UP_REFERENCE,
+  INTERNAL_REFERENCE,
 } from "../lib/constants.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2394,9 +2396,12 @@ export default function CarpentryJobDetail() {
   if (error)   return <div className="p-10 text-center text-red-600 text-sm">{error}</div>;
   if (!job)    return <div className="p-10 text-center text-muted text-sm">Job not found.</div>;
 
-  // BLB Charge Up gets its own layout (site list + per-site hours), not the standard tabs.
-  // Branch on the reference specifically — BL-INTERNAL is also project_type='other' but keeps the tabs.
+  // The two permanent internal jobs get their own layouts, not the standard carpentry tabs.
+  // Branch on the reference specifically (both are project_type='other'):
+  //   • BLB Charge Up   → site list + per-site hours/charge-out
+  //   • BL-INTERNAL     → cost-only category report (worked + derived leave), by FY/quarter
   if (job.reference === CHARGE_UP_REFERENCE) return <ChargeUpJobDetail job={job} />;
+  if (job.reference === INTERNAL_REFERENCE) return <InternalJobDetail job={job} />;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
