@@ -616,10 +616,10 @@ function dropboxApiArg(obj) {
   return JSON.stringify(obj).replace(/[^\x00-\x7F]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
-export async function dropboxUploadBuffer(accessToken, dropboxPath, buffer, { autorename = true } = {}) {
+export async function dropboxUploadBuffer(accessToken, dropboxPath, buffer, { autorename = true, mode = "add" } = {}) {
   const arg = dropboxApiArg({
     path: dropboxPath,
-    mode: "add",
+    mode,          // "add" (default) keeps existing files; "overwrite" replaces (regenerated docs)
     autorename,
     mute: true
   });
@@ -973,9 +973,10 @@ export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderP
     return { copied, failed };
   }
   try {
-    const { data: docs } = await sb.from("lead_documents").select("filename, storage_path").eq("lead_id", leadId);
+    const { data: docs } = await sb.from("lead_documents").select("filename, storage_path, document_type").eq("lead_id", leadId);
     for (const doc of docs || []) {
       const fileName = String(doc.filename || "").trim() || "document";
+      const isConcept = doc.document_type === "concept_agreement";
       try {
         const { data: blob, error: dlErr } = await sb.storage.from("lead-documents").download(doc.storage_path);
         if (dlErr || !blob) { failed += 1; continue; }
@@ -996,8 +997,10 @@ export async function backfillLeadDocsToClientFolder({ sb, leadId, clientFolderP
           } catch { /* conversion unavailable/failed — upload the DOCX as-is */ }
         }
         const destPath = `${conceptRoot}/${outName}`;
-        if (await pathExists(token, destPath)) continue;
-        await dropboxUploadBuffer(token, destPath, buffer, { autorename: false });
+        // The concept agreement is regenerated (designer/fee changes) → OVERWRITE so the client folder
+        // always holds the latest. Other docs are skipped if already present (never clobber edits).
+        if (!isConcept && await pathExists(token, destPath)) continue;
+        await dropboxUploadBuffer(token, destPath, buffer, { autorename: false, mode: isConcept ? "overwrite" : "add" });
         copied += 1;
       } catch (e) {
         failed += 1;

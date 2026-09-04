@@ -1237,6 +1237,12 @@ export function registerSalesRoutes(app) {
     try { await sb.from("lead_documents").insert({ lead_id: req.params.id, filename, storage_path: storagePath, mime_type: DOCX_MIME, document_type: "concept_agreement", uploaded_by: req.caller?.id || null }); } catch { /* pre-mig-181 */ }
     // stamp the lead (needs mig 179 — degrades to null lead if not yet applied).
     const { data: updated } = await sb.from("leads").update({ concept_agreement_status: "generated", concept_agreement_generated_at: new Date().toISOString(), concept_agreement_document_path: storagePath }).eq("id", req.params.id).select().single();
+    // If the client folder already exists (regenerating after acceptance), push the new agreement to
+    // Dropbox immediately — don't make the operator re-accept just to sync the latest version.
+    if (dropboxConfigured() && lead.client_folder_path) {
+      try { await backfillLeadDocsToClientFolder({ sb, leadId: req.params.id, clientFolderPath: lead.client_folder_path }); }
+      catch (e) { console.warn("[concept-agreement/generate] Dropbox push failed:", e?.message || e); }
+    }
     const { data: signed } = await sb.storage.from("lead-documents").createSignedUrl(storagePath, 3600);
     // Open in Google Docs for final edits (like the fee proposal), when Drive is configured.
     let editUrl = null;
@@ -1270,14 +1276,24 @@ export function registerSalesRoutes(app) {
       .eq("id", req.params.id).select().single();
     if (uErr) return err(res, 400, translateDbError(uErr));
     try { await sb.from("lead_activities").insert({ lead_id: req.params.id, activity_type: "note", summary: "Concept agreement accepted" }); } catch { /* best-effort */ }
-    let provisioning = { folder: false };
-    if (dropboxConfigured() && !updated?.client_folder_created_at) {
+    let provisioning = { folder: false, uploaded: 0 };
+    if (dropboxConfigured()) {
       try {
-        const clientName = updated?.name || [updated?.first_name, updated?.last_name].filter(Boolean).join(" ");
-        const { path, link } = await ensureLeadClientFolder({ clientName, leadId: req.params.id, suburb: updated?.suburb });
-        await sb.from("leads").update({ client_folder_path: path, client_folder_link: link, client_folder_created_at: new Date().toISOString() }).eq("id", req.params.id);
-        await backfillLeadDocsToClientFolder({ sb, leadId: req.params.id, clientFolderPath: path });
-        provisioning = { folder: true, path, link };
+        let path = updated?.client_folder_path;
+        let link = updated?.client_folder_link;
+        // Create the folder the first time; if it already exists, reuse it — but ALWAYS push the docs,
+        // so a re-generated concept agreement lands in the client folder on every acceptance.
+        if (!updated?.client_folder_created_at || !path) {
+          const clientName = updated?.name || [updated?.first_name, updated?.last_name].filter(Boolean).join(" ");
+          const folder = await ensureLeadClientFolder({ clientName, leadId: req.params.id, suburb: updated?.suburb });
+          path = folder.path; link = folder.link;
+          await sb.from("leads").update({ client_folder_path: path, client_folder_link: link, client_folder_created_at: new Date().toISOString() }).eq("id", req.params.id);
+          provisioning.folder = true;
+        }
+        if (path) {
+          const bf = await backfillLeadDocsToClientFolder({ sb, leadId: req.params.id, clientFolderPath: path });
+          provisioning = { ...provisioning, path, link, uploaded: bf?.copied ?? 0 };
+        }
       } catch (e) {
         console.warn("[concept-agreement/accept] folder provisioning failed:", e?.message || e);
       }

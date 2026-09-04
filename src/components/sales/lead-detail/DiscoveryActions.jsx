@@ -50,10 +50,12 @@ export default function DiscoveryActions({ lead, reload }) {
   async function markAccepted() {
     if (!window.confirm("Mark the concept agreement as accepted? This creates the client folder.")) return;
     setBusy(true); setMsg(null);
-    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-agreement/accept`, {});
+    const { ok, data, error } = await apiPost(`/api/sales/leads/${lead.id}/concept-agreement/accept`, {});
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not accept." }); return; }
-    setMsg({ type: "success", text: "Concept agreement accepted — client folder created." }); await reload();
+    const p = data?.provisioning || {};
+    const tail = p.folder ? "client folder created." : p.uploaded ? "concept agreement uploaded to the client folder." : "recorded.";
+    setMsg({ type: "success", text: `Concept agreement accepted — ${tail}` }); await reload();
   }
 
   return (
