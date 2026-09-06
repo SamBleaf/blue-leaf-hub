@@ -32,7 +32,9 @@ export default function ConceptStage({ lead, patch, reload }) {
     setBusy(false);
     if (ok) reload?.();
   }
-  function setStatus(s) { patch({ concept_design_status: status === s ? null : s }); }
+  // Forward-only: clicking a step sets it; clicking the already-active step is a no-op
+  // (never silently clears the design status). Correcting a mis-click = click an earlier step.
+  function setStatus(s) { if (status !== s) patch({ concept_design_status: s }); }
 
   function saveRows(next) { setRows(next); patch({ selections_schedule: next }); }
   const addRow = () => saveRows([...rows, { area: "", item: "", notes: "" }]);

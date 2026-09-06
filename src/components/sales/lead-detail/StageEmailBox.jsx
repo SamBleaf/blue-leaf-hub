@@ -11,27 +11,14 @@ import { apiPost } from "../../../lib/apiFetch.js";
 // stage key → the emails available in its dropdown. { label, path (endpoint), which (template key) }.
 // Enquiry = a call (no email); Consultants = handled by the per-consultant comms threads.
 const STAGE_EMAILS = {
-  qualify: [
-    { label: "Qualify intro (with booking link)", path: "qualify-email/send", which: null },
-  ],
-  discovery: [
-    { label: "Discovery follow-up + Concept Agreement", path: "discovery-email/send", which: null },
-  ],
-  winning_offer: [ // Concept
-    { label: "Brief questions (before the brief meeting)", path: "concept-email/send", which: "brief_questions" },
-    { label: "Interim concept update", path: "concept-email/send", which: "interim" },
-    { label: "Concept approval follow-up", path: "concept-email/send", which: "followup" },
-  ],
+  // Stages with a dedicated email sender (Qualify, Discovery, Concept, and the Tender / accepted-concepts
+  // buttons) are intentionally NOT listed here — their own panel owns those sends, so the box would only
+  // duplicate them. The box carries the pipeline-gap emails that have no dedicated card of their own.
   fee_proposal: [ // PTSA / Plans
-    { label: "Accepted-concepts acknowledgement", path: "concept-email/send", which: "accepted_concepts" },
     { label: "PTSA covering email", path: "pipeline-email/send", which: "ptsa_covering" },
   ],
   tender: [
     { label: "Tender started (client update)", path: "pipeline-email/send", which: "tender_started" },
-    { label: "Proposal follow-up (24h)", path: "tender-email/send", which: "proposal_followup" },
-    { label: "Client review follow-up", path: "tender-email/send", which: "review_followup" },
-    { label: "Contract sent", path: "tender-email/send", which: "contract_sent" },
-    { label: "Unsigned contract follow-up", path: "tender-email/send", which: "contract_followup" },
   ],
   won: [
     { label: "Contract signed — welcome", path: "pipeline-email/send", which: "contract_signed" },
@@ -44,6 +31,9 @@ const STAGE_EMAILS = {
     { label: "Lost close-off", path: "pipeline-email/send", which: "lost" },
   ],
 };
+
+// Stages whose client email is owned by a dedicated in-stage panel (so the box defers to it).
+const DEDICATED_SENDER_STAGES = new Set(["qualify", "discovery", "winning_offer"]);
 
 export default function StageEmailBox({ lead }) {
   const templates = STAGE_EMAILS[lead.stage] || [];
@@ -82,7 +72,11 @@ export default function StageEmailBox({ lead }) {
       <div className="rounded-card border border-hairline bg-surface p-4">
         <h3 className="section-label mb-1">Stage email</h3>
         <p className="text-xs text-muted">
-          No client email at this stage.{lead.stage === "consultants" ? " Consultant messages go through the per-consultant comms threads above." : lead.stage === "enquiry" ? " The Enquiry step is a call." : ""}
+          {DEDICATED_SENDER_STAGES.has(lead.stage)
+            ? "This stage has its own client-email panel above — send it from there."
+            : lead.stage === "consultants" ? "Consultant messages go through the per-consultant comms threads above."
+            : lead.stage === "enquiry" ? "The Enquiry step is a call — no client email yet."
+            : "No client email at this stage."}
         </p>
       </div>
     );

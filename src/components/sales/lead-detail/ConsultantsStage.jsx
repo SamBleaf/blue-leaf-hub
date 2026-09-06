@@ -22,7 +22,9 @@ import MeetingScheduler from "./MeetingScheduler.jsx";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
 const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key) || { label: key, feeds: "none" };
-const nextStatus = (s) => DELIVERABLE_STATUS_ORDER[(DELIVERABLE_STATUS_ORDER.indexOf(s) + 1) % DELIVERABLE_STATUS_ORDER.length];
+// Clamp forward (no wrap): a deliverable at the final status stays there rather than silently
+// resetting to pending on an extra click.
+const nextStatus = (s) => { const i = DELIVERABLE_STATUS_ORDER.indexOf(s); return DELIVERABLE_STATUS_ORDER[Math.min(i + 1, DELIVERABLE_STATUS_ORDER.length - 1)]; };
 const isDoneStatus = (s) => s === "received" || s === "issued";
 // Global key → label lookup (keys are unique across the role templates).
 const DELIVERABLE_LABELS = {};

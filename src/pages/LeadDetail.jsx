@@ -105,38 +105,43 @@ const PTSA_STATUS_LABELS = {
 // provisions the job folder. The dropdown offers draft / sent / declined only.
 const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 
+// Each gate row: { field, label (the requirement), check, hint (plain-English HOW to satisfy it — shown
+// under an unmet row + surfaced as the header "Next:" step) }.
 const GATE_REQUIREMENTS = {
   qualify:       [],
   discovery:     [
-    { field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5 },
+    { field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5, hint: "Score the qualifying questions in the scorecard above" },
     // Sales OS Slice 1 hard gate — a booked build conversation. Only enforced once migration 174 is
     // applied (the column is present on the lead); pre-migration it passes so nothing is blocked early.
-    { field: "discovery_meeting_booked_at", label: "Build conversation booked", check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at },
+    { field: "discovery_meeting_booked_at", label: "Build conversation booked", check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at, hint: "Send the qualify email; the client books via the link (or Check for booking)" },
   ],
   winning_offer: [
     // Sales OS Discovery hard gate — only enforced once mig 179 is applied (column present); pre-mig it passes.
-    { field: "concept_agreement_status", label: "Concept agreement accepted", check: l => !("concept_agreement_status" in l) || l.concept_agreement_status === "accepted" },
-    { field: "discovery_notes",   label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim() },
-    { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage },
-    { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date },
+    { field: "concept_agreement_status", label: "Concept agreement accepted", check: l => !("concept_agreement_status" in l) || l.concept_agreement_status === "accepted", hint: "Generate the concept agreement, then Mark accepted" },
+    { field: "discovery_notes",   label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim(), hint: "Capture the discovery notes below" },
+    { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage, hint: "Set the Design stage (Concept readiness in the focus card)" },
+    { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date, hint: "Set the client's desired start date (Concept readiness)" },
   ],
   fee_proposal:  [
     // Concept exit → PTSA / Plans: design approved + pathway explained + the pre-con fee set.
-    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved" },
-    { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained },
-    { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null },
+    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Mark the concept design Approved once the client signs off" },
+    { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained, hint: "Tick 'PTSA / Plans pathway explained' after walking the client through it" },
+    { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null, hint: "Enter the pre-construction fee in the Concept card" },
   ],
-  consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed" }],
+  consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed", hint: "Send the PTSA, then Mark PTSA as signed (uploads the signed PDF)" }],
   tender:        [
     // Consultants exit → Tender (CW-2): full document set in + Fixed-Price proposal generated
     // (+ final presentation booked, surfaced advisorily in the stage). Certification moved to Won.
-    { field: "consultant_roster", label: "Consultant documents complete", check: l => consultantDocsReady(l.consultant_roster) },
-    { field: "fee_proposal_id", label: "Fixed-Price proposal generated", check: l => !!l.fee_proposal_id },
-    { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
-    { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim() },
-    { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id },
+    { field: "consultant_roster", label: "Consultant documents complete", check: l => consultantDocsReady(l.consultant_roster), hint: "Advance each consultant's deliverables to received/issued" },
+    { field: "fee_proposal_id", label: "Fixed-Price proposal generated", check: l => !!l.fee_proposal_id, hint: "Generate the Fixed-Price proposal (button in the Consultants stage)" },
+    { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued, hint: "Issue the provisional F&F schedule to suppliers, then tick 'issued'" },
+    { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim(), hint: "Add the site address in Lead details" },
+    { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id, hint: "Create the job from this lead (button below)" },
   ],
-  won:           [],
+  // Tender exit → Won: a signed building contract is the hard requirement (no more one-click finish).
+  won:           [
+    { field: "contract_status", label: "Building contract signed", check: l => !("contract_status" in l) || l.contract_status === "signed", hint: "Capture the signed building contract in the Tender stage" },
+  ],
 };
 
 function nextStage(current) {
@@ -2447,22 +2452,25 @@ export default function LeadDetail() {
                     {gateChecks.map((g, i) => {
                       const pass = g.check(lead);
                       return (
-                        <li key={i} className={`flex items-center gap-2 text-sm ${pass ? "text-green-700" : "text-danger"}`}>
-                          <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${pass ? "bg-green-100 text-green-600" : "bg-red-50 text-danger"}`}>
-                            {pass ? "✓" : "✗"}
-                          </span>
-                          <span className={pass ? "" : "font-medium"}>{g.label}</span>
+                        <li key={i} className={`text-sm ${pass ? "text-green-700" : "text-danger"}`}>
+                          <div className="flex items-center gap-2">
+                            <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${pass ? "bg-green-100 text-green-600" : "bg-red-50 text-danger"}`}>
+                              {pass ? "✓" : "✗"}
+                            </span>
+                            <span className={pass ? "" : "font-medium"}>{g.label}</span>
+                          </div>
+                          {!pass && g.hint && <p className="ml-7 mt-0.5 text-[11px] font-normal text-muted">{g.hint}</p>}
                         </li>
                       );
                     })}
                   </ul>
                 )}
-                {lead.stage === "fee_proposal" && !lead.fee_proposal_id && (
+                {lead.stage === "consultants" && !lead.fee_proposal_id && (
                   <Link
                     to="/tender-manager/fee-proposal/new"
                     className="block w-full text-center rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3"
                   >
-                    Create Fee Proposal →
+                    Generate Fixed-Price proposal →
                   </Link>
                 )}
                 {next === "tender" && !lead.job_id && (
@@ -2642,14 +2650,26 @@ export default function LeadDetail() {
 
   // ── Pass 3A: one obvious primary action (reuses existing handlers) ──────────
   let primaryAction = null;
-  if (lead.stage === "won") {
+  const firstUnmet = gateChecks.find((g) => !g.check(lead));
+  const scrollToFocus = () => { try { document.getElementById("lead-focus")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* noop */ } };
+  if (lead.stage === "enquiry") {
+    primaryAction = null; // the Enquiry call script owns the Proceed / Nurture / Lost decision
+  } else if (lead.stage === "won") {
     primaryAction = lead.job_id
       ? { label: "View job dashboard →", onClick: () => nav(`/finance/jobs/${lead.job_id}`) }
       : { label: creatingJob ? "Creating…" : "Create Job from Lead →", onClick: createJobFromLead, disabled: creatingJob || !lead.site_address?.trim() };
   } else if (lead.stage === "tender") {
     primaryAction = { label: creatingJob ? "Setting up…" : "Proceed to RFQ Engine →", onClick: startTenderRfq, disabled: creatingJob || !lead.site_address?.trim() };
   } else if (next) {
-    primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage, disabled: !gatePass || (showSiteAddressWarning && next === "tender") };
+    // The ONE obvious next step. If the exit gate isn't met, name the next requirement + jump to the
+    // work — an ACTIVE pointer, not a dead greyed-out "Move to X". Only once met is it the advance.
+    if (gatePass && !(showSiteAddressWarning && next === "tender")) {
+      primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage };
+    } else if (firstUnmet) {
+      primaryAction = { label: `Next: ${firstUnmet.hint || firstUnmet.label}`, onClick: scrollToFocus };
+    } else {
+      primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage, disabled: true };
+    }
   }
 
   // ── WON special case — success marker + hand-off CTAs (no "Next: Won →") ────
@@ -2667,7 +2687,6 @@ export default function LeadDetail() {
         ) : (
           <button type="button" onClick={createJobFromLead} disabled={creatingJob || !lead.site_address?.trim()} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{creatingJob ? "Creating…" : "Create Job from Lead →"}</button>
         )}
-        <button type="button" onClick={() => nav("/tender-manager/board")} className="w-full rounded-lg border border-hairline px-4 py-2 text-sm font-semibold text-ink hover:bg-page">Hand off to Tender Manager</button>
       </div>
       {!lead.job_id && !lead.site_address?.trim() && <p className="mt-2 text-center text-[11px] font-medium text-orange-600">Add site address before creating a job.</p>}
     </div>
@@ -2677,7 +2696,7 @@ export default function LeadDetail() {
   const focusBlockId = { enquiry: "qualifying", qualify: "qualifying", discovery: "discovery", winning_offer: "winning_offer", fee_proposal: "ptsa" }[lead.stage] || null;
   const conversationsInFocus = lead.stage === "discovery"; // conversations live in the Discovery focus, not the Activity group
   const focusEl = focusShown ? (
-    <LeadNextActionCard stageLabel={stageMeta?.label}><LeadManagementStrip lead={lead} patch={patch} />{archTenderBlock}{focusContent}<StageEmailBox lead={lead} /></LeadNextActionCard>
+    <LeadNextActionCard id="lead-focus" stageLabel={stageMeta?.label}>{archTenderBlock}{focusContent}<StageEmailBox lead={lead} /><LeadManagementStrip lead={lead} patch={patch} /></LeadNextActionCard>
   ) : null;
   const nextActionEl = lead.stage === "won" ? wonCard : advanceBlock;
 
