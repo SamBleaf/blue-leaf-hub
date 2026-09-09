@@ -52,6 +52,49 @@ import { INTERNAL_REFERENCE, deriveLeaveCost, listCategories, isMissingTable as 
 const MARGIN_TARGET = { labour: 0.25, material: 0.20 };
 const catSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
 
+// ── Finance → carpentry read-through (Phase 0 / Issue 3) ────────────────────────
+// Finance allocates supplier invoices to a carpentry job by writing ONLY
+// financial_documents (carpentry_job_id + carpentry_cost_category, financeRoutes.mjs:713-723) —
+// it never writes carpentry_job_costs. So an approved invoice was invisible to /summary and
+// /budget (which read only carpentry_job_costs). We read those approved docs through here so their
+// material $ tally against the job total and, where the category name maps to a material budget
+// line, against that line.
+//   DOUBLE-COUNT GUARD (source isolation): finance invoices live ONLY in financial_documents and
+//   manual entries ONLY in carpentry_job_costs — two disjoint tables. A spend summed here is never
+//   also summed as a manual carpentry_job_cost, so totals stay source-labelled (source:'finance'
+//   vs the manual row's own 'manual'/'xero'). Operational rule: never enter the same invoice both
+//   as a finance allocation AND a manual cost.
+//   FAIL-SOFT: pre-mig-088/089 (carpentry_job_id / carpentry_cost_category absent) or if
+//   financial_documents itself is missing, this returns empties and callers keep their prior
+//   carpentry_job_costs-only behaviour — no migration required for this fix.
+const FINANCE_APPROVED_STATUSES = ["approved", "filed", "xero_synced"]; // mirrors financeRoutes.mjs:1059
+
+async function readFinanceCarpentryCosts(sb, jobId) {
+  try {
+    const { data, error } = await sb
+      .from("financial_documents")
+      .select("id, carpentry_cost_category, amount_ex_gst, amount_total, supplier_name, invoice_number, invoice_date, status, created_at")
+      .eq("carpentry_job_id", jobId)
+      .in("status", FINANCE_APPROVED_STATUSES);
+    if (error) throw error;
+    const rows = data || [];
+    const byCategory = {}; // { categoryName | "" (unlinked) : summed ex-GST amount }
+    let total = 0;
+    for (const d of rows) {
+      const amt = Number(d.amount_ex_gst ?? d.amount_total ?? 0) || 0;
+      total += amt;
+      const key = d.carpentry_cost_category || "";
+      byCategory[key] = (byCategory[key] || 0) + amt;
+    }
+    return { total: Math.round(total * 100) / 100, byCategory, rows };
+  } catch (e) {
+    // isMissingTable covers relation/column-missing + schema-cache; catch-all stays fail-soft so a
+    // finance-side issue can never break carpentry costing.
+    if (!isInternalMissingTable(e)) console.warn("[carpentry/finance read-through]", e?.message || e);
+    return { total: 0, byCategory: {}, rows: [] };
+  }
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const JOB_STATUSES    = ["active", "on_hold", "defects", "complete", "cancelled"];
@@ -1343,7 +1386,29 @@ export function registerCarpentryRoutes(app) {
         .eq("job_id", req.params.id)
         .order("cost_date", { ascending: false });
       if (error) throw error;
-      return ok(res, { costs: rowsToCamel(data || []) });
+      // Manual cost entries — editable. Tag the source so the two sources are always distinguishable
+      // (carpentry_job_costs.source is 'manual'/'xero'; default to 'manual' for legacy nulls).
+      const manual = (data || []).map((c) => ({ ...rowToCamel(c), source: c.source || "manual", readOnly: false }));
+      // Phase 0 / Issue 3: approved finance invoices, surfaced as READ-ONLY rows (source:'finance')
+      // so they're visible in the Costs tab, not just summed into the budget. They live in
+      // financial_documents — editing/deleting happens in Finance, not here. Disjoint from the manual
+      // rows above → no double-count. Fail-soft: fin is empty when the finance columns aren't present.
+      const fin = await readFinanceCarpentryCosts(sb, req.params.id);
+      const financeRows = fin.rows.map((d) => ({
+        id: d.id,
+        jobId: req.params.id,
+        costType: "material",
+        description: [d.supplier_name, d.invoice_number ? `Inv ${d.invoice_number}` : null].filter(Boolean).join(" — ") || "Finance invoice",
+        category: d.carpentry_cost_category || null,
+        amount: Number(d.amount_ex_gst ?? d.amount_total ?? 0) || 0,
+        costDate: d.invoice_date || (d.created_at ? String(d.created_at).slice(0, 10) : null),
+        source: "finance",
+        status: d.status,
+        readOnly: true,
+      }));
+      // Newest first across both sources (finance rows keyed on invoice/created date).
+      const costs = [...manual, ...financeRows].sort((a, b) => String(b.costDate || "").localeCompare(String(a.costDate || "")));
+      return ok(res, { costs });
     } catch (e) {
       console.error("[carpentry/costs GET]", e);
       return err(res, 502, translateDbError(e));
@@ -2067,12 +2132,32 @@ export function registerCarpentryRoutes(app) {
       const cm = await getCostModel(sb); // company cost model (null until mig 090 + sync)
 
       const { data: costRows } = await sb.from("carpentry_job_costs").select("*").eq("job_id", jobId);
-      const materialActualTotal = round2((costRows || []).reduce((s, c) => s + Number(c.amount || 0), 0));
       // D5: per-line material actuals — costs tagged to a budget line via carpentry_job_budget_id.
       const materialActualByLine = {};
       for (const c of costRows || []) {
         if (c.carpentry_job_budget_id) materialActualByLine[c.carpentry_job_budget_id] = (materialActualByLine[c.carpentry_job_budget_id] || 0) + Number(c.amount || 0);
       }
+      // Phase 0 / Issue 3: fold approved finance invoices (financial_documents) into material
+      // actuals. Job-level total is category-blind. Per-line: resolve carpentry_cost_category name →
+      // material budget-line UUID via the budgets already loaded above (UNIQUE(job_id, category_name),
+      // mig 067 → deterministic). Names with no matching material line still count in the total but
+      // accumulate in an "unlinked" bucket surfaced on totals (never dropped). Disjoint from
+      // carpentry_job_costs, so no double-count. Fail-soft: fin is empty pre-mig-088/089.
+      const fin = await readFinanceCarpentryCosts(sb, jobId);
+      const materialLineByName = {};
+      for (const b of budgets || []) {
+        if (b.cost_type === "material" && b.category_name) materialLineByName[b.category_name] = b.id;
+      }
+      let financeUnlinkedActual = 0;
+      for (const [cat, amt] of Object.entries(fin.byCategory)) {
+        const lineId = cat ? materialLineByName[cat] : null;
+        if (lineId) materialActualByLine[lineId] = (materialActualByLine[lineId] || 0) + amt;
+        else financeUnlinkedActual += amt;
+      }
+      financeUnlinkedActual = round2(financeUnlinkedActual);
+      const materialActualTotal = round2(
+        (costRows || []).reduce((s, c) => s + Number(c.amount || 0), 0) + fin.total
+      );
 
       // P3: sub-task line items (leaf mappings) + per-line-item labour actuals. Fail-soft — the table
       // exists only after migration 140, and lines only populate after an estimate (re-)import.
@@ -2175,6 +2260,11 @@ export function registerCarpentryRoutes(app) {
         materialBudget, materialActual: materialActualTotal,
         totalBudget: round2(labourBudget + materialBudget),
         totalActual: round2(labourActual + materialActualTotal),
+        // Phase 0: how much of materialActual came from approved finance invoices (read-through),
+        // and the portion whose category didn't map to any material budget line ("unlinked" —
+        // counted in the total, shown separately so it isn't silently attributed to a line).
+        financeMaterialActual: fin.total,
+        financeUnlinkedActual,
       };
       // Job-level LABOUR projection — sum the per-line schedule-driven projected cost (each already
       // target-anchored + evidence-clamped). A labour line with no completion signal contributes its
@@ -2238,26 +2328,47 @@ export function registerCarpentryRoutes(app) {
         .eq("carpentry_job_id", id)
         .eq("status", "approved");
 
+      // labourActual (base rate × hours), total hours, and a labour-by-category split — the last two
+      // additive for the cost-only house glance view (InternalHouseJobDetail). Category comes from
+      // timesheet_entries.task_category (null → "general"); the per-category cost sums back to
+      // labourActual so the glance KPI and breakdown reconcile.
       let labourActual = 0;
+      let labourHours = 0;
+      const labourByCat = {}; // task_category → { hours, cost }
       for (const ts of timesheets || []) {
         const [{ data: entries }, { data: emp }] = await Promise.all([
-          sb.from("timesheet_entries").select("hours").eq("timesheet_id", ts.id),
+          sb.from("timesheet_entries").select("hours, task_category").eq("timesheet_id", ts.id),
           sb.from("employees").select("hourly_rate").eq("id", ts.employee_id).maybeSingle(),
         ]);
         const rate = Number(emp?.hourly_rate || 0);
-        const hours = (entries || []).reduce((sum, e) => sum + Number(e.hours || 0), 0);
-        labourActual += hours * rate;
+        for (const e of entries || []) {
+          const h = Number(e.hours || 0);
+          labourHours += h;
+          labourActual += h * rate;
+          const key = e.task_category || "general";
+          const bucket = labourByCat[key] || (labourByCat[key] = { hours: 0, cost: 0 });
+          bucket.hours += h;
+          bucket.cost += h * rate;
+        }
       }
       labourActual = Math.round(labourActual * 100) / 100;
+      labourHours = Math.round(labourHours * 100) / 100;
+      const labourByCategory = Object.entries(labourByCat)
+        .map(([category, v]) => ({ category, hours: Math.round(v.hours * 100) / 100, cost: Math.round(v.cost * 100) / 100 }))
+        .sort((a, b) => b.cost - a.cost);
 
-      // Material + subcontract costs
+      // Material + subcontract costs — manual carpentry_job_costs PLUS approved finance invoices
+      // read through from financial_documents (Phase 0 / Issue 3). Disjoint tables, so no
+      // double-count. otherActual is category-blind (a plain SUM), so no name→line resolve needed.
       const { data: costRows } = await sb
         .from("carpentry_job_costs")
         .select("amount")
         .eq("job_id", id);
-      const otherActual = Math.round(
+      const fin = await readFinanceCarpentryCosts(sb, id);
+      const manualOtherActual = Math.round(
         (costRows || []).reduce((sum, c) => sum + Number(c.amount || 0), 0) * 100
       ) / 100;
+      const otherActual = Math.round((manualOtherActual + fin.total) * 100) / 100;
 
       const totalActual = Math.round((labourActual + otherActual) * 100) / 100;
       const revenue = Number(job.quoted_value || 0);
@@ -2277,12 +2388,19 @@ export function registerCarpentryRoutes(app) {
           budgetCost,
           budgetMarginPct,
           labourActual,
+          labourHours,
+          labourByCategory,
           otherActual,
           totalActual,
           forecastMarginPct,
           variance,
           timesheetCount: (timesheets || []).length,
           costEntryCount: (costRows || []).length,
+          // Phase 0: source-split of otherActual so the UI can show finance-allocated invoices
+          // distinctly from manual cost entries (finance $ arrives via read-through, not a table copy).
+          manualOtherActual,
+          financeActual: fin.total,
+          financeInvoiceCount: fin.rows.length,
         },
       });
     } catch (e) {
