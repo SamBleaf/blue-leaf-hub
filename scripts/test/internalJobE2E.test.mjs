@@ -693,6 +693,37 @@ await scenario("11 finance→carpentry: approved folds into summary+budget line;
 });
 
 // =============================================================================
+// SCENARIO 11b — EX-GST ONLY: an approved finance doc whose amount_ex_gst is NULL
+//   must contribute $0 to the material read-through (matching the finance ledger's
+//   own `amount_ex_gst || 0` convention) — it must NEVER fall back to amount_total,
+//   which is GST-inclusive and would overstate the ex-GST material sum by ~10%.
+//   (Regression guard for the finance→carpentry read-through GST-fold bug.)
+// =============================================================================
+await scenario("11b ex-GST guard: approved finance doc with null ex-GST contributes $0, never amount_total (inc-GST)", async () => {
+  const store = seedBase();
+  store.carpentry_jobs.push({ id: CLIENT_JOB, reference: "BL-2402", address: "34 GST St", status: "active", client_name: "GST Co", quoted_value: 0 });
+  store.carpentry_job_costs = [];
+  store.financial_documents = [
+    // ex-GST captured → counts at 300.
+    { id: "g1", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: 300, amount_total: 330, status: "approved", supplier_name: "Bowens", invoice_number: "G1", invoice_date: "2025-09-03", created_at: "2025-09-03" },
+    // ex-GST NOT captured (a plain receipt) → must count $0, NOT the inc-GST amount_total (1100).
+    { id: "g2", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: null, amount_total: 1100, status: "approved", supplier_name: "Bunnings", invoice_number: "G2", invoice_date: "2025-09-04", created_at: "2025-09-04" },
+  ];
+  const sb = makeSb(store, { uniques: { carpentry_job_budgets: [["job_id", "category_name"]] } });
+
+  const sum = await call("GET", "/api/carpentry/jobs/:id/summary", { params: { id: CLIENT_JOB } }, sb);
+  assert.equal(sum.statusCode, 200, JSON.stringify(sum.body));
+  assert.equal(sum.body.summary.financeActual, 300, `financeActual = 300 (null-ex-GST doc contributes 0, not amount_total 1100), got ${sum.body.summary.financeActual}`);
+  assert.equal(sum.body.summary.otherActual, 300, "otherActual = 300 (no manual costs; the inc-GST 1100 must not leak in)");
+
+  // The null-ex-GST doc still SURFACES as a read-only row, but at $0 (signals "capture the ex-GST").
+  const costs = await call("GET", "/api/carpentry/jobs/:id/costs", { params: { id: CLIENT_JOB } }, sb);
+  const g2row = costs.body.costs.find((r) => r.id === "g2");
+  assert.ok(g2row, "null-ex-GST finance doc still surfaces as a row");
+  assert.equal(g2row.amount, 0, `null-ex-GST row shows $0, not inc-GST 1100, got ${g2row.amount}`);
+});
+
+// =============================================================================
 // SCENARIO 12 — HOUSE GLANCE inputs (BL-JOSH-HOUSE)
 //   The Charge-Up-style glance reads /summary: labour hours + labour$ by category
 //   (approved timesheets) and material$ (finance invoices), summed correctly.

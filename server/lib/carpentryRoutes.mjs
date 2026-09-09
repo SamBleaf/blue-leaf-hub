@@ -81,7 +81,11 @@ async function readFinanceCarpentryCosts(sb, jobId) {
     const byCategory = {}; // { categoryName | "" (unlinked) : summed ex-GST amount }
     let total = 0;
     for (const d of rows) {
-      const amt = Number(d.amount_ex_gst ?? d.amount_total ?? 0) || 0;
+      // Ex-GST only (Law). Match the finance ledger's own convention (financeRoutes.mjs:1060 uses
+      // `amount_ex_gst || 0`) so carpentry reconciles with finance for the same document — never fall
+      // back to amount_total, which is GST-INCLUSIVE and would overstate the ex-GST material sum by the
+      // GST component. A doc whose ex-GST wasn't captured contributes 0 here, exactly as it does in finance.
+      const amt = Number(d.amount_ex_gst || 0);
       total += amt;
       const key = d.carpentry_cost_category || "";
       byCategory[key] = (byCategory[key] || 0) + amt;
@@ -1400,7 +1404,7 @@ export function registerCarpentryRoutes(app) {
         costType: "material",
         description: [d.supplier_name, d.invoice_number ? `Inv ${d.invoice_number}` : null].filter(Boolean).join(" — ") || "Finance invoice",
         category: d.carpentry_cost_category || null,
-        amount: Number(d.amount_ex_gst ?? d.amount_total ?? 0) || 0,
+        amount: Number(d.amount_ex_gst || 0), // ex-GST only — matches the summed total in readFinanceCarpentryCosts
         costDate: d.invoice_date || (d.created_at ? String(d.created_at).slice(0, 10) : null),
         source: "finance",
         status: d.status,
