@@ -8,7 +8,20 @@ import {
   CARPENTRY_JOB_STATUS_LABELS,
   CARPENTRY_PROJECT_TYPES,
   CARPENTRY_PROJECT_TYPE_LABELS,
+  INTERNAL_REFERENCE,
+  CHARGE_UP_REFERENCE,
+  BL_JOSH_HOUSE_REFERENCE,
+  BL_SAM_HOUSE_REFERENCE,
 } from "../lib/constants.js";
+
+// Internal (non-client) carpentry jobs — grouped under their own heading in the
+// job list so they don't clutter the client pipeline. Purely presentational.
+const INTERNAL_JOB_REFERENCES = new Set([
+  INTERNAL_REFERENCE,
+  CHARGE_UP_REFERENCE,
+  BL_JOSH_HOUSE_REFERENCE,
+  BL_SAM_HOUSE_REFERENCE,
+]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +49,32 @@ const STATUS_BADGE = {
   complete:     "bg-blue-100    text-blue-800",
   cancelled:    "bg-gray-100    text-gray-500",
 };
+
+// Single job row — shared by the client-job and Internal sections of the list.
+function JobRow({ job, onOpen }) {
+  return (
+    <tr
+      onClick={onOpen}
+      className="hover:bg-slate-50 cursor-pointer transition-colors"
+    >
+      <td className="px-4 py-3 font-mono text-xs text-primary font-medium">{job.reference}</td>
+      <td className="px-4 py-3 font-medium text-ink max-w-[160px] truncate">{job.clientName}</td>
+      <td className="px-4 py-3 text-muted max-w-[200px] truncate">{job.address}</td>
+      <td className="px-4 py-3 text-muted">
+        {CARPENTRY_PROJECT_TYPE_LABELS[job.projectType] || job.projectType}
+      </td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE[job.status] || "bg-gray-100 text-gray-500"}`}>
+          {CARPENTRY_JOB_STATUS_LABELS[job.status] || job.status}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">{fmt$(job.quotedValue)}</td>
+      <td className="px-4 py-3 text-right tabular-nums text-muted">{fmtPct(job.quotedMarginPct)}</td>
+      <td className="px-4 py-3 text-muted whitespace-nowrap">{fmtDate(job.startDate)}</td>
+      <td className="px-4 py-3 text-muted whitespace-nowrap">{fmtDate(job.endDate)}</td>
+    </tr>
+  );
+}
 
 // ── New Job Modal ─────────────────────────────────────────────────────────────
 
@@ -653,6 +692,11 @@ export default function CarpentryDashboard() {
     { value: "all",       label: "All Jobs" },
   ];
 
+  // Presentational split only — same jobs, same links; internal jobs render under
+  // their own "Internal" heading below the client pipeline (plan §0 Phase 4).
+  const clientJobs   = jobs.filter((j) => !INTERNAL_JOB_REFERENCES.has(j.reference));
+  const internalJobs = jobs.filter((j) =>  INTERNAL_JOB_REFERENCES.has(j.reference));
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Page header */}
@@ -722,29 +766,21 @@ export default function CarpentryDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {jobs.map((job) => (
-                  <tr
-                    key={job.id}
-                    onClick={() => navigate(`/carpentry/${job.id}`)}
-                    className="hover:bg-slate-50 cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-primary font-medium">{job.reference}</td>
-                    <td className="px-4 py-3 font-medium text-ink max-w-[160px] truncate">{job.clientName}</td>
-                    <td className="px-4 py-3 text-muted max-w-[200px] truncate">{job.address}</td>
-                    <td className="px-4 py-3 text-muted">
-                      {CARPENTRY_PROJECT_TYPE_LABELS[job.projectType] || job.projectType}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE[job.status] || "bg-gray-100 text-gray-500"}`}>
-                        {CARPENTRY_JOB_STATUS_LABELS[job.status] || job.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{fmt$(job.quotedValue)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted">{fmtPct(job.quotedMarginPct)}</td>
-                    <td className="px-4 py-3 text-muted whitespace-nowrap">{fmtDate(job.startDate)}</td>
-                    <td className="px-4 py-3 text-muted whitespace-nowrap">{fmtDate(job.endDate)}</td>
-                  </tr>
+                {clientJobs.map((job) => (
+                  <JobRow key={job.id} job={job} onOpen={() => navigate(`/carpentry/${job.id}`)} />
                 ))}
+                {internalJobs.length > 0 && (
+                  <>
+                    <tr className="bg-slate-50">
+                      <td colSpan={9} className="px-4 py-2 text-xs font-semibold text-muted uppercase tracking-wide">
+                        Internal
+                      </td>
+                    </tr>
+                    {internalJobs.map((job) => (
+                      <JobRow key={job.id} job={job} onOpen={() => navigate(`/carpentry/${job.id}`)} />
+                    ))}
+                  </>
+                )}
               </tbody>
             </table>
           </div>

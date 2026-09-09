@@ -109,15 +109,24 @@ export default function InternalJobDetail({ job }) {
   const visibleCats = reportCats.filter((c) => showArchived || c.status !== "archived" || hasData(c));
   const hiddenArchivedCount = reportCats.filter((c) => c.status === "archived" && !hasData(c)).length;
   const activeCount = categories.filter((c) => c.status !== "archived").length;
-  // Retro-assign targets: only WORKED (timesheet) active categories — a leave target is rejected
-  // server-side so costed leave can never be written into the timesheet ledger.
+  // Retro-assign targets. WORKED (timesheet) categories tag the hours in place. LEAVE categories
+  // are CONVERT targets: assigning to one moves the hours off the timesheet ledger onto the planner
+  // leave spine (removes the worked entry, writes a typed leave day) — costed as leave, no double-count.
   const assignTargets = categories.filter((c) => c.status !== "archived" && c.costSource === "timesheet");
+  const leaveAssignTargets = categories.filter((c) => c.status !== "archived" && c.costSource === "leave");
 
   async function assignUntagged(entryIds, internalCategoryId) {
     if (!internalCategoryId || !entryIds.length) return;
+    const target = categories.find((c) => c.id === internalCategoryId);
+    const toLeave = target && target.costSource === "leave";
+    if (toLeave && !window.confirm(
+      `Convert ${entryIds.length} entr${entryIds.length === 1 ? "y" : "ies"} to ${catLabel(target)}?\n\n` +
+      "This removes the worked timesheet hours and records a leave day (same worker, date, hours) " +
+      "on the planner instead. It can't be undone from here."
+    )) return;
     setAssigning(true); setError(null);
     const { ok, error: e } = await apiPost(`/api/carpentry/jobs/${job.id}/internal-assign`, { entryIds, internalCategoryId });
-    if (!ok) { setError(e || "Could not assign the hours."); setAssigning(false); return; }
+    if (!ok) { setError(e || (toLeave ? "Could not convert the hours." : "Could not assign the hours.")); setAssigning(false); return; }
     await load();
     setAssigning(false);
   }
@@ -253,8 +262,8 @@ export default function InternalJobDetail({ job }) {
         </div>
       )}
 
-      {/* ③ Untagged worked hours — retro-assign to a worked category */}
-      {untagged.length > 0 && assignTargets.length > 0 && (
+      {/* ③ Untagged worked hours — tag as worked, or convert to a leave day */}
+      {untagged.length > 0 && (assignTargets.length > 0 || leaveAssignTargets.length > 0) && (
         <div className="rounded-card border border-amber-200 bg-amber-50/60 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-amber-200">
             <h2 className="text-sm font-semibold text-amber-900">Untagged hours — assign to a category</h2>
@@ -263,11 +272,20 @@ export default function InternalJobDetail({ job }) {
               <select disabled={assigning} defaultValue="" onChange={(e) => { if (e.target.value) assignUntagged(untagged.map((u) => u.entryId), e.target.value); }}
                 className="text-xs border border-amber-300 rounded px-2 py-1 bg-white">
                 <option value="">Assign all to…</option>
-                {assignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                {assignTargets.length > 0 && (
+                  <optgroup label="Tag as worked">
+                    {assignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                  </optgroup>
+                )}
+                {leaveAssignTargets.length > 0 && (
+                  <optgroup label="Convert to leave (removes worked hours)">
+                    {leaveAssignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>
-          <p className="px-4 py-2 text-[11px] text-amber-800">These internal hours were approved without a category (e.g. logged before the picker existed). Assign each to a worked category so it shows in the report below. Leave categories are derived — they can&rsquo;t receive worked hours.</p>
+          <p className="px-4 py-2 text-[11px] text-amber-800">These internal hours were approved without a category (e.g. logged before the picker existed). <b>Tag as worked</b> to file them under a worked category, or <b>Convert to leave</b> (Sick / Annual / RDO) to reclassify mis-logged leave — that <b>removes the worked hours</b> and records a leave day on the planner, costed as leave.</p>
           <div className="divide-y divide-amber-200/70 max-h-72 overflow-y-auto">
             {untagged.map((u) => (
               <div key={u.entryId} className={`flex items-center gap-3 px-4 py-2 text-sm ${assigning ? "opacity-60" : ""}`}>
@@ -280,7 +298,16 @@ export default function InternalJobDetail({ job }) {
                 <select disabled={assigning} defaultValue="" onChange={(e) => { if (e.target.value) assignUntagged([u.entryId], e.target.value); }}
                   className="text-xs border border-hairline rounded px-2 py-1 bg-white w-40 shrink-0">
                   <option value="">Assign to…</option>
-                  {assignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                  {assignTargets.length > 0 && (
+                    <optgroup label="Tag as worked">
+                      {assignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                    </optgroup>
+                  )}
+                  {leaveAssignTargets.length > 0 && (
+                    <optgroup label="Convert to leave">
+                      {leaveAssignTargets.map((c) => <option key={c.id} value={c.id}>{catLabel(c)}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             ))}

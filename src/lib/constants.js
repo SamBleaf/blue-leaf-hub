@@ -884,6 +884,14 @@ export const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
 // bespoke cost-by-category-by-FY/quarter report layout (InternalJobDetail), no charge-out/margin.
 export const INTERNAL_REFERENCE = "BL-INTERNAL";
 
+// The two cost-only internal HOUSE jobs (mig 202): real carpentry_jobs with no Buildxact quote and
+// no budget/allowance — finance invoices + timesheet hours attach directly. They get a bespoke
+// Charge-Up-STYLE glance layout (InternalHouseJobDetail): hours + labour $ + material $ by category
+// + tasks done, no budget/variance. Branch on the reference in CarpentryJobDetail.
+export const BL_JOSH_HOUSE_REFERENCE = "BL-JOSH-HOUSE";
+export const BL_SAM_HOUSE_REFERENCE  = "BL-SAM-HOUSE";
+export const INTERNAL_HOUSE_REFERENCES = [BL_JOSH_HOUSE_REFERENCE, BL_SAM_HOUSE_REFERENCE];
+
 /** Leave types on the internal-category leave spine (migs 200/201). Annual / Sick / RDO are the
  *  three derived (non-worked) categories costed from the leave/RDO spine; unpaid days show at $0.
  *  LEAVE_TYPE_LABELS double as archive-safe fallbacks so a leave category's historical report line
