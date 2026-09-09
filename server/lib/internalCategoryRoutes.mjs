@@ -180,10 +180,14 @@ export function registerInternalCategoryRoutes(app) {
     }
   });
 
-  // Retro-assign untagged entries to a category. The target MUST be a worked (timesheet-source)
-  // category belonging to this job — a leave-source target is rejected (400) so costed leave can
-  // never be written into the timesheet ledger (plan §7 / critique B1). Entries are constrained to
-  // this job's approved timesheets so we never re-tag someone else's hours.
+  // Retro-assign untagged entries to a category. Behaviour depends on the target's cost_source:
+  //  • WORKED (timesheet) target → tag the entries in place (set internal_category_id).
+  //  • LEAVE target (sick/annual/rdo/unpaid) → CONVERT: the worked timesheet entry is deleted and a
+  //    typed leave day is written to the leave spine (workforce_employee_rdo_dates) for the same
+  //    employee/date/hours. The hours then cost as leave (base×(1+SG) etc.) via the derived report
+  //    path and live on ONE spine only — no double-count. (Requested by Sam: reclassify mis-logged
+  //    sick/annual/RDO hours through the normal assign route, not just the Workforce "Record sick day".)
+  // Entries are constrained to this job's approved timesheets so we never touch someone else's hours.
   app.post("/api/carpentry/jobs/:id/internal-assign", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured", "NO_DB");
@@ -193,20 +197,71 @@ export function registerInternalCategoryRoutes(app) {
     if (!internalCategoryId) return err(res, 400, "Pick a category to assign to");
     if (!entryIds.length) return err(res, 400, "No hours selected");
     try {
-      const { data: cat } = await sb.from(TABLE).select("id, cost_source").eq("id", internalCategoryId).eq("carpentry_job_id", jobId).maybeSingle();
+      const { data: cat } = await sb.from(TABLE).select("id, cost_source, leave_type").eq("id", internalCategoryId).eq("carpentry_job_id", jobId).maybeSingle();
       if (!cat) return err(res, 400, "That category isn't part of this job");
-      if (cat.cost_source !== "timesheet") return err(res, 400, "Leave categories are derived — you can't assign worked hours to them");
-      const { data: ts } = await sb.from("timesheets").select("id").eq("carpentry_job_id", jobId).eq("status", "approved");
+      const { data: ts } = await sb.from("timesheets").select("id, date").eq("carpentry_job_id", jobId).eq("status", "approved");
       const tsIds = (ts || []).map((t) => t.id);
       if (!tsIds.length) return err(res, 400, "No approved hours to assign");
-      const { data: updated, error } = await sb.from("timesheet_entries")
-        .update({ internal_category_id: internalCategoryId }).in("id", entryIds).in("timesheet_id", tsIds).select("id");
-      if (error) throw error;
-      ok(res, { assigned: (updated || []).length });
+
+      // WORKED target → tag in place (unchanged behaviour).
+      if (cat.cost_source === "timesheet") {
+        const { data: updated, error } = await sb.from("timesheet_entries")
+          .update({ internal_category_id: internalCategoryId }).in("id", entryIds).in("timesheet_id", tsIds).select("id");
+        if (error) throw error;
+        return ok(res, { assigned: (updated || []).length, converted: 0 });
+      }
+
+      // LEAVE target → CONVERT worked hours into a typed leave day.
+      const leaveType = cat.leave_type;
+      if (!LEAVE_TYPES.includes(leaveType)) return err(res, 400, "That leave category has no valid leave type");
+      // A typed conversion only makes sense once mig 201's leave columns exist (else it'd write untyped → read as rdo).
+      const rdoHasLeaveCols = !(await sb.from("workforce_employee_rdo_dates").select("leave_type, hours").limit(1)).error;
+      if (!rdoHasLeaveCols) return err(res, 503, "Leave typing needs migration 201 applied", "MIGRATION_PENDING");
+
+      const dateByTs = new Map((ts || []).map((t) => [t.id, t.date]));
+      const { data: rows, error: selErr } = await sb.from("timesheet_entries")
+        .select("id, employee_id, hours, timesheet_id").in("id", entryIds).in("timesheet_id", tsIds);
+      if (selErr) throw selErr;
+
+      let converted = 0;
+      for (const r of rows || []) {
+        const rdoDate = dateByTs.get(r.timesheet_id);
+        if (!r.employee_id || !rdoDate) continue;
+        const hours = Number(r.hours) || null;
+        const insRow = { employee_id: r.employee_id, rdo_date: rdoDate, leave_type: leaveType, note: "Converted from internal timesheet hours", created_by: req.caller.id };
+        if (hours != null) insRow.hours = hours;
+        const { error: insErr } = await sb.from("workforce_employee_rdo_dates").insert(insRow);
+        if (insErr) {
+          if (insErr.code === "23505") {
+            // That date already has a leave/RDO row for this employee — retype it to the chosen leave
+            // type instead of creating a duplicate (mirrors the day-off approve conflict handling).
+            const patch = { leave_type: leaveType };
+            if (hours != null) patch.hours = hours;
+            const { error: updErr } = await sb.from("workforce_employee_rdo_dates").update(patch)
+              .eq("employee_id", r.employee_id).eq("rdo_date", rdoDate);
+            if (updErr) return err(res, 500, translateDbError(updErr));
+          } else if (plannerTableMissing(insErr)) {
+            return err(res, 503, "Leave spine needs migration 119 applied", "MIGRATION_PENDING");
+          } else {
+            return err(res, 500, translateDbError(insErr));
+          }
+        }
+        // Remove the worked entry so the hours live ONLY on the leave spine (single source of truth, no double-count).
+        const { error: delErr } = await sb.from("timesheet_entries").delete().eq("id", r.id);
+        if (delErr) return err(res, 500, translateDbError(delErr));
+        converted++;
+      }
+      return ok(res, { assigned: 0, converted });
     } catch (e) {
       if (isMissingTable(e)) return err(res, 503, "Internal categories not enabled yet — apply migration 200", "MIGRATION_PENDING");
       err(res, 500, translateDbError(e));
       console.error("[internal-assign]", e?.message || e);
     }
   });
+}
+
+// Match the leave/planner "table absent" fail-soft used elsewhere (mig 119/139 not applied).
+function plannerTableMissing(e) {
+  const m = (e?.message || "").toLowerCase();
+  return e?.code === "42P01" || /relation .*(workforce_employee_rdo_dates|does not exist)/.test(m);
 }

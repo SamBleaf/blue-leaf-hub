@@ -574,6 +574,10 @@ function formatAllocation(row) {
     chargeUpJobId: base.chargeUpJobId ?? null,
     chargeUpSiteLabel: null,
     chargeUpSiteAddress: null,
+    // BL-INTERNAL: which worked cost category (e.g. Logistics) this shift is tagged to, so the
+    // PWA can autofill it. Present only when tagged to an internal_categories row (mig 203).
+    internalCategoryId: base.internalCategoryId ?? null,
+    internalCategoryLabel: null,
   };
 }
 
@@ -638,6 +642,42 @@ async function attachChargeUpSites(sb, allocations) {
     const s = byId.get(a.chargeUpJobId);
     a.chargeUpSiteLabel = s?.site_label ?? "(deleted site)";
     a.chargeUpSiteAddress = s?.address ?? null;
+  }
+  return allocations;
+}
+
+// Validate + resolve the internal cost category to tag on an allocation. Sibling of
+// resolveAllocChargeUpSite; delegates to resolveInternalCategory so the belongs-to-this-job +
+// cost_source='timesheet' rule (critique D1 — a leave category or a stale/crafted id is rejected)
+// lives in one place. Fails soft (null) before mig 200/203 so the Planner never breaks.
+async function resolveAllocInternalCategory(sb, carpentryJobId, internalCategoryId) {
+  if (!internalCategoryId) return { internalCategoryId: null };
+  const r = await resolveInternalCategory(sb, carpentryJobId, internalCategoryId);
+  if (r.error) return { error: r.error };
+  // resolveInternalCategory returns a non-null id ONLY when it belongs to this BL-INTERNAL job
+  // AND is a worked (timesheet) category — otherwise null (untagged, worker picks in PWA).
+  if (!r.internalCategoryId) return { internalCategoryId: null };
+  // Fail-soft across the mig-200/mig-203 gap: internal_categories (mig 200) can be present while
+  // workforce_allocations.internal_category_id (mig 203) is not. Probe the alloc column before
+  // handing back an id to stamp, so the INSERT/UPDATE never references a column that doesn't exist
+  // yet (would 500 the whole Planner). Untagged is the safe degrade — the worker picks in the PWA.
+  const probe = await sb.from("workforce_allocations").select("internal_category_id").limit(1);
+  if (probe.error && internalColMissing(probe.error)) return { internalCategoryId: null };
+  return { internalCategoryId: r.internalCategoryId };
+}
+
+// Attach each allocation's internal cost-category label in one query (guarded — a missing
+// table/column pre-migration just leaves the label null; ids still flow through). Sibling of
+// attachChargeUpSites.
+async function attachInternalCategories(sb, allocations) {
+  const ids = [...new Set(allocations.map((a) => a.internalCategoryId).filter(Boolean))];
+  if (!ids.length) return allocations;
+  const { data, error } = await sb.from("internal_categories").select("id, category_label").in("id", ids);
+  if (error) return allocations; // pre-mig or transient — labels stay null, non-fatal
+  const byId = new Map((data || []).map((c) => [c.id, c]));
+  for (const a of allocations) {
+    if (!a.internalCategoryId) continue;
+    a.internalCategoryLabel = byId.get(a.internalCategoryId)?.category_label ?? "(archived category)";
   }
   return allocations;
 }
@@ -1782,7 +1822,8 @@ export function registerWorkforceRoutes(app) {
     if (carpentryJobId) q = q.eq("carpentry_job_id", carpentryJobId);
     const { data, error } = await q;
     if (error) return err(res, 500, translateDbError(error));
-    const allocations = await attachChargeUpSites(sb, (data || []).map(formatAllocation));
+    let allocations = await attachChargeUpSites(sb, (data || []).map(formatAllocation));
+    allocations = await attachInternalCategories(sb, allocations);
     ok(res, { allocations });
   });
 
@@ -1801,6 +1842,8 @@ export function registerWorkforceRoutes(app) {
 
     const cu = await resolveAllocChargeUpSite(sb, spine.carpentryJobId, req.body.chargeUpJobId ?? req.body.charge_up_job_id ?? null);
     if (cu.error) return err(res, 400, cu.error);
+    const ic = await resolveAllocInternalCategory(sb, spine.carpentryJobId, req.body.internalCategoryId ?? req.body.internal_category_id ?? null);
+    if (ic.error) return err(res, 400, ic.error);
 
     const crewId = req.body.crewId ?? req.body.crew_id ?? null;
     const row = {
@@ -1816,6 +1859,9 @@ export function registerWorkforceRoutes(app) {
     // Only include the column when a site is actually chosen, so the insert never references
     // charge_up_job_id before mig 146 is applied (would 500 the whole Planner otherwise).
     if (cu.chargeUpJobId) row.charge_up_job_id = cu.chargeUpJobId;
+    // Same guard for the internal cost category (mig 203) — only include when a valid worked
+    // category was picked, so the insert never references the column before the migration lands.
+    if (ic.internalCategoryId) row.internal_category_id = ic.internalCategoryId;
     const { data, error } = await sb.from("workforce_allocations").insert(row).select("id").single();
     if (error) {
       if (/duplicate key|unique constraint/i.test(error.message || "")) {
@@ -1860,6 +1906,15 @@ export function registerWorkforceRoutes(app) {
       update.carpentry_job_id = spine.carpentryJobId;
     }
 
+    // Internal cost category (mig 203) — set only when the caller supplies one, resolved against
+    // the effective carpentry job. Guarded (only added to the update when a valid worked category
+    // resolves) so this never references the column before mig 203 is applied.
+    if (req.body.internalCategoryId !== undefined || req.body.internal_category_id !== undefined) {
+      const ic = await resolveAllocInternalCategory(sb, nextCarpentryId, req.body.internalCategoryId ?? req.body.internal_category_id ?? null);
+      if (ic.error) return err(res, 400, ic.error);
+      if (ic.internalCategoryId) update.internal_category_id = ic.internalCategoryId;
+    }
+
     const checkEmployeeId = update.employee_id ?? current.employee_id;
     const checkDate = update.allocation_date ?? current.allocation_date;
     const { data: dup } = await sb.from("workforce_allocations")
@@ -1900,7 +1955,8 @@ export function registerWorkforceRoutes(app) {
     for (const id of ids) {
       try { const full = await fetchAllocationById(sb, id); if (full) out.push(formatAllocation(full)); } catch { /* deleted mid-swap */ }
     }
-    return attachChargeUpSites(sb, out);
+    await attachChargeUpSites(sb, out);
+    return attachInternalCategories(sb, out);
   }
 
   app.post("/api/workforce/allocations/assign", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -1913,13 +1969,18 @@ export function registerWorkforceRoutes(app) {
     if (spine.error) return err(res, 400, spine.error);
     const cu = await resolveAllocChargeUpSite(sb, spine.carpentryJobId, req.body.chargeUpJobId ?? req.body.charge_up_job_id ?? null);
     if (cu.error) return err(res, 400, cu.error);
+    const ic = await resolveAllocInternalCategory(sb, spine.carpentryJobId, req.body.internalCategoryId ?? req.body.internal_category_id ?? null);
+    if (ic.error) return err(res, 400, ic.error);
     const notes = req.body.notes ?? null;
     // The assign RPC replaces-or-inserts one (employee, date) cell but doesn't know about the
-    // charge-up site column; stamp it on the resulting row afterwards. Guarded so it never runs
-    // (nor references the column) unless a real site was chosen — safe before mig 146.
+    // charge-up site / internal-category columns; stamp them on the resulting row afterwards.
+    // Guarded so the update only names a column when a real tag was chosen — safe before mig 146/203.
     const tagSite = async (ids) => {
-      if (cu.chargeUpJobId) {
-        await sb.from("workforce_allocations").update({ charge_up_job_id: cu.chargeUpJobId })
+      const patch = {};
+      if (cu.chargeUpJobId) patch.charge_up_job_id = cu.chargeUpJobId;
+      if (ic.internalCategoryId) patch.internal_category_id = ic.internalCategoryId;
+      if (Object.keys(patch).length) {
+        await sb.from("workforce_allocations").update(patch)
           .eq("employee_id", employeeId).eq("allocation_date", allocationDate);
       }
       return formatAllocIds(sb, ids);
@@ -1939,6 +2000,7 @@ export function registerWorkforceRoutes(app) {
           notes, created_by: req.caller.id, updated_at: new Date().toISOString(),
         };
         if (cu.chargeUpJobId) insRow.charge_up_job_id = cu.chargeUpJobId;
+        if (ic.internalCategoryId) insRow.internal_category_id = ic.internalCategoryId;
         const ins = await sb.from("workforce_allocations").insert(insRow).select("id").single();
         if (ins.error) return err(res, 500, translateDbError(ins.error));
         return ok(res, { allocations: await formatAllocIds(sb, [ins.data.id]) });
@@ -3743,6 +3805,7 @@ export function registerWorkforceRoutes(app) {
     const formatted = (data || []).map(formatAllocation);
     await attachAllocationColors(sb, formatted);
     await attachChargeUpSites(sb, formatted);   // BLB Charge Up: show the specific site, not just the category
+    await attachInternalCategories(sb, formatted);   // BL-INTERNAL: autofill the tagged cost category (Logistics)
     const byDate = {};
     for (const a of formatted) byDate[a.allocationDate] = a;
     ok(res, { today: byDate[today] ?? null, tomorrow: byDate[tomorrow] ?? null });
@@ -3767,6 +3830,7 @@ export function registerWorkforceRoutes(app) {
     const allocations = (data || []).map(formatAllocation);
     await attachAllocationColors(sb, allocations);
     await attachChargeUpSites(sb, allocations);   // BLB Charge Up: show the specific site, not just the category
+    await attachInternalCategories(sb, allocations);   // BL-INTERNAL: autofill the tagged cost category (Logistics)
     ok(res, { weekStart: from, weekEnd: to, allocations });
   });
 

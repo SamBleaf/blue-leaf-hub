@@ -2,7 +2,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { authFetch } from "../../lib/authFetch.js";
 import { PLANNER_PALETTE, paletteByKey, autoColorKey } from "../../lib/plannerColors.js";
-import { CHARGE_UP_REFERENCE } from "../../lib/constants.js";
+import { CHARGE_UP_REFERENCE, INTERNAL_REFERENCE, BL_JOSH_HOUSE_REFERENCE, BL_SAM_HOUSE_REFERENCE } from "../../lib/constants.js";
+
+// Synthetic legend key for the grouped "Blue Leaf Internal" entry. It is a UI stand-in for three
+// real carpentry jobs (BL-INTERNAL → Logistics, Josh's house, Sam's house); dragging/dropping it
+// opens a 3-option picker that then assigns to the chosen REAL job key. Never sent to the server.
+const INTERNAL_GROUP_KEY = "internal:group";
 
 // W17-P4b — Planner drag-drop + colour redesign.
 // Advisory only: calls the W16 allocation routes + the job-colour routes; never a
@@ -55,6 +60,26 @@ function LegendChip({ jKey, label, color, pinned, onPickColor, onRemove }) {
       {pinned && onRemove && (
         <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onRemove(); }}
           className="text-[12px] leading-none opacity-0 group-hover:opacity-100 focus:opacity-100" style={{ color: color.text }} title="Remove from board" aria-label={`Remove ${label} from board`}>×</button>
+      )}
+    </div>
+  );
+}
+
+// ── Grouped "Blue Leaf Internal" legend chip (drag source → opens the 3-option picker) ────────
+// Mirrors LegendChip but is fixed-label and carries the synthetic INTERNAL_GROUP_KEY. Colour +
+// board actions operate on the real BL-INTERNAL job (handled by the parent).
+function InternalGroupChip({ color, pinned, onPickColor, onRemove }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `legend:${INTERNAL_GROUP_KEY}`, data: { kind: "legend", jKey: INTERNAL_GROUP_KEY } });
+  return (
+    <div ref={setNodeRef} {...attributes} {...listeners}
+      className={`group flex items-center gap-1.5 border border-hairline rounded-full pl-1.5 pr-2 py-1 cursor-grab select-none ${isDragging ? "opacity-40" : ""}`}
+      style={{ touchAction: "none", background: color.bg }}>
+      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onPickColor(e); }}
+        className="w-4 h-4 rounded border border-black/10" style={{ background: color.dot }} title="Change colour" aria-label="Change colour for Blue Leaf Internal" />
+      <span className="text-xs truncate max-w-[150px]" style={{ color: color.text }}>Blue Leaf Internal</span>
+      {pinned && onRemove && (
+        <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="text-[12px] leading-none opacity-0 group-hover:opacity-100 focus:opacity-100" style={{ color: color.text }} title="Remove from board" aria-label="Remove Blue Leaf Internal from board">×</button>
       )}
     </div>
   );
@@ -141,6 +166,8 @@ export default function WorkforcePlannerTab() {
   const [cellPicker, setCellPicker] = useState(null); // { empId, day } — tap-empty-cell job picker
   const [chargeUpSites, setChargeUpSites] = useState([]); // active BLB Charge Up sites (for the shift's site picker)
   const [sitePicker, setSitePicker] = useState(null); // { empId, day, jKey } — pick a charge-up site before the shift is saved
+  const [internalCats, setInternalCats] = useState([]); // active worked BL-INTERNAL categories (Logistics lives here)
+  const [internalPicker, setInternalPicker] = useState(null); // { empId, day } — pick Logistics / Josh / Sam before saving
   const altRef = useRef(false); // desktop: hold Alt while dragging a chip → duplicate instead of move
   const [fill, setFill] = useState(null); // { empId, jKey, anchorIdx, endIdx, prevRightIdx } — across days
   const [fillDown, setFillDown] = useState(null); // { day, dayIdx, jKey, anchorRow, endRow, prevBottomRow } — down workers
@@ -230,11 +257,35 @@ export default function WorkforcePlannerTab() {
       .catch(() => {});
   }, [chargeUpJKey]);
   const siteLabelById = useMemo(() => { const m = {}; for (const s of chargeUpSites) m[s.id] = s.siteLabel; return m; }, [chargeUpSites]);
+  // "Blue Leaf Internal" is one grouped legend entry standing in for three real carpentry jobs:
+  // BL-INTERNAL (Logistics), Josh's house, Sam's house. Dropping it opens a 3-option picker that
+  // routes to the chosen real job; Logistics also stamps the internal cost category (mig 203).
+  const internalJKey = useMemo(() => { const j = carpJobs.find((c) => c.reference === INTERNAL_REFERENCE); return j ? `carpentry:${j.id}` : null; }, [carpJobs]);
+  const joshJKey = useMemo(() => { const j = carpJobs.find((c) => c.reference === BL_JOSH_HOUSE_REFERENCE); return j ? `carpentry:${j.id}` : null; }, [carpJobs]);
+  const samJKey = useMemo(() => { const j = carpJobs.find((c) => c.reference === BL_SAM_HOUSE_REFERENCE); return j ? `carpentry:${j.id}` : null; }, [carpJobs]);
+  // The three keys the group stands in for — hidden as individual chips; reached via the picker only.
+  const internalGroupKeys = useMemo(() => new Set([internalJKey, joshJKey, samJKey].filter(Boolean)), [internalJKey, joshJKey, samJKey]);
+  // Worked (timesheet) categories under BL-INTERNAL — only Logistics is offered in the picker
+  // (ATEC excluded, Personal work archived per the plan). Fail-soft: empty before mig 200.
+  useEffect(() => {
+    if (!internalJKey) { setInternalCats([]); return; }
+    const id = internalJKey.split(":")[1];
+    authFetch(`/api/carpentry/jobs/${id}/internal-categories`).then(json)
+      .then((j) => { if (j.ok) setInternalCats((j.internalCategories || []).filter((c) => c.status === "active" && c.costSource === "timesheet")); })
+      .catch(() => {});
+  }, [internalJKey]);
+  const logisticsCat = useMemo(() => internalCats.find((c) => c.slug === "logistics") || null, [internalCats]);
+  const internalCatLabelById = useMemo(() => { const m = {}; for (const c of internalCats) m[c.id] = c.categoryLabel; return m; }, [internalCats]);
   // Board membership (W17-P4c, opt-in): a job is on the board if it's been added (onBoard)
   // OR it already has a shift this week (so nothing scheduled ever disappears).
   const allocKeys = useMemo(() => new Set(allocations.map((a) => allocJobKey(a)).filter(Boolean)), [allocations]);
-  const boardJobs = useMemo(() => jobs.filter((j) => settings[j.jKey]?.onBoard || allocKeys.has(j.jKey)), [jobs, settings, allocKeys]);
-  const orderedKeys = useMemo(() => boardJobs.map((j) => j.jKey), [boardJobs]);
+  // Individual chips exclude the three internal-group jobs — they appear only as the "Blue Leaf
+  // Internal" grouped chip below. orderedKeys keeps them so their locked colours are still assigned.
+  const boardJobs = useMemo(() => jobs.filter((j) => !internalGroupKeys.has(j.jKey) && (settings[j.jKey]?.onBoard || allocKeys.has(j.jKey))), [jobs, settings, allocKeys, internalGroupKeys]);
+  const orderedKeys = useMemo(() => jobs.filter((j) => settings[j.jKey]?.onBoard || allocKeys.has(j.jKey)).map((j) => j.jKey), [jobs, settings, allocKeys]);
+  // Show the grouped "Blue Leaf Internal" chip when BL-INTERNAL exists and the group is on the board
+  // or any of its three jobs has a shift this week (so scheduled internal work never disappears).
+  const internalGroupShown = useMemo(() => !!internalJKey && (settings[internalJKey]?.onBoard || [internalJKey, joshJKey, samJKey].some((k) => k && allocKeys.has(k))), [internalJKey, joshJKey, samJKey, settings, allocKeys]);
   const colorMap = useMemo(() => { const m = {}; for (const k of Object.keys(settings)) if (settings[k]?.color) m[k] = settings[k].color; return m; }, [settings]);
   // Colours are LOCKED to a job by the SERVER (workforce_planner_jobs.color, self-healed on read so
   // every on-board job has a unique, persisted colour that matches the Worker PWA). The client just
@@ -245,9 +296,21 @@ export default function WorkforcePlannerTab() {
     for (const k of orderedKeys) byKey[k] = paletteByKey(colorMap[k] || autoColorKey(k));
     return byKey;
   }, [orderedKeys, colorMap]);
-  const colorFor = useCallback((jKey) => colorByKey[jKey] || paletteByKey(colorMap[jKey] || autoColorKey(jKey)), [colorByKey, colorMap]);
+  // The grouped-internal key borrows the real BL-INTERNAL job's colour (so drag overlay + chip match).
+  const colorFor = useCallback((jKey) => {
+    const k = jKey === INTERNAL_GROUP_KEY ? (internalJKey || jKey) : jKey;
+    return colorByKey[k] || paletteByKey(colorMap[k] || autoColorKey(k));
+  }, [colorByKey, colorMap, internalJKey]);
   const labelMap = useMemo(() => { const m = {}; for (const j of jobs) m[j.jKey] = j.label; return m; }, [jobs]);
-  const labelFor = useCallback((jKey) => labelMap[jKey] || "Job", [labelMap]);
+  const labelFor = useCallback((jKey) => jKey === INTERNAL_GROUP_KEY ? "Blue Leaf Internal" : (labelMap[jKey] || "Job"), [labelMap]);
+  // The 3-option picker's entries (only those whose real job exists). Logistics carries the cost category.
+  const internalOptions = useMemo(() => {
+    const opts = [];
+    if (internalJKey) opts.push({ key: "logistics", jKey: internalJKey, label: logisticsCat?.categoryLabel || "Logistics", internalCategoryId: logisticsCat?.id || null });
+    if (joshJKey) opts.push({ key: "josh", jKey: joshJKey, label: labelMap[joshJKey] || "Josh's house" });
+    if (samJKey) opts.push({ key: "sam", jKey: samJKey, label: labelMap[samJKey] || "Sam's house" });
+    return opts;
+  }, [internalJKey, joshJKey, samJKey, logisticsCat, labelMap]);
   const holidayMap = useMemo(() => { const m = {}; for (const h of nonWorking.holidays) m[h.date] = h.name; return m; }, [nonWorking]);
   const rdoSet = useMemo(() => new Set(nonWorking.rdo.map((r) => `${r.employeeId}|${r.date}`)), [nonWorking]);
   // Team RDOs apply to EVERY field worker on that date (whole-crew day off) → keyed by date only.
@@ -281,27 +344,30 @@ export default function WorkforcePlannerTab() {
 
   // Atomic assign (replace-or-insert for one cell) + delete. Fill/duplicate use assignReq so they never
   // hit the old POST's 409 on an occupied cell, and apply the returned rows (no full-week refetch = no lag).
-  const assignReq = (empId, day, jKey, siteId = null) =>
-    authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), ...(siteId ? { chargeUpJobId: siteId } : {}) }) }).then(json);
+  const assignReq = (empId, day, jKey, siteId = null, internalCategoryId = null) =>
+    authFetch("/api/workforce/allocations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), ...(siteId ? { chargeUpJobId: siteId } : {}), ...(internalCategoryId ? { internalCategoryId } : {}) }) }).then(json);
   const del = (id) => authFetch(`/api/workforce/allocations/${id}`, { method: "DELETE" }).then(json);
 
   // A charge-up shift always needs a site (address). If one wasn't chosen, open the site picker
   // and defer the assign until the user picks; every add path funnels through here.
   function needsSite(jKey, siteId) { return jKey === chargeUpJKey && !siteId; }
 
-  async function assignFromLegend(jKey, empId, day, siteId = null) {
+  async function assignFromLegend(jKey, empId, day, siteId = null, internalCategoryId = null) {
+    // The grouped "Blue Leaf Internal" entry isn't a real job — open the 3-option picker, which
+    // re-enters this with the chosen REAL key (+ the Logistics cost category) and never re-intercepts.
+    if (jKey === INTERNAL_GROUP_KEY) { setInternalPicker({ empId, day }); return; }
     if (needsSite(jKey, siteId)) {
       if (!chargeUpSites.length) { setMsg({ type: "error", text: "Add a charge-up site first — open BLB Charge Up to create one." }); return; }
       setSitePicker({ empId, day, jKey });   // pick a site, then re-enter with siteId
       return;
     }
     const existing = allocMap[`${empId}|${day}`];
-    if (existing && allocJobKey(existing) === jKey && (existing.chargeUpJobId || null) === (siteId || null)) return;
+    if (existing && allocJobKey(existing) === jKey && (existing.chargeUpJobId || null) === (siteId || null) && (existing.internalCategoryId || null) === (internalCategoryId || null)) return;
     setMsg(null); setBusy(true);
-    const tmp = { id: `tmp-${empId}-${day}-${Date.now()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null };
+    const tmp = { id: `tmp-${empId}-${day}-${Date.now()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, internalCategoryId: internalCategoryId || null, internalCategoryLabel: internalCategoryId ? (internalCatLabelById[internalCategoryId] || null) : null, notes: null };
     setAllocations((prev) => [...prev.filter((a) => !(a.employeeId === empId && a.allocationDate === day)), tmp]); // optimistic
     try {
-      const r = await assignReq(empId, day, jKey, siteId);
+      const r = await assignReq(empId, day, jKey, siteId, internalCategoryId);
       if (r.ok) applyAllocations(r.allocations);              // atomic replace-or-insert → server truth
       else { setMsg({ type: "error", text: r.error || "Could not assign." }); loadAllocations(true); }
     } catch { setMsg({ type: "error", text: "Network error." }); loadAllocations(true); } finally { setBusy(false); }
@@ -325,17 +391,17 @@ export default function WorkforcePlannerTab() {
   }
 
   // Fill / deduct across a row: days anchor..end get the job; days end+1..prevRight (this job) are removed.
-  async function fillCommit(empId, jKey, anchorIdx, endIdx, prevRightIdx, siteId = null) {
+  async function fillCommit(empId, jKey, anchorIdx, endIdx, prevRightIdx, siteId = null, internalCategoryId = null) {
     const creates = [], removes = [];
     for (let i = anchorIdx; i <= endIdx; i++) { if (!allocMap[`${empId}|${days[i]}`]) creates.push(days[i]); }         // fill empties only
     for (let i = endIdx + 1; i <= prevRightIdx; i++) { const c = allocMap[`${empId}|${days[i]}`]; if (c && allocJobKey(c) === jKey) removes.push(c); } // deduct the trailing run
     if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
     const removeIds = new Set(removes.map((r) => r.id));
-    const temps = creates.map((day) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null }));
+    const temps = creates.map((day) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, internalCategoryId: internalCategoryId || null, internalCategoryLabel: internalCategoryId ? (internalCatLabelById[internalCategoryId] || null) : null, notes: null }));
     setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const results = await Promise.all([...creates.map((day) => assignReq(empId, day, jKey, siteId)), ...removes.map((r) => del(r.id))]);
+      const results = await Promise.all([...creates.map((day) => assignReq(empId, day, jKey, siteId, internalCategoryId)), ...removes.map((r) => del(r.id))]);
       const returned = results.flatMap((r) => r.allocations || []);
       if (returned.length) applyAllocations(returned);
       if (results.some((r) => !r.ok)) loadAllocations(true);
@@ -438,7 +504,7 @@ export default function WorkforcePlannerTab() {
     if (!o || o.kind !== "cell") return;
     if (a.kind === "legend") assignFromLegend(a.jKey, o.empId, o.day);
     else if (a.kind === "chip") {
-      if (altRef.current || evt.activatorEvent?.altKey) assignFromLegend(allocJobKey(a.alloc), o.empId, o.day, a.alloc.chargeUpJobId || null); // Alt-drag = duplicate (original stays; carries its site)
+      if (altRef.current || evt.activatorEvent?.altKey) assignFromLegend(allocJobKey(a.alloc), o.empId, o.day, a.alloc.chargeUpJobId || null, a.alloc.internalCategoryId || null); // Alt-drag = duplicate (original stays; carries its site / internal category)
       else moveChip(a.alloc, o.empId, o.day);
     }
   }
@@ -453,7 +519,7 @@ export default function WorkforcePlannerTab() {
     const anchorIdx = dIdx;
     let prevRightIdx = dIdx;
     while (prevRightIdx < 6 && allocJobKey(allocMap[`${empId}|${days[prevRightIdx + 1]}`]) === jKey) prevRightIdx++;
-    setFill({ empId, jKey, siteId: alloc.chargeUpJobId || null, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
+    setFill({ empId, jKey, siteId: alloc.chargeUpJobId || null, internalCategoryId: alloc.internalCategoryId || null, anchorIdx, endIdx: prevRightIdx, prevRightIdx });
     e.target.setPointerCapture?.(e.pointerId);
     // Snapshot this row's cell rects ONCE, then hit-test with pure maths + rAF — no elementFromPoint
     // per pointermove (that forced a sync layout every move = the "laggy control" stutter).
@@ -479,24 +545,24 @@ export default function WorkforcePlannerTab() {
       document.removeEventListener("pointerup", onUp);
       const f = fillRef.current;
       setFill(null);
-      if (f) fillCommit(f.empId, f.jKey, f.anchorIdx, f.endIdx, f.prevRightIdx, f.siteId);
+      if (f) fillCommit(f.empId, f.jKey, f.anchorIdx, f.endIdx, f.prevRightIdx, f.siteId, f.internalCategoryId);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
   }
 
   // Duplicate downwards: copy a shift down the day-column to other workers (drag back up = deduct).
-  async function fillDownCommit(day, jKey, anchorRow, endRow, prevBottomRow, siteId = null) {
+  async function fillDownCommit(day, jKey, anchorRow, endRow, prevBottomRow, siteId = null, internalCategoryId = null) {
     const creates = [], removes = [];
     for (let r = anchorRow; r <= endRow; r++) { const emp = employees[r]; if (emp && !allocMap[`${emp.id}|${day}`]) creates.push(emp.id); }
     for (let r = endRow + 1; r <= prevBottomRow; r++) { const emp = employees[r]; if (!emp) continue; const c = allocMap[`${emp.id}|${day}`]; if (c && allocJobKey(c) === jKey) removes.push(c); }
     if (!creates.length && !removes.length) return;
     setBusy(true); setMsg(null);
     const removeIds = new Set(removes.map((r) => r.id));
-    const temps = creates.map((empId) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, notes: null }));
+    const temps = creates.map((empId) => ({ id: `tmp-${empId}-${day}-${Math.random()}`, employeeId: empId, allocationDate: day, ...jobBodyFromKey(jKey), chargeUpJobId: siteId || null, chargeUpSiteLabel: siteId ? (siteLabelById[siteId] || null) : null, internalCategoryId: internalCategoryId || null, internalCategoryLabel: internalCategoryId ? (internalCatLabelById[internalCategoryId] || null) : null, notes: null }));
     setAllocations((prev) => [...prev.filter((a) => !removeIds.has(a.id)), ...temps]); // optimistic
     try {
-      const results = await Promise.all([...creates.map((empId) => assignReq(empId, day, jKey, siteId)), ...removes.map((r) => del(r.id))]);
+      const results = await Promise.all([...creates.map((empId) => assignReq(empId, day, jKey, siteId, internalCategoryId)), ...removes.map((r) => del(r.id))]);
       const returned = results.flatMap((r) => r.allocations || []);
       if (returned.length) applyAllocations(returned);
       if (results.some((r) => !r.ok)) loadAllocations(true);
@@ -511,7 +577,7 @@ export default function WorkforcePlannerTab() {
     if (anchorRow < 0) return;
     let prevBottomRow = anchorRow;
     while (prevBottomRow < employees.length - 1 && allocJobKey(allocMap[`${employees[prevBottomRow + 1].id}|${day}`]) === jKey) prevBottomRow++;
-    setFillDown({ day, dayIdx, jKey, siteId: alloc.chargeUpJobId || null, anchorRow, endRow: prevBottomRow, prevBottomRow });
+    setFillDown({ day, dayIdx, jKey, siteId: alloc.chargeUpJobId || null, internalCategoryId: alloc.internalCategoryId || null, anchorRow, endRow: prevBottomRow, prevBottomRow });
     e.target.setPointerCapture?.(e.pointerId);
     // Snapshot this day-column's cell rects ONCE (indexed by employee row) → maths hit-test + rAF.
     const rects = [];
@@ -539,7 +605,7 @@ export default function WorkforcePlannerTab() {
       document.removeEventListener("pointerup", onUp);
       const f = fillDownRef.current;
       setFillDown(null);
-      if (f) fillDownCommit(f.day, f.jKey, f.anchorRow, f.endRow, f.prevBottomRow, f.siteId);
+      if (f) fillDownCommit(f.day, f.jKey, f.anchorRow, f.endRow, f.prevBottomRow, f.siteId, f.internalCategoryId);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
@@ -563,23 +629,23 @@ export default function WorkforcePlannerTab() {
     setChipMenu({ alloc, x: x - (wrap?.left || 0), y: y - (wrap?.top || 0) });
   }
   function chipClicked(alloc, e) {
-    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; setDupMode(null); assignFromLegend(jk, alloc.employeeId, alloc.allocationDate, sid); return; }
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; const icid = dupMode.alloc.internalCategoryId || null; setDupMode(null); assignFromLegend(jk, alloc.employeeId, alloc.allocationDate, sid, icid); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (src.id !== alloc.id) moveChip(src, alloc.employeeId, alloc.allocationDate); return; }
     openNotes(alloc, e);
   }
   function onCellPick(empId, day) {
-    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; setDupMode(null); assignFromLegend(jk, empId, day, sid); return; }
+    if (dupMode) { const jk = allocJobKey(dupMode.alloc); const sid = dupMode.alloc.chargeUpJobId || null; const icid = dupMode.alloc.internalCategoryId || null; setDupMode(null); assignFromLegend(jk, empId, day, sid, icid); return; }
     if (moveMode) { const src = moveMode.alloc; setMoveMode(null); if (!(src.employeeId === empId && src.allocationDate === day)) moveChip(src, empId, day); return; }
     if (!allocMap[`${empId}|${day}`]) { setChipMenu(null); setCellPicker({ empId, day }); }
   }
   function menuFillWeek(alloc) {  // fill this job from this day to Friday (weekdays)
     const idx = days.indexOf(alloc.allocationDate);
     setChipMenu(null); vibrate(8);
-    fillCommit(alloc.employeeId, allocJobKey(alloc), idx, idx <= 4 ? 4 : idx, idx);
+    fillCommit(alloc.employeeId, allocJobKey(alloc), idx, idx <= 4 ? 4 : idx, idx, alloc.chargeUpJobId || null, alloc.internalCategoryId || null);
   }
   function menuCopyDown(alloc) {  // copy this job to every crew member on this day (empty cells only)
     setChipMenu(null); vibrate(8);
-    fillDownCommit(alloc.allocationDate, allocJobKey(alloc), 0, employees.length - 1, 0);
+    fillDownCommit(alloc.allocationDate, allocJobKey(alloc), 0, employees.length - 1, 0, alloc.chargeUpJobId || null, alloc.internalCategoryId || null);
   }
   async function clearWeek() {
     if (!allocations.length) return;
@@ -620,8 +686,9 @@ export default function WorkforcePlannerTab() {
         {/* Legend — only jobs on the board (opt-in) + any job allocated this week */}
         <div className="flex flex-wrap items-center gap-2 mb-1">
           <span className="text-xs text-muted mr-1">Jobs:</span>
-          {boardJobs.length === 0 ? <span className="text-xs text-muted">No jobs on the board yet — add some.</span>
+          {boardJobs.length === 0 && !internalGroupShown ? <span className="text-xs text-muted">No jobs on the board yet — add some.</span>
             : boardJobs.map((j) => <LegendChip key={j.jKey} jKey={j.jKey} label={j.label} color={colorFor(j.jKey)} pinned={!!settings[j.jKey]?.onBoard} onPickColor={openColor} onRemove={() => toggleBoard(j.jKey, false)} />)}
+          {internalGroupShown && <InternalGroupChip color={colorFor(INTERNAL_GROUP_KEY)} pinned={!!settings[internalJKey]?.onBoard} onPickColor={(e) => openColor(internalJKey, e)} onRemove={() => toggleBoard(internalJKey, false)} />}
           <button type="button" onClick={(e) => { e.stopPropagation(); setAddOpen((v) => !v); }} className="text-xs text-primary border border-dashed border-primary/40 rounded-full px-2.5 py-1">+ Add jobs</button>
           <button type="button" onClick={(e) => { e.stopPropagation(); setDaysOffOpen((v) => !v); }} className="text-xs text-muted border border-dashed border-hairline rounded-full px-2.5 py-1">Days off</button>
         </div>
@@ -629,7 +696,20 @@ export default function WorkforcePlannerTab() {
           <div className="border border-hairline rounded-lg bg-white p-2 mb-3 max-w-md" onClick={(e) => e.stopPropagation()}>
             <input autoFocus value={addSearch} onChange={(e) => setAddSearch(e.target.value)} placeholder="Search jobs…" className="w-full border border-hairline rounded px-2 py-1 text-sm mb-2" />
             <div className="max-h-48 overflow-y-auto divide-y divide-hairline">
-              {jobs.filter((j) => j.label.toLowerCase().includes(addSearch.toLowerCase())).slice(0, 200).map((j) => {
+              {/* The three internal-group jobs collapse into one "Blue Leaf Internal" toggle (its board
+                  state is the BL-INTERNAL job's). Picking it on a cell opens the Logistics/Josh/Sam picker. */}
+              {internalJKey && "blue leaf internal".includes(addSearch.toLowerCase()) && (() => {
+                const on = !!settings[internalJKey]?.onBoard;
+                return (
+                  <label key={INTERNAL_GROUP_KEY} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer">
+                    <input type="checkbox" checked={on} onChange={(e) => toggleBoard(internalJKey, e.target.checked)} />
+                    <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: colorFor(INTERNAL_GROUP_KEY).dot }} />
+                    <span className="truncate flex-1">Blue Leaf Internal</span>
+                    <span className="text-[10px] text-muted shrink-0">Internal</span>
+                  </label>
+                );
+              })()}
+              {jobs.filter((j) => !internalGroupKeys.has(j.jKey) && j.label.toLowerCase().includes(addSearch.toLowerCase())).slice(0, 200).map((j) => {
                 const on = !!settings[j.jKey]?.onBoard;
                 const allocated = allocKeys.has(j.jKey);
                 return (
@@ -764,7 +844,7 @@ export default function WorkforcePlannerTab() {
                         <DayCell key={d} empId={emp.id} day={d} dayIdx={i} fillActive={fillCovers(emp.id, i) || fillDownCovers(emp.id, d)} nonWork={nonWorkFor(emp.id, d)} picking={!!moveMode || !!dupMode} onPick={onCellPick} className={i >= 5 ? "hidden sm:table-cell" : ""}>
                           {a ? (
                             <div className="relative w-full h-full">
-                              <ShiftChip alloc={a} label={a.chargeUpJobId ? (a.chargeUpSiteLabel || siteLabelById[a.chargeUpJobId] || labelFor(jKey)) : labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
+                              <ShiftChip alloc={a} label={a.chargeUpJobId ? (a.chargeUpSiteLabel || siteLabelById[a.chargeUpJobId] || labelFor(jKey)) : a.internalCategoryId ? (a.internalCategoryLabel || internalCatLabelById[a.internalCategoryId] || labelFor(jKey)) : labelFor(jKey)} color={colorFor(jKey)} onClick={onChipClick} onLongPress={onChipLongPress} onFillStart={onChipFillStart} onFillDownStart={onChipFillDownStart} />
                               <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeAlloc(a); }}
                                 className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-hairline text-muted text-[10px] leading-none opacity-0 hover:opacity-100 focus:opacity-100" title="Remove" aria-label="Remove allocation">×</button>
                             </div>
@@ -836,7 +916,7 @@ export default function WorkforcePlannerTab() {
                 <p className="text-sm font-semibold text-ink">Add a job</p>
                 <button type="button" onClick={() => setCellPicker(null)} className="text-sm text-muted">Close</button>
               </div>
-              {boardJobs.length === 0 ? <p className="text-xs text-muted py-4">No jobs on the board — add some from the Jobs row above.</p> : (
+              {boardJobs.length === 0 && !internalGroupShown ? <p className="text-xs text-muted py-4">No jobs on the board — add some from the Jobs row above.</p> : (
                 <div className="space-y-1.5">
                   {boardJobs.map((j) => { const c = colorFor(j.jKey); return (
                     <button key={j.jKey} type="button" onClick={() => { const { empId, day } = cellPicker; setCellPicker(null); vibrate(8); assignFromLegend(j.jKey, empId, day); }}
@@ -845,6 +925,13 @@ export default function WorkforcePlannerTab() {
                       <span className="text-sm truncate" style={{ color: c.text }}>{j.label}</span>
                     </button>
                   ); })}
+                  {internalGroupShown && (() => { const c = colorFor(INTERNAL_GROUP_KEY); return (
+                    <button key={INTERNAL_GROUP_KEY} type="button" onClick={() => { const { empId, day } = cellPicker; setCellPicker(null); vibrate(8); assignFromLegend(INTERNAL_GROUP_KEY, empId, day); }}
+                      className="w-full flex items-center gap-2 min-h-[48px] px-3 rounded-lg border border-hairline text-left" style={{ background: c.bg }}>
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: c.dot }} />
+                      <span className="text-sm truncate" style={{ color: c.text }}>Blue Leaf Internal</span>
+                    </button>
+                  ); })()}
                 </div>
               )}
             </div>
@@ -871,6 +958,32 @@ export default function WorkforcePlannerTab() {
                       {s.address ? <span className="text-[11px] text-muted truncate">{s.address}</span> : null}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Blue Leaf Internal picker (bottom sheet) — choose Logistics / Josh's / Sam's before saving */}
+        {internalPicker && (
+          <div className="fixed inset-0 z-50 flex items-end" onClick={() => setInternalPicker(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative w-full bg-white rounded-t-2xl p-4 max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold text-ink">Blue Leaf Internal — which?</p>
+                <button type="button" onClick={() => setInternalPicker(null)} className="text-sm text-muted">Cancel</button>
+              </div>
+              <p className="text-[11px] text-muted mb-2">Pick where these internal hours belong.</p>
+              {internalOptions.length === 0 ? <p className="text-xs text-muted py-4">Blue Leaf Internal is not set up yet.</p> : (
+                <div className="space-y-1.5">
+                  {internalOptions.map((opt) => { const c = colorFor(opt.jKey); return (
+                    <button key={opt.key} type="button"
+                      onClick={() => { const { empId, day } = internalPicker; setInternalPicker(null); vibrate(8); assignFromLegend(opt.jKey, empId, day, null, opt.internalCategoryId || null); }}
+                      className="w-full flex items-center gap-2 min-h-[48px] px-3 rounded-lg border border-hairline text-left" style={{ background: c.bg }}>
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: c.dot }} />
+                      <span className="text-sm truncate" style={{ color: c.text }}>{opt.label}</span>
+                    </button>
+                  ); })}
                 </div>
               )}
             </div>

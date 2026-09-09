@@ -138,6 +138,8 @@ export default function WorkerLogHours() {
                 setSelectedId(sid);
                 setScheduledId(sid);
                 if (al.chargeUpJobId) setChargeUpJobId(al.chargeUpJobId);
+                // BL-INTERNAL: a planner-tagged Logistics shift prefills the cost category (mig 203).
+                if (al.internalCategoryId) setInternalCategoryId(al.internalCategoryId);
               } else {
                 setScheduledId(null);
               }
