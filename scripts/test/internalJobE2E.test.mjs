@@ -475,23 +475,40 @@ await scenario("6 worker tag: leave-category id 400-rejects; worked id accepted 
 // =============================================================================
 // SCENARIO 7 — retro-assign guard (POST /api/carpentry/jobs/:id/internal-assign)
 // =============================================================================
-await scenario("7 retro-assign: leave target 400; worked target ok", async () => {
+await scenario("7 retro-assign: worked target tags in place; leave target CONVERTS to a leave day", async () => {
   const store = seedBase();
+  const emp = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
   const tsId = "ts7";
-  store.timesheets.push({ id: tsId, employee_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01", date: "2025-09-20", carpentry_job_id: INTERNAL_JOB, status: "approved" });
-  store.timesheet_entries.push({ id: "e7", timesheet_id: tsId, employee_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01", task_category: "site_labouring", hours: 6, cost_amount: 300, internal_category_id: null });
-  const sb = makeSb(store);
+  store.timesheets.push({ id: tsId, employee_id: emp, date: "2025-09-20", carpentry_job_id: INTERNAL_JOB, status: "approved" });
+  store.timesheet_entries.push({ id: "e7a", timesheet_id: tsId, employee_id: emp, task_category: "site_labouring", hours: 6, cost_amount: 300, internal_category_id: null });
+  store.timesheet_entries.push({ id: "e7b", timesheet_id: tsId, employee_id: emp, task_category: "site_labouring", hours: 7.6, cost_amount: 456, internal_category_id: null });
+  const sb = makeSb(store, { uniques: RDO_UNIQUE });
 
-  const leave = await call("POST", "/api/carpentry/jobs/:id/internal-assign",
-    { params: { id: INTERNAL_JOB }, body: { internalCategoryId: "cat_annual", entryIds: ["e7"] } }, sb);
-  assert.equal(leave.statusCode, 400, `leave target expected 400, got ${leave.statusCode}: ${JSON.stringify(leave.body)}`);
-  assert.equal(store.timesheet_entries[0].internal_category_id, null, "entry not tagged to a leave category");
-
+  // Worked target → tag in place (unchanged behaviour).
   const worked = await call("POST", "/api/carpentry/jobs/:id/internal-assign",
-    { params: { id: INTERNAL_JOB }, body: { internalCategoryId: "cat_logistics", entryIds: ["e7"] } }, sb);
+    { params: { id: INTERNAL_JOB }, body: { internalCategoryId: "cat_logistics", entryIds: ["e7a"] } }, sb);
   assert.equal(worked.statusCode, 200, `worked target expected 200, got ${worked.statusCode}: ${JSON.stringify(worked.body)}`);
-  assert.equal(worked.body.assigned, 1, "one entry assigned");
-  assert.equal(store.timesheet_entries[0].internal_category_id, "cat_logistics", "entry now tagged to the worked category");
+  assert.equal(worked.body.assigned, 1, "one entry tagged");
+  assert.equal(worked.body.converted, 0);
+  assert.equal(store.timesheet_entries.find((x) => x.id === "e7a").internal_category_id, "cat_logistics", "worked entry tagged in place");
+
+  // Leave target → CONVERT: the worked entry is removed and a typed sick leave day is written.
+  const conv = await call("POST", "/api/carpentry/jobs/:id/internal-assign",
+    { params: { id: INTERNAL_JOB }, body: { internalCategoryId: "cat_sick", entryIds: ["e7b"] } }, sb);
+  assert.equal(conv.statusCode, 200, `convert expected 200, got ${conv.statusCode}: ${JSON.stringify(conv.body)}`);
+  assert.equal(conv.body.converted, 1, "one entry converted");
+  assert.equal(conv.body.assigned, 0);
+  assert.ok(!store.timesheet_entries.find((x) => x.id === "e7b"), "worked entry removed (no double-count)");
+  const leaveRow = store.workforce_employee_rdo_dates.find((r) => r.rdo_date === "2025-09-20" && r.employee_id === emp);
+  assert.ok(leaveRow, "leave-spine row written");
+  assert.equal(leaveRow.leave_type, "sick", "typed sick");
+  assert.equal(leaveRow.hours, 7.6, "hours carried from the worked entry");
+
+  // …and it now costs as SICK (base×(1+SG)), not the worked loaded rate.
+  const { rows } = await costWindow(sb, "2025-07-01", "2026-06-30");
+  const s = rows.find((r) => r.leaveType === "sick" && r.fy === "2025-26" && r.quarter === 1);
+  assert.ok(s, "sick cost row present after convert");
+  assert.equal(s.cost, round2(7.6 * sickRate), `converted sick costed 7.6×${sickRate}=${round2(7.6 * sickRate)}, got ${s.cost}`);
 });
 
 // =============================================================================
@@ -585,6 +602,182 @@ await scenario("9 approve annual over a pre-existing RDO date → row re-typed t
   assert.equal(a.cost, round2(8 * annualRate), `re-typed day costed as annual 8×${annualRate}=${round2(8 * annualRate)}, got ${a.cost}`);
   const rdoRow = costRows.find((r) => r.leaveType === "rdo" && r.fy === "2025-26" && r.quarter === 2);
   assert.ok(!rdoRow, "the date is NOT costed as rdo any more (no mis-costing)");
+});
+
+// =============================================================================
+// SCENARIO 10 — convert over a date that ALREADY has a leave row → retype, no duplicate
+// =============================================================================
+await scenario("10 convert untagged hours over a pre-existing leave date → retypes existing row, removes worked entry", async () => {
+  const store = seedBase();
+  const emp = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+  const date = "2025-11-12";
+  // The date already carries a (wrongly-typed) rdo leave row.
+  store.workforce_employee_rdo_dates.push({ id: "pre_rdo_10", employee_id: emp, rdo_date: date, leave_type: "rdo", note: "pattern rdo" });
+  const tsId = "ts10";
+  store.timesheets.push({ id: tsId, employee_id: emp, date, carpentry_job_id: INTERNAL_JOB, status: "approved" });
+  store.timesheet_entries.push({ id: "e10", timesheet_id: tsId, employee_id: emp, task_category: "site_labouring", hours: 8, cost_amount: 480, internal_category_id: null });
+  const sb = makeSb(store, { uniques: RDO_UNIQUE });
+
+  const conv = await call("POST", "/api/carpentry/jobs/:id/internal-assign",
+    { params: { id: INTERNAL_JOB }, body: { internalCategoryId: "cat_sick", entryIds: ["e10"] } }, sb);
+  assert.equal(conv.statusCode, 200, `convert expected 200, got ${conv.statusCode}: ${JSON.stringify(conv.body)}`);
+  assert.equal(conv.body.converted, 1, "one entry converted");
+  const leaveRows = store.workforce_employee_rdo_dates.filter((r) => r.rdo_date === date && r.employee_id === emp);
+  assert.equal(leaveRows.length, 1, "no duplicate leave row — the existing one was retyped in place");
+  assert.equal(leaveRows[0].leave_type, "sick", "existing rdo row retyped to sick");
+  assert.ok(!store.timesheet_entries.find((x) => x.id === "e10"), "worked entry removed");
+});
+
+// =============================================================================
+// ===  NEW: BL-INTERNAL / house-jobs / finance→carpentry build (plan §0)  =====
+// Adversarial scenarios for the Josh/Sam-house + finance-read-through + planner-
+// Logistics-auto-tag build. Same mock harness, driving the REAL handlers.
+// =============================================================================
+const CLIENT_JOB = "carp_client";   // an ordinary (non-internal) carpentry job
+const JOSH_JOB   = "carp_josh";     // BL-JOSH-HOUSE cost-only job (mig 202)
+
+// =============================================================================
+// SCENARIO 11 — FINANCE→CARPENTRY read-through (Issue 3 / Phase 0)
+//   approved finance doc → summed into /summary otherActual + folded into the
+//   matching /budget material line (name→UUID); unapproved/rejected NOT counted;
+//   a category with no matching line still hits the job total (unlinked bucket),
+//   never dropped; manual carpentry_job_cost + finance doc NOT double-counted.
+// =============================================================================
+await scenario("11 finance→carpentry: approved folds into summary+budget line; unapproved excluded; unlinked kept; no double-count", async () => {
+  const store = seedBase();
+  const TIMBER_LINE = "bl_timber_line";
+  store.carpentry_jobs.push({ id: CLIENT_JOB, reference: "BL-2401", address: "12 Client St", status: "active", client_name: "Client Co", quoted_value: 0 });
+  // One material budget line named "Timber" (UNIQUE(job_id,category_name) → deterministic name→UUID).
+  store.carpentry_job_budgets.push({ id: TIMBER_LINE, job_id: CLIENT_JOB, category_name: "Timber", cost_type: "material", budget_ex_gst: 1000, sort_order: 10, workforce_task_category: null });
+  // Finance invoices allocated to this job.
+  store.financial_documents = [
+    { id: "fd1", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: 300, status: "approved",        supplier_name: "Bunnings", invoice_number: "A1", invoice_date: "2025-09-03", created_at: "2025-09-03" },
+    { id: "fd2", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: 200, status: "filed",           supplier_name: "Bowens",   invoice_number: "A2", invoice_date: "2025-09-04", created_at: "2025-09-04" },
+    { id: "fd3", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Glue",   amount_ex_gst: 50,  status: "approved",        supplier_name: "Selleys",  invoice_number: "A3", invoice_date: "2025-09-05", created_at: "2025-09-05" },
+    { id: "fd4", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: 999, status: "pending_approval", supplier_name: "X",       invoice_number: "A4", invoice_date: "2025-09-06", created_at: "2025-09-06" },
+    { id: "fd5", carpentry_job_id: CLIENT_JOB, carpentry_cost_category: "Timber", amount_ex_gst: 777, status: "rejected",         supplier_name: "Y",       invoice_number: "A5", invoice_date: "2025-09-07", created_at: "2025-09-07" },
+  ];
+  // A manual cost entry (disjoint table) — must be counted once, source-labelled, never merged with finance.
+  store.carpentry_job_costs = [{ id: "c1", job_id: CLIENT_JOB, amount: 100, cost_type: "material", description: "Manual timber top-up", carpentry_job_budget_id: null, source: "manual", cost_date: "2025-09-02" }];
+  const sb = makeSb(store, { uniques: { carpentry_job_budgets: [["job_id", "category_name"]] } });
+
+  // /summary — otherActual = manual 100 + finance(300+200+50)=550 → 650; split labelled.
+  const sum = await call("GET", "/api/carpentry/jobs/:id/summary", { params: { id: CLIENT_JOB } }, sb);
+  assert.equal(sum.statusCode, 200, JSON.stringify(sum.body));
+  const s = sum.body.summary;
+  assert.equal(s.otherActual, 650, `otherActual = manual 100 + approved finance 550 = 650, got ${s.otherActual}`);
+  assert.equal(s.financeActual, 550, "financeActual = 300+200+50 (approved/filed only)");
+  assert.equal(s.manualOtherActual, 100, "manual side is 100, source-split preserved");
+  assert.equal(s.financeInvoiceCount, 3, "only the 3 approved/filed docs counted (pending+rejected excluded)");
+
+  // /budget — Timber line folds finance-Timber (500); Glue has no line → unlinked (50); total 650.
+  const bud = await call("GET", "/api/carpentry/jobs/:id/budget", { params: { id: CLIENT_JOB } }, sb);
+  assert.equal(bud.statusCode, 200, JSON.stringify(bud.body));
+  const timber = bud.body.lines.find((l) => l.categoryName === "Timber");
+  assert.ok(timber, "Timber budget line present");
+  assert.equal(timber.actual, 500, `Timber line actual = finance Timber 300+200 = 500 (name→UUID fold), got ${timber.actual}`);
+  assert.equal(bud.body.totals.materialActual, 650, "material total = manual 100 + finance 550");
+  assert.equal(bud.body.totals.financeMaterialActual, 550, "finance portion surfaced");
+  assert.equal(bud.body.totals.financeUnlinkedActual, 50, "Glue has no matching line → unlinked bucket (kept in total, not dropped)");
+
+  // /costs — both sources visible, source-labelled, finance read-only. No double-count.
+  const costs = await call("GET", "/api/carpentry/jobs/:id/costs", { params: { id: CLIENT_JOB } }, sb);
+  assert.equal(costs.statusCode, 200, JSON.stringify(costs.body));
+  const rows = costs.body.costs;
+  const financeRows = rows.filter((r) => r.source === "finance");
+  const manualRows = rows.filter((r) => r.source === "manual");
+  assert.equal(financeRows.length, 3, "3 approved finance rows surfaced (read-only)");
+  assert.ok(financeRows.every((r) => r.readOnly === true), "finance rows are read-only");
+  assert.equal(manualRows.length, 1, "the single manual row appears exactly once (not duplicated by finance)");
+  assert.equal(manualRows[0].readOnly, false, "manual row stays editable");
+});
+
+// =============================================================================
+// SCENARIO 12 — HOUSE GLANCE inputs (BL-JOSH-HOUSE)
+//   The Charge-Up-style glance reads /summary: labour hours + labour$ by category
+//   (approved timesheets) and material$ (finance invoices), summed correctly.
+// =============================================================================
+await scenario("12 house glance: BL-JOSH-HOUSE /summary sums hours+labour$ by category and material$ from finance", async () => {
+  const store = seedBase();
+  const emp = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01"; // hourly_rate 40 (seed)
+  store.carpentry_jobs.push({ id: JOSH_JOB, reference: "BL-JOSH-HOUSE", address: "Josh's house — internal", status: "active", client_name: "Blue Leaf Building", quoted_value: 0 });
+  const tsId = "ts_j";
+  store.timesheets.push({ id: tsId, employee_id: emp, date: "2025-09-10", carpentry_job_id: JOSH_JOB, status: "approved" });
+  store.timesheet_entries.push({ id: "ej1", timesheet_id: tsId, employee_id: emp, task_category: "framing",  hours: 8 });
+  store.timesheet_entries.push({ id: "ej2", timesheet_id: tsId, employee_id: emp, task_category: "framing",  hours: 2 });
+  store.timesheet_entries.push({ id: "ej3", timesheet_id: tsId, employee_id: emp, task_category: "cleanup",  hours: 5 });
+  // Material via finance invoices (houses never auto-match → manual finance allocation only).
+  store.financial_documents = [
+    { id: "fj1", carpentry_job_id: JOSH_JOB, carpentry_cost_category: "Timber",  amount_ex_gst: 500, status: "approved", supplier_name: "Bowens", invoice_number: "J1", invoice_date: "2025-09-11", created_at: "2025-09-11" },
+    { id: "fj2", carpentry_job_id: JOSH_JOB, carpentry_cost_category: "Fixings", amount_ex_gst: 120, status: "filed",    supplier_name: "Fastfix", invoice_number: "J2", invoice_date: "2025-09-12", created_at: "2025-09-12" },
+  ];
+  const sb = makeSb(store);
+
+  const res = await call("GET", "/api/carpentry/jobs/:id/summary", { params: { id: JOSH_JOB } }, sb);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  const s = res.body.summary;
+  assert.equal(s.labourHours, 15, "labour hours = 8+2+5");
+  assert.equal(s.labourActual, 600, "labour$ = 15h × $40 base rate");
+  const framing = s.labourByCategory.find((c) => c.category === "framing");
+  const cleanup = s.labourByCategory.find((c) => c.category === "cleanup");
+  assert.equal(framing.hours, 10, "framing hours grouped (8+2)");
+  assert.equal(framing.cost, 400, "framing $ = 10h × 40");
+  assert.equal(cleanup.hours, 5, "cleanup hours");
+  assert.equal(cleanup.cost, 200, "cleanup $ = 5h × 40");
+  assert.equal(s.otherActual, 620, "material$ = finance 500+120 (no manual costs)");
+  assert.equal(s.financeActual, 620, "all material came through the finance read-through");
+  assert.equal(s.financeInvoiceCount, 2);
+});
+
+// =============================================================================
+// SCENARIO 13 — PLANNER LOGISTICS AUTO-TAG (Model C, mig 203)
+//   Creating a BL-INTERNAL allocation with internal_category_id=Logistics stores
+//   + echoes it. The mig-143 move RPC re-insert must carry BOTH charge_up_job_id
+//   AND internal_category_id (regression guard for the confirmed drop bug).
+// =============================================================================
+await scenario("13 planner Logistics auto-tag: POST allocation stores+echoes internal_category_id; move-RPC re-insert carries both sub-tags", async () => {
+  const store = seedBase();
+  const emp = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+  const sb = makeSb(store);
+
+  const res = await call("POST", "/api/workforce/allocations",
+    { body: { allocationDate: "2025-12-01", employeeId: emp, carpentryJobId: INTERNAL_JOB, internalCategoryId: "cat_logistics" } }, sb);
+  assert.equal(res.statusCode, 200, `allocation POST expected 200, got ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.allocation.internalCategoryId, "cat_logistics", "response echoes the Logistics tag");
+  const stored = store.workforce_allocations.find((a) => a.employee_id === emp && a.allocation_date === "2025-12-01");
+  assert.ok(stored, "allocation row written");
+  assert.equal(stored.internal_category_id, "cat_logistics", "stored row carries internal_category_id");
+  // A worked Logistics category must never be rejected: it is cost_source='timesheet' on BL-INTERNAL.
+
+  // Regression guard for the mig-143 sub-tag drop bug — asserted at the SQL-shape level.
+  // NOTE / LIMITATION: the mock Supabase cannot execute the plpgsql workforce_allocation_move RPC
+  // (nor the fallback's .or()/.neq() chains), so the re-insert cannot be driven end-to-end here.
+  // We instead assert the migration's re-insert names BOTH sub-tag columns (the exact fix).
+  const { readFileSync } = await import("node:fs");
+  const mig = readFileSync(new URL("../../supabase/migrations/203_alloc_internal_category.sql", import.meta.url), "utf8");
+  const reinsert = /insert into workforce_allocations[\s\S]*?values/i.exec(mig);
+  assert.ok(reinsert, "mig 203 contains the move-RPC re-insert");
+  assert.match(reinsert[0], /charge_up_job_id/, "re-insert carries charge_up_job_id (charge-up sub-tag preserved on swap)");
+  assert.match(reinsert[0], /internal_category_id/, "re-insert carries internal_category_id (the mig-143 drop-bug fix)");
+});
+
+// =============================================================================
+// SCENARIO 14 — FAIL-SOFT: internal_category_id column absent (mig 203 not applied)
+//   The allocation POST must still succeed, just untagged — no 500, existing
+//   planner keeps working before Sam applies the migration.
+// =============================================================================
+await scenario("14 fail-soft: mig 203 absent (no internal_category_id column) → allocation POST still succeeds, untagged", async () => {
+  const store = seedBase();
+  const emp = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+  const sb = makeSb(store, { missingColumns: { workforce_allocations: new Set(["internal_category_id"]) } });
+
+  const res = await call("POST", "/api/workforce/allocations",
+    { body: { allocationDate: "2025-12-02", employeeId: emp, carpentryJobId: INTERNAL_JOB, internalCategoryId: "cat_logistics" } }, sb);
+  assert.equal(res.statusCode, 200, `POST with column absent expected 200 (fail-soft), got ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.allocation.internalCategoryId, null, "untagged when the column is missing");
+  const stored = store.workforce_allocations.find((a) => a.employee_id === emp && a.allocation_date === "2025-12-02");
+  assert.ok(stored, "allocation row still written");
+  assert.ok(!("internal_category_id" in stored), "no internal_category_id key written when the column is absent (guarded insert)");
 });
 
 // =============================================================================

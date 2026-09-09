@@ -1,7 +1,7 @@
 ---
-sop_version: 1.4
-last_reviewed: 2026-07-21
-app_version: 1.4 — built (site detail pop-up now tabbed: Shifts · Tasks · Diary, reusing the carpentry job tables/components)
+sop_version: 1.5
+last_reviewed: 2026-09-09
+app_version: 1.5 — built (site detail pop-up tabbed: Shifts · Tasks · Diary). Cross-ref added: the Planner "Blue Leaf Internal" chip now has an analogous 3-option picker (Logistics / Josh's / Sam's house), the direct sibling of this site picker — see SOP 10-07.
 screenshot_status: not_applicable
 owner: Admin
 test_status: untested
@@ -38,7 +38,7 @@ Admin/supervisors set up the charge-up sites and read the per-site invoicing fig
 - **Photos**: a leading hand can attach a photo of the work to a charge-up line on the app (camera button on each task); it shows against that shift in the pop-up.
 - **Per-site target gross margin** (director-only, mig 150): a site can carry a **margin %** that prices it off the wage cost — charge-out = wage cost ÷ (1 − margin), so the realised gross margin equals the number set. It's the lever for "adjust the margin on this job". Blank = fall back to each worker's charge-up rate. Changing it re-computes charge-out + margin live; it never changes approved hours or the internal cost. Margin reveals cost, so it's shown/editable to directors only.
 
-In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker** — a charge-up shift always names its site (address), so everyone can see where the boys are before they log hours. (The site is also confirmed when logging hours, so it's captured either way.)
+In the **Planner**, dropping BLB Charge Up on a shift cell opens a **site picker** — a charge-up shift always names its site (address), so everyone can see where the boys are before they log hours. (The site is also confirmed when logging hours, so it's captured either way.) The **Blue Leaf Internal** chip works the same way with an analogous **3-option picker** (Logistics / Josh's house / Sam's house) — the direct sibling of this site picker; see **[SOP 10-07](internal_cost_categories.md)**.
 
 ## 4. Before you start
 - Migrations 145 (sites), 146 (Planner shift → site link), 150 (per-site target gross margin) and 151 (per-site tasks + diary) applied.
@@ -95,6 +95,7 @@ Hours become part of the site's totals once the worker's timesheet is **approved
 ## 9. Related SOPs
 - SOP 10-01 Workforce Overview (timesheets/approvals)
 - SOP 10-04 Workforce Pipeline; SOP 14-xx Cost Intelligence (the charge-up rate lives in the cost model)
+- [SOP 10-07 BL-INTERNAL & internal house jobs](internal_cost_categories.md) — the cost-only sibling of this backbone; its Planner "Blue Leaf Internal" picker mirrors the charge-up site picker
 
 ## 10. Automation notes
 - Sites CRUD: `GET/POST /api/carpentry/jobs/:id/charge-up-jobs`, `PATCH/DELETE /api/carpentry/charge-up-jobs/:id` (admin/supervisor). PATCH whitelists `marginPct` (per-site target gross margin, mig 150; **admin-only** since it reveals cost; validated 0 ≤ x < 100, blank clears). Analytics: `GET /api/carpentry/jobs/:id/charge-up-summary` returns per-site `entries[]` (date · worker · notes · hours · charge-out · cost), `lastDate`, `marginPct` (directors only), and by-FY — all cost/margin fields director-gated (`stripCost`). Site detail pop-up (tabbed): `GET /api/carpentry/charge-up-jobs/:id/shifts` returns the site's fields + priced shifts **with `completionPhotoUrl` + `taskCategory`** + totals (photos lazy-loaded). **Tasks** reuse `site_tasks` re-keyed to `charge_up_job_id` (mig 151): `GET/POST /api/carpentry/charge-up-jobs/:id/tasks` + the id-scoped `PATCH/DELETE /api/carpentry/tasks/:id`. **Diary** reuses `carpentry_site_diary` re-keyed the same way: `GET/POST /api/carpentry/charge-up-jobs/:id/diary`. Shared frontend: `CarpentrySiteDiary` (extracted from the job's DiaryTab — the job page renders the same component), `ChargeUpTasksPanel` (lean, same endpoints), `KpiCard` / `MobileTabs`, and a shared `mediaUrl`. Charge-up PWA entries can carry a completion photo (leading hand), stored in `timesheet_entries.completion_photo_url` as before.
