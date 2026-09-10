@@ -908,9 +908,11 @@ export function groupInternalJobs(list, refOf = (j) => j.reference) {
 }
 
 // Friendly label for an internal-group job inside the "Blue Leaf Internal" optgroup. BL-INTERNAL is a
-// category bucket (Logistics / ATEC picked after), the houses show their address.
+// category bucket — in the worker PWA it's picked as "Blue Leaf Internal" then the category (Logistics /
+// ATEC) is chosen in the next step; the houses show their address. (Admin dropdowns list the individual
+// categories directly, so they don't use this for BL-INTERNAL.)
 export function internalJobLabel(job, fallbackAddress) {
-  if (job.reference === INTERNAL_REFERENCE) return "Logistics / ATEC";
+  if (job.reference === INTERNAL_REFERENCE) return "Blue Leaf Internal";
   return fallbackAddress || job.address || job.reference;
 }
 

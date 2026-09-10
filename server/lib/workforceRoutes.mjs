@@ -864,7 +864,7 @@ export function registerWorkforceRoutes(app) {
     // Pull the job + entry breakdown too, so the hover tooltip can show which job and which sub-tasks
     // (e.g. J1171 · Wall framing) a day's hours were logged against.
     const { data: ts } = await sb.from("timesheets")
-      .select("id, employee_id, date, status, carpentry_jobs(reference, address, client_name), projects(address), timesheet_entries(hours, task_category, canonical_key, budget_line_item_id, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address))")
+      .select("id, employee_id, date, status, carpentry_jobs(reference, address, client_name), projects(address), timesheet_entries(hours, task_category, canonical_key, budget_line_item_id, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address), internal_categories(category_label))")
       .gte("date", week_start).lte("date", week_end);
     const statusByKey = {};
     const idByKey = {};
@@ -876,11 +876,14 @@ export function registerWorkforceRoutes(app) {
       statusByKey[k] = t.status;
       idByKey[k] = t.id;
       const cj = t.carpentry_jobs;
-      // For a BLB Charge Up timesheet, label the day with the SITE the work was done on (from the
-      // entries' charge_up_jobs), not the generic parent reference ("BL-CHARGEUP").
+      // For a BLB Charge Up timesheet, label the day with the SITE the work was done on; for a
+      // BL-INTERNAL timesheet, with the cost CATEGORY (Logistics / ATEC) — not the generic parent
+      // reference ("BL-CHARGEUP" / "BL-INTERNAL").
       const cuSites = [...new Set((t.timesheet_entries || []).map((en) => en.charge_up_jobs?.site_label).filter(Boolean))];
       const cuSite = cuSites.length === 1 ? cuSites[0] : cuSites.length > 1 ? `${cuSites.length} charge-up sites` : null;
-      jobByKey[k] = cuSite || (cj ? (cj.reference || cj.address || cj.client_name || null) : (t.projects?.address || null));
+      const intCats = [...new Set((t.timesheet_entries || []).map((en) => en.internal_categories?.category_label).filter(Boolean))];
+      const intCat = intCats.length === 1 ? intCats[0] : intCats.length > 1 ? `${intCats.length} categories` : null;
+      jobByKey[k] = cuSite || intCat || (cj ? (cj.reference || cj.address || cj.client_name || null) : (t.projects?.address || null));
       let h = 0;
       const labels = [];
       for (const en of t.timesheet_entries || []) {
@@ -987,7 +990,7 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address))")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address), internal_categories(category_label))")
       // Include rejected timesheets so the office can fix + re-approve them here (they show a red
       // "rejected" badge) instead of waiting for the worker to redo it in the PWA.
       .in("status", ["submitted", "rejected"])
@@ -1297,6 +1300,9 @@ export function registerWorkforceRoutes(app) {
   app.patch("/api/workforce/timesheets/:id/carpentry-job", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase();
     const { carpentryJobId } = req.body;
+    // Optional internal cost category (Logistics / ATEC) when re-attributing to BL-INTERNAL — the
+    // office picks the specific category, which tags the timesheet's hours for cost reporting.
+    const internalCategoryId = req.body.internalCategoryId ?? req.body.internal_category_id ?? null;
     // Verify the timesheet exists and is editable (not yet approved)
     const { data: ts, error: tsErr } = await sb
       .from("timesheets")
@@ -1312,10 +1318,22 @@ export function registerWorkforceRoutes(app) {
       const { data: job } = await sb.from("carpentry_jobs").select("id").eq("id", carpentryJobId).maybeSingle();
       if (!job) return res.status(400).json({ ok: false, error: "Carpentry job not found" });
     }
+    // Resolve the internal category — validates it belongs to the (internal) job + is active; for any
+    // non-internal job it resolves to null so the tag is cleared when hours move off BL-INTERNAL.
+    const ic = await resolveInternalCategory(sb, carpentryJobId || null, internalCategoryId);
+    if (ic.error) return res.status(400).json({ ok: false, error: ic.error });
+    // BL-INTERNAL requires a specific cost category (Logistics / ATEC) — don't silently clear the tag.
+    if (ic.required && !ic.internalCategoryId) return res.status(400).json({ ok: false, error: "Pick a cost category (Logistics / ATEC) for Blue Leaf Internal." });
     const { error } = await sb.from("timesheets")
       .update({ carpentry_job_id: carpentryJobId || null, updated_at: new Date().toISOString() })
       .eq("id", req.params.id);
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) return res.status(500).json({ ok: false, error: translateDbError(error) });
+    // Re-tag this timesheet's entries with the chosen internal category (or clear it when the target
+    // isn't BL-INTERNAL). Office attribution is authoritative for which category the hours cost against.
+    const { error: eErr } = await sb.from("timesheet_entries")
+      .update({ internal_category_id: ic.internalCategoryId || null })
+      .eq("timesheet_id", req.params.id);
+    if (eErr && !internalColMissing(eErr)) return res.status(500).json({ ok: false, error: translateDbError(eErr) });
     res.json({ ok: true });
   });
 

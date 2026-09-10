@@ -5,7 +5,7 @@ import { apiFetch, apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
-import { CHARGE_UP_REFERENCE, groupInternalJobs, internalJobLabel } from "../lib/constants.js";
+import { CHARGE_UP_REFERENCE, INTERNAL_REFERENCE, groupInternalJobs, internalJobLabel } from "../lib/constants.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
 import WorkforcePipelineTab from "./workforce/WorkforcePipelineTab.jsx";
@@ -32,13 +32,30 @@ function chargeUpSiteLabel(ts) {
   return sites.length === 1 ? sites[0] : sites.length > 1 ? `${sites.length} sites` : null;
 }
 
-// Project-column label for a timesheet: the charge-up site when present, else the carpentry job
-// (address / reference) or the building project address.
+// The internal cost category (Logistics / ATEC) a BL-INTERNAL timesheet was logged against, else null.
+function internalCategoryLabel(ts) {
+  const cats = [...new Set((ts?.timesheet_entries || []).map(e => e.internal_categories?.category_label).filter(Boolean))];
+  return cats.length === 1 ? cats[0] : cats.length > 1 ? `${cats.length} categories` : null;
+}
+
+// Project-column label for a timesheet: the charge-up site or internal category when present, else the
+// carpentry job (address / reference) or the building project address.
 function timesheetJobLabel(ts) {
   const site = chargeUpSiteLabel(ts);
   if (site) return `${site} (${ts.carpentry_jobs?.reference || "BL-CHARGEUP"})`;
+  const cat = internalCategoryLabel(ts);
+  if (cat) return `${cat} (${ts.carpentry_jobs?.reference || "BL-INTERNAL"})`;
   if (ts?.carpentry_jobs) return `${ts.carpentry_jobs.address || ts.carpentry_jobs.reference} (${ts.carpentry_jobs.reference})`;
   return ts?.projects?.address || "—";
+}
+
+// Encode a timesheet's current attribution as the dropdown value. A BL-INTERNAL timesheet carries the
+// cost category on its entries → "int:<categoryId>" so the picker shows Logistics / ATEC individually;
+// everything else is just the carpentry_job_id.
+function encodeAttrib(t) {
+  const catId = (t?.timesheet_entries || []).map(e => e.internal_category_id).find(Boolean);
+  if (catId) return `int:${catId}`;
+  return t?.carpentry_job_id || "";
 }
 
 // ── Approvals tab ─────────────────────────────────────────────────────────────
@@ -63,7 +80,8 @@ function ApprovalsTab({ role }) {
   const [subtasksByJob, setSubtasksByJob] = useState({});   // { [carpentryJobId]: { [task_category]: [{ key, label, budgetLineItemId }] } }
   // Carpentry job attribution
   const [carpentryJobs, setCarpentryJobs] = useState([]);
-  const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
+  const [internalCats, setInternalCats] = useState([]);   // BL-INTERNAL worked categories (Logistics / ATEC)
+  const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: "int:<catId>" | carpentryJobId | "" }
   const [attribBusy, setAttribBusy] = useState(new Set());
   const [detailId, setDetailId] = useState(null);   // timesheet open in the banner detail modal
   // Sort order for the pending list. "recent" = server order (most recently submitted first, the
@@ -78,15 +96,26 @@ function ApprovalsTab({ role }) {
         if (j.ok) {
           const ts = j.timesheets || [];
           setTimesheets(ts);
-          // Seed attribMap with any existing carpentry_job_id values
+          // Seed attribMap with the current attribution (BL-INTERNAL → its category, else the job id)
           const m = {};
-          ts.forEach(t => { m[t.id] = t.carpentry_job_id || ""; });
+          ts.forEach(t => { m[t.id] = encodeAttrib(t); });
           setAttribMap(m);
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  // BL-INTERNAL's worked cost categories (Logistics / ATEC), so the attribution dropdown can offer
+  // them individually. Fail-soft: empty before mig 200 or if BL-INTERNAL isn't present.
+  useEffect(() => {
+    const blId = carpentryJobs.find(j => j.reference === INTERNAL_REFERENCE)?.id;
+    if (!blId) { setInternalCats([]); return; }
+    authFetch(`/api/carpentry/jobs/${blId}/internal-categories`)
+      .then(r => r.json())
+      .then(j => { if (j.ok) setInternalCats((j.internalCategories || []).filter(c => c.status === "active" && c.costSource === "timesheet")); })
+      .catch(() => {});
+  }, [carpentryJobs]);
 
   // Load active carpentry jobs once for the attribution dropdown
   useEffect(() => {
@@ -119,17 +148,38 @@ function ApprovalsTab({ role }) {
     }
   }
 
-  async function assignCarpentryJob(timesheetId, carpentryJobId) {
+  // value is the encoded dropdown selection: "int:<categoryId>" (BL-INTERNAL + that cost category),
+  // a bare carpentry_job_id, or "" (none).
+  async function assignCarpentryJob(timesheetId, value) {
+    let carpentryJobId = value || null;
+    let internalCategoryId = null;
+    if (typeof value === "string" && value.startsWith("int:")) {
+      internalCategoryId = value.slice(4);
+      carpentryJobId = carpentryJobs.find(j => j.reference === INTERNAL_REFERENCE)?.id || null;
+    }
     setAttribBusy(prev => new Set(prev).add(timesheetId));
     try {
       const res = await authFetch(`/api/workforce/timesheets/${timesheetId}/carpentry-job`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ carpentryJobId: carpentryJobId || null }),
+        body: JSON.stringify({ carpentryJobId, internalCategoryId }),
       });
       const j = await res.json();
       if (j.ok) {
-        setAttribMap(prev => ({ ...prev, [timesheetId]: carpentryJobId }));
+        setAttribMap(prev => ({ ...prev, [timesheetId]: value }));
+        // Reflect the new attribution locally so the Project column updates without collapsing the row.
+        const catLabel = internalCategoryId ? (internalCats.find(c => c.id === internalCategoryId)?.categoryLabel || null) : null;
+        const jobObj = carpentryJobId ? (carpentryJobs.find(j => j.id === carpentryJobId) || null) : null;
+        setTimesheets(prev => prev.map(t => t.id !== timesheetId ? t : {
+          ...t,
+          carpentry_job_id: carpentryJobId,
+          carpentry_jobs: jobObj,
+          timesheet_entries: (t.timesheet_entries || []).map(e => ({
+            ...e,
+            internal_category_id: internalCategoryId || null,
+            internal_categories: internalCategoryId ? { category_label: catLabel } : null,
+          })),
+        }));
         showToast("Carpentry job assigned ✓");
       } else {
         showToast(`Could not assign: ${j.error || "Unknown error"}`, "error");
@@ -394,6 +444,8 @@ function ApprovalsTab({ role }) {
                     <td className="px-3 py-3 text-muted">{(() => {
                       const site = chargeUpSiteLabel(ts);
                       if (site) return <span>{site} <span className="text-xs">({ts.carpentry_jobs?.reference || "BL-CHARGEUP"})</span></span>;
+                      const cat = internalCategoryLabel(ts);
+                      if (cat) return <span>{cat} <span className="text-xs">({ts.carpentry_jobs?.reference || "BL-INTERNAL"})</span></span>;
                       return ts.carpentry_jobs ? <span>{ts.carpentry_jobs.address || ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.reference})</span></span> : (ts.projects?.address || "—");
                     })()}</td>
                     <td className="px-3 py-3">
@@ -450,14 +502,30 @@ function ApprovalsTab({ role }) {
                             <option value="">— None —</option>
                             {(() => {
                               const { rest, internal } = groupInternalJobs(carpentryJobs);
+                              const houses = internal.filter(j => j.reference !== INTERNAL_REFERENCE);
+                              const hasInternal = internal.some(j => j.reference === INTERNAL_REFERENCE);
+                              // Keep the CURRENT attribution visible even if its category was archived (or
+                              // a legacy untagged BL-INTERNAL row) — else the <select> would fall back to
+                              // "— None —" and read as unattributed. Render a synthetic option for it.
+                              const cur = attribMap[ts.id] || "";
+                              const curKnown = !cur
+                                || rest.some(j => j.id === cur)
+                                || houses.some(h => h.id === cur)
+                                || (cur.startsWith("int:") && internalCats.some(c => `int:${c.id}` === cur));
                               return (<>
+                                {!curKnown && (
+                                  <option value={cur}>{cur.startsWith("int:") ? `${internalCategoryLabel(ts) || "Internal category"} (archived)` : "Blue Leaf Internal"}</option>
+                                )}
                                 {rest.map(cj => (
                                   <option key={cj.id} value={cj.id}>{cj.reference}{cj.client_name ? ` — ${cj.client_name}` : ""}</option>
                                 ))}
-                                {internal.length > 0 && (
+                                {(hasInternal || houses.length > 0) && (
                                   <optgroup label="Blue Leaf Internal">
-                                    {internal.map(cj => (
-                                      <option key={cj.id} value={cj.id}>{internalJobLabel(cj)}</option>
+                                    {hasInternal && internalCats.map(c => (
+                                      <option key={c.id} value={`int:${c.id}`}>{c.categoryLabel}</option>
+                                    ))}
+                                    {houses.map(h => (
+                                      <option key={h.id} value={h.id}>{internalJobLabel(h)}</option>
                                     ))}
                                   </optgroup>
                                 )}
@@ -684,7 +752,8 @@ function MassFillTab() {
   const [projects, setProjects] = useState([]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [carpJobs, setCarpJobs] = useState([]);
-  const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>"
+  const [internalCats, setInternalCats] = useState([]);   // BL-INTERNAL worked categories (Logistics / ATEC)
+  const [site, setSite] = useState("");   // "" | "project:<id>" | "carpentry:<id>" | "internal:<categoryId>"
   const [chargeUpSites, setChargeUpSites] = useState([]);   // active sites for the BL-CHARGEUP job
   const [chargeUpJobId, setChargeUpJobId] = useState("");   // selected charge-up site
   const [subtasksByCat, setSubtasksByCat] = useState({});   // { [task_category]: [{ key, label, budgetLineItemId }] } for the job
@@ -704,11 +773,23 @@ function MassFillTab() {
     authFetch("/api/carpentry/jobs?status=active").then(r => r.json()).then(j => { if (j.ok) setCarpJobs(j.jobs || []); }).catch(() => {});
   }, []);
 
+  // BL-INTERNAL's worked categories, so the site picker can offer Logistics / ATEC individually.
+  useEffect(() => {
+    const blId = carpJobs.find(j => j.reference === INTERNAL_REFERENCE)?.id;
+    if (!blId) { setInternalCats([]); return; }
+    authFetch(`/api/carpentry/jobs/${blId}/internal-categories`).then(r => r.json())
+      .then(j => { if (j.ok) setInternalCats((j.internalCategories || []).filter(c => c.status === "active" && c.costSource === "timesheet")); })
+      .catch(() => {});
+  }, [carpJobs]);
+
   // BLB Charge Up: when the selected job is the charge-up category, load its sites into a second
   // dropdown so hours can be tagged to a location (the invoicing signal). Cleared for any other site.
+  // An "internal:<categoryId>" selection resolves to the BL-INTERNAL job (never charge-up).
   const selectedCarpJob = site.startsWith("carpentry:")
     ? carpJobs.find(j => j.id === site.slice(10))
-    : null;
+    : site.startsWith("internal:")
+      ? carpJobs.find(j => j.reference === INTERNAL_REFERENCE)
+      : null;
   const isChargeUp = selectedCarpJob?.reference === CHARGE_UP_REFERENCE;
   useEffect(() => {
     setChargeUpJobId("");
@@ -758,6 +839,10 @@ function MassFillTab() {
       const payload = { date, entries };
       if (site.startsWith("project:")) payload.project_id = site.slice(8);
       else if (site.startsWith("carpentry:")) payload.carpentry_job_id = site.slice(10);
+      else if (site.startsWith("internal:")) {
+        payload.carpentry_job_id = carpJobs.find(j => j.reference === INTERNAL_REFERENCE)?.id || undefined;
+        payload.internal_category_id = site.slice(9);
+      }
       if (isChargeUp && chargeUpJobId) payload.charge_up_job_id = chargeUpJobId;
       const res = await authFetch("/api/workforce/timesheets/mass-fill", {
         method: "POST",
@@ -795,11 +880,16 @@ function MassFillTab() {
                     {rest.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{j.reference}{j.client_name ? ` — ${j.client_name}` : (j.address ? ` — ${j.address}` : "")}</option>)}
                   </optgroup>
                 )}
-                {internal.length > 0 && (
-                  <optgroup label="Blue Leaf Internal">
-                    {internal.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{internalJobLabel(j)}</option>)}
-                  </optgroup>
-                )}
+                {(() => {
+                  const houses = internal.filter(j => j.reference !== INTERNAL_REFERENCE);
+                  const hasInternal = internal.some(j => j.reference === INTERNAL_REFERENCE);
+                  return (hasInternal || houses.length > 0) ? (
+                    <optgroup label="Blue Leaf Internal">
+                      {hasInternal && internalCats.map(c => <option key={c.id} value={`internal:${c.id}`}>{c.categoryLabel}</option>)}
+                      {houses.map(h => <option key={h.id} value={`carpentry:${h.id}`}>{internalJobLabel(h)}</option>)}
+                    </optgroup>
+                  ) : null;
+                })()}
               </>);
             })()}
           </select>
