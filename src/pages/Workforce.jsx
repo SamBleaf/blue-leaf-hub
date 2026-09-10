@@ -50,6 +50,9 @@ function ApprovalsTab({ role }) {
   const [attribMap, setAttribMap] = useState({});   // { [timesheetId]: carpentryJobId | "" }
   const [attribBusy, setAttribBusy] = useState(new Set());
   const [detailId, setDetailId] = useState(null);   // timesheet open in the banner detail modal
+  // Sort order for the pending list. "recent" = server order (most recently submitted first, the
+  // default); "date_desc"/"date_asc" = by the work date on the timesheet.
+  const [sortMode, setSortMode] = useState("recent");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -262,6 +265,22 @@ function ApprovalsTab({ role }) {
 
   const totalOtHours = ts => (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.overtime_hours || 0), 0);
 
+  // Rendered order. "recent" keeps the server order (submitted_at desc). The date modes sort by the
+  // timesheet's work date; rows with no date sink to the bottom. Sort a copy so `timesheets` (used for
+  // counts + select-all) stays in its original order.
+  const sortedTimesheets = useMemo(() => {
+    if (sortMode === "recent") return timesheets;
+    const dir = sortMode === "date_asc" ? 1 : -1;
+    const key = ts => (ts.date ? new Date(ts.date).getTime() : NaN);
+    return [...timesheets].sort((a, b) => {
+      const av = key(a), bv = key(b);
+      if (Number.isNaN(av) && Number.isNaN(bv)) return 0;
+      if (Number.isNaN(av)) return 1;   // undated rows always last
+      if (Number.isNaN(bv)) return -1;
+      return (av - bv) * dir;
+    });
+  }, [timesheets, sortMode]);
+
   return (
     <div>
       {toast && (
@@ -275,6 +294,20 @@ function ApprovalsTab({ role }) {
             <span className="ml-2 bg-primary/10 text-primary text-xs px-2 py-0.5 rounded-full font-semibold">{timesheets.length}</span>
           )}
         </h2>
+        {timesheets.length > 0 && (
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            <span className="hidden sm:inline">Sort</span>
+            <select
+              value={sortMode}
+              onChange={e => setSortMode(e.target.value)}
+              className="rounded-lg border border-hairline bg-white px-2 py-1 text-xs text-ink focus-ring"
+            >
+              <option value="recent">Recently added</option>
+              <option value="date_desc">Work date (newest first)</option>
+              <option value="date_asc">Work date (oldest first)</option>
+            </select>
+          </label>
+        )}
         {selected.size > 0 && (
           <div className="flex gap-2 ml-auto">
             {canApprove && (
@@ -321,7 +354,7 @@ function ApprovalsTab({ role }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-hairline">
-              {timesheets.map(ts => {
+              {sortedTimesheets.map(ts => {
                 const totalHrs = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
                 const otHrs = totalOtHours(ts);
                 const expanded2 = expanded.has(ts.id);
@@ -503,7 +536,7 @@ function ApprovalsTab({ role }) {
             <input type="checkbox" checked={selected.size === timesheets.length} onChange={selectAll} className="accent-primary" />
             Select all ({timesheets.length})
           </label>
-          {timesheets.map(ts => {
+          {sortedTimesheets.map(ts => {
             const totalHrs = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
             const otHrs = totalOtHours(ts);
             const isBusy = busy.has(ts.id);
