@@ -864,7 +864,7 @@ export function registerWorkforceRoutes(app) {
     // Pull the job + entry breakdown too, so the hover tooltip can show which job and which sub-tasks
     // (e.g. J1171 · Wall framing) a day's hours were logged against.
     const { data: ts } = await sb.from("timesheets")
-      .select("id, employee_id, date, status, carpentry_jobs(reference, address, client_name), projects(address), timesheet_entries(hours, task_category, canonical_key, budget_line_item_id, carpentry_budget_line_items(canonical_key, description))")
+      .select("id, employee_id, date, status, carpentry_jobs(reference, address, client_name), projects(address), timesheet_entries(hours, task_category, canonical_key, budget_line_item_id, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address))")
       .gte("date", week_start).lte("date", week_end);
     const statusByKey = {};
     const idByKey = {};
@@ -876,7 +876,11 @@ export function registerWorkforceRoutes(app) {
       statusByKey[k] = t.status;
       idByKey[k] = t.id;
       const cj = t.carpentry_jobs;
-      jobByKey[k] = cj ? (cj.reference || cj.address || cj.client_name || null) : (t.projects?.address || null);
+      // For a BLB Charge Up timesheet, label the day with the SITE the work was done on (from the
+      // entries' charge_up_jobs), not the generic parent reference ("BL-CHARGEUP").
+      const cuSites = [...new Set((t.timesheet_entries || []).map((en) => en.charge_up_jobs?.site_label).filter(Boolean))];
+      const cuSite = cuSites.length === 1 ? cuSites[0] : cuSites.length > 1 ? `${cuSites.length} charge-up sites` : null;
+      jobByKey[k] = cuSite || (cj ? (cj.reference || cj.address || cj.client_name || null) : (t.projects?.address || null));
       let h = 0;
       const labels = [];
       for (const en of t.timesheet_entries || []) {
@@ -983,7 +987,7 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { data, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description))")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address))")
       // Include rejected timesheets so the office can fix + re-approve them here (they show a red
       // "rejected" badge) instead of waiting for the worker to redo it in the PWA.
       .in("status", ["submitted", "rejected"])

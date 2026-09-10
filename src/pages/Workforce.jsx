@@ -25,6 +25,22 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// The site a BLB Charge Up timesheet was worked on (from its entries' charge_up_jobs), else null —
+// so the Project column shows the actual location instead of the generic "Charge Up — misc works".
+function chargeUpSiteLabel(ts) {
+  const sites = [...new Set((ts?.timesheet_entries || []).map(e => e.charge_up_jobs?.site_label).filter(Boolean))];
+  return sites.length === 1 ? sites[0] : sites.length > 1 ? `${sites.length} sites` : null;
+}
+
+// Project-column label for a timesheet: the charge-up site when present, else the carpentry job
+// (address / reference) or the building project address.
+function timesheetJobLabel(ts) {
+  const site = chargeUpSiteLabel(ts);
+  if (site) return `${site} (${ts.carpentry_jobs?.reference || "BL-CHARGEUP"})`;
+  if (ts?.carpentry_jobs) return `${ts.carpentry_jobs.address || ts.carpentry_jobs.reference} (${ts.carpentry_jobs.reference})`;
+  return ts?.projects?.address || "—";
+}
+
 // ── Approvals tab ─────────────────────────────────────────────────────────────
 
 function ApprovalsTab({ role }) {
@@ -375,7 +391,11 @@ function ApprovalsTab({ role }) {
                       <p className="font-medium text-ink">{ts.employees?.name}</p>
                       <p className="text-xs text-muted">{ts.employees?.trade}</p>
                     </td>
-                    <td className="px-3 py-3 text-muted">{ts.carpentry_jobs ? <span>{ts.carpentry_jobs.address || ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.reference})</span></span> : (ts.projects?.address || "—")}</td>
+                    <td className="px-3 py-3 text-muted">{(() => {
+                      const site = chargeUpSiteLabel(ts);
+                      if (site) return <span>{site} <span className="text-xs">({ts.carpentry_jobs?.reference || "BL-CHARGEUP"})</span></span>;
+                      return ts.carpentry_jobs ? <span>{ts.carpentry_jobs.address || ts.carpentry_jobs.reference} <span className="text-xs">({ts.carpentry_jobs.reference})</span></span> : (ts.projects?.address || "—");
+                    })()}</td>
                     <td className="px-3 py-3">
                       {(ts.timesheet_entries || []).length === 0 ? <span className="text-muted">—</span> : (
                         <div className="space-y-0.5">
@@ -552,9 +572,7 @@ function ApprovalsTab({ role }) {
             const totalHrs = (ts.timesheet_entries || []).reduce((s, e) => s + Number(e.hours || 0), 0);
             const otHrs = totalOtHours(ts);
             const isBusy = busy.has(ts.id);
-            const project = ts.carpentry_jobs
-              ? `${ts.carpentry_jobs.address || ts.carpentry_jobs.reference} (${ts.carpentry_jobs.reference})`
-              : (ts.projects?.address || "—");
+            const project = timesheetJobLabel(ts);
             return (
               <div
                 key={ts.id}
