@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
+import { groupInternalJobs, internalJobLabel } from "../../lib/constants.js";
 
 // Read an image file, downscale it, and return a compressed JPEG data URL so a
 // completion photo stays small enough to store inline (a few hundred KB).
@@ -399,11 +400,24 @@ export default function WorkerLogHours() {
               className="w-full rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="" disabled>Select…</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.address}{p.status && p.status !== "active" ? ` (${String(p.status).replace(/_/g, " ")})` : ""}
-                </option>
-              ))}
+              {(() => {
+                // Group the internal jobs (BL-INTERNAL + the two houses) under one "Blue Leaf Internal"
+                // heading so the boys' site list stays short. Only carpentry rows can be internal.
+                const { rest, internal } = groupInternalJobs(projects, (p) => (p.type === "carpentry" ? p.reference : null));
+                const suffix = (p) => (p.status && p.status !== "active" ? ` (${String(p.status).replace(/_/g, " ")})` : "");
+                return (<>
+                  {rest.map(p => (
+                    <option key={p.id} value={p.id}>{p.address}{suffix(p)}</option>
+                  ))}
+                  {internal.length > 0 && (
+                    <optgroup label="Blue Leaf Internal">
+                      {internal.map(p => (
+                        <option key={p.id} value={p.id}>{internalJobLabel(p, p.address)}{suffix(p)}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </>);
+              })()}
             </select>
             {scheduledId && selectedId === scheduledId && <p className="text-[11px] text-primary mt-1">From your schedule — change if you moved</p>}
           </div>

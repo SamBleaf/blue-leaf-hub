@@ -5,7 +5,7 @@ import { apiFetch, apiPatch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 import { TASK_LABELS, TASK_OPTIONS } from "../lib/taskCategories.js";
-import { CHARGE_UP_REFERENCE } from "../lib/constants.js";
+import { CHARGE_UP_REFERENCE, groupInternalJobs, internalJobLabel } from "../lib/constants.js";
 import WorkforceTeam from "./WorkforceTeam.jsx";
 import WorkforcePlannerTab from "./workforce/WorkforcePlannerTab.jsx";
 import WorkforcePipelineTab from "./workforce/WorkforcePipelineTab.jsx";
@@ -428,9 +428,21 @@ function ApprovalsTab({ role }) {
                             className="border border-hairline rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white disabled:opacity-50 min-w-[200px]"
                           >
                             <option value="">— None —</option>
-                            {carpentryJobs.map(cj => (
-                              <option key={cj.id} value={cj.id}>{cj.reference}{cj.client_name ? ` — ${cj.client_name}` : ""}</option>
-                            ))}
+                            {(() => {
+                              const { rest, internal } = groupInternalJobs(carpentryJobs);
+                              return (<>
+                                {rest.map(cj => (
+                                  <option key={cj.id} value={cj.id}>{cj.reference}{cj.client_name ? ` — ${cj.client_name}` : ""}</option>
+                                ))}
+                                {internal.length > 0 && (
+                                  <optgroup label="Blue Leaf Internal">
+                                    {internal.map(cj => (
+                                      <option key={cj.id} value={cj.id}>{internalJobLabel(cj)}</option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                              </>);
+                            })()}
                           </select>
                           {attribBusy.has(ts.id) && <span className="text-xs text-muted">Saving…</span>}
                         </div>
@@ -757,11 +769,21 @@ function MassFillTab() {
                 {projects.map(p => <option key={p.id} value={`project:${p.id}`}>{p.address || p.name}</option>)}
               </optgroup>
             )}
-            {carpJobs.length > 0 && (
-              <optgroup label="Carpentry jobs">
-                {carpJobs.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{j.reference}{j.client_name ? ` — ${j.client_name}` : (j.address ? ` — ${j.address}` : "")}</option>)}
-              </optgroup>
-            )}
+            {carpJobs.length > 0 && (() => {
+              const { rest, internal } = groupInternalJobs(carpJobs);
+              return (<>
+                {rest.length > 0 && (
+                  <optgroup label="Carpentry jobs">
+                    {rest.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{j.reference}{j.client_name ? ` — ${j.client_name}` : (j.address ? ` — ${j.address}` : "")}</option>)}
+                  </optgroup>
+                )}
+                {internal.length > 0 && (
+                  <optgroup label="Blue Leaf Internal">
+                    {internal.map(j => <option key={j.id} value={`carpentry:${j.id}`}>{internalJobLabel(j)}</option>)}
+                  </optgroup>
+                )}
+              </>);
+            })()}
           </select>
         </div>
         {isChargeUp && (

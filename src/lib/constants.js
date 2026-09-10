@@ -892,6 +892,28 @@ export const BL_JOSH_HOUSE_REFERENCE = "BL-JOSH-HOUSE";
 export const BL_SAM_HOUSE_REFERENCE  = "BL-SAM-HOUSE";
 export const INTERNAL_HOUSE_REFERENCES = [BL_JOSH_HOUSE_REFERENCE, BL_SAM_HOUSE_REFERENCE];
 
+// The internal jobs that collapse under one "Blue Leaf Internal" heading in every job-selection menu
+// (worker PWA + admin Approvals/Mass Fill dropdowns) — BL-INTERNAL first, then the two houses. Keeps
+// the job lists uncluttered; matches how the planner board already groups them.
+export const INTERNAL_GROUP_REFERENCES = [INTERNAL_REFERENCE, ...INTERNAL_HOUSE_REFERENCES];
+
+// Split a job list into { rest, internal } for the "Blue Leaf Internal" optgroup. refOf extracts a
+// job's reference (returns null for non-carpentry rows so they never group). Internal jobs come back
+// in INTERNAL_GROUP_REFERENCES order (BL-INTERNAL first) regardless of the source list's order.
+export function groupInternalJobs(list, refOf = (j) => j.reference) {
+  const rest = [], internal = [];
+  for (const j of list) (INTERNAL_GROUP_REFERENCES.includes(refOf(j)) ? internal : rest).push(j);
+  internal.sort((a, b) => INTERNAL_GROUP_REFERENCES.indexOf(refOf(a)) - INTERNAL_GROUP_REFERENCES.indexOf(refOf(b)));
+  return { rest, internal };
+}
+
+// Friendly label for an internal-group job inside the "Blue Leaf Internal" optgroup. BL-INTERNAL is a
+// category bucket (Logistics / ATEC picked after), the houses show their address.
+export function internalJobLabel(job, fallbackAddress) {
+  if (job.reference === INTERNAL_REFERENCE) return "Logistics / ATEC";
+  return fallbackAddress || job.address || job.reference;
+}
+
 /** Leave types on the internal-category leave spine (migs 200/201). Annual / Sick / RDO are the
  *  three derived (non-worked) categories costed from the leave/RDO spine; unpaid days show at $0.
  *  LEAVE_TYPE_LABELS double as archive-safe fallbacks so a leave category's historical report line

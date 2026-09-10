@@ -1018,7 +1018,7 @@ export function registerWorkforceRoutes(app) {
     const isDirector = req.caller.role === "admin";
     const { data: ts, error } = await sb
       .from("timesheets")
-      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description))")
+      .select("*, employees(id, name, trade" + (isDirector ? ", hourly_rate, overtime_multiplier" : "") + "), projects(id, address), carpentry_jobs(id, reference, client_name, address), timesheet_entries(*, carpentry_budget_line_items(canonical_key, description), charge_up_jobs(site_label, address), internal_categories(category_label))")
       .eq("id", req.params.id)
       .maybeSingle();
     if (error) return err(res, 500, translateDbError(error));
@@ -2455,14 +2455,16 @@ export function registerWorkforceRoutes(app) {
     // Fetch construction projects AND carpentry jobs in parallel
     const [projRes, carpRes] = await Promise.all([
       sb.from("projects").select("id, address, job_id, status").order("address", { ascending: true }),
-      sb.from("carpentry_jobs").select("id, address, client_name, status").order("address", { ascending: true }),
+      sb.from("carpentry_jobs").select("id, reference, address, client_name, status").order("address", { ascending: true }),
     ]);
     if (projRes.error) return res.status(500).json({ ok: false, error: projRes.error.message });
 
     const projects = (projRes.data || []).map(p => ({ ...p, type: "project" }));
-    // Carpentry jobs surface as sites — show "address (client)" for clarity
+    // Carpentry jobs surface as sites — show "address (client)" for clarity. reference lets the PWA
+    // group the internal jobs (BL-INTERNAL / the houses) under one "Blue Leaf Internal" heading.
     const carpJobs = (carpRes.data || []).map(j => ({
       id: j.id,
+      reference: j.reference,
       address: j.client_name ? `${j.address} (${j.client_name})` : j.address,
       status: j.status,
       type: "carpentry",

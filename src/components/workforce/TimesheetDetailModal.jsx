@@ -81,9 +81,17 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
   // Rejected timesheets are editable + approvable on the desktop too (editing re-opens them
   // server-side; approve un-rejects) — so the office can fix them without a PWA redo.
   const isEditable = isSubmitted || ts?.status === "rejected";
-  const jobLabel = ts?.carpentry_jobs
+  // For a BLB Charge Up timesheet the entries carry the specific SITE (charge_up_jobs.site_label) they
+  // were logged against — surface it instead of the generic parent-job name ("Charge Up — misc works").
+  const chargeUpSites = [...new Set(entries.map((e) => e.charge_up_jobs?.site_label).filter(Boolean))];
+  let jobLabel = ts?.carpentry_jobs
     ? `${ts.carpentry_jobs.reference || ""} ${ts.carpentry_jobs.address || ts.carpentry_jobs.client_name || ""}`.trim()
     : (ts?.projects?.address || null);
+  if (ts?.carpentry_jobs?.reference && chargeUpSites.length === 1) {
+    jobLabel = `${ts.carpentry_jobs.reference} · ${chargeUpSites[0]}`;
+  } else if (ts?.carpentry_jobs?.reference && chargeUpSites.length > 1) {
+    jobLabel = `${ts.carpentry_jobs.reference} · ${chargeUpSites.length} sites`;
+  }
 
   async function approve() {
     setBusy(true); setError("");
@@ -242,6 +250,11 @@ export default function TimesheetDetailModal({ timesheetId, role, onClose, onCha
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-ink">{e.taskLabel || TASK_LABELS[e.task_category] || e.task_category}</p>
+                              {e.charge_up_jobs?.site_label ? (
+                                <p className="text-[11px] font-medium text-primary mt-0.5">📍 {e.charge_up_jobs.site_label}{e.charge_up_jobs.address ? ` — ${e.charge_up_jobs.address}` : ""}</p>
+                              ) : e.internal_categories?.category_label ? (
+                                <p className="text-[11px] text-muted mt-0.5">{e.internal_categories.category_label}</p>
+                              ) : null}
                               {e.taskLabel && (TASK_LABELS[e.task_category] || e.task_category) && e.taskLabel !== (TASK_LABELS[e.task_category] || e.task_category) && (
                                 <p className="text-[11px] text-muted mt-0.5">{TASK_LABELS[e.task_category] || e.task_category}</p>
                               )}
