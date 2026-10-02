@@ -12,14 +12,47 @@
 //   GET /api/carpentry/jobs/:id/tasks    → site_tasks (completed ones = "tasks done")
 // Rendered by CarpentryJobDetail's reference branch (see INTERNAL_HOUSE_REFERENCES).
 // =============================================================================
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
-import { apiFetch } from "../lib/apiFetch.js";
+import { apiFetch, apiPost } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 const fmtH = (n) => (n == null ? "—" : `${Math.round(Number(n) * 10) / 10}`);
+
+// Read a chosen invoice file for upload: PDFs pass through as-is; images are downscaled + JPEG-compressed
+// (phone photos are large) so the scan POST stays small. Returns { base64, mimeType }.
+function fileToUploadBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    if (!file.type?.startsWith("image/")) {
+      reader.onload = () => resolve({ base64: String(reader.result).split(",")[1] || "", mimeType: file.type || "application/pdf" });
+      reader.readAsDataURL(file);
+      return;
+    }
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not read the image."));
+      img.onload = () => {
+        const maxDim = 1800;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const s = maxDim / Math.max(width, height);
+          width = Math.round(width * s); height = Math.round(height * s);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        resolve({ base64: dataUrl.split(",")[1] || "", mimeType: "image/jpeg" });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 // Humanise a timesheet task_category slug (mirrors CarpentryJobDetail's CATEGORY_LABEL_MAP,
 // with a title-case fallback for any unmapped stream so nothing renders as a raw slug).
@@ -45,6 +78,13 @@ export default function InternalHouseJobDetail({ job }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Scan / upload a supplier invoice straight onto this job (director-only, behind showCost).
+  const fileRef = useRef(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMsg, setScanMsg] = useState(null);         // { type, text }
+  const [draft, setDraft] = useState(null);             // prefilled cost awaiting confirmation
+  const [saving, setSaving] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     const [sumRes, costRes, taskRes] = await Promise.all([
@@ -60,6 +100,58 @@ export default function InternalHouseJobDetail({ job }) {
     setTasks(taskRes.ok ? (taskRes.data?.tasks || []) : []);
   }, [job.id]);
   useEffect(() => { load(); }, [load]);
+
+  async function onInvoiceFile(e) {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = "";   // allow re-picking the same file
+    if (!file) return;
+    setScanBusy(true); setScanMsg(null); setDraft(null);
+    try {
+      const { base64, mimeType } = await fileToUploadBase64(file);
+      const { ok, data, error: err } = await apiPost(`/api/carpentry/jobs/${job.id}/cost-receipt/scan`, {
+        fileBase64: base64, mimeType, filename: file.name,
+      });
+      if (!ok) { setScanMsg({ type: "error", text: err || "Couldn't read the invoice." }); return; }
+      setDraft({
+        receiptPath: data.receiptPath,
+        supplierName: data.supplierName || "",
+        description: data.suggestedDescription || data.supplierName || "Supplier invoice",
+        amount: data.amountExGst != null ? String(data.amountExGst) : "",
+        costDate: data.invoiceDate || new Date().toISOString().slice(0, 10),
+      });
+      if (!data.extractionOk || data.amountExGst == null) {
+        setScanMsg({ type: "info", text: "Couldn't auto-read the amount — check the invoice and enter it below." });
+      }
+    } catch (ex) {
+      setScanMsg({ type: "error", text: ex.message || "Couldn't process that file." });
+    } finally { setScanBusy(false); }
+  }
+
+  async function saveInvoiceCost() {
+    if (!draft) return;
+    if (!draft.description.trim()) { setScanMsg({ type: "error", text: "Add a description." }); return; }
+    const amt = Number(draft.amount);
+    if (draft.amount === "" || !(amt >= 0)) { setScanMsg({ type: "error", text: "Enter the ex-GST amount." }); return; }
+    setSaving(true); setScanMsg(null);
+    const { ok, error: err } = await apiPost(`/api/carpentry/jobs/${job.id}/costs`, {
+      costType: "material",
+      description: draft.description.trim(),
+      amount: amt,
+      costDate: draft.costDate,
+      receiptPath: draft.receiptPath,
+      supplierName: draft.supplierName || undefined,
+    });
+    setSaving(false);
+    if (!ok) { setScanMsg({ type: "error", text: err || "Couldn't save the cost." }); return; }
+    setDraft(null);
+    setScanMsg({ type: "success", text: "Invoice added to the job tally." });
+    await load();
+  }
+
+  // Captured supplier invoices = the manual cost rows (what we've added here); finance read-through
+  // rows are shown in the category table, not re-listed. Newest first.
+  const capturedInvoices = costs.filter((c) => c.source === "manual")
+    .sort((a, b) => String(b.costDate || "").localeCompare(String(a.costDate || "")));
 
   // Labour by category — from summary (already reconciles to summary.labourActual). Fail-soft if
   // the API predates the labourByCategory field (older server): fall back to a single labour row.
@@ -94,7 +186,7 @@ export default function InternalHouseJobDetail({ job }) {
         <h1 className="text-3xl font-semibold tracking-tight text-primary">{jobName}</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           Cost-only internal job — hours, labour and material spend tracked against actuals. No quote,
-          no budget or variance. Material spend includes supplier invoices allocated in Finance.
+          no budget or variance. Scan or upload supplier invoices below (or allocate them in Finance).
         </p>
       </header>
 
@@ -175,12 +267,78 @@ export default function InternalHouseJobDetail({ job }) {
             </div>
           )}
 
+          {/* Supplier invoices — scan / upload a PDF or photo straight onto the job (adds to the tally) */}
+          {showCost && (
+            <div className="rounded-card border border-hairline bg-surface overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-hairline">
+                <h2 className="text-sm font-semibold text-ink">Supplier invoices</h2>
+                <div className="flex items-center gap-2">
+                  <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={onInvoiceFile} />
+                  <button type="button" onClick={() => fileRef.current?.click()} disabled={scanBusy || saving}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                    {scanBusy ? "Reading…" : "📷 Scan / upload invoice"}
+                  </button>
+                </div>
+              </div>
+
+              {scanMsg && (
+                <p className={`px-4 pt-3 text-xs ${scanMsg.type === "error" ? "text-red-600" : scanMsg.type === "success" ? "text-green-600" : "text-muted"}`}>{scanMsg.text}</p>
+              )}
+
+              {draft && (
+                <div className="m-4 rounded-lg border border-primary/30 bg-primary/[0.03] p-3 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Confirm the invoice — then it adds to the tally</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <label className="text-xs text-muted sm:col-span-1">Supplier / description
+                      <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                        className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink focus-ring" />
+                    </label>
+                    <label className="text-xs text-muted">Amount (ex-GST)
+                      <input type="number" step="0.01" min="0" value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
+                        placeholder="0.00" className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink text-right focus-ring" />
+                    </label>
+                    <label className="text-xs text-muted">Date
+                      <input type="date" value={draft.costDate} onChange={(e) => setDraft((d) => ({ ...d, costDate: e.target.value }))}
+                        className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink focus-ring" />
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-muted">Read by AI from the file — check the amount before saving. Stored ex-GST.</p>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => { setDraft(null); setScanMsg(null); }} disabled={saving}
+                      className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink hover:bg-page">Discard</button>
+                    <button type="button" onClick={saveInvoiceCost} disabled={saving}
+                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">{saving ? "Saving…" : "Add to job"}</button>
+                  </div>
+                </div>
+              )}
+
+              {capturedInvoices.length === 0 ? (
+                !draft && <p className="p-4 text-sm text-muted">No invoices captured here yet. Scan or upload a supplier invoice and it adds straight to the job&rsquo;s material tally.</p>
+              ) : (
+                <div className="divide-y divide-hairline">
+                  {capturedInvoices.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-ink truncate">{c.supplierName || c.description}</p>
+                        <p className="text-[11px] text-muted truncate">{c.supplierName && c.description && c.description !== c.supplierName ? `${c.description} · ` : ""}{c.costDate || ""}</p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {c.receiptUrl && <a href={c.receiptUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">📄 View</a>}
+                        <span className="text-sm font-semibold text-ink">{fmt$(c.amount)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Material / other by cost category (manual costs + finance invoices) */}
           {showCost && (
             <div className="rounded-card border border-hairline bg-surface overflow-hidden">
               <h2 className="text-sm font-semibold text-ink px-4 py-2 border-b border-hairline">Materials &amp; other by category</h2>
               {materialByCategory.length === 0 ? (
-                <p className="p-4 text-sm text-muted">No material or supplier costs yet. Allocate supplier invoices to this job in Finance and they&rsquo;ll appear here.</p>
+                <p className="p-4 text-sm text-muted">No material or supplier costs yet. Scan or upload a supplier invoice above, or allocate one in Finance.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">

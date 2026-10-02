@@ -43,6 +43,7 @@ import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./carpentrySubtaskDictionary.mjs";
 import { recordTaskDeletion } from "./taskAudit.mjs";
+import { extractInvoiceHaiku } from "./financeRoutes.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 import { auFyQuarter } from "./financialYear.mjs";
@@ -101,6 +102,7 @@ async function readFinanceCarpentryCosts(sb, jobId) {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const RECEIPT_BUCKET  = "job-cost-receipts"; // private bucket for cost-receipt PDFs/photos (mig 204)
 const JOB_STATUSES    = ["active", "on_hold", "defects", "complete", "cancelled"];
 const PROJECT_TYPES   = ["frame", "fitoff", "lockup", "full_package", "other"];
 const COST_TYPES      = ["material", "subcontract", "other"];
@@ -1393,6 +1395,15 @@ export function registerCarpentryRoutes(app) {
       // Manual cost entries — editable. Tag the source so the two sources are always distinguishable
       // (carpentry_job_costs.source is 'manual'/'xero'; default to 'manual' for legacy nulls).
       const manual = (data || []).map((c) => ({ ...rowToCamel(c), source: c.source || "manual", readOnly: false }));
+      // Sign any attached receipt (PDF/photo) so the client can open it — best-effort, 1h expiry.
+      for (const m of manual) {
+        if (m.receiptPath) {
+          try {
+            const { data: s } = await sb.storage.from(RECEIPT_BUCKET).createSignedUrl(m.receiptPath, 3600);
+            if (s?.signedUrl) m.receiptUrl = s.signedUrl;
+          } catch { /* best-effort — a missing bucket/file just omits the link */ }
+        }
+      }
       // Phase 0 / Issue 3: approved finance invoices, surfaced as READ-ONLY rows (source:'finance')
       // so they're visible in the Costs tab, not just summed into the budget. They live in
       // financial_documents — editing/deleting happens in Finance, not here. Disjoint from the manual
@@ -1425,7 +1436,7 @@ export function registerCarpentryRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     try {
-      const { costType, description, amount, costDate, source = "manual", sourceReference, carpentryJobBudgetId, carpentryBudgetLineItemId } = req.body || {};
+      const { costType, description, amount, costDate, source = "manual", sourceReference, carpentryJobBudgetId, carpentryBudgetLineItemId, receiptPath, supplierName } = req.body || {};
 
       if (!costType) return err(res, 400, "costType is required.");
       if (!COST_TYPES.includes(costType)) {
@@ -1456,6 +1467,10 @@ export function registerCarpentryRoutes(app) {
           // Tag to a sub-task line item for per-sub-task material actuals (only when provided, so
           // this stays safe before migration 142 adds the column).
           ...(carpentryBudgetLineItemId ? { carpentry_budget_line_item_id: carpentryBudgetLineItemId } : {}),
+          // A captured supplier invoice: the stored receipt + OCR'd supplier (only when provided, so
+          // this stays safe before migration 204 adds the columns).
+          ...(receiptPath ? { receipt_path: String(receiptPath) } : {}),
+          ...(supplierName ? { supplier_name: String(supplierName).trim() } : {}),
           created_at:       now,
           updated_at:       now,
         })
@@ -1465,6 +1480,66 @@ export function registerCarpentryRoutes(app) {
       return ok(res, { cost: rowToCamel(cost) });
     } catch (e) {
       console.error("[carpentry/costs POST]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/cost-receipt/scan ──────────────────────────
+  // Store an uploaded / phone-camera-scanned supplier invoice in the receipts bucket and run Haiku OCR
+  // to prefill supplier + ex-GST amount. Does NOT create the cost row — the caller confirms the amount,
+  // then POSTs /costs with { receiptPath, supplierName, amount, ... }. Lets the office add a supplier
+  // cost straight from the Workforce internal-house view instead of routing through Finance.
+  app.post("/api/carpentry/jobs/:id/cost-receipt/scan", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+    const { fileBase64, mimeType, filename } = req.body || {};
+    if (!fileBase64) return err(res, 400, "fileBase64 is required.");
+    const mime = String(mimeType || "").toLowerCase();
+    if (!(mime === "application/pdf" || mime.startsWith("image/"))) {
+      return err(res, 400, "Only a PDF or image invoice is supported.");
+    }
+    try {
+      const { data: job } = await sb.from("carpentry_jobs").select("id").eq("id", req.params.id).maybeSingle();
+      if (!job) return err(res, 404, "Carpentry job not found.", "NOT_FOUND");
+
+      const b64 = String(fileBase64).replace(/^data:[^;]+;base64,/, "");
+      const buffer = Buffer.from(b64, "base64");
+      if (!buffer.length) return err(res, 400, "Empty file.");
+      if (buffer.length > 15 * 1024 * 1024) return err(res, 413, "File too large (max 15MB).");
+
+      // Store: [bucket]/carpentry_jobs/[jobId]/[date]-[epoch]-[sanitised-filename]
+      const ext = mime === "application/pdf" ? "pdf" : ((mime.split("/")[1] || "jpg").replace(/[^a-z0-9]/g, "") || "jpg");
+      const base = String(filename || `invoice.${ext}`).replace(/[^a-zA-Z0-9._-]/g, "-").toLowerCase().slice(0, 60);
+      const safe = base.endsWith(`.${ext}`) ? base : `${base}.${ext}`;
+      const path = `carpentry_jobs/${req.params.id}/${new Date().toISOString().slice(0, 10)}-${Date.now()}-${safe}`;
+      const { error: upErr } = await sb.storage.from(RECEIPT_BUCKET).upload(path, buffer, { contentType: mime, upsert: false });
+      if (upErr) {
+        const msg = /not found|does not exist|bucket/i.test(upErr.message || "")
+          ? "Receipts storage isn't set up yet — apply migration 204 (the job-cost-receipts bucket)."
+          : translateDbError(upErr);
+        return err(res, 502, msg);
+      }
+
+      // Haiku OCR — token-conservative, best-effort. The caller confirms before the cost is saved.
+      const exd = await extractInvoiceHaiku(b64, mime);
+      const round2 = (v) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Math.round(Number(v) * 100) / 100 : null);
+      const exGst = round2(exd?.amount_ex_gst);
+      const total = round2(exd?.amount_total);
+      // ex-GST is the stored basis — prefer a captured ex-GST figure, else derive from the inc-GST total.
+      const amountExGst = exGst != null ? exGst : (total != null ? round2(total / 1.1) : null);
+
+      return ok(res, {
+        receiptPath: path,
+        supplierName: exd?.supplier_name || null,
+        amountExGst,
+        amountTotal: total,
+        invoiceDate: exd?.invoice_date || null,
+        suggestedDescription: exd?.supplier_name || "Supplier invoice",
+        extractionOk: !exd?.error,
+      });
+    } catch (e) {
+      console.error("[carpentry/cost-receipt/scan]", e);
       return err(res, 502, translateDbError(e));
     }
   });

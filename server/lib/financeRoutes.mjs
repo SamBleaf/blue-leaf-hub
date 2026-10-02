@@ -500,6 +500,21 @@ async function extractDocument(fileBase64, mimeType) {
   return extracted || { supplier_name: null };
 }
 
+// Haiku-ONLY invoice OCR (token-conservative) — reused by the carpentry cost-receipt scan so capturing
+// a supplier invoice against a job never escalates to Sonnet. Returns the raw extracted fields
+// (supplier_name, amount_ex_gst, amount_total, invoice_date, ...) or a null-ish shape on failure.
+export async function extractInvoiceHaiku(fileBase64, mimeType) {
+  const isPdf = mimeType === "application/pdf";
+  const isImage = typeof mimeType === "string" && mimeType.startsWith("image/");
+  if (!isImage && !isPdf) return { supplier_name: null, error: "Unsupported file type" };
+  try {
+    return (await claudeExtract(fileBase64, mimeType, MODEL_FAST)) || { supplier_name: null };
+  } catch (e) {
+    console.error("[finance] Haiku-only extraction error", e?.message);
+    return { supplier_name: null, error: "extraction_failed" };
+  }
+}
+
 // ── Dropbox helpers ───────────────────────────────────────────────────────────
 
 async function uploadToInbox(token, buffer, filename) {
