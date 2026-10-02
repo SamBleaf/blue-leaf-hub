@@ -1,7 +1,7 @@
 ---
 sop_version: 1.0
 last_reviewed: 2026-10-03
-app_version: main — built 2026-10-03 (migration 204): scan/upload a supplier invoice straight onto an internal house job (BL-JOSH-HOUSE / BL-SAM-HOUSE) from the Workforce house view (Phase 1) or the Worker PWA (Phase 2, admin/supervisor only). Haiku-only OCR prefills supplier + ex-GST amount; the operator confirms the amount; it saves as a carpentry_job_cost and drops into the job's material tally. Stored in the private 'job-cost-receipts' bucket. Requires migration 204 applied.
+app_version: main — built 2026-10-03 (migration 204): scan/upload a supplier invoice straight onto an internal house job (BL-JOSH-HOUSE / BL-SAM-HOUSE) from the Workforce house view (Phase 1, Hub admin/supervisor) or the Worker PWA (Phase 2, gated to leading hands / admins / supervisors). Haiku-only OCR prefills supplier + ex-GST amount; the operator confirms the amount; it saves as a carpentry_job_cost and drops into the job's material tally. Stored in the private 'job-cost-receipts' bucket. Requires migration 204 applied.
 screenshot_status: placeholders_only
 owner: Admin
 test_status: untested
@@ -17,9 +17,10 @@ test_status: untested
 ---
 
 ## 1. Who uses this
-- **Admin / Director** — the primary users (Sam, Josh). Scan or upload supplier invoices for Josh's / Sam's house as they come in.
-- **Supervisor** — may also capture invoices (same permissions as Admin for this action).
-- **Field workers** — **cannot** use this. Cost capture writes money onto a job and is director-only on both surfaces.
+- **Admin / Director** (Sam, Josh) and the **field supervisor** (Max) — scan or upload supplier invoices for Josh's / Sam's house as they come in.
+- **Hub house view:** any **Admin / Supervisor** Hub login.
+- **Worker PWA:** anyone flagged a **leading hand** (the field director signal — Sam, Josh, Max) **or** a login linked to an admin/supervisor role.
+- **Regular field workers cannot** — cost capture writes money onto a job.
 
 ## 2. When to use it
 A supplier invoice or receipt arrives for materials bought for an internal house (timber, hardware, fixtures, etc.) and you want it counted against that house's running cost **without** going through the Finance module. Use it when you're already looking at the house in Workforce, or standing at the ute with the paper invoice in hand and your phone.
@@ -29,7 +30,7 @@ Lets you photograph or upload a supplier invoice straight onto an internal house
 
 ## 4. Before you start
 - **Migration 204 must be applied** (adds the receipt columns + the `job-cost-receipts` storage bucket). If it isn't, the scan button returns "Receipts storage isn't set up yet — apply migration 204" and nothing is saved.
-- You must be signed in as **Admin or Supervisor**.
+- Hub house view: signed in as **Admin or Supervisor**. Worker PWA: you must be a **leading hand** (or a login linked to an admin/supervisor role).
 - The two internal house jobs (**BL-JOSH-HOUSE**, **BL-SAM-HOUSE**) must exist (seeded by migration 202).
 - On a phone, allow the browser/app camera permission the first time.
 
@@ -44,8 +45,8 @@ Lets you photograph or upload a supplier invoice straight onto an internal house
 6. Click **Add to job**.
 
 ### B. From the Worker PWA (on your phone)
-1. Open the **Worker app** (the installed PWA / `/worker`). You must be logged in as an admin or supervisor.
-2. On the home screen, tap **Scan supplier invoice** (this tile only shows for admins/supervisors).
+1. Open the **Worker app** (the installed PWA / `/worker`). You must be a **leading hand** (or a linked admin/supervisor).
+2. On the home screen, tap **Scan supplier invoice** (this tile only shows for leading hands / admins / supervisors).
 3. Choose the **House** (Josh's / Sam's).
 4. Tap **📷 Scan / upload invoice** → photograph the invoice.
 5. Check the pre-filled **amount (ex-GST)** and fix if needed.
@@ -76,8 +77,8 @@ Lets you photograph or upload a supplier invoice straight onto an internal house
 |----------------------|-------------------|-----|
 | "Receipts storage isn't set up yet — apply migration 204" | Migration 204 not applied on this environment | Apply `supabase/migrations/204_carpentry_cost_receipts.sql` in the Supabase SQL editor |
 | "Couldn't auto-read the amount — enter it below" | OCR couldn't find a clear ex-GST figure | Type the ex-GST amount manually and save — the file is still attached |
-| The **Scan supplier invoice** tile isn't on the Worker home | You're not an admin/supervisor, or your login isn't linked to an employee with a worker token | Only admins/supervisors see it; a director who can't see it needs their login linked to an employee record with a worker token (see §12) |
-| "Only an admin or supervisor can capture invoices." | A non-director hit the endpoint | Expected — the action is director-only on both surfaces |
+| The **Scan supplier invoice** tile isn't on the Worker home | You're not a **leading hand** and not a linked admin/supervisor | Only leading hands / admins / supervisors see it. If a director should capture invoices, set their **leading hand** flag (Workforce → Team) |
+| "Only a leading hand, admin or supervisor can capture invoices." | A non-director hit the Worker-PWA endpoint | Expected — the PWA action is gated to leading hands / admins / supervisors |
 | 📄 View does nothing | The signed URL expired (older than 1 hour) or storage is misconfigured | Reload the page to get a fresh link |
 
 ## 9. Related modules
@@ -97,14 +98,14 @@ Lets you photograph or upload a supplier invoice straight onto an internal house
 - **Record created in:** `carpentry_job_costs` — `source='manual'`, `cost_type='material'`, `amount` (ex-GST), `supplier_name`, `receipt_path`.
 - **Amount basis:** stored ex-GST — prefers the invoice's captured ex-GST figure, else derives it from the inc-GST total ÷ 1.1; always human-confirmed before save.
 - **Tally:** the job `/summary` + `/budget` endpoints already sum `carpentry_job_costs`, so the row counts immediately; it is **disjoint** from the finance read-through (no double-count).
-- **Role gate:** Hub = `requireAuth` + the director-only (`$`-visibility) UI gate; Worker PWA = `requireWorkerDirector` (worker-token employee → `user_profiles.role` ∈ {admin, supervisor}).
+- **Role gate:** Hub = `requireAuth` + the director-only (`$`-visibility) UI gate; Worker PWA = `requireWorkerDirector` — allowed when the worker-token employee is a **leading hand** (`employees.is_leading_hand`) OR links to an admin/supervisor login; `/api/worker/me.canCaptureCosts` drives the UI.
 
 ## 12. Edge cases and limits
 - **Amount blank / OCR fails:** the file is still stored; you must type the ex-GST amount before **Add to job** will save (0 is allowed, negatives are rejected).
 - **File types / size:** PDF or image only; max 15 MB (phone photos are downscaled + JPEG-compressed client-side first).
 - **Discarded draft:** if you scan then **Discard**, the file is already in storage but no cost row references it (harmless orphan; no money recorded).
 - **Non-GST-registered supplier:** the ÷1.1 derivation would under-count — the confirm step is where you catch it and type the true amount.
-- **Worker PWA access for directors:** a director can only use the PWA scan if their login is linked to an **employee** record (`employees.user_id`) that has a **worker token**. As at 2026-10-03, only **Sam** is linked; Josh / the supervisor need linking to use the PWA path (they can all use the Hub path today).
+- **Worker PWA capture gate:** the PWA scan is shown + allowed for an employee who is a **leading hand** (`employees.is_leading_hand`) OR whose login links to an admin/supervisor role. As at 2026-10-03 the leading hands are exactly the three directors (Sam, Josh, Max) — all three can scan from the PWA; the four regular carpenters cannot. Max has no Hub login at all, so the leading-hand flag is why he's recognised. Tighten later with a dedicated per-employee flag if the leading-hand set ever grows beyond directors.
 - **Deleting a cost:** removing the `carpentry_job_cost` row drops it from the tally; the stored file is not auto-deleted.
 
 ## 13. Owner of the process
@@ -146,11 +147,11 @@ Next review date: 2027-04-03
 3. Expected result: a **second** cost row is created (the app does not dedupe — two genuine entries; the tally reflects both). Document this behaviour; it's expected, not a bug.
 - [ ] Pass  [ ] Fail
 
-**TC-04 — Wrong role (field worker)**
-1. In the Worker PWA, open as a **field worker** (worker token for a non-admin/supervisor employee).
+**TC-04 — Wrong role (regular field worker)**
+1. In the Worker PWA, open as a regular field worker — a **non-leading-hand** employee (e.g. Dylan / Ben) via their worker token.
 2. Expected result: the **Scan supplier invoice** tile is NOT shown on the home screen.
 3. Call `POST /api/worker/carpentry/jobs/<houseId>/cost-receipt/scan` directly with that worker token.
-4. Expected result: HTTP 403 "Only an admin or supervisor can capture invoices." — no file stored, no row created.
+4. Expected result: HTTP 403 "Only a leading hand, admin or supervisor can capture invoices." — no file stored, no row created.
 - [ ] Pass  [ ] Fail
 
 **TC-05 — Automation verification (storage + signed URL + tally)**

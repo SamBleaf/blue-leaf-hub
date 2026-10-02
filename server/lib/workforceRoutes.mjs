@@ -2467,10 +2467,14 @@ export function registerWorkforceRoutes(app) {
     // Return employee without rate
     const { hourly_rate: _r, overtime_multiplier: _om, double_time_multiplier: _dm, worker_token: _wt, ...safeEmp } = emp;
 
+    const meRole = await workerRoleFor(sb, emp);
     res.json({
       ok: true,
       employee: safeEmp,
-      role: await workerRoleFor(sb, emp),   // admin/supervisor → the PWA shows director-only actions (invoice capture)
+      role: meRole,
+      // Gate for director-only PWA actions (invoice capture): a linked admin/supervisor login OR a field
+      // leading hand (covers crew leads with no Hub login). Mirrors requireWorkerDirector on the server.
+      canCaptureCosts: ["admin", "supervisor"].includes(meRole) || !!emp.is_leading_hand,
       today_timesheet: todayTs.data || null,
       yesterday_project: yesterdayTs.data?.projects || null,
       weekly_hours: Math.round(weeklyHours * 100) / 100,
@@ -2488,8 +2492,14 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee;
     if (!emp) { res.status(403).json({ ok: false, error: "No employee record found" }); return null; }
     if (req.workerPreview) { res.status(403).json({ ok: false, error: "Read-only preview — can't capture invoices." }); return null; }
+    // "Can capture costs" = a linked Hub admin/supervisor login OR a field leading hand. The leading-hand
+    // flag is the only director signal for a crew lead (e.g. Max) who has no Hub login at all, and for a
+    // director (e.g. Josh) whose employee record isn't linked to their login.
     const role = await workerRoleFor(sb, emp);
-    if (!["admin", "supervisor"].includes(role)) { res.status(403).json({ ok: false, error: "Only an admin or supervisor can capture invoices." }); return null; }
+    if (!(["admin", "supervisor"].includes(role) || emp.is_leading_hand)) {
+      res.status(403).json({ ok: false, error: "Only a leading hand, admin or supervisor can capture invoices." });
+      return null;
+    }
     return emp;
   }
 

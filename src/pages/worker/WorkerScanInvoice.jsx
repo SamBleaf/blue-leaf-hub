@@ -14,7 +14,7 @@ export default function WorkerScanInvoice() {
   const fileRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState(null);
+  const [canCapture, setCanCapture] = useState(false);
   const [houses, setHouses] = useState([]);
   const [jobId, setJobId] = useState("");
   const [scanBusy, setScanBusy] = useState(false);
@@ -29,7 +29,7 @@ export default function WorkerScanInvoice() {
       workerFetch("/api/worker/projects").then((r) => r.json()).catch(() => ({ ok: false })),
     ]).then(([me, proj]) => {
       if (stop) return;
-      setRole(me?.ok ? (me.role || null) : null);
+      setCanCapture(me?.ok ? !!me.canCaptureCosts : false);
       const list = proj?.ok ? (proj.projects || []) : [];
       const hs = list.filter((p) => p.type === "carpentry" && INTERNAL_HOUSE_REFERENCES.includes(p.reference));
       setHouses(hs);
@@ -39,7 +39,7 @@ export default function WorkerScanInvoice() {
     return () => { stop = true; };
   }, []);
 
-  const isDirector = role === "admin" || role === "supervisor";
+  const isDirector = canCapture;
 
   async function onFile(e) {
     const file = e.target.files?.[0];

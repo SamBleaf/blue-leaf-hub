@@ -178,8 +178,8 @@ export default function WorkerHome() {
     );
   }
 
-  const { employee, today_timesheet: ts, yesterday_project, weekly_hours, role } = me;
-  const isDirector = role === "admin" || role === "supervisor";
+  const { employee, today_timesheet: ts, yesterday_project, weekly_hours, canCaptureCosts } = me;
+  const isDirector = !!canCaptureCosts;   // linked admin/supervisor OR a field leading hand
   const today = new Date();
   const firstName = (employee?.name || "").split(" ")[0];
   const hasEntries = ts?.timesheet_entries?.length > 0;
