@@ -178,7 +178,8 @@ export default function WorkerHome() {
     );
   }
 
-  const { employee, today_timesheet: ts, yesterday_project, weekly_hours } = me;
+  const { employee, today_timesheet: ts, yesterday_project, weekly_hours, role } = me;
+  const isDirector = role === "admin" || role === "supervisor";
   const today = new Date();
   const firstName = (employee?.name || "").split(" ")[0];
   const hasEntries = ts?.timesheet_entries?.length > 0;
@@ -303,6 +304,24 @@ export default function WorkerHome() {
           </span>
           <span className="text-primary text-sm font-medium">→</span>
         </button>
+
+        {/* Scan a supplier invoice onto an internal house job — directors only (admin/supervisor) */}
+        {isDirector && (
+          <button
+            type="button"
+            onClick={() => navigate("/worker/scan-invoice")}
+            className="w-full rounded-card bg-white shadow-sm border border-hairline p-4 mb-3 flex items-center justify-between text-left"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-primary shrink-0">
+                <path d="M4 7V5a2 2 0 0 1 2-2h2M16 3h2a2 2 0 0 1 2 2v2M20 17v2a2 2 0 0 1-2 2h-2M8 21H6a2 2 0 0 1-2-2v-2" />
+                <path d="M4 12h16" />
+              </svg>
+              Scan supplier invoice
+            </span>
+            <span className="text-primary text-sm font-medium">→</span>
+          </button>
+        )}
 
         {/* Weekly hours — tasks live on the Today card + the Tasks tab now */}
         <p className="text-center text-sm text-muted mt-4">

@@ -17,42 +17,10 @@ import { Link } from "react-router-dom";
 import { apiFetch, apiPost } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
+import { fileToUploadBase64 } from "../lib/receiptFile.js";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 const fmtH = (n) => (n == null ? "—" : `${Math.round(Number(n) * 10) / 10}`);
-
-// Read a chosen invoice file for upload: PDFs pass through as-is; images are downscaled + JPEG-compressed
-// (phone photos are large) so the scan POST stays small. Returns { base64, mimeType }.
-function fileToUploadBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read the file."));
-    if (!file.type?.startsWith("image/")) {
-      reader.onload = () => resolve({ base64: String(reader.result).split(",")[1] || "", mimeType: file.type || "application/pdf" });
-      reader.readAsDataURL(file);
-      return;
-    }
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("Could not read the image."));
-      img.onload = () => {
-        const maxDim = 1800;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const s = maxDim / Math.max(width, height);
-          width = Math.round(width * s); height = Math.round(height * s);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width; canvas.height = height;
-        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-        resolve({ base64: dataUrl.split(",")[1] || "", mimeType: "image/jpeg" });
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 // Humanise a timesheet task_category slug (mirrors CarpentryJobDetail's CATEGORY_LABEL_MAP,
 // with a title-case fallback for any unmapped stream so nothing renders as a raw slug).

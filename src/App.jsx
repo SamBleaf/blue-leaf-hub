@@ -56,6 +56,7 @@ import WorkerLogHours from "./pages/worker/WorkerLogHours.jsx";
 import WorkerRequestDayOff from "./pages/worker/WorkerRequestDayOff.jsx";
 import WorkerTasks from "./pages/worker/WorkerTasks.jsx";
 import WorkerWeek from "./pages/worker/WorkerWeek.jsx";
+import WorkerScanInvoice from "./pages/worker/WorkerScanInvoice.jsx";
 import CarpentryDashboard from "./pages/CarpentryDashboard.jsx";
 import CarpentryJobDetail from "./pages/CarpentryJobDetail.jsx";
 import ConfirmQueue from "./pages/ConfirmQueue.jsx";
@@ -114,6 +115,7 @@ export default function App() {
             <Route path="/worker/day-off" element={<WorkerRequestDayOff />} />
             <Route path="/worker/tasks" element={<WorkerTasks />} />
             <Route path="/worker/week" element={<WorkerWeek />} />
+            <Route path="/worker/scan-invoice" element={<WorkerScanInvoice />} />
             {UiReviewIndex && (
               <Route
                 path="/ui-review"

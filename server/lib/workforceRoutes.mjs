@@ -15,6 +15,16 @@ import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker 
 import { recordTaskDeletion } from "./taskAudit.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
+import { storeAndScanReceipt, insertJobCost } from "./jobCostReceipts.mjs";
+
+// The Hub role (admin/supervisor/employee) of a worker-token employee, via employees.user_id →
+// user_profiles.id = auth uid → role. Lets a Worker-PWA action be gated to directors (invoice
+// capture writes money onto a job). Returns null if the employee isn't linked to a login.
+async function workerRoleFor(sb, emp) {
+  if (!emp?.user_id || !sb) return null;
+  const { data } = await sb.from("user_profiles").select("role").eq("id", emp.user_id).maybeSingle();
+  return data?.role || null;
+}
 
 // BLB Charge Up category — an allocation to this carpentry job must name a site (address).
 const CHARGE_UP_REFERENCE = "BL-CHARGEUP";
@@ -2460,6 +2470,7 @@ export function registerWorkforceRoutes(app) {
     res.json({
       ok: true,
       employee: safeEmp,
+      role: await workerRoleFor(sb, emp),   // admin/supervisor → the PWA shows director-only actions (invoice capture)
       today_timesheet: todayTs.data || null,
       yesterday_project: yesterdayTs.data?.projects || null,
       weekly_hours: Math.round(weeklyHours * 100) / 100,
@@ -2467,6 +2478,47 @@ export function registerWorkforceRoutes(app) {
       current_project_id: currentProjectId,
       settings: settings.data || null,
     });
+  });
+
+  // ── Worker PWA: capture a supplier invoice onto a carpentry job (admin/supervisor only) ──────────
+  // Mirrors the Hub house-view flow via the shared jobCostReceipts helpers, so both behave identically.
+  // Gated to directors because it writes money onto the job. Only reachable on the field-worker token
+  // path — the admin-preview path is read-only (POST blocked in workerAuth).
+  async function requireWorkerDirector(req, res, sb) {
+    const emp = req.workerEmployee;
+    if (!emp) { res.status(403).json({ ok: false, error: "No employee record found" }); return null; }
+    if (req.workerPreview) { res.status(403).json({ ok: false, error: "Read-only preview — can't capture invoices." }); return null; }
+    const role = await workerRoleFor(sb, emp);
+    if (!["admin", "supervisor"].includes(role)) { res.status(403).json({ ok: false, error: "Only an admin or supervisor can capture invoices." }); return null; }
+    return emp;
+  }
+
+  app.post("/api/worker/carpentry/jobs/:id/cost-receipt/scan", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!await requireWorkerDirector(req, res, sb)) return;
+    if (!isUuid(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid job id." });
+    try {
+      const r = await storeAndScanReceipt(sb, req.params.id, req.body || {});
+      if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+      return res.json({ ok: true, ...r.data });
+    } catch (e) {
+      console.error("[worker/carpentry/cost-receipt/scan]", e);
+      return res.status(502).json({ ok: false, error: translateDbError(e) });
+    }
+  });
+
+  app.post("/api/worker/carpentry/jobs/:id/costs", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!await requireWorkerDirector(req, res, sb)) return;
+    if (!isUuid(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid job id." });
+    try {
+      const r = await insertJobCost(sb, req.params.id, req.body || {});
+      if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+      return res.json({ ok: true, cost: r.cost });
+    } catch (e) {
+      console.error("[worker/carpentry/costs]", e);
+      return res.status(502).json({ ok: false, error: translateDbError(e) });
+    }
   });
 
   app.get("/api/worker/projects", workerAuth, async (req, res) => {
