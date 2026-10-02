@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-09-09 (SOP 10-07 expanded — internal house jobs + planner picker + finance read-through; SOP 10-05 cross-ref)
-> Total SOPs: 157 (+ 1 reference: portal stack matrix)  
+> Last updated: 2026-10-03 (SOP 10-08 new — scan/upload a supplier invoice onto an internal house job, Hub + Worker PWA)
+> Total SOPs: 158 (+ 1 reference: portal stack matrix)  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -111,6 +111,7 @@
 | 10-05 | BLB Charge Up — site-level charge-up tracking | [charge_up_sites.md](10_workforce/charge_up_sites.md) | Workforce | Admin, Supervisor, Field worker | Draft | untested | Yes | Medium |
 | 10-06 | Worker PWA — plans, crew view, multi-assign & timesheet autofill | [worker_pwa_updates.md](10_workforce/worker_pwa_updates.md) | Workforce | Field worker, Leading hand, Admin, Supervisor | Draft | untested | No | High |
 | 10-07 | BL-INTERNAL & internal house jobs — internal cost categories, planner picker, finance→carpentry read-through | [internal_cost_categories.md](10_workforce/internal_cost_categories.md) | Workforce | Admin, Supervisor, Field worker | Draft | untested | No | High |
+| 10-08 | Capture a supplier invoice on an internal house job (scan / upload, Haiku OCR) | [capture_house_invoice.md](10_workforce/capture_house_invoice.md) | Workforce / Carpentry | Admin, Supervisor | Draft | untested | Yes | High |
 | 11-00 | Portal stack matrix (v1↔v2, v2 canonical) | [00_PORTAL_STACK_MATRIX.md](11_client_portal/00_PORTAL_STACK_MATRIX.md) | Client Portal | Admin | Reference | n/a | No | High |
 | 11-01 | Enable the client portal for a project (legacy v1) | [portal_enable_for_client.md](11_client_portal/portal_enable_for_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
 | 11-02 | View the portal as the client | [portal_view_as_client.md](11_client_portal/portal_view_as_client.md) | Client Portal | Admin | Draft | untested | Yes | High |
