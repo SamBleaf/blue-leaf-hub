@@ -13,6 +13,7 @@ import CarpentrySiteDiary from "../components/carpentry/CarpentrySiteDiary.jsx";
 import WhsPackTab from "../components/carpentry/WhsPackTab.jsx";
 import JobPlansCard from "../components/JobPlansCard.jsx";
 import TaskDeleteLog from "../components/carpentry/TaskDeleteLog.jsx";
+import CaptureInvoiceCard from "../components/carpentry/CaptureInvoiceCard.jsx";
 import AssigneeStack from "../components/AssigneeStack.jsx";
 import AssigneePickerSheet from "../components/AssigneePickerSheet.jsx";
 import {
@@ -1671,6 +1672,18 @@ function CostsTab({ jobId }) {
           </div>
         </div>
       )}
+
+      {/* Scan / upload a supplier invoice or misc receipt straight onto the job (Haiku OCR → filed to
+          Dropbox → added to the material tally). The full ledger is the table below. */}
+      <div className="mb-6">
+        <CaptureInvoiceCard
+          jobId={jobId}
+          costs={costs}
+          onSaved={load}
+          receiptsOnly
+          budgetCategories={materialLines.map((l) => ({ id: l.id, name: l.categoryName || l.name || "Material" }))}
+        />
+      </div>
 
       {/* Cost entries */}
       <div className="flex items-center justify-between mb-3">

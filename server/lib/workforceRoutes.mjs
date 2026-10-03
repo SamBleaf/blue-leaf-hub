@@ -15,7 +15,7 @@ import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker 
 import { recordTaskDeletion } from "./taskAudit.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
-import { storeAndScanReceipt, insertJobCost } from "./jobCostReceipts.mjs";
+import { extractReceipt, saveReceiptCost, resolveReceiptLink } from "./jobCostReceipts.mjs";
 
 // The Hub role (admin/supervisor/employee) of a worker-token employee, via employees.user_id →
 // user_profiles.id = auth uid → role. Lets a Worker-PWA action be gated to directors (invoice
@@ -2508,7 +2508,7 @@ export function registerWorkforceRoutes(app) {
     if (!await requireWorkerDirector(req, res, sb)) return;
     if (!isUuid(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid job id." });
     try {
-      const r = await storeAndScanReceipt(sb, req.params.id, req.body || {});
+      const r = await extractReceipt(req.body || {});   // OCR only — no storage
       if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
       return res.json({ ok: true, ...r.data });
     } catch (e) {
@@ -2517,16 +2517,32 @@ export function registerWorkforceRoutes(app) {
     }
   });
 
-  app.post("/api/worker/carpentry/jobs/:id/costs", workerAuth, async (req, res) => {
+  app.post("/api/worker/carpentry/jobs/:id/cost-receipt", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!await requireWorkerDirector(req, res, sb)) return;
     if (!isUuid(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid job id." });
     try {
-      const r = await insertJobCost(sb, req.params.id, req.body || {});
+      const r = await saveReceiptCost(sb, req.params.id, req.body || {});
       if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
-      return res.json({ ok: true, cost: r.cost });
+      return res.json({ ok: true, cost: r.cost, ...(r.receiptWarning ? { receiptWarning: r.receiptWarning } : {}) });
     } catch (e) {
-      console.error("[worker/carpentry/costs]", e);
+      console.error("[worker/carpentry/cost-receipt]", e);
+      return res.status(502).json({ ok: false, error: translateDbError(e) });
+    }
+  });
+
+  app.get("/api/worker/carpentry/jobs/:id/costs/:costId/receipt-link", workerAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!await requireWorkerDirector(req, res, sb)) return;
+    if (!isUuid(req.params.costId)) return res.status(400).json({ ok: false, error: "Invalid cost id." });
+    try {
+      const { data: row } = await sb.from("carpentry_job_costs").select("receipt_path").eq("id", req.params.costId).eq("job_id", req.params.id).maybeSingle();
+      if (!row) return res.status(404).json({ ok: false, error: "Cost not found." });
+      const r = await resolveReceiptLink(sb, row.receipt_path);
+      if (!r.ok) return res.status(r.status || 404).json({ ok: false, error: r.error });
+      return res.json({ ok: true, url: r.url });
+    } catch (e) {
+      console.error("[worker/carpentry/receipt-link]", e);
       return res.status(502).json({ ok: false, error: translateDbError(e) });
     }
   });

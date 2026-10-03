@@ -12,12 +12,12 @@
 //   GET /api/carpentry/jobs/:id/tasks    → site_tasks (completed ones = "tasks done")
 // Rendered by CarpentryJobDetail's reference branch (see INTERNAL_HOUSE_REFERENCES).
 // =============================================================================
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { apiFetch, apiPost } from "../lib/apiFetch.js";
+import { apiFetch } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
 import { can } from "../lib/roles.js";
-import { fileToUploadBase64 } from "../lib/receiptFile.js";
+import CaptureInvoiceCard from "../components/carpentry/CaptureInvoiceCard.jsx";
 
 const fmt$ = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
 const fmtH = (n) => (n == null ? "—" : `${Math.round(Number(n) * 10) / 10}`);
@@ -46,13 +46,6 @@ export default function InternalHouseJobDetail({ job }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Scan / upload a supplier invoice straight onto this job (director-only, behind showCost).
-  const fileRef = useRef(null);
-  const [scanBusy, setScanBusy] = useState(false);
-  const [scanMsg, setScanMsg] = useState(null);         // { type, text }
-  const [draft, setDraft] = useState(null);             // prefilled cost awaiting confirmation
-  const [saving, setSaving] = useState(false);
-
   const load = useCallback(async () => {
     setLoading(true);
     const [sumRes, costRes, taskRes] = await Promise.all([
@@ -68,58 +61,6 @@ export default function InternalHouseJobDetail({ job }) {
     setTasks(taskRes.ok ? (taskRes.data?.tasks || []) : []);
   }, [job.id]);
   useEffect(() => { load(); }, [load]);
-
-  async function onInvoiceFile(e) {
-    const file = e.target.files?.[0];
-    if (e.target) e.target.value = "";   // allow re-picking the same file
-    if (!file) return;
-    setScanBusy(true); setScanMsg(null); setDraft(null);
-    try {
-      const { base64, mimeType } = await fileToUploadBase64(file);
-      const { ok, data, error: err } = await apiPost(`/api/carpentry/jobs/${job.id}/cost-receipt/scan`, {
-        fileBase64: base64, mimeType, filename: file.name,
-      });
-      if (!ok) { setScanMsg({ type: "error", text: err || "Couldn't read the invoice." }); return; }
-      setDraft({
-        receiptPath: data.receiptPath,
-        supplierName: data.supplierName || "",
-        description: data.suggestedDescription || data.supplierName || "Supplier invoice",
-        amount: data.amountExGst != null ? String(data.amountExGst) : "",
-        costDate: data.invoiceDate || new Date().toISOString().slice(0, 10),
-      });
-      if (!data.extractionOk || data.amountExGst == null) {
-        setScanMsg({ type: "info", text: "Couldn't auto-read the amount — check the invoice and enter it below." });
-      }
-    } catch (ex) {
-      setScanMsg({ type: "error", text: ex.message || "Couldn't process that file." });
-    } finally { setScanBusy(false); }
-  }
-
-  async function saveInvoiceCost() {
-    if (!draft) return;
-    if (!draft.description.trim()) { setScanMsg({ type: "error", text: "Add a description." }); return; }
-    const amt = Number(draft.amount);
-    if (draft.amount === "" || !(amt >= 0)) { setScanMsg({ type: "error", text: "Enter the ex-GST amount." }); return; }
-    setSaving(true); setScanMsg(null);
-    const { ok, error: err } = await apiPost(`/api/carpentry/jobs/${job.id}/costs`, {
-      costType: "material",
-      description: draft.description.trim(),
-      amount: amt,
-      costDate: draft.costDate,
-      receiptPath: draft.receiptPath,
-      supplierName: draft.supplierName || undefined,
-    });
-    setSaving(false);
-    if (!ok) { setScanMsg({ type: "error", text: err || "Couldn't save the cost." }); return; }
-    setDraft(null);
-    setScanMsg({ type: "success", text: "Invoice added to the job tally." });
-    await load();
-  }
-
-  // Captured supplier invoices = the manual cost rows (what we've added here); finance read-through
-  // rows are shown in the category table, not re-listed. Newest first.
-  const capturedInvoices = costs.filter((c) => c.source === "manual")
-    .sort((a, b) => String(b.costDate || "").localeCompare(String(a.costDate || "")));
 
   // Labour by category — from summary (already reconciles to summary.labourActual). Fail-soft if
   // the API predates the labourByCategory field (older server): fall back to a single labour row.
@@ -235,71 +176,8 @@ export default function InternalHouseJobDetail({ job }) {
             </div>
           )}
 
-          {/* Supplier invoices — scan / upload a PDF or photo straight onto the job (adds to the tally) */}
-          {showCost && (
-            <div className="rounded-card border border-hairline bg-surface overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-hairline">
-                <h2 className="text-sm font-semibold text-ink">Supplier invoices</h2>
-                <div className="flex items-center gap-2">
-                  <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={onInvoiceFile} />
-                  <button type="button" onClick={() => fileRef.current?.click()} disabled={scanBusy || saving}
-                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
-                    {scanBusy ? "Reading…" : "📷 Scan / upload invoice"}
-                  </button>
-                </div>
-              </div>
-
-              {scanMsg && (
-                <p className={`px-4 pt-3 text-xs ${scanMsg.type === "error" ? "text-red-600" : scanMsg.type === "success" ? "text-green-600" : "text-muted"}`}>{scanMsg.text}</p>
-              )}
-
-              {draft && (
-                <div className="m-4 rounded-lg border border-primary/30 bg-primary/[0.03] p-3 space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Confirm the invoice — then it adds to the tally</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <label className="text-xs text-muted sm:col-span-1">Supplier / description
-                      <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-                        className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink focus-ring" />
-                    </label>
-                    <label className="text-xs text-muted">Amount (ex-GST)
-                      <input type="number" step="0.01" min="0" value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-                        placeholder="0.00" className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink text-right focus-ring" />
-                    </label>
-                    <label className="text-xs text-muted">Date
-                      <input type="date" value={draft.costDate} onChange={(e) => setDraft((d) => ({ ...d, costDate: e.target.value }))}
-                        className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-1.5 text-sm text-ink focus-ring" />
-                    </label>
-                  </div>
-                  <p className="text-[10px] text-muted">Read by AI from the file — check the amount before saving. Stored ex-GST.</p>
-                  <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => { setDraft(null); setScanMsg(null); }} disabled={saving}
-                      className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink hover:bg-page">Discard</button>
-                    <button type="button" onClick={saveInvoiceCost} disabled={saving}
-                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">{saving ? "Saving…" : "Add to job"}</button>
-                  </div>
-                </div>
-              )}
-
-              {capturedInvoices.length === 0 ? (
-                !draft && <p className="p-4 text-sm text-muted">No invoices captured here yet. Scan or upload a supplier invoice and it adds straight to the job&rsquo;s material tally.</p>
-              ) : (
-                <div className="divide-y divide-hairline">
-                  {capturedInvoices.map((c) => (
-                    <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink truncate">{c.supplierName || c.description}</p>
-                        <p className="text-[11px] text-muted truncate">{c.supplierName && c.description && c.description !== c.supplierName ? `${c.description} · ` : ""}{c.costDate || ""}</p>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        {c.receiptUrl && <a href={c.receiptUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">📄 View</a>}
-                        <span className="text-sm font-semibold text-ink">{fmt$(c.amount)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Supplier invoices & misc costs — scan / upload (filed to Dropbox), added to the tally */}
+          {showCost && <CaptureInvoiceCard jobId={job.id} costs={costs} onSaved={load} />}
 
           {/* Material / other by cost category (manual costs + finance invoices) */}
           {showCost && (

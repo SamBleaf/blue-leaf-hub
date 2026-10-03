@@ -43,7 +43,7 @@ import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./carpentrySubtaskDictionary.mjs";
 import { recordTaskDeletion } from "./taskAudit.mjs";
-import { RECEIPT_BUCKET, storeAndScanReceipt, insertJobCost } from "./jobCostReceipts.mjs";
+import { extractReceipt, saveReceiptCost, insertJobCost, resolveReceiptLink } from "./jobCostReceipts.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 import { auFyQuarter } from "./financialYear.mjs";
@@ -1393,16 +1393,9 @@ export function registerCarpentryRoutes(app) {
       if (error) throw error;
       // Manual cost entries — editable. Tag the source so the two sources are always distinguishable
       // (carpentry_job_costs.source is 'manual'/'xero'; default to 'manual' for legacy nulls).
-      const manual = (data || []).map((c) => ({ ...rowToCamel(c), source: c.source || "manual", readOnly: false }));
-      // Sign any attached receipt (PDF/photo) so the client can open it — best-effort, 1h expiry.
-      for (const m of manual) {
-        if (m.receiptPath) {
-          try {
-            const { data: s } = await sb.storage.from(RECEIPT_BUCKET).createSignedUrl(m.receiptPath, 3600);
-            if (s?.signedUrl) m.receiptUrl = s.signedUrl;
-          } catch { /* best-effort — a missing bucket/file just omits the link */ }
-        }
-      }
+      // Manual rows carry receiptPath (a Dropbox path, or a legacy Supabase path). The view URL is
+      // resolved on demand via GET .../costs/:costId/receipt-link, so we don't hit Dropbox per row here.
+      const manual = (data || []).map((c) => ({ ...rowToCamel(c), source: c.source || "manual", readOnly: false, hasReceipt: !!c.receipt_path }));
       // Phase 0 / Issue 3: approved finance invoices, surfaced as READ-ONLY rows (source:'finance')
       // so they're visible in the Costs tab, not just summed into the budget. They live in
       // financial_documents — editing/deleting happens in Finance, not here. Disjoint from the manual
@@ -1446,21 +1439,52 @@ export function registerCarpentryRoutes(app) {
   });
 
   // ── POST /api/carpentry/jobs/:id/cost-receipt/scan ──────────────────────────
-  // Store an uploaded / phone-camera-scanned supplier invoice in the receipts bucket and run Haiku OCR
-  // to prefill supplier + ex-GST amount. Does NOT create the cost row — the caller confirms the amount,
-  // then POSTs /costs with { receiptPath, supplierName, amount, ... }. Lets the office add a supplier
-  // cost straight from the Workforce internal-house view instead of routing through Finance.
+  // Haiku-OCR an uploaded / phone-scanned supplier invoice → prefill supplier + ex-GST amount + invoice
+  // date. Stores NOTHING — the caller confirms, then POSTs /cost-receipt (which files the file to Dropbox
+  // + creates the cost). Lets a misc supplier cost be captured straight onto any carpentry job.
   app.post("/api/carpentry/jobs/:id/cost-receipt/scan", requireAuth, async (req, res) => {
-    const sb = getServiceSupabase();
-    if (!sb) return err(res, 503, "Database not configured.");
     if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
     try {
-      // Shared with the Worker PWA path (server/lib/jobCostReceipts.mjs) so both behave identically.
-      const r = await storeAndScanReceipt(sb, req.params.id, req.body || {});
+      const r = await extractReceipt(req.body || {});
       if (!r.ok) return err(res, r.status, r.error);
       return ok(res, r.data);
     } catch (e) {
       console.error("[carpentry/cost-receipt/scan]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── POST /api/carpentry/jobs/:id/cost-receipt ───────────────────────────────
+  // Confirmed capture: file the receipt to Dropbox (/BLUE LEAF BUILDING/RECIEPTS, named "<D.M.YYYY>
+  // <supplier>.<ext>") + insert the carpentry_job_cost. Shared with the Worker PWA path.
+  app.post("/api/carpentry/jobs/:id/cost-receipt", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id.");
+    try {
+      const r = await saveReceiptCost(sb, req.params.id, req.body || {});
+      if (!r.ok) return err(res, r.status, r.error);
+      return ok(res, { cost: r.cost, ...(r.receiptWarning ? { receiptWarning: r.receiptWarning } : {}) });
+    } catch (e) {
+      console.error("[carpentry/cost-receipt]", e);
+      return err(res, 502, translateDbError(e));
+    }
+  });
+
+  // ── GET /api/carpentry/jobs/:id/costs/:costId/receipt-link ──────────────────
+  // Resolve a viewable URL for a captured receipt (Dropbox shared link, or a legacy Supabase signed URL).
+  app.get("/api/carpentry/jobs/:id/costs/:costId/receipt-link", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    if (!isUuid(req.params.costId)) return err(res, 400, "Invalid cost id.");
+    try {
+      const { data: row } = await sb.from("carpentry_job_costs").select("receipt_path").eq("id", req.params.costId).eq("job_id", req.params.id).maybeSingle();
+      if (!row) return err(res, 404, "Cost not found.", "NOT_FOUND");
+      const r = await resolveReceiptLink(sb, row.receipt_path);
+      if (!r.ok) return err(res, r.status || 404, r.error);
+      return ok(res, { url: r.url });
+    } catch (e) {
+      console.error("[carpentry/costs receipt-link]", e);
       return err(res, 502, translateDbError(e));
     }
   });

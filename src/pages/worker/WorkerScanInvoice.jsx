@@ -1,12 +1,11 @@
-// WorkerScanInvoice — Worker PWA screen to scan/upload a supplier invoice onto an internal house job.
-// Admin/supervisor only (gated on /api/worker/me.role; the server enforces it too). Mirrors the Hub
-// house-view flow: scan -> Haiku OCR prefill -> confirm the ex-GST amount -> adds to the job tally.
+// WorkerScanInvoice — Worker PWA screen to scan/upload a supplier invoice onto ANY carpentry job.
+// Leading hands / admins / supervisors only (gated on /api/worker/me.canCaptureCosts; the server enforces
+// it too). Scan -> Haiku OCR prefill -> confirm ex-GST amount -> filed to Dropbox + added to the job tally.
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import WorkerLayout from "../../components/worker/WorkerLayout.jsx";
 import { workerFetch, isWorkerPreview } from "../../lib/workerFetch.js";
 import { fileToUploadBase64 } from "../../lib/receiptFile.js";
-import { INTERNAL_HOUSE_REFERENCES } from "../../lib/constants.js";
 
 export default function WorkerScanInvoice() {
   const navigate = useNavigate();
@@ -15,7 +14,7 @@ export default function WorkerScanInvoice() {
 
   const [loading, setLoading] = useState(true);
   const [canCapture, setCanCapture] = useState(false);
-  const [houses, setHouses] = useState([]);
+  const [jobs, setJobs] = useState([]);
   const [jobId, setJobId] = useState("");
   const [scanBusy, setScanBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -31,9 +30,9 @@ export default function WorkerScanInvoice() {
       if (stop) return;
       setCanCapture(me?.ok ? !!me.canCaptureCosts : false);
       const list = proj?.ok ? (proj.projects || []) : [];
-      const hs = list.filter((p) => p.type === "carpentry" && INTERNAL_HOUSE_REFERENCES.includes(p.reference));
-      setHouses(hs);
-      if (hs.length === 1) setJobId(hs[0].id);
+      const js = list.filter((p) => p.type === "carpentry");
+      setJobs(js);
+      if (js.length === 1) setJobId(js[0].id);
       setLoading(false);
     });
     return () => { stop = true; };
@@ -45,18 +44,19 @@ export default function WorkerScanInvoice() {
     const file = e.target.files?.[0];
     if (e.target) e.target.value = "";
     if (!file) return;
-    if (!jobId) { setMsg({ type: "error", text: "Pick a house first." }); return; }
+    if (!jobId) { setMsg({ type: "error", text: "Pick a job first." }); return; }
     setScanBusy(true); setMsg(null); setDraft(null);
     try {
       const { base64, mimeType } = await fileToUploadBase64(file);
       const res = await workerFetch(`/api/worker/carpentry/jobs/${jobId}/cost-receipt/scan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileBase64: base64, mimeType, filename: file.name }),
+        body: JSON.stringify({ fileBase64: base64, mimeType }),
       });
       const j = await res.json();
       if (!j.ok) { setMsg({ type: "error", text: j.error || "Couldn't read the invoice." }); return; }
       setDraft({
-        receiptPath: j.receiptPath,
+        fileBase64: base64,
+        mimeType,
         supplierName: j.supplierName || "",
         description: j.suggestedDescription || j.supplierName || "Supplier invoice",
         amount: j.amountExGst != null ? String(j.amountExGst) : "",
@@ -74,15 +74,15 @@ export default function WorkerScanInvoice() {
     if (!draft.description.trim()) { setMsg({ type: "error", text: "Add a description." }); return; }
     if (draft.amount === "" || !(amt >= 0)) { setMsg({ type: "error", text: "Enter the ex-GST amount." }); return; }
     setSaving(true); setMsg(null);
-    const res = await workerFetch(`/api/worker/carpentry/jobs/${jobId}/costs`, {
+    const res = await workerFetch(`/api/worker/carpentry/jobs/${jobId}/cost-receipt`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ costType: "material", description: draft.description.trim(), amount: amt, costDate: draft.costDate, receiptPath: draft.receiptPath, supplierName: draft.supplierName || undefined }),
+      body: JSON.stringify({ fileBase64: draft.fileBase64, mimeType: draft.mimeType, costType: "material", description: draft.description.trim(), amount: amt, costDate: draft.costDate, supplierName: draft.supplierName || undefined }),
     });
     const j = await res.json();
     setSaving(false);
     if (!j.ok) { setMsg({ type: "error", text: j.error || "Couldn't save the cost." }); return; }
     setDraft(null);
-    setMsg({ type: "success", text: "Invoice added to the job tally." });
+    setMsg({ type: j.receiptWarning ? "info" : "success", text: j.receiptWarning || "Invoice added to the job tally — filed to Dropbox." });
   }
 
   return (
@@ -95,15 +95,15 @@ export default function WorkerScanInvoice() {
           <p className="text-sm text-muted">Not available in preview mode.</p>
         ) : !isDirector ? (
           <p className="text-sm text-muted">This is only available to admins and supervisors.</p>
-        ) : houses.length === 0 ? (
-          <p className="text-sm text-muted">No internal house jobs found.</p>
+        ) : jobs.length === 0 ? (
+          <p className="text-sm text-muted">No carpentry jobs found.</p>
         ) : (
           <>
-            <label className="block text-sm text-muted">House
+            <label className="block text-sm text-muted">Job
               <select value={jobId} onChange={(e) => { setJobId(e.target.value); setDraft(null); setMsg(null); }}
                 className="mt-1 w-full rounded-lg border border-hairline px-3 py-2.5 text-sm bg-white text-ink">
                 <option value="">Select…</option>
-                {houses.map((h) => <option key={h.id} value={h.id}>{h.address || h.reference}</option>)}
+                {jobs.map((jb) => <option key={jb.id} value={jb.id}>{jb.address || jb.reference}</option>)}
               </select>
             </label>
 
