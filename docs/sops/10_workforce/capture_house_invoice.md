@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-10-04
+sop_version: 2.1
+last_reviewed: 2026-10-05
 app_version: main — built 2026-10-04 (migration 204): scan/upload a supplier invoice or misc receipt straight onto ANY carpentry job (the internal houses + real client jobs) from the Hub (Carpentry job → Costs tab, or the Internal house glance view) or the Worker PWA (gated to leading hands / admins / supervisors). Haiku-only OCR prefills supplier + ex-GST amount + the invoice date; the operator confirms; it saves as a carpentry_job_cost (source 'manual') and drops into the job's material tally. The receipt file is filed to Dropbox at /BLUE LEAF BUILDING/RECIEPTS named "<invoice date D.M.YYYY> <supplier>". An amber guard warns when the job also has Finance invoices (don't enter the same invoice twice). Requires migration 204 applied.
 screenshot_status: placeholders_only
 owner: Admin
@@ -41,7 +41,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 ### A. From the Hub — real client job (Carpentry → job → Costs tab)
 1. Go to **Carpentry** in the sidebar and open the job.
 2. Open the **Costs** tab. At the top is the **Supplier invoices & misc costs** card.
-3. Click **📷 Scan / upload invoice**. On a computer this opens a file picker (PDF or image); on a phone it opens the **camera**.
+3. Click **📷 Scan / upload invoice**. On a computer this opens a file picker (PDF or image); on an iPhone it opens the full sheet — **Take Photo** (camera), **Photo Library** (a photo you already took), or **Choose File / Browse** (a PDF).
 4. Wait a moment — **"Reading…"** means the AI is reading the invoice. A confirm box appears, pre-filled with the **supplier / description**, the **amount (ex-GST)**, and the **date** (the invoice date read off the receipt).
 5. **Check the amount and the date.** The AI read them off the invoice — fix anything wrong (especially the amount if the supplier isn't GST-registered). All amounts are stored **ex-GST**.
 6. *(Optional)* Pick a **Cost category** to file the cost against one of the job's material budget lines. Leave it "Uncategorised" if unsure.
@@ -56,7 +56,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 1. Open the **Worker app** (the installed PWA / `/worker`). You must be a **leading hand** (or a linked admin/supervisor).
 2. On the home screen, tap **Scan supplier invoice** (this tile only shows for leading hands / admins / supervisors).
 3. Choose the **Job** (any carpentry job — houses and real client jobs both appear).
-4. Tap **📷 Scan / upload invoice** → photograph the invoice.
+4. Tap **📷 Take photo** to shoot the invoice with the camera, **or** tap **Upload photo or PDF** to pick a photo you already took (Photo Library) or a PDF (Files).
 5. Check the pre-filled **amount (ex-GST)** and **date**; fix if needed.
 6. Tap **Add to job**.
 
