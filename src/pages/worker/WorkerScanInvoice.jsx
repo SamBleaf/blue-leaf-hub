@@ -10,7 +10,8 @@ import { fileToUploadBase64 } from "../../lib/receiptFile.js";
 export default function WorkerScanInvoice() {
   const navigate = useNavigate();
   const preview = isWorkerPreview();
-  const fileRef = useRef(null);
+  const cameraRef = useRef(null);  // capture="environment" → opens the camera directly
+  const uploadRef = useRef(null);  // no capture → iOS offers Photo Library + Files (existing photo or PDF)
 
   const [loading, setLoading] = useState(true);
   const [canCapture, setCanCapture] = useState(false);
@@ -107,11 +108,21 @@ export default function WorkerScanInvoice() {
               </select>
             </label>
 
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={onFile} />
-            <button type="button" disabled={!jobId || scanBusy || saving} onClick={() => fileRef.current?.click()}
-              className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
-              {scanBusy ? "Reading…" : "📷 Scan / upload invoice"}
-            </button>
+            {/* Two paths, same handler: the camera button forces the camera (one tap, for the field);
+                the upload button has NO capture attr, so iOS shows Photo Library + Files — letting you
+                pick a photo you already took or a PDF (a capture-only input hides both on iPhone). */}
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
+            <input ref={uploadRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile} />
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" disabled={!jobId || scanBusy || saving} onClick={() => cameraRef.current?.click()}
+                className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
+                {scanBusy ? "Reading…" : "📷 Take photo"}
+              </button>
+              <button type="button" disabled={!jobId || scanBusy || saving} onClick={() => uploadRef.current?.click()}
+                className="rounded-lg border border-primary px-4 py-3 text-sm font-semibold text-primary disabled:opacity-50">
+                {scanBusy ? "Reading…" : "Upload photo or PDF"}
+              </button>
+            </div>
 
             {msg && <p className={`text-sm ${msg.type === "error" ? "text-red-600" : msg.type === "success" ? "text-green-600" : "text-muted"}`}>{msg.text}</p>}
 

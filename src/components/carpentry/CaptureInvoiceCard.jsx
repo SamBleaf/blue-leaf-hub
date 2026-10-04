@@ -81,7 +81,9 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-hairline">
         <h2 className="text-sm font-semibold text-ink">Supplier invoices &amp; misc costs</h2>
         <div className="flex items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={onFile} />
+          {/* No capture attr: on iPhone this shows the full sheet (Camera + Photo Library + Files) so an
+              already-taken photo or a PDF can be picked; on desktop it's an ordinary file dialog. */}
+          <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile} />
           <button type="button" onClick={() => fileRef.current?.click()} disabled={scanBusy || saving}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {scanBusy ? "Reading…" : "📷 Scan / upload invoice"}
