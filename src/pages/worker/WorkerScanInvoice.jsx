@@ -20,6 +20,7 @@ export default function WorkerScanInvoice() {
   const [scanBusy, setScanBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [dup, setDup] = useState(null);     // possible duplicate flagged at scan time (soft — overridable)
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export default function WorkerScanInvoice() {
     if (e.target) e.target.value = "";
     if (!file) return;
     if (!jobId) { setMsg({ type: "error", text: "Pick a job first." }); return; }
-    setScanBusy(true); setMsg(null); setDraft(null);
+    setScanBusy(true); setMsg(null); setDraft(null); setDup(null);
     try {
       const { base64, mimeType } = await fileToUploadBase64(file);
       const res = await workerFetch(`/api/worker/carpentry/jobs/${jobId}/cost-receipt/scan`, {
@@ -62,7 +63,9 @@ export default function WorkerScanInvoice() {
         description: j.suggestedDescription || j.supplierName || "Supplier invoice",
         amount: j.amountExGst != null ? String(j.amountExGst) : "",
         costDate: j.invoiceDate || new Date().toISOString().slice(0, 10),
+        invoiceNumber: j.invoiceNumber || "",
       });
+      setDup(j.possibleDuplicate || null);
       if (!j.extractionOk || j.amountExGst == null) setMsg({ type: "info", text: "Couldn't auto-read the amount — check the invoice and enter it below." });
     } catch (ex) {
       setMsg({ type: "error", text: ex.message || "Couldn't process that file." });
@@ -77,12 +80,12 @@ export default function WorkerScanInvoice() {
     setSaving(true); setMsg(null);
     const res = await workerFetch(`/api/worker/carpentry/jobs/${jobId}/cost-receipt`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileBase64: draft.fileBase64, mimeType: draft.mimeType, costType: "material", description: draft.description.trim(), amount: amt, costDate: draft.costDate, supplierName: draft.supplierName || undefined }),
+      body: JSON.stringify({ fileBase64: draft.fileBase64, mimeType: draft.mimeType, costType: "material", description: draft.description.trim(), amount: amt, costDate: draft.costDate, supplierName: draft.supplierName || undefined, invoiceNumber: draft.invoiceNumber || undefined }),
     });
     const j = await res.json();
     setSaving(false);
     if (!j.ok) { setMsg({ type: "error", text: j.error || "Couldn't save the cost." }); return; }
-    setDraft(null);
+    setDraft(null); setDup(null);
     setMsg({ type: j.receiptWarning ? "info" : "success", text: j.receiptWarning || "Invoice added to the job tally — filed to Dropbox." });
   }
 
@@ -129,6 +132,15 @@ export default function WorkerScanInvoice() {
             {draft && (
               <div className="rounded-lg border border-primary/30 bg-primary/[0.03] p-3 space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Confirm — then it adds to the tally</p>
+                {dup && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                    ⚠ {dup.matchType === "invoice"
+                      ? `Invoice #${dup.existing.invoiceNumber} from ${dup.existing.supplierName || "this supplier"} looks like it's already on this job`
+                      : "A cost with the same supplier, date and amount is already on this job"}
+                    {` (${dup.existing.supplierName || dup.existing.description || "—"} · ${dup.existing.costDate || "?"} · $${Math.round(Number(dup.existing.amount || 0)).toLocaleString()}).`}
+                    {" Only add again if it's a separate bill."}
+                  </p>
+                )}
                 <label className="block text-xs text-muted">Supplier / description
                   <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
                     className="mt-0.5 w-full rounded-lg border border-hairline px-2 py-2 text-sm text-ink" />
@@ -145,7 +157,7 @@ export default function WorkerScanInvoice() {
                 </div>
                 <p className="text-[10px] text-muted">Read by AI from the file — check the amount before saving. Stored ex-GST.</p>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => { setDraft(null); setMsg(null); }} disabled={saving}
+                  <button type="button" onClick={() => { setDraft(null); setMsg(null); setDup(null); }} disabled={saving}
                     className="flex-1 rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink">Discard</button>
                   <button type="button" onClick={save} disabled={saving}
                     className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Add to job"}</button>

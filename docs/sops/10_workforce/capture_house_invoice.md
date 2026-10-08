@@ -1,6 +1,6 @@
 ---
-sop_version: 2.1
-last_reviewed: 2026-10-05
+sop_version: 2.2
+last_reviewed: 2026-10-09
 app_version: main — built 2026-10-04 (migration 204): scan/upload a supplier invoice or misc receipt straight onto ANY carpentry job (the internal houses + real client jobs) from the Hub (Carpentry job → Costs tab, or the Internal house glance view) or the Worker PWA (gated to leading hands / admins / supervisors). Haiku-only OCR prefills supplier + ex-GST amount + the invoice date; the operator confirms; it saves as a carpentry_job_cost (source 'manual') and drops into the job's material tally. The receipt file is filed to Dropbox at /BLUE LEAF BUILDING/RECIEPTS named "<invoice date D.M.YYYY> <supplier>". An amber guard warns when the job also has Finance invoices (don't enter the same invoice twice). Requires migration 204 applied.
 screenshot_status: placeholders_only
 owner: Admin
@@ -32,6 +32,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 
 ## 4. Before you start
 - **Migration 204 must be applied** (adds `carpentry_job_costs.receipt_path` + `supplier_name`). It is applied on production.
+- **Migration 205** (adds `carpentry_job_costs.invoice_number`) powers the duplicate-scan check. Capture works without it (fail-soft), but the strong invoice-number match only activates once it's applied.
 - **Dropbox must be configured** (`DROPBOX_APP_KEY/SECRET/REFRESH_TOKEN` + `DROPBOX_NAMESPACE_ID`) for the file to be filed. If it isn't, the **cost still saves** and you'll see a note that the file wasn't filed — fix the config and re-upload the file later.
 - Hub: signed in as **Admin or Supervisor**. Worker PWA: you must be a **leading hand** (or a login linked to an admin/supervisor role).
 - On a phone, allow the browser/app camera permission the first time.
@@ -69,6 +70,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 - A row is written to **carpentry_job_costs** (source `manual`, cost_type `material`) with the amount, supplier, date, optional budget-category link, and the Dropbox path to the file (`receipt_path`).
 - The job's **Material $** / **Total $** figures and the per-category total go **up** by the amount on the next load.
 - The invoice shows in the **captured** list with a **📄 View** link. Clicking it resolves a **Dropbox shared link** on demand and opens the file in a new tab. (One pre-existing legacy row still resolves via a Supabase signed URL — handled automatically.)
+- **Duplicate check:** when you scan, the app checks whether this invoice is already logged on this job and, if so, shows an **amber warning** in the confirm box (naming the supplier, date and amount of the existing one). It's a heads-up only — you can still **Add to job** if it's genuinely a separate bill. Nothing is blocked.
 - Nothing is sent to Finance or Xero — this is the internal misc-cost lane.
 
 ## 7. Common mistakes
@@ -77,6 +79,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 |---------|---------------|-----------------|
 | Entering the GST-inclusive total | The invoice shows the big (inc-GST) number most prominently | The field is labelled **ex-GST**; the AI prefills the ex-GST figure — leave it unless it's clearly wrong |
 | Entering the **same invoice** here *and* in Finance | Capturing here and also allocating it to the job in Finance | The card shows an **amber warning** when the job already has Finance invoices. Pick one lane per invoice — entering it in both double-counts the cost |
+| Scanning the **same receipt twice** | Logging it once, forgetting, scanning it again | On scan the app warns if the same invoice (by invoice number, or supplier+date+amount) is already on the job — read the amber note before you **Add to job** |
 | Expecting the filename to use the photo date | Assuming the file is named by when you snapped it | The file is named by the **invoice date** read off the receipt (e.g. `4.10.2026 bunnings.jpg`) — if the date prefill is wrong, fix it before saving |
 | Scanning a blurry photo | Camera moved / poor light | Hold steady; if the amount comes back blank, just type it in |
 
@@ -112,6 +115,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 - **Tally:** the job `/summary` + `/budget` endpoints already sum `carpentry_job_costs`, so the row counts immediately; it is **disjoint** from the finance read-through (no double-count unless a human enters the same invoice in both lanes — which the §7 guard warns about).
 - **View link:** `GET /api/carpentry/jobs/:id/costs/:costId/receipt-link` (and the worker equivalent) resolves on demand — a Dropbox shared link for paths starting `/`, else a Supabase signed URL for legacy paths. Job-scoped (`id` + `job_id`) so you can't read another job's receipt.
 - **Endpoints:** `POST …/cost-receipt/scan` (OCR only), `POST …/cost-receipt` (save = insert + file), `GET …/costs/:costId/receipt-link` (view) — mirrored under `/api/worker/carpentry/jobs/:id/…`.
+- **Duplicate detection** (`findPossibleDuplicate` in `jobCostReceipts.mjs`, run at scan time, job-scoped): the Haiku OCR reads the **invoice number** (stored in `carpentry_job_costs.invoice_number`, **migration 205**). STRONG match = same invoice number + supplier (near-certain). FUZZY fallback = same supplier + `cost_date` + `amount`. The scan response carries `possibleDuplicate` (or null); the confirm UI shows it as an advisory amber banner. **Advisory only — never blocks a save** (genuine same-supplier same-day receipts exist), mirroring Finance's `is_duplicate` flag. Fail-soft before mig 205: the save retries without the invoice number so the cost still records, and the fuzzy check still runs (the strong, invoice-number match activates once the column lands).
 - **Role gate:** Hub = `requireAuth` + the director-only (`$`-visibility) UI gate; Worker PWA = `requireWorkerDirector` — allowed when the worker-token employee is a **leading hand** (`employees.is_leading_hand`) OR links to an admin/supervisor login; `/api/worker/me.canCaptureCosts` drives the UI.
 
 ## 12. Edge cases and limits
@@ -203,4 +207,14 @@ Next review date: 2027-04-04
 2. Capture a receipt on job A. Note its `costId`.
 3. Call `GET /api/carpentry/jobs/<jobB>/costs/<costId>/receipt-link` (a DIFFERENT job B).
 4. Expected: 404 "No receipt on this cost." / not-found — the link is scoped by both `id` and `job_id`, so job B can't read job A's receipt.
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Duplicate-scan detection (feature-specific; needs migration 205 for the strong match)**
+1. Capture an invoice on a job (TC-01) with a visible invoice number (e.g. #INV-5521, $200 ex-GST, dated 1.10.2026).
+2. Scan the **same** invoice again on the **same** job.
+3. Expected: the confirm box shows an **amber "already logged" warning** naming the existing supplier + date + amount; you can **still Add to job** (advisory, not blocked). Adding creates a genuine second row (no auto-dedupe).
+4. Scan a **different** invoice from the **same supplier, same day, same amount, with no invoice number** → expected: the fuzzy warning still appears.
+5. Scan a genuinely different invoice (different number and amount) → expected: **no** warning.
+6. Expected DB: the saved rows carry `invoice_number` when the invoice had one (verify `carpentry_job_costs.invoice_number`).
+7. (Pre-migration-205 environments only) scanning + saving still works; the strong invoice-number match is inactive until 205 is applied, but the supplier+date+amount fuzzy warning still fires.
 - [ ] Pass  [ ] Fail

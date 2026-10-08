@@ -15,6 +15,7 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
   const [scanBusy, setScanBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [dup, setDup] = useState(null);     // possible duplicate flagged at scan time (soft — overridable)
   const [saving, setSaving] = useState(false);
 
   // receiptsOnly: list only the rows that have a stored receipt (used where a full cost table already
@@ -27,7 +28,7 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
     const file = e.target.files?.[0];
     if (e.target) e.target.value = "";
     if (!file) return;
-    setScanBusy(true); setMsg(null); setDraft(null);
+    setScanBusy(true); setMsg(null); setDraft(null); setDup(null);
     try {
       const { base64, mimeType } = await fileToUploadBase64(file);
       const { ok, data, error } = await apiPost(`/api/carpentry/jobs/${jobId}/cost-receipt/scan`, { fileBase64: base64, mimeType });
@@ -39,8 +40,10 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
         description: data.suggestedDescription || data.supplierName || "Supplier invoice",
         amount: data.amountExGst != null ? String(data.amountExGst) : "",
         costDate: data.invoiceDate || new Date().toISOString().slice(0, 10),
+        invoiceNumber: data.invoiceNumber || "",
         budgetId: "",
       });
+      setDup(data.possibleDuplicate || null);
       if (!data.extractionOk || data.amountExGst == null) setMsg({ type: "info", text: "Couldn't auto-read the amount — check the invoice and enter it below." });
     } catch (ex) {
       setMsg({ type: "error", text: ex.message || "Couldn't process that file." });
@@ -61,11 +64,12 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
       amount: amt,
       costDate: draft.costDate,
       supplierName: draft.supplierName || undefined,
+      invoiceNumber: draft.invoiceNumber || undefined,
       carpentryJobBudgetId: draft.budgetId || undefined,
     });
     setSaving(false);
     if (!ok) { setMsg({ type: "error", text: error || "Couldn't save the cost." }); return; }
-    setDraft(null);
+    setDraft(null); setDup(null);
     setMsg({ type: data.receiptWarning ? "info" : "success", text: data.receiptWarning || "Invoice added to the job tally — filed to Dropbox." });
     onSaved?.();
   }
@@ -103,6 +107,15 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
       {draft && (
         <div className="m-4 rounded-lg border border-primary/30 bg-primary/[0.03] p-3 space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Confirm the invoice — then it adds to the tally</p>
+          {dup && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+              ⚠ {dup.matchType === "invoice"
+                ? `Invoice #${dup.existing.invoiceNumber} from ${dup.existing.supplierName || "this supplier"} looks like it's already logged on this job`
+                : "A cost with the same supplier, date and amount is already on this job"}
+              {` (${dup.existing.supplierName || dup.existing.description || "—"} · ${dup.existing.costDate || "?"} · ${fmt$(dup.existing.amount)}).`}
+              {" Only add it again if it's genuinely a separate bill."}
+            </p>
+          )}
           <div className={`grid grid-cols-1 gap-2 ${budgetCategories.length ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <label className="text-xs text-muted">Supplier / description
               <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
@@ -128,7 +141,7 @@ export default function CaptureInvoiceCard({ jobId, costs = [], onSaved, budgetC
           </div>
           <p className="text-[10px] text-muted">Read by AI from the file — check the amount before saving. Stored ex-GST; filed to Dropbox as the invoice date + supplier.</p>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => { setDraft(null); setMsg(null); }} disabled={saving}
+            <button type="button" onClick={() => { setDraft(null); setMsg(null); setDup(null); }} disabled={saving}
               className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink hover:bg-page">Discard</button>
             <button type="button" onClick={save} disabled={saving}
               className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">{saving ? "Saving…" : "Add to job"}</button>

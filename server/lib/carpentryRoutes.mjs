@@ -43,7 +43,7 @@ import { geocodeToFacts } from "./geocodeService.mjs";
 import { getCostModel, burnForLine } from "./costModelService.mjs";
 import { mapLineItem, catalogueFor, budgetTaskCategory, slugCategory } from "./carpentrySubtaskDictionary.mjs";
 import { recordTaskDeletion } from "./taskAudit.mjs";
-import { extractReceipt, saveReceiptCost, insertJobCost, resolveReceiptLink } from "./jobCostReceipts.mjs";
+import { extractReceipt, saveReceiptCost, insertJobCost, resolveReceiptLink, findPossibleDuplicate } from "./jobCostReceipts.mjs";
 import { categoryPctComplete, projectMargin } from "./marginProjection.mjs";
 import { rollupSubtaskActuals, subtaskKey } from "./subtaskRollup.mjs";
 import { auFyQuarter } from "./financialYear.mjs";
@@ -1447,7 +1447,12 @@ export function registerCarpentryRoutes(app) {
     try {
       const r = await extractReceipt(req.body || {});
       if (!r.ok) return err(res, r.status, r.error);
-      return ok(res, r.data);
+      const sb = getServiceSupabase();
+      const dup = sb ? await findPossibleDuplicate(sb, req.params.id, {
+        invoiceNumber: r.data.invoiceNumber, supplierName: r.data.supplierName,
+        amount: r.data.amountExGst, costDate: r.data.invoiceDate,
+      }) : { duplicate: false };
+      return ok(res, { ...r.data, possibleDuplicate: dup.duplicate ? dup : null });
     } catch (e) {
       console.error("[carpentry/cost-receipt/scan]", e);
       return err(res, 502, translateDbError(e));

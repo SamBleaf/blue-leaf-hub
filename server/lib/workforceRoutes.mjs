@@ -15,7 +15,7 @@ import { attachAssigneesFromDb, assigneesForTask, setAssignees, visibleToWorker 
 import { recordTaskDeletion } from "./taskAudit.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
-import { extractReceipt, saveReceiptCost, resolveReceiptLink } from "./jobCostReceipts.mjs";
+import { extractReceipt, saveReceiptCost, resolveReceiptLink, findPossibleDuplicate } from "./jobCostReceipts.mjs";
 
 // The Hub role (admin/supervisor/employee) of a worker-token employee, via employees.user_id →
 // user_profiles.id = auth uid → role. Lets a Worker-PWA action be gated to directors (invoice
@@ -2510,7 +2510,11 @@ export function registerWorkforceRoutes(app) {
     try {
       const r = await extractReceipt(req.body || {});   // OCR only — no storage
       if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
-      return res.json({ ok: true, ...r.data });
+      const dup = await findPossibleDuplicate(sb, req.params.id, {
+        invoiceNumber: r.data.invoiceNumber, supplierName: r.data.supplierName,
+        amount: r.data.amountExGst, costDate: r.data.invoiceDate,
+      });
+      return res.json({ ok: true, ...r.data, possibleDuplicate: dup.duplicate ? dup : null });
     } catch (e) {
       console.error("[worker/carpentry/cost-receipt/scan]", e);
       return res.status(502).json({ ok: false, error: translateDbError(e) });
