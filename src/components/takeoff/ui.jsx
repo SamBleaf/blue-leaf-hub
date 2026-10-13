@@ -61,6 +61,8 @@ const STATUS = {
   unsynced: ["Not synced", "bg-amber-50 text-amber-800 border-amber-200"],
   conflict: ["Conflict", "bg-red-50 text-red-700 border-red-200"],
   error: ["Not saved", "bg-red-50 text-red-700 border-red-200"],
+  // R04: held only in this device's recovery store (not on the server yet)
+  local: ["On this device", "bg-slate-50 text-slate-700 border-slate-300"],
 };
 export function SaveChip({ status }) {
   const [label, cls] = STATUS[status] || STATUS.saved;

@@ -15,6 +15,7 @@ import {
   buildCalibration, verifyCalibration, normalisePageMeta, normaliseRect, validatePoints, pointsWithinCalibration,
   segmentLengthMm, getMethod, normaliseFlashingRules, normaliseProfile, computeWorkspace, orderStatus,
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
+  normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
@@ -159,14 +160,9 @@ export async function loadSnapshotFresh(sb, wsId) {
 
 // ── Commit ────────────────────────────────────────────────────────────────────
 function cleanSpec(spec) {
-  const s = spec || {};
-  let bmt = s.bmt;
-  if (bmt === "" || bmt === undefined) bmt = null;
-  if (bmt != null) { bmt = Number(bmt); must(isFiniteNumber(bmt) && bmt > 0 && bmt < 10, "BMT must be a thickness in mm, e.g. 0.55."); }
-  return {
-    product: optStr(s.product, 80), productCode: optStr(s.productCode, 60), finish: optStr(s.finish, 60), bmt,
-    colour: optStr(s.colour, 60), colourCode: optStr(s.colourCode, 40), supplierName: optStr(s.supplierName, 80), notes: optStr(s.notes, 300),
-  };
+  // Spec v2 (construction, finish id, BMT, colour applicability, perforation). Legacy v1 specs are upgraded:
+  // missing construction = solid, finish text → finish id, "N/A" colour on unpainted = not applicable.
+  try { return normaliseSpec(spec); } catch (e) { throw bad(e.message); }
 }
 
 function cleanSourceReview(r) {
@@ -361,8 +357,13 @@ export async function commitWorkspace(sb, ctx, body) {
       must(!Array.isArray(c.split.laps) || c.split.laps.length <= 19, "A split can have at most 19 joints.");
       const pieces = Array.isArray(c.split.pieces) ? c.split.pieces.map(Number) : [];
       const laps = Array.isArray(c.split.laps) ? c.split.laps.map(Number) : [];
-      split = { pieces, laps, sourceFinishedMm: Number(c.split.sourceFinishedMm), version: Number(c.split.version || 1) };
-      changedSplits.push(c.id);
+      const originals = c.split.originals == null ? 1 : Number(c.split.originals);
+      must(Number.isInteger(originals) && originals >= 1 && originals <= 10000, "Choose how many pieces to split.");
+      split = { pieces, laps, sourceFinishedMm: Number(c.split.sourceFinishedMm), originals, version: Number(c.split.version || 1) };
+      const prev = contribs.get(c.id)?.split;
+      const same = prev && prev.sourceSignature && JSON.stringify([prev.pieces, prev.laps, prev.originals || 1, prev.sourceFinishedMm]) === JSON.stringify([pieces, laps, originals, split.sourceFinishedMm]);
+      if (same) split.sourceSignature = prev.sourceSignature; // re-sent unchanged: keep what it was made against
+      else changedSplits.push(c.id);
     }
     const rec = { id: c.id, measurementId: c.measurementId, jobMaterialId: c.jobMaterialId, role: "primary", split };
     out.contributions.upsert.push(rec);
@@ -375,7 +376,17 @@ export async function commitWorkspace(sb, ctx, body) {
     documents: [...docs.values()], calibrations: [...cals.values()], materials: [...mats.values()],
     measurements: [...meas.values()], contributions: [...contribs.values()].filter((c) => meas.has(c.measurementId) && mats.has(c.jobMaterialId)),
   };
-  const computed = computeWorkspace(merged);
+  let computed = computeWorkspace(merged);
+  // New/changed splits are stamped (server-side) with exactly what they were made against, so any later
+  // change to the run, calibration, rules or quantity makes them stale — even if it rounds the same.
+  for (const id of changedSplits) {
+    const c = computed.contributions.find((x) => x.contributionId === id);
+    const rec = contribs.get(id);
+    if (!c || !rec?.split) continue;
+    must(c.result && rec.split.sourceFinishedMm === c.result.finishedLengthMm, "The length changed while you were splitting — reopen the split.");
+    rec.split.sourceSignature = c.sourceSignature;
+  }
+  if (changedSplits.length) computed = computeWorkspace(merged);
   for (const id of changedSplits) {
     const c = computed.contributions.find((x) => x.contributionId === id);
     if (c?.split && (!c.split.valid || c.split.stale)) {
@@ -542,15 +553,22 @@ export async function saveOrder(sb, ctx, orderRow, body) {
     const { snapshot } = await loadSnapshotFresh(sb, orderRow.workspace_id);
     const computed = computeWorkspace(snapshot);
     const byKey = new Map(computed.scheduleLines.map((l) => [l.bucketKey, l]));
+    const stored = await q(sb.from("takeoff_order_lines").select("*").eq("order_id", orderRow.id));
+    const storedByKey = new Map(stored.map((r) => [`${r.bucket_key}#${r.job_material_id || ""}`, r]));
     const seen = new Set();
     lines = body.lines.map((l) => {
-      const sl = byKey.get(l.bucketKey);
-      must(sl, "A selected length is no longer in the takeoff — refresh the schedule.");
       must(!seen.has(l.bucketKey), "A length is listed twice.");
       seen.add(l.bucketKey);
       const quantity = requireQuantity(Number(l.quantity));
       must(quantity <= 10000, "Quantity looks too large.");
-      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm, quantity };
+      // An unchanged existing line is kept exactly as chosen — even if it has gone stale — so editing
+      // other lines never silently relinks it. Stale lines are shown and block order-ready exports.
+      const keep = storedByKey.get(`${l.bucketKey}#${l.jobMaterialId || ""}`);
+      if (keep) return { bucketKey: keep.bucket_key, specKey: keep.spec_key, jobMaterialId: keep.job_material_id, finishedLengthMm: keep.finished_length_mm, quantity };
+      const sl = byKey.get(l.bucketKey);
+      must(sl, "A selected length is no longer in the takeoff — refresh the schedule.");
+      must(!l.jobMaterialId || sl.jobMaterialIds.includes(l.jobMaterialId), "That material doesn't supply this length — choose the line again.");
+      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: l.jobMaterialId || sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm, quantity };
     });
   }
   const { data, error } = await sb.rpc("takeoff_save_order", { p_order_id: orderRow.id, p_expected_revision: expected, p_fields: fields, p_lines: lines });
@@ -576,20 +594,24 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   if (wsSnapshot.workspace.state === "needs_review") problems.push("A plan used by this takeoff was replaced or removed — review the takeoff and mark it reviewed.");
   const groups = new Map();
   for (const l of lines) {
-    const sl = byKey.get(l.bucketKey);
-    const mat = mats.get(l.jobMaterialId);
-    if (!sl || !mat) { problems.push("A length on this order is no longer in the takeoff."); continue; }
+    const st = orderLineState(l, computed, mats);
+    const sl = st.current;
+    if (st.stale) problems.push(PROBLEM_TEXT[st.problem]);
+    if (!sl) continue;
+    // Print exactly what the bucket is: a material whose CURRENT spec key equals the bucket's.
+    const mat = sl.jobMaterialIds.map((id) => mats.get(id)).find((m) => m && materialSpecKey(m) === sl.specKey);
+    if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
     for (const p of sl.problems) problems.push(PROBLEM_TEXT[p] || p);
     if (l.quantity < 1) problems.push("Quantities must be 1 or more.");
     let g = groups.get(sl.specKey);
     if (!g) {
       let dims = null;
       try { dims = mat.profile ? profileDimensionList(mat.profile) : null; } catch { problems.push(PROBLEM_TEXT.profile_invalid); }
-      g = { specKey: sl.specKey, materialName: mat.name, spec: mat.spec, profile: mat.profile, dimensions: dims, rules: normaliseFlashingRules(mat.rules),
+      g = { specKey: sl.specKey, materialName: mat.name, spec: normaliseSpec(mat.spec), specText: describeSpec(mat.spec, mat.profile), profile: mat.profile, dimensions: dims, rules: normaliseFlashingRules(mat.rules),
         materialProblems: materialProblems(mat), lines: [] };
       groups.set(sl.specKey, g);
     }
-    g.lines.push({ bucketKey: l.bucketKey, finishedLengthMm: l.finishedLengthMm, quantity: l.quantity, handlingFlag: sl.handlingFlag, ceilingExceeded: sl.ceilingExceeded });
+    g.lines.push({ bucketKey: sl.bucketKey, stale: st.stale, finishedLengthMm: sl.finishedLengthMm, quantity: l.quantity, handlingFlag: sl.handlingFlag, ceilingExceeded: sl.ceilingExceeded });
   }
   const groupList = [...groups.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.specKey < b.specKey ? -1 : 1)).map((g, i) => {
     for (const p of g.materialProblems) problems.push(PROBLEM_TEXT[p] || p);
@@ -608,7 +630,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     if (m?.calibrationId) usedCalIds.add(m.calibrationId);
   }
   const snapshot = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    specSchemaVersion: SPEC_SCHEMA_VERSION,
     calculationVersion: CALCULATION_VERSION,
     profileSchemaVersion: PROFILE_SCHEMA_VERSION,
     rendererVersion,

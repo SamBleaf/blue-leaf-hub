@@ -1,0 +1,4 @@
+CONFIRMED split provenance: raw6980→6990, same finished7200; stale=false despite source edit.
+CONFIRMED unpainted material: blank colour blocks readiness.
+CONFIRMED requested catalogue extension: perforation field not part of identity; solid and perforated keys identical.
+CONFIRMED WRONG EXPORT: saved Monument bucket + changed m1=Surfmist + m2 still Monument → no problems; PDF snapshot uses Surfmist, allocation bucket still Monument.

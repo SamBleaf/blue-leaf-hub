@@ -20,6 +20,9 @@ import { applyMatrix, invertMatrix, totalRotation, viewportTransform } from "../
 import { clamp, createGestureTracker } from "./gestures.js";
 import { MAX_BACKING_PIXELS, SETTLE_MS, ZOOM_MAX_FACTOR, ZOOM_MIN_FACTOR, pageMetaOf } from "./pdfDocument.js";
 
+const LOUPE_PX = 132;
+const LOUPE_ZOOM = 3;
+
 const stats = { renders: 0, cancels: 0, lastRenderMs: 0, canvases: 0, maxBackingPixels: 0 };
 if (typeof window !== "undefined") window.__takeoffViewerStats = stats;
 
@@ -43,6 +46,9 @@ const PdfViewport = forwardRef(function PdfViewport(
   onPageMetaRef.current = onPageMeta;
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState(viewRef.current);
+  // R04 F08: press-and-hold magnifier — the point under the finger shown 3× above it with a crosshair
+  const [loupe, setLoupe] = useState(null);
+  const loupeRef = useRef(null);
   const [pageMeta, setPageMeta] = useState(null);
   const [pageError, setPageError] = useState(null);
   const [rendering, setRendering] = useState(false);
@@ -189,6 +195,7 @@ const PdfViewport = forwardRef(function PdfViewport(
       },
       onGestureEnd: () => scheduleRender(),
       shouldIgnore: (ev) => !!ev.target?.closest?.("[data-takeoff-handle]"),
+      onPrecise: (phase, pt) => setLoupe(phase === "start" || phase === "move" ? pt : null),
     });
     const detach = tracker.attach(el);
     const wheel = (e) => {
@@ -255,6 +262,28 @@ const PdfViewport = forwardRef(function PdfViewport(
     }
   };
 
+  useLayoutEffect(() => {
+    const lc = loupeRef.current, c = frontRef.current, wrap = wrapRef.current;
+    if (!loupe || !lc || !c || !wrap || !c.width) return;
+    const cr = c.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    if (!cr.width) return;
+    const dpr = window.devicePixelRatio || 1;
+    lc.width = LOUPE_PX * dpr; lc.height = LOUPE_PX * dpr;
+    const ctx = lc.getContext("2d");
+    const kx = c.width / cr.width, ky = c.height / cr.height;
+    const px = (wr.left + loupe.x - cr.left) * kx, py = (wr.top + loupe.y - cr.top) * ky;
+    const sw = (LOUPE_PX / LOUPE_ZOOM) * kx, sh = (LOUPE_PX / LOUPE_ZOOM) * ky;
+    ctx.fillStyle = "#e2e8f0"; ctx.fillRect(0, 0, lc.width, lc.height);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(c, px - sw / 2, py - sh / 2, sw, sh, 0, 0, lc.width, lc.height);
+    const m = lc.width / 2;
+    ctx.strokeStyle = "#006c9b"; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(m, 6 * dpr); ctx.lineTo(m, m - 6 * dpr); ctx.moveTo(m, m + 6 * dpr); ctx.lineTo(m, lc.height - 6 * dpr);
+    ctx.moveTo(6 * dpr, m); ctx.lineTo(m - 6 * dpr, m); ctx.moveTo(m + 6 * dpr, m); ctx.lineTo(lc.width - 6 * dpr, m); ctx.stroke();
+    if (typeof window !== "undefined") window.__takeoffViewerStats = { ...(window.__takeoffViewerStats || {}), loupeShown: (window.__takeoffViewerStats?.loupeShown || 0) + 1 };
+  }, [loupe]);
+  const loupePos = loupe ? { left: clamp(loupe.x - LOUPE_PX / 2, 4, Math.max(4, size.w - LOUPE_PX - 4)), top: loupe.y - LOUPE_PX - 56 < 4 ? loupe.y + 56 : loupe.y - LOUPE_PX - 56 } : null;
+
   return (
     <div
       ref={wrapRef}
@@ -272,6 +301,10 @@ const PdfViewport = forwardRef(function PdfViewport(
         <svg className="absolute inset-0 z-[2] pointer-events-none" width={size.w} height={size.h} aria-hidden="true">
           {overlay?.({ view, toScreen: (p) => toScreen(p, view), toPdf: (p) => toPdf(p, view), size, rotation })}
         </svg>
+      )}
+      {loupe && (
+        <canvas ref={loupeRef} data-takeoff-loupe="" aria-hidden="true" className="pointer-events-none absolute z-[4] rounded-full border-2 border-primary shadow-lg"
+          style={{ width: LOUPE_PX, height: LOUPE_PX, left: loupePos.left, top: loupePos.top }} />
       )}
       {(rendering && !renderedRef.current) && <div className="absolute inset-0 z-[3] flex items-center justify-center text-sm text-muted">Drawing page…</div>}
       {pageError && <div role="alert" className="absolute inset-x-4 top-4 z-[3] rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{pageError}</div>}

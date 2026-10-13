@@ -15,6 +15,7 @@ import { TakeoffValidationError, stableStringify, totalLinearMetres } from "./un
 import { calibrationOrderReady, latestPageCalibrations, pointsWithinCalibration, segmentLengthMm } from "./calibration.js";
 import { evaluateSplit, lengthFlags, manualPieceResult, measuredRunResult, normaliseFlashingRules } from "./flashing.js";
 import { profileGeometryKey, profileProblems } from "./profile.js";
+import { fabricationIdentity, specProblems } from "./catalogue.js";
 
 export const LIMITS = Object.freeze({
   measurementsPerWorkspace: 500,
@@ -34,27 +35,28 @@ export const PROBLEM_TEXT = Object.freeze({
   split_invalid: "The split pieces do not cover the run.",
   profile_invalid: "The flashing profile has a problem.",
   material_incomplete: "Material, finish, BMT or colour is missing.",
+  perforation_incomplete: "Perforated — add the supplier product code, or the hole pattern, size, pitch and which legs.",
+  line_stale_missing: "The lengths for this line changed — update or remove the line.",
+  line_stale_material: "This line's material changed (colour, finish, BMT, perforation or shape) — update or remove the line.",
+  line_stale_quantity: "Fewer pieces are needed now than this line orders — update the quantity.",
   measurement_invalid: "This measurement is invalid.",
 });
 
-/** Spec identity for grouping: method + product/finish/BMT/colour + profile geometry. */
+/** Spec identity for grouping: method + full fabrication spec (construction, finish, BMT, colour,
+ *  perforation) + profile geometry incl. coated face. Anything that changes what is made changes the key. */
 export function materialSpecKey(material) {
-  const s = material.spec || {};
   let profileKey = null;
   if (material.profile) {
     try { profileKey = profileGeometryKey(material.profile); } catch { profileKey = `invalid:${material.id}`; }
   }
+  let spec;
+  try { spec = fabricationIdentity(material.spec); } catch { spec = `invalid:${material.id}`; }
   return stableStringify({
     method: `${material.methodKey}@${material.methodVersion}`,
     // Without a drawn profile the NAME is what tells the supplier which part it is
     // (e.g. "Stop end LH" vs "Stop end RH" in the same colour) — never merge those.
     item: material.profile ? null : String(material.name || "").trim().toLowerCase() || `id:${material.id}`,
-    product: s.product || null,
-    productCode: s.productCode || null,
-    finish: s.finish || null,
-    bmt: s.bmt ?? null,
-    colour: s.colour || null,
-    colourCode: s.colourCode || null,
+    spec,
     profile: profileKey,
   });
 }
@@ -63,15 +65,27 @@ export function bucketKey(specKey, finishedLengthMm) {
   return `${specKey}|${finishedLengthMm}`;
 }
 
-/** Material-level problems (profile + spec completeness). */
+/** Material-level problems (profile + spec completeness, perforation definition). */
 export function materialProblems(material) {
-  const out = [];
-  const s = material.spec || {};
-  if (!s.product || !s.finish || s.bmt == null || s.bmt === "" || !s.colour) out.push("material_incomplete");
+  let out;
+  try { out = specProblems(material.spec, material.profile); } catch { out = ["material_incomplete"]; }
   if (material.methodKey === "flashing_runs" || material.profile) {
     if (!material.profile || profileProblems(material.profile).length) out.push("profile_invalid");
   }
   return out;
+}
+
+/** What a split was made against. Any change (even one that rounds to the same finished length)
+ *  — raw run, calibration revision, rules, quantity — makes the split stale until reviewed. */
+export function splitSourceSignature(m, cal, rules, result) {
+  return stableStringify({
+    kind: m.kind,
+    raw: result.rawLengthMm != null ? Math.round(result.rawLengthMm * 10) / 10 : null,
+    finished: result.finishedLengthMm,
+    quantity: result.quantity,
+    calibration: cal ? `${cal.id}@${cal.calibrationRevision || 0}` : null,
+    rules,
+  });
 }
 
 /**
@@ -101,6 +115,7 @@ export function computeContribution(contribution, ctx) {
       if (doc && doc.status !== "current") problems.push("plan_superseded");
       const raw = segmentLengthMm(cal, m.points[0], m.points[1]);
       result = measuredRunResult(raw, rules);
+      result.calibration = cal;
     } else if (m.kind === "count") {
       const qty = Array.isArray(m.points) ? m.points.length : 0;
       if (qty < 1) throw new TakeoffValidationError("Tap at least one occurrence.");
@@ -118,26 +133,37 @@ export function computeContribution(contribution, ctx) {
     throw e;
   }
 
+  const signature = splitSourceSignature(m, result.calibration || null, rules, result);
+  delete result.calibration;
   let pieces = [{ finishedLengthMm: result.finishedLengthMm, quantity: result.quantity, handlingFlag: result.handlingFlag, ceilingExceeded: result.ceilingExceeded }];
   let split = null;
   if (contribution.split) {
     const sp = contribution.split;
-    // A split is tied to the exact finished length it was made against (one piece only).
-    const stale = result.quantity !== 1 || sp.sourceFinishedMm !== result.finishedLengthMm;
+    // How many of this contribution's identical pieces are split (runs: 1; manual/count: 1..quantity).
+    const originals = Number.isInteger(sp.originals) && sp.originals >= 1 ? sp.originals : 1;
+    // Stale when the source changed at all since the split was made — not just its rounded output.
+    const stale = sp.sourceSignature ? sp.sourceSignature !== signature
+      : (sp.sourceFinishedMm !== result.finishedLengthMm || result.quantity !== 1);
     let ev;
     try {
-      ev = evaluateSplit({ requiredFinishedMm: result.finishedLengthMm, pieces: sp.pieces, laps: sp.laps }, rules);
+      ev = originals > result.quantity
+        ? { valid: false, children: [], problems: ["More pieces are split than exist."], coverageMm: 0, overcoverageMm: 0 }
+        : evaluateSplit({ requiredFinishedMm: result.finishedLengthMm, pieces: sp.pieces, laps: sp.laps }, rules);
     } catch (e) {
       ev = { valid: false, children: [], problems: [e.message], coverageMm: 0, overcoverageMm: 0 };
     }
-    split = { ...ev, stale, version: sp.version || 1 };
+    split = { ...ev, stale, originals, version: sp.version || 1 };
     if (stale) problems.push("split_stale");
     if (!ev.valid) problems.push("split_invalid");
-    // Applying a split REPLACES the unsplit contribution — never both.
-    pieces = ev.children.map((c) => ({ finishedLengthMm: c.finishedLengthMm, quantity: 1, handlingFlag: c.handlingFlag, ceilingExceeded: c.ceilingExceeded }));
+    // A split REPLACES the originals it splits — never both. Unsplit remainder stays whole.
+    const remainder = Math.max(0, result.quantity - originals);
+    pieces = [
+      ...(remainder ? [{ finishedLengthMm: result.finishedLengthMm, quantity: remainder, handlingFlag: result.handlingFlag, ceilingExceeded: result.ceilingExceeded }] : []),
+      ...ev.children.map((c) => ({ finishedLengthMm: c.finishedLengthMm, quantity: originals, handlingFlag: c.handlingFlag, ceilingExceeded: c.ceilingExceeded })),
+    ];
   }
   if (pieces.some((p) => p.ceilingExceeded)) problems.push("ceiling_exceeded");
-  return { ...base, kind: m.kind, result, split, pieces, problems: [...new Set(problems)], explanation: explain(result) };
+  return { ...base, kind: m.kind, result, split, pieces, sourceSignature: signature, problems: [...new Set(problems)], explanation: explain(result) };
 }
 
 /** "Measured 4,312 + allowance 200 → order 4,600 mm" */
@@ -209,6 +235,26 @@ export function computeWorkspace(ws) {
     totalLm: totalLinearMetres(scheduleLines),
     orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0),
   };
+}
+
+/**
+ * Is a saved order line still the same thing it was when chosen? The line, its material and the current
+ * schedule bucket must describe the same full spec — otherwise it is STALE and must be updated or removed
+ * explicitly (never silently relinked to another material). Returns { stale, problem, current, suggestion }.
+ *   suggestion: the current bucket the line's own material now supplies at the same length (for "Update").
+ */
+export function orderLineState(line, computed, materials) {
+  const mats = materials instanceof Map ? materials : new Map((materials || []).map((m) => [m.id, m]));
+  const sl = computed.scheduleLines.find((x) => x.bucketKey === line.bucketKey) || null;
+  const mat = line.jobMaterialId ? mats.get(line.jobMaterialId) : null;
+  const ownKey = mat ? materialSpecKey(mat) : null;
+  const suggestion = mat ? computed.scheduleLines.find((x) => x.specKey === ownKey && x.jobMaterialIds.includes(mat.id) && x.finishedLengthMm === line.finishedLengthMm) || null : null;
+  let problem = null;
+  if (!sl) problem = "line_stale_missing";
+  else if (line.jobMaterialId && (!mat || ownKey !== sl.specKey || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";
+  else if (line.specKey && line.specKey !== sl.specKey) problem = "line_stale_material";
+  else if (line.quantity > sl.quantity) problem = "line_stale_quantity";
+  return { stale: !!problem, problem, current: sl, suggestion: suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
 }
 
 /** Re-flag thresholds for a finished length under a material's rules (UI helper). */

@@ -10,6 +10,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
+import { PROBLEM_TEXT, describeSpec, orderLineState } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { fmtLm, fmtMm } from "./format.js";
 
@@ -90,6 +91,15 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
   const [delivery, setDelivery] = useState(order.delivery || {});
   const [notes, setNotes] = useState(order.notes || "");
   const [qty, setQty] = useState(() => Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.quantity])));
+  // the material each saved line was chosen for (kept on save; a changed material = stale, never relinked silently)
+  const [chosen, setChosen] = useState(() => Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.jobMaterialId])));
+  const mats = useMemo(() => new Map((ws.view?.materials || []).map((m) => [m.id, m])), [ws.view]);
+  const lineStates = useMemo(() => (ws.computed ? order.lines.map((l) => ({ line: l, ...orderLineState(l, ws.computed, mats) })) : []), [order.lines, ws.computed, mats]);
+  const staleLines = lineStates.filter((x) => x.stale && (qty[x.line.bucketKey] ?? 0) > 0);
+  const labelFor = (sl) => {
+    const m = sl.jobMaterialIds.map((id) => mats.get(id)).find(Boolean);
+    return m ? `${m.name} · ${describeSpec(m.spec, m.profile).line}` : "";
+  };
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [exportRes, setExportRes] = useState(null);
@@ -105,7 +115,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
   async function save() {
     setBusy(true); setMsg(null);
     const body = { expectedRevision: order.revision, supplierId: supplierId || null, delivery, notes,
-      lines: Object.entries(qty).filter(([, n]) => n > 0).map(([bucketKey, quantity]) => ({ bucketKey, quantity })) };
+      lines: Object.entries(qty).filter(([, n]) => n > 0).map(([bucketKey, quantity]) => ({ bucketKey, quantity, jobMaterialId: chosen[bucketKey] || undefined })) };
     const r = await api.saveOrder(order.id, body);
     if (!r.ok) setMsg(r.status === 409 ? "Someone else changed this order — it has been reloaded." : r.error);
     await onChanged();
@@ -122,7 +132,16 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
   }
 
   const dirtyForm = supplierId !== (order.supplierId || "") || JSON.stringify(delivery) !== JSON.stringify(order.delivery || {}) || notes !== (order.notes || "")
-    || lines.some((l) => (qty[l.bucketKey] || 0) !== (order.lines.find((x) => x.bucketKey === l.bucketKey)?.quantity || 0));
+    || Object.keys({ ...qty, ...Object.fromEntries(order.lines.map((l) => [l.bucketKey, 1])) }).some((k) => (qty[k] || 0) !== (order.lines.find((x) => x.bucketKey === k)?.quantity || 0)
+      || (chosen[k] || null) !== (order.lines.find((x) => x.bucketKey === k)?.jobMaterialId || null));
+
+  // explicit reconcile of a stale line: switch it to what its material supplies now, or drop it
+  const updateLine = (x) => {
+    const to = x.suggestion;
+    setQty((q) => { const n = { ...q }; const was = n[x.line.bucketKey] || 0; delete n[x.line.bucketKey]; n[to.bucketKey] = Math.min(Math.max(was, 1), to.quantity); return n; });
+    setChosen((c) => { const n = { ...c }; delete n[x.line.bucketKey]; n[to.bucketKey] = x.line.jobMaterialId; return n; });
+  };
+  const removeLine = (x) => { setQty((q) => ({ ...q, [x.line.bucketKey]: 0 })); setChosen((c) => { const n = { ...c }; delete n[x.line.bucketKey]; return n; }); };
 
   return (
     <section className="space-y-3 rounded-card border border-hairline bg-white p-3">
@@ -164,6 +183,22 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
         <TextField label="Notes for supplier" value={notes} onChange={setNotes} />
       </div>
       <div>
+        {staleLines.length > 0 && (
+          <div className="mb-2 space-y-2" data-testid="stale-lines">
+            {staleLines.map((x) => (
+              <Banner key={x.line.bucketKey} tone="warn">
+                <p className="font-medium">{fmtMm(x.line.finishedLengthMm)} mm × {qty[x.line.bucketKey]} — needs updating</p>
+                <p className="text-xs">{PROBLEM_TEXT[x.problem]}{x.current ? ` It is still listed as: ${labelFor(x.current)}.` : ""}</p>
+                {x.suggestion && <p className="text-xs">Its material is now: {labelFor(x.suggestion)}.</p>}
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {x.suggestion && <Btn kind="secondary" onClick={() => updateLine(x)}>Update to current material</Btn>}
+                  {x.problem === "line_stale_quantity" && <Btn kind="secondary" onClick={() => setQty((q) => ({ ...q, [x.line.bucketKey]: x.current.quantity }))}>Set to {x.current.quantity}</Btn>}
+                  <Btn kind="secondary" onClick={() => removeLine(x)}>Remove line</Btn>
+                </div>
+              </Banner>
+            ))}
+          </div>
+        )}
         <p className="mb-1 text-xs font-medium text-muted">Lengths on this order</p>
         <ul className="divide-y divide-hairline rounded-lg border border-hairline">
           {lines.map((l) => {
@@ -171,6 +206,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
             return (
               <li key={l.bucketKey} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm">
                 <span className="flex-1">{fmtMm(l.finishedLengthMm)} mm{l.handlingFlag ? " · long" : ""}{l.problems.length ? <span className="ml-1 text-[11px] text-red-700">needs attention</span> : null}
+                  <span className="block text-[11px] text-ink">{labelFor(l)}</span>
                   <span className="block text-[11px] text-muted">need {st?.required ?? l.quantity} · ordered {st?.ordered ?? 0} · left {st?.remaining ?? l.quantity}</span></span>
                 <div className="w-28"><NumberField label="Qty" unit="pcs" integer min={0} value={qty[l.bucketKey] ?? 0} onCommit={(n) => setQty((q) => ({ ...q, [l.bucketKey]: n }))} /></div>
               </li>

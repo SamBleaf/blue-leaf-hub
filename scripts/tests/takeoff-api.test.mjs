@@ -558,6 +558,76 @@ await t("review #9: replacing a plan bumps the takeoff revision (stale exports c
   if (refs) assert.ok((await q("SELECT revision FROM takeoff_workspaces WHERE id=$1", [wsId])).rows[0].revision > before);
 });
 
+// ── R04 corrections over real routes + real SQL ──────────────────────────────
+const w4 = id(); const r4 = { m1: id(), m2: id(), a: id(), b: id(), ca: id(), cb: id(), man: id(), cm: id(), perf: id(), zinc: id() };
+async function w4rev() { return (await S(`/workspaces/${w4}`)).data.snapshot.workspace.revision; }
+await t("R04 F01: changing the colour of a line's material makes the saved line stale; re-saving keeps it (no silent relink); export refused; draft prints the bucket's colour", async () => {
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w4, name: "R04" });
+  let r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: 1, changes: {
+    materials: { upsert: [{ id: r4.m1, name: "Apron A", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec, profile }, { id: r4.m2, name: "Apron B", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec, profile }] },
+    measurements: { upsert: [{ id: r4.a, kind: "manual", finishedLengthMm: 4600, quantity: 1 }, { id: r4.b, kind: "manual", finishedLengthMm: 4600, quantity: 1 }] },
+    contributions: { upsert: [{ id: r4.ca, measurementId: r4.a, jobMaterialId: r4.m1 }, { id: r4.cb, measurementId: r4.b, jobMaterialId: r4.m2 }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const oid = id();
+  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+  const line = (await S(`/workspaces/${w4}/orders`)).data.scheduleLines[0];
+  r = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 1, jobMaterialId: r4.m1 }] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual((await S(`/orders/${oid}/preview`)).data.preview.problems, []);
+  r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { materials: { upsert: [{ id: r4.m1, name: "Apron A", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: { ...spec, colour: "Surfmist" }, profile }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const pv = (await S(`/orders/${oid}/preview`)).data.preview;
+  assert.ok(pv.problems.some((p) => /material changed/.test(p)), JSON.stringify(pv.problems));
+  // editing something else re-sends the line unchanged → still m1 → still stale (never relinked to m2)
+  const ord = (await S(`/workspaces/${w4}/orders`)).data.orders.find((x) => x.id === oid);
+  r = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: ord.revision, notes: "edit", lines: ord.lines.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity, jobMaterialId: l.jobMaterialId })) } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const ord2 = (await S(`/workspaces/${w4}/orders`)).data.orders.find((x) => x.id === oid);
+  assert.equal(ord2.lines[0].jobMaterialId, r4.m1);
+  const wsRev = await w4rev();
+  const ex = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "r4-f01-ready", expectedOrderRevision: ord2.revision, expectedWorkspaceRevision: wsRev });
+  assert.equal(ex.status, 400); assert.equal(ex.data.code, "NOT_READY");
+  const dr = await SP(`/orders/${oid}/exports`, { isDraft: true, idempotencyKey: "r4-f01-draft", expectedOrderRevision: ord2.revision, expectedWorkspaceRevision: wsRev });
+  assert.equal(dr.status, 200, JSON.stringify(dr.data));
+  const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [dr.data.export.exportId])).rows[0].snapshot;
+  assert.equal(snap.groups[0].spec.colour, "Monument");
+  // explicit update to the bucket m1 now supplies → ready again, printed Surfmist
+  const now = (await S(`/workspaces/${w4}/orders`)).data;
+  const surf = now.scheduleLines.find((l) => /surfmist/.test(l.bucketKey));
+  r = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: now.orders.find((x) => x.id === oid).revision, lines: [{ bucketKey: surf.bucketKey, quantity: 1, jobMaterialId: r4.m1 }] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual((await S(`/orders/${oid}/preview`)).data.preview.problems, []);
+});
+await t("R04 F07/F05: manual 7,200 × 3 split one original over HTTP → 2 × 7,200 + 2 × 3,700; server stamps provenance; a quantity change makes it stale", async () => {
+  let r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: {
+    measurements: { upsert: [{ id: r4.man, kind: "manual", finishedLengthMm: 7200, quantity: 3 }] },
+    contributions: { upsert: [{ id: r4.cm, measurementId: r4.man, jobMaterialId: r4.m2, split: { pieces: [3700, 3700], laps: [200], sourceFinishedMm: 7200, originals: 1 } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const c = r.data.computed.contributions.find((x) => x.contributionId === r4.cm);
+  assert.equal(c.split.stale, false, JSON.stringify(c.split)); assert.equal(c.split.valid, true);
+  const byLen = {}; for (const p of c.pieces) byLen[p.finishedLengthMm] = (byLen[p.finishedLengthMm] || 0) + p.quantity;
+  assert.deepEqual(byLen, { 3700: 2, 7200: 2 }, JSON.stringify(c.pieces));
+  const stored = (await q("SELECT split FROM takeoff_contributions WHERE id=$1", [r4.cm])).rows[0].split;
+  assert.ok(stored.sourceSignature, "signature stamped by the server");
+  r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { measurements: { upsert: [{ id: r4.man, kind: "manual", finishedLengthMm: 7200, quantity: 4 }] } } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.computed.contributions.find((x) => x.contributionId === r4.cm).split.stale, true);
+});
+await t("R04 F06/F04: perforated + unpainted specs survive commit → reload → snapshot; solid/perforated never share a bucket", async () => {
+  const perfSpec = { product: "Flashing", construction: "perforated", finishId: "colorbond", bmt: 0.55, colour: "Surfmist", perforation: { pattern: "round", holeSizeMm: 3, pitchMm: 6, extent: "all" } };
+  const zincSpec = { product: "Flashing", finishId: "zincalume", bmt: 0.5, colour: "" };
+  let r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: {
+    materials: { upsert: [{ id: r4.perf, name: "Vent", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: perfSpec, profile }, { id: r4.zinc, name: "Zinc", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: zincSpec, profile }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const mats = (await S(`/workspaces/${w4}`)).data.snapshot.materials;
+  const perf = mats.find((m) => m.id === r4.perf), zinc = mats.find((m) => m.id === r4.zinc);
+  assert.equal(perf.spec.construction, "perforated"); assert.equal(perf.spec.perforation.holeSizeMm, 3); assert.equal(perf.spec.finish, "COLORBOND");
+  assert.equal(zinc.spec.colourApplicable, false); assert.equal(zinc.spec.colour, null);
+  assert.deepEqual(r.data.computed.materialProblems[r4.zinc], []);
+  const bad = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { materials: { upsert: [{ id: r4.perf, name: "Vent", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: { ...perfSpec, perforation: { holeSizeMm: "abc" } }, profile }] } } });
+  assert.equal(bad.status, 400);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

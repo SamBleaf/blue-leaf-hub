@@ -15,7 +15,7 @@
 // =============================================================================
 import {
   normaliseProfile, profileVertices, treatmentGlyphs, treatmentDrawing, includedAngle, formatMm,
-  MAX_PROFILE_SEGMENTS, TakeoffValidationError,
+  MAX_PROFILE_SEGMENTS, TakeoffValidationError, addSegment,
 } from "../../../shared/takeoff/index.js";
 
 export const SKETCH_GRID_MM = 10;
@@ -431,4 +431,41 @@ export function sketchToProfile(points, { coatedFace = "left" } = {}) {
     end: { type: "none" },
     coatedFace,
   });
+}
+
+/** Where the profile's END vertex is (mm, y up) when its start sits at `anchor`, and its last heading. */
+export function profileEnd(profile, anchor = { x: 0, y: 0 }) {
+  const { points, headings } = profileVertices(profile);
+  const last = points[points.length - 1];
+  return { x: anchor.x + last.x, y: anchor.y + last.y, heading: headings[headings.length - 1] };
+}
+
+/**
+ * Draw on from the END of an existing profile toward a tap (mm, y up): a new leg to the nearest 5 mm at the
+ * nearest 15°, keeping every typed size. The end treatment (e.g. a crush fold) stays on the END — i.e. it
+ * MOVES to the new last leg; the caller tells the user so. Throws for a zero leg or one folding straight back.
+ */
+export function appendLegToward(profile, anchor, tapMm) {
+  const end = profileEnd(profile, anchor);
+  const dx = tapMm.x - end.x, dy = tapMm.y - end.y;
+  const len = Math.round(Math.hypot(dx, dy) / SKETCH_LENGTH_STEP_MM) * SKETCH_LENGTH_STEP_MM;
+  if (len <= 0) throw new TakeoffValidationError("Tap further from the end to draw the next leg.");
+  if (profile.segments.length >= MAX_PROFILE_SEGMENTS) throw new TakeoffValidationError(`A profile can have at most ${MAX_PROFILE_SEGMENTS} legs.`);
+  const hd = normDeg(Math.round(deg(Math.atan2(dy, dx)) / SKETCH_ANGLE_STEP_DEG) * SKETCH_ANGLE_STEP_DEG);
+  const turn = norm180(hd - end.heading);
+  if (Math.abs(turn) >= 180) throw new TakeoffValidationError("That would fold straight back along the last leg — tap somewhere else.");
+  return addSegment(profile, { lengthMm: len, turnDeg: turn });
+}
+
+/** Preview of the leg a tap would add: { from, to (mm), lengthMm, includedDeg } or null. */
+export function previewLeg(profile, anchor, firstPoint, tapMm) {
+  if (!profile && !firstPoint) return null;
+  const from = profile ? profileEnd(profile, anchor) : { ...firstPoint, heading: null };
+  const dx = tapMm.x - from.x, dy = tapMm.y - from.y;
+  const len = Math.round(Math.hypot(dx, dy) / SKETCH_LENGTH_STEP_MM) * SKETCH_LENGTH_STEP_MM;
+  if (len <= 0) return null;
+  const hd = normDeg(Math.round(deg(Math.atan2(dy, dx)) / SKETCH_ANGLE_STEP_DEG) * SKETCH_ANGLE_STEP_DEG);
+  const to = { x: from.x + len * Math.cos(rad(hd)), y: from.y + len * Math.sin(rad(hd)) };
+  const turn = from.heading == null ? null : norm180(hd - from.heading);
+  return { from, to, lengthMm: len, includedDeg: turn == null ? null : 180 - Math.abs(turn) };
 }

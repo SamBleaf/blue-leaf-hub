@@ -123,3 +123,43 @@ export async function clearRememberedActorRecovery() {
   try { a = localStorage.getItem(LAST_ACTOR); localStorage.removeItem(LAST_ACTOR); } catch { /* ignore */ }
   if (a) await clearActorRecovery(a);
 }
+
+// ── Profile-editor drafts (R04 F02) ───────────────────────────────────────────
+// The whole drawing session — unfinished sketch points, last valid profile, typed field drafts that
+// aren't valid yet, and a bounded undo history — kept per (actor, workspace, flashing). Same store and
+// same actor scoping as the change-set recovery, so logout clears these too. Local only: "On this device".
+const editorKey = (actorKey, workspaceId, materialId) => `editor|${actorKey}|${workspaceId}|${materialId}`;
+
+export async function saveEditorDraft({ actorKey, workspaceId, materialId, draft }) {
+  if (!actorKey || !workspaceId || !materialId) return { ok: false, reason: "no-identity" };
+  try {
+    const record = { key: editorKey(actorKey, workspaceId, materialId), kind: "editor", actorKey, workspaceId, materialId, draft: JSON.parse(JSON.stringify(draft)), savedAt: Date.now() };
+    await tx("readwrite", (s) => s.put(record));
+    return { ok: true };
+  } catch (e) {
+    const quota = e?.name === "QuotaExceededError" || /quota/i.test(String(e?.message || ""));
+    return { ok: false, reason: quota ? "quota" : "unavailable" };
+  }
+}
+
+export async function loadEditorDraft(actorKey, workspaceId, materialId) {
+  try {
+    const key = editorKey(actorKey, workspaceId, materialId);
+    const rec = await tx("readonly", (s) => reqP(s.get(key)));
+    if (!rec || Date.now() - rec.savedAt > RECOVERY_TTL_MS) return { ok: true, record: null };
+    return { ok: true, record: rec };
+  } catch { return { ok: false, record: null }; }
+}
+
+/** Unfinished drawings for one actor + workspace (to offer "Continue drawing" after a reload). */
+export async function listEditorDrafts(actorKey, workspaceId) {
+  try {
+    const all = await tx("readonly", (s) => reqP(s.getAll()));
+    return all.filter((r) => r.kind === "editor" && r.actorKey === actorKey && r.workspaceId === workspaceId && Date.now() - r.savedAt <= RECOVERY_TTL_MS);
+  } catch { return []; }
+}
+
+export async function clearEditorDraft(actorKey, workspaceId, materialId) {
+  try { await tx("readwrite", (s) => s.delete(editorKey(actorKey, workspaceId, materialId))); return { ok: true }; }
+  catch { return { ok: false }; }
+}

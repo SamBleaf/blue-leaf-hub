@@ -6,18 +6,21 @@
 import { spawnSync } from "node:child_process";
 
 const SUITES = [
-  "takeoff-calc", "takeoff-geometry", "takeoff-gestures", "takeoff-profile-editor", "takeoff-pdf", "takeoff-db", "takeoff-api", "takeoff-premigration",
+  "takeoff-calc", "takeoff-r04", "takeoff-geometry", "takeoff-gestures", "takeoff-profile-editor", "takeoff-pdf", "takeoff-db", "takeoff-api", "takeoff-premigration",
 ];
-let failed = 0;
+let failed = 0, skipped = 0;
 const rows = [];
 for (const s of SUITES) {
   const r = spawnSync(process.execPath, [`scripts/tests/${s}.test.mjs`], { encoding: "utf8" });
   const out = `${r.stdout || ""}${r.stderr || ""}`;
   const summary = (out.match(new RegExp(`${s}: .*`)) || [out.trim().split("\n").pop()])[0];
   const status = /SKIPPED/.test(out) ? "SKIPPED" : r.status === 0 ? "PASS" : "FAIL";
+  if (status === "SKIPPED") skipped++;
   if (status === "FAIL") { failed++; process.stderr.write(out); }
   else if (process.env.TAKEOFF_TEST_VERBOSE) process.stdout.write(`── ${s}\n${out}`);
   rows.push(`${status.padEnd(8)} ${summary}`);
 }
 console.log(rows.join("\n"));
-process.exit(failed ? 1 : 0);
+// A skipped DB suite is NOT a pass: exit non-zero unless the caller explicitly accepts skips.
+if (skipped && !failed) console.log(`\n${skipped} suite(s) SKIPPED — not verified. Set TAKEOFF_ALLOW_SKIP=1 to exit 0 anyway.`);
+process.exit(failed || (skipped && !process.env.TAKEOFF_ALLOW_SKIP) ? 1 : 0);

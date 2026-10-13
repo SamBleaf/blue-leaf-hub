@@ -16,7 +16,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
-export const RENDERER_VERSION = "takeoff-pdf@1";
+export const RENDERER_VERSION = "takeoff-pdf@2"; // @2: spec v2 text, perforation detail, crush wording, painted/reference face
 const BRAND = "#006c9b";
 const INK = "#1A1A2E";
 const MUTED = "#64748b";
@@ -48,7 +48,9 @@ function pickFont(doc) {
 }
 
 /** Draw a profile into the box (x,y,w,h). Returns nothing; all labels inside the box. */
-export function drawProfile(doc, profile, box, fonts) {
+export function drawProfile(doc, profile, box, fonts, { painted = true } = {}) {
+  // painted: brand-colour band on the colour face; unpainted: grey dashed reference side (no colour face)
+  const band = (d) => (painted ? d.lineWidth(2.4).strokeColor(BRAND) : d.lineWidth(1.4).dash(3, { space: 2 }).strokeColor("#9aa5b1"));
   const { points, headings } = profileVertices(profile);
   const coated = coatedOffsetSegments(profile, 0);
   const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
@@ -69,7 +71,7 @@ export function drawProfile(doc, profile, box, fonts) {
     // left normal of traversal in PDF page space (y down) is (dy, -dx)/len
     const side = profile.coatedFace === "left" ? 1 : -1;
     const nx = (dy / len) * side * off, ny = (-dx / len) * side * off;
-    doc.save().moveTo(a.x + nx, a.y + ny).lineTo(b.x + nx, b.y + ny).lineWidth(2.4).strokeColor(BRAND).stroke().restore();
+    band(doc.save().moveTo(a.x + nx, a.y + ny).lineTo(b.x + nx, b.y + ny)).stroke().restore();
     void seg;
   });
   // the profile itself
@@ -87,14 +89,14 @@ export function drawProfile(doc, profile, box, fonts) {
       pts.map(P).forEach((q, i) => (i ? doc.lineTo(q.x, q.y) : doc.moveTo(q.x, q.y)));
       doc.stroke().restore();
     };
-    line(d.band, 2.4, BRAND);
+    if (painted) line(d.band, 2.4, BRAND);
     line(d.points, 1.4, INK);
     const hdgRad = (g.headingDeg * Math.PI) / 180;
     const dir = { x: Math.cos(hdgRad), y: -Math.sin(hdgRad) };
     const n = { x: g.normal.x, y: -g.normal.y };
     const w = d.drawnLengthMm * s;
     // label sits beyond the end of the leg (along its direction), clear of the leg's own label
-    const lbl = T(`${g.type === "closed_hem" ? "Hem" : "Return"} ${fmt(g.widthMm)}`);
+    const lbl = T(`${g.type === "closed_hem" ? "Crush" : "Return"} ${fmt(g.widthMm)}`);
     doc.font(fonts.regular).fontSize(6.5).fillColor(MUTED);
     const lw = doc.widthOfString(lbl);
     const lx = at.x + dir.x * 14 + n.x * (w / 2), ly = at.y + dir.y * 14 + n.y * (w / 2);
@@ -171,7 +173,7 @@ function draw(doc, snap, opts) {
     if (fs.existsSync(LOGO)) { try { doc.image(LOGO, M, y, { width: 120 }); } catch { /* logo optional */ } }
     doc.font(fonts.bold).fontSize(15).fillColor(INK).text(T(opts.isDraft ? "DRAFT FLASHING ORDER" : "FLASHING ORDER"), M, y, { width: CW, align: "right" });
     doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""}${cont ? " (continued)" : ""}`), M, y + 19, { width: CW, align: "right" });
-    y += cont ? 46 : 78; // clear the wordmark (it is taller than the title block)
+    y += 78; // clear the wordmark on every page (it is taller than the title block)
     if (opts.isDraft) {
       doc.save().rotate(-30, { origin: [W / 2, doc.page.height / 2] }).font(fonts.bold).fontSize(90).fillColor("#c0392b").opacity(0.08)
         .text("DRAFT", 0, doc.page.height / 2 - 50, { width: W, align: "center" }).restore();
@@ -214,21 +216,36 @@ function draw(doc, snap, opts) {
 
   // profiles
   for (const g of snap.groups || []) {
-    need(250);
+    // keep a profile's drawing and (a short) cutting list together on one page; long lists still paginate
+    need(Math.min(bottom() - 120, 300 + Math.min(g.lines.length, 12) * 15 + (g.specText?.perforation ? 24 : 0)));
     doc.save().rect(M, y, CW, 20).fill("#eef5f9").restore();
     const sp = g.spec || {};
     doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`${g.profileId} — ${g.materialName}`), M + 6, y + 5, { width: CW * 0.5, lineBreak: false });
+    // spec v2 text comes frozen in the snapshot (describeSpec); v1 snapshots fall back to the raw fields
+    const st = g.specText || { line: [sp.finish, sp.colour, sp.bmt != null ? `${sp.bmt} BMT` : null].filter(Boolean).join(" · ") };
+    const painted = sp.colourApplicable !== false;
     doc.font(fonts.regular).fontSize(8.5).fillColor(INK)
-      .text(T([sp.finish, sp.colour, sp.colourCode ? `(${sp.colourCode})` : null, sp.bmt != null ? `${sp.bmt} BMT` : null, sp.product, sp.productCode].filter(Boolean).join(" · ")),
+      .text(T([st.line, sp.colourCode ? `(${sp.colourCode})` : null, sp.construction === "perforated" ? null : "solid", sp.productCode ? `code ${sp.productCode}` : null].filter(Boolean).join(" · ")),
         M + CW * 0.5, y + 6, { width: CW * 0.5 - 6, align: "right", lineBreak: false });
-    y += 26;
+    y += 24;
+    if (st.perforation) {
+      // perforation is part of what is made — spelled out, never just "perforated"
+      doc.font(fonts.bold).fontSize(8.5).fillColor(INK).text(T(st.perforation), M + 6, y, { width: CW - 12 });
+      y = doc.y + 2;
+    }
+    if (st.availability) {
+      doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(st.availability), M + 6, y, { width: CW - 12, lineBreak: false });
+      y += 10;
+    }
+    y += 2;
 
     const boxW = CW * 0.52, boxH = 170;
-    if (g.profile) drawProfile(doc, g.profile, { x: M, y, w: boxW, h: boxH }, fonts);
+    if (g.profile) drawProfile(doc, g.profile, { x: M, y, w: boxW, h: boxH }, fonts, { painted });
     else doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text("No profile drawing", M, y + 70, { width: boxW, align: "center" });
     // coated-face legend
-    doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(2.4).strokeColor(BRAND).stroke().restore();
-    doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(`Coated face (${g.profile?.coatedFace === "right" ? "right" : "left"} side travelling L1 -> L${g.profile?.segments?.length || 1})`), M + 28, y + boxH + 4.5, { width: boxW - 30, lineBreak: false });
+    (painted ? doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(2.4).strokeColor(BRAND) : doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(1.4).dash(3, { space: 2 }).strokeColor("#9aa5b1")).stroke().restore();
+    const sideTxt = `${g.profile?.coatedFace === "right" ? "right" : "left"} side travelling L1 -> L${g.profile?.segments?.length || 1}`;
+    doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(painted ? `Painted (colour) face — ${sideTxt}` : `Reference side (unpainted — no colour face) — ${sideTxt}`), M + 28, y + boxH + 4.5, { width: boxW - 30, lineBreak: false });
 
     // dimension table: as many rows as fit beside the drawing, the rest continue below it
     // (three columns, paginating) so a long profile never strands single lines on blank pages.
@@ -238,7 +255,7 @@ function draw(doc, snap, opts) {
     if (dims) {
       for (const l of dims.legs) dimLines.push({ t: `${l.label}  ${fmt(l.lengthMm)} mm` });
       for (const b of dims.bends) dimLines.push({ t: `${b.label}  ${fmt(b.includedDeg)}° ${b.direction === "straight" ? "straight" : `fold ${b.direction}`}` });
-      const tr = (t, name) => (t.type === "none" ? `${name}: plain` : `${name}: ${t.type === "closed_hem" ? "closed hem" : "open return"} ${fmt(t.widthMm)} mm (${t.side})`);
+      const tr = (t, name) => (t.type === "none" ? `${name}: plain` : `${name}: ${t.type === "closed_hem" ? "crush fold (closed hem)" : "open return"} ${fmt(t.widthMm)} mm, folds ${t.side}`);
       dimLines.push({ t: tr(dims.start, "Start") }, { t: tr(dims.end, "End") }, { t: `Indicative girth ${fmt(dims.girthMm)} mm`, muted: true });
     }
     let ty = y;

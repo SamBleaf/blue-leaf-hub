@@ -14,6 +14,7 @@
 
 export const TAP_SLOP_PX = 8;
 const TAP_MAX_MS = 600;
+export const PRECISE_HOLD_MS = 280;
 
 /**
  * @param {{
@@ -24,7 +25,12 @@ const TAP_MAX_MS = 600;
  *   onPinch?: (scaleFactor:number, center:{x:number,y:number}, dx:number, dy:number) => void,
  *   onGestureEnd?: () => void,
  *   shouldIgnore?: (ev:PointerEvent) => boolean,   // e.g. a draggable endpoint handle owns it
+ *   onPrecise?: (phase:"start"|"move"|"end"|"cancel", pt:{x:number,y:number}) => void,
  * }} handlers  (points are element-relative CSS px)
+ *
+ * Precision placement (R04 F08, only when onPrecise is given): in "tap" mode, holding ONE finger still for
+ * PRECISE_HOLD_MS enters "precise": the finger then moves a crosshair (shown magnified by the caller) instead
+ * of panning, and lifting places the point exactly there (onTap). A second finger cancels it.
  */
 export function createGestureTracker(handlers) {
   const pointers = new Map(); // id → {x,y}
@@ -33,6 +39,8 @@ export function createGestureTracker(handlers) {
   let last = null;            // last single-pointer position
   let pinchPrev = null;       // {dist, cx, cy}
   let el = null;
+  let holdTimer = null;
+  const clearHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
 
   const rel = (ev) => {
     const r = el.getBoundingClientRect();
@@ -43,6 +51,8 @@ export function createGestureTracker(handlers) {
     return { dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
   };
   const end = () => {
+    clearHold();
+    if (state === "precise") handlers.onPrecise?.("cancel", last);
     const wasActive = state === "panning" || state === "pinching" || state === "draining";
     state = "idle"; start = null; last = null; pinchPrev = null;
     if (wasActive) handlers.onGestureEnd?.();
@@ -59,7 +69,15 @@ export function createGestureTracker(handlers) {
       start = { ...p, t: performance.now() };
       last = p;
       if (state === "panning") handlers.onPanStart?.();
+      if (state === "pending" && handlers.onPrecise) {
+        holdTimer = setTimeout(() => {
+          holdTimer = null;
+          if (state === "pending" && pointers.size === 1) { state = "precise"; handlers.onPrecise("start", last); }
+        }, PRECISE_HOLD_MS);
+      }
     } else if (pointers.size === 2) {
+      clearHold();
+      if (state === "precise") handlers.onPrecise?.("cancel", last);
       // second finger: cancel any pending tap; navigation only from here on
       if (state !== "panning" && state !== "pinching") handlers.onPanStart?.();
       state = "pinching";
@@ -78,8 +96,10 @@ export function createGestureTracker(handlers) {
       pinchPrev = cur;
       return;
     }
+    if (state === "precise") { last = p; handlers.onPrecise?.("move", p); return; }
     if (state === "pending") {
       if (Math.hypot(p.x - start.x, p.y - start.y) > TAP_SLOP_PX) {
+        clearHold();
         state = "panning";
         handlers.onPanStart?.();
         handlers.onPan?.(p.x - last.x, p.y - last.y);
@@ -97,6 +117,14 @@ export function createGestureTracker(handlers) {
     if (!pointers.has(ev.pointerId)) return;
     const p = rel(ev);
     pointers.delete(ev.pointerId);
+    if (state === "precise" && pointers.size === 0) {
+      clearHold();
+      state = "idle"; start = null; last = null;
+      handlers.onPrecise?.("end", p);
+      handlers.onTap?.(p, ev);
+      return;
+    }
+    clearHold();
     if (state === "pending" && pointers.size === 0) {
       const quick = performance.now() - start.t <= TAP_MAX_MS;
       const still = Math.hypot(p.x - start.x, p.y - start.y) <= TAP_SLOP_PX;

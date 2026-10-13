@@ -46,6 +46,27 @@ await t("winAnsi keeps × ° ± and replaces unencodable characters visibly", ()
   assert.equal(winAnsi("a → b"), "a -> b");
 });
 
+await t("R04 A07: solid painted, unpainted and perforated flashings print their full spec; perforation spelled out; no fake colour", async () => {
+  const p = starterProfile();
+  const legId = String(p.segments[1].id);
+  const ws = wsWith(
+    [{ id: "m1", name: "Apron (solid)", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: spec("Monument"), profile: p },
+     { id: "m2", name: "Apron (zinc)", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: { product: "Flashing", finishId: "zincalume", bmt: 0.5, colour: "" }, profile: p },
+     { id: "m3", name: "Vent flashing", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: { ...spec("Surfmist"), construction: "perforated", perforation: { pattern: "round", holeSizeMm: 3, pitchMm: 6, openAreaPct: 11, extent: "selected_legs", legIds: [legId], solidMarginMm: 10 } }, profile: p }],
+    [{ id: "a", kind: "manual", finishedLengthMm: 4600, quantity: 1 }, { id: "b", kind: "manual", finishedLengthMm: 4600, quantity: 1 }, { id: "c", kind: "manual", finishedLengthMm: 4600, quantity: 1 }],
+    [{ id: "c1", measurementId: "a", jobMaterialId: "m1" }, { id: "c2", measurementId: "b", jobMaterialId: "m2" }, { id: "c3", measurementId: "c", jobMaterialId: "m3" }],
+  );
+  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot: ws, order, lines: orderFor(ws), supplier, company, jobLabel: "1 Sample Street (Sample client)", rendererVersion: RENDERER_VERSION });
+  assert.deepEqual(problems, []);
+  assert.equal(snapshot.groups.length, 3, "solid / unpainted / perforated never merge");
+  const pdf = await renderSupplierOrderPdf(snapshot, { exportNo: 1, isDraft: true, snapshotSha256: snapshotHash(snapshot) });
+  const all = (await pdfText(pdf)).join(" ");
+  for (const s of ["COLORBOND · Monument · 0.55 BMT", "ZINCALUME · natural (unpainted) · 0.5 BMT", "Reference side (unpainted", "PERFORATED", "round holes 3 mm @ 6 mm pitch", "11% open", "legs L2", "solid margin 10 mm", "Confirm availability with supplier"]) {
+    assert.ok(all.includes(s), `missing "${s}"`);
+  }
+  if (WRITE) { mkdirSync("docs/takeoff/evidence", { recursive: true }); writeFileSync("docs/takeoff/evidence/sample-supplier-order-solid-unpainted-perforated.pdf", pdf); }
+});
+
 await t("single-profile order: all fields, every leg/bend/end, rows and totals present", async () => {
   const p = starterProfile();
   const ws = wsWith(
@@ -58,7 +79,7 @@ await t("single-profile order: all fields, every leg/bend/end, rows and totals p
   const pdf = await renderSupplierOrderPdf(snapshot, { exportNo: 1, isDraft: false, snapshotSha256: snapshotHash(snapshot) });
   const text = (await pdfText(pdf)).join(" ");
   for (const s of ["FLASHING ORDER", "FO-001001", "Fielders (sample branch)", "1 Sample Street, Testville", "Required: 2026-10-20", "COLORBOND", "Monument", "0.55 BMT",
-    "L1 100", "L2 150", "L3 50", "B1", "B2", "fold left", "fold right", "closed hem 10", "Indicative girth 310", "4,600", "6,100", "3 ×", "Long piece", "Coated face", "Order total: 4 pieces"]) {
+    "L1 100", "L2 150", "L3 50", "B1", "B2", "fold left", "fold right", "crush fold (closed hem) 10", "Indicative girth 310", "4,600", "6,100", "3 ×", "Long piece", "Painted (colour) face", "solid", "Confirm availability with supplier", "Order total: 4 pieces"]) {
     assert.ok(text.includes(s), `missing "${s}"`);
   }
   assert.ok(!/DRAFT/.test(text));
@@ -109,7 +130,7 @@ await t("review #8: 30-leg profile paginates sanely; continued cutting lists kee
   for (const p of pages.slice(1)) assert.ok(/P\d — Long profile/.test(p) || /Order total/.test(p), "every continued page names its profile");
   const all = pages.join(" ");
   assert.ok(/L1\s+12\.5 mm/.test(all), "fractional leg printed exactly");
-  assert.ok(all.includes("closed hem 12.5 mm"), "fractional hem printed exactly");
+  assert.ok(all.includes("closed hem) 12.5 mm"), "fractional hem printed exactly");
   assert.ok(all.includes("1,000.5"), "fractional finished length printed exactly");
   for (let i = 1; i <= 29; i++) assert.ok(all.includes(`B${i} `), `B${i} present`);
 });

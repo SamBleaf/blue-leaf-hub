@@ -9,7 +9,8 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { indicativeGirthMm, latestPageCalibrations, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, indicativeGirthMm, latestPageCalibrations, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { describeChanges, partial } from "./changeset.js";
 import { useTakeoffWorkspace } from "./useTakeoffWorkspace.js";
@@ -99,15 +100,31 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   const [presets, setPresets] = useState([]);
   const [manualFor, setManualFor] = useState(null);
   const [notice, setNotice] = useState(null);
+  // unfinished drawings kept on this device (R04 F02) — offered after a reload / PWA restart
+  const [editorDrafts, setEditorDrafts] = useState([]);
+  const draftActor = ws.server?.capabilities?.actorKey || null;
+  const draftWs = view?.workspace?.id || null;
+  const refreshDrafts = useCallback(() => {
+    if (!draftActor || !draftWs) return;
+    listEditorDrafts(draftActor, draftWs).then(setEditorDrafts);
+  }, [draftActor, draftWs]);
+  useEffect(() => { refreshDrafts(); }, [refreshDrafts]);
 
   const plans = useMemo(() => view?.documents || job?.plans || [], [view?.documents, job?.plans]);
   const primaryDoc = view?.workspace?.primaryDocumentId;
+  // ?scalePlan=<docId> (from "Scale plans" after an upload): open that plan's page setup once
+  const [scalePlan] = useState(() => { try { return new URLSearchParams(window.location.search).get("scalePlan"); } catch { return null; } });
+  const [scaleHandled, setScaleHandled] = useState(false);
   useEffect(() => {
-    if (!view || docId) return;
+    if (!view) return;
+    if (scalePlan && !scaleHandled && plans.some((p) => p.id === scalePlan && p.status === "current")) {
+      setScaleHandled(true); setDocId(scalePlan); setPageIndex(0); setWin("setup"); return;
+    }
+    if (docId) return;
     const first = primaryDoc || plans.find((p) => p.status === "current")?.id || null;
     setDocId(first);
     setPageIndex(view.workspace.primaryPageIndex ?? 0);
-  }, [view, docId, primaryDoc, plans]);
+  }, [view, docId, primaryDoc, plans, scalePlan, scaleHandled]);
   useEffect(() => { if (!activeMaterial && view?.materials?.length) setActiveMaterial(view.materials[0].id); }, [view, activeMaterial]);
   useEffect(() => { let stop = false; api.presets().then((r) => { if (!stop && r.ok) setPresets(r.data.presets || []); }); return () => { stop = true; }; }, [api]);
 
@@ -123,16 +140,17 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
 
   const contribCount = (mid) => view.contributions.filter((c) => c.jobMaterialId === mid).length;
   const linesFor = (mid) => (ws.computed?.scheduleLines || []).filter((l) => l.jobMaterialIds.includes(mid));
-  const startEdit = (material, isNew, next = "overview") => setEditing({ material, isNew, next });
 
-  function saveMaterial(m) {
-    const rec = { id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion || 1, spec: m.spec, rules: m.rules, profile: m.profile || null, fromPresetId: m.fromPresetId || null, fromPresetRevision: m.fromPresetRevision || null };
-    ws.edit(partial({ materials: [rec] }));
+  const actorKey = ws.server?.capabilities?.actorKey || null;
+  const matRec = (m) => ({ id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion || 1, spec: m.spec, rules: m.rules || {}, profile: m.profile || null, fromPresetId: m.fromPresetId || null, fromPresetRevision: m.fromPresetRevision || null });
+  /** Job copies auto-apply: upsert straight into the takeoff (autosave + device recovery). */
+  function upsertMaterial(m) {
+    ws.edit(partial({ materials: [matRec(m)] }));
     setActiveMaterial(m.id);
-    const next = editing?.next || "overview";
-    setEditing(null);
-    setWin(next);
   }
+  const currentMat = (m) => view.materials.find((x) => x.id === m.id) || m;
+  const newFlashing = () => ({ id: newId(), name: `Flashing ${view.materials.filter((x) => x.methodKey === "flashing_runs").length + 1}`, methodKey: "flashing_runs", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: {}, profile: null });
+  const isPainted = (m) => { try { return normaliseSpec(m?.spec).colourApplicable !== false; } catch { return true; } };
 
   function useStandard(p) {
     const id = newId();
@@ -153,53 +171,68 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     else setNotice({ tone: "error", text: r.error });
   }
 
+  const leaveEditor = () => { setEditing(null); setWin("overview"); refreshDrafts(); };
+  const toLengths = (m) => { setActiveMaterial(m.id); setEditing(null); setWin(docId ? "measure" : "overview"); };
+
   // ── focused windows ─────────────────────────────────────────────────────────
   if (editing?.stage === "profile" || win === "profile") {
     const m = editing?.material;
+    const std = !!editing?.isStandard;
+    const cur = std ? m : currentMat(m);
     // Portal like FocusedWindow so the editor covers the AppShell's floating buttons.
+    // key = the flashing id ONLY: saves / server revisions never remount the editor (focus, keyboard, history kept).
     return createPortal(
-      <><FocusMode /><ProfileEditor key={`${m?.id}:${m?.revision ?? "new"}`} value={m?.profile || null} startBlank={!!editing?.isNew && !m?.profile} title={m?.name || "Flashing profile"} readOnly={!caps.edit}
-        onCancel={() => { setEditing(null); setWin("overview"); }}
+      <><FocusMode /><ProfileEditor key={`${std ? "std" : "job"}:${m?.id}`} value={cur?.profile || null} title={cur?.name || "Flashing"} readOnly={std ? !caps.editStandards : !caps.edit}
+        mode={std ? "standard" : "job"} painted={isPainted(cur)} syncStatus={ws.status}
+        draftScope={actorKey && m?.id ? { actorKey, workspaceId: std ? "standards" : wsId, materialId: m.id } : null}
+        onClose={leaveEditor}
+        onChange={(profile) => upsertMaterial({ ...currentMat(m), profile })}
+        onDetails={() => setEditing({ material: currentMat(m), stage: "details" })}
+        onLengths={() => toLengths(m)}
         onSave={(profile) => {
-          if (editing?.isNew) setEditing({ ...editing, stage: "rules", material: { ...m, profile } });
-          else if (editing?.isStandard) {
-            api.savePreset({ presetId: m.id, expectedRevision: m.revision, content: { ...m, profile } }).then(async (r) => {
-              setNotice(r.ok ? { tone: "ok", text: `Saved a new revision of “${m.name}”. Jobs keep their own copies until you update them.` } : { tone: "error", text: r.error });
-              const x = await api.presets(); if (x.ok) setPresets(x.data.presets || []);
-              setEditing(null); setWin("pick");
-            });
-          }
-          else { saveMaterial({ ...m, profile }); }
+          api.savePreset({ presetId: m.id, expectedRevision: m.revision, content: { ...m, profile } }).then(async (r) => {
+            setNotice(r.ok ? { tone: "ok", text: `Saved a new revision of “${m.name}”. Jobs keep their own copies until you update them.` } : { tone: "error", text: r.error });
+            const x = await api.presets(); if (x.ok) setPresets(x.data.presets || []);
+            setEditing(null); setWin("pick");
+          });
         }} /></>,
       document.body,
     );
   }
   if (editing) {
+    const std = !!editing.isStandard;
+    const m = std ? editing.material : currentMat(editing.material);
     return (
-      <FocusedWindow title={editing.isNew ? "New material" : editing.material.name} subtitle={editing.isStandard ? "Company standard" : "This job only"} onClose={() => { setEditing(null); setWin("overview"); }} closeLabel="Cancel">
+      <FocusedWindow title={std ? editing.material.name : "Flashing details"} subtitle={std ? "Company standard" : `${m.name} · this job only`} onClose={leaveEditor} closeLabel={std ? "Cancel" : "Close"}
+        actions={!std && m.methodKey === "flashing_runs" ? <SaveChip status={ws.status} /> : null}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <MaterialSheet value={editing.material} view={view} mode={editing.isStandard ? "standard" : "job"} canEditSourceReview={caps.editStandards}
-            onCancel={() => { setEditing(null); setWin("overview"); }}
-            onSave={async (m) => {
-              if (editing.isStandard) {
-                const r = await api.savePreset({ presetId: m.id, expectedRevision: m.revision, content: { ...m } });
-                if (!r.ok) { setNotice({ tone: "error", text: r.error }); setEditing(null); setWin("pick"); return; }
-                const p = await api.presets(); if (p.ok) setPresets(p.data.presets || []);
-                setEditing(null); setWin("pick");
-              } else saveMaterial(m);
+          <MaterialSheet key={m.id} value={m} view={view} mode={std ? "standard" : "job"} canEditSourceReview={caps.editStandards}
+            onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules })}
+            onCancel={leaveEditor}
+            onSave={async (x) => {
+              const r = await api.savePreset({ presetId: x.id, expectedRevision: x.revision, content: { ...x } });
+              if (!r.ok) { setNotice({ tone: "error", text: r.error }); setEditing(null); setWin("pick"); return; }
+              const p = await api.presets(); if (p.ok) setPresets(p.data.presets || []);
+              setEditing(null); setWin("pick");
             }} />
+          {!std && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {m.methodKey === "flashing_runs" && <Btn onClick={() => setEditing({ material: m, stage: "profile" })}>Drawing</Btn>}
+              <Btn kind="primary" className={m.methodKey === "flashing_runs" ? "" : "col-span-2"} onClick={() => toLengths(m)}>Lengths</Btn>
+            </div>
+          )}
         </div>
       </FocusedWindow>
     );
   }
   if (win === "pick") {
     return (
-      <FocusedWindow title="Choose material" onClose={() => setWin("overview")} closeLabel="Back">
+      <FocusedWindow title="Choose flashing" onClose={() => setWin("overview")} closeLabel="Back">
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <MaterialPicker api={api} canEditStandards={caps.editStandards}
             onUseStandard={useStandard}
-            onDrawNew={() => setEditing({ material: { id: newId(), name: "Flashing", methodKey: "flashing_runs", methodVersion: 1, profile: null }, isNew: true, stage: "profile", next: docId ? "measure" : "overview" })}
-            onPiecesOnly={() => startEdit({ id: newId(), name: "Finished pieces", methodKey: "finished_piece_count", methodVersion: 1, profile: null }, true)}
+            onDrawNew={() => setEditing({ material: newFlashing(), isNew: true, stage: "profile" })}
+            onPiecesOnly={() => { const m = { id: newId(), name: "Finished pieces", methodKey: "finished_piece_count", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: {}, profile: null }; upsertMaterial(m); setEditing({ material: m, stage: "details" }); }}
             onEditStandard={(p) => setEditing({ material: p, isStandard: true })}
             onEditStandardProfile={(p) => setEditing({ material: p, isStandard: true, stage: "profile" })}
             onRetireStandard={async (p) => {
@@ -248,7 +281,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
             <button key={m.id} type="button" onClick={() => { setActiveMaterial(m.id); setWin("measure"); }} aria-pressed={m.id === activeMaterial}
               className={`flex min-h-[52px] w-full items-center rounded-card border px-3 text-left text-sm ${m.id === activeMaterial ? "border-primary bg-primary/5" : "border-hairline bg-white"}`}>{m.name}</button>
           ))}
-          {caps.edit && <Btn kind="primary" className="w-full" onClick={() => setWin("pick")}>Add material</Btn>}
+          {caps.edit && <Btn kind="primary" className="w-full" onClick={() => setWin("pick")}>Add flashing</Btn>}
         </div>
       </FocusedWindow>
     );
@@ -298,6 +331,19 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
         </Banner>
       )}
       {ws.status === "unsynced" && ws.saveError && <Banner tone="warn">{ws.saveError}</Banner>}
+      {caps.edit && editorDrafts.map((d) => {
+        const m = view.materials.find((x) => x.id === d.materialId);
+        const empty = !d.draft?.hist?.present?.profile && !d.draft?.hist?.present?.first;
+        if (empty) return null;
+        return (
+          <Banner key={d.key} tone="info" action={<div className="flex gap-1">
+            <Btn onClick={() => setEditing({ material: m || { ...newFlashing(), id: d.materialId, name: "New flashing" }, isNew: !m, stage: "profile" })}>Continue drawing</Btn>
+            <Btn kind="ghost" onClick={() => { if (window.confirm("Discard this unfinished drawing from this device?")) clearEditorDraft(draftActor, draftWs, d.materialId).then(refreshDrafts); }}>Discard</Btn>
+          </div>}>
+            Unfinished drawing on this device: <span className="font-semibold">{m ? m.name : "a new flashing"}</span>{Object.keys(d.draft?.drafts || {}).length ? " (has a size that isn't valid yet)" : ""}.
+          </Banner>
+        );
+      })}
       {(() => { const n = rescaleCandidates(view).length; return n > 0 && (
         <Banner tone="warn" action={<Btn onClick={() => setWin("rescale")}>Review with new scale</Btn>}>
           {n} run(s) were measured before the page was re-scaled. They can&apos;t be ordered until you review them.
@@ -329,7 +375,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
       <section className="space-y-2 rounded-card border border-hairline bg-white p-3">
         <div className="flex items-center gap-2">
           <h2 className="flex-1 text-sm font-semibold text-ink">Materials</h2>
-          {caps.edit && <Btn onClick={() => setWin("pick")}>Add material</Btn>}
+          {caps.edit && <Btn onClick={() => setWin("pick")}>Add flashing</Btn>}
         </div>
         {!view.materials.length && <p className="text-sm text-muted">No materials yet. Add a flashing to start measuring.</p>}
         <ul className="divide-y divide-hairline">
@@ -343,7 +389,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
                     <span className="block text-[11px] font-normal text-muted">{[m.spec?.finish, m.spec?.colour, m.spec?.bmt != null ? `${m.spec.bmt} BMT` : null].filter(Boolean).join(" · ")}{m.profile ? ` · girth ${fmtMm(indicativeGirthMm(m.profile))} mm` : ""} · {contribCount(m.id)} item(s) · {ls.reduce((a, l) => a + l.quantity, 0)} pcs{m.pending ? " · unsaved" : ""}</span>
                   </p>
                   {(m.profile || m.methodKey === "flashing_runs") && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: "profile" })}>{caps.edit ? "Profile" : "View profile"}</Btn>}
-                  {caps.edit && <Btn kind="ghost" onClick={() => startEdit(m, false)}>Rules</Btn>}
+                  {caps.edit && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: "details" })}>Details</Btn>}
                   {caps.edit && <Btn kind="ghost" onClick={() => setManualFor(manualFor === m.id ? null : m.id)}>Add lengths</Btn>}
                   {caps.editStandards && api.savePreset && <Btn kind="ghost" onClick={() => saveAsStandard(m)}>Save as standard</Btn>}
                   {caps.edit && <Btn kind="ghost" onClick={() => {

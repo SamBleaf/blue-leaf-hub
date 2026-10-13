@@ -1,5 +1,5 @@
 // =============================================================================
-// MaterialPicker — "Choose material": company standards (search), Draw new flashing, or a
+// MaterialPicker — "Choose flashing": company standards (search), New flashing, or a
 // finished-pieces material. Using a standard makes an independent FULL copy on the job (the
 // server copies the exact standard revision) — later job edits never write back.
 // =============================================================================
@@ -32,7 +32,7 @@ export default function MaterialPicker({ api, onUseStandard, onDrawNew, onPieces
     <div className="space-y-3">
       {notice && <Banner tone={notice.tone} action={<Btn kind="ghost" onClick={onDismissNotice}>Dismiss</Btn>}>{notice.text}</Banner>}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Btn kind="primary" onClick={onDrawNew}>Draw new flashing</Btn>
+        <Btn kind="primary" onClick={onDrawNew}>New flashing</Btn>
         <Btn onClick={onPiecesOnly}>Finished pieces only (no drawing)</Btn>
       </div>
       <div>

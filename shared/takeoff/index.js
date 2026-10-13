@@ -10,4 +10,4 @@ export * from "./history.js";
 export * from "./catalogue.js";
 
 /** Bumped when any calculation in this package changes behaviour; frozen into exports. */
-export const CALCULATION_VERSION = "takeoff-calc@1";
+export const CALCULATION_VERSION = "takeoff-calc@2"; // @2: spec v2 identity (construction/finish/perforation), split provenance, manual/count splits

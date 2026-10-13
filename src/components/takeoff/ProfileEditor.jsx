@@ -1,246 +1,280 @@
 // =============================================================================
-// ProfileEditor — focused workspace for drawing and editing a flashing cross-section profile
-// (R03 §6). Phone: full screen — top bar (Cancel · title · Undo/Redo · Save), the drawing,
-// and a bottom sheet for the selected leg / corner / end. ≥1024px (lg): the same drawing with
-// a right-hand property panel.
+// ProfileEditor — draw and edit a flashing cross-section on the canvas (R03 §6, revised by R04 01-INTERACTION).
 //
-// The profile is the canonical shared/takeoff/profile.js model. Every edit is one pure
-// command pushed to a bounded undo history (shared/takeoff/history.js); a command that throws
-// TakeoffValidationError shows its plain-English message inline and never enters history.
-// The drawing is pure SVG laid out in screen px by profileEditorModel.js (leg labels on the
-// non-coated side, angles outside each fold, leader lines when crowded). Pointer input goes
-// through the shared gesture tracker: tap selects (or places a sketch point), drag pans, two
-// fingers pinch-zoom; Ctrl/⌘+scroll zooms on desktop.
-//
-// `value` is read on mount — remount (key) to load a different profile. onSave receives the
-// normalised profile; the parent persists it. readOnly = pan/zoom only.
-// `startBlank` (a NEW flashing): opens on an empty grid with nothing drawn — tap the shape out point
-// by point (FlashIt-style), then refine exact sizes, angles, hems and the coated face.
+// Everyday path: tap points to draw → tap a size label to type it → tap an end → Crush fold → Details / Lengths.
+// * The canvas is the editor. Header: Close · name · save status · Undo · More. Nothing selected = at most five
+//   general actions (Close, Undo, More, Details, Lengths). Rare transforms (Redo, Rotate, Mirror, Reverse,
+//   Flip painted face, Remove last leg, Clear, Fit, dimension list) live under More.
+// * Edits AUTO-APPLY — no Apply / Enter / intermediate Save. A typing session on one field is ONE undo step
+//   (100 → 1 → 15 → 150 undoes straight back to 100); a toggle or a new point is one step. Partial / invalid
+//   text stays a draft (never 0 / NaN), the last valid shape is kept, and the draft survives a reload.
+// * Job copies autosave: every valid shape goes to onChange (≈400 ms debounce, and on blur / selection change /
+//   close) → the takeoff's normal save + device recovery. The whole drawing session (unfinished points, typed
+//   drafts, undo history) is also kept per actor + job + flashing on this device, so a reload / PWA kill
+//   restores the same drawing. "Saved" only ever comes from the server (syncStatus).
+// * Company standards: same editing, but publishing is the explicit "Save new revision" (it affects other jobs).
+// * Mount with a STABLE key (the flashing id) — server acknowledgements never remount it, so focus, keyboard,
+//   viewport and history survive saves.
 // =============================================================================
-import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  normaliseProfile, starterProfile, setSegmentLength, setIncludedAngle, setBendDirection, addSegment,
-  removeLastSegment, setTreatment, rotateProfile, mirrorProfile, flipCoatedFace, reverseProfile,
-  profileProblems, indicativeGirthMm, includedAngle, bendDirection, formatMm, MAX_PROFILE_SEGMENTS,
-  TakeoffValidationError, createHistory, pushHistory, undo, redo, canUndo, canRedo,
+  normaliseProfile, setSegmentLength, setIncludedAngle, setBendDirection, removeLastSegment, setTreatment,
+  rotateProfile, mirrorProfile, flipCoatedFace, reverseProfile, profileProblems, indicativeGirthMm, includedAngle,
+  bendDirection, formatMm, TakeoffValidationError, createHistory, pushHistory, undo, redo, canUndo, canRedo,
 } from "../../../shared/takeoff/index.js";
 import { createGestureTracker } from "./gestures.js";
 import {
-  layoutProfile, hitTest, fitView, fitProfileView, zoomAt, panBy, screenToMm, snapToGrid, profileBoundsMm, gridLines,
-  sketchLegs, sketchToProfile, parseNumberInput, formatAngle, treatmentText, SKETCH_GRID_MM,
+  layoutProfile, hitTest, fitView, zoomAt, panBy, screenToMm, snapToGrid, profileBoundsMm, gridLines,
+  sketchToProfile, parseNumberInput, formatAngle, treatmentText, appendLegToward, previewLeg, SKETCH_GRID_MM,
 } from "./profileEditorModel.js";
+import { loadEditorDraft, saveEditorDraft, clearEditorDraft } from "../../lib/takeoffRecovery.js";
+import { SaveChip } from "./ui.jsx";
 
-const NEW_LEG_MM = 50;
-const FIT_INSET = { top: 48 }; // keep the fitted drawing clear of the Fit / zoom buttons
-const SNAP_ANGLES = [45, 90, 135, 180];
+const FIT_INSET = { top: 16 };
+const AUTOSAVE_MS = 400;
+const PREFS_KEY = "blhub_takeoff_editor_prefs";
+const readPrefs = () => { try { return { crushWidth: 10, crushSide: null, returnWidth: 10, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") }; } catch { return { crushWidth: 10, crushSide: null, returnWidth: 10 }; } };
+const writePrefs = (p) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* private mode */ } };
 
-function loadInitial(value) {
-  if (!value) return { profile: starterProfile(), error: null };
-  try {
-    return { profile: normaliseProfile(value), error: null };
-  } catch (e) {
-    return { profile: starterProfile(), error: `The saved profile couldn’t be read (${e.message})` };
-  }
-}
-const sameSel = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id && a.index === b.index && a.which === b.which;
-const sameProfile = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const selKey = (s) => (!s ? "" : s.kind === "leg" ? `leg:${s.id}` : s.kind === "corner" ? `corner:${s.index}` : `end:${s.which}`);
 const pts = (list) => list.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
-export default function ProfileEditor({ value, title, readOnly = false, startBlank = false, onSave, onCancel }) {
-  const [init] = useState(() => loadInitial(value));
-  // Blank start: no shape exists until the first sketch is finished (Save stays off until then).
-  const [blank, setBlank] = useState(() => !!startBlank && !readOnly);
-  const [hist, setHist] = useState(() => createHistory(init.profile));
-  const profile = hist.present;
-  const [selection, setSelection] = useState(null);
+function initialEntry(value) {
+  if (!value) return { entry: { profile: null, anchor: null, first: null }, error: null };
+  try { return { entry: { profile: normaliseProfile(value), anchor: { x: 0, y: 0 }, first: null }, error: null }; }
+  catch (e) { return { entry: { profile: null, anchor: null, first: null }, error: `The saved profile couldn’t be read (${e.message}).` }; }
+}
+
+/** iOS/Android keyboards cover a fixed layout: follow the VISUAL viewport so the sheet stays above it. */
+function useVisualViewport() {
+  const [vv, setVv] = useState(null);
+  useEffect(() => {
+    const v = window.visualViewport;
+    if (!v) return undefined;
+    const on = () => setVv({ h: v.height, top: v.offsetTop });
+    on();
+    v.addEventListener("resize", on); v.addEventListener("scroll", on);
+    return () => { v.removeEventListener("resize", on); v.removeEventListener("scroll", on); };
+  }, []);
+  return vv;
+}
+
+export default function ProfileEditor({
+  value, title, readOnly = false, mode = "job", draftScope = null, syncStatus = null, painted = true,
+  onChange, onSave, onClose, onDetails, onLengths, onCancel,
+}) {
+  const close = onClose || onCancel;
+  const [init] = useState(() => initialEntry(value));
+  const [hist, setHist] = useState(() => createHistory(init.entry, 60));
+  const entry = hist.present;
+  const profile = entry.profile;
+  const [sel, setSel] = useState(null);
+  const [drafts, setDrafts] = useState({});          // fieldKey → raw text that isn't a valid value yet
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);       // { text, action? }
+  const [menu, setMenu] = useState(false);
+  const [list, setList] = useState(false);          // accessible dimension list (More)
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [nav, setNav] = useState({ auto: true, view: null }); // auto = follow zoom-to-fit
-  const [sketch, setSketch] = useState(null);                 // { points: [{x,y}] in mm }
-  const [addTurn, setAddTurn] = useState("left");
+  const [view, setView] = useState(null);
+  const [hover, setHover] = useState(null);         // snapped mm point under the pointer (drawing preview)
+  const [loaded, setLoaded] = useState(!draftScope); // don't overwrite a stored draft before reading it
+  const [prefs, setPrefs] = useState(readPrefs);
   const drawRef = useRef(null);
   const handlers = useRef({});
+  const session = useRef(null);                     // the field currently being typed into (coalesces undo)
+  const latest = useRef({});
+  const lastSent = useRef(init.entry.profile);
+  const vv = useVisualViewport();
+  const job = mode === "job";
+  const editable = !readOnly;
 
-  const heading = title || "Flashing profile";
-  const broken = readOnly && !!init.error; // never show a stand-in shape as if it were the saved one
-  const editable = !readOnly && !sketch;
+  // ── derived ────────────────────────────────────────────────────────────────
+  const problems = useMemo(() => (profile ? profileProblems(profile) : []), [profile]);
+  const girth = useMemo(() => (profile ? indicativeGirthMm(profile) : 0), [profile]);
+  const anchor = useMemo(() => entry.anchor || { x: 0, y: 0 }, [entry.anchor]);
+  const v = view || { scale: 1, tx: 0, ty: 0 };
+  const layout = useMemo(() => (profile && size.w > 0 ? layoutProfile(profile, v.scale) : null), [profile, v.scale, size.w]);
+  const grid = useMemo(() => (editable && size.w > 0 && view ? gridLines(view, size) : null), [editable, view, size]);
+  const origin = { x: v.tx + anchor.x * v.scale, y: v.ty - anchor.y * v.scale };
+  const n = profile?.segments.length || 0;
+  const invalidCount = Object.keys(drafts).length;
+  latest.current = { entry, drafts, hist, profile, sel };
 
-  // ── derived geometry (memoised) ────────────────────────────────────────────
-  const problems = useMemo(() => profileProblems(profile), [profile]);
-  const girth = useMemo(() => indicativeGirthMm(profile), [profile]);
-  const fitted = useMemo(() => fitProfileView(profile, size, FIT_INSET), [profile, size]);
-  const view = (nav.auto && !sketch) || !nav.view ? fitted : nav.view;
-  const sketchProfile = useMemo(() => {
-    if (!sketch || !sketchLegs(sketch.points).lengths.length) return null;
-    return sketchToProfile(sketch.points, { coatedFace: profile.coatedFace });
-  }, [sketch, profile.coatedFace]);
-  const shown = broken ? null : sketch ? sketchProfile : profile;
-  const layout = useMemo(() => (shown && size.w > 0 ? layoutProfile(shown, view.scale) : null), [shown, view.scale, size.w]);
-  const grid = useMemo(() => (sketch && size.w > 0 ? gridLines(view, size) : null), [sketch, view, size]);
-  const anchor = sketch?.points.length ? sketch.points[0] : { x: 0, y: 0 };
-  const origin = { x: view.tx + anchor.x * view.scale, y: view.ty - anchor.y * view.scale };
+  const fitAll = useCallback((p = profile, a = anchor) => {
+    if (!p || size.w <= 0) return null;
+    const b = profileBoundsMm(p);
+    return fitView({ minX: b.minX + a.x, maxX: b.maxX + a.x, minY: b.minY + a.y, maxY: b.maxY + a.y }, size, FIT_INSET);
+  }, [profile, anchor, size]);
 
-  const sel = useMemo(() => {
-    if (!editable || !selection) return null;
-    if (selection.kind === "leg") return profile.segments.some((g) => g.id === selection.id) ? selection : null;
-    if (selection.kind === "corner") return selection.index < profile.bends.length ? selection : null;
-    return selection;
-  }, [editable, selection, profile]);
+  // first view once the canvas has a size: fit an existing shape, or an empty 10 mm grid for a new one.
+  // After that the view only changes when the user pans / zooms / asks to fit — never on a keystroke.
+  useEffect(() => {
+    if (view || size.w <= 0) return;
+    setView(profile ? fitAll() : { scale: Math.min(6, Math.max(0.5, Math.min(size.w, size.h) / 300)), tx: size.w * 0.3, ty: size.h * 0.6 });
+  }, [view, size, profile, fitAll]);
 
-  // Start · L1 · B1 · L2 · … · Ln · End — Previous/Next walk the profile in traversal order
-  const sequence = useMemo(() => {
-    const out = [{ kind: "end", which: "start" }];
-    profile.segments.forEach((s, i) => {
-      out.push({ kind: "leg", id: s.id });
-      if (i < profile.bends.length) out.push({ kind: "corner", index: i });
+  // ── restore an unfinished drawing session from this device (F02) ───────────
+  useEffect(() => {
+    if (!draftScope) return undefined;
+    let stop = false;
+    loadEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId).then(({ record }) => {
+      if (stop) return;
+      const d = record?.draft;
+      if (d?.hist?.present) {
+        const serverNow = init.entry.profile;
+        const restore = () => {
+          setHist({ ...createHistory(d.hist.present, 60), past: d.hist.past || [], future: d.hist.future || [] });
+          setDrafts(d.drafts || {});
+          if (d.view) setView(d.view);
+        };
+        if (sameJson(d.hist.present.profile, serverNow)) restore(); // same shape — just bring back the history/drafts
+        else if (sameJson(d.base ?? null, serverNow ?? null) || !serverNow) {
+          restore();
+          setNotice({ text: "Restored your unfinished drawing from this device.", action: { label: "Discard it", fn: discardDraft } });
+        } else {
+          setNotice({ text: "This flashing was changed elsewhere after your unsaved drawing on this device.", action: { label: "Use my drawing", fn: () => { restore(); setNotice(null); } }, dismissLabel: "Keep the saved one" });
+        }
+      }
+      setLoaded(true);
     });
-    out.push({ kind: "end", which: "end" });
-    return out;
-  }, [profile]);
-  const seqAt = sel ? sequence.findIndex((x) => sameSel(x, sel)) : -1;
+    return () => { stop = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  }, []);
+
+  function discardDraft() {
+    if (draftScope) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
+    setHist(createHistory(init.entry, 60)); setDrafts({}); setNotice(null); session.current = null;
+  }
+
+  // every change is written to the device draft at once (not debounced) — includes unfinished points
+  useEffect(() => {
+    if (!draftScope || !loaded || readOnly) return;
+    const empty = !entry.profile && !entry.first && !hist.past.length && !invalidCount;
+    if (empty) { clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); return; }
+    saveEditorDraft({ ...draftScope, draft: { v: 1, base: init.entry.profile, hist: { present: hist.present, past: hist.past.slice(-30), future: hist.future.slice(0, 30) }, drafts, view } });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- view is saved opportunistically with the next edit
+  }, [hist, drafts, loaded]);
+
+  // ── autosave (job copies) ──────────────────────────────────────────────────
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const flush = useCallback(() => {
+    if (!job || !onChangeRef.current || readOnly) return;
+    const p = latest.current.profile;
+    if (!p || sameJson(p, lastSent.current)) return;
+    try { const clean = normaliseProfile(p); lastSent.current = clean; onChangeRef.current(clean); } catch { /* invalid shapes never leave the editor */ }
+  }, [job, readOnly]);
+  useEffect(() => {
+    if (!job || !profile) return undefined;
+    const t = setTimeout(flush, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+  }, [job, profile, flush]);
+  useEffect(() => () => flush(), [flush]); // leaving flushes
 
   // ── commands ───────────────────────────────────────────────────────────────
-  function select(next) {
-    setSelection(next);
-    setError(null);
+  /** One logical edit. `sessionKey` coalesces repeated valid values typed into the same field. */
+  function commit(nextEntry, sessionKey = null) {
+    if (sameJson(nextEntry, latest.current.entry)) return;
+    const coalesce = sessionKey && session.current === sessionKey;
+    setHist((h) => (coalesce ? { ...h, present: nextEntry, future: [] } : pushHistory(h, nextEntry)));
+    session.current = sessionKey;
+    latest.current.entry = nextEntry;
+    latest.current.profile = nextEntry.profile;
   }
-  /** Run one pure command → ONE history entry. Validation errors show inline; no-ops are skipped. */
-  function run(cmd, { refit = false, clearSelection = false } = {}) {
-    let next;
+  function run(fn, { sessionKey = null, quiet = false } = {}) {
+    const cur = latest.current.entry;
+    if (!cur.profile) return false;
     try {
-      next = cmd(profile);
+      const next = fn(cur.profile);
+      commit({ ...cur, profile: next }, sessionKey);
+      if (!quiet) setError(null);
+      return true;
     } catch (e) {
-      setError(e instanceof TakeoffValidationError ? e.message : "That change couldn’t be applied.");
+      if (!quiet) setError(e instanceof TakeoffValidationError ? e.message : "That change couldn’t be applied.");
       return false;
     }
-    setError(null);
-    if (!sameProfile(next, profile)) setHist((h) => pushHistory(h, next));
-    if (refit) setNav({ auto: true, view: null });
-    if (clearSelection) setSelection(null);
-    return true;
   }
-  function doUndo() { setHist((h) => undo(h)); setError(null); }
-  function doRedo() { setHist((h) => redo(h)); setError(null); }
+  function endSession() { session.current = null; }
+  function doUndo() {
+    endSession();
+    setHist((h) => undo(h));
+    setDrafts({}); setError(null);
+  }
+  function doRedo() { endSession(); setHist((h) => redo(h)); setDrafts({}); setError(null); }
+  function select(next) {
+    endSession();
+    flush();
+    setSel(next);
+    setError(null);
+    setMenu(false);
+  }
+  const setDraft = (key, raw) => setDrafts((d) => {
+    if (raw == null) { if (!(key in d)) return d; const x = { ...d }; delete x[key]; return x; }
+    return d[key] === raw ? d : { ...d, [key]: raw };
+  });
+  function savePrefs(patch) { const next = { ...prefs, ...patch }; setPrefs(next); writePrefs(next); }
 
-  function applyLength(segId, draft) {
-    const n = parseNumberInput(draft);
-    if (!Number.isFinite(n)) { setError("Enter the leg length in mm, for example 100."); return; }
-    run((p) => setSegmentLength(p, segId, n));
+  // ── canvas input ───────────────────────────────────────────────────────────
+  function canvasHit(pt) {
+    if (!layout) return null;
+    const q = { x: pt.x - origin.x, y: pt.y - origin.y };
+    // a tap ON a size label always means that size (labels sit near corners/ends on a small screen)
+    const inBox = (bx, pad = 6) => bx && q.x >= bx.x - pad && q.x <= bx.x + bx.w + pad && q.y >= bx.y - pad && q.y <= bx.y + bx.h + pad;
+    for (const l of layout.legs) if (inBox(l.label.box)) return { kind: "leg", id: l.id };
+    for (const c of layout.corners) if (inBox(c.label.box)) return { kind: "corner", index: c.index };
+    for (const e of layout.ends) if (e.glyph && inBox(e.glyph.label.box)) return { kind: "end", which: e.which };
+    return hitTest(layout, q, 26);
   }
-  function applyAngle(index, draft, direction) {
-    const n = typeof draft === "number" ? draft : parseNumberInput(draft);
-    if (!Number.isFinite(n)) { setError("Enter the included angle in degrees, for example 90."); return; }
-    run((p) => setIncludedAngle(p, index, n, direction));
-  }
-  function applyTreatment(which, { type, width, side }) {
-    if (type === "none") { run((p) => setTreatment(p, which, { type: "none" })); return; }
-    const w = parseNumberInput(width);
-    if (!Number.isFinite(w)) { setError(`Enter the ${type === "closed_hem" ? "hem" : "return"} width in mm, for example 10.`); return; }
-    run((p) => setTreatment(p, which, { type, widthMm: w, side }));
-  }
-  const tools = {
-    add: () => run((p) => addSegment(p, { lengthMm: NEW_LEG_MM, turnDeg: addTurn === "left" ? 90 : -90 }), { refit: true }),
-    remove: () => run(removeLastSegment, { refit: true }),
-    rotate: () => run((p) => rotateProfile(p, 90), { refit: true }),
-    mirror: () => run(mirrorProfile, { refit: true }),
-    flip: () => run(flipCoatedFace),
-    reverse: () => run(reverseProfile, { refit: true, clearSelection: true }),
-  };
-
-  // ── sketch mode ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (blank && !sketch && size.w > 0) startSketch();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- open the empty grid once, as soon as it has a size
-  }, [blank, size.w]);
-  function startSketch() {
-    select(null);
-    const s = Math.min(6, Math.max(0.5, Math.min(size.w, size.h) / 300));
-    setNav({ auto: false, view: { scale: s, tx: size.w * 0.3, ty: size.h * 0.6 } });
-    setSketch({ points: [] });
-  }
-  function addSketchPoint(pt) {
-    const mm = snapToGrid(screenToMm(view, pt), SKETCH_GRID_MM);
-    const prev = sketch.points;
-    if (prev.length) {
-      const legs = sketchLegs(prev).lengths.length;
-      if (legs >= MAX_PROFILE_SEGMENTS) { setError(`A profile can have at most ${MAX_PROFILE_SEGMENTS} legs.`); return; }
-      if (sketchLegs([...prev, mm]).lengths.length === legs) {
-        setError("That point doesn’t add a leg — tap further from the last point, and not straight back along it.");
-        return;
-      }
-    }
-    setSketch({ points: [...prev, mm] });
-    setError(null);
-  }
-  function undoSketchPoint() {
-    setSketch((sk) => (sk ? { points: sk.points.slice(0, -1) } : sk));
-    setError(null);
-  }
-  function cancelSketch() {
-    if (blank) { setSketch((sk) => (sk ? { points: [] } : sk)); setError(null); return; } // blank: Clear, stay on the grid
-    setSketch(null);
-    setNav({ auto: true, view: null });
-    setError(null);
-  }
-  function finishSketch() {
-    let next;
-    try {
-      next = sketchToProfile(sketch.points, { coatedFace: profile.coatedFace });
-    } catch (e) {
-      setError(e instanceof TakeoffValidationError ? e.message : "That sketch couldn’t be converted.");
+  function addPoint(pt) {
+    const mm = snapToGrid(screenToMm(v, pt), SKETCH_GRID_MM);
+    const cur = latest.current.entry;
+    if (!cur.profile && !cur.first) { commit({ profile: null, anchor: null, first: mm }); setError(null); return; }
+    if (!cur.profile) {
+      try {
+        const p = sketchToProfile([cur.first, mm], { coatedFace: "left" });
+        commit({ profile: p, anchor: cur.first, first: null }); setError(null);
+      } catch (e) { setError(e instanceof TakeoffValidationError ? e.message : "Tap further from the first point."); }
       return;
     }
-    if (blank) {
-      // first shape of a new flashing: it IS the starting point (undo never returns to a stand-in shape)
-      setHist(createHistory(next));
-      setBlank(false);
-      setSketch(null);
-      setNav({ auto: true, view: null });
-      setError(null);
-      return;
+    const hadEnd = cur.profile.end.type !== "none";
+    if (run((p) => appendLegToward(p, cur.anchor || { x: 0, y: 0 }, mm)) && hadEnd) {
+      setNotice({ text: `The ${cur.profile.end.type === "closed_hem" ? "crush fold" : "return"} moved to the new end of L${cur.profile.segments.length + 1}. Tap that end to change it.` });
     }
-    setHist((h) => pushHistory(h, next));
-    cancelSketch();
   }
-
-  // ── viewport ───────────────────────────────────────────────────────────────
-  function navigate(fn) {
-    setNav((n) => ({ auto: false, view: fn(!n.auto && n.view ? n.view : view) }));
-  }
-  function fit() {
-    if (!sketch) { setNav({ auto: true, view: null }); return; }
-    if (!sketchProfile) return;
-    const b = profileBoundsMm(sketchProfile);
-    setNav({ auto: false, view: fitView({ minX: b.minX + anchor.x, maxX: b.maxX + anchor.x, minY: b.minY + anchor.y, maxY: b.maxY + anchor.y }, size, FIT_INSET) });
-  }
-  const zoomCentre = (f) => navigate((v) => zoomAt(v, f, { x: size.w / 2, y: size.h / 2 }));
-
   function handleTap(pt) {
-    if (sketch) { addSketchPoint(pt); return; }
-    if (!editable || !layout) return;
-    select(hitTest(layout, { x: pt.x - origin.x, y: pt.y - origin.y }));
+    if (readOnly) return;
+    setHover(null);
+    const hit = canvasHit(pt);
+    if (hit) { select(hit); return; }
+    if (sel || menu) { select(null); return; }  // first tap off the shape closes the sheet
+    addPoint(pt);
   }
-  function handleWheel(ev) {
-    const r = drawRef.current.getBoundingClientRect();
-    if (ev.ctrlKey || ev.metaKey) navigate((v) => zoomAt(v, Math.exp(-ev.deltaY * 0.01), { x: ev.clientX - r.left, y: ev.clientY - r.top }));
-    else navigate((v) => panBy(v, -ev.deltaX, -ev.deltaY));
-  }
+  function navigate(fn) { setView((cur) => fn(cur || v)); }
+  const zoomCentre = (f) => navigate((x) => zoomAt(x, f, { x: size.w / 2, y: size.h / 2 }));
+  function fit() { const f = fitAll(); if (f) setView(f); setMenu(false); }
+
+  // keep the selected item clear of the sheet / keyboard (once per selection or resize, never per keystroke)
+  useEffect(() => {
+    if (!sel || !layout || !view) return;
+    let p = null;
+    if (sel.kind === "leg") { const l = layout.legs.find((x) => x.id === sel.id); if (l) p = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 }; }
+    if (sel.kind === "corner") p = layout.corners.find((c) => c.index === sel.index)?.v;
+    if (sel.kind === "end") p = layout.ends.find((e) => e.which === sel.which)?.p;
+    if (!p) return;
+    const sx = origin.x + p.x, sy = origin.y + p.y, m = 40;
+    const dx = sx < m ? m - sx : sx > size.w - m ? size.w - m - sx : 0;
+    const dy = sy < m ? m - sy : sy > size.h - m ? size.h - m - sy : 0;
+    if (dx || dy) setView((cur) => panBy(cur, dx, dy));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately only on selection / canvas size changes
+  }, [selKey(sel), size.h, size.w]);
+
   function handleKey(ev) {
-    if (ev.key === "Escape") {
-      if (sel) { ev.preventDefault(); select(null); }
-      return;
-    }
+    if (ev.key === "Escape") { if (menu) setMenu(false); else if (sel) select(null); return; }
     if (readOnly || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
-    const t = ev.target;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // native text undo
     const k = ev.key.toLowerCase();
-    if (k === "z" && !ev.shiftKey) {
-      ev.preventDefault();
-      if (sketch) undoSketchPoint(); else doUndo();
-    } else if ((k === "z" && ev.shiftKey) || (k === "y" && ev.ctrlKey && !ev.metaKey)) {
-      ev.preventDefault();
-      if (!sketch) doRedo();
-    }
+    if (k === "z" && !ev.shiftKey) { ev.preventDefault(); doUndo(); }
+    else if ((k === "z" && ev.shiftKey) || (k === "y" && ev.ctrlKey && !ev.metaKey)) { ev.preventDefault(); doRedo(); }
   }
   function onDrawingKey(e) {
     const d = e.shiftKey ? 120 : 40;
@@ -248,19 +282,26 @@ export default function ProfileEditor({ value, title, readOnly = false, startBla
     if (e.key === "+" || e.key === "=") zoomCentre(1.25);
     else if (e.key === "-") zoomCentre(0.8);
     else if (e.key === "0") fit();
-    else if (pan) navigate((v) => panBy(v, pan[0], pan[1]));
+    else if (pan) navigate((x) => panBy(x, pan[0], pan[1]));
     else return;
     e.preventDefault();
   }
-
-  // the tracker + listeners attach once and always call the latest handlers
   useLayoutEffect(() => {
     handlers.current = {
       tap: handleTap,
-      pan: (dx, dy) => navigate((v) => panBy(v, dx, dy)),
-      pinch: (f, c, dx, dy) => navigate((v) => panBy(zoomAt(v, f, c), dx, dy)),
-      wheel: handleWheel,
+      pan: (dx, dy) => { setHover(null); navigate((x) => panBy(x, dx, dy)); },
+      pinch: (f, c, dx, dy) => { setHover(null); navigate((x) => panBy(zoomAt(x, f, c), dx, dy)); },
+      wheel: (ev) => {
+        const r = drawRef.current.getBoundingClientRect();
+        if (ev.ctrlKey || ev.metaKey) navigate((x) => zoomAt(x, Math.exp(-ev.deltaY * 0.01), { x: ev.clientX - r.left, y: ev.clientY - r.top }));
+        else navigate((x) => panBy(x, -ev.deltaX, -ev.deltaY));
+      },
       key: handleKey,
+      hover: (pt) => {
+        // live preview of the next point/leg — shown with a readout ABOVE the finger, not under it
+        if (readOnly || sel || menu || !pt || (pt && canvasHit(pt))) { setHover(null); return; }
+        setHover({ screen: pt, mm: snapToGrid(screenToMm(v, pt), SKETCH_GRID_MM) });
+      },
     };
   });
   useEffect(() => {
@@ -273,249 +314,253 @@ export default function ProfileEditor({ value, title, readOnly = false, startBla
       onPinch: (f, c, dx, dy) => handlers.current.pinch(f, c, dx, dy),
     });
     const detach = tracker.attach(el);
+    const local = (ev) => { const r = el.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+    let down = null, touches = 0;
+    const onDown = (ev) => { touches += 1; down = local(ev); handlers.current.hover(touches === 1 ? down : null); };
+    const onMove = (ev) => {
+      const p = local(ev);
+      if (ev.pointerType === "mouse" && !ev.buttons) { handlers.current.hover(p); return; }
+      if (!down || touches !== 1) return;
+      if (Math.hypot(p.x - down.x, p.y - down.y) > 8) { handlers.current.hover(null); down = null; return; } // it's a pan
+      handlers.current.hover(p);
+    };
+    const onUp = () => { touches = Math.max(0, touches - 1); down = null; };
+    const onLeave = () => handlers.current.hover(null);
     const onWheel = (ev) => { ev.preventDefault(); handlers.current.wheel(ev); };
     const onKey = (ev) => handlers.current.key(ev);
+    el.addEventListener("pointerdown", onDown); el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp); el.addEventListener("pointercancel", onUp); el.addEventListener("pointerleave", onLeave);
     el.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("keydown", onKey);
     return () => {
       detach();
+      el.removeEventListener("pointerdown", onDown); el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp); el.removeEventListener("pointercancel", onUp); el.removeEventListener("pointerleave", onLeave);
       el.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKey);
     };
   }, []);
-  // drawing size: measured before first paint, then tracked
   useLayoutEffect(() => {
     const el = drawRef.current;
     if (!el) return undefined;
     const measure = (w, h) => setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
     const r = el.getBoundingClientRect();
     measure(Math.round(r.width), Math.round(r.height));
-    const ro = new ResizeObserver(([entry]) => measure(Math.round(entry.contentRect.width), Math.round(entry.contentRect.height)));
+    const ro = new ResizeObserver(([e]) => measure(Math.round(e.contentRect.width), Math.round(e.contentRect.height)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  // lock page scroll under the focused workspace
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  // ── top bar actions ────────────────────────────────────────────────────────
-  function cancel() {
-    const dirty = (!blank && hist.present !== init.profile) || (sketch?.points.length ?? 0) > 0;
-    if (!readOnly && dirty && !window.confirm("Discard your changes to this profile?")) return;
-    onCancel?.();
+  // ── leave / publish ────────────────────────────────────────────────────────
+  function leave() {
+    endSession();
+    if (!job && editable && hist.past.length && !window.confirm("Leave without publishing these changes to the company standard? (Your drawing stays on this device.)")) return;
+    flush();
+    // a job copy that reached the takeoff and has no unfinished field drafts doesn't need the device draft
+    if (draftScope && job && profile && !invalidCount) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
+    if (draftScope && !profile && !entry.first) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
+    close?.();
   }
-  function save() {
-    if (sketch || blank) return;
-    try {
-      onSave?.(normaliseProfile(profile));
-    } catch (e) {
-      setError(e instanceof TakeoffValidationError ? e.message : "This profile couldn’t be saved.");
-    }
+  function goto(fn) { endSession(); flush(); fn?.(); }
+  function publish() {
+    try { onSave?.(normaliseProfile(profile)); if (draftScope) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); }
+    catch (e) { setError(e instanceof TakeoffValidationError ? e.message : "This profile couldn’t be saved."); }
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
-  const n = profile.segments.length;
-  const s = view.scale;
-  const step = (dir) => { const next = sequence[seqAt + dir]; if (next) select(next); };
-  const header = (titleText, subtitle) => (
-    <SheetHeader
-      title={titleText} subtitle={subtitle} onClose={() => select(null)}
-      onPrev={seqAt > 0 ? () => step(-1) : null} onNext={seqAt >= 0 && seqAt < sequence.length - 1 ? () => step(1) : null}
-    />
-  );
+  const status = !job ? null : invalidCount || (!profile && entry.first) ? "local" : syncStatus || "saved";
+  const preview = hover && !sel ? previewLeg(profile, anchor, entry.first, hover.mm) : null;
+  const s = v.scale;
+  const toScreen = (mm) => ({ x: v.tx + mm.x * s, y: v.ty - mm.y * s });
+  const hint = readOnly ? null : !profile && !entry.first ? "Tap where the flashing starts." : !profile ? "Tap the end of the first leg." : "Tap to draw the next leg · tap a size to change it · tap an end for a crush fold";
+  const faceWord = painted ? "Painted face" : "Reference side";
 
-  let editor = null;
-  if (sel?.kind === "leg") {
+  let sheet = null;
+  if (sel?.kind === "leg" && profile) {
     const i = profile.segments.findIndex((g) => g.id === sel.id);
     const seg = profile.segments[i];
-    editor = (
-      <LegEditor key={`leg:${seg.id}`} lengthMm={seg.lengthMm} error={error} onApply={(d) => applyLength(seg.id, d)}
-        header={header(`Leg L${i + 1}`, "Finished face size of this leg")} />
+    if (seg) {
+      const key = `leg:${seg.id}`;
+      sheet = (
+        <Sheet title={`Leg L${i + 1}`} onDone={() => select(null)} onPrev={i > 0 ? () => select({ kind: "leg", id: profile.segments[i - 1].id }) : null}
+          onNext={i < n - 1 ? () => select({ kind: "leg", id: profile.segments[i + 1].id }) : null}>
+          <LiveNumber key={key} label={`L${i + 1} length`} unit="mm" value={seg.lengthMm} draft={drafts[key]} autoFocus
+            onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
+            onValid={(num) => run((p) => setSegmentLength(p, seg.id, num), { sessionKey: key, quiet: true })}
+            validate={(num) => { try { setSegmentLength(profile, seg.id, num); return null; } catch (e) { return e.message; } }} />
+          <button type="button" onClick={() => { endSession(); run(flipCoatedFace); }} className="mt-2 min-h-[44px] w-full rounded-lg border border-hairline text-sm text-ink">
+            {faceWord}: {profile.coatedFace} side ⇄ swap
+          </button>
+        </Sheet>
+      );
+    }
+  } else if (sel?.kind === "corner" && profile && sel.index < profile.bends.length) {
+    const b = profile.bends[sel.index];
+    const key = `corner:${sel.index}`;
+    const dir = bendDirection(b.turnDeg);
+    sheet = (
+      <Sheet title={`Corner B${sel.index + 1}`} onDone={() => select(null)} onPrev={sel.index > 0 ? () => select({ kind: "corner", index: sel.index - 1 }) : null}
+        onNext={sel.index < profile.bends.length - 1 ? () => select({ kind: "corner", index: sel.index + 1 }) : null}>
+        <LiveNumber key={key} label="Included angle" unit="°" value={includedAngle(b.turnDeg)} draft={drafts[key]} autoFocus
+          onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
+          onValid={(num) => run((p) => setIncludedAngle(p, sel.index, num, dir === "straight" ? "left" : dir), { sessionKey: key, quiet: true })}
+          validate={(num) => { try { setIncludedAngle(profile, sel.index, num, dir === "straight" ? "left" : dir); return null; } catch (e) { return e.message; } }} />
+        <div className="mt-2 grid grid-cols-5 gap-1.5">
+          {[45, 90, 135].map((a) => <Chip key={a} on={Math.abs(includedAngle(b.turnDeg) - a) < 1e-6} onClick={() => { endSession(); run((p) => setIncludedAngle(p, sel.index, a, dir === "straight" ? "left" : dir)); }}>{a}°</Chip>)}
+          <Chip on={dir === "left"} onClick={() => { endSession(); run((p) => setBendDirection(p, sel.index, "left")); }} label="Fold left">↶ L</Chip>
+          <Chip on={dir === "right"} onClick={() => { endSession(); run((p) => setBendDirection(p, sel.index, "right")); }} label="Fold right">R ↷</Chip>
+        </div>
+      </Sheet>
     );
-  } else if (sel?.kind === "corner") {
-    editor = (
-      <CornerEditor key={`corner:${sel.index}`} turnDeg={profile.bends[sel.index].turnDeg} error={error}
-        onApply={(d, dir) => applyAngle(sel.index, d, dir)}
-        onDirection={(dir) => run((p) => setBendDirection(p, sel.index, dir))}
-        header={header(`Corner B${sel.index + 1}`, `Between L${sel.index + 1} and L${sel.index + 2}`)} />
-    );
-  } else if (sel?.kind === "end") {
+  } else if (sel?.kind === "end" && profile) {
     const t = profile[sel.which];
-    editor = (
-      <EndEditor key={`end:${sel.which}`} treatment={t} legCount={n} coatedFace={profile.coatedFace} error={error}
-        onApply={(draft) => applyTreatment(sel.which, draft)}
-        header={header(sel.which === "start" ? "Start treatment" : "End treatment", sel.which === "start" ? "Before L1" : `After L${n}`)} />
-    );
-  }
-
-  let panel;
-  if (broken) {
-    panel = <p className="text-sm text-muted">Nothing to show — ask whoever saved this profile to open and re-save it.</p>;
-  } else if (readOnly) {
-    panel = <DimensionChips profile={profile} />;
-  } else if (sketch) {
-    const legs = sketchProfile ? sketchProfile.segments.length : 0;
-    panel = (
-      <div>
-        <h2 className="text-base font-bold text-ink">{blank ? "Draw the flashing" : "Draw shape"}</h2>
-        <p className="mt-1 text-sm text-muted">
-          Tap points on the grid (10 mm squares) along the flashing&apos;s cross-section. Each tap after the first adds a leg —
-          lengths round to 5 mm and angles snap to 15°. Then tap any leg or corner to type the exact size, and add hems at the ends.
-        </p>
-        <p className="mt-2 text-sm font-semibold text-ink" aria-live="polite">
-          {!sketch.points.length ? "Tap where the profile starts." : !legs ? "Tap the end of the first leg." : `${legs} leg${legs === 1 ? "" : "s"} drawn`}
-        </p>
-        <ErrorText error={error} />
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <Btn onClick={undoSketchPoint} disabled={!sketch.points.length}>Undo point</Btn>
-          <Btn onClick={cancelSketch} disabled={blank && !sketch.points.length}>{blank ? "Clear" : "Cancel sketch"}</Btn>
-          <Btn kind="primary" onClick={finishSketch} disabled={!legs}>{blank ? "Done drawing" : "Done sketching"}</Btn>
+    const key = `end:${sel.which}:w`;
+    const side = (t.type !== "none" && t.side) || prefs.crushSide || (profile.coatedFace === "left" ? "right" : "left");
+    const set = (type) => {
+      endSession();
+      if (type === "none") { run((p) => setTreatment(p, sel.which, { type: "none" })); return; }
+      const w = type === "closed_hem" ? prefs.crushWidth : prefs.returnWidth;
+      run((p) => setTreatment(p, sel.which, { type, widthMm: w, side }));
+      savePrefs({ crushSide: side });
+    };
+    sheet = (
+      <Sheet title={sel.which === "start" ? "Start of L1" : `End of L${n}`} onDone={() => select(null)}
+        onPrev={sel.which === "end" ? () => select({ kind: "end", which: "start" }) : null} onNext={sel.which === "start" ? () => select({ kind: "end", which: "end" }) : null}>
+        <div className="grid grid-cols-3 gap-2" role="group" aria-label="End">
+          <EndChoice on={t.type === "none"} onClick={() => set("none")} label="Plain end" icon="plain" />
+          <EndChoice on={t.type === "closed_hem"} onClick={() => set("closed_hem")} label="Crush fold" icon="crush" />
+          <EndChoice on={t.type === "open_return"} onClick={() => set("open_return")} label="Open return" icon="return" />
         </div>
-        <p className="mt-2 text-[11px] text-muted">
-          Drag to move around, pinch to zoom.{blank ? "" : " Done sketching replaces the current shape — you can undo it."}
-        </p>
-      </div>
-    );
-  } else {
-    panel = (
-      <>
-        {editor}
-        <div className={editor ? "hidden lg:mt-5 lg:block lg:border-t lg:border-hairline lg:pt-4" : ""}>
-          <p className="text-sm text-muted">Tap a leg, corner or end on the drawing to edit it.</p>
-          <DimensionChips profile={profile} onSelect={select} selected={sel} />
-          <h3 className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">Shape</h3>
-          <div className="flex gap-2">
-            <div role="group" aria-label="Turn for the new leg" className="grid shrink-0 grid-cols-2 gap-1">
-              <Toggle pressed={addTurn === "left"} onClick={() => setAddTurn("left")}>Turn left</Toggle>
-              <Toggle pressed={addTurn === "right"} onClick={() => setAddTurn("right")}>Turn right</Toggle>
-            </div>
-            <Btn kind="primary" className="flex-1" onClick={tools.add} disabled={n >= MAX_PROFILE_SEGMENTS}
-              aria-label={`Add a ${NEW_LEG_MM} mm leg at the end, turning ${addTurn} 90°`}>Add leg</Btn>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <Btn onClick={tools.remove} disabled={n <= 1} aria-label={`Remove the last leg (L${n})`}>Remove last leg</Btn>
-            <Btn onClick={tools.rotate} aria-label="Rotate the drawing 90° — orientation only, the part is unchanged">Rotate 90°</Btn>
-            <Btn onClick={tools.mirror} aria-label="Mirror — flip the shape and its coating together">Mirror</Btn>
-            <Btn onClick={tools.flip} aria-label="Flip coated face — keep the shape, coat the other face">Flip coated face</Btn>
-            <Btn onClick={tools.reverse} aria-label="Reverse direction — number the legs from the other end; same part">Reverse direction</Btn>
-            <Btn onClick={startSketch} aria-label="Draw a new shape by tapping points on a grid">Draw shape</Btn>
-          </div>
-          <p className="mt-2 text-[11px] leading-snug text-muted">
-            <span className="font-semibold text-ink">Mirror</span> flips the whole shape and its coating together.{" "}
-            <span className="font-semibold text-ink">Flip coated face</span> keeps the shape and moves the coating to the other face.
-          </p>
-          {!editor && <ErrorText error={error} />}
-        </div>
-      </>
-    );
-  }
-
-  const drawingLabel = broken
-    ? "Profile drawing unavailable"
-    : blank
-    ? "Empty grid for drawing a new flashing. Tap points to draw its cross-section; drag to pan, pinch or Ctrl+scroll to zoom."
-    : `Profile drawing, ${n} leg${n === 1 ? "" : "s"}. Drag to pan, pinch or Ctrl+scroll to zoom${editable ? "; tap a leg, corner or end to edit it" : ""}.`;
-
-  return (
-    <div data-takeoff-focus="" className="fixed inset-0 z-[70] flex flex-col bg-page" role="dialog" aria-modal="true" aria-label={heading}>
-      <header className="flex shrink-0 items-center gap-1 border-b border-hairline bg-white px-2" style={{ paddingTop: "env(safe-area-inset-top)", minHeight: 52 }}>
-        <button type="button" onClick={cancel} className="min-h-[44px] min-w-[44px] rounded-lg px-2 text-sm font-medium text-primary hover:bg-primary/5">
-          {readOnly ? "Close" : "Cancel"}
-        </button>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{heading}</h1>
-        {!readOnly && (
-          <>
-            <IconBtn label="Undo" onClick={doUndo} disabled={!canUndo(hist) || !!sketch}><UndoIcon /></IconBtn>
-            <IconBtn label="Redo" onClick={doRedo} disabled={!canRedo(hist) || !!sketch}><UndoIcon flip /></IconBtn>
-            <button type="button" onClick={save} disabled={!!sketch || blank}
-              aria-label={problems.length ? "Save profile (it has problems that block ordering)" : "Save profile"}
-              className="min-h-[44px] shrink-0 rounded-lg bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-40">
-              {problems.length ? "Save (has problems)" : "Save"}
+        {t.type !== "none" && (
+          <div className="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
+            <LiveNumber key={`${key}:${t.type}`} label={t.type === "closed_hem" ? "Crush width" : "Return width"} unit="mm" value={t.widthMm} draft={drafts[key]}
+              onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
+              onValid={(num) => { if (run((p) => setTreatment(p, sel.which, { ...p[sel.which], widthMm: num }), { sessionKey: key, quiet: true })) savePrefs(t.type === "closed_hem" ? { crushWidth: num } : { returnWidth: num }); }}
+              validate={(num) => { try { setTreatment(profile, sel.which, { ...t, widthMm: num }); return null; } catch (e) { return e.message; } }} />
+            <button type="button" onClick={() => { endSession(); const ns = t.side === "left" ? "right" : "left"; run((p) => setTreatment(p, sel.which, { ...p[sel.which], side: ns })); savePrefs({ crushSide: ns }); }}
+              className="min-h-[44px] rounded-lg border border-hairline px-3 text-sm font-medium text-ink" aria-label={`Flip fold — folds ${t.side} now`}>
+              <FoldIcon side={t.side} /> Flip fold
             </button>
+          </div>
+        )}
+        {t.type !== "none" && <p className="mt-1 text-[11px] text-muted">Folds to the {t.side}. Width counts once in the girth.</p>}
+      </Sheet>
+    );
+  }
+
+  const menuItems = [
+    ["Redo", doRedo, !canRedo(hist)],
+    ["Fit to screen", fit, !profile],
+    ["Zoom in", () => zoomCentre(1.25), false],
+    ["Zoom out", () => zoomCentre(0.8), false],
+    ["Rotate 90°", () => { run((p) => rotateProfile(p, 90)); }, !profile],
+    ["Mirror (shape + paint together)", () => run(mirrorProfile), !profile],
+    [`Swap ${faceWord.toLowerCase()}`, () => run(flipCoatedFace), !profile],
+    ["Reverse direction (number from the other end)", () => { run(reverseProfile); setSel(null); }, !profile],
+    ["Remove last leg", () => run(removeLastSegment), n <= 1],
+    ["Clear drawing", () => { if (window.confirm("Clear the drawing? You can undo this.")) { commit({ profile: null, anchor: null, first: null }); setSel(null); setView(null); } }, !profile && !entry.first],
+    [list ? "Hide dimension list" : "Show dimension list", () => setList((x) => !x), !profile],
+  ];
+
+  const rootStyle = vv ? { top: vv.top, height: vv.h, bottom: "auto" } : undefined;
+  return (
+    <div data-takeoff-focus="" className="fixed inset-0 z-[70] flex flex-col bg-page" style={rootStyle} role="dialog" aria-modal="true" aria-label={title || "Flashing"}>
+      <header className="flex shrink-0 items-center gap-1 border-b border-hairline bg-white px-2" style={{ paddingTop: "env(safe-area-inset-top)", minHeight: 52 }}>
+        <button type="button" onClick={leave} className="min-h-[44px] min-w-[44px] rounded-lg px-2 text-sm font-medium text-primary hover:bg-primary/5">Close</button>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-sm font-semibold text-ink">{title || "Flashing"}</h1>
+          {status && <SaveChip status={status} />}
+        </div>
+        {editable && (
+          <>
+            <IconBtn label="Undo" onClick={doUndo} disabled={!canUndo(hist)}><UndoIcon /></IconBtn>
+            <IconBtn label="More" onClick={() => { endSession(); setMenu((m) => !m); setSel(null); }} pressed={menu}><span aria-hidden="true" className="text-lg leading-none">⋯</span></IconBtn>
           </>
         )}
       </header>
 
-      {(init.error || (problems.length > 0 && !sketch && !blank)) && (
-        <div className="shrink-0 space-y-2 px-3 pt-2">
-          {init.error && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {init.error}{readOnly ? "." : " — starting from a blank starter shape instead."}
+      {(init.error || notice || (problems.length > 0 && !sel)) && (
+        <div className="shrink-0 space-y-1.5 px-3 pt-2">
+          {init.error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{init.error}</div>}
+          {notice && (
+            <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm text-sky-900">
+              <span className="flex-1">{notice.text}</span>
+              {notice.action && <button type="button" className="min-h-[36px] rounded-md px-2 font-semibold underline" onClick={() => { notice.action.fn(); }}>{notice.action.label}</button>}
+              <button type="button" className="min-h-[36px] rounded-md px-2" onClick={() => setNotice(null)}>{notice.dismissLabel || "OK"}</button>
             </div>
           )}
-          {problems.length > 0 && !sketch && !broken && (
-            <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <span className="font-semibold">Check this profile: </span>{problems.join(" ")}
-              {!readOnly && " You can still save it, but it can’t go on an order until it’s fixed."}
-            </div>
-          )}
+          {problems.length > 0 && !sel && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900">{problems.join(" ")}</div>}
         </div>
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="flex min-h-[180px] flex-1 flex-col overflow-hidden bg-white lg:m-3 lg:rounded-card lg:border lg:border-hairline">
-          <div className="relative min-h-0 flex-1">
-            <div
-              ref={drawRef}
-              data-takeoff-viewport=""
-              tabIndex={0}
-              role="application"
-              aria-label={drawingLabel}
-              onKeyDown={onDrawingKey}
-              className="absolute inset-0 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-              style={{ touchAction: "none", cursor: sketch ? "crosshair" : "default" }}
-            >
-              {size.w > 0 && (
-                <svg width={size.w} height={size.h} className="block" aria-hidden="true">
-                  {grid && (
+        <div className="relative min-h-[160px] flex-1 overflow-hidden bg-white lg:m-3 lg:rounded-card lg:border lg:border-hairline">
+          <div ref={drawRef} data-takeoff-viewport="" tabIndex={0} role="application" onKeyDown={onDrawingKey}
+            aria-label={profile ? `Flashing drawing, ${n} leg${n === 1 ? "" : "s"}. Tap a size or an end to edit it; tap empty space to draw the next leg.` : "Empty 10 mm grid. Tap points to draw the flashing."}
+            className="absolute inset-0 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            style={{ touchAction: "none", cursor: editable ? "crosshair" : "default" }}>
+            {size.w > 0 && (
+              <svg width={size.w} height={size.h} className="block" aria-hidden="true">
+                {grid && (
+                  <g>
+                    {grid.v.map((l) => <line key={`v${l.at}`} x1={l.at} x2={l.at} y1={0} y2={size.h} strokeWidth={l.major ? 1.25 : 1} className={l.major ? "stroke-slate-300" : "stroke-slate-200"} />)}
+                    {grid.h.map((l) => <line key={`h${l.at}`} y1={l.at} y2={l.at} x1={0} x2={size.w} strokeWidth={l.major ? 1.25 : 1} className={l.major ? "stroke-slate-300" : "stroke-slate-200"} />)}
+                  </g>
+                )}
+                {layout && <ProfileDrawing layout={layout} origin={origin} sel={sel} painted={painted} />}
+                {entry.first && (() => { const p = toScreen(entry.first); return <circle cx={p.x} cy={p.y} r={6} className="fill-primary" />; })()}
+                {preview && (() => {
+                  const a = toScreen(preview.from), b = toScreen(preview.to);
+                  return (
                     <g>
-                      {grid.v.map((l) => <line key={`v${l.at}`} x1={l.at} x2={l.at} y1={0} y2={size.h} strokeWidth={l.major ? 1.25 : 1} className={l.major ? "stroke-slate-400/80" : "stroke-slate-300"} />)}
-                      {grid.h.map((l) => <line key={`h${l.at}`} y1={l.at} y2={l.at} x1={0} x2={size.w} strokeWidth={l.major ? 1.25 : 1} className={l.major ? "stroke-slate-400/80" : "stroke-slate-300"} />)}
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} strokeWidth={2} strokeDasharray="6 4" className="stroke-primary" />
+                      <circle cx={b.x} cy={b.y} r={5} className="fill-white stroke-primary" strokeWidth={2} />
                     </g>
-                  )}
-                  {layout && <ProfileDrawing layout={layout} origin={origin} sel={sel} sketching={!!sketch} />}
-                  {sketch?.points.map((p, i) => (
-                    <circle key={`${i}:${p.x},${p.y}`} cx={view.tx + p.x * s} cy={view.ty - p.y * s} r={i === 0 ? 5 : 3.5}
-                      className={i === 0 ? "fill-primary" : "fill-slate-400"} />
-                  ))}
-                </svg>
-              )}
-            </div>
-            <div className="absolute right-2 top-2 flex gap-1">
-              <OverlayBtn label="Zoom to fit" onClick={fit}>Fit</OverlayBtn>
-              <OverlayBtn label="Zoom in" onClick={() => zoomCentre(1.25)}>+</OverlayBtn>
-              <OverlayBtn label="Zoom out" onClick={() => zoomCentre(0.8)}>−</OverlayBtn>
-            </div>
+                  );
+                })()}
+                {hover && !preview && (() => { const p = toScreen(hover.mm); return <g><line x1={p.x - 10} x2={p.x + 10} y1={p.y} y2={p.y} className="stroke-primary" /><line y1={p.y - 10} y2={p.y + 10} x1={p.x} x2={p.x} className="stroke-primary" /></g>; })()}
+              </svg>
+            )}
           </div>
-          {!broken && (
-            <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline px-3 py-1.5 text-[11px] text-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <svg width="26" height="10" aria-hidden="true">
-                  <line x1="1" y1="2.5" x2="25" y2="2.5" strokeWidth="3" strokeLinecap="round" className="stroke-primary" />
-                  <line x1="1" y1="7.5" x2="25" y2="7.5" strokeWidth="2" strokeLinecap="round" className="stroke-ink" />
-                </svg>
-                <span>
-                  <span className="font-semibold text-ink">Coated face</span> — {profile.coatedFace} side{(blank ? sketchProfile?.segments.length : (sketchProfile?.segments.length || n)) ? ` travelling L1 → L${sketchProfile?.segments.length || n}` : " (flip it after drawing)"}
-                </span>
-              </span>
-              <span>Dimensions in mm</span>
-              {sketch
-                ? <span>Sketch preview — lengths to 5 mm, angles to 15°</span>
-                : <span>Indicative girth {formatMm(girth)} mm (no bend deduction)</span>}
+          {preview && (
+            <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-ink/85 px-3 py-1 text-sm font-semibold text-white" aria-hidden="true">
+              {formatMm(preview.lengthMm)} mm{preview.includedDeg != null ? ` · ${formatAngle(preview.includedDeg)}°` : ""}
+            </div>
+          )}
+          {menu && (
+            <div className="absolute right-2 top-2 z-10 w-64 overflow-hidden rounded-lg border border-hairline bg-white shadow-lg" role="menu" aria-label="More">
+              {menuItems.map(([label, fn, disabled]) => (
+                <button key={label} type="button" role="menuitem" disabled={disabled} onClick={() => { fn(); if (label !== "Zoom in" && label !== "Zoom out") setMenu(false); }}
+                  className="block min-h-[44px] w-full border-b border-hairline px-3 text-left text-sm text-ink last:border-0 hover:bg-page disabled:text-muted disabled:opacity-50">{label}</button>
+              ))}
             </div>
           )}
         </div>
 
-        <aside
-          aria-label={editor ? "Edit selection" : "Profile tools"}
-          className="z-10 max-h-[50vh] shrink-0 overflow-y-auto overscroll-contain rounded-t-2xl border-t border-hairline bg-white px-4 pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)] lg:max-h-none lg:w-[380px] lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
-          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
-        >
-          {panel}
+        <aside className="z-10 shrink-0 overflow-y-auto overscroll-contain border-t border-hairline bg-white px-3 pt-2 lg:w-[360px] lg:border-l lg:border-t-0"
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))", maxHeight: "55%" }} aria-label={sel ? "Edit selection" : "Flashing"}>
+          {error && <p role="alert" className="mb-1 text-xs text-red-700">{error}</p>}
+          {profile && <p className="mb-1 text-[11px] text-muted">{faceWord}: {profile.coatedFace} side · mm · indicative girth {formatMm(girth)} mm</p>}
+          {sheet || (
+            <>
+              {hint && <p className="text-xs text-muted" aria-live="polite">{hint}</p>}
+              {invalidCount > 0 && <p className="mt-1 text-xs text-amber-800">{invalidCount} size{invalidCount === 1 ? " isn’t" : "s aren’t"} valid yet — kept on this device until fixed.</p>}
+              {(list || readOnly) && profile && <DimensionList profile={profile} onSelect={editable ? select : null} />}
+              {editable && (job ? (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => goto(onDetails)} disabled={!profile || !onDetails} className="min-h-[48px] rounded-lg border border-primary text-sm font-semibold text-primary disabled:opacity-40">Details</button>
+                  <button type="button" onClick={() => goto(onLengths)} disabled={!profile || !onLengths} className="min-h-[48px] rounded-lg bg-primary text-sm font-semibold text-white disabled:opacity-40">Lengths</button>
+                </div>
+              ) : (
+                <button type="button" onClick={publish} disabled={!profile} className="mt-2 min-h-[48px] w-full rounded-lg bg-primary text-sm font-semibold text-white disabled:opacity-40">Save new revision of the standard</button>
+              ))}
+            </>
+          )}
         </aside>
       </div>
     </div>
@@ -523,39 +568,36 @@ export default function ProfileEditor({ value, title, readOnly = false, startBla
 }
 
 // ── drawing ───────────────────────────────────────────────────────────────────
-
-function ProfileDrawing({ layout, origin, sel, sketching }) {
+function ProfileDrawing({ layout, origin, sel, painted }) {
   const isLeg = (l) => sel?.kind === "leg" && sel.id === l.id;
   const isCorner = (c) => sel?.kind === "corner" && sel.index === c.index;
   const isEnd = (e) => sel?.kind === "end" && sel.which === e.which;
   const labels = [
     ...layout.legs.map((l) => ({ key: `l${l.index}`, label: l.label, selected: isLeg(l), tone: "ink" })),
     ...layout.corners.map((c) => ({ key: `c${c.index}`, label: c.label, selected: isCorner(c), tone: "muted" })),
-    ...layout.ends.filter((e) => e.glyph).map((e) => ({ key: `e${e.which}`, label: e.glyph.label, selected: isEnd(e), tone: "muted" })),
+    ...layout.ends.filter((e) => e.glyph).map((e) => ({ key: `e${e.which}`, label: { ...e.glyph.label, text: e.glyph.label.text.replace(/^Hem/, "Crush") }, selected: isEnd(e), tone: "muted" })),
   ];
+  const band = painted ? "stroke-primary" : "stroke-slate-400";
   return (
     <g transform={`translate(${origin.x.toFixed(1)} ${origin.y.toFixed(1)})`}>
-      {layout.legs.filter(isLeg).map((l) => (
-        <line key="sel" x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} strokeWidth={16} strokeLinecap="round" className="stroke-primary/20" />
-      ))}
-      {layout.corners.filter(isCorner).map((c) => c.v).map((p) => (
-        <circle key="selpt" cx={p.x} cy={p.y} r={12} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />
-      ))}
-      {/* a selected end treatment is highlighted along its own shape, never covered by a marker */}
+      {layout.legs.filter(isLeg).map((l) => <line key="sel" x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} strokeWidth={16} strokeLinecap="round" className="stroke-primary/20" />)}
+      {layout.corners.filter(isCorner).map((c) => <circle key="selpt" cx={c.v.x} cy={c.v.y} r={12} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />)}
       {layout.ends.filter(isEnd).map((e) => (e.glyph
         ? <path key="selend" d={e.glyph.path} fill="none" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" className="stroke-primary/20" />
-        : <circle key="selend" cx={e.p.x} cy={e.p.y} r={12} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />))}
-      <polyline points={pts(layout.coated)} fill="none" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" className="stroke-primary" />
-      <polyline points={pts(layout.pts)} fill="none" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round"
-        className={sketching ? "stroke-ink/80" : "stroke-ink"} />
+        : <circle key="selend" cx={e.p.x} cy={e.p.y} r={14} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />))}
+      <polyline points={pts(layout.coated)} fill="none" strokeWidth={painted ? 3 : 1.5} strokeDasharray={painted ? undefined : "4 3"} strokeLinejoin="round" strokeLinecap="round" className={band} />
+      <polyline points={pts(layout.pts)} fill="none" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" className="stroke-ink" />
       {layout.ends.map((e) => e.glyph && (
         <g key={`g${e.which}`}>
-          <polyline points={pts(e.glyph.band)} fill="none" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="stroke-primary" />
+          {painted && <polyline points={pts(e.glyph.band)} fill="none" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="stroke-primary" />}
           <path d={e.glyph.path} fill="none" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" className="stroke-ink" />
         </g>
       ))}
       {layout.corners.map((c) => <circle key={`cv${c.index}`} cx={c.v.x} cy={c.v.y} r={3} strokeWidth={1.25} className="fill-white stroke-ink" />)}
-      {layout.ends.map((e) => !e.glyph && <circle key={`ev${e.which}`} cx={e.p.x} cy={e.p.y} r={3.5} strokeWidth={1.25} className="fill-white stroke-slate-400" />)}
+      {/* big, visible end handles: tap → Plain / Crush fold / Open return */}
+      {layout.ends.map((e) => (e.glyph
+        ? <circle key={`ev${e.which}`} data-end-handle={e.which} cx={e.p.x} cy={e.p.y} r={4} className="fill-primary/40" />
+        : <circle key={`ev${e.which}`} data-end-handle={e.which} cx={e.p.x} cy={e.p.y} r={7} strokeWidth={2} className="fill-white stroke-primary" />))}
       {labels.map(({ key, label }) => label.leader && (
         <g key={`ld${key}`}>
           <line x1={label.leader.from.x} y1={label.leader.from.y} x2={label.leader.to.x} y2={label.leader.to.y} strokeWidth={1} strokeDasharray="3 2" className="stroke-slate-400" />
@@ -564,228 +606,117 @@ function ProfileDrawing({ layout, origin, sel, sketching }) {
       ))}
       {labels.map(({ key, label, selected, tone }) => (
         <g key={key}>
-          <rect x={label.box.x} y={label.box.y} width={label.box.w} height={label.box.h} rx={5} strokeWidth={1}
-            className={selected ? "fill-primary stroke-primary" : "fill-white stroke-hairline"} />
+          <rect x={label.box.x} y={label.box.y} width={label.box.w} height={label.box.h} rx={5} strokeWidth={1} className={selected ? "fill-primary stroke-primary" : "fill-white stroke-hairline"} />
           <text x={label.box.x + label.box.w / 2} y={label.box.y + label.box.h / 2} textAnchor="middle" dominantBaseline="central"
-            className={`text-[12px] ${tone === "ink" ? "font-bold" : "font-semibold"} ${selected ? "fill-white" : tone === "ink" ? "fill-ink" : "fill-slate-600"}`}>
-            {label.text}
-          </text>
+            className={`text-[12px] ${tone === "ink" ? "font-bold" : "font-semibold"} ${selected ? "fill-white" : tone === "ink" ? "fill-ink" : "fill-slate-600"}`}>{label.text}</text>
         </g>
       ))}
     </g>
   );
 }
 
-// ── panel pieces ──────────────────────────────────────────────────────────────
+// ── pieces ────────────────────────────────────────────────────────────────────
 
-function DimensionChips({ profile, onSelect, selected }) {
-  const n = profile.segments.length;
-  const items = [
-    ...profile.segments.map((s, i) => ({ sel: { kind: "leg", id: s.id }, text: `L${i + 1} ${formatMm(s.lengthMm)} mm`, aria: `Leg L${i + 1}, ${formatMm(s.lengthMm)} mm` })),
-    ...profile.bends.map((b, i) => {
-      const dir = bendDirection(b.turnDeg);
-      const text = `B${i + 1} ${formatAngle(includedAngle(b.turnDeg))}° ${dir === "straight" ? "straight" : dir}`;
-      return { sel: { kind: "corner", index: i }, text, aria: `Corner B${i + 1}, ${text.slice(3)}` };
-    }),
-    { sel: { kind: "end", which: "start" }, text: `Start: ${treatmentText(profile.start)}`, aria: `Start treatment: ${treatmentText(profile.start)}` },
-    { sel: { kind: "end", which: "end" }, text: `End: ${treatmentText(profile.end)}`, aria: `End treatment (after L${n}): ${treatmentText(profile.end)}` },
-  ];
-  const chip = "inline-flex min-h-[44px] items-center rounded-lg border px-3 text-sm";
+/**
+ * A number that applies while you type. Valid values call onValid (the editor coalesces them into one undo
+ * step for the field); partial / invalid text stays as a draft with an inline note — never 0 or NaN.
+ * When `value` changes from OUTSIDE (Undo / Redo), the text follows it.
+ */
+function LiveNumber({ label, unit, value, draft, onValid, onDraft, onBlur, validate, autoFocus = false }) {
+  const id = useId();
+  const fmt = (x) => (x == null ? "" : String(Math.round(x * 100) / 100));
+  const [text, setText] = useState(draft ?? fmt(value));
+  const emitted = useRef(value);
+  const [err, setErr] = useState(draft != null ? "Not a valid size yet." : null);
+  useEffect(() => {
+    if (value !== emitted.current) { emitted.current = value; setText(fmt(value)); setErr(null); onDraft(null); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- follow outside changes only
+  }, [value]);
+  function change(raw) {
+    setText(raw);
+    const num = parseNumberInput(raw);
+    const problem = !Number.isFinite(num) ? "Type a number." : num <= 0 ? "Must be more than 0." : validate?.(num);
+    if (problem) { setErr(problem); onDraft(raw); return; }
+    setErr(null); onDraft(null);
+    emitted.current = num;
+    onValid(num);
+  }
   return (
     <div>
-      <h3 className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Dimensions</h3>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((it) => (onSelect ? (
-          <button key={it.text + JSON.stringify(it.sel)} type="button" onClick={() => onSelect(it.sel)} aria-label={`Edit ${it.aria}`}
-            className={`${chip} ${sameSel(it.sel, selected) ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-white text-ink hover:bg-page"}`}>
-            {it.text}
-          </button>
-        ) : (
-          <span key={it.text + JSON.stringify(it.sel)} className={`${chip} border-hairline bg-page text-ink`}>{it.text}</span>
-        )))}
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
+      <div className={`flex items-stretch rounded-lg border bg-white focus-within:ring-2 focus-within:ring-primary ${err ? "border-amber-400" : "border-hairline"}`}>
+        <input id={id} autoFocus={autoFocus} inputMode="decimal" enterKeyHint="done" value={text} onChange={(e) => change(e.target.value)}
+          onBlur={onBlur} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} onFocus={(e) => e.currentTarget.select()}
+          aria-invalid={!!err} aria-describedby={err ? `${id}-e` : undefined}
+          className="min-h-[48px] w-full min-w-0 rounded-l-lg border-0 px-3 text-lg font-semibold text-ink focus:ring-0" />
+        <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span>
       </div>
+      {err && <p id={`${id}-e`} className="mt-1 text-xs text-amber-800">{err} The drawing keeps the last valid size.</p>}
     </div>
   );
 }
 
-function LegEditor({ lengthMm, error, onApply, header }) {
-  const id = useId();
-  const inputRef = useRef(null);
-  const [draft, setDraft] = useState(() => String(lengthMm));
-  useEffect(() => { setDraft(String(lengthMm)); }, [lengthMm]); // undo/redo/apply refresh the field
-  useEffect(() => { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); }, []);
+function Sheet({ title, children, onDone, onPrev, onNext }) {
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onApply(draft); }} noValidate>
-      {header}
-      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">Length (mm)</label>
-      <div className="flex gap-2">
-        <UnitInput ref={inputRef} id={id} unit="mm" value={draft} onChange={setDraft} invalid={!!error} describedBy={error ? `${id}-err` : undefined} />
-        <Btn kind="primary" type="submit" className="px-5">Apply</Btn>
+    <div>
+      <div className="mb-1.5 flex items-center gap-1">
+        <h2 className="flex-1 text-sm font-semibold text-ink">{title}</h2>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onPrev || undefined} disabled={!onPrev} aria-label="Previous" className="min-h-[40px] min-w-[40px] rounded-lg text-lg text-ink disabled:opacity-30">‹</button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onNext || undefined} disabled={!onNext} aria-label="Next" className="min-h-[40px] min-w-[40px] rounded-lg text-lg text-ink disabled:opacity-30">›</button>
+        <button type="button" onClick={onDone} className="min-h-[40px] rounded-lg px-3 text-sm font-semibold text-primary">Done</button>
       </div>
-      <ErrorText id={`${id}-err`} error={error} />
-      <p className="mt-2 text-[11px] text-muted">Other legs and angles stay the same — the rest of the shape moves.</p>
-    </form>
-  );
-}
-
-function CornerEditor({ turnDeg, error, onApply, onDirection, header }) {
-  const id = useId();
-  const inputRef = useRef(null);
-  const included = includedAngle(turnDeg);
-  const current = bendDirection(turnDeg);
-  const [draft, setDraft] = useState(() => formatAngle(included));
-  const [dir, setDir] = useState(current === "right" ? "right" : "left");
-  useEffect(() => { setDraft(formatAngle(included)); }, [included]);
-  useEffect(() => { if (current !== "straight") setDir(current); }, [current]);
-  useEffect(() => { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); }, []);
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onApply(draft, dir); }} noValidate>
-      {header}
-      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">Included angle (°)</label>
-      <div className="flex gap-2">
-        <UnitInput ref={inputRef} id={id} unit="°" value={draft} onChange={setDraft} invalid={!!error} describedBy={error ? `${id}-err` : undefined} />
-        <Btn kind="primary" type="submit" className="px-5">Apply</Btn>
-      </div>
-      <div role="group" aria-label="Quick angles" className="mt-2 grid grid-cols-4 gap-2">
-        {SNAP_ANGLES.map((a) => (
-          <Toggle key={a} pressed={included === a} onClick={() => onApply(a, dir)} aria-label={a === 180 ? "180° — straight" : `${a}°`}>
-            {a === 180 ? "180° flat" : `${a}°`}
-          </Toggle>
-        ))}
-      </div>
-      <p id={`${id}-dir`} className="mb-1 mt-3 text-xs font-medium text-muted">Bend direction (travelling from L1)</p>
-      <div role="group" aria-labelledby={`${id}-dir`} className="grid grid-cols-2 gap-2">
-        <Toggle pressed={dir === "left"} onClick={() => { setDir("left"); onDirection("left"); }}>Left</Toggle>
-        <Toggle pressed={dir === "right"} onClick={() => { setDir("right"); onDirection("right"); }}>Right</Toggle>
-      </div>
-      {current === "straight" && <p className="mt-1 text-[11px] text-muted">Straight now — the direction is used when you change the angle.</p>}
-      <ErrorText id={`${id}-err`} error={error} />
-      <p className="mt-2 text-[11px] leading-snug text-muted">
-        Included angle is measured inside the fold: 90° is a square fold, 180° is straight. It is not the roof pitch. Leg lengths stay the same.
-      </p>
-    </form>
-  );
-}
-
-const TREATMENTS = [["none", "None"], ["open_return", "Open return"], ["closed_hem", "Closed hem"]];
-
-function EndEditor({ treatment, legCount, coatedFace, error, onApply, header }) {
-  const id = useId();
-  const typeRef = useRef(null);
-  const [type, setType] = useState(treatment.type);
-  const [width, setWidth] = useState(() => (treatment.type === "none" ? "10" : String(treatment.widthMm)));
-  const [side, setSide] = useState(treatment.side || "left");
-  useEffect(() => {
-    setType(treatment.type);
-    if (treatment.type !== "none") { setWidth(String(treatment.widthMm)); setSide(treatment.side); }
-  }, [treatment.type, treatment.widthMm, treatment.side]);
-  useEffect(() => { typeRef.current?.focus({ preventScroll: true }); }, []);
-  const noun = type === "closed_hem" ? "hem" : "return";
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onApply({ type, width, side }); }} noValidate>
-      {header}
-      <p id={`${id}-type`} className="mb-1 text-xs font-medium text-muted">Treatment</p>
-      <div role="group" aria-labelledby={`${id}-type`} className="grid grid-cols-3 gap-2">
-        {TREATMENTS.map(([v, l]) => (
-          <Toggle key={v} ref={v === treatment.type ? typeRef : undefined} pressed={type === v} onClick={() => setType(v)}>{l}</Toggle>
-        ))}
-      </div>
-      {type !== "none" && (
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <div>
-            <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{noun === "hem" ? "Hem" : "Return"} width (mm)</label>
-            <UnitInput id={id} unit="mm" value={width} onChange={setWidth} invalid={!!error} describedBy={error ? `${id}-err` : undefined} />
-          </div>
-          <div>
-            <p id={`${id}-side`} className="mb-1 text-xs font-medium text-muted">Folds to the</p>
-            <div role="group" aria-labelledby={`${id}-side`} className="grid grid-cols-2 gap-2">
-              <Toggle pressed={side === "left"} onClick={() => setSide("left")}>Left</Toggle>
-              <Toggle pressed={side === "right"} onClick={() => setSide("right")}>Right</Toggle>
-            </div>
-          </div>
-          <p className="text-[11px] text-muted sm:col-span-2 lg:col-span-1">
-            {side === "left" ? "Left" : "Right"} when travelling L1 → L{legCount} — folds onto the {side === coatedFace ? "coated" : "uncoated"} face.
-          </p>
-        </div>
-      )}
-      <Btn kind="primary" type="submit" className="mt-3 w-full">Apply</Btn>
-      <ErrorText id={`${id}-err`} error={error} />
-      <p className="mt-2 text-[11px] text-muted">A closed hem is drawn folded 180° back alongside the leg (the small gap is only so you can see it — it&apos;s crushed flat). The blue band shows which face the coating ends up on. Counted once in the girth.</p>
-    </form>
-  );
-}
-
-function SheetHeader({ title, subtitle, onPrev, onNext, onClose }) {
-  return (
-    <div className="mb-3 flex items-start gap-1">
-      <div className="min-w-0 flex-1 pt-1.5">
-        <h2 className="text-base font-bold text-ink">{title}</h2>
-        {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
-      </div>
-      <IconBtn label="Previous item" onClick={onPrev || undefined} disabled={!onPrev}>‹</IconBtn>
-      <IconBtn label="Next item" onClick={onNext || undefined} disabled={!onNext}>›</IconBtn>
-      <IconBtn label="Close editor" onClick={onClose}>✕</IconBtn>
-    </div>
-  );
-}
-
-// ── primitives (match src/components/takeoff/ui.jsx styling) ──────────────────
-
-const UnitInput = forwardRef(function UnitInput({ id, unit, value, onChange, invalid, describedBy }, ref) {
-  return (
-    <div className="flex min-w-0 flex-1 items-stretch rounded-lg border border-hairline bg-white focus-within:ring-2 focus-within:ring-primary">
-      <input
-        ref={ref} id={id} type="text" inputMode="decimal" enterKeyHint="done" autoComplete="off" spellCheck={false}
-        value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={invalid || undefined} aria-describedby={describedBy}
-        className="min-h-[44px] w-full min-w-0 rounded-l-lg border-0 px-3 text-base text-ink focus:ring-0"
-      />
-      <span aria-hidden="true" className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span>
-    </div>
-  );
-});
-
-function ErrorText({ id, error }) {
-  return error ? <p id={id} role="alert" className="mt-2 text-sm text-red-700">{error}</p> : null;
-}
-
-function Btn({ kind = "secondary", className = "", type = "button", ...rest }) {
-  const cls = kind === "primary"
-    ? "bg-primary text-white hover:bg-primary/90 disabled:opacity-40"
-    : "border border-hairline bg-white text-ink hover:bg-page disabled:opacity-40";
-  return <button type={type} {...rest} className={`min-h-[44px] rounded-lg px-3 text-sm font-medium leading-tight ${cls} ${className}`} />;
-}
-
-const Toggle = forwardRef(function Toggle({ pressed, className = "", ...rest }, ref) {
-  return (
-    <button ref={ref} type="button" aria-pressed={pressed} {...rest}
-      className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium leading-tight ${pressed ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-white text-ink hover:bg-page"} ${className}`} />
-  );
-});
-
-function IconBtn({ label, children, className = "", ...rest }) {
-  return (
-    <button type="button" aria-label={label} title={label} {...rest}
-      className={`inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-lg text-lg leading-none text-ink hover:bg-page disabled:opacity-30 ${className}`}>
       {children}
+    </div>
+  );
+}
+
+function Chip({ on, onClick, children, label }) {
+  return <button type="button" aria-pressed={on} aria-label={label} onMouseDown={(e) => e.preventDefault()} onClick={onClick} className={`min-h-[44px] rounded-lg border text-sm font-medium ${on ? "border-primary bg-primary text-white" : "border-hairline text-ink"}`}>{children}</button>;
+}
+
+function EndChoice({ on, onClick, label, icon }) {
+  return (
+    <button type="button" aria-pressed={on} onClick={onClick} className={`flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline text-ink"}`}>
+      <svg width="44" height="22" viewBox="0 0 44 22" aria-hidden="true" className="stroke-current" fill="none" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+        {icon === "plain" && <path d="M4 16 H40" />}
+        {icon === "crush" && <path d="M4 16 H36 A3 3 0 0 0 36 10 H22" />}
+        {icon === "return" && <path d="M4 16 H36 V6" />}
+      </svg>
+      {label}
     </button>
   );
 }
 
-function OverlayBtn({ label, children, onClick }) {
+function FoldIcon({ side }) {
+  return <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true" className="mr-1 inline stroke-current" fill="none" strokeWidth="2"><path d={side === "left" ? "M2 10 H14 A2.5 2.5 0 0 0 14 5 H8" : "M2 2 H14 A2.5 2.5 0 0 1 14 7 H8"} /></svg>;
+}
+
+function DimensionList({ profile, onSelect }) {
+  const items = [
+    ...profile.segments.map((s, i) => ({ sel: { kind: "leg", id: s.id }, text: `L${i + 1} ${formatMm(s.lengthMm)} mm` })),
+    ...profile.bends.map((b, i) => ({ sel: { kind: "corner", index: i }, text: `B${i + 1} ${formatAngle(includedAngle(b.turnDeg))}° ${bendDirection(b.turnDeg)}` })),
+    { sel: { kind: "end", which: "start" }, text: `Start: ${treatmentText(profile.start).replace(/closed hem/i, "crush fold")}` },
+    { sel: { kind: "end", which: "end" }, text: `End: ${treatmentText(profile.end).replace(/closed hem/i, "crush fold")}` },
+  ];
   return (
-    <button type="button" aria-label={label} title={label} onClick={onClick}
-      className="min-h-[44px] min-w-[44px] rounded-lg border border-hairline bg-white/95 px-2 text-sm font-semibold text-ink shadow-sm hover:bg-page">
-      {children}
-    </button>
+    <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Dimensions">
+      {items.map((it) => (
+        <li key={it.text + selKey(it.sel)}>
+          {onSelect ? <button type="button" onClick={() => onSelect(it.sel)} className="min-h-[40px] rounded-lg border border-hairline px-2 text-sm text-ink">{it.text}</button>
+            : <span className="inline-flex min-h-[40px] items-center rounded-lg border border-hairline bg-page px-2 text-sm text-ink">{it.text}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function UndoIcon({ flip = false }) {
+function IconBtn({ label, children, pressed, ...rest }) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden="true" style={flip ? { transform: "scaleX(-1)" } : undefined}>
-      <path d="M9 14 4 9l5-5" />
-      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-    </svg>
+    <button type="button" aria-label={label} aria-pressed={pressed} onMouseDown={(e) => e.preventDefault()} {...rest}
+      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-ink hover:bg-page disabled:opacity-30">{children}</button>
   );
+}
+
+function UndoIcon() {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>;
 }

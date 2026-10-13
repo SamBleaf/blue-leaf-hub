@@ -180,54 +180,123 @@ test.describe("journeys", () => {
     await page.screenshot({ path: `${SHOTS}/orders-desktop.png`, fullPage: true });
   });
 
-  test("profile editor: edit L2, mirror vs flip are distinct, save updates the job copy", async ({ page }) => {
+  test("R04 A01/A02 existing profile: live edit (no Apply), one Undo per typing session, invalid text never changes the shape, autosaves", async ({ page }) => {
     await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
     await ready(page);
     await page.getByRole("button", { name: "Profile" }).first().click();
-    await expect(page.getByRole("dialog", { name: /Apron flashing/ })).toBeVisible();
+    const dlg = page.getByRole("dialog", { name: /Apron flashing/ });
+    await expect(dlg).toBeVisible();
     expect(await page.locator(".blueprint-fab:visible").count()).toBe(0); // global FAB hidden in focus mode
-    await page.getByRole("button", { name: /^Edit Leg L2/ }).click();
-    await page.getByLabel("Length (mm)").fill("200");
-    await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.getByText(/Indicative girth 360 mm/)).toBeVisible();
-    await page.getByRole("button", { name: "Undo" }).click();
-    await expect(page.getByText(/Indicative girth 310 mm/)).toBeVisible();
-    await page.getByRole("button", { name: "Redo" }).click();
+    // quiet default screen: Close · Undo · More · Details · Lengths — no duplicate dimension list, no Apply/Save
+    await expect(dlg.getByRole("button", { name: /^(Close|Undo|More|Details|Lengths)$/ })).toHaveCount(5);
+    expect(await dlg.getByRole("button").filter({ visible: true }).count()).toBeLessThanOrEqual(5);
+    await expect(dlg.getByRole("button", { name: /Apply|^Save/ })).toHaveCount(0);
+    const girth = (mm) => dlg.getByText(new RegExp(`indicative girth ${mm} mm`));
+    await expect(girth(310)).toBeVisible();
+    // tap the L2 size label on the drawing → its field, focused, applies while typing
+    await dlg.locator("svg text", { hasText: "L2 150" }).click();
+    const field = dlg.getByLabel("L2 length");
+    await expect(field).toBeFocused();
+    await field.fill("");                       // empty: a draft, never 0
+    await expect(dlg.getByText(/Type a number/)).toBeVisible();
+    await expect(girth(310)).toBeVisible();
+    for (const bad of [".", "0", "-5", "abc"]) {
+      await field.fill(bad);
+      await expect(girth(310)).toBeVisible();
+    }
+    await field.fill("");
+    await field.pressSequentially("200");       // 2 → 20 → 200: all valid, ONE undo step
+    await expect(girth(360)).toBeVisible();
+    await expect(dlg.locator("svg text", { hasText: "L2 200" })).toBeVisible();
+    await dlg.getByRole("button", { name: "Undo" }).click();
+    await expect(girth(310)).toBeVisible();      // straight back to 150, not 20
+    await expect(field).toHaveValue("150");      // field and drawing agree
+    await expect(dlg.getByText("Leg L2")).toBeVisible(); // still in the editor
+    await dlg.getByRole("button", { name: "More" }).click();
+    await dlg.getByRole("menuitem", { name: "Redo" }).click();
+    await expect(girth(360)).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/profile-editor-390x844.png` });
-    await page.getByRole("button", { name: "Save profile" }).click();
-    await expect(page.getByText(/girth 360 mm/).first()).toBeVisible();
+    await expect(dlg.getByRole("status").filter({ hasText: /Saved|Saving|Not synced/ })).toBeVisible();
+    await dlg.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByText(/girth 360 mm/).first()).toBeVisible();   // autosaved to the job copy, no Save pressed
   });
 
-  test("new flashing starts on an EMPTY grid; tap the shape out; Save only after drawing", async ({ page }) => {
+  test("R04 A01/A02 new flashing: empty grid, tap the shape, correct sizes, two-tap crush fold + flip, survives reload", async ({ page }) => {
     await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
     await ready(page);
-    await page.getByRole("button", { name: "Add material" }).click();
-    await page.getByRole("button", { name: "Draw new flashing" }).click();
-    const dlg = page.getByRole("dialog", { name: "Flashing" });
+    await page.getByRole("button", { name: "Add flashing" }).click();
+    await page.getByRole("button", { name: "New flashing" }).click();
+    const dlg = page.getByRole("dialog", { name: /^Flashing/ });
     await expect(dlg).toBeVisible();
-    await expect(dlg.getByText("Tap where the profile starts.")).toBeVisible();
-    await expect(dlg.getByRole("button", { name: "Save profile" })).toBeDisabled();
-    // nothing drawn: no leg labels / dimension chips, only grid lines
+    await expect(dlg.getByText("Tap where the flashing starts.")).toBeVisible();
     expect(await dlg.locator("svg text").count()).toBe(0);
     expect(await dlg.locator("svg line").count()).toBeGreaterThan(10);
     await page.screenshot({ path: `${SHOTS}/new-flashing-empty-grid-390x844.png` });
     const box = await dlg.locator("[data-takeoff-viewport]").boundingBox();
     const at = (fx, fy) => page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
     await at(0.25, 0.8); await at(0.25, 0.3); await at(0.7, 0.3); await at(0.7, 0.45);
-    await expect(dlg.getByText("3 legs drawn")).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/new-flashing-drawn-390x844.png` });
-    await dlg.getByRole("button", { name: "Undo point" }).click();
-    await expect(dlg.getByText("2 legs drawn")).toBeVisible();
+    await expect(dlg.locator("svg text", { hasText: /^L3 / })).toBeVisible();   // drawn — no "Done drawing" step
+    await dlg.getByRole("button", { name: "Undo" }).click();
+    await expect(dlg.locator("svg text", { hasText: /^L3 / })).toHaveCount(0);  // one point = one undo
     await at(0.7, 0.45);
-    await dlg.getByRole("button", { name: "Done drawing" }).click();
-    await expect(dlg.getByRole("button", { name: /^Edit Leg L3/ })).toBeVisible();
-    await expect(dlg.getByRole("button", { name: "Save profile" })).toBeEnabled();
-    await dlg.getByRole("button", { name: /^Edit Leg L1/ }).click();
-    await page.getByLabel("Length (mm)").fill("125");
-    await page.getByRole("button", { name: "Apply" }).click();
-    await expect(dlg.locator("svg text").filter({ hasText: "L1 125" })).toBeVisible();
-    await dlg.getByRole("button", { name: "Save profile" }).click();
-    await expect(page.getByRole("heading", { name: "New material" })).toBeVisible();
+    await expect(dlg.locator("svg text", { hasText: /^L3 / })).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/new-flashing-drawn-390x844.png` });
+    // correct sizes straight on the drawing
+    for (const [leg, mm] of [["L1", "100"], ["L2", "150"], ["L3", "75"]]) {
+      await dlg.locator("svg text", { hasText: new RegExp(`^${leg} `) }).click();
+      await dlg.getByLabel(`${leg} length`).fill(mm);
+      await expect(dlg.locator("svg text", { hasText: `${leg} ${mm}` })).toBeVisible();
+    }
+    await dlg.getByRole("button", { name: "Done" }).click();
+    // crush fold: tap the end handle (where the last point went), then Crush fold — applied at once, no form
+    const endBox = await dlg.locator('[data-end-handle="end"]').boundingBox();
+    await page.mouse.click(endBox.x + endBox.width / 2, endBox.y + endBox.height / 2);   // tap 1: the end
+    await dlg.getByRole("button", { name: "Crush fold" }).click();                       // tap 2: crush fold
+    await expect(dlg.locator("svg text", { hasText: /^Crush 10/ })).toBeVisible();
+    const side = await dlg.getByText(/^Folds to the (left|right)/).textContent();
+    await dlg.getByRole("button", { name: /Flip fold/ }).click();
+    await expect(dlg.getByText(/^Folds to the (left|right)/)).not.toHaveText(side);
+    await dlg.getByLabel("Crush width").fill("12");
+    await expect(dlg.locator("svg text", { hasText: /^Crush 12/ })).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/new-flashing-crush-390x844.png` });
+    await dlg.getByRole("button", { name: "Done" }).click();
+    await expect(dlg.getByRole("button", { name: /Apply|^Save/ })).toHaveCount(0);
+    // autosave reaches the takeoff (server persistence across a reload is proven in the sandbox spec — this
+    // backend is in-memory); close → reopen from the materials list → the same drawing
+    await expect(dlg.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+    const name = (await dlg.getByRole("heading", { level: 1 }).textContent()).trim();
+    await dlg.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByText(name).first()).toBeVisible();          // listed as a job material
+    await page.getByRole("button", { name: "Profile" }).last().click();  // newest material is last
+    const again = page.getByRole("dialog", { name });
+    for (const t of ["L1 100", "L2 150", "L3 75", "Crush 12"]) await expect(again.locator("svg text", { hasText: t })).toBeVisible();
+  });
+
+  test("R04 A02 unfinished drawing + invalid field draft are restored after a reload (this device, this actor)", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await ready(page);
+    await page.getByRole("button", { name: "Add flashing" }).click();
+    await page.getByRole("button", { name: "New flashing" }).click();
+    const dlg = page.getByRole("dialog", { name: /^Flashing/ });
+    const box = await dlg.locator("[data-takeoff-viewport]").boundingBox();
+    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.7);          // ONE point: not a flashing yet
+    await expect(dlg.getByRole("status").filter({ hasText: "On this device" })).toBeVisible();
+    await page.waitForTimeout(300);
+    await page.reload();
+    await ready(page);
+    await expect(page.getByText(/Unfinished drawing on this device/)).toBeVisible();
+    await page.getByRole("button", { name: "Continue drawing" }).click();
+    const back = page.getByRole("dialog", { name: /^(Flashing|New flashing)/ });
+    await expect(back.getByText("Tap the end of the first leg.")).toBeVisible();          // the first point came back
+    await back.locator("[data-takeoff-viewport]").click({ position: { x: box.width * 0.3, y: box.height * 0.3 } });
+    await back.locator("svg text", { hasText: /^L1 / }).click();
+    await back.getByLabel("L1 length").fill(".");                                         // invalid → draft
+    await page.waitForTimeout(300);
+    await page.reload();
+    await ready(page);
+    await page.getByRole("button", { name: "Continue drawing" }).first().click();
+    const d3 = page.getByRole("dialog", { name: /^(Flashing|New flashing)/ });
+    await expect(d3.getByText(/size isn’t valid yet/)).toBeVisible();
   });
 
   test("ordinary worker sees no takeoff access", async ({ page }) => {

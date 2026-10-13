@@ -40,18 +40,18 @@ test("sandbox: scale, draw a flashing, measure, export a REAL supplier PDF", asy
   await page.getByRole("textbox", { name: "Printed check dimension" }).fill("3000"); await page.keyboard.press("Enter");
   await page.getByRole("button", { name: "Save scale" }).click();
 
-  // no material yet → Done → add a drawn flashing
+  // no material yet → Done → Add flashing: tap it out on the empty grid (autosaves), choose the colour, Lengths
   await page.getByRole("button", { name: "Done" }).click();
-  await page.getByRole("button", { name: "Add material" }).click();
-  await page.getByRole("button", { name: "Draw new flashing" }).click();
-  // empty grid: tap the flashing out (4 taps = 3 legs), then Done drawing
-  const dlg = page.getByRole("dialog", { name: "Flashing" });
+  await page.getByRole("button", { name: "Add flashing" }).click();
+  await page.getByRole("button", { name: "New flashing" }).click();
+  const dlg = page.getByRole("dialog", { name: /^Flashing/ });
   const gb = await dlg.locator("[data-takeoff-viewport]").boundingBox();
   for (const [fx, fy] of [[0.3, 0.8], [0.3, 0.35], [0.65, 0.35], [0.65, 0.5]]) await page.mouse.click(gb.x + gb.width * fx, gb.y + gb.height * fy);
-  await dlg.getByRole("button", { name: "Done drawing" }).click();
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await page.getByRole("combobox", { name: "Colour", exact: true }).fill("Monument");
-  await page.getByRole("button", { name: "Save material" }).click();
+  await expect(dlg.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await dlg.getByRole("button", { name: "Details" }).click();
+  await page.getByLabel("Colour", { exact: true }).selectOption("Monument");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Lengths" }).click();
 
   // measure the 4,312 eaves line (the plan re-opens for the Measure screen)
   await page.locator("[data-takeoff-viewport]").waitFor({ timeout: 30_000 });
@@ -64,7 +64,7 @@ test("sandbox: scale, draw a flashing, measure, export a REAL supplier PDF", asy
   // order + export (server renders the PDF with pdfkit)
   await page.getByRole("button", { name: /Review & export order/ }).click();
   await page.getByRole("button", { name: "New order" }).click();
-  await expect(page.getByText(/^Ready: 1 pieces/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/^Ready: 1 piece/)).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Export supplier PDF" }).click();
   await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible({ timeout: 30_000 });
   const exportId = await page.evaluate(async (job) => {

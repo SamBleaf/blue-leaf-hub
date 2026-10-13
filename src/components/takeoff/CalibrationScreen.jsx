@@ -147,7 +147,7 @@ export default function CalibrationScreen({ doc, documentId, pageIndex, displayR
         {msg && <div className="mb-2"><Banner tone="warn">{msg}</Banner></div>}
         {step === "start" && (
           <div className="space-y-2">
-            <p className="text-sm text-muted">Pick a long horizontal dimension and a long vertical dimension printed on this page. Zoom in before tapping each end.</p>
+            <p className="text-sm text-muted">Pick a long horizontal dimension and a long vertical dimension printed on this page. Zoom in before tapping each end — or press and hold for a magnifier, slide to the exact point, and lift.</p>
             <Btn kind="primary" className="w-full" onClick={() => setStep("h")}>Scale the whole page</Btn>
             <Btn className="w-full" onClick={() => setStep("r1")}>Scale a region only (e.g. one floor plan on a sheet)</Btn>
           </div>

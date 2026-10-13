@@ -71,51 +71,69 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
   await shot("calibrate-check-ready", "Independent check on a third printed dimension → Ready");
   await page.getByRole("button", { name: "Save scale" }).click();
 
-  // no material yet → draw a new flashing on the blank grid
+  // ── A01: Add flashing → draw on the empty grid → correct sizes on the drawing → crush fold (2 taps) ──
   await page.getByRole("button", { name: "Done" }).click();
-  await page.getByRole("button", { name: "Add material" }).click();
-  await shot("choose-material", "Choose material — company standards, Draw new flashing, pieces-only");
-  await page.getByRole("button", { name: "Draw new flashing" }).click();
-  const dlg = page.getByRole("dialog", { name: "Flashing" });
-  await expect(dlg.getByText("Tap where the profile starts.")).toBeVisible();
+  await page.getByRole("button", { name: "Add flashing" }).click();
+  await shot("choose-flashing", "Choose flashing — company standards, New flashing, pieces-only");
+  await page.getByRole("button", { name: "New flashing" }).click();
+  const dlg = page.getByRole("dialog", { name: /^Flashing/ });
+  await expect(dlg.getByText("Tap where the flashing starts.")).toBeVisible();
   await page.waitForTimeout(300);
-  await shot("flashing-blank-grid", "New flashing opens on an EMPTY grid");
+  await shot("flashing-blank-grid", "New flashing opens on an EMPTY grid — header: Close · Undo · More only");
   const gb = await dlg.locator("[data-takeoff-viewport]").boundingBox();
   for (const [fx, fy] of [[0.25, 0.75], [0.25, 0.3], [0.65, 0.3], [0.65, 0.42]]) await tapAt(gb.x + gb.width * fx, gb.y + gb.height * fy);
-  await expect(dlg.getByText("3 legs drawn")).toBeVisible();
-  await shot("flashing-tapped-out", "Shape tapped out leg by leg (lengths to 5 mm, angles to 15°)");
-  await dlg.getByRole("button", { name: "Done drawing" }).click();
-  await dlg.getByRole("button", { name: /^Edit End treatment/ }).click();
-  await dlg.getByRole("button", { name: "Closed hem" }).click();
-  await dlg.getByRole("button", { name: "Apply" }).click();
-  await shot("flashing-closed-hem", "Closed hem added — drawn as a 180° fold; blue band = coated face");
-  await dlg.getByRole("button", { name: "Save profile" }).click();
-  await page.getByRole("combobox", { name: "Colour", exact: true }).fill("Monument");
-  await shot("material-rules", "Material + ordering rules (allowance 200, round 100, flag >6000, ceiling 9000)");
-  await page.getByRole("button", { name: "Save material" }).click();
+  await expect(dlg.locator("svg text", { hasText: /^L3 / })).toBeVisible();
+  await shot("flashing-tapped-out", "Shape tapped out (each tap = one leg; no Done-drawing step)");
+  // tap the label's own box (its rect), as a finger would
+  const tapSvgText = async (re) => { const bb = await dlg.locator("svg text", { hasText: re }).first().locator("xpath=../*[local-name()='rect']").boundingBox(); await tapAt(bb.x + bb.width / 2, bb.y + bb.height / 2); };
+  for (const [leg, mm] of [["L1", "100"], ["L2", "150"], ["L3", "75"]]) {
+    await tapSvgText(new RegExp(`^${leg} `));
+    await dlg.getByLabel(`${leg} length`).fill(mm);
+    await expect(dlg.locator("svg text", { hasText: `${leg} ${mm}` })).toBeVisible();
+  }
+  await expect(dlg.getByRole("button", { name: /Apply|^Save/ })).toHaveCount(0);
+  await shot("flashing-sizes", "Sizes typed straight onto the drawing — applied while typing, no Apply / Enter / Save");
+  await dlg.getByRole("button", { name: "Done" }).click();
+  const eb = await dlg.locator('[data-end-handle="end"]').boundingBox();
+  await tapAt(eb.x + eb.width / 2, eb.y + eb.height / 2);                 // tap 1: the end
+  await dlg.getByRole("button", { name: "Crush fold" }).click();          // tap 2: crush fold (10 mm, last-used side)
+  await expect(dlg.locator("svg text", { hasText: /^Crush 10/ })).toBeVisible();
+  await dlg.getByRole("button", { name: /Flip fold/ }).click();
+  await shot("flashing-crush-fold", "Endpoint → Crush fold (2 taps), shown at once; Flip fold is one tap");
+  await dlg.getByRole("button", { name: "Done" }).click();
+  await expect(dlg.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await dlg.getByRole("button", { name: "Details" }).click();
+  // ── Flashing details: dependent dropdowns, auto-applied ──
+  await page.getByLabel("Colour", { exact: true }).selectOption("Monument");
+  await expect(page.getByLabel("Thickness (BMT)")).toHaveValue("0.55");
+  await shot("flashing-details", "Flashing details — Solid/Perforated, finish, BMT (0.55 company default), colour; saves automatically");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Lengths" }).click();
 
-  // measure: connected runs (each corner ends a run), a long run, then a count
+  // ── A09 lengths: two separate 4,321 runs + one 6,980 run (zoomed on each end for accuracy) ──
   await viewer();
-  // (taps land on whole screen pixels, so runs are kept off exact 100 mm boundaries)
-  await tapPdf(at(1000, 2000)); await tapPdf(at(5312, 2000)); await tapPdf(at(5312, 4950));
-  await expect(page.getByText(/Measured 2,9\d\d(\.\d)? \+ allowance 200 → order 3,200 mm/)).toBeVisible();
-  await page.getByRole("button", { name: "End this line" }).click();
-  await tapPdf(at(0, 6000)); await tapPdf(at(6950, 6000));
+  await page.getByRole("checkbox", { name: "Connected" }).uncheck();
+  await zoomOn(at(1000, 2000), 8);
+  for (const [a, b2] of [[at(1000, 2000), at(5321, 2000)], [at(1000, 3000), at(5321, 3000)], [at(0, 6000), at(6980, 6000)]]) {
+    await tapZoomed(a); await tapZoomed(b2);
+  }
   await expect(page.getByText(/Measured 6,9\d\d(\.\d)? \+ allowance 200 → order 7,200 mm/)).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
-  await shot("measure-runs", "Measured runs: connected 4,312 → 4,600 and 2,950 → 3,200 (each corner ends a run); 6,950 → 7,200 (long piece)");
-  await page.getByRole("radio", { name: "Count" }).click();
-  await page.getByRole("textbox", { name: /Finished length/ }).fill("2400"); await page.keyboard.press("Enter");
-  for (const x of [9000, 9500, 10000]) await tapPdf(at(x, 1000));
-  await expect(page.getByText(/Counted 3 × 2,400 mm/)).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
-  await shot("measure-count", "Count: finished length first (no allowance), then tap each occurrence — Saved");
+  await shot("measure-runs", "Measured runs 2 × 4,321 → 4,600 and 6,980 → 7,200 (long piece, kept whole + flagged)");
   await page.getByRole("button", { name: "Done" }).click();
+
+  // two manual finished 3,000s (no allowance)
+  await page.getByRole("button", { name: "Add lengths" }).first().click();
+  await page.getByLabel("Finished length").fill("3000"); await page.getByLabel("Finished length").press("Tab");
+  await page.getByLabel("Qty").fill("2"); await page.getByLabel("Qty").press("Tab");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText(/2 × 3,000 mm/)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
 
   // schedule + explicit split of the 7,200
   await page.getByRole("button", { name: "Open schedule" }).click();
   await page.getByRole("button", { name: /7,200 mm/ }).click();
-  await shot("schedule", "Length schedule — qty × finished length, explanation on expansion, long-piece flag");
+  await shot("schedule", "Length schedule — the 7,200 is one piece with a handling flag and a Split action");
   await page.getByRole("button", { name: "Split", exact: true }).click();
   await page.getByLabel("Piece 1 length").fill("3700"); await page.getByLabel("Piece 1 length").press("Tab");
   await page.getByLabel("Lap at joint 1").fill("200"); await page.getByLabel("Lap at joint 1").press("Tab");
@@ -127,13 +145,54 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("dialog", { name: "Length schedule" }).getByRole("button", { name: "Back" }).click();
 
+  // ── second colour (grouping isolation): same kind of flashing in Surfmist, 1 × 4,600 ──
+  await page.getByRole("button", { name: "Add flashing" }).first().click();
+  await page.getByRole("button", { name: "New flashing" }).click();
+  const d2 = page.getByRole("dialog", { name: /^Flashing/ });
+  const g2 = await d2.locator("[data-takeoff-viewport]").boundingBox();
+  for (const [fx, fy] of [[0.3, 0.7], [0.3, 0.35], [0.6, 0.35]]) await tapAt(g2.x + g2.width * fx, g2.y + g2.height * fy);
+  await expect(d2.locator("svg text", { hasText: /^L2 / })).toBeVisible();
+  await expect(d2.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await d2.getByRole("button", { name: "Details" }).click();
+  await page.getByLabel("Colour", { exact: true }).selectOption("Surfmist");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Add lengths" }).last().click();
+  await page.getByLabel("Finished length").fill("4600"); await page.getByLabel("Finished length").press("Tab");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+
+  // ── close / reload: profile, marks and lengths come back from the server ──
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Flashings" })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click();
+  const back = page.getByRole("dialog", { name: /^Flashing/ });
+  for (const t of ["L1 100", "L2 150", "L3 75", "Crush 10"]) await expect(back.locator("svg text", { hasText: t })).toBeVisible();
+  await shot("reload-restored", "After a reload the drawing comes back from the server exactly");
+  await back.getByRole("button", { name: "Close" }).click();
+  // the schedule reconciles BEFORE ordering: Monument 2 × 4,600 + 2 × 3,700 + 2 × 3,000 = 6 pieces / 22,600 mm
+  const sched = await page.evaluate(async ({ job, mobile }) => {
+    const base = mobile ? "/api/worker/takeoff" : "/api/takeoff";
+    const j = await (await fetch(`${base}/jobs/carpentry/${job}`)).json();
+    const w = await (await fetch(`${base}/workspaces/${j.workspaces[0].id}`)).json();
+    return w.computed.scheduleLines.map((l) => ({ spec: l.specKey, len: l.finishedLengthMm, qty: l.quantity, problems: l.problems }));
+  }, { job: JOB, mobile: isMobile });
+  const mono = sched.filter((l) => /monument/.test(l.spec)), surf = sched.filter((l) => /surfmist/.test(l.spec));
+  expect(mono.map((l) => `${l.qty}×${l.len}`).sort()).toEqual(["2×3000", "2×3700", "2×4600"]);
+  expect(mono.reduce((a, l) => a + l.qty * l.len, 0)).toBe(22600);
+  expect(surf.map((l) => `${l.qty}×${l.len}`)).toEqual(["1×4600"]);
+  writeFileSync(`${dir}/schedule.json`, JSON.stringify(sched, null, 2));
+
   // order → export (real PDF) → (director) record as placed
   await page.getByRole("button", { name: /Review & export order|Orders/ }).click();
   await page.getByRole("button", { name: "New order" }).click();
   await expect(page.getByText(/^Ready: \d+ pieces/)).toBeVisible({ timeout: 20_000 });
   await shot("order-review", "Order review — supplier (Fielders default), delivery, lengths still needed, readiness");
+  await page.getByRole("button", { name: "Export draft PDF" }).click();
+  await expect(page.getByText(/Export 1 \(draft\) is frozen/)).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Export supplier PDF" }).click();
-  await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Export 2 is frozen\. Nothing has been sent\./)).toBeVisible({ timeout: 30_000 });
   await shot("order-exported", "Export frozen — nothing sent, nothing ordered");
   // save the exported PDF as evidence
   const pdf = await page.evaluate(async ({ job, mobile }) => {
@@ -145,9 +204,18 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
     return Array.from(new Uint8Array(await r.arrayBuffer()));
   }, { job: JOB, mobile: isMobile });
   writeFileSync(`${dir}/supplier-order.pdf`, Buffer.from(pdf));
+  // read the REAL PDF back: every piece, length, spec and the crush fold must be on it
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), isEvalSupported: false, verbosity: 0 }).promise;
+  let text = "";
+  for (let i = 1; i <= doc.numPages; i++) text += " " + (await (await doc.getPage(i)).getTextContent()).items.map((x) => x.str).join(" ");
+  for (const t of ["FLASHING ORDER", "COLORBOND · Monument · 0.55 BMT", "COLORBOND · Surfmist · 0.55 BMT", "L1 100 mm", "L2 150 mm", "L3 75 mm", "crush fold (closed hem) 10 mm",
+    "4,600", "3,700", "3,000", "6 pieces · 22.600 LM", "Order total: 7 pieces · 27.200 LM", "Fielders"]) expect(text, `PDF missing "${t}"`).toContain(t);
+  expect(text).not.toContain("DRAFT");
+  writeFileSync(`${dir}/supplier-order.txt`, text);
   if (!isMobile) {
     await page.getByRole("button", { name: "Record order placed…" }).click();
-    await page.getByLabel("Which PDF did you send?").selectOption({ index: 1 });
+    await page.getByLabel("Which PDF did you send?").selectOption({ label: "Export 2" });
     await page.getByRole("textbox", { name: "Supplier reference" }).fill("SO-WALKTHROUGH");
     await page.getByRole("button", { name: "Record order placed", exact: true }).click();
     await expect(page.getByText("Placed externally")).toBeVisible();

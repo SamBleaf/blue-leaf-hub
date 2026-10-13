@@ -3,8 +3,9 @@
 // raw/allowance explanation on expansion and long-piece / ceiling flags. Lines only group when
 // the full spec, profile and finished length match; different lengths are never merged into LM.
 // "Ordered" counts come ONLY from recorded placed orders (exports don't count).
-// A measured run can be split explicitly (SplitSheet) — the split replaces the run's
-// contribution; Remove split restores it.
+// Any long piece — measured run, manual or counted finished length — can be split explicitly (R04 F07).
+// The split replaces the pieces it splits (for N identical pieces, choose how many); the rest stay whole.
+// Remove split restores the originals. A split made against a source that later changes is flagged stale.
 // =============================================================================
 import { useMemo, useState } from "react";
 import { evaluateSplit, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
@@ -65,11 +66,11 @@ export default function ScheduleScreen({ ws, onBack }) {
                       {l.contributionIds.map((cid) => {
                         const c = contribs.get(cid);
                         if (!c) return null;
-                        const canSplit = c.kind === "run" && c.result?.quantity === 1 && ws.capabilities?.edit;
+                        const canSplit = !!c.result && ws.capabilities?.edit;
                         return (
                           <div key={cid} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5">
-                            <span className="flex-1 text-ink">{c.split ? `Split of a ${fmtMm(c.result.finishedLengthMm)} mm run: ${c.split.children.map((x) => fmtMm(x.finishedLengthMm)).join(" + ")} (laps ${c.split.laps.join(", ")} mm)` : c.explanation}</span>
-                            {canSplit && <Btn kind="ghost" onClick={() => setSplitFor(cid)}>{c.split ? "Edit split" : "Split"}</Btn>}
+                            <span className="flex-1 text-ink">{c.split ? `${c.split.originals > 1 ? `${c.split.originals} of ` : ""}${c.result.quantity > 1 ? `${c.result.quantity} × ` : ""}${fmtMm(c.result.finishedLengthMm)} mm split: ${c.split.children.map((x) => fmtMm(x.finishedLengthMm)).join(" + ")} (laps ${c.split.laps.join(", ")} mm)${c.result.quantity - (c.split.originals || 1) > 0 ? ` · ${c.result.quantity - (c.split.originals || 1)} kept whole` : ""}${c.split.stale ? " — source changed, review" : ""}` : c.explanation}</span>
+                            {canSplit && <Btn kind="ghost" onClick={() => setSplitFor(cid)}>{c.split ? (c.split.stale ? "Review split" : "Edit split") : "Split"}</Btn>}
                             {c.split && ws.capabilities?.edit && (
                               <Btn kind="ghost" onClick={() => { const raw = view.contributions.find((x) => x.id === cid); ws.edit(partial({ contributions: [{ ...raw, split: null }] })); }}>Remove split</Btn>
                             )}
@@ -91,9 +92,9 @@ export default function ScheduleScreen({ ws, onBack }) {
         const mat = mats.get(raw?.jobMaterialId);
         if (!c || !raw) return null;
         return (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 lg:items-center" role="dialog" aria-modal="true" aria-label="Split run">
-            <div className="w-full max-w-lg"><Sheet title="Split this run" onClose={() => setSplitFor(null)}>
-              <SplitForm required={c.result.finishedLengthMm} rules={mat?.rules} initial={raw.split}
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 lg:items-center" role="dialog" aria-modal="true" aria-label="Split piece">
+            <div className="w-full max-w-lg"><Sheet title={c.kind === "run" ? "Split this run" : "Split these pieces"} onClose={() => setSplitFor(null)}>
+              <SplitForm required={c.result.finishedLengthMm} rules={mat?.rules} initial={raw.split} quantity={c.result.quantity} measured={c.kind === "run"}
                 onApply={(sp) => { ws.edit(partial({ contributions: [{ ...raw, split: { ...sp, sourceFinishedMm: c.result.finishedLengthMm, version: (raw.split?.version || 0) + 1 } }] })); setSplitFor(null); }}
                 onCancel={() => setSplitFor(null)} />
             </Sheet></div>
@@ -105,7 +106,8 @@ export default function ScheduleScreen({ ws, onBack }) {
 }
 
 /** Explicit split: child lengths + a lap per joint; coverage must reach the run's finished length. */
-export function SplitForm({ required, rules, initial, onApply, onCancel }) {
+export function SplitForm({ required, rules, initial, onApply, onCancel, quantity = 1, measured = true }) {
+  const [originals, setOriginals] = useState(Math.min(initial?.originals || 1, quantity));
   const [pieces, setPieces] = useState(initial?.pieces?.length ? initial.pieces : [null, null]);
   const [laps, setLaps] = useState(initial?.laps?.length ? initial.laps : [null]);
   const ready = pieces.every((p) => p > 0) && laps.every((l) => l != null && l >= 0);
@@ -115,7 +117,13 @@ export function SplitForm({ required, rules, initial, onApply, onCancel }) {
   const setL = (i) => (n) => setLaps((a) => a.map((x, j) => (j === i ? n : x)));
   return (
     <div className="space-y-2 text-sm">
-      <p className="text-muted">This run needs <b className="text-ink">{fmtMm(required)} mm</b> of coverage (its allowance is already included — pieces don&apos;t get another one). Enter each piece and the lap at each joint.</p>
+      <p className="text-muted">{measured
+        ? <>This run needs <b className="text-ink">{fmtMm(required)} mm</b> of coverage (its allowance is already included — pieces don&apos;t get another one).</>
+        : <>Each piece is a finished <b className="text-ink">{fmtMm(required)} mm</b> length — the split pieces must cover it (no allowance is added).</>} Enter each piece and the lap at each joint.</p>
+      {quantity > 1 && (
+        <NumberField label={`How many of the ${quantity} pieces to split`} unit="pcs" integer min={1} max={quantity} value={originals} onCommit={(n) => setOriginals(n)}
+          help={`${quantity - originals} stay whole at ${fmtMm(required)} mm.`} />
+      )}
       {pieces.map((p, i) => (
         <div key={i} className="space-y-2">
           <NumberField label={`Piece ${i + 1} length`} value={p} onCommit={setP(i)} />
@@ -135,7 +143,7 @@ export function SplitForm({ required, rules, initial, onApply, onCancel }) {
       )}
       <div className="flex gap-2">
         <Btn onClick={onCancel}>Cancel</Btn>
-        <Btn kind="primary" className="flex-1" disabled={!ev?.valid} onClick={() => onApply({ pieces: ev.children.map((c) => c.finishedLengthMm), laps: ev.laps })}>Apply split</Btn>
+        <Btn kind="primary" className="flex-1" disabled={!ev?.valid} onClick={() => onApply({ pieces: ev.children.map((c) => c.finishedLengthMm), laps: ev.laps, originals })}>Apply split</Btn>
       </div>
     </div>
   );
