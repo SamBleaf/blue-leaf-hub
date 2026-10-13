@@ -1,0 +1,704 @@
+{
+  "workspace": {
+    "id": "bcbdb915-aebd-4f35-8284-add2bbd9a8c7",
+    "name": "Example — flashings (seeded)",
+    "revision": 5,
+    "state": "active",
+    "reviewReason": null,
+    "primaryDocumentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+    "primaryPageIndex": 0,
+    "owner": {
+      "carpentryJobId": "5a4db0c5-0000-4000-8000-00000000a001"
+    },
+    "createdAt": "2026-10-14 00:02:05.027185+10:30",
+    "updatedAt": "2026-10-14 00:02:05.0729+10:30"
+  },
+  "documents": [
+    {
+      "id": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "title": "synthetic-plan-set.pdf",
+      "documentType": "architectural",
+      "status": "current",
+      "revisionLabel": null,
+      "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
+      "byteSize": "2146710",
+      "uploadedAt": "2026-10-14 00:01:51.168506+10:30",
+      "version": 1,
+      "supersedesDocumentId": null,
+      "archivedAt": null
+    }
+  ],
+  "calibrations": [
+    {
+      "id": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "pageMeta": {
+        "rotate": 0,
+        "viewBox": [
+          0,
+          0,
+          842,
+          595
+        ],
+        "userUnit": 1
+      },
+      "region": null,
+      "regionLabel": null,
+      "calibrationRevision": 1,
+      "supersedesCalibrationId": null,
+      "basisRotation": 0,
+      "mode": "uniform",
+      "sx": 35.27777777777777,
+      "sy": 35.27777777777777,
+      "measuredSx": 35.27777777777778,
+      "measuredSy": 35.27777777777777,
+      "discrepancy": 2.0141368887687884e-16,
+      "tolerance": 0.005,
+      "horizontal": {
+        "p1": {
+          "x": 120,
+          "y": 110
+        },
+        "p2": {
+          "x": 460.15748031496065,
+          "y": 110
+        },
+        "knownMm": 12000
+      },
+      "vertical": {
+        "p1": {
+          "x": 80,
+          "y": 150
+        },
+        "p2": {
+          "x": 80,
+          "y": 376.77165354330714
+        },
+        "knownMm": 8000
+      },
+      "verification": {
+        "p1": {
+          "x": 120,
+          "y": 406.77165354330714
+        },
+        "p2": {
+          "x": 205.03937007874015,
+          "y": 406.77165354330714
+        },
+        "error": 3.0316490059097607e-16,
+        "passed": true,
+        "expectedMm": 3000,
+        "observedMm": 2999.999999999999
+      },
+      "status": "ready",
+      "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
+      "createdAt": "2026-10-14 00:02:05.035271+10:30"
+    },
+    {
+      "id": "d3d9416f-68bf-422b-9cab-2f20e8c23107",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 1,
+      "pageMeta": {
+        "rotate": 90,
+        "viewBox": [
+          30,
+          -40,
+          872,
+          555
+        ],
+        "userUnit": 1
+      },
+      "region": null,
+      "regionLabel": null,
+      "calibrationRevision": 1,
+      "supersedesCalibrationId": null,
+      "basisRotation": 90,
+      "mode": "uniform",
+      "sx": 35.27777777777777,
+      "sy": 35.27777777777777,
+      "measuredSx": 35.27777777777777,
+      "measuredSy": 35.27777777777778,
+      "discrepancy": 2.0141368887687884e-16,
+      "tolerance": 0.005,
+      "horizontal": {
+        "p1": {
+          "x": 110,
+          "y": 110
+        },
+        "p2": {
+          "x": 110,
+          "y": 336.77165354330714
+        },
+        "knownMm": 8000
+      },
+      "vertical": {
+        "p1": {
+          "x": 150,
+          "y": 70
+        },
+        "p2": {
+          "x": 490.15748031496065,
+          "y": 70
+        },
+        "knownMm": 12000
+      },
+      "verification": {
+        "p1": {
+          "x": 150,
+          "y": 366.77165354330714
+        },
+        "p2": {
+          "x": 235.03937007874015,
+          "y": 366.77165354330714
+        },
+        "error": 3.0316490059097607e-16,
+        "passed": true,
+        "expectedMm": 3000,
+        "observedMm": 2999.999999999999
+      },
+      "status": "ready",
+      "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
+      "createdAt": "2026-10-14 00:02:05.035271+10:30"
+    }
+  ],
+  "measurements": [
+    {
+      "id": "344d80dd-fc46-42f9-84eb-6dfca4c7a57e",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 148.3464566929134,
+          "y": 206.69291338582678
+        },
+        {
+          "x": 270.57637795275593,
+          "y": 206.69291338582678
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 4312,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "75054ec6-3b0a-4eed-a874-5b921c915310",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 270.57637795275593,
+          "y": 206.69291338582678
+        },
+        {
+          "x": 270.57637795275593,
+          "y": 291.73228346456693
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 2999.999999999999,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "96047022-8c8f-4d0e-9671-7f3585548650",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 120,
+          "y": 320.0787401574803
+        },
+        {
+          "x": 318.4251968503937,
+          "y": 320.0787401574803
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 6999.999999999999,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "8c795628-6eb6-4869-86e8-9862315a3e6a",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 134.17322834645668,
+          "y": 362.5984251968504
+        },
+        {
+          "x": 383.65039370078745,
+          "y": 362.5984251968504
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 8801,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "43500c2a-2a1a-4907-b54b-671a32ec8051",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 431.8110236220473,
+          "y": 150
+        },
+        {
+          "x": 431.8110236220473,
+          "y": 317.24409448818903
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 5900.000000000001,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "388cc880-8b90-4ffd-b9dd-2d19f4730f2e",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 1,
+      "calibrationId": "d3d9416f-68bf-422b-9cab-2f20e8c23107",
+      "points": [
+        {
+          "x": 178.3464566929134,
+          "y": 166.69291338582678
+        },
+        {
+          "x": 300.57637795275593,
+          "y": 166.69291338582678
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 4312,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "7ddcc43b-70db-445b-9010-3e7539cd5207",
+      "kind": "run",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "points": [
+        {
+          "x": 176.69291338582678,
+          "y": 235.03937007874015
+        },
+        {
+          "x": 295.74803149606305,
+          "y": 235.03937007874015
+        }
+      ],
+      "label": null,
+      "rawLengthMm": 4200.000000000001,
+      "finishedLengthMm": null,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "0f224d33-04a9-4d16-b90a-2dd757e11bf0",
+      "kind": "count",
+      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "pageIndex": 0,
+      "calibrationId": null,
+      "points": [
+        {
+          "x": 375.1181102362205,
+          "y": 178.3464566929134
+        },
+        {
+          "x": 389.2913385826772,
+          "y": 178.3464566929134
+        },
+        {
+          "x": 403.46456692913387,
+          "y": 178.3464566929134
+        },
+        {
+          "x": 417.6377952755906,
+          "y": 178.3464566929134
+        }
+      ],
+      "label": null,
+      "rawLengthMm": null,
+      "finishedLengthMm": 2400,
+      "quantity": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "2e7466c4-2174-464d-8704-12fded31a612",
+      "kind": "manual",
+      "documentId": null,
+      "pageIndex": null,
+      "calibrationId": null,
+      "points": null,
+      "label": null,
+      "rawLengthMm": null,
+      "finishedLengthMm": 300,
+      "quantity": 6,
+      "revision": 1,
+      "archived": false
+    }
+  ],
+  "materials": [
+    {
+      "id": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "name": "Apron flashing",
+      "methodKey": "flashing_runs",
+      "methodVersion": 1,
+      "spec": {
+        "bmt": 0.55,
+        "notes": null,
+        "colour": "Monument",
+        "finish": "COLORBOND",
+        "product": "Flashing",
+        "colourCode": null,
+        "productCode": null,
+        "supplierName": null
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": {
+        "end": {
+          "side": "right",
+          "type": "closed_hem",
+          "widthMm": 10
+        },
+        "bends": [
+          {
+            "turnDeg": 90
+          },
+          {
+            "turnDeg": -90
+          }
+        ],
+        "start": {
+          "side": "left",
+          "type": "none",
+          "widthMm": 0
+        },
+        "units": "mm",
+        "segments": [
+          {
+            "id": "a1",
+            "lengthMm": 100
+          },
+          {
+            "id": "a2",
+            "lengthMm": 150
+          },
+          {
+            "id": "a3",
+            "lengthMm": 50
+          }
+        ],
+        "coatedFace": "left",
+        "schemaVersion": 1,
+        "initialDirectionDeg": 0
+      },
+      "fromPresetId": null,
+      "fromPresetRevision": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "73d2a890-6445-403c-9821-a76538a79935",
+      "name": "Barge flashing",
+      "methodKey": "flashing_runs",
+      "methodVersion": 1,
+      "spec": {
+        "bmt": 0.55,
+        "notes": null,
+        "colour": "Surfmist",
+        "finish": "COLORBOND",
+        "product": "Flashing",
+        "colourCode": null,
+        "productCode": null,
+        "supplierName": null
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": {
+        "end": {
+          "side": "right",
+          "type": "closed_hem",
+          "widthMm": 12.5
+        },
+        "bends": [
+          {
+            "turnDeg": 90
+          },
+          {
+            "turnDeg": 45
+          },
+          {
+            "turnDeg": -90
+          }
+        ],
+        "start": {
+          "side": "left",
+          "type": "open_return",
+          "widthMm": 15
+        },
+        "units": "mm",
+        "segments": [
+          {
+            "id": "b1",
+            "lengthMm": 80
+          },
+          {
+            "id": "b2",
+            "lengthMm": 160
+          },
+          {
+            "id": "b3",
+            "lengthMm": 120
+          },
+          {
+            "id": "b4",
+            "lengthMm": 25
+          }
+        ],
+        "coatedFace": "right",
+        "schemaVersion": 1,
+        "initialDirectionDeg": 0
+      },
+      "fromPresetId": null,
+      "fromPresetRevision": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "3ab198f5-e923-4416-b093-3e14c0dc6545",
+      "name": "Std valley gutter (example)",
+      "methodKey": "flashing_runs",
+      "methodVersion": 1,
+      "spec": {
+        "bmt": 0.55,
+        "notes": null,
+        "colour": "Basalt",
+        "finish": "COLORBOND",
+        "product": "Flashing",
+        "colourCode": null,
+        "productCode": null,
+        "supplierName": null
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": {
+        "end": {
+          "side": "left",
+          "type": "none",
+          "widthMm": 0
+        },
+        "bends": [
+          {
+            "turnDeg": -60
+          },
+          {
+            "turnDeg": -60
+          }
+        ],
+        "start": {
+          "side": "left",
+          "type": "none",
+          "widthMm": 0
+        },
+        "units": "mm",
+        "segments": [
+          {
+            "id": "smv6pzwhe0",
+            "lengthMm": 60
+          },
+          {
+            "id": "smv6pzwhe1",
+            "lengthMm": 200
+          },
+          {
+            "id": "smv6pzwhe2",
+            "lengthMm": 60
+          }
+        ],
+        "coatedFace": "left",
+        "schemaVersion": 1,
+        "initialDirectionDeg": 0
+      },
+      "fromPresetId": "6aa3c32b-4a5f-418e-8a4f-7fe8ae4d99db",
+      "fromPresetRevision": 1,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+      "name": "Stop end (pieces)",
+      "methodKey": "finished_piece_count",
+      "methodVersion": 1,
+      "spec": {
+        "bmt": 0.55,
+        "notes": null,
+        "colour": "Monument",
+        "finish": "COLORBOND",
+        "product": "Flashing",
+        "colourCode": null,
+        "productCode": "SE-EX",
+        "supplierName": null
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": null,
+      "fromPresetId": null,
+      "fromPresetRevision": null,
+      "revision": 1,
+      "archived": false
+    }
+  ],
+  "contributions": [
+    {
+      "id": "e4846f2a-4b51-4b02-887b-fa012c4c2b6c",
+      "measurementId": "344d80dd-fc46-42f9-84eb-6dfca4c7a57e",
+      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "32a8e9c8-1ea8-4f34-b1ba-ea98e8ebe2b4",
+      "measurementId": "75054ec6-3b0a-4eed-a874-5b921c915310",
+      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "0f139fee-190e-4134-9ca5-ebe5237c5ab0",
+      "measurementId": "43500c2a-2a1a-4907-b54b-671a32ec8051",
+      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "90341222-9ac2-41c1-aeaf-b194d7383b78",
+      "measurementId": "388cc880-8b90-4ffd-b9dd-2d19f4730f2e",
+      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "cbbb0e6a-0a0d-4183-9fe3-d5568116e0ed",
+      "measurementId": "96047022-8c8f-4d0e-9671-7f3585548650",
+      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "role": "primary",
+      "split": {
+        "laps": [
+          200
+        ],
+        "pieces": [
+          3700,
+          3700
+        ],
+        "version": 1,
+        "sourceFinishedMm": 7200
+      },
+      "splitVersion": 1,
+      "archived": false
+    },
+    {
+      "id": "49f2d308-c413-456e-85f2-56b1404a59de",
+      "measurementId": "8c795628-6eb6-4869-86e8-9862315a3e6a",
+      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "role": "primary",
+      "split": {
+        "laps": [
+          100
+        ],
+        "pieces": [
+          4600,
+          4600
+        ],
+        "version": 1,
+        "sourceFinishedMm": 9100
+      },
+      "splitVersion": 1,
+      "archived": false
+    },
+    {
+      "id": "f4405afc-8942-456b-abe4-a1ed182f0c03",
+      "measurementId": "0f224d33-04a9-4d16-b90a-2dd757e11bf0",
+      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "292e4716-cceb-49e9-9db6-033d576dc74f",
+      "measurementId": "7ddcc43b-70db-445b-9010-3e7539cd5207",
+      "jobMaterialId": "3ab198f5-e923-4416-b093-3e14c0dc6545",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "f8c13fe0-778f-4295-9a8f-6db654d88cea",
+      "measurementId": "2e7466c4-2174-464d-8704-12fded31a612",
+      "jobMaterialId": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    }
+  ]
+}
