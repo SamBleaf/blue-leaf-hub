@@ -6,7 +6,7 @@
 //   node scripts/tests/takeoff-api.test.mjs
 //
 // Covers the R03 acceptance table: A01–A06, A08–A17, A21–A27 (A07 + SQL atomicity in
-// takeoff-db.test.mjs; A18–A20 recovery in takeoff-recovery.test.mjs; A28 in takeoff-pdf.test.mjs).
+// takeoff-db.test.mjs; A18–A20 recovery in e2e/ui-review/takeoff.spec.js; A28 in takeoff-pdf.test.mjs).
 // =============================================================================
 import assert from "node:assert/strict";
 import { register } from "node:module";

@@ -1,7 +1,8 @@
 # Takeoff R03 — consolidated handover
 
 Branch **`takeoff-r03`** (from `portal-v2` @ `022202a`), main checkout `~/Desktop/blue-leaf-hub.nosync`.
-**Nothing is deployed, committed, merged or applied to production.** The feature is dark behind `TAKEOFF_ENABLED`.
+**Committed locally on `takeoff-r03` only — nothing pushed, merged, deployed or applied to production.** The feature is dark behind `TAKEOFF_ENABLED`.
+Independent-review package: `~/Takeoff-Review/` (acceptance matrix, evidence, logs, run instructions).
 Contract: `docs/takeoff/R03/`. Decision record: `docs/takeoff/ADR-001-hub-takeoff.md`. Resume log: `docs/takeoff/BUILD_PROGRESS.md`.
 
 ---
@@ -21,7 +22,7 @@ One feature, one UI (`src/components/takeoff/`), two API adapters (`src/lib/take
 plan entry + primary page; in-app PDF viewer (pdf.js, bounded raster + vector overlay, real touch gestures);
 two-axis calibration with agreement rule, explicit "stretched" mode, independent check, named regions; measured runs
 (connected, corner ends a run) and counts (length first); manual finished lengths; flashing profile editor
-(legs/angles/hems/coated face, mirror vs flip vs reverse, sketch, ≥30 undo); company standards → independent job copies;
+(a new flashing opens on an **empty grid** and is tapped out point by point; legs/angles/hems/coated face, mirror vs flip vs reverse, ≥30 undo; closed hems drawn as a visible 180° fold); company standards → independent job copies;
 editable ordering rules with before/after preview; length schedule; explicit split with laps + coverage check;
 autosave with revision CAS, conflict handling and device recovery; supplier/delivery review; frozen draft and
 order-ready supplier PDFs; externally-placed order record + cancellation; required / ordered / remaining.
@@ -61,21 +62,23 @@ Before 206 is applied the existing plan features keep working (proven: `takeoff-
 
 ## 4. Test matrix
 
-Commands: `npm run test:takeoff` (8 suites; DB suites use an isolated local/CI Postgres, never Supabase) ·
+Commands: `npm run test:takeoff` (8 suites, `TAKEOFF_TEST_VERBOSE=1` lists every test; DB suites use an isolated local/CI Postgres, never Supabase) ·
 `npm run test:takeoff:ui` (Playwright, UI Review Mode) · `npm run lint` · `npm run build`.
 
 | Suite | Result |
 |---|---|
 | takeoff-calc (R03 `calculation-cases.json` + boundaries + review regressions) | PASS 60/60 |
-| takeoff-geometry (vs pdf.js PageViewport, rotations 0/90/180/270, crop offsets, userUnit 2.5, DPR 1/2/3, zoom 1/4/12; profile invariants) | PASS 35/35 |
+| takeoff-geometry (vs pdf.js PageViewport, rotations 0/90/180/270, crop offsets, userUnit 2.5, DPR 1/2/3, zoom 1/4/12; profile invariants) | PASS 36/36 |
 | takeoff-gestures (tap/slop/pinch/lift-first/cancel/handles/detach) | PASS 10/10 |
 | takeoff-profile-editor (layout, labels, sketch, hit-test) | PASS 38/38 |
 | takeoff-pdf (1-profile, 40-line multi-profile, 30-leg profile pagination, decimals, glyphs, readiness) | PASS 5/5 |
 | takeoff-db (migration 206 on Postgres 17: privileges, CAS, atomicity, triggers, FKs, two-connection race, lock-out regression, rule history, re-apply) | PASS 20/20 |
 | takeoff-api (real Express routes + auth middleware + real SQL, incl. review regressions) | PASS 37/37 |
 | takeoff-premigration (206 absent) | PASS 5/5 |
-| Playwright `e2e/ui-review/takeoff.spec.js` (Chromium) | PASS 21/21 |
+| Playwright `e2e/ui-review/takeoff.spec.js` (Chromium, MOCKED backend) | PASS 22/22 |
 | Playwright `e2e/ui-review/takeoff-sandbox.spec.js` (full local stack: scale → draw → measure → order → server-rendered PDF) | PASS 1/1 |
+| Playwright `e2e/ui-review/takeoff-capture.spec.js` (complete workflow, local stack, screens + video) on desktop Chromium and **WebKit iPhone 13 emulation** | PASS 1/1 each |
+| `node scripts/takeoff/verify-migration.mjs` (206 apply + re-apply, RLS/grants/function audit, client-role denial probes; isolated PG17) | PASS |
 | `npm run lint` (zero warnings, whole repo) | PASS |
 | `npm run build` | PASS — main +8 kB vs baseline; TakeoffApp 156 kB + pdf.js 500 kB lazy; worker 1.1 MB `.mjs` not precached; no fixture files in `dist` |
 
@@ -116,7 +119,8 @@ Phone usability / performance:
 
 | Check | Result |
 |---|---|
-| 390×844, 844×390, 360×780, desktop layouts; no horizontal scroll | PASS (Chromium screenshots) |
+| 390×844, 844×390, 360×780, desktop layouts; no horizontal scroll | PASS (Chromium, mocked backend; overflow asserted) |
+| Complete leading-hand workflow by touch, Safari engine | PASS — Playwright WebKit 26.5, iPhone 13 emulation, real local stack (`evidence/workflow/iphone13-webkit/`) — emulation, not a device |
 | Pointer placement ≤ 2 CSS px at DPR 1/2/3, zoom 1/4/12 | PASS (Chromium) |
 | Backing canvas bounded at max zoom (≤ 4096² per canvas, 2 canvases) | PASS (Chromium) |
 | Two-finger / drag never place points; lift-first | PASS (gestures unit + Chromium CDP touch) |
@@ -126,7 +130,10 @@ Phone usability / performance:
 
 ## 5. Evidence
 
-- Screenshots: `docs/takeoff/evidence/ui/` (hub overview/measure desktop, worker measure 390×844 / 844×390 / 360×780, calibration check, split, profile editor, orders, recovery offer, zoomed viewer).
+- Complete workflows (real local stack): `docs/takeoff/evidence/workflow/{desktop-chromium,iphone13-webkit}/` — 18 step screens, STEPS.md, `workflow.webm`, the exported `supplier-order.pdf`.
+- Seeded example (real API): `docs/takeoff/evidence/seeded-example/` — calibration (incl. a /Rotate 90 page), three profiles, counted + manual lengths, two splits, placed + cancelled orders, three supplier PDFs (README explains).
+- Migration 206 verification (isolated PG17): `docs/takeoff/evidence/migration-206-verification.md`.
+- Screenshots from the MOCKED suite: `docs/takeoff/evidence/ui/` (hub overview/measure desktop, worker measure 390×844 / 844×390 / 360×780, calibration check, split, profile editor, orders, recovery offer, zoomed viewer).
 - Sample supplier PDFs (synthetic): `docs/takeoff/evidence/sample-supplier-order-1-profile.pdf`, `…-40-lines-draft.pdf`.
 - Live schema probe (read-only, 2026-10-13): `docs/takeoff/evidence/live-schema-probe-2026-10-13.txt`.
 
@@ -181,4 +188,7 @@ order readiness reports "Needs review".
 - Bestimator span-table defect (T48 `9005`) untouched — still to be checked upstream against the source table.
 - Split is offered for measured runs only; a counted/manual length over the ceiling is fixed by entering shorter finished lengths.
 - Not built (later): "recent items" in Choose material; a worker-app sign-out (worker drafts expire after 7 days or on save/discard).
+- On a phone at fit-to-page, a printed dimension is only a few dozen pixels long: tapping its ends without zooming can miss by enough to fail the 0.5% independent check (it correctly stays Needs review). The calibration screen tells people to zoom in on each end; a magnifier loupe would make this easier (not built).
+- The save pill shows **Not synced** for the 500 ms autosave debounce after each edit, then Saving… → Saved. Honest per §11, but it flickers amber while measuring.
+- `.github/workflows/takeoff.yml` is written but not committed — the repo's `.gitignore` keeps `.github/workflows/` out of commits ("commit separately with a workflow-scoped token"); CI has therefore never run.
 - `SOP_INDEX.md` header total and the folder lists in `SOP_MAINTENANCE.md`/`CLAUDE.md` don't yet mention `20_takeoff` (append-only edits this round).

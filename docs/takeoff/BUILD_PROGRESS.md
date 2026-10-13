@@ -59,4 +59,15 @@ Branch `takeoff-r03` (from `portal-v2` @ `022202a`, clean tree at start, 2026-10
 - LOCAL SANDBOX for the owner's drawings: `npm run takeoff:sandbox` (scripts/takeoff/sandbox.mjs) — persistent local PG
   `blh_takeoff_sandbox` + real routes on 127.0.0.1:8788 + Vite UI-review on :5181 with takeoff passthrough; watches
   ~/Takeoff-Sandbox/drawings. Full-stack smoke e2e/ui-review/takeoff-sandbox.spec.js PASS.
-- Owner asked (2026-10-13) to test on a set of drawings first — sandbox handed over; waiting on that feedback. NOT committed.
+- Owner asked (2026-10-13) to test on a set of drawings first — sandbox handed over; waiting on that feedback.
+- Owner feedback (2026-10-13): new flashing must open on an EMPTY grid and be tapped out (FlashIt-style) → `startBlank`
+  in ProfileEditor; closed hem was unclear → shared `treatmentDrawing` (visible 180° fold + coated band) used by the
+  editor, glyphs and the supplier PDF. Raw measured lengths now shown to 0.1 mm.
+- Committed locally on takeoff-r03 (a8585ec, d9a850d, e7cda09, 201ecd9, …) because the review ZIP needs a final commit id.
+  NOT pushed / merged / deployed.
+- Evidence: complete-workflow captures (desktop Chromium + WebKit iPhone 13 emulation, real local stack) in
+  evidence/workflow/; seeded example (real API) in evidence/seeded-example/; migration verifier
+  (scripts/takeoff/verify-migration.mjs) report in evidence/migration-206-verification.md.
+- Independent-review ZIP assembled in ~/Takeoff-Review/ (acceptance matrix with adversarial verification, PII scan).
+- Remaining owner/device gates: real iPhone 20-minute gate; apply 206 in production; enable TAKEOFF_ENABLED; commit the
+  CI workflow with a workflow-scoped token.

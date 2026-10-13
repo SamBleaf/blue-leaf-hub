@@ -31,8 +31,8 @@ const k = P0.pdfUnitsPerMm;
 const now = () => new Date().toISOString();
 
 // ── seed ────────────────────────────────────────────────────────────────────
-const DOC = { id: "doc-plan-c", title: "Gibson-St-architectural.pdf — Rev C", documentType: "architectural", status: "current", revisionLabel: "Rev C", contentSha256: "synthetic", byteSize: 2146000, uploadedAt: "2026-10-01T02:00:00Z", version: 3, supersedesDocumentId: "doc-plan-b", archivedAt: null };
-const OLD = { ...DOC, id: "doc-plan-b", title: "Gibson-St-architectural.pdf — Rev B", status: "superseded", revisionLabel: "Rev B", version: 2 };
+const DOC = { id: "doc-plan-c", title: "Example-St-architectural.pdf — Rev C", documentType: "architectural", status: "current", revisionLabel: "Rev C", contentSha256: "synthetic", byteSize: 2146000, uploadedAt: "2026-10-01T02:00:00Z", version: 3, supersedesDocumentId: "doc-plan-b", archivedAt: null };
+const OLD = { ...DOC, id: "doc-plan-b", title: "Example-St-architectural.pdf — Rev B", status: "superseded", revisionLabel: "Rev B", version: 2 };
 const bx = 120, by = 150;
 const H = { p1: { x: bx, y: by - 40 }, p2: { x: bx + 12000 * k, y: by - 40 }, knownMm: 12000 };
 const V = { p1: { x: bx - 40, y: by }, p2: { x: bx - 40, y: by + 8000 * k }, knownMm: 8000 };
@@ -160,13 +160,13 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     route("GET", `${base}/jobs/:jobType/:jobId`, ({ params }) => {
       if (worker && !caps(true).view) return fail(403, "Takeoffs are for leading hands and office staff.", "FORBIDDEN");
       if (params.jobType === "project" && params.jobId === "proj-nolink") return fail(409, "This project has no linked job to hold takeoffs. Link the project to its job first.", "NO_LINKED_JOB");
-      return { ok: true, job: { jobType: params.jobType, jobId: params.jobId, label: "5A Gibson Street, Marino SA (Synthetic)" }, workspaces: [{ ...state.workspace, revision: state.revision }], plans: [DOC], capabilities: caps(worker) };
+      return { ok: true, job: { jobType: params.jobType, jobId: params.jobId, label: "1 Example Street, Testville SA (Synthetic)" }, workspaces: [{ ...state.workspace, revision: state.revision }], plans: [DOC], capabilities: caps(worker) };
     });
     route("POST", `${base}/jobs/:jobType/:jobId/workspaces`, () => ({ ok: true, workspace: { ...state.workspace, revision: state.revision } }));
     route("GET", `${base}/workspaces/:id`, () => {
       if (worker && !caps(true).view) return fail(403, "Takeoffs are for leading hands and office staff.", "FORBIDDEN");
       const snap = snapshot();
-      return { ok: true, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status(), capabilities: caps(worker), jobLabel: "5A Gibson Street, Marino SA (Synthetic)", jobAddress: "5A Gibson Street, Marino SA" };
+      return { ok: true, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status(), capabilities: caps(worker), jobLabel: "1 Example Street, Testville SA (Synthetic)", jobAddress: "1 Example Street, Testville SA" };
     });
     route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => applyCommit(bodyJson || {}));
     route("GET", `${base}/documents/:docId/content`, () => fetch(planUrl));
