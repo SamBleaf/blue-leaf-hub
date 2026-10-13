@@ -628,6 +628,24 @@ await t("R04 F06/F04: perforated + unpainted specs survive commit → reload →
   assert.equal(bad.status, 400);
 });
 
+await t("R04 real plans: a plan uploaded BEFORE migration 206 (no hash/size) is served, anchored on first open, and calibrations made on it record that hash", async () => {
+  const legacy = id();
+  const path = `carpentry/${J.carpA}/${legacy}.pdf`;
+  await sb.storage.from("job-plans").upload(path, plan.bytes);
+  await q(`INSERT INTO job_documents (id, carpentry_job_id, document_type, title, status, storage_provider, storage_path, audience_layer)
+           VALUES ($1,$2,'architectural','Legacy-plan.pdf','current','supabase',$3,'worker')`, [legacy, J.carpA, `job-plans/${path}`]);
+  const r = await S(`/documents/${legacy}/content`);
+  assert.equal(r.status, 200);
+  const row = (await q("SELECT content_sha256, byte_size FROM job_documents WHERE id=$1", [legacy])).rows[0];
+  assert.equal(row.content_sha256, crypto.createHash("sha256").update(plan.bytes).digest("hex"));
+  assert.equal(Number(row.byte_size), plan.bytes.length);
+  // a calibration on it is anchored to those bytes
+  const cid = id();
+  const c = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { calibrations: { insert: [{ id: cid, documentId: legacy, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V }] } } });
+  assert.equal(c.status, 200, JSON.stringify(c.data));
+  assert.equal((await q("SELECT content_sha256 FROM takeoff_calibrations WHERE id=$1", [cid])).rows[0].content_sha256, row.content_sha256);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

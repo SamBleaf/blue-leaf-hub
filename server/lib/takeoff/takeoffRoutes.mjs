@@ -176,6 +176,13 @@ function mount(app, P, adapter) {
     if (buf.length > RENDER_LIMIT_BYTES) throw new TakeoffHttpError(413, "This plan is too large to measure in the app. Open it in your device viewer instead.", "TOO_LARGE");
     const servedSha = sha256(buf);
     if (doc.content_sha256 && servedSha !== doc.content_sha256) throw new TakeoffHttpError(500, "The stored plan doesn't match its record — re-upload it.", "INTEGRITY");
+    if (!doc.content_sha256) {
+      // Plans uploaded before migration 206 have no recorded hash. Anchor them on first open (one-time,
+      // NULL → hash only — the identity trigger then keeps them fixed) so calibrations made on these
+      // existing plans are tied to exactly these bytes.
+      const { error: anchorErr } = await sb.from("job_documents").update({ content_sha256: servedSha, byte_size: buf.length }).eq("id", doc.id).is("content_sha256", null);
+      if (anchorErr) console.warn("[takeoff] legacy plan anchor skipped", doc.id, anchorErr.message);
+    }
     // Measurements are anchored to the bytes that were calibrated: never serve different bytes under them.
     const { data: calShas } = await sb.from("takeoff_calibrations").select("content_sha256").eq("document_id", doc.id);
     if ((calShas || []).some((c) => c.content_sha256 && c.content_sha256 !== servedSha)) {
