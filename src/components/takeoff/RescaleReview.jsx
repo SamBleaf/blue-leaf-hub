@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn } from "./ui.jsx";
-import { fmtMm } from "./format.js";
+import { fmtMm, fmtRaw } from "./format.js";
 
 export default function RescaleReview({ ws, onDone }) {
   const rows = useMemo(() => rescaleCandidates(ws.view), [ws.view]);
@@ -30,7 +30,7 @@ export default function RescaleReview({ ws, onDone }) {
                 onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.measurement.id); else n.delete(r.measurement.id); return n; })} />
               <span className="flex-1">
                 Order {r.before ? `${fmtMm(r.before.finishedLengthMm)} mm` : "—"} → <b>{r.after ? `${fmtMm(r.after.finishedLengthMm)} mm` : "invalid"}</b>
-                <span className="block text-[11px] text-muted">Measured {r.before ? fmtMm(r.before.rawLengthMm) : "—"} → {r.after ? fmtMm(r.after.rawLengthMm) : "—"} mm · page {r.to.pageIndex + 1}{r.to.regionLabel ? ` · ${r.to.regionLabel}` : ""}</span>
+                <span className="block text-[11px] text-muted">Measured {r.before ? fmtRaw(r.before.rawLengthMm) : "—"} → {r.after ? fmtRaw(r.after.rawLengthMm) : "—"} mm · page {r.to.pageIndex + 1}{r.to.regionLabel ? ` · ${r.to.regionLabel}` : ""}</span>
               </span>
             </label>
           </li>

@@ -37,6 +37,7 @@ export function winAnsi(s) {
 // Exact to 0.01 mm — a 12.5 mm hem must never print as "13".
 const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString("en-AU", { maximumFractionDigits: 2 }) : "—");
 const T = (s) => winAnsi(s);
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function pickFont(doc) {
   const p = process.env.LATO_TTF_PATH?.trim();
@@ -279,13 +280,13 @@ function draw(doc, snap, opts) {
       doc.save().moveTo(M, y + rowH).lineTo(M + CW, y + rowH).lineWidth(0.4).strokeColor(HAIR).stroke().restore();
       y += rowH;
     }
-    doc.font(fonts.bold).fontSize(9).fillColor(INK).text(T(`${g.pieces} pieces · ${g.totalLm.toFixed(3)} LM`), M, y + 4, { width: CW, align: "right" });
+    doc.font(fonts.bold).fontSize(9).fillColor(INK).text(T(`${plural(g.pieces, "piece")} · ${g.totalLm.toFixed(3)} LM`), M, y + 4, { width: CW, align: "right" });
     y = doc.y + 14;
   }
 
   need(40);
   const t = snap.totals || {};
-  doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`Order total: ${t.pieces || 0} pieces · ${(t.totalLm || 0).toFixed(3)} LM${t.handlingFlags ? ` · ${t.handlingFlags} long piece(s) flagged` : ""}`), M, y, { width: CW });
+  doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`Order total: ${plural(t.pieces || 0, "piece")} · ${(t.totalLm || 0).toFixed(3)} LM${t.handlingFlags ? ` · ${plural(t.handlingFlags, "long piece")} flagged` : ""}`), M, y, { width: CW });
   y = doc.y + 4;
   doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("This document lists quantities and profiles only. It is not a price or a contract. Confirm product availability, colour and fabrication allowances with the supplier."), M, y, { width: CW });
 

@@ -214,8 +214,16 @@ const PdfViewport = forwardRef(function PdfViewport(
   // Expose read-only transform helpers on the element for automated geometry tests (no data).
   useEffect(() => {
     const el = wrapRef.current;
-    if (el) el.takeoffViewport = { toScreen: (p) => toScreen(p), toPdf: (p) => toPdf(p), view: () => ({ ...viewRef.current }), rotation: () => rotationRef.current };
-  }, [toScreen, toPdf]);
+    if (el) el.takeoffViewport = {
+      toScreen: (p) => toScreen(p), toPdf: (p) => toPdf(p), view: () => ({ ...viewRef.current }), rotation: () => rotationRef.current,
+      /** Zoom by `factor` on PDF point `p` (as a pinch there would), then centre it. */
+      zoomOn: (p, factor) => {
+        zoomAt(factor, toScreen(p));
+        const sc = toScreen(p), v = viewRef.current;
+        commitView({ ...v, panX: v.panX + size.w / 2 - sc.x, panY: v.panY + size.h / 2 - sc.y });
+      },
+    };
+  }, [toScreen, toPdf, zoomAt, commitView, size.w, size.h]);
 
   useImperativeHandle(ref, () => ({
     fit, zoomBy: (f) => zoomAt(f, { x: size.w / 2, y: size.h / 2 }),

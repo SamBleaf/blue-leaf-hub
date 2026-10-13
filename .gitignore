@@ -53,3 +53,6 @@ docs/ui-review/
 
 # CI workflows — commit separately with a workflow-scoped token (Gate 10)
 .github/workflows/
+
+# Takeoff evidence capture — raw Playwright artifacts (the curated copy lives beside STEPS.md)
+docs/takeoff/evidence/workflow/_artifacts/

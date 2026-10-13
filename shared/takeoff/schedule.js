@@ -143,8 +143,9 @@ export function computeContribution(contribution, ctx) {
 /** "Measured 4,312 + allowance 200 → order 4,600 mm" */
 export function explain(result) {
   if (!result) return null;
-  const f = (n) => Math.round(n).toLocaleString("en-AU");
-  if (result.source === "measured") return `Measured ${f(result.rawLengthMm)} + allowance ${f(result.allowanceMm)} → order ${f(result.finishedLengthMm)} mm`;
+  const f = (n) => n.toLocaleString("en-AU", { maximumFractionDigits: 1 });
+  // the raw run keeps 0.1 mm so the sum always explains the rounding (3,000.4 + 200 → 3,300)
+  if (result.source === "measured") return `Measured ${f(Math.round(result.rawLengthMm * 10) / 10)} + allowance ${f(result.allowanceMm)} → order ${f(result.finishedLengthMm)} mm`;
   if (result.source === "count") return `Counted ${result.quantity} × ${f(result.finishedLengthMm)} mm (finished length, no allowance)`;
   return `Entered ${result.quantity} × ${f(result.finishedLengthMm)} mm (finished length, no allowance)`;
 }

@@ -17,7 +17,7 @@ import PdfViewport from "./PdfViewport.jsx";
 import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
-import { fmtMm } from "./format.js";
+import { fmtMm, fmtRaw } from "./format.js";
 
 const MODES = [
   { k: "run", label: "Run" }, { k: "count", label: "Count" }, { k: "select", label: "Select" }, { k: "pan", label: "Pan" },
@@ -243,7 +243,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         {mode === "run" && (
           <div className="space-y-1 text-sm">
             {lastResult ? (
-              <p className="text-ink">Measured <b>{fmtMm(lastResult.rawLengthMm)}</b> + allowance {fmtMm(lastResult.allowanceMm)} → order <b>{fmtMm(lastResult.finishedLengthMm)} mm</b>
+              <p className="text-ink">Measured <b>{fmtRaw(lastResult.rawLengthMm)}</b> + allowance {fmtMm(lastResult.allowanceMm)} → order <b>{fmtMm(lastResult.finishedLengthMm)} mm</b>
                 {lastResult.ceilingExceeded ? <span className="ml-1 font-semibold text-red-700">over order ceiling — split it</span> : lastResult.handlingFlag ? <span className="ml-1 font-semibold text-amber-700">long piece</span> : null}</p>
             ) : <p className="text-muted">{start ? "Tap the finish of this run." : "Tap the start of a straight run."}</p>}
             <p className="text-[11px] text-muted">{runCount} run(s) on this page. {connected ? "Connected: each corner ends a run and starts the next." : "Each pair of taps is one run."}</p>
