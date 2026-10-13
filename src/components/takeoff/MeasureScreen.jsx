@@ -267,7 +267,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           </div>
         ) : <p className="text-sm text-muted">Tap a run or count mark to select it.</p>)}
         {mode === "pan" && <p className="text-sm text-muted">Drag to move around; pinch or use +/− to zoom. Nothing is placed in Pan.</p>}
-        {ws.saveError && <div className="mt-2"><Banner tone={ws.status === "unsynced" ? "warn" : "error"}>{ws.saveError}</Banner></div>}
+        {ws.saveError && <div className="mt-2"><Banner tone={ws.status === "unsynced" ? "warn" : "error"}
+          action={ws.rejected ? <div className="flex gap-1"><Btn onClick={ws.retryRejected}>Try again</Btn><Btn kind="ghost" onClick={ws.discardRejected}>Discard</Btn></div> : null}>{ws.rejected ? `Not saved: ${ws.saveError}` : ws.saveError}</Banner></div>}
       </Sheet>
     </FocusedWindow>
   );

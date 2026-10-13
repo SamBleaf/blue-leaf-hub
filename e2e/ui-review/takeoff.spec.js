@@ -299,6 +299,36 @@ test.describe("journeys", () => {
     await expect(d3.getByText(/size isn’t valid yet/)).toBeVisible();
   });
 
+  test("R04b R5/R19/R20 refused save is never 'Saved' and is kept; Undo with an invalid draft only clears that field; no 'Saved' before the server has the shape", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await ready(page);
+    await page.getByRole("button", { name: "Profile" }).first().click();
+    const dlg = page.getByRole("dialog", { name: /Apron flashing/ });
+    const chip = dlg.getByRole("status").first();
+    await dlg.locator("svg text", { hasText: "L2 150" }).click();
+    const field = dlg.getByLabel("L2 length");
+    await field.fill("180");
+    await expect(chip).not.toHaveText("Saved");                         // R20: the server doesn't have 180 yet
+    await expect(chip).toHaveText("Saved", { timeout: 10_000 });
+    // R19: a NEW session that only holds invalid text → Undo clears just that text, the shape keeps 180
+    await dlg.getByRole("button", { name: "Done" }).click();
+    await dlg.locator("svg text", { hasText: "L2 180" }).click();
+    await field.fill(".");
+    await dlg.getByRole("button", { name: "Undo" }).click();
+    await expect(field).toHaveValue("180");
+    await expect(dlg.getByText(/indicative girth 340 mm/)).toBeVisible();
+    // R5: a refused save (expired sign-in) → "Not saved", kept, and Try again sends it
+    await page.evaluate(() => { window.__takeoffReviewRefuse = 401; });
+    await field.fill("200");
+    await expect(chip).toHaveText("Not saved", { timeout: 10_000 });
+    await dlg.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByText(/Not saved: Your sign-in has expired/)).toBeVisible();
+    await page.evaluate(() => { window.__takeoffReviewRefuse = 0; });
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved" }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/girth 360 mm/).first()).toBeVisible();
+  });
+
   test("ordinary worker sees no takeoff access", async ({ page }) => {
     await page.goto("/worker/takeoff/carpentry/cjb-1?takeoffWorker=ordinary");
     await ready(page);

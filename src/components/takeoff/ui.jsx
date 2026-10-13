@@ -63,6 +63,7 @@ const STATUS = {
   error: ["Not saved", "bg-red-50 text-red-700 border-red-200"],
   // R04: held only in this device's recovery store (not on the server yet)
   local: ["On this device", "bg-slate-50 text-slate-700 border-slate-300"],
+  rejected: ["Not saved", "bg-red-50 text-red-700 border-red-200"],
 };
 export function SaveChip({ status }) {
   const [label, cls] = STATUS[status] || STATUS.saved;

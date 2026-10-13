@@ -61,7 +61,7 @@ const E = { lh: id(), w: id() };
 await q("INSERT INTO employees (id, name, is_leading_hand, is_active, worker_token) VALUES ($1, 'Lee Hand', true, true, 'wt-lh'), ($2, 'Will Worker', false, true, 'wt-w')", [E.lh, E.w]);
 const supplier = id();
 await q("INSERT INTO suppliers (id, name, email, phone, notes, account_terms) VALUES ($1, 'Fielders Test Branch', 'orders@fielders.test', '08 0000 0000', 'PRIVATE NOTE', '30 days')", [supplier]);
-await q("INSERT INTO company_profile (name, abn, address) VALUES ('Blue Leaf Building', '00 000 000 000', '1 Office Rd')");
+await q("INSERT INTO company_profile (name, abn, address, phone) VALUES ('Blue Leaf Building', '00 000 000 000', '1 Office Rd', '08 0000 0000')");
 
 const plan = buildKnownPlanPdf({});
 async function storePlan(owner, title) {
@@ -321,7 +321,7 @@ await t("draft export: frozen + watermarked PDF; A21 export doesn't change order
   assert.ok(st.every((x) => x.ordered === 0));
 });
 await t("order-ready export after delivery set; stale expected revision → 409", async () => {
-  let pr = await call("PATCH", `/api/takeoff/orders/${orderId}`, { body: { expectedRevision: orderRev, delivery: { method: "delivery", address: "1 Test St", requiredDate: "2026-10-20" } } });
+  let pr = await call("PATCH", `/api/takeoff/orders/${orderId}`, { body: { expectedRevision: orderRev, delivery: { method: "delivery", address: "1 Test St", requiredDate: "2026-10-20", contactPhone: "0400 000 000" } } });
   orderRev = pr.data.result.revision;
   const wsRev = (await S(`/workspaces/${wsId}`)).data.snapshot.workspace.revision;
   const stale = await SP(`/orders/${orderId}/exports`, { isDraft: false, idempotencyKey: "exp-stale-1", expectedOrderRevision: orderRev - 1, expectedWorkspaceRevision: wsRev });
@@ -364,16 +364,16 @@ await t("A27 artifact failure: retryable, no ready link, no placement", async ()
 
 // A22/A23 partial allocation in a clean workspace
 const ws2 = id(); let rev2; const m10 = id(), c10 = id(), mat2 = id();
-async function exportReady(oid, key) {
+async function exportReady(oid, key, extra = {}) {
   const o = (await S(`/workspaces/${ws2}/orders`)).data.orders.find((x) => x.id === oid);
   const wsRev = (await S(`/workspaces/${ws2}`)).data.snapshot.workspace.revision;
-  const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: key, expectedOrderRevision: o.revision, expectedWorkspaceRevision: wsRev });
+  const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: key, expectedOrderRevision: o.revision, expectedWorkspaceRevision: wsRev, ...extra });
   assert.equal(e.status, 200, JSON.stringify(e.data));
   return e.data.export.exportId;
 }
 async function newOrder(qty) {
   const oid = id();
-  const o = await SP(`/workspaces/${ws2}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+  const o = await SP(`/workspaces/${ws2}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
   const line = (await S(`/workspaces/${ws2}/orders`)).data.scheduleLines[0];
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: qty }] } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
@@ -401,7 +401,12 @@ await t("A22 required 10, placed 6 → remaining 4; retry unchanged; over-alloca
   const o = (await S(`/workspaces/${ws2}/orders`)).data.orders.find((x) => x.id === orderA);
   assert.equal((await call("PATCH", `/api/takeoff/orders/${orderA}`, { body: { expectedRevision: o.revision, notes: "x" } })).status, 400);
   const orderB = await newOrder(6);
-  const exB = await exportReady(orderB, "exB-ready-1");
+  // R04b R7: pieces already placed can't go on another order-ready export by accident…
+  const oB = (await S(`/workspaces/${ws2}/orders`)).data.orders.find((x) => x.id === orderB);
+  const refused = await SP(`/orders/${orderB}/exports`, { isDraft: false, idempotencyKey: "exB-refused", expectedOrderRevision: oB.revision, expectedWorkspaceRevision: (await S(`/workspaces/${ws2}`)).data.snapshot.workspace.revision });
+  assert.equal(refused.status, 400); assert.match(refused.data.error, /already on/);
+  // …only with an explicit "order extra" acknowledgement
+  const exB = await exportReady(orderB, "exB-ready-1", { acknowledgeSurplus: true });
   const over = await SP(`/orders/${orderB}/placements`, { exportId: exB, placedOn: "2026-10-13", idempotencyKey: "place-B-0001" });
   assert.equal(over.status, 409); assert.equal(over.data.code, "SURPLUS");
   const ack = await SP(`/orders/${orderB}/placements`, { exportId: exB, placedOn: "2026-10-13", acknowledgeSurplus: true, idempotencyKey: "place-B-0002" });
@@ -477,7 +482,7 @@ await t("review #1: a shrunk requirement never locks out later, unrelated placem
     contributions: { upsert: [{ id: c1, measurementId: m1, jobMaterialId: mat }, { id: c2, measurementId: m2, jobMaterialId: mat }] } } });
   const place = async (bucketLen, qty, key) => {
     const oid = id();
-    const o = await SP(`/workspaces/${w3}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+    const o = await SP(`/workspaces/${w3}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
     const line = (await S(`/workspaces/${w3}/orders`)).data.scheduleLines.find((l) => l.finishedLengthMm === bucketLen);
     await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: qty }] } });
     const ord = (await S(`/workspaces/${w3}/orders`)).data.orders.find((x) => x.id === oid);
@@ -569,7 +574,7 @@ await t("R04 F01: changing the colour of a line's material makes the saved line 
     contributions: { upsert: [{ id: r4.ca, measurementId: r4.a, jobMaterialId: r4.m1 }, { id: r4.cb, measurementId: r4.b, jobMaterialId: r4.m2 }] } } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const oid = id();
-  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
   const line = (await S(`/workspaces/${w4}/orders`)).data.scheduleLines[0];
   r = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 1, jobMaterialId: r4.m1 }] } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -644,6 +649,24 @@ await t("R04 real plans: a plan uploaded BEFORE migration 206 (no hash/size) is 
   const c = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { calibrations: { insert: [{ id: cid, documentId: legacy, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V }] } } });
   assert.equal(c.status, 200, JSON.stringify(c.data));
   assert.equal((await q("SELECT content_sha256 FROM takeoff_calibrations WHERE id=$1", [cid])).rows[0].content_sha256, row.content_sha256);
+});
+
+await t("R04b R9: 'Review split' (re-apply, version+1) re-stamps a stale split against the current source → not stale", async () => {
+  const snap = (await S(`/workspaces/${w4}`)).data.snapshot;
+  const raw = snap.contributions.find((c) => c.id === r4.cm);           // made stale earlier by qty 3 → 4
+  const r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: snap.workspace.revision, changes: { contributions: { upsert: [{ ...raw, split: { ...raw.split, sourceSignature: undefined, version: (raw.split.version || 1) + 1 } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.computed.contributions.find((x) => x.contributionId === r4.cm).split.stale, false);
+});
+await t("R04b R13 + R8: order-ready needs branch / date / contact; open exported orders are reported per length", async () => {
+  const oid = id();
+  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+  const line = (await S(`/workspaces/${w4}/orders`)).data.scheduleLines.find((l) => /surfmist/.test(l.bucketKey));
+  await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 1 }] } });
+  const pv = (await S(`/orders/${oid}/preview`)).data.preview.problems.join(" ");
+  for (const re of [/pickup branch/, /required by/, /site contact phone/]) assert.match(pv, re);
+  const list = (await S(`/workspaces/${w4}/orders`)).data;
+  assert.ok(list.orderStatus.every((x) => typeof x.onExportedOrders === "number"));
 });
 
 server.close();

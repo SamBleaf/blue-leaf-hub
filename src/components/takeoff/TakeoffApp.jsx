@@ -129,7 +129,11 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   useEffect(() => { let stop = false; api.presets().then((r) => { if (!stop && r.ok) setPresets(r.data.presets || []); }); return () => { stop = true; }; }, [api]);
 
   const needsPdf = ["setup", "calibrate", "measure"].includes(win);
-  const plan = usePlanDocument(api, needsPdf ? docId : null);
+  // once opened, keep the plan loaded while in this takeoff — switching material / editing a flashing must not
+  // re-download and re-parse the whole PDF on a phone (R04b R22)
+  const [keepPlan, setKeepPlan] = useState(false);
+  useEffect(() => { if (needsPdf) setKeepPlan(true); }, [needsPdf]);
+  const plan = usePlanDocument(api, needsPdf || keepPlan ? docId : null);
   const planDoc = plans.find((p) => p.id === docId) || null;
   const pageCals = useMemo(() => (view ? latestPageCalibrations(view.calibrations, docId, pageIndex) : []), [view, docId, pageIndex]);
   const pageScale = !pageCals.length ? "Not scaled" : pageCals.every((c) => c.status === "ready") ? "Ready" : "Needs review";
@@ -171,8 +175,16 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     else setNotice({ tone: "error", text: r.error });
   }
 
-  const leaveEditor = () => { setEditing(null); setWin("overview"); refreshDrafts(); };
-  const toLengths = (m) => { setActiveMaterial(m.id); setEditing(null); setWin(docId ? "measure" : "overview"); };
+  const leaveEditor = () => { setEditing(null); setWin("overview"); setTimeout(refreshDrafts, 50); };
+  const toLengths = (m) => { setActiveMaterial(m.id); setEditing(null); setWin(docId ? "measure" : "overview"); setTimeout(refreshDrafts, 50); };
+  /** The editor's status for THIS flashing: Saved only when the server holds exactly this shape (R04b R20). */
+  const materialSync = (m, shownProfile) => {
+    if (ws.status === "rejected" || ws.status === "conflict" || ws.status === "error") return ws.status;
+    const onServer = ws.server?.snapshot?.materials?.find((x) => x.id === m.id);
+    if (!onServer) return ws.status === "saving" ? "saving" : "unsynced";
+    if (shownProfile !== undefined && JSON.stringify(onServer.profile ?? null) !== JSON.stringify(shownProfile ?? null)) return ws.status === "saving" ? "saving" : "unsynced";
+    return ws.status === "saving" ? "saving" : ws.dirty ? "unsynced" : "saved";
+  };
 
   // ── focused windows ─────────────────────────────────────────────────────────
   if (editing?.stage === "profile" || win === "profile") {
@@ -183,11 +195,11 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     // key = the flashing id ONLY: saves / server revisions never remount the editor (focus, keyboard, history kept).
     return createPortal(
       <><FocusMode /><ProfileEditor key={`${std ? "std" : "job"}:${m?.id}`} value={cur?.profile || null} title={cur?.name || "Flashing"} readOnly={std ? !caps.editStandards : !caps.edit}
-        mode={std ? "standard" : "job"} painted={isPainted(cur)} syncStatus={ws.status}
+        mode={std ? "standard" : "job"} painted={isPainted(cur)} syncStatus={std ? null : materialSync(m, currentMat(m).profile)}
         draftScope={actorKey && m?.id ? { actorKey, workspaceId: std ? "standards" : wsId, materialId: m.id } : null}
         onClose={leaveEditor}
-        onChange={(profile) => upsertMaterial({ ...currentMat(m), profile })}
-        onDetails={() => setEditing({ material: currentMat(m), stage: "details" })}
+        onChange={(profile) => { if (profile || view.materials.some((x) => x.id === m.id)) upsertMaterial({ ...currentMat(m), profile }); }}
+        onDetails={() => { setEditing({ material: currentMat(m), stage: "details" }); setTimeout(refreshDrafts, 50); }}
         onLengths={() => toLengths(m)}
         onSave={(profile) => {
           api.savePreset({ presetId: m.id, expectedRevision: m.revision, content: { ...m, profile } }).then(async (r) => {
@@ -293,7 +305,8 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     return <FocusedWindow title="Review with new scale" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><RescaleReview ws={ws} onDone={() => setWin("overview")} /></div></FocusedWindow>;
   }
   if (win === "orders") {
-    return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} jobAddress={ws.server?.jobAddress} /></div></FocusedWindow>;
+    return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} jobAddress={ws.server?.jobAddress}
+      deviceDrafts={editorDrafts.map((d) => ({ name: view.materials.find((x) => x.id === d.materialId)?.name || "A new flashing", invalid: Object.keys(d.draft?.drafts || {}).length }))} /></div></FocusedWindow>;
   }
 
   // ── overview ────────────────────────────────────────────────────────────────
@@ -326,8 +339,8 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
       )}
       {ws.status === "error" && <Banner tone="error" action={<Btn onClick={ws.retry}>Try again</Btn>}>{ws.saveError}</Banner>}
       {ws.rejected && (
-        <Banner tone="error" action={<Btn onClick={ws.discardRejected}>Discard that change</Btn>}>
-          A change couldn&apos;t be saved: {ws.rejected.error} ({describeChanges(ws.rejected.changes).join("; ")}). Your other edits keep saving.
+        <Banner tone="error" action={<div className="flex gap-1"><Btn onClick={ws.retryRejected}>Try again</Btn><Btn kind="ghost" onClick={ws.discardRejected}>Discard</Btn></div>}>
+          Not saved: {ws.rejected.error} ({describeChanges(ws.rejected.changes).join("; ")}). It&apos;s kept on this device; your other edits keep saving.
         </Banner>
       )}
       {ws.status === "unsynced" && ws.saveError && <Banner tone="warn">{ws.saveError}</Banner>}

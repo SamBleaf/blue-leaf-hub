@@ -20,7 +20,7 @@ import {
 } from "./takeoffAccess.mjs";
 import {
   PLAN_DOC_TYPES, RENDER_LIMIT_BYTES, listWorkspaces, createWorkspace, getWorkspaceRow, loadSnapshotFresh, commitWorkspace,
-  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, sha256,
+  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
 
@@ -219,7 +219,10 @@ function mount(app, P, adapter) {
     const orders = await listOrders(sb, ctx.ws.id);
     const { snapshot } = await loadSnapshotFresh(sb, ctx.ws.id);
     const { computed, status } = await scheduleStatus(sb, snapshot);
-    return ok(res, { orders, orderStatus: status, scheduleLines: computed.scheduleLines, workspaceRevision: snapshot.workspace.revision });
+    // pieces already on an exported (sent-able) order that isn't recorded placed yet — a new order must not repeat them
+    const cover = await otherOrderCover(sb, ctx.ws.id, null);
+    const withCover = status.map((x) => { const c = cover.get(x.bucketKey); return { ...x, onExportedOrders: c?.exported || 0, exportedRefs: c?.refs || [] }; });
+    return ok(res, { orders, orderStatus: withCover, scheduleLines: computed.scheduleLines, unplaced: computed.unplaced, workspaceRevision: snapshot.workspace.revision });
   }));
 
   app.post(`${P}/workspaces/:id/orders`, ...mw, gate, wrap(async (req, res, sb) => {

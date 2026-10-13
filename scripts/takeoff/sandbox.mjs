@@ -60,7 +60,7 @@ await q("INSERT INTO carpentry_jobs (id, address, client_name, status) VALUES ($
 await q("INSERT INTO employees (id, name, is_leading_hand, is_active, worker_token) VALUES ($1, 'Sandbox Leading Hand', true, true, $2) ON CONFLICT DO NOTHING", [IDS.leadingHand, TOKENS.leadingHand]);
 await q("INSERT INTO suppliers (id, name, email, phone, contact_name) VALUES ($1, 'Fielders (SANDBOX — not a real contact)', 'orders@example.invalid', '00 0000 0000', 'Sandbox orders') ON CONFLICT DO NOTHING", [IDS.supplier]);
 if (!(await q("SELECT 1 FROM company_profile LIMIT 1")).rowCount) {
-  await q("INSERT INTO company_profile (name, address) VALUES ('Blue Leaf Building (sandbox)', 'Sandbox address')");
+  await q("INSERT INTO company_profile (name, address, phone, email) VALUES ('Blue Leaf Building (sandbox)', 'Sandbox address', '00 0000 0000', 'office@example.invalid')");
 }
 
 // ── load drawings (and keep watching the folders: drop PDFs in, refresh the page) ─────

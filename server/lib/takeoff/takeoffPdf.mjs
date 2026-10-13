@@ -172,7 +172,7 @@ function draw(doc, snap, opts) {
     y = 36;
     if (fs.existsSync(LOGO)) { try { doc.image(LOGO, M, y, { width: 120 }); } catch { /* logo optional */ } }
     doc.font(fonts.bold).fontSize(15).fillColor(INK).text(T(opts.isDraft ? "DRAFT FLASHING ORDER" : "FLASHING ORDER"), M, y, { width: CW, align: "right" });
-    doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""}${cont ? " (continued)" : ""}`), M, y + 19, { width: CW, align: "right" });
+    doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""}${snap.issuedOn ? ` · ${snap.issuedOn}` : ""}${cont ? " (continued)" : ""}`), M, y + 19, { width: CW, align: "right" });
     y += 78; // clear the wordmark on every page (it is taller than the title block)
     if (opts.isDraft) {
       doc.save().rotate(-30, { origin: [W / 2, doc.page.height / 2] }).font(fonts.bold).fontSize(90).fillColor("#c0392b").opacity(0.08)
@@ -206,6 +206,12 @@ function draw(doc, snap, opts) {
     d.requiredDate ? `Required: ${d.requiredDate}` : null,
     d.contactName || d.contactPhone ? `Site contact: ${[d.contactName, d.contactPhone].filter(Boolean).join(" ")}` : null]);
   y = Math.max(y1, y2, y3) + 8;
+  if (opts.isDraft && (snap.readinessProblems || []).length) {
+    doc.save().rect(M, y, CW, 14 + 11 * Math.min(8, snap.readinessProblems.length)).fill("#fdf2e9").restore();
+    doc.font(fonts.bold).fontSize(8.5).fillColor("#9a3412").text(T("DRAFT — not ready to order:"), M + 6, y + 3, { width: CW - 12 });
+    snap.readinessProblems.slice(0, 8).forEach((p, i) => doc.font(fonts.regular).fontSize(8).fillColor("#9a3412").text(T(`• ${p}`), M + 10, y + 14 + i * 11, { width: CW - 20, lineBreak: false, ellipsis: true, height: 10 }));
+    y += 20 + 11 * Math.min(8, snap.readinessProblems.length);
+  }
   if (d.notes || snap.notes) {
     doc.font(fonts.regular).fontSize(8.5).fillColor(INK).text(T(`Notes: ${[d.notes, snap.notes].filter(Boolean).join(" · ")}`), M, y, { width: CW });
     y = doc.y + 6;
@@ -220,13 +226,13 @@ function draw(doc, snap, opts) {
     need(Math.min(bottom() - 120, 300 + Math.min(g.lines.length, 12) * 15 + (g.specText?.perforation ? 24 : 0)));
     doc.save().rect(M, y, CW, 20).fill("#eef5f9").restore();
     const sp = g.spec || {};
-    doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`${g.profileId} — ${g.materialName}`), M + 6, y + 5, { width: CW * 0.5, lineBreak: false });
+    doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`${g.profileId} — ${g.materialName}`), M + 6, y + 5, { width: CW * 0.42 - 6, lineBreak: false, ellipsis: true, height: 12 });
     // spec v2 text comes frozen in the snapshot (describeSpec); v1 snapshots fall back to the raw fields
     const st = g.specText || { line: [sp.finish, sp.colour, sp.bmt != null ? `${sp.bmt} BMT` : null].filter(Boolean).join(" · ") };
     const painted = sp.colourApplicable !== false;
     doc.font(fonts.regular).fontSize(8.5).fillColor(INK)
       .text(T([st.line, sp.colourCode ? `(${sp.colourCode})` : null, sp.construction === "perforated" ? null : "solid", sp.productCode ? `code ${sp.productCode}` : null].filter(Boolean).join(" · ")),
-        M + CW * 0.5, y + 6, { width: CW * 0.5 - 6, align: "right", lineBreak: false });
+        M + CW * 0.42, y + 6, { width: CW * 0.58 - 6, align: "right", lineBreak: false, ellipsis: true, height: 11 });
     y += 24;
     if (st.perforation) {
       // perforation is part of what is made — spelled out, never just "perforated"
@@ -239,13 +245,13 @@ function draw(doc, snap, opts) {
     }
     y += 2;
 
-    const boxW = CW * 0.52, boxH = 170;
+    const boxW = CW * 0.52, boxH = g.profile ? 170 : 0;
     if (g.profile) drawProfile(doc, g.profile, { x: M, y, w: boxW, h: boxH }, fonts, { painted });
-    else doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text("No profile drawing", M, y + 70, { width: boxW, align: "center" });
+    else { doc.font(fonts.regular).fontSize(8.5).fillColor(MUTED).text(T("Finished pieces (no drawn profile) — see the item name and product code."), M + 6, y, { width: CW - 12 }); y = doc.y + 4; }
     // coated-face legend
-    (painted ? doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(2.4).strokeColor(BRAND) : doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(1.4).dash(3, { space: 2 }).strokeColor("#9aa5b1")).stroke().restore();
+    if (g.profile) (painted ? doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(2.4).strokeColor(BRAND) : doc.save().moveTo(M + 2, y + boxH + 8).lineTo(M + 24, y + boxH + 8).lineWidth(1.4).dash(3, { space: 2 }).strokeColor("#9aa5b1")).stroke().restore();
     const sideTxt = `${g.profile?.coatedFace === "right" ? "right" : "left"} side travelling L1 -> L${g.profile?.segments?.length || 1}`;
-    doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(painted ? `Painted (colour) face — ${sideTxt}` : `Reference side (unpainted — no colour face) — ${sideTxt}`), M + 28, y + boxH + 4.5, { width: boxW - 30, lineBreak: false });
+    if (g.profile) doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(painted ? `Painted (colour) face — ${sideTxt}` : `Reference side (unpainted — no colour face) — ${sideTxt}`), M + 28, y + boxH + 4.5, { width: boxW - 30, lineBreak: false });
 
     // dimension table: as many rows as fit beside the drawing, the rest continue below it
     // (three columns, paginating) so a long profile never strands single lines on blank pages.

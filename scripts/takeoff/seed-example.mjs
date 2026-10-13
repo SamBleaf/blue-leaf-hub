@@ -144,7 +144,7 @@ const ready = await exportOrder(flashings, false);
 await call("POST", `/api/takeoff/orders/${flashings.id}/placements`, { exportId: ready.exportId, placedOn: "2026-10-13", supplierReference: "SO-EXAMPLE-1", idempotencyKey: `seed-p-${randomUUID()}` });
 log(`${flashings.ref}: draft export ${draft.exportNo}, order-ready export ${ready.exportNo}, recorded as placed (SO-EXAMPLE-1)`);
 
-const stops = await makeOrder(bySpec("Stop end (pieces)"), { method: "pickup", pickupBranch: "Example branch" }, "Pickup example");
+const stops = await makeOrder(bySpec("Stop end (pieces)"), { method: "pickup", pickupBranch: "Example branch", asap: true, contactPhone: "0400 000 000" }, "Pickup example");
 const stopsReady = await exportOrder(stops, false);
 const pl = (await call("POST", `/api/takeoff/orders/${stops.id}/placements`, { exportId: stopsReady.exportId, placedOn: "2026-10-13", supplierReference: "SO-EXAMPLE-2", idempotencyKey: `seed-p-${randomUUID()}` })).placement;
 await call("POST", `/api/takeoff/placements/${pl.placementId}/cancel`, { reason: "Example cancellation — supplier out of stock" });

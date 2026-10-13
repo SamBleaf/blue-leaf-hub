@@ -36,7 +36,7 @@ export const PROBLEM_TEXT = Object.freeze({
   profile_invalid: "The flashing profile has a problem.",
   material_incomplete: "Material, finish, BMT or colour is missing.",
   perforation_incomplete: "Perforated — add the supplier product code, or the hole pattern, size, pitch and which legs.",
-  line_stale_missing: "The lengths for this line changed — update or remove the line.",
+  line_stale_missing: "This length is no longer in the takeoff (its measurements, split or material changed) — update or remove the line.",
   line_stale_material: "This line's material changed (colour, finish, BMT, perforation or shape) — update or remove the line.",
   line_stale_quantity: "Fewer pieces are needed now than this line orders — update the quantity.",
   measurement_invalid: "This measurement is invalid.",
@@ -50,7 +50,13 @@ export function materialSpecKey(material) {
     try { profileKey = profileGeometryKey(material.profile); } catch { profileKey = `invalid:${material.id}`; }
   }
   let spec;
-  try { spec = fabricationIdentity(material.spec); } catch { spec = `invalid:${material.id}`; }
+  try {
+    spec = fabricationIdentity(material.spec);
+    if (spec.perforation?.legIds?.length) {
+      const idx = (id) => (material.profile?.segments || []).findIndex((sg) => String(sg.id) === String(id));
+      spec = { ...spec, perforation: { ...spec.perforation, legIds: spec.perforation.legIds.map((id) => { const i = idx(id); return i >= 0 ? `L${i + 1}` : `missing:${id}`; }).sort() } };
+    }
+  } catch { spec = `invalid:${material.id}`; }
   return stableStringify({
     method: `${material.methodKey}@${material.methodVersion}`,
     // Without a drawn profile the NAME is what tells the supplier which part it is
@@ -83,7 +89,9 @@ export function splitSourceSignature(m, cal, rules, result) {
     raw: result.rawLengthMm != null ? Math.round(result.rawLengthMm * 10) / 10 : null,
     finished: result.finishedLengthMm,
     quantity: result.quantity,
-    calibration: cal ? `${cal.id}@${cal.calibrationRevision || 0}` : null,
+    // calibrations are immutable (a re-scale is a NEW id), so the id alone identifies the scale — and it is
+    // known even when the calibration is saved in the same batch as the split (R04b R11)
+    calibration: cal ? cal.id : null,
     rules,
   });
 }
@@ -155,12 +163,16 @@ export function computeContribution(contribution, ctx) {
     split = { ...ev, stale, originals, version: sp.version || 1 };
     if (stale) problems.push("split_stale");
     if (!ev.valid) problems.push("split_invalid");
-    // A split REPLACES the originals it splits — never both. Unsplit remainder stays whole.
-    const remainder = Math.max(0, result.quantity - originals);
-    pieces = [
-      ...(remainder ? [{ finishedLengthMm: result.finishedLengthMm, quantity: remainder, handlingFlag: result.handlingFlag, ceilingExceeded: result.ceilingExceeded }] : []),
-      ...ev.children.map((c) => ({ finishedLengthMm: c.finishedLengthMm, quantity: originals, handlingFlag: c.handlingFlag, ceilingExceeded: c.ceilingExceeded })),
-    ];
+    if (ev.valid) {
+      // A split REPLACES the originals it splits — never both. Unsplit remainder stays whole.
+      const remainder = Math.max(0, result.quantity - originals);
+      pieces = [
+        ...(remainder ? [{ finishedLengthMm: result.finishedLengthMm, quantity: remainder, handlingFlag: result.handlingFlag, ceilingExceeded: result.ceilingExceeded }] : []),
+        ...ev.children.map((c) => ({ finishedLengthMm: c.finishedLengthMm, quantity: originals, handlingFlag: c.handlingFlag, ceilingExceeded: c.ceilingExceeded })),
+      ];
+    }
+    // an invalid split (e.g. more originals than now exist) keeps the ORIGINAL pieces whole and flagged —
+    // pieces never silently vanish from the schedule (R04b R1)
   }
   if (pieces.some((p) => p.ceilingExceeded)) problems.push("ceiling_exceeded");
   return { ...base, kind: m.kind, result, split, pieces, sourceSignature: signature, problems: [...new Set(problems)], explanation: explain(result) };
@@ -228,12 +240,19 @@ export function computeWorkspace(ws) {
     }
   }
   const scheduleLines = [...lines.values()].sort((a, b) => (a.specKey === b.specKey ? b.finishedLengthMm - a.finishedLengthMm : a.specKey < b.specKey ? -1 : 1));
+  // a measurement that produced NO pieces (invalid run, no scale, …) is a missing requirement, not zero:
+  // it is listed and blocks ordering of that material (R04b R1)
+  const unplaced = contributions.filter((c) => !c.pieces.length && c.problems.length).map((c) => {
+    const mat = ctx.materialsById.get(c.jobMaterialId);
+    return { contributionId: c.contributionId, jobMaterialId: c.jobMaterialId, specKey: mat ? materialSpecKey(mat) : null, problems: c.problems, explanation: c.explanation };
+  });
   return {
     contributions,
     scheduleLines,
+    unplaced,
     materialProblems: Object.fromEntries(matProblems),
     totalLm: totalLinearMetres(scheduleLines),
-    orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0),
+    orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0) && !unplaced.length,
   };
 }
 
@@ -255,6 +274,26 @@ export function orderLineState(line, computed, materials) {
   else if (line.specKey && line.specKey !== sl.specKey) problem = "line_stale_material";
   else if (line.quantity > sl.quantity) problem = "line_stale_quantity";
   return { stale: !!problem, problem, current: sl, suggestion: suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
+}
+
+/**
+ * Explicit "Update to current material" for a stale order line (R04b R2). Keeps EVERY piece the line covered:
+ * what other materials still supply stays on the old length (attributed to one of them); only the rest moves,
+ * ADDED to anything already on the target. qty / chosen are { bucketKey → quantity / jobMaterialId }.
+ */
+export function reconcileStaleLine(qty, chosen, state) {
+  const { line, current, suggestion: to } = state;
+  const was = qty[line.bucketKey] || 0;
+  const keep = current ? Math.min(was, current.quantity) : 0;
+  const other = current?.jobMaterialIds.find((id) => id !== line.jobMaterialId) || null;
+  const kept = keep && other ? keep : 0;
+  const moved = Math.max(was - kept, 1);
+  const q = { ...qty }, c = { ...chosen };
+  delete q[line.bucketKey]; delete c[line.bucketKey];
+  if (kept) { q[line.bucketKey] = kept; c[line.bucketKey] = other; }
+  q[to.bucketKey] = Math.min((q[to.bucketKey] || 0) + moved, to.quantity);
+  c[to.bucketKey] = line.jobMaterialId;
+  return { qty: q, chosen: c, kept, moved };
 }
 
 /** Re-flag thresholds for a finished length under a material's rules (UI helper). */

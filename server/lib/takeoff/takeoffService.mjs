@@ -362,7 +362,9 @@ export async function commitWorkspace(sb, ctx, body) {
       split = { pieces, laps, sourceFinishedMm: Number(c.split.sourceFinishedMm), originals, version: Number(c.split.version || 1) };
       const prev = contribs.get(c.id)?.split;
       const same = prev && prev.sourceSignature && JSON.stringify([prev.pieces, prev.laps, prev.originals || 1, prev.sourceFinishedMm]) === JSON.stringify([pieces, laps, originals, split.sourceFinishedMm]);
-      if (same) split.sourceSignature = prev.sourceSignature; // re-sent unchanged: keep what it was made against
+      // re-sent unchanged (same version): keep what it was made against. An explicit review/re-apply bumps the
+      // version → it is re-validated and re-stamped against the CURRENT source, clearing staleness (R04b R9).
+      if (same && Number(prev.version || 1) === split.version) split.sourceSignature = prev.sourceSignature;
       else changedSplits.push(c.id);
     }
     const rec = { id: c.id, measurementId: c.measurementId, jobMaterialId: c.jobMaterialId, role: "primary", split };
@@ -383,13 +385,15 @@ export async function commitWorkspace(sb, ctx, body) {
     const c = computed.contributions.find((x) => x.contributionId === id);
     const rec = contribs.get(id);
     if (!c || !rec?.split) continue;
-    must(c.result && rec.split.sourceFinishedMm === c.result.finishedLengthMm, "The length changed while you were splitting — reopen the split.");
-    rec.split.sourceSignature = c.sourceSignature;
+    if (!c.result) continue;
+    // the source moved while the split was being made (e.g. offline): keep the split but mark it stale for
+    // review instead of refusing the whole batch (R04b R5)
+    rec.split.sourceSignature = rec.split.sourceFinishedMm === c.result.finishedLengthMm ? c.sourceSignature : "source-changed-while-splitting";
   }
   if (changedSplits.length) computed = computeWorkspace(merged);
   for (const id of changedSplits) {
     const c = computed.contributions.find((x) => x.contributionId === id);
-    if (c?.split && (!c.split.valid || c.split.stale)) {
+    if (c?.split && (!c.split.valid || (c.split.stale && contribs.get(id)?.split?.sourceSignature !== "source-changed-while-splitting"))) {
       throw bad(c.split.problems?.[0] || (c.split.stale ? PROBLEM_TEXT.split_stale : PROBLEM_TEXT.split_invalid), "SPLIT_INVALID");
     }
   }
@@ -484,6 +488,26 @@ export async function listOrders(sb, wsId) {
   }));
 }
 
+/**
+ * What OTHER orders already cover, per bucket (R04b R7/R8): placed allocations + lines of open orders that
+ * already have an order-ready (sent-able) export but no placement recorded yet.
+ * → Map bucketKey → { placed, exported, refs: [orderRef…] }
+ */
+export async function otherOrderCover(sb, wsId, excludeOrderId = null) {
+  const out = new Map();
+  const add = (k, field, n, ref) => { const e = out.get(k) || { placed: 0, exported: 0, refs: [] }; e[field] += n; if (ref && !e.refs.includes(ref)) e.refs.push(ref); out.set(k, e); };
+  for (const c of await loadCommitments(sb, wsId)) add(c.bucketKey, "placed", c.quantity, null);
+  const orders = (await q(sb.from("takeoff_orders").select("id, order_ref, status").eq("workspace_id", wsId))).filter((o) => o.id !== excludeOrderId && o.status === "draft");
+  if (!orders.length) return out;
+  const ids = orders.map((o) => o.id);
+  const ready = new Set((await q(sb.from("takeoff_exports").select("order_id, is_draft, artifact_status").in("order_id", ids))).filter((e) => !e.is_draft).map((e) => e.order_id));
+  if (!ready.size) return out;
+  const lines = await q(sb.from("takeoff_order_lines").select("order_id, bucket_key, quantity").in("order_id", [...ready]));
+  const refOf = new Map(orders.map((o) => [o.id, o.order_ref]));
+  for (const l of lines) add(l.bucket_key, "exported", l.quantity, refOf.get(l.order_id));
+  return out;
+}
+
 /** Schedule + required/ordered/remaining from trustworthy records only. */
 export async function scheduleStatus(sb, snapshot) {
   const computed = computeWorkspace(snapshot);
@@ -530,6 +554,7 @@ export function cleanDelivery(d) {
     address: optStr(x.address, 200),
     addressSource: x.addressSource === "job" ? "job" : x.address ? "entered" : null,
     requiredDate: ymd(x.requiredDate),
+    asap: x.asap === true && !ymd(x.requiredDate),
     contactName: optStr(x.contactName, 80),
     contactPhone: optStr(x.contactPhone, 40),
     pickupBranch: optStr(x.pickupBranch, 120),
@@ -581,7 +606,7 @@ export async function saveOrder(sb, ctx, orderRow, body) {
  * Build the frozen supplier-order snapshot. Pure apart from the reads passed in.
  * Returns { snapshot, problems } — problems block an order-ready export (drafts allowed).
  */
-export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, company, jobLabel, rendererVersion }) {
+export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, company, jobLabel, rendererVersion, cover = null, acknowledgeSurplus = false }) {
   const computed = computeWorkspace(wsSnapshot);
   const byKey = new Map(computed.scheduleLines.map((l) => [l.bucketKey, l]));
   const mats = new Map(wsSnapshot.materials.map((m) => [m.id, m]));
@@ -590,6 +615,11 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   const d = order.delivery || {};
   if (d.method !== "delivery" && d.method !== "pickup") problems.push("Choose delivery or pickup.");
   if (d.method === "delivery" && !d.address) problems.push("Enter the delivery address.");
+  // what a supplier needs to act on the order (R04b R13) — never invented, always asked for
+  if (d.method === "pickup" && !d.pickupBranch) problems.push("Enter the pickup branch.");
+  if (!d.requiredDate && !d.asap) problems.push("Enter the date it's required by (or choose As soon as possible).");
+  if (!d.contactPhone) problems.push("Enter a site contact phone number.");
+  if (company && !company.phone && !company.email) problems.push("Add Blue Leaf's phone or email in Settings › Company so the supplier can reply.");
   if (!lines.length) problems.push("Add at least one length to the order.");
   if (wsSnapshot.workspace.state === "needs_review") problems.push("A plan used by this takeoff was replaced or removed — review the takeoff and mark it reviewed.");
   const groups = new Map();
@@ -603,6 +633,11 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
     for (const p of sl.problems) problems.push(PROBLEM_TEXT[p] || p);
     if (l.quantity < 1) problems.push("Quantities must be 1 or more.");
+    const cv = cover?.get(sl.bucketKey);
+    if (cv && cv.placed + cv.exported + l.quantity > sl.quantity && !acknowledgeSurplus) {
+      const left = Math.max(0, sl.quantity - cv.placed - cv.exported);
+      problems.push(`${mat.name} ${sl.finishedLengthMm.toLocaleString("en-AU")} mm: ${cv.placed + cv.exported} of ${sl.quantity} are already on ${cv.refs.length ? cv.refs.join(", ") : "a placed order"}${cv.placed ? " (placed)" : " (exported)"} — only ${left} more needed. Reduce this line or remove it.`);
+    }
     let g = groups.get(sl.specKey);
     if (!g) {
       let dims = null;
@@ -613,6 +648,9 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     }
     g.lines.push({ bucketKey: sl.bucketKey, stale: st.stale, finishedLengthMm: sl.finishedLengthMm, quantity: l.quantity, handlingFlag: sl.handlingFlag, ceilingExceeded: sl.ceilingExceeded });
   }
+  // measurements of these materials that produced no pieces = unknown quantity → not ready (R04b R1)
+  const specs = new Set([...groups.keys()]);
+  for (const u of computed.unplaced || []) if (u.specKey && specs.has(u.specKey)) problems.push(`A measurement couldn't be turned into lengths (${(u.problems || []).map((p) => PROBLEM_TEXT[p] || p).join(" ")}) — fix or remove it.`);
   const groupList = [...groups.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.specKey < b.specKey ? -1 : 1)).map((g, i) => {
     for (const p of g.materialProblems) problems.push(PROBLEM_TEXT[p] || p);
     g.lines.sort((a, b) => b.finishedLengthMm - a.finishedLengthMm);
@@ -636,6 +674,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     profileSchemaVersion: PROFILE_SCHEMA_VERSION,
     rendererVersion,
     orderRef: order.orderRef,
+    issuedOn: new Date().toISOString().slice(0, 10),
     company: company ? { name: company.name, abn: company.abn || null, address: company.address || null, phone: company.phone || null, email: company.email || null } : { name: "Blue Leaf Building" },
     job: { label: jobLabel || null, owner: wsSnapshot.workspace.owner, takeoffName: wsSnapshot.workspace.name },
     supplier: supplier ? { id: supplier.id, name: supplier.name, contactName: supplier.contact_name || null, email: supplier.email || null, phone: supplier.phone || null, abn: supplier.abn || null } : null,

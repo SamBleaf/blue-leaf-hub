@@ -14,7 +14,7 @@
 
 export const TAP_SLOP_PX = 8;
 const TAP_MAX_MS = 600;
-export const PRECISE_HOLD_MS = 280;
+export const PRECISE_HOLD_MS = 500; // a deliberate hold — a short rest before a pan stays a pan (R04b R21)
 
 /**
  * @param {{

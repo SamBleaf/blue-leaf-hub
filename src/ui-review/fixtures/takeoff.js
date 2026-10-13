@@ -86,6 +86,7 @@ const fail = (status, error, code) => ({ __status: status, body: { ok: false, er
 
 function applyCommit(body) {
   if (window.__takeoffReviewOffline) throw new TypeError("Failed to fetch"); // simulate a dropped connection
+  if (window.__takeoffReviewRefuse) { state.commitCount = (state.commitCount || 0) + 1; return fail(window.__takeoffReviewRefuse, "Your sign-in has expired.", "UNAUTHENTICATED"); } // simulate a 4xx refusal
   state.commitCount = (state.commitCount || 0) + 1;
   if (qs().get("takeoffConflict") === "1" && !state.conflicted) { state.conflicted = true; state.revision += 1; return fail(409, "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare.", "CONFLICT"); }
   if (body.expectedRevision !== state.revision) return fail(409, "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare.", "CONFLICT");

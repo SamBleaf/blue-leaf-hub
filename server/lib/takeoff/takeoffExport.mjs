@@ -15,7 +15,7 @@ import { computeWorkspace, contributionPiecesForBucket } from "../../../shared/t
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
 import { ownerColumns, isUuid } from "./takeoffAccess.mjs";
 import {
-  EXPORTS_BUCKET, buildExportSnapshot, loadCommitments, loadSnapshotFresh, sha256, snapshotHash,
+  EXPORTS_BUCKET, buildExportSnapshot, loadCommitments, loadSnapshotFresh, otherOrderCover, sha256, snapshotHash,
 } from "./takeoffService.mjs";
 import { RENDERER_VERSION, renderSupplierOrderPdf } from "./takeoffPdf.mjs";
 
@@ -40,7 +40,8 @@ async function loadOrderBundle(sb, orderRow) {
 export async function previewExport(sb, ctx, orderRow, jobLabel) {
   const { snapshot: wsSnapshot } = await loadSnapshotFresh(sb, orderRow.workspace_id);
   const b = await loadOrderBundle(sb, orderRow);
-  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION });
+  const cover = await otherOrderCover(sb, orderRow.workspace_id, orderRow.id);
+  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION, cover });
   return { snapshot, problems, workspaceRevision: wsSnapshot.workspace.revision, orderRevision: orderRow.revision };
 }
 
@@ -64,7 +65,11 @@ export async function createExport(sb, ctx, orderRow, body, jobLabel) {
   if (Number(body.expectedOrderRevision) !== orderRow.revision || Number(body.expectedWorkspaceRevision) !== wsSnapshot.workspace.revision) {
     throw new TakeoffHttpError(409, "The takeoff or order changed — review the latest version, then export again.", "CONFLICT");
   }
-  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION });
+  const cover = await otherOrderCover(sb, orderRow.workspace_id, orderRow.id);
+  // ordering MORE than is still needed (spares) must be chosen explicitly (R04b R7)
+  const acknowledgeSurplus = body?.acknowledgeSurplus === true;
+  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION, cover, acknowledgeSurplus });
+  if (acknowledgeSurplus) snapshot.surplusAcknowledged = true;
   if (!isDraft && problems.length) {
     throw new TakeoffHttpError(400, `Not ready to order: ${problems.join(" ")}`, "NOT_READY");
   }

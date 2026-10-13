@@ -48,7 +48,10 @@ function Choice({ label, value, options, onChange, name }) {
 export default function MaterialSheet({ value, view, profile = null, mode = "job", onChange, onSave, onCancel, canEditSourceReview = false }) {
   const job = mode === "job";
   const [name, setName] = useState(value?.name || "Flashing");
-  const [spec, setSpec] = useState(() => { try { return normaliseSpec({ ...FLASHING_SPEC_DEFAULTS, ...(value?.spec || {}) }); } catch { return normaliseSpec(FLASHING_SPEC_DEFAULTS); } });
+  const [spec, setSpec] = useState(() => {
+    const has = value?.spec && Object.keys(value.spec).length;
+    try { return normaliseSpec(has ? value.spec : FLASHING_SPEC_DEFAULTS); } catch { return normaliseSpec(FLASHING_SPEC_DEFAULTS); }
+  });
   const [rules, setRules] = useState({ ...FLASHING_RULE_DEFAULTS, ...(value?.rules || {}) });
   const [review, setReview] = useState(value?.sourceReview || { status: "user_entered" });
   const [error, setError] = useState(null);
@@ -81,7 +84,7 @@ export default function MaterialSheet({ value, view, profile = null, mode = "job
     const f = finishInfo(id);
     const keepColour = f.palette && (colourOptions(id) || []).includes(latest.current.spec.colour);
     setCustomColour(false);
-    setS({ finishId: id, finish: f.label, colourApplicable: f.painted === null ? latest.current.spec.colourApplicable : f.painted, colour: keepColour ? latest.current.spec.colour : f.painted === false ? null : "" });
+    setS({ finishId: id, finish: id === "other" ? "" : f.label, colourApplicable: f.painted, colour: keepColour ? latest.current.spec.colour : f.painted === false ? null : "" });
   }
 
   function saveStandard() {
@@ -125,12 +128,10 @@ export default function MaterialSheet({ value, view, profile = null, mode = "job
           {customBmt && <div className="mt-2"><NumberField label="BMT" unit="mm" value={spec.bmt} onCommit={(n) => setS({ bmt: n })} help="Confirm this thickness with the supplier." /></div>}
         </div>
         {spec.finishId === "other" && (
-          <label className="flex min-h-[44px] items-center gap-2 text-sm">
-            <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={!!spec.colourApplicable} onChange={(e) => setS({ colourApplicable: e.target.checked, colour: e.target.checked ? "" : null })} />
-            This material is painted (has a colour)
-          </label>
+          <Choice name={`painted-${value?.id}`} label="Is it painted?" value={spec.colourApplicable === true ? "yes" : spec.colourApplicable === false ? "no" : null}
+            onChange={(v) => setS({ colourApplicable: v === "yes", colour: v === "yes" ? "" : null })} options={[["yes", "Painted (has a colour)"], ["no", "Unpainted / natural"]]} />
         )}
-        {spec.colourApplicable ? (
+        {spec.colourApplicable == null ? null : spec.colourApplicable ? (
           <div>
             <label htmlFor={`col-${value?.id}`} className="mb-1 block text-xs font-medium text-muted">Colour</label>
             {palette ? (
@@ -162,13 +163,22 @@ export default function MaterialSheet({ value, view, profile = null, mode = "job
                   {PERFORATION_PATTERNS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </div>
-              <NumberField label="Hole size" unit="mm" value={perf.holeSizeMm} onCommit={(n) => setP({ holeSizeMm: n })} />
-              <NumberField label="Pitch (centres)" unit="mm" value={perf.pitchMm} onCommit={(n) => setP({ pitchMm: n })} />
-              <NumberField label="Open area (optional)" unit="%" value={perf.openAreaPct} onCommit={(n) => setP({ openAreaPct: n })} />
+              <NumberField label="Hole size" unit="mm" min={0.1} value={perf.holeSizeMm} onCommit={(n) => setP({ holeSizeMm: n })} />
+              <NumberField label="Pitch (centres)" unit="mm" min={0.1} value={perf.pitchMm} onCommit={(n) => setP({ pitchMm: n })} />
+              <NumberField label="Open area (optional)" unit="%" min={0.1} max={99} value={perf.openAreaPct} onCommit={(n) => setP({ openAreaPct: n })} />
+              <div>
+                <label htmlFor={`arr-${value?.id}`} className="mb-1 block text-xs font-medium text-muted">Hole rows</label>
+                <select id={`arr-${value?.id}`} className={sel} value={perf.arrangement || ""} onChange={(e) => setP({ arrangement: e.target.value || null })}>
+                  <option value="">Not specified</option><option value="straight">Straight rows</option><option value="staggered">Staggered</option>
+                </select>
+              </div>
             </div>
             {perf.pattern === "other" && <TextField label="Describe the pattern" value={perf.description} onChange={(v) => setP({ description: v })} />}
             <Choice name={`ext-${value?.id}`} label="Where" value={perf.extent || "all"} onChange={(v) => setP({ extent: v, legIds: v === "all" ? [] : perf.legIds || [] })}
               options={[["all", "All legs"], ["selected_legs", "Selected legs"]]} />
+            {perf.extent === "selected_legs" && (perf.legIds || []).some((id) => !legs.some((l) => l.id === id)) && (
+              <Banner tone="warn" action={<Btn onClick={() => setP({ legIds: (perf.legIds || []).filter((id) => legs.some((l) => l.id === id)) })}>Clear removed legs</Btn>}>A perforated leg was removed or redrawn — choose the legs again.</Banner>
+            )}
             {perf.extent === "selected_legs" && (
               <div className="flex flex-wrap gap-2" role="group" aria-label="Perforated legs">
                 {legs.length ? legs.map((l) => {

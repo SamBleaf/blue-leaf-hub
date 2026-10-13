@@ -109,3 +109,19 @@ export function partial({ measurements = [], contributions = [], materials = [],
   }
   return ch;
 }
+
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** 3-way per field: keep what THIS user changed since `base`, take everything else from `latest` (R04b R14). */
+export function rebaseRecord(mine, base, latest) {
+  if (!base || !latest) return mine;
+  const out = { ...latest };
+  for (const k of Object.keys(mine)) {
+    if (k === "spec" || k === "rules") {
+      const m = mine[k] || {}, b = base[k] || {}, l = latest[k] || {};
+      const merged = { ...l };
+      for (const f of new Set([...Object.keys(m), ...Object.keys(b)])) if (!sameJson(m[f], b[f])) merged[f] = m[f];
+      out[k] = merged;
+    } else if (!sameJson(mine[k], base[k])) out[k] = mine[k];
+  }
+  return out;
+}

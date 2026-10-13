@@ -4,9 +4,10 @@
 import assert from "node:assert/strict";
 import {
   starterProfile, computeWorkspace, materialProblems, materialSpecKey, buildCalibration, verifyCalibration,
-  orderLineState, normaliseSpec, describeSpec, specProblems, colourOptions, thicknessOptions, PALETTES,
+  orderLineState, reconcileStaleLine, normaliseSpec, describeSpec, specProblems, colourOptions, thicknessOptions, PALETTES,
 } from "../../shared/takeoff/index.js";
 import { buildExportSnapshot } from "../../server/lib/takeoff/takeoffService.mjs";
+import { rebaseRecord } from "../../src/components/takeoff/changeset.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -33,7 +34,7 @@ function f01() {
   const lines = [{ bucketKey: original.bucketKey, specKey: original.specKey, jobMaterialId: "m1", finishedLengthMm: 4600, quantity: 1 }];
   return { ws, lines, original };
 }
-const exp = (ws, lines) => buildExportSnapshot({ wsSnapshot: ws, order: { orderRef: "FO-T", revision: 1, delivery: { method: "pickup" } }, lines, supplier: { id: "s", name: "Synthetic supplier" }, company: { name: "Test" }, jobLabel: "Synthetic", rendererVersion: "t" });
+const exp = (ws, lines) => buildExportSnapshot({ wsSnapshot: ws, order: { orderRef: "FO-T", revision: 1, delivery: { method: "pickup", pickupBranch: "Synthetic branch", asap: true, contactPhone: "0400 000 000" } }, lines, supplier: { id: "s", name: "Synthetic supplier" }, company: { name: "Test", phone: "08 0000 0000" }, jobLabel: "Synthetic", rendererVersion: "t" });
 
 t("F01 colour change on the line's material → line stale, order-ready blocked, PDF never prints the new colour against the old bucket", () => {
   const { ws, lines } = f01();
@@ -76,6 +77,18 @@ t("F01 removed length → stale (missing), no PDF group invented", () => {
   assert.equal(exp(ws, lines).snapshot.groups.length, 0);
 });
 
+t("R2 'Update to current material' on a 2-piece line shared by two identical flashings keeps BOTH pieces (1 old colour + 1 new)", () => {
+  const { ws, original } = f01();
+  const lines = [{ bucketKey: original.bucketKey, specKey: original.specKey, jobMaterialId: "m1", finishedLengthMm: 4600, quantity: 2 }];
+  ws.materials[0].spec.colour = "Surfmist";
+  const comp = computeWorkspace(ws);
+  const st = orderLineState(lines[0], comp, ws.materials);
+  const r = reconcileStaleLine({ [original.bucketKey]: 2 }, { [original.bucketKey]: "m1" }, { line: lines[0], ...st });
+  assert.equal(Object.values(r.qty).reduce((a, b) => a + b, 0), 2, "no piece dropped");
+  assert.equal(r.qty[original.bucketKey], 1); assert.equal(r.chosen[original.bucketKey], "m2");
+  assert.equal(r.qty[st.suggestion.bucketKey], 1); assert.equal(r.chosen[st.suggestion.bucketKey], "m1");
+});
+
 // ── F04 / F06 / A07: material model ──────────────────────────────────────────
 t("F04 unpainted ZINCALUME needs no colour; blank colour is not a problem; prints natural", () => {
   const z = mat("z", { product: "Flashing", finish: "ZINCALUME", bmt: 0.5, colour: "" });
@@ -116,6 +129,27 @@ t("02 dropdowns: sourced palettes (Bluegum in Classic, no Mangrove), unpainted h
   assert.match(thicknessOptions("colorbond")[0].note, /confirm/i);
 });
 
+t("R12 'Other / custom' needs a real description AND an explicit painted/unpainted answer; never prints 'natural' by default", () => {
+  assert.ok(specProblems({ product: "Flashing", finishId: "other", finish: "Other / custom", bmt: 0.55, colour: "" }).includes("material_incomplete"));
+  assert.ok(specProblems({ product: "Flashing", finish: "Other", bmt: 0.55, colour: "" }).includes("material_incomplete"), "R03 'Other' + blank colour stays incomplete");
+  assert.ok(specProblems({ product: "Flashing", finishId: "other", finish: "Copper", bmt: 0.55 }).includes("material_incomplete"), "painted/unpainted not answered");
+  assert.deepEqual(specProblems({ product: "Flashing", finishId: "other", finish: "Copper", bmt: 0.55, colourApplicable: false }), []);
+  assert.match(describeSpec({ product: "Flashing", finishId: "other", finish: "Copper", bmt: 0.55 }).line, /painted or unpainted\?/);
+});
+t("R31 placeholder colour 'N/A' / 'none' on a painted finish is not a colour", () => {
+  for (const c of ["N/A", "none", "n/a"]) assert.ok(specProblems({ ...spec, colour: c }).includes("material_incomplete"));
+});
+t("R27 perforated legs are keyed by leg POSITION: same ids on different physical legs never merge", () => {
+  const a = mat("pa", { ...spec, construction: "perforated", perforation: { pattern: "round", holeSizeMm: 3, pitchMm: 6, extent: "selected_legs", legIds: ["x"] } });
+  const b = mat("pb", { ...a.spec });
+  a.profile = { ...a.profile, segments: a.profile.segments.map((sg, i) => ({ ...sg, id: i === 0 ? "x" : `a${i}` })) };
+  b.profile = { ...b.profile, segments: b.profile.segments.map((sg, i) => ({ ...sg, id: i === 1 ? "x" : `b${i}` })) };
+  assert.notEqual(materialSpecKey(a), materialSpecKey(b));
+});
+t("R29 open area outside 0–100 % is rejected", () => {
+  for (const v of [-5, 0, 250]) assert.throws(() => normaliseSpec({ ...spec, construction: "perforated", perforation: { openAreaPct: v } }));
+});
+
 // ── F05 / F07 / A06: splits ──────────────────────────────────────────────────
 const splitWs = (mm) => wsBase({ measurements: [run("r", mm)], contributions: [{ id: "k", measurementId: "r", jobMaterialId: "m1" }] });
 t("A06 6,980 → 7,200 stays one flagged piece until split; 3,700 + 3,700 − 200 lap = 7,200", () => {
@@ -136,10 +170,12 @@ t("F05 source 6,980 → 6,990 (same 7,200 finished) makes the split stale", () =
   assert.equal(c.split.stale, true);
   assert.ok(computeWorkspace(ws).scheduleLines.every((l) => l.problems.includes("split_stale")));
 });
-t("F05 a calibration revision or a rule change that rounds the same also makes it stale", () => {
+t("F05 a re-scale (new calibration) or a rule change that rounds the same also makes it stale", () => {
   const ws = splitWs(6980);
   ws.contributions[0].split = { pieces: [3700, 3700], laps: [200], sourceFinishedMm: 7200, sourceSignature: signed(ws, "k") };
-  const wsCal = structuredClone(ws); wsCal.calibrations[0].calibrationRevision = 2;
+  // a re-scale is a NEW calibration (immutable rows); the run reviewed onto it → stale even at the same scale
+  const wsCal = structuredClone(ws); wsCal.calibrations.push({ ...wsCal.calibrations[0], id: "cal2", calibrationRevision: 2 }); wsCal.measurements[0].calibrationId = "cal2";
+  assert.equal(computeWorkspace(wsCal).contributions[0].result.finishedLengthMm, 7200);
   assert.equal(computeWorkspace(wsCal).contributions[0].split.stale, true);
   const wsRule = structuredClone(ws); wsRule.materials[0].rules = { handlingThresholdMm: 6500 };
   assert.equal(computeWorkspace(wsRule).contributions[0].result.finishedLengthMm, 7200);
@@ -169,6 +205,42 @@ t("A06 boundaries: exactly 6,000 not flagged; 9,100 blocks order-ready until spl
   assert.equal(out.scheduleLines.find((l) => l.finishedLengthMm === 6000).handlingFlag, false);
   assert.ok(out.scheduleLines.find((l) => l.finishedLengthMm === 9100).problems.includes("ceiling_exceeded"));
   assert.equal(out.orderReady, false);
+});
+
+t("R1 a split count cut below its split originals keeps the pieces WHOLE and flagged — nothing vanishes, not order-ready", () => {
+  const ws = wsBase({ measurements: [{ id: "c", kind: "count", documentId: "d", pageIndex: 0, finishedLengthMm: 7200, points: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }], contributions: [{ id: "k", measurementId: "c", jobMaterialId: "m1" }] });
+  ws.contributions[0].split = { pieces: [3700, 3700], laps: [200], sourceFinishedMm: 7200, originals: 3, sourceSignature: signed(ws, "k") };
+  assert.deepEqual(sched(ws), ["6×3700"]);
+  ws.measurements[0].points.pop(); // one count mark deleted: 2 left, split was of 3
+  const out = computeWorkspace(ws);
+  assert.deepEqual(sched(ws), ["2×7200"]);
+  assert.ok(out.scheduleLines[0].problems.includes("split_invalid"));
+  assert.equal(out.orderReady, false);
+});
+t("R1 a measurement with no pieces (invalid run) is listed as unplaced and blocks ordering", () => {
+  const ws = wsBase({ measurements: [run("a", 4321), { id: "bad", kind: "run", documentId: "d", pageIndex: 0, calibrationId: "missing", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }],
+    contributions: [{ id: "ka", measurementId: "a", jobMaterialId: "m1" }, { id: "kb", measurementId: "bad", jobMaterialId: "m1" }] });
+  const out = computeWorkspace(ws);
+  assert.equal(out.unplaced.length, 1); assert.equal(out.orderReady, false);
+});
+t("R11 a split made in the same batch as its calibration is not stale (signature uses the calibration id)", () => {
+  const ws = splitWs(6980);
+  const sig = signed(ws, "k");
+  ws.calibrations[0].calibrationRevision = 7; // revision assigned later by the database
+  ws.contributions[0].split = { pieces: [3700, 3700], laps: [200], sourceFinishedMm: 7200, sourceSignature: sig };
+  assert.equal(computeWorkspace(ws).contributions[0].split.stale, false);
+});
+
+t("R14 conflict rebase keeps ONLY the fields I changed: a colleague's profile edit survives my colour change", () => {
+  const base = mat("m1");
+  const theirs = { ...base, profile: { ...base.profile, segments: base.profile.segments.map((sg, i) => (i ? sg : { ...sg, lengthMm: 140 })) } };
+  const mine = { ...base, spec: { ...base.spec, colour: "Surfmist" } };
+  const out = rebaseRecord(mine, base, theirs);
+  assert.equal(out.spec.colour, "Surfmist");
+  assert.equal(out.profile.segments[0].lengthMm, 140);
+  const mineBmt = { ...base, spec: { ...base.spec, bmt: 0.42 } }, theirsColour = { ...base, spec: { ...base.spec, colour: "Basalt" } };
+  const merged = rebaseRecord(mineBmt, base, theirsColour);
+  assert.equal(merged.spec.bmt, 0.42); assert.equal(merged.spec.colour, "Basalt");
 });
 
 // ── A05 arithmetic ───────────────────────────────────────────────────────────

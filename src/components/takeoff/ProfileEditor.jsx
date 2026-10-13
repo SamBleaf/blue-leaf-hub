@@ -24,7 +24,7 @@ import {
 } from "../../../shared/takeoff/index.js";
 import { createGestureTracker } from "./gestures.js";
 import {
-  layoutProfile, hitTest, fitView, zoomAt, panBy, screenToMm, snapToGrid, profileBoundsMm, gridLines,
+  layoutProfile, hitTest, fitProfileView, zoomAt, panBy, screenToMm, snapToGrid, gridLines,
   sketchToProfile, parseNumberInput, formatAngle, treatmentText, appendLegToward, previewLeg, SKETCH_GRID_MM,
 } from "./profileEditorModel.js";
 import { loadEditorDraft, saveEditorDraft, clearEditorDraft } from "../../lib/takeoffRecovery.js";
@@ -80,6 +80,8 @@ export default function ProfileEditor({
   const [hover, setHover] = useState(null);         // snapped mm point under the pointer (drawing preview)
   const [loaded, setLoaded] = useState(!draftScope); // don't overwrite a stored draft before reading it
   const [prefs, setPrefs] = useState(readPrefs);
+  const [fieldReset, setFieldReset] = useState(0);
+  const [selVia, setSelVia] = useState(null); // "label" when a size label was tapped (focus its field) // remounts the open field so it shows the restored value
   const drawRef = useRef(null);
   const handlers = useRef({});
   const session = useRef(null);                     // the field currently being typed into (coalesces undo)
@@ -103,12 +105,20 @@ export default function ProfileEditor({
 
   const fitAll = useCallback((p = profile, a = anchor) => {
     if (!p || size.w <= 0) return null;
-    const b = profileBoundsMm(p);
-    return fitView({ minX: b.minX + a.x, maxX: b.maxX + a.x, minY: b.minY + a.y, maxY: b.maxY + a.y }, size, FIT_INSET);
+    // label-aware fit (dimension boxes, crush labels), then shift for where the drawing's start sits
+    const f = fitProfileView(p, size, FIT_INSET);
+    return { ...f, tx: f.tx - a.x * f.scale, ty: f.ty + a.y * f.scale };
   }, [profile, anchor, size]);
 
   // first view once the canvas has a size: fit an existing shape, or an empty 10 mm grid for a new one.
   // After that the view only changes when the user pans / zooms / asks to fit — never on a keystroke.
+  const lastW = useRef(0);
+  useEffect(() => {
+    if (!view || !lastW.current) { lastW.current = size.w; return; }
+    if (Math.abs(size.w - lastW.current) > 60 && profile) { const f = fitAll(); if (f) setView(f); } // rotated / resized
+    lastW.current = size.w;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only on width changes
+  }, [size.w]);
   useEffect(() => {
     if (view || size.w <= 0) return;
     setView(profile ? fitAll() : { scale: Math.min(6, Math.max(0.5, Math.min(size.w, size.h) / 300)), tx: size.w * 0.3, ty: size.h * 0.6 });
@@ -152,7 +162,7 @@ export default function ProfileEditor({
     if (!draftScope || !loaded || readOnly) return;
     const empty = !entry.profile && !entry.first && !hist.past.length && !invalidCount;
     if (empty) { clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); return; }
-    saveEditorDraft({ ...draftScope, draft: { v: 1, base: init.entry.profile, hist: { present: hist.present, past: hist.past.slice(-30), future: hist.future.slice(0, 30) }, drafts, view } });
+    saveEditorDraft({ ...draftScope, draft: { v: 1, base: lastSent.current ?? null, hist: { present: hist.present, past: hist.past.slice(-30), future: hist.future.slice(0, 30) }, drafts, view } });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- view is saved opportunistically with the next edit
   }, [hist, drafts, loaded]);
 
@@ -162,11 +172,12 @@ export default function ProfileEditor({
   const flush = useCallback(() => {
     if (!job || !onChangeRef.current || readOnly) return;
     const p = latest.current.profile;
-    if (!p || sameJson(p, lastSent.current)) return;
+    if (sameJson(p ?? null, lastSent.current ?? null)) return;
+    if (!p) { lastSent.current = null; onChangeRef.current(null); return; } // cleared / undone to blank: the job copy follows
     try { const clean = normaliseProfile(p); lastSent.current = clean; onChangeRef.current(clean); } catch { /* invalid shapes never leave the editor */ }
   }, [job, readOnly]);
   useEffect(() => {
-    if (!job || !profile) return undefined;
+    if (!job) return undefined;
     const t = setTimeout(flush, AUTOSAVE_MS);
     return () => clearTimeout(t);
   }, [job, profile, flush]);
@@ -197,15 +208,21 @@ export default function ProfileEditor({
   }
   function endSession() { session.current = null; }
   function doUndo() {
+    const key = sel ? (sel.kind === "end" ? `end:${sel.which}:w` : selKey(sel)) : null;
+    if (key && drafts[key] != null && session.current !== key) {
+      // the open field only holds text that never applied: undo just that text, not someone else's leg (R04b R19)
+      setDraft(key, null); setFieldReset((n) => n + 1); setError(null); return;
+    }
     endSession();
     setHist((h) => undo(h));
-    setDrafts({}); setError(null);
+    setDrafts({}); setFieldReset((n) => n + 1); setError(null);
   }
   function doRedo() { endSession(); setHist((h) => redo(h)); setDrafts({}); setError(null); }
   function select(next) {
     endSession();
     flush();
-    setSel(next);
+    setSel(next ? { kind: next.kind, id: next.id, index: next.index, which: next.which } : null);
+    setSelVia(next?.via || null);
     setError(null);
     setMenu(false);
   }
@@ -223,8 +240,14 @@ export default function ProfileEditor({
     const inBox = (bx, pad = 6) => bx && q.x >= bx.x - pad && q.x <= bx.x + bx.w + pad && q.y >= bx.y - pad && q.y <= bx.y + bx.h + pad;
     for (const l of layout.legs) if (inBox(l.label.box)) return { kind: "leg", id: l.id };
     for (const c of layout.corners) if (inBox(c.label.box)) return { kind: "corner", index: c.index };
-    for (const e of layout.ends) if (e.glyph && inBox(e.glyph.label.box)) return { kind: "end", which: e.which };
-    return hitTest(layout, q, 26);
+    for (const e of layout.ends) if (e.glyph && inBox(e.glyph.label.box)) return { kind: "end", which: e.which, via: "label" };
+    const h = hitTest(layout, q, 26);
+    if (h?.kind === "end") {
+      // a plain end only claims taps right on its handle — just beyond it you can still draw a short return
+      const e = layout.ends.find((x) => x.which === h.which);
+      if (!e.glyph && Math.hypot(q.x - e.p.x, q.y - e.p.y) > 16) return null;
+    }
+    return h;
   }
   function addPoint(pt) {
     const mm = snapToGrid(screenToMm(v, pt), SKETCH_GRID_MM);
@@ -253,6 +276,7 @@ export default function ProfileEditor({
   function navigate(fn) { setView((cur) => fn(cur || v)); }
   const zoomCentre = (f) => navigate((x) => zoomAt(x, f, { x: size.w / 2, y: size.h / 2 }));
   function fit() { const f = fitAll(); if (f) setView(f); setMenu(false); }
+  const refitSoon = () => setTimeout(() => { const p = latest.current.profile; const f = p ? fitAll(p, latest.current.entry.anchor || { x: 0, y: 0 }) : null; if (f) setView(f); }, 0);
 
   // keep the selected item clear of the sheet / keyboard (once per selection or resize, never per keystroke)
   useEffect(() => {
@@ -373,7 +397,8 @@ export default function ProfileEditor({
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
-  const status = !job ? null : invalidCount || (!profile && entry.first) ? "local" : syncStatus || "saved";
+  const unsent = job && !sameJson(profile ?? null, lastSent.current ?? null);
+  const status = !job ? null : invalidCount || (!profile && entry.first) ? "local" : !profile && !lastSent.current ? null : unsent ? "unsynced" : syncStatus || "unsynced";
   const preview = hover && !sel ? previewLeg(profile, anchor, entry.first, hover.mm) : null;
   const s = v.scale;
   const toScreen = (mm) => ({ x: v.tx + mm.x * s, y: v.ty - mm.y * s });
@@ -389,10 +414,10 @@ export default function ProfileEditor({
       sheet = (
         <Sheet title={`Leg L${i + 1}`} onDone={() => select(null)} onPrev={i > 0 ? () => select({ kind: "leg", id: profile.segments[i - 1].id }) : null}
           onNext={i < n - 1 ? () => select({ kind: "leg", id: profile.segments[i + 1].id }) : null}>
-          <LiveNumber key={key} label={`L${i + 1} length`} unit="mm" value={seg.lengthMm} draft={drafts[key]} autoFocus
+          <LiveNumber key={`${key}:${fieldReset}`} label={`L${i + 1} length`} unit="mm" value={seg.lengthMm} draft={drafts[key]} autoFocus
             onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
             onValid={(num) => run((p) => setSegmentLength(p, seg.id, num), { sessionKey: key, quiet: true })}
-            validate={(num) => { try { setSegmentLength(profile, seg.id, num); return null; } catch (e) { return e.message; } }} />
+            validate={(num) => { if (num < 5) return "Legs are at least 5 mm."; try { setSegmentLength(profile, seg.id, num); return null; } catch (e) { return e.message; } }} />
           <button type="button" onClick={() => { endSession(); run(flipCoatedFace); }} className="mt-2 min-h-[44px] w-full rounded-lg border border-hairline text-sm text-ink">
             {faceWord}: {profile.coatedFace} side ⇄ swap
           </button>
@@ -406,7 +431,7 @@ export default function ProfileEditor({
     sheet = (
       <Sheet title={`Corner B${sel.index + 1}`} onDone={() => select(null)} onPrev={sel.index > 0 ? () => select({ kind: "corner", index: sel.index - 1 }) : null}
         onNext={sel.index < profile.bends.length - 1 ? () => select({ kind: "corner", index: sel.index + 1 }) : null}>
-        <LiveNumber key={key} label="Included angle" unit="°" value={includedAngle(b.turnDeg)} draft={drafts[key]} autoFocus
+        <LiveNumber key={`${key}:${fieldReset}`} label="Included angle" unit="°" value={includedAngle(b.turnDeg)} draft={drafts[key]} autoFocus
           onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
           onValid={(num) => run((p) => setIncludedAngle(p, sel.index, num, dir === "straight" ? "left" : dir), { sessionKey: key, quiet: true })}
           validate={(num) => { try { setIncludedAngle(profile, sel.index, num, dir === "straight" ? "left" : dir); return null; } catch (e) { return e.message; } }} />
@@ -438,10 +463,10 @@ export default function ProfileEditor({
         </div>
         {t.type !== "none" && (
           <div className="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
-            <LiveNumber key={`${key}:${t.type}`} label={t.type === "closed_hem" ? "Crush width" : "Return width"} unit="mm" value={t.widthMm} draft={drafts[key]}
+            <LiveNumber key={`${key}:${t.type}:${fieldReset}`} autoFocus={selVia === "label"} label={t.type === "closed_hem" ? "Crush width" : "Return width"} unit="mm" value={t.widthMm} draft={drafts[key]}
               onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
               onValid={(num) => { if (run((p) => setTreatment(p, sel.which, { ...p[sel.which], widthMm: num }), { sessionKey: key, quiet: true })) savePrefs(t.type === "closed_hem" ? { crushWidth: num } : { returnWidth: num }); }}
-              validate={(num) => { try { setTreatment(profile, sel.which, { ...t, widthMm: num }); return null; } catch (e) { return e.message; } }} />
+              validate={(num) => { if (num < 3) return "At least 3 mm."; try { setTreatment(profile, sel.which, { ...t, widthMm: num }); return null; } catch (e) { return e.message; } }} />
             <button type="button" onClick={() => { endSession(); const ns = t.side === "left" ? "right" : "left"; run((p) => setTreatment(p, sel.which, { ...p[sel.which], side: ns })); savePrefs({ crushSide: ns }); }}
               className="min-h-[44px] rounded-lg border border-hairline px-3 text-sm font-medium text-ink" aria-label={`Flip fold — folds ${t.side} now`}>
               <FoldIcon side={t.side} /> Flip fold
@@ -458,10 +483,10 @@ export default function ProfileEditor({
     ["Fit to screen", fit, !profile],
     ["Zoom in", () => zoomCentre(1.25), false],
     ["Zoom out", () => zoomCentre(0.8), false],
-    ["Rotate 90°", () => { run((p) => rotateProfile(p, 90)); }, !profile],
-    ["Mirror (shape + paint together)", () => run(mirrorProfile), !profile],
+    ["Rotate 90°", () => { if (run((p) => rotateProfile(p, 90))) refitSoon(); }, !profile],
+    ["Mirror (shape + paint together)", () => { if (run(mirrorProfile)) refitSoon(); }, !profile],
     [`Swap ${faceWord.toLowerCase()}`, () => run(flipCoatedFace), !profile],
-    ["Reverse direction (number from the other end)", () => { run(reverseProfile); setSel(null); }, !profile],
+    ["Reverse direction (number from the other end)", () => { if (run(reverseProfile)) refitSoon(); setSel(null); }, !profile],
     ["Remove last leg", () => run(removeLastSegment), n <= 1],
     ["Clear drawing", () => { if (window.confirm("Clear the drawing? You can undo this.")) { commit({ profile: null, anchor: null, first: null }); setSel(null); setView(null); } }, !profile && !entry.first],
     [list ? "Hide dimension list" : "Show dimension list", () => setList((x) => !x), !profile],
@@ -484,22 +509,23 @@ export default function ProfileEditor({
         )}
       </header>
 
-      {(init.error || notice || (problems.length > 0 && !sel)) && (
-        <div className="shrink-0 space-y-1.5 px-3 pt-2">
+      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row landscape:flex-row">
+        <div className="relative min-h-[120px] flex-1 overflow-hidden bg-white lg:m-3 lg:rounded-card lg:border lg:border-hairline">
+      {(init.error || notice || syncStatus === "rejected" || (problems.length > 0 && !sel)) && (
+        <div className="pointer-events-none absolute inset-x-2 top-2 z-[5] space-y-1.5 [&>*]:pointer-events-auto">
           {init.error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{init.error}</div>}
           {notice && (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm text-sky-900">
               <span className="flex-1">{notice.text}</span>
-              {notice.action && <button type="button" className="min-h-[36px] rounded-md px-2 font-semibold underline" onClick={() => { notice.action.fn(); }}>{notice.action.label}</button>}
-              <button type="button" className="min-h-[36px] rounded-md px-2" onClick={() => setNotice(null)}>{notice.dismissLabel || "OK"}</button>
+              {notice.action && <button type="button" className="min-h-[44px] rounded-md px-2 font-semibold underline" onClick={() => { notice.action.fn(); }}>{notice.action.label}</button>}
+              <button type="button" className="min-h-[44px] rounded-md px-2" onClick={() => setNotice(null)}>{notice.dismissLabel || "OK"}</button>
             </div>
           )}
+          {syncStatus === "rejected" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-700">A change couldn&apos;t be saved — it&apos;s kept on this device. Close to see why and try again.</div>}
           {problems.length > 0 && !sel && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900">{problems.join(" ")}</div>}
         </div>
       )}
 
-      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative min-h-[160px] flex-1 overflow-hidden bg-white lg:m-3 lg:rounded-card lg:border lg:border-hairline">
           <div ref={drawRef} data-takeoff-viewport="" tabIndex={0} role="application" onKeyDown={onDrawingKey}
             aria-label={profile ? `Flashing drawing, ${n} leg${n === 1 ? "" : "s"}. Tap a size or an end to edit it; tap empty space to draw the next leg.` : "Empty 10 mm grid. Tap points to draw the flashing."}
             className="absolute inset-0 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
@@ -542,8 +568,8 @@ export default function ProfileEditor({
           )}
         </div>
 
-        <aside className="z-10 shrink-0 overflow-y-auto overscroll-contain border-t border-hairline bg-white px-3 pt-2 lg:w-[360px] lg:border-l lg:border-t-0"
-          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))", maxHeight: "55%" }} aria-label={sel ? "Edit selection" : "Flashing"}>
+        <aside className="z-10 max-h-[55%] shrink-0 overflow-y-auto overscroll-contain border-t border-hairline bg-white px-3 pt-2 lg:max-h-none lg:w-[360px] lg:border-l lg:border-t-0 landscape:max-h-none landscape:w-[min(340px,45vw)] landscape:border-l landscape:border-t-0"
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }} aria-label={sel ? "Edit selection" : "Flashing"}>
           {error && <p role="alert" className="mb-1 text-xs text-red-700">{error}</p>}
           {profile && <p className="mb-1 text-[11px] text-muted">{faceWord}: {profile.coatedFace} side · mm · indicative girth {formatMm(girth)} mm</p>}
           {sheet || (
@@ -646,7 +672,8 @@ function LiveNumber({ label, unit, value, draft, onValid, onDraft, onBlur, valid
       <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
       <div className={`flex items-stretch rounded-lg border bg-white focus-within:ring-2 focus-within:ring-primary ${err ? "border-amber-400" : "border-hairline"}`}>
         <input id={id} autoFocus={autoFocus} inputMode="decimal" enterKeyHint="done" value={text} onChange={(e) => change(e.target.value)}
-          onBlur={onBlur} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} onFocus={(e) => e.currentTarget.select()}
+          onBlur={onBlur} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          onFocus={(e) => { const el = e.currentTarget; el.select(); setTimeout(() => el.scrollIntoView?.({ block: "center", behavior: "smooth" }), 350); }}
           aria-invalid={!!err} aria-describedby={err ? `${id}-e` : undefined}
           className="min-h-[48px] w-full min-w-0 rounded-l-lg border-0 px-3 text-lg font-semibold text-ink focus:ring-0" />
         <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span>
@@ -661,9 +688,9 @@ function Sheet({ title, children, onDone, onPrev, onNext }) {
     <div>
       <div className="mb-1.5 flex items-center gap-1">
         <h2 className="flex-1 text-sm font-semibold text-ink">{title}</h2>
-        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onPrev || undefined} disabled={!onPrev} aria-label="Previous" className="min-h-[40px] min-w-[40px] rounded-lg text-lg text-ink disabled:opacity-30">‹</button>
-        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onNext || undefined} disabled={!onNext} aria-label="Next" className="min-h-[40px] min-w-[40px] rounded-lg text-lg text-ink disabled:opacity-30">›</button>
-        <button type="button" onClick={onDone} className="min-h-[40px] rounded-lg px-3 text-sm font-semibold text-primary">Done</button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onPrev || undefined} disabled={!onPrev} aria-label="Previous" className="min-h-[44px] min-w-[44px] rounded-lg text-lg text-ink disabled:opacity-30">‹</button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onNext || undefined} disabled={!onNext} aria-label="Next" className="min-h-[44px] min-w-[44px] rounded-lg text-lg text-ink disabled:opacity-30">›</button>
+        <button type="button" onClick={onDone} className="min-h-[44px] rounded-lg px-3 text-sm font-semibold text-primary">Done</button>
       </div>
       {children}
     </div>
@@ -702,7 +729,7 @@ function DimensionList({ profile, onSelect }) {
     <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Dimensions">
       {items.map((it) => (
         <li key={it.text + selKey(it.sel)}>
-          {onSelect ? <button type="button" onClick={() => onSelect(it.sel)} className="min-h-[40px] rounded-lg border border-hairline px-2 text-sm text-ink">{it.text}</button>
+          {onSelect ? <button type="button" onClick={() => onSelect(it.sel)} className="min-h-[44px] rounded-lg border border-hairline px-2 text-sm text-ink">{it.text}</button>
             : <span className="inline-flex min-h-[40px] items-center rounded-lg border border-hairline bg-page px-2 text-sm text-ink">{it.text}</span>}
         </li>
       ))}

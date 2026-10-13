@@ -10,7 +10,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { PROBLEM_TEXT, describeSpec, orderLineState } from "../../../shared/takeoff/index.js";
+import { PROBLEM_TEXT, describeSpec, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { fmtLm, fmtMm } from "./format.js";
 
@@ -28,7 +28,7 @@ async function openPdf(api, exportId, setMsg) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export default function OrdersScreen({ api, ws, jobAddress, onBack }) {
+export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts = [] }) {
   const wsId = ws.view?.workspace?.id;
   const [data, setData] = useState(null);
   const [suppliers, setSuppliers] = useState(null);
@@ -55,7 +55,8 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack }) {
     setBusy(true); setMsg(null);
     const r = await api.createOrder(wsId, { id: newId(), supplierId: suppliers?.defaultSupplierId || null, delivery: { method: "delivery", address: jobAddress || "", addressSource: jobAddress ? "job" : null } });
     if (!r.ok) { setMsg(friendly(r)); setBusy(false); return; }
-    const lines = (data?.scheduleLines || []).map((l) => ({ bucketKey: l.bucketKey, quantity: status.get(l.bucketKey)?.remaining ?? l.quantity })).filter((l) => l.quantity > 0);
+    // still needed = required − placed − already on another exported (sent-able) order (R04b R8)
+    const lines = (data?.scheduleLines || []).map((l) => { const st = status.get(l.bucketKey); return { bucketKey: l.bucketKey, quantity: Math.max(0, (st?.remaining ?? l.quantity) - (st?.onExportedOrders || 0)) }; }).filter((l) => l.quantity > 0);
     if (lines.length) {
       const s = await api.saveOrder(r.data.order.id, { expectedRevision: r.data.order.revision, lines });
       if (!s.ok) setMsg(s.error);
@@ -78,7 +79,7 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack }) {
       <AsyncState loading={!data && !error} error={error} onRetry={load}>
         {active && (
           <DraftOrder key={`${active.id}:${active.revision}`} api={api} order={active} data={data} status={status} suppliers={suppliers} ws={ws}
-            onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} />
+            onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} deviceDrafts={deviceDrafts} />
         )}
         <OrderHistory api={api} orders={data?.orders || []} caps={caps} onChanged={load} setMsg={setMsg} />
       </AsyncState>
@@ -86,7 +87,8 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack }) {
   );
 }
 
-function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg, drafts, onPick }) {
+function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [] }) {
+  const [extra, setExtra] = useState(false); // explicit "order more than is still needed" (spares)
   const [supplierId, setSupplierId] = useState(order.supplierId || "");
   const [delivery, setDelivery] = useState(order.delivery || {});
   const [notes, setNotes] = useState(order.notes || "");
@@ -104,6 +106,8 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
   const [busy, setBusy] = useState(false);
   const [exportRes, setExportRes] = useState(null);
   const lines = data.scheduleLines || [];
+  const invalidDrafts = (deviceDrafts || []).filter((x) => x.invalid > 0);
+  const surplusAsked = !!preview?.problems?.some((p) => /already on/.test(p));
   const d = (k) => (v) => setDelivery((x) => ({ ...x, [k]: v, ...(k === "address" ? { addressSource: "entered" } : {}) }));
 
   const loadPreview = useCallback(async () => {
@@ -124,7 +128,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
 
   async function exportPdf(isDraft) {
     setBusy(true); setMsg(null); setExportRes(null);
-    const r = await api.exportOrder(order.id, { isDraft, idempotencyKey: `x-${newId()}`, expectedOrderRevision: order.revision, expectedWorkspaceRevision: ws.server?.snapshot?.workspace?.revision });
+    const r = await api.exportOrder(order.id, { isDraft, idempotencyKey: `x-${newId()}`, expectedOrderRevision: order.revision, expectedWorkspaceRevision: ws.server?.snapshot?.workspace?.revision, acknowledgeSurplus: !isDraft && extra });
     if (r.ok) setExportRes({ ok: true, ...r.data.export });
     else setExportRes({ ok: false, error: friendly(r), code: r.code });
     await onChanged();
@@ -136,10 +140,12 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
       || (chosen[k] || null) !== (order.lines.find((x) => x.bucketKey === k)?.jobMaterialId || null));
 
   // explicit reconcile of a stale line: switch it to what its material supplies now, or drop it
+  // keeps EVERY piece the line covered (R04b R2): what other materials still supply stays on the old length
+  // (now attributed to one of them), only the rest moves — and it's ADDED to anything already on the target
   const updateLine = (x) => {
-    const to = x.suggestion;
-    setQty((q) => { const n = { ...q }; const was = n[x.line.bucketKey] || 0; delete n[x.line.bucketKey]; n[to.bucketKey] = Math.min(Math.max(was, 1), to.quantity); return n; });
-    setChosen((c) => { const n = { ...c }; delete n[x.line.bucketKey]; n[to.bucketKey] = x.line.jobMaterialId; return n; });
+    const r = reconcileStaleLine(qty, chosen, x);
+    setQty(r.qty); setChosen(r.chosen);
+    setMsg(r.kept ? `Kept ${r.kept} × ${fmtMm(x.line.finishedLengthMm)} mm for the other flashing in that colour and moved ${r.moved} to the new colour — check, then save.` : null);
   };
   const removeLine = (x) => { setQty((q) => ({ ...q, [x.line.bucketKey]: 0 })); setChosen((c) => { const n = { ...c }; delete n[x.line.bucketKey]; return n; }); };
 
@@ -175,8 +181,9 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
       {delivery.method === "pickup" && <TextField label="Pickup branch" value={delivery.pickupBranch} onChange={d("pickupBranch")} />}
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label htmlFor={`req-${order.id}`} className="mb-1 block text-xs font-medium text-muted">Required by (optional)</label>
-          <input id={`req-${order.id}`} type="date" value={delivery.requiredDate || ""} onChange={(e) => d("requiredDate")(e.target.value || null)} className="min-h-[44px] w-full rounded-lg border border-hairline px-2 text-base" />
+          <label htmlFor={`req-${order.id}`} className="mb-1 block text-xs font-medium text-muted">Required by</label>
+          <input id={`req-${order.id}`} type="date" value={delivery.requiredDate || ""} disabled={!!delivery.asap} onChange={(e) => d("requiredDate")(e.target.value || null)} className="min-h-[44px] w-full rounded-lg border border-hairline px-2 text-base disabled:opacity-50" />
+          <label className="mt-1 flex min-h-[44px] items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5 rounded text-primary" checked={!!delivery.asap} onChange={(e) => setDelivery((x) => ({ ...x, asap: e.target.checked, requiredDate: e.target.checked ? null : x.requiredDate }))} />As soon as possible</label>
         </div>
         <TextField label="Site contact" value={delivery.contactName} onChange={d("contactName")} />
         <TextField label="Contact phone" value={delivery.contactPhone} onChange={d("contactPhone")} />
@@ -215,12 +222,21 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
         </ul>
       </div>
       {dirtyForm && <Btn kind="primary" className="w-full" onClick={save} disabled={busy}>Save order details</Btn>}
+      {invalidDrafts.length > 0 && (
+        <Banner tone="warn">{invalidDrafts.map((x) => x.name).join(", ")}: a size typed on this device isn&apos;t valid yet, so the drawing on this order may be out of date. Open the flashing and fix it before sending.</Banner>
+      )}
+      {surplusAsked && (
+        <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900">
+          <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={extra} onChange={(e) => setExtra(e.target.checked)} />
+          Order these extra pieces anyway (spares) — I know some are already ordered
+        </label>
+      )}
       {preview && !dirtyForm && (preview.problems.length
         ? <Banner tone="warn"><p className="font-medium">Not ready to order yet:</p><ul className="ml-4 list-disc text-xs">{preview.problems.map((p) => <li key={p}>{p}</li>)}</ul></Banner>
         : <Banner tone="ok">Ready: {preview.snapshot.totals.pieces} pieces · {fmtLm(preview.snapshot.totals.totalLm)} LM to {preview.snapshot.supplier?.name}.</Banner>)}
       <div className="flex flex-wrap gap-2">
         <Btn onClick={() => exportPdf(true)} disabled={busy || dirtyForm || ws.dirty}>Export draft PDF</Btn>
-        <Btn kind="primary" onClick={() => exportPdf(false)} disabled={busy || dirtyForm || ws.dirty || !preview || preview.problems.length > 0}>Export supplier PDF</Btn>
+        <Btn kind="primary" onClick={() => exportPdf(false)} disabled={busy || dirtyForm || ws.dirty || !preview || preview.problems.some((p) => !(extra && /already on/.test(p))) || invalidDrafts.length > 0}>Export supplier PDF</Btn>
       </div>
       {exportRes && (exportRes.ok
         ? <Banner tone="ok" action={<Btn onClick={() => openPdf(api, exportRes.exportId, setMsg)}>Open PDF</Btn>}>Export {exportRes.exportNo}{exportRes.isDraft ? " (draft)" : ""} is frozen. Nothing has been sent.</Banner>

@@ -14,14 +14,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computeWorkspace } from "../../../shared/takeoff/index.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { clearRecovery, loadRecovery, rememberActor, saveRecovery } from "../../lib/takeoffRecovery.js";
-import { applyChanges, emptyChanges, fromPayload, isEmpty, mergeChanges, toPayload } from "./changeset.js";
+import { applyChanges, emptyChanges, fromPayload, isEmpty, mergeChanges, rebaseRecord, toPayload } from "./changeset.js";
 
 export const SAVE_DEBOUNCE_MS = 500;
 
 /** Everything not yet confirmed by the server: held + in-flight + queued (later wins). */
 function allPending(cur, queue) {
-  return mergeChanges(mergeChanges(cur.held?.changes || null, cur.inflight?.changes || null) || emptyChanges(), queue);
+  // refused (4xx) changes stay in device recovery until the user retries or discards them (R04b R5)
+  const parked = mergeChanges(cur.rejected?.changes || null, mergeChanges(cur.held?.changes || null, cur.inflight?.changes || null));
+  return mergeChanges(parked || emptyChanges(), queue);
 }
+
+
 
 export function useTakeoffWorkspace(api, workspaceId) {
   const [server, setServer] = useState(null);      // { snapshot, orderStatus, capabilities, jobLabel }
@@ -108,8 +112,10 @@ export function useTakeoffWorkspace(api, workspaceId) {
       setSaveError(null);
       const rest = latest.current.queue;
       if (isEmpty(rest)) {
-        setStatus("saved");
-        if (latest.current.actorKey) clearRecovery(latest.current.actorKey, workspaceId);
+        // "Saved" only when nothing is parked as refused; refused changes keep their device copy
+        setStatus(latest.current.rejected ? "rejected" : "saved");
+        if (latest.current.actorKey && !latest.current.rejected) clearRecovery(latest.current.actorKey, workspaceId);
+        else if (latest.current.rejected) persistRecovery(allPending(latest.current, rest));
       } else {
         setStatus("unsynced");
       }
@@ -124,11 +130,15 @@ export function useTakeoffWorkspace(api, workspaceId) {
       setStatus("conflict"); setSaveError(r.error); return;
     }
     if (r.status >= 400 && r.status < 500) {
-      // A definite refusal (e.g. invalid value): park it, keep everything else flowing.
-      setRejected({ changes: batch.changes, error: r.error || "That change couldn't be saved." });
-      const rest = latest.current.queue;
-      setStatus(isEmpty(rest) ? "saved" : "unsynced");
-      setSaveError(null);
+      // A definite refusal (expired sign-in, permission, invalid value): park it — MERGED with anything
+      // refused before, kept in device recovery — and keep later edits flowing. Never shown as Saved.
+      const prev = latest.current.rejected;
+      const parked = { changes: mergeChanges(prev?.changes || null, batch.changes), error: r.status === 401 ? "Your sign-in has expired — sign in again, then choose Try again." : r.error || "That change couldn't be saved." };
+      latest.current.rejected = parked;
+      setRejected(parked);
+      persistRecovery(allPending(latest.current, latest.current.queue));
+      setStatus(isEmpty(latest.current.queue) ? "rejected" : "unsynced");
+      setSaveError(parked.error);
       return;
     }
     // No verdict (network / server error): hold the batch to resend unchanged.
@@ -137,7 +147,7 @@ export function useTakeoffWorkspace(api, workspaceId) {
     if (r.network || !r.status) { setStatus("unsynced"); setSaveError("No connection — your changes are kept on this device and will save when you're back online."); return; }
     setStatus("error");
     setSaveError(r.error || "Couldn't save.");
-  }, [api, workspaceId]);
+  }, [api, workspaceId, persistRecovery]);
 
   const flush = useCallback(async () => {
     const { queue: q, inflight: inf, held: h, server: srv, status: st } = latest.current;
@@ -195,10 +205,20 @@ export function useTakeoffWorkspace(api, workspaceId) {
     await load();
   }, [load, persistRecovery]);
 
-  /** User chose: re-apply my edits on top of the latest server version. */
+  /** User chose: re-apply my edits on top of the latest server version — field by field, so a colleague's
+   *  change to a field I didn't touch survives (R04b R14). */
   const applyMineOnLatest = useCallback(async () => {
+    const before = latest.current.server?.snapshot;
     const fresh = await load();
     if (!fresh) return;
+    const q = latest.current.queue;
+    const latestMats = new Map((fresh.snapshot?.materials || []).map((m) => [m.id, m]));
+    const baseMats = new Map((before?.materials || []).map((m) => [m.id, m]));
+    const upsert = {};
+    for (const [id, rec] of Object.entries(q.materials.upsert)) upsert[id] = rebaseRecord(rec, baseMats.get(id), latestMats.get(id));
+    const next = { ...q, materials: { ...q.materials, upsert } };
+    latest.current.queue = next;
+    setQueue(next);
     setStatus("unsynced"); setSaveError(null);
   }, [load]);
 
@@ -218,11 +238,24 @@ export function useTakeoffWorkspace(api, workspaceId) {
   }, [workspaceId]);
 
   const retry = useCallback(() => { setStatus("unsynced"); setSaveError(null); }, []); // the held batch is resent first
-  const discardRejected = useCallback(() => setRejected(null), []);
+  const discardRejected = useCallback(() => {
+    latest.current.rejected = null; setRejected(null);
+    setStatus((st) => (st === "rejected" ? "saved" : st)); setSaveError(null);
+    persistRecovery(allPending(latest.current, latest.current.queue));
+  }, [persistRecovery]);
+  /** Put refused changes back in the queue (e.g. after signing in again or fixing the cause). */
+  const retryRejected = useCallback(() => {
+    const parked = latest.current.rejected;
+    if (!parked) return;
+    latest.current.rejected = null; setRejected(null);
+    latest.current.queue = mergeChanges(parked.changes, latest.current.queue);
+    setQueue(latest.current.queue);
+    setStatus("unsynced"); setSaveError(null);
+  }, []);
   const refreshServer = load;
 
   return {
-    loadState, server, view, computed, pending, dirty, status, saveError, recovery, rejected, discardRejected,
+    loadState, server, view, computed, pending, dirty, status, saveError, recovery, rejected, discardRejected, retryRejected,
     capabilities: server?.capabilities || null,
     edit, flush, retry, reloadFromServer, applyMineOnLatest, restoreRecovery, discardRecovery, refreshServer,
   };

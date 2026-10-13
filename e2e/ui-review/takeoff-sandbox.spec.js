@@ -64,6 +64,10 @@ test("sandbox: scale, draw a flashing, measure, export a REAL supplier PDF", asy
   // order + export (server renders the PDF with pdfkit)
   await page.getByRole("button", { name: /Review & export order/ }).click();
   await page.getByRole("button", { name: "New order" }).click();
+  // what the supplier needs: when (or ASAP) and who to call — never invented, asked for
+  await page.getByLabel("As soon as possible").check();
+  await page.getByRole("textbox", { name: "Contact phone" }).fill("0400 000 000");
+  await page.getByRole("button", { name: "Save order details" }).click();
   await expect(page.getByText(/^Ready: 1 piece/)).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Export supplier PDF" }).click();
   await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible({ timeout: 30_000 });

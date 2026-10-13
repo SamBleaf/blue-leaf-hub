@@ -8,7 +8,7 @@
 // Remove split restores the originals. A split made against a source that later changes is flagged stale.
 // =============================================================================
 import { useMemo, useState } from "react";
-import { evaluateSplit, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
+import { describeSpec, evaluateSplit, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, NumberField, Sheet } from "./ui.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -23,8 +23,10 @@ export default function ScheduleScreen({ ws, onBack }) {
   const groups = useMemo(() => {
     const g = new Map();
     for (const l of computed?.scheduleLines || []) {
-      const name = mats.get(l.jobMaterialIds[0])?.name || "Material";
-      if (!g.has(l.specKey)) g.set(l.specKey, { name, lines: [] });
+      const m = mats.get(l.jobMaterialIds[0]);
+      const name = m?.name || "Material";
+      let spec = ""; try { spec = m ? describeSpec(m.spec, m.profile).line : ""; } catch { /* legacy */ }
+      if (!g.has(l.specKey)) g.set(l.specKey, { name, spec, lines: [] });
       g.get(l.specKey).lines.push(l);
     }
     return [...g.values()];
@@ -42,7 +44,7 @@ export default function ScheduleScreen({ ws, onBack }) {
       {surplus.length > 0 && <Banner tone="warn">Some placed orders no longer match the takeoff (a measurement or rule changed). They show as surplus — check them before ordering more.</Banner>}
       {groups.map((g) => (
         <section key={g.name + g.lines[0].specKey} className="rounded-card border border-hairline bg-white">
-          <h3 className="border-b border-hairline px-3 py-2 text-sm font-semibold text-ink">{g.name}</h3>
+          <h3 className="border-b border-hairline px-3 py-2 text-sm font-semibold text-ink">{g.name}{g.spec && <span className="block text-[11px] font-normal text-muted">{g.spec}</span>}</h3>
           <ul className="divide-y divide-hairline">
             {g.lines.map((l) => {
               const st = status.get(l.bucketKey);
@@ -69,7 +71,7 @@ export default function ScheduleScreen({ ws, onBack }) {
                         const canSplit = !!c.result && ws.capabilities?.edit;
                         return (
                           <div key={cid} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5">
-                            <span className="flex-1 text-ink">{c.split ? `${c.split.originals > 1 ? `${c.split.originals} of ` : ""}${c.result.quantity > 1 ? `${c.result.quantity} × ` : ""}${fmtMm(c.result.finishedLengthMm)} mm split: ${c.split.children.map((x) => fmtMm(x.finishedLengthMm)).join(" + ")} (laps ${c.split.laps.join(", ")} mm)${c.result.quantity - (c.split.originals || 1) > 0 ? ` · ${c.result.quantity - (c.split.originals || 1)} kept whole` : ""}${c.split.stale ? " — source changed, review" : ""}` : c.explanation}</span>
+                            <span className="flex-1 text-ink">{c.split ? `${c.result.quantity > 1 ? `${c.split.originals || 1} of ${c.result.quantity} × ` : ""}${fmtMm(c.result.finishedLengthMm)} mm split into ${c.split.children.map((x) => fmtMm(x.finishedLengthMm)).join(" + ")} (laps ${c.split.laps.join(", ")} mm)${c.result.quantity - (c.split.originals || 1) > 0 ? ` · ${c.result.quantity - (c.split.originals || 1)} kept whole` : ""}${c.split.stale ? " — source changed, review" : ""}` : c.explanation}</span>
                             {canSplit && <Btn kind="ghost" onClick={() => setSplitFor(cid)}>{c.split ? (c.split.stale ? "Review split" : "Edit split") : "Split"}</Btn>}
                             {c.split && ws.capabilities?.edit && (
                               <Btn kind="ghost" onClick={() => { const raw = view.contributions.find((x) => x.id === cid); ws.edit(partial({ contributions: [{ ...raw, split: null }] })); }}>Remove split</Btn>

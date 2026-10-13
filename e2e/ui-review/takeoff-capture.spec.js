@@ -187,6 +187,10 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
   // order → export (real PDF) → (director) record as placed
   await page.getByRole("button", { name: /Review & export order|Orders/ }).click();
   await page.getByRole("button", { name: "New order" }).click();
+  // what the supplier needs: when (or ASAP) and who to call — never invented, asked for
+  await page.getByLabel("As soon as possible").check();
+  await page.getByRole("textbox", { name: "Contact phone" }).fill("0400 000 000");
+  await page.getByRole("button", { name: "Save order details" }).click();
   await expect(page.getByText(/^Ready: \d+ pieces/)).toBeVisible({ timeout: 20_000 });
   await shot("order-review", "Order review — supplier (Fielders default), delivery, lengths still needed, readiness");
   await page.getByRole("button", { name: "Export draft PDF" }).click();

@@ -85,7 +85,8 @@ export function normaliseSpec(spec) {
   const legacyNA = typeof s.colour === "string" && /^(n\/?a|natural|none|not applicable)$/i.test(s.colour.trim());
   // colour applies to painted finishes; "other" lets the user say
   let colourApplicable = info ? info.painted : null;
-  if (colourApplicable === null) colourApplicable = s.colourApplicable === false || legacyNA ? false : s.colourApplicable === true ? true : !!(s.colour && !legacyNA);
+  // "Other / custom": painted or not must be ANSWERED (a blank colour is not "unpainted"); legacy "N/A" = unpainted
+  if (colourApplicable === null) colourApplicable = s.colourApplicable === false || legacyNA ? false : s.colourApplicable === true || (s.colour && !legacyNA) ? true : null;
   let bmt = s.bmt === "" || s.bmt == null ? null : Number(s.bmt);
   if (bmt != null && (!isFiniteNumber(bmt) || bmt <= 0 || bmt >= 10)) throw new TakeoffValidationError("BMT must be a thickness in mm, e.g. 0.55.");
   const construction = s.construction === "perforated" ? "perforated" : "solid";
@@ -104,10 +105,16 @@ export function normaliseSpec(spec) {
       pattern: PERFORATION_PATTERNS.some((x) => x.id === p.pattern) ? p.pattern : null,
       holeSizeMm: num(p.holeSizeMm ?? p.holeDiameterMm, "Hole size"),
       pitchMm: num(p.pitchMm, "Pitch"),
-      openAreaPct: p.openAreaPct === "" || p.openAreaPct == null ? null : r2(p.openAreaPct),
+      openAreaPct: (() => {
+        if (p.openAreaPct === "" || p.openAreaPct == null) return null;
+        const n = Number(p.openAreaPct);
+        if (!isFiniteNumber(n) || n <= 0 || n >= 100) throw new TakeoffValidationError("Open area must be between 0 and 100 %.");
+        return r2(n);
+      })(),
       extent,
       legIds: extent === "selected_legs" ? [...new Set((p.legIds || []).map(String))].sort() : [],
       solidMarginMm: num(p.solidMarginMm, "Solid margin"),
+      arrangement: ["straight", "staggered"].includes(p.arrangement) ? p.arrangement : null,
       description: txt(p.description, 200),
     };
   }
@@ -120,7 +127,7 @@ export function normaliseSpec(spec) {
     finish: info && finishId !== "other" ? info.label : txt(s.finish, 60),
     bmt: bmt == null ? null : r2(bmt),
     colourApplicable,
-    colour: colourApplicable ? txt(s.colour, 60) : null,
+    colour: colourApplicable && !legacyNA ? txt(s.colour, 60) : null, // "N/A" / "none" is not a colour
     colourCode: colourApplicable ? txt(s.colourCode, 40) : null,
     perforation,
     availability: s.availability === AVAILABILITY.CONFIRMED ? AVAILABILITY.CONFIRMED : AVAILABILITY.CONFIRM,
@@ -144,7 +151,8 @@ export function fabricationIdentity(spec) {
 export function specProblems(spec, profile = null) {
   const n = normaliseSpec(spec);
   const out = [];
-  if (!n.finishId || !n.finish || n.bmt == null || (n.colourApplicable && !n.colour)) out.push("material_incomplete");
+  const placeholder = !n.finish || /^other( \/ custom)?$/i.test(n.finish.trim());
+  if (!n.finishId || placeholder || n.bmt == null || n.colourApplicable == null || (n.colourApplicable && !n.colour)) out.push("material_incomplete");
   if (n.construction === "perforated") {
     const p = n.perforation;
     const defined = p.supplierProductCode || (p.pattern && p.holeSizeMm && p.pitchMm && p.pitchMm > p.holeSizeMm && (p.pattern !== "other" || p.description));
@@ -157,13 +165,13 @@ export function specProblems(spec, profile = null) {
 /** One line for screens/PDF: "COLORBOND Monument 0.55 BMT · perforated Ø3 @ 6 pitch (legs L2)". */
 export function describeSpec(spec, profile = null) {
   const n = normaliseSpec(spec);
-  const parts = [n.finish || "Finish?", n.colourApplicable ? n.colour || "colour?" : "natural (unpainted)", n.bmt != null ? `${n.bmt} BMT` : "BMT?"];
+  const parts = [n.finish || "Finish?", n.colourApplicable === true ? n.colour || "colour?" : n.colourApplicable === false ? "natural (unpainted)" : "painted or unpainted?", n.bmt != null ? `${n.bmt} BMT` : "BMT?"];
   let perf = null;
   if (n.perforation) {
     const p = n.perforation;
     const legs = p.extent === "all" ? "all legs" : `legs ${p.legIds.map((id) => legLabel(profile, id)).join(", ")}`;
     const pat = p.pattern ? `${PERFORATION_PATTERNS.find((x) => x.id === p.pattern).label.toLowerCase()} ${p.holeSizeMm ?? "?"} mm @ ${p.pitchMm ?? "?"} mm pitch` : null;
-    perf = ["PERFORATED", p.supplierProductCode && `code ${p.supplierProductCode}`, pat, p.openAreaPct != null && `${p.openAreaPct}% open`, legs, p.solidMarginMm != null && `solid margin ${p.solidMarginMm} mm`, p.description].filter(Boolean).join(" · ");
+    perf = ["PERFORATED", p.supplierProductCode && `code ${p.supplierProductCode}`, pat, p.arrangement && `${p.arrangement} rows`, p.openAreaPct != null && `${p.openAreaPct}% open`, legs, p.solidMarginMm != null && `solid margin ${p.solidMarginMm} mm`, p.description].filter(Boolean).join(" · ");
   }
   return { line: parts.join(" · "), perforation: perf, availability: n.availability === AVAILABILITY.CONFIRMED ? "Supplier confirmed" : "Confirm availability with supplier" };
 }
