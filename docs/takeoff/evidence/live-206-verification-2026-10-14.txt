@@ -1,0 +1,116 @@
+# Live migration 206 verification — 2026-10-14 06:38 ACDT — read-only
+
+## node scripts/takeoff/verify-live-206.mjs
+PASS  table takeoff_workspaces exists — 0 rows
+PASS  table takeoff_calibrations exists — 0 rows
+PASS  table takeoff_material_presets exists — 0 rows
+PASS  table takeoff_material_preset_revisions exists — 0 rows
+PASS  table takeoff_job_materials exists — 0 rows
+PASS  table takeoff_material_rule_history exists — 0 rows
+PASS  table takeoff_measurements exists — 0 rows
+PASS  table takeoff_contributions exists — 0 rows
+PASS  table takeoff_orders exists — 0 rows
+PASS  table takeoff_order_lines exists — 0 rows
+PASS  table takeoff_exports exists — 0 rows
+PASS  table takeoff_placements exists — 0 rows
+PASS  table takeoff_placement_allocations exists — 0 rows
+PASS  table takeoff_idempotency exists — 0 rows
+PASS  rpc takeoff_commit published to the service role
+PASS  rpc takeoff_save_order published to the service role
+PASS  rpc takeoff_create_export published to the service role
+PASS  rpc takeoff_place_order published to the service role
+PASS  rpc takeoff_cancel_placement published to the service role
+PASS  rpc takeoff_plan_insert published to the service role
+PASS  rpc takeoff_archive_if_referenced published to the service role
+PASS  rpc takeoff_save_preset published to the service role
+PASS  rpc takeoff_next_order_ref published to the service role
+PASS  anon cannot read takeoff_workspaces — 42501 permission denied for table takeoff_workspaces
+PASS  anon cannot read takeoff_calibrations — 42501 permission denied for table takeoff_calibrations
+PASS  anon cannot read takeoff_material_presets — 42501 permission denied for table takeoff_material_presets
+PASS  anon cannot read takeoff_material_preset_revisions — 42501 permission denied for table takeoff_material_preset_revisions
+PASS  anon cannot read takeoff_job_materials — 42501 permission denied for table takeoff_job_materials
+PASS  anon cannot read takeoff_material_rule_history — 42501 permission denied for table takeoff_material_rule_history
+PASS  anon cannot read takeoff_measurements — 42501 permission denied for table takeoff_measurements
+PASS  anon cannot read takeoff_contributions — 42501 permission denied for table takeoff_contributions
+PASS  anon cannot read takeoff_orders — 42501 permission denied for table takeoff_orders
+PASS  anon cannot read takeoff_order_lines — 42501 permission denied for table takeoff_order_lines
+PASS  anon cannot read takeoff_exports — 42501 permission denied for table takeoff_exports
+PASS  anon cannot read takeoff_placements — 42501 permission denied for table takeoff_placements
+PASS  anon cannot read takeoff_placement_allocations — 42501 permission denied for table takeoff_placement_allocations
+PASS  anon cannot read takeoff_idempotency — 42703 column takeoff_idempotency.id does not exist
+PASS  anon cannot execute takeoff_commit — 42501 permission denied for function takeoff_commit
+PASS  anon cannot execute takeoff_next_order_ref — 42501 permission denied for function takeoff_next_order_ref
+PASS  takeoff-exports bucket is private — public=false
+PASS  job_documents provenance columns
+INFO  current plans: 11 · hash-anchored: 0 (others anchor automatically on first open in Takeoffs)
+
+All checks passed.
+
+## node scripts/takeoff/probe-live-schema.mjs
+PRESENT  job_documents.id  (mig 069)
+PRESENT  job_documents.job_id  (mig 069)
+PRESENT  job_documents.document_type  (mig 069)
+PRESENT  job_documents.title  (mig 069)
+PRESENT  job_documents.version  (mig 069)
+PRESENT  job_documents.status  (mig 069)
+PRESENT  job_documents.storage_provider  (mig 069)
+PRESENT  job_documents.storage_path  (mig 069)
+PRESENT  job_documents.audience_layer  (mig 069)
+PRESENT  job_documents.supersedes_document_id  (mig 069)
+PRESENT  job_documents.uploaded_by  (mig 069)
+PRESENT  job_documents.uploaded_at  (mig 069)
+PRESENT  job_documents.carpentry_job_id  (mig 152)
+PRESENT  job_documents.charge_up_job_id  (mig 172)
+PRESENT  job_documents.revision_label  (mig 206 (expected MISSING until applied))
+PRESENT  job_documents.content_sha256  (mig 206 (expected MISSING until applied))
+PRESENT  job_documents.byte_size  (mig 206 (expected MISSING until applied))
+PRESENT  job_documents.archived_at  (mig 206 (expected MISSING until applied))
+PRESENT  job_documents.archived_by  (mig 206 (expected MISSING until applied))
+PRESENT  suppliers.id  (mig 085)
+PRESENT  suppliers.name  (mig 085)
+PRESENT  suppliers.email  (mig 085)
+PRESENT  suppliers.phone  (mig 085)
+PRESENT  suppliers.contact_name  (mig 085)
+PRESENT  suppliers.abn  (mig 085)
+PRESENT  suppliers.is_active  (mig 085)
+PRESENT  suppliers.updated_at  (mig 085)
+PRESENT  suppliers.is_preferred  (mig 092)
+PRESENT  suppliers.account_terms  (mig 092)
+MISSING  suppliers.address  (audit: selected by procurementRoutes.mjs but in NO migration) — 42703
+PRESENT  company_profile.name  (mig 069)
+PRESENT  company_profile.abn  (mig 069)
+PRESENT  company_profile.address  (mig 069)
+PRESENT  company_profile.phone  (mig 069)
+PRESENT  company_profile.email  (mig 069)
+PRESENT  company_profile.updated_at  (mig 069)
+PRESENT  carpentry_jobs.id  (mig 065)
+PRESENT  carpentry_jobs.address  (mig 065)
+PRESENT  carpentry_jobs.client_name  (mig 065)
+PRESENT  carpentry_jobs.status  (mig 065)
+PRESENT  projects.id  (core)
+PRESENT  projects.job_id  (core)
+PRESENT  projects.address  (core)
+PRESENT  projects.status  (core)
+PRESENT  charge_up_jobs.id  (mig 145)
+PRESENT  charge_up_jobs.carpentry_job_id  (mig 145)
+PRESENT  charge_up_jobs.status  (mig 145)
+PRESENT  charge_up_jobs.address  (mig 145)
+PRESENT  employees.id  (mig 059)
+PRESENT  employees.user_id  (mig 059)
+PRESENT  employees.is_leading_hand  (mig 059)
+PRESENT  employees.is_active  (mig 059)
+PRESENT  user_profiles.id  (core)
+PRESENT  user_profiles.role  (core)
+PRESENT  user_profiles.is_active  (core)
+PRESENT  timesheets.employee_id  (mig 059/065)
+PRESENT  timesheets.project_id  (mig 059/065)
+PRESENT  timesheets.carpentry_job_id  (mig 059/065)
+PRESENT  timesheets.date  (mig 059/065)
+PRESENT  takeoff_workspaces.id  (mig 206 (expected MISSING until applied))
+PRESENT  takeoff_workspaces.revision  (mig 206 (expected MISSING until applied))
+PRESENT  takeoff_exports.id  (mig 206 (expected MISSING until applied))
+PRESENT  takeoff_exports.artifact_status  (mig 206 (expected MISSING until applied))
+PRESENT  storage bucket job-plans (public=false)
+PRESENT  storage bucket takeoff-exports (public=false)
+
+1 column/table check(s) missing.
