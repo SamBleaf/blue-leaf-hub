@@ -14,7 +14,7 @@
 import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs } from "../../../shared/takeoff/index.js";
+import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
 export const RENDERER_VERSION = "takeoff-pdf@1";
 const BRAND = "#006c9b";
@@ -76,29 +76,27 @@ export function drawProfile(doc, profile, box, fonts) {
   points.forEach((p, i) => { const q = P(p); if (i === 0) doc.moveTo(q.x, q.y); else doc.lineTo(q.x, q.y); });
   doc.stroke().restore();
 
-  // end treatments
+  // end treatments — same drawing as the editor (shared/takeoff treatmentDrawing): a closed hem folds
+  // 180° back alongside the leg, an open return turns 90°; the coated band follows the sheet round.
   for (const g of treatmentGlyphs(profile)) {
     const at = P(g.point);
-    const w = Math.max(6, Math.min(18, g.widthMm * s));
+    const d = treatmentDrawing(profile, g, s, { coatOffsetPx: off, minPx: 10, maxPx: 60 });
+    const line = (pts, width, color) => {
+      doc.save().lineWidth(width).strokeColor(color).lineJoin("round").lineCap("round");
+      pts.map(P).forEach((q, i) => (i ? doc.lineTo(q.x, q.y) : doc.moveTo(q.x, q.y)));
+      doc.stroke().restore();
+    };
+    line(d.band, 2.4, BRAND);
+    line(d.points, 1.4, INK);
     const hdgRad = (g.headingDeg * Math.PI) / 180;
     const dir = { x: Math.cos(hdgRad), y: -Math.sin(hdgRad) };
     const n = { x: g.normal.x, y: -g.normal.y };
-    doc.save().lineWidth(1.4).strokeColor(INK);
-    if (g.type === "closed_hem") {
-      // folded back flat: short return parallel to the leg on the chosen side, with a closed loop
-      const a2 = { x: at.x + n.x * 3, y: at.y + n.y * 3 };
-      doc.moveTo(at.x, at.y).bezierCurveTo(at.x + dir.x * 4, at.y + dir.y * 4, a2.x + dir.x * 4, a2.y + dir.y * 4, a2.x, a2.y)
-        .lineTo(a2.x - dir.x * w, a2.y - dir.y * w).stroke();
-    } else {
-      // open return: a 90° return on the chosen side
-      doc.moveTo(at.x, at.y).lineTo(at.x + n.x * w, at.y + n.y * w).stroke();
-    }
-    doc.restore();
+    const w = d.drawnLengthMm * s;
     // label sits beyond the end of the leg (along its direction), clear of the leg's own label
     const lbl = T(`${g.type === "closed_hem" ? "Hem" : "Return"} ${fmt(g.widthMm)}`);
     doc.font(fonts.regular).fontSize(6.5).fillColor(MUTED);
     const lw = doc.widthOfString(lbl);
-    const lx = at.x + dir.x * 12 + n.x * (w / 2), ly = at.y + dir.y * 12 + n.y * (w / 2);
+    const lx = at.x + dir.x * 14 + n.x * (w / 2), ly = at.y + dir.y * 14 + n.y * (w / 2);
     doc.text(lbl, dir.x >= 0 ? lx : lx - lw, ly - 3.5, { width: lw + 2, lineBreak: false });
   }
 
@@ -109,11 +107,16 @@ export function drawProfile(doc, profile, box, fonts) {
   profile.segments.forEach((seg, i) => {
     const a = P(points[i]), b = P(points[i + 1]);
     const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
-    const side = profile.coatedFace === "left" ? -1 : 1;
+    // labels go on the non-coated side — unless an end hem/return folds onto that side of this leg
+    const nonCoated = profile.coatedFace === "left" ? "right" : "left";
+    const blocked = (i === profile.segments.length - 1 && profile.end.type !== "none" && profile.end.side === nonCoated)
+      || (i === 0 && profile.start.type !== "none" && profile.start.side === nonCoated);
+    const labelSide = blocked ? profile.coatedFace : nonCoated;
+    const side = labelSide === "left" ? 1 : -1;
     const nx = (dy / len) * side, ny = (-dx / len) * side;
     const label = T(`L${i + 1} ${fmt(seg.lengthMm)}`);
     const w = doc.widthOfString(label);
-    const d = 5 + Math.abs(nx) * (w / 2) + Math.abs(ny) * (lh / 2);
+    const d = (blocked ? 5 + off + 2 : 5) + Math.abs(nx) * (w / 2) + Math.abs(ny) * (lh / 2);
     const cx = (a.x + b.x) / 2 + nx * d, cy = (a.y + b.y) / 2 + ny * d;
     doc.text(label, cx - w / 2, cy - lh / 2, { width: w + 2, lineBreak: false });
   });

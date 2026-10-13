@@ -8,7 +8,7 @@ import {
   segmentLengthMm, CALIBRATION_STATUS, lockSecondaryAxis,
   starterProfile, normaliseProfile, setSegmentLength, setIncludedAngle, rotateProfile, mirrorProfile, reverseProfile,
   flipCoatedFace, profileVertices, coatedOffsetSegments, profileGeometryKey, indicativeGirthMm, profileProblems,
-  includedAngle, createHistory, pushHistory, undo, redo, MIN_UNDO_DEPTH, TakeoffValidationError,
+  includedAngle, createHistory, pushHistory, undo, redo, MIN_UNDO_DEPTH, TakeoffValidationError, treatmentGlyphs, treatmentDrawing, setTreatment,
 } from "../../shared/takeoff/index.js";
 import { buildKnownPlanPdf } from "./lib/takeoffPdfFixture.mjs";
 
@@ -200,6 +200,28 @@ await t("leg passing through another leg's corner is flagged (touch, not just cr
   assert.ok(profileProblems(touch).length > 0, "L3 runs through the start point");
   const u = normaliseProfile({ segments: [{ lengthMm: 50 }, { lengthMm: 20 }, { lengthMm: 50 }], bends: [{ turnDeg: 90 }, { turnDeg: 90 }], start: { type: "none" }, end: { type: "none" }, coatedFace: "left" });
   assert.deepEqual(profileProblems(u), [], "a narrow U is fine");
+});
+await t("closed hem drawing: folds 180° back along the leg by its true width, on the chosen side", () => {
+  // starter: L3 heads east (+x), end = closed hem 10 folding RIGHT (south); coated LEFT (north)
+  const g = treatmentGlyphs(P).find((x) => x.at === "end");
+  const d = treatmentDrawing(P, g, 4); // 4 px/mm → 10 mm = 40 px > min
+  const first = d.points[0], last = d.points[d.points.length - 1];
+  near(first.x, g.point.x, 1e-9); near(first.y, g.point.y, 1e-9);
+  near(g.point.x - last.x, 10 - 0, 0.6, "returns ~10 mm back along the leg"); // arc radius is visual only
+  assert.ok(last.y < g.point.y, "folds to the right of travel (south)");
+  assert.ok(Math.max(...d.points.map((p) => p.x)) > g.point.x, "rounded fold beyond the end");
+  // coating stays on the same face: folding onto the UNCOATED side leaves the band OUTSIDE (further south than the hem)
+  assert.ok(Math.min(...d.band.map((p) => p.y)) < last.y, "band outside the fold");
+  // folding onto the COATED side: band inside the fold, between leg and hem, and a wider gap
+  const L = setTreatment(P, "end", { type: "closed_hem", widthMm: 10, side: "left" });
+  const dl = treatmentDrawing(L, treatmentGlyphs(L).find((x) => x.at === "end"), 4);
+  const hemY = dl.points[dl.points.length - 1].y, legY = treatmentGlyphs(L).find((x) => x.at === "end").point.y;
+  const bandEndY = dl.band[dl.band.length - 1].y;
+  assert.ok(bandEndY < hemY && bandEndY > legY, "band between leg and hem when folded onto the coated face");
+  assert.equal(dl.foldOntoCoated, true);
+  // tiny hems stay visible: never drawn shorter than 14 px
+  const tiny = treatmentDrawing(setTreatment(P, "end", { type: "closed_hem", widthMm: 2, side: "right" }), treatmentGlyphs(setTreatment(P, "end", { type: "closed_hem", widthMm: 2, side: "right" })).find((x) => x.at === "end"), 4);
+  assert.equal(tiny.trueScale, false); near(tiny.drawnLengthMm, 3.5, 1e-9);
 });
 await t("invalid profile inputs rejected", () => {
   assert.throws(() => normaliseProfile({ ...P, segments: [{ lengthMm: 0 }, ...P.segments.slice(1)] }), TakeoffValidationError);

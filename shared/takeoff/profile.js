@@ -160,6 +160,55 @@ export function treatmentGlyphs(profile) {
   return out;
 }
 
+/**
+ * How to DRAW an end treatment (editor + PDF), in mm space (y up) at a given scale (px per mm).
+ *   closed_hem   the sheet folds 180° back on itself: a rounded fold just beyond the end, then the hem
+ *                runs back alongside the leg for its width. A crushed hem has no real gap — the gap
+ *                here is visual only, wide enough to show the coated band inside the fold when the hem
+ *                folds onto the coated face.
+ *   open_return  a 90° return of its width on the fold side.
+ * Lengths are true scale, but never drawn shorter than `minPx` (so a 10 mm hem stays visible).
+ * `band` is the coated-face highlight continuing around the treatment on the correct face: the
+ * coating stays on the same face of the sheet, which is the coated side of the profile's traversal
+ * (reversed for a START treatment, which is traced outward from L1).
+ */
+export function treatmentDrawing(profile, glyph, scale, { coatOffsetPx = 4.5, minPx = 14, maxPx = 160 } = {}) {
+  const mmPerPx = 1 / scale;
+  const h = deg2rad(glyph.headingDeg);
+  const v = { x: Math.cos(h), y: Math.sin(h) };   // outward along the leg
+  const u = glyph.normal;                          // toward the fold side
+  const len = Math.min(Math.max(glyph.widthMm, minPx * mmPerPx), maxPx * mmPerPx);
+  const at = glyph.point;
+  const coatedSide = glyph.at === "end" ? profile.coatedFace : flip(profile.coatedFace);
+  const foldOntoCoated = glyph.side === profile.coatedFace;
+  let points;
+  if (glyph.type === "closed_hem") {
+    const gap = (foldOntoCoated ? 3.4 : 2.2) * coatOffsetPx * mmPerPx;
+    const r = gap / 2, c = { x: at.x + u.x * r, y: at.y + u.y * r };
+    points = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = (Math.PI * i) / 12;
+      points.push({ x: c.x - u.x * r * Math.cos(t) + v.x * r * Math.sin(t), y: c.y - u.y * r * Math.cos(t) + v.y * r * Math.sin(t) });
+    }
+    const back = points[points.length - 1];
+    points.push({ x: back.x - v.x * len, y: back.y - v.y * len });
+  } else {
+    points = [{ ...at }, { x: at.x + u.x * len, y: at.y + u.y * len }];
+  }
+  // offset the traced sheet toward the coated side of its own direction of travel
+  const off = coatOffsetPx * mmPerPx;
+  const sideN = (a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
+    return coatedSide === "left" ? { x: -dy / l, y: dx / l } : { x: dy / l, y: -dx / l };
+  };
+  const band = points.map((p, i) => {
+    const n1 = i > 0 ? sideN(points[i - 1], p) : null, n2 = i < points.length - 1 ? sideN(p, points[i + 1]) : null;
+    const nx = (n1?.x || 0) + (n2?.x || 0), ny = (n1?.y || 0) + (n2?.y || 0), l = Math.hypot(nx, ny) || 1;
+    return { x: p.x + (nx / l) * off, y: p.y + (ny / l) * off };
+  });
+  return { type: glyph.type, at: glyph.at, points, band, drawnLengthMm: len, trueScale: len === glyph.widthMm, foldOntoCoated };
+}
+
 // ── Editing commands (pure: return a NEW normalised profile) ─────────────────
 
 export function setSegmentLength(profile, segId, lengthMm) {

@@ -538,17 +538,24 @@ function ProfileDrawing({ layout, origin, sel, sketching }) {
       {layout.legs.filter(isLeg).map((l) => (
         <line key="sel" x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} strokeWidth={16} strokeLinecap="round" className="stroke-primary/20" />
       ))}
-      {[...layout.corners.filter(isCorner).map((c) => c.v), ...layout.ends.filter(isEnd).map((e) => e.p)].map((p) => (
+      {layout.corners.filter(isCorner).map((c) => c.v).map((p) => (
         <circle key="selpt" cx={p.x} cy={p.y} r={12} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />
       ))}
+      {/* a selected end treatment is highlighted along its own shape, never covered by a marker */}
+      {layout.ends.filter(isEnd).map((e) => (e.glyph
+        ? <path key="selend" d={e.glyph.path} fill="none" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" className="stroke-primary/20" />
+        : <circle key="selend" cx={e.p.x} cy={e.p.y} r={12} strokeWidth={1.5} className="fill-primary/15 stroke-primary" />))}
       <polyline points={pts(layout.coated)} fill="none" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" className="stroke-primary" />
       <polyline points={pts(layout.pts)} fill="none" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round"
         className={sketching ? "stroke-ink/80" : "stroke-ink"} />
       {layout.ends.map((e) => e.glyph && (
-        <path key={`g${e.which}`} d={e.glyph.path} fill="none" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" className="stroke-ink" />
+        <g key={`g${e.which}`}>
+          <polyline points={pts(e.glyph.band)} fill="none" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="stroke-primary" />
+          <path d={e.glyph.path} fill="none" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" className="stroke-ink" />
+        </g>
       ))}
       {layout.corners.map((c) => <circle key={`cv${c.index}`} cx={c.v.x} cy={c.v.y} r={3} strokeWidth={1.25} className="fill-white stroke-ink" />)}
-      {layout.ends.map((e) => <circle key={`ev${e.which}`} cx={e.p.x} cy={e.p.y} r={3.5} strokeWidth={1.25} className="fill-white stroke-slate-400" />)}
+      {layout.ends.map((e) => !e.glyph && <circle key={`ev${e.which}`} cx={e.p.x} cy={e.p.y} r={3.5} strokeWidth={1.25} className="fill-white stroke-slate-400" />)}
       {labels.map(({ key, label }) => label.leader && (
         <g key={`ld${key}`}>
           <line x1={label.leader.from.x} y1={label.leader.from.y} x2={label.leader.to.x} y2={label.leader.to.y} strokeWidth={1} strokeDasharray="3 2" className="stroke-slate-400" />
@@ -703,7 +710,7 @@ function EndEditor({ treatment, legCount, coatedFace, error, onApply, header }) 
       )}
       <Btn kind="primary" type="submit" className="mt-3 w-full">Apply</Btn>
       <ErrorText id={`${id}-err`} error={error} />
-      <p className="mt-2 text-[11px] text-muted">A closed hem is drawn as a symbol, not a leg, and is counted once in the girth.</p>
+      <p className="mt-2 text-[11px] text-muted">A closed hem is drawn folded 180° back alongside the leg (the small gap is only so you can see it — it&apos;s crushed flat). The blue band shows which face the coating ends up on. Counted once in the girth.</p>
     </form>
   );
 }

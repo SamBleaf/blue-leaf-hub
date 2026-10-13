@@ -14,7 +14,7 @@
 // the pan translation with an SVG transform, so panning never re-runs the layout.
 // =============================================================================
 import {
-  normaliseProfile, profileVertices, treatmentGlyphs, includedAngle, formatMm,
+  normaliseProfile, profileVertices, treatmentGlyphs, treatmentDrawing, includedAngle, formatMm,
   MAX_PROFILE_SEGMENTS, TakeoffValidationError,
 } from "../../../shared/takeoff/index.js";
 
@@ -181,28 +181,17 @@ function withLeader(c, anchor, pushed) {
   return { ...c, leader: pushed ? { from: anchor, to: boxEdgeToward(c.box, anchor) } : null };
 }
 
-/** End-treatment glyph in layout space: SVG path, obstacle segments, outward direction. */
-function glyphLayout(g, scale) {
+/** End-treatment glyph in layout space: SVG path, coated band, obstacle segments, outward direction. */
+function glyphLayout(profile, g, scale) {
   const at = { x: g.point.x * scale, y: -g.point.y * scale };
   const dir = { x: Math.cos(rad(g.headingDeg)), y: -Math.sin(rad(g.headingDeg)) };
   const n = { x: g.normal.x, y: -g.normal.y };
-  const w = clamp(g.widthMm * scale, 10, 40);
+  const d = treatmentDrawing(profile, g, scale, { coatOffsetPx: COAT_OFFSET_PX });
+  const S = (p) => ({ x: p.x * scale, y: -p.y * scale });
+  const pts = d.points.map(S);
   const P = (p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
-  if (g.type === "closed_hem") {
-    // folded flat back on itself: a tight hook on the chosen side, then the return along the leg
-    const gap = 5;
-    const a2 = { x: at.x + n.x * gap, y: at.y + n.y * gap };
-    const tip = { x: a2.x - dir.x * w, y: a2.y - dir.y * w };
-    const c1 = { x: at.x + dir.x * 5, y: at.y + dir.y * 5 }, c2 = { x: a2.x + dir.x * 5, y: a2.y + dir.y * 5 };
-    return {
-      type: g.type, at, dir, n,
-      path: `M ${P(at)} C ${P(c1)} ${P(c2)} ${P(a2)} L ${P(tip)}`,
-      segs: [[at, c1], [c1, c2], [c2, a2], [a2, tip]],
-    };
-  }
-  // open return: a short 90° return on the chosen side
-  const end = { x: at.x + n.x * w, y: at.y + n.y * w };
-  return { type: g.type, at, dir, n, path: `M ${P(at)} L ${P(end)}`, segs: [[at, end]] };
+  const segs = pts.slice(1).map((p, i) => [pts[i], p]);
+  return { type: g.type, at, dir, n, path: `M ${pts.map(P).join(" L ")}`, band: d.band.map(S), segs };
 }
 
 /**
@@ -219,7 +208,7 @@ export function layoutProfile(profile, scale) {
   const coated = offsetPolyline(pts, coatedNormals, COAT_OFFSET_PX);
 
   const glyphs = {};
-  for (const g of treatmentGlyphs(profile)) glyphs[g.at] = { ...glyphLayout(g, scale), widthMm: g.widthMm, side: g.side };
+  for (const g of treatmentGlyphs(profile)) glyphs[g.at] = { ...glyphLayout(profile, g, scale), widthMm: g.widthMm, side: g.side };
 
   const obstacles = { segs: [], boxes: [] };
   for (let i = 0; i < pts.length - 1; i++) obstacles.segs.push([pts[i], pts[i + 1]]);
