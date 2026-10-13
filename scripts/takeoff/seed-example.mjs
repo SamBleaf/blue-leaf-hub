@@ -81,12 +81,17 @@ const spec = (colour) => ({ product: "Flashing", finish: "COLORBOND", bmt: 0.55,
 const std = (await call("POST", "/api/takeoff/presets", { content: { name: "Std valley gutter (example)", methodKey: "flashing_runs", methodVersion: 1,
   spec: spec("Basalt"), rules: {}, profile: { initialDirectionDeg: 0, segments: [{ lengthMm: 60 }, { lengthMm: 200 }, { lengthMm: 60 }], bends: [{ turnDeg: -60 }, { turnDeg: -60 }], start: { type: "none" }, end: { type: "none" }, coatedFace: "left" },
   sourceReview: { status: "user_entered" } } })).preset;
-const M = { apron: randomUUID(), barge: randomUUID(), valley: randomUUID(), stop: randomUUID() };
+const M = { apron: randomUUID(), barge: randomUUID(), valley: randomUUID(), stop: randomUUID(), vent: randomUUID(), zinc: randomUUID() };
 await commit({ materials: { upsert: [
   { id: M.apron, name: "Apron flashing", methodKey: "flashing_runs", methodVersion: 1, spec: spec("Monument"), rules: {}, profile: apron },
   { id: M.barge, name: "Barge flashing", methodKey: "flashing_runs", methodVersion: 1, spec: spec("Surfmist"), rules: {}, profile: barge },
   { id: M.valley, fromPreset: { presetId: std.presetId, revision: std.revision } },
   { id: M.stop, name: "Stop end (pieces)", methodKey: "finished_piece_count", methodVersion: 1, spec: { ...spec("Monument"), productCode: "SE-EX" }, rules: {}, profile: null },
+  // R04: perforated (selected leg, pattern, margin) and unpainted examples — synthetic values, not a Fielders product
+  { id: M.vent, name: "Vent flashing (perforated)", methodKey: "flashing_runs", methodVersion: 1, rules: {}, profile: apron,
+    spec: { product: "Flashing", construction: "perforated", finishId: "colorbond", bmt: 0.55, colour: "Surfmist", perforation: { pattern: "round", holeSizeMm: 3, pitchMm: 6, arrangement: "staggered", extent: "selected_legs", legIds: [String(apron.segments[1].id)], solidMarginMm: 10 } } },
+  { id: M.zinc, name: "Capping (unpainted)", methodKey: "flashing_runs", methodVersion: 1, rules: {}, profile: barge,
+    spec: { product: "Flashing", finishId: "zincalume", bmt: 0.5, colour: "" } },
 ] } });
 log("materials: Apron, Barge, Valley (from company standard), Stop end (pieces)");
 
@@ -103,13 +108,16 @@ const runs = {
 };
 const count = { id: randomUUID(), kind: "count", documentId: plan.id, pageIndex: 0, points: [at1(9000, 1000), at1(9500, 1000), at1(10000, 1000), at1(10500, 1000)], finishedLengthMm: 2400 };
 const manual = { id: randomUUID(), kind: "manual", finishedLengthMm: 300, quantity: 6 };
+const ventLen = { id: randomUUID(), kind: "manual", finishedLengthMm: 3000, quantity: 2 };
+const zincLen = { id: randomUUID(), kind: "manual", finishedLengthMm: 2400, quantity: 3 };
 const c = (m, mat, split) => ({ id: randomUUID(), measurementId: m.id, jobMaterialId: mat, split: split || null });
 const C = {
   eaves: c(runs.eaves, M.apron), cornerA: c(runs.cornerA, M.apron), handling: c(runs.handling, M.apron), rotated: c(runs.rotated, M.apron),
   long: c(runs.long, M.barge), over: c(runs.over, M.barge), count: c(count, M.barge), valley: c(runs.valleyRun, M.valley), stop: c(manual, M.stop),
+  vent: c(ventLen, M.vent), zinc: c(zincLen, M.zinc),
 };
 // a leading hand records the runs/counts from the Worker app (actor = employee)
-await commit({ measurements: { upsert: [...Object.values(runs), count, manual] }, contributions: { upsert: Object.values(C) } }, WORKER);
+await commit({ measurements: { upsert: [...Object.values(runs), count, manual, ventLen, zincLen] }, contributions: { upsert: Object.values(C) } }, WORKER);
 await commit({ contributions: { upsert: [
   { ...C.long, split: { pieces: [3700, 3700], laps: [200], sourceFinishedMm: 7200 } },
   { ...C.over, split: { pieces: [4600, 4600], laps: [100], sourceFinishedMm: 9100 } },

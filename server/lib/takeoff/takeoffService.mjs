@@ -674,7 +674,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     profileSchemaVersion: PROFILE_SCHEMA_VERSION,
     rendererVersion,
     orderRef: order.orderRef,
-    issuedOn: new Date().toISOString().slice(0, 10),
+    issuedOn: new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Adelaide" }), // YYYY-MM-DD, local (SA) date
     company: company ? { name: company.name, abn: company.abn || null, address: company.address || null, phone: company.phone || null, email: company.email || null } : { name: "Blue Leaf Building" },
     job: { label: jobLabel || null, owner: wsSnapshot.workspace.owner, takeoffName: wsSnapshot.workspace.name },
     supplier: supplier ? { id: supplier.id, name: supplier.name, contactName: supplier.contact_name || null, email: supplier.email || null, phone: supplier.phone || null, abn: supplier.abn || null } : null,

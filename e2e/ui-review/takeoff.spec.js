@@ -140,6 +140,46 @@ test.describe("journeys", () => {
     await expect(page.getByText("Tap the start of a straight run.")).toBeVisible();
   });
 
+  test("R04 F08 press-and-hold shows the loupe; lifting places the point exactly there", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await ready(page);
+    await page.getByRole("button", { name: "Scale this page" }).click();
+    await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0);
+    await page.getByRole("button", { name: "Scale the whole page" }).click();
+    const s = await screenOf(page, { x: BX, y: BY - 40 });
+    await page.mouse.move(s.x, s.y); await page.mouse.down();
+    await page.waitForTimeout(650);                                   // hold ≥ 500 ms
+    await expect(page.locator("[data-takeoff-loupe]")).toBeVisible();
+    await page.mouse.move(s.x + 3, s.y + 2, { steps: 3 });            // fine-tune under the magnifier (no pan)
+    await page.screenshot({ path: `${SHOTS}/loupe-390x844.png` });
+    await page.mouse.up();
+    await expect(page.locator("[data-takeoff-loupe]")).toHaveCount(0);
+    await expect(page.getByText(/Tap the other end/)).toBeVisible();  // the hold placed the first point
+  });
+
+  test("R04 A08 a saved order line whose material changes shows as stale and blocks the supplier PDF until updated", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await ready(page);
+    await page.getByRole("button", { name: /Review & export order/ }).click();
+    if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
+    await expect(page.getByText(/Draft FO-/)).toBeVisible();
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Details" }).first().click();
+    await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
+    await page.waitForTimeout(1200);
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: /Review & export order/ }).click();
+    await expect(page.getByTestId("stale-lines")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Export supplier PDF" })).toBeDisabled();
+    await page.screenshot({ path: `${SHOTS}/stale-order-line-390x844.png`, fullPage: true });
+    // every stale length is reconciled explicitly (one tap each), then the order can be saved
+    for (let i = 0; i < 10 && (await page.getByRole("button", { name: "Update to current material" }).count()); i++) {
+      await page.getByRole("button", { name: "Update to current material" }).first().click();
+    }
+    await expect(page.getByTestId("stale-lines")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save order details" })).toBeVisible();
+  });
+
   test("schedule → split the 7,200 run (invalid then valid)", async ({ page }) => {
     await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
     await ready(page);

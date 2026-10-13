@@ -669,6 +669,24 @@ await t("R04b R13 + R8: order-ready needs branch / date / contact; open exported
   assert.ok(list.orderStatus.every((x) => typeof x.onExportedOrders === "number"));
 });
 
+await t("R04 A03: a perforated company standard copies into two jobs with every spec field; editing job A's copy leaves the standard and job B unchanged", async () => {
+  const perfSpec = { product: "Flashing", construction: "perforated", finishId: "colorbond", bmt: 0.55, colour: "Surfmist", perforation: { pattern: "round", holeSizeMm: 3, pitchMm: 6, arrangement: "staggered", extent: "all" } };
+  const p = await SP("/presets", { content: { name: "Std vent", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: perfSpec, profile } });
+  assert.equal(p.status, 200, JSON.stringify(p.data));
+  const pid = p.data.preset.presetId, a = id(), b = id();
+  let r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { materials: { upsert: [{ id: a, fromPreset: { presetId: pid } }, { id: b, fromPreset: { presetId: pid } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const ca = r.data.snapshot.materials.find((m) => m.id === a);
+  assert.equal(ca.spec.construction, "perforated"); assert.equal(ca.spec.perforation.arrangement, "staggered"); assert.equal(ca.spec.perforation.holeSizeMm, 3);
+  r = await SP(`/workspaces/${w4}/commit`, { expectedRevision: await w4rev(), changes: { materials: { upsert: [{ ...ca, spec: { ...ca.spec, colour: "Monument", perforation: { ...ca.spec.perforation, holeSizeMm: 4 } } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const after = r.data.snapshot.materials;
+  assert.equal(after.find((m) => m.id === b).spec.perforation.holeSizeMm, 3);
+  assert.equal(after.find((m) => m.id === b).spec.colour, "Surfmist");
+  const std = (await S("/presets")).data.presets.find((x) => x.id === pid);
+  assert.equal(std.spec.perforation.holeSizeMm, 3); assert.equal(std.spec.colour, "Surfmist"); assert.equal(std.revision, 1);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

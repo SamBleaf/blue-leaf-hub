@@ -236,7 +236,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
         : <Banner tone="ok">Ready: {preview.snapshot.totals.pieces} pieces · {fmtLm(preview.snapshot.totals.totalLm)} LM to {preview.snapshot.supplier?.name}.</Banner>)}
       <div className="flex flex-wrap gap-2">
         <Btn onClick={() => exportPdf(true)} disabled={busy || dirtyForm || ws.dirty}>Export draft PDF</Btn>
-        <Btn kind="primary" onClick={() => exportPdf(false)} disabled={busy || dirtyForm || ws.dirty || !preview || preview.problems.some((p) => !(extra && /already on/.test(p))) || invalidDrafts.length > 0}>Export supplier PDF</Btn>
+        <Btn kind="primary" onClick={() => exportPdf(false)} disabled={busy || dirtyForm || ws.dirty || !preview || preview.problems.some((p) => !(extra && /already on/.test(p))) || invalidDrafts.length > 0 || staleLines.length > 0}>Export supplier PDF</Btn>
       </div>
       {exportRes && (exportRes.ok
         ? <Banner tone="ok" action={<Btn onClick={() => openPdf(api, exportRes.exportId, setMsg)}>Open PDF</Btn>}>Export {exportRes.exportNo}{exportRes.isDraft ? " (draft)" : ""} is frozen. Nothing has been sent.</Banner>
