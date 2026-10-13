@@ -98,7 +98,7 @@ const WP = (p, body, o = {}) => call("POST", `/api/worker/takeoff${p}`, { ...o, 
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
-  try { await fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); }
+  try { await fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); }
 }
 const f = plan.meta.features;
 const H = { p1: f.horizontalDim.p1, p2: f.horizontalDim.p2, knownMm: 12000 };

@@ -14,7 +14,7 @@ import { buildKnownPlanPdf } from "./lib/takeoffPdfFixture.mjs";
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
-  try { await fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
+  try { await fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
 }
 const near = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg || ""} expected ${b}, got ${a}`);
 

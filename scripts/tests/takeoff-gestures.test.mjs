@@ -7,7 +7,7 @@ import { createGestureTracker, TAP_SLOP_PX } from "../../src/components/takeoff/
 
 globalThis.performance ??= { now: () => Date.now() };
 let pass = 0, fail = 0;
-function t(name, fn) { try { fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
+function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
 
 function fakeEl() {
   const l = {};

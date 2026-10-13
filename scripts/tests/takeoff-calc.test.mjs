@@ -14,7 +14,7 @@ import {
 const cases = JSON.parse(readFileSync(new URL("../../docs/takeoff/R03/calculation-cases.json", import.meta.url), "utf8"));
 let pass = 0, fail = 0;
 function t(name, fn) {
-  try { fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
+  try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
 }
 const throwsValidation = (fn) => assert.throws(fn, (e) => e instanceof TakeoffValidationError);
 

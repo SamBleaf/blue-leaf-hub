@@ -12,7 +12,7 @@ if (db.skip) { console.log(`takeoff-db: SKIPPED — ${db.skip}`); process.exit(0
 const c = db.client;
 let pass = 0, fail = 0;
 async function t(name, fn) {
-  try { await c.query("BEGIN"); await fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
+  try { await c.query("BEGIN"); await fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); }
   finally { await c.query("ROLLBACK").catch(() => {}); }
 }
 const id = () => crypto.randomUUID();

@@ -10,7 +10,7 @@ import { renderSupplierOrderPdf, winAnsi, RENDERER_VERSION } from "../../server/
 import { starterProfile, mirrorProfile, setIncludedAngle, computeWorkspace, normaliseProfile } from "../../shared/takeoff/index.js";
 
 let pass = 0, fail = 0;
-async function t(name, fn) { try { await fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
+async function t(name, fn) { try { await fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
 const WRITE = process.argv.includes("--write-samples");
 
 async function pdfText(buf) {

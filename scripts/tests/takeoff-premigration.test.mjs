@@ -40,7 +40,7 @@ const call = async (method, path, body) => {
   return { status: r.status, data: await r.json() };
 };
 let pass = 0, fail = 0;
-async function t(name, fn) { try { await fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
+async function t(name, fn) { try { await fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.message}`); } }
 const pdf = Buffer.from(buildKnownPlanPdf({}).bytes).toString("base64");
 
 await t("A25 takeoff endpoints: 503 MIGRATION_PENDING with a plain message", async () => {
