@@ -1,7 +1,7 @@
 # R04b fix plan — from the adversarial review of 6148e30 / e933807 (2026-10-14)
 
 Review: 4 independent attackers (brief, data integrity, phone UX, end-to-end PDF), then a skeptic triage.
-62 raw findings → 3 blockers, 16 majors and 30 minors confirmed or plausible; 11 rejected or duplicate.
+62 raw findings → 3 blockers, 15 majors and 33 minors confirmed or plausible; 11 rejected or duplicate.
 Scope: fix every blocker and major, plus the cheap minors. Ids are the triage's R-numbers.
 
 | Group | Fixes | Where |

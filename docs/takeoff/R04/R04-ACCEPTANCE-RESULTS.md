@@ -24,7 +24,7 @@ NOT VERIFIED is not PASS. **The feature is not called site-ready:** the real-pho
 
 | | Status |
 |---|---|
-| Implementation (F01–F08, B01–B14, plus all 3 blockers and 16 majors from the adversarial review) | **Complete** (deferred minors listed below) |
+| Implementation (F01–F08, B01–B14, plus all 3 blockers and 15 majors from the adversarial review) | **Complete** (deferred minors listed below) |
 | Automated tests (node: unit + real-Postgres SQL + real routes) | **PASS**: 251 tests across 9 suites, 0 skipped |
 | Browser, mocked backend | **PASS**: 26 tests |
 | Browser, real local stack (A09) | **PASS**: desktop Chromium and WebKit iPhone 13 emulation |
@@ -80,7 +80,7 @@ NOT VERIFIED is not PASS. **The feature is not called site-ready:** the real-pho
 
 ## Adversarial review (2026-10-14) → R04b
 
-Four attackers and a skeptic produced 62 findings: 3 blockers, 16 majors and 30 minors confirmed, 11 rejected or duplicate. Every blocker and major is fixed and has a regression test. Plan: `FIX-PLAN-R04b.md`.
+Four attackers and a skeptic produced 62 findings: 3 blockers, 15 majors and 33 minors confirmed, 11 rejected or duplicate. Every blocker and major is fixed and has a regression test. Plan: `FIX-PLAN-R04b.md`.
 
 Deferred minors, known and documented:
 - **R44:** leading hands can raise rule ceilings.
