@@ -4,8 +4,10 @@
 // (server), lists the job's CURRENT plans, and supersedes EXPLICITLY (the uploader
 // picks the plan a revision replaces — never inferred). base = "/api/carpentry/jobs/:id"
 // or "/api/projects/:id". Worker sees the current set on the PWA.
+// `takeoffPath` (optional) adds a Takeoffs action when the takeoff feature is switched on.
 // =============================================================================
 import { useEffect, useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import { apiFetch, apiPost, apiDelete } from "../lib/apiFetch.js";
 
 const PLAN_TYPES = [
@@ -23,7 +25,7 @@ function fileToBase64(file) {
   });
 }
 
-export default function JobPlansCard({ base }) {
+export default function JobPlansCard({ base, takeoffPath }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -43,6 +45,15 @@ export default function JobPlansCard({ base }) {
     setPlans(data?.plans || []);
   }, [base]);
   useEffect(() => { load(); }, [load]);
+
+  // Show the Takeoffs entry only when the server reports the feature enabled for this user.
+  const [takeoffOn, setTakeoffOn] = useState(false);
+  useEffect(() => {
+    if (!takeoffPath) return undefined;
+    let stop = false;
+    apiFetch("/api/takeoff/capabilities").then(({ ok, data }) => { if (!stop) setTakeoffOn(!!(ok && data?.enabled && data.capabilities?.view)); });
+    return () => { stop = true; };
+  }, [takeoffPath]);
 
   async function upload() {
     if (!file) return;
@@ -71,14 +82,17 @@ export default function JobPlansCard({ base }) {
   }
   async function removePlan(docId) {
     if (!confirm("Remove this plan from the field?")) return;
-    const { ok, error: e } = await apiDelete(`/api/job-plans/${docId}`);
-    if (ok) setPlans((p) => p.filter((x) => x.docId !== docId));
+    const { ok, data, error: e } = await apiDelete(`/api/job-plans/${docId}`);
+    if (ok) { setPlans((p) => p.filter((x) => x.docId !== docId)); if (data?.archived) setError(data.message); }
     else setError(e || "Could not remove.");
   }
 
   return (
     <div className="rounded-card border border-hairline bg-surface p-4">
-      <h3 className="text-sm font-semibold text-ink mb-3">Plans <span className="text-muted font-normal">(issued to the field)</span></h3>
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="flex-1 text-sm font-semibold text-ink">Plans <span className="text-muted font-normal">(issued to the field)</span></h3>
+        {takeoffOn && <Link to={takeoffPath} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/5">Takeoffs</Link>}
+      </div>
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
 
       {loading ? (
@@ -89,7 +103,7 @@ export default function JobPlansCard({ base }) {
         <div className="space-y-1.5 mb-3">
           {plans.map((p) => (
             <div key={p.docId} className="flex items-center gap-2 text-sm rounded-lg border border-hairline px-3 py-2">
-              <span className="flex-1 min-w-0 truncate text-ink">{p.fileName} <span className="text-[10px] text-muted">· {p.documentType}</span></span>
+              <span className="flex-1 min-w-0 truncate text-ink">{p.fileName} <span className="text-[10px] text-muted">· {p.documentType}{p.version > 1 ? ` · v${p.version}` : ""}</span></span>
               <button onClick={() => viewPlan(p.docId)} className="text-xs text-primary hover:underline shrink-0">View</button>
               <button onClick={() => removePlan(p.docId)} className="text-xs text-muted hover:text-red-500 shrink-0">Remove</button>
             </div>

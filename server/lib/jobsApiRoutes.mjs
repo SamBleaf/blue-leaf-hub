@@ -255,6 +255,15 @@ export function registerJobsApiRoutes(app) {
         );
       }
 
+      // Takeoffs (mig 206) hold measurement / order evidence for this job — never cascade them away.
+      const { count: takeoffCount, error: tkErr } = await sb
+        .from("takeoff_workspaces")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", jobId);
+      if (!tkErr && (takeoffCount || 0) > 0) {
+        return err(res, 409, "This job has takeoffs (measurements or orders). Archive it instead of deleting.", "JOB_HAS_TAKEOFFS");
+      }
+
       const { data: projIds } = await sb.from("projects").select("id").eq("job_id", jobId);
       const ids = (projIds || []).map((p) => p.id).filter(Boolean);
       for (const pid of ids) {

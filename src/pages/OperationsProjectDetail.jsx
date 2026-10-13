@@ -1530,7 +1530,7 @@ export default function OperationsProjectDetail() {
           {tab === "tasks" && renderSiteTasksContent()}
           {tab === "files" && (
             <>
-              <JobPlansCard base={`/api/projects/${projectId}`} />
+              <JobPlansCard base={`/api/projects/${projectId}`} takeoffPath={`/operations/${projectId}/takeoff`} />
               {renderFinancialsContent()}
               {renderLabourContent()}
               <SectionCard title="Key details">

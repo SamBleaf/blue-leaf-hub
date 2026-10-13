@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSupabase, supabaseConfigured, SUPABASE_AUTH_CLIENT_RESET } from "./supabaseClient.js";
+import { clearRememberedActorRecovery } from "./takeoffRecovery.js";
 
 // eslint-disable-next-line react-refresh/only-export-components -- context exported for useAuth hook
 export const AuthContext = createContext(null);
@@ -23,6 +24,7 @@ export function AuthProvider({ children }) {
   const signOut = useCallback(async () => {
     const sb = getSupabase();
     if (sb) await sb.auth.signOut().catch(() => {});
+    await clearRememberedActorRecovery().catch(() => {}); // explicit logout drops unsaved takeoff drafts on this device
     setProfile(null);
     navigate("/login", { replace: true });
   }, [navigate]);

@@ -457,7 +457,7 @@ function OverviewTab({ job, performance, onUpdated, onStatusChange, onDeleted, s
       )}
 
       {/* Plans issued to the field (worker PWA) */}
-      <div className="mt-2"><JobPlansCard base={`/api/carpentry/jobs/${job.id}`} /></div>
+      <div className="mt-2"><JobPlansCard base={`/api/carpentry/jobs/${job.id}`} takeoffPath={`/carpentry/${job.id}/takeoff`} /></div>
 
       {/* Closeout performance snapshot (shown once job is complete) */}
       {job.status === "complete" && performance && (

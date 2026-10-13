@@ -22,6 +22,7 @@ import "./worker.js";
 import "./field.js";
 import "./portal.js";
 import "./crm.js";
+import "./takeoff.js";
 
 // ── Supabase auth/session shape (a few components read the user via supabase) ────
 route("GET", "/rest/v1/user_profiles", () => {

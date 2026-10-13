@@ -328,6 +328,8 @@ export default function AppShell() {
   }, []);
 
   function handleTouchStart(e) {
+    // Takeoff plan viewer / focused editors own their gestures — never open the sidebar from them.
+    if (e.target?.closest?.("[data-takeoff-viewport],[data-takeoff-focus]")) { touchStartX.current = null; return; }
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
   }

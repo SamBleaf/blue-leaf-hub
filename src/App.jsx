@@ -48,6 +48,10 @@ import JobDashboardSelector from "./pages/JobDashboardSelector.jsx";
 import SupervisorHome from "./pages/SupervisorHome.jsx";
 import PortalAdmin from "./pages/PortalAdmin.jsx";
 const PortalV2Admin = React.lazy(() => import("./pages/PortalV2Admin.jsx"));
+// Takeoffs (R03) — lazy so pdf.js and the takeoff UI load only when a takeoff opens.
+const TakeoffPage = React.lazy(() => import("./pages/takeoff/TakeoffPage.jsx"));
+const WorkerTakeoff = React.lazy(() => import("./pages/worker/WorkerTakeoff.jsx"));
+const takeoffFallback = <div className="min-h-screen bg-page" />;
 import RfqPackageList from "./pages/RfqPackageList.jsx";
 const MarketingRouter = React.lazy(() => import("./components/marketing/MarketingRouter.jsx"));
 import Workforce from "./pages/Workforce.jsx";
@@ -116,6 +120,7 @@ export default function App() {
             <Route path="/worker/tasks" element={<WorkerTasks />} />
             <Route path="/worker/week" element={<WorkerWeek />} />
             <Route path="/worker/scan-invoice" element={<WorkerScanInvoice />} />
+            <Route path="/worker/takeoff/:jobType/:jobId" element={<Suspense fallback={takeoffFallback}><WorkerTakeoff /></Suspense>} />
             {UiReviewIndex && (
               <Route
                 path="/ui-review"
@@ -326,6 +331,10 @@ export default function App() {
                 <Route path="/operations/:projectId/whs" element={<WhsManager />} />
                 <Route path="/operations/:projectId/whs-setup" element={<WhsEngine />} />
                 <Route path="/operations/:projectId/diary" element={<SiteDiary />} />
+                <Route
+                  path="/operations/:projectId/takeoff"
+                  element={<RoleRoute element={<Suspense fallback={takeoffFallback}><TakeoffPage jobType="project" /></Suspense>} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
 
                 <Route
                   path="/sales"
@@ -411,6 +420,14 @@ export default function App() {
                 <Route
                   path="/carpentry/:jobId"
                   element={<RoleRoute element={<CarpentryJobDetail />} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/carpentry/:jobId/takeoff"
+                  element={<RoleRoute element={<Suspense fallback={takeoffFallback}><TakeoffPage jobType="carpentry" /></Suspense>} allowed={["admin", "supervisor"]} redirectTo="/home" />}
+                />
+                <Route
+                  path="/carpentry/:jobId/sites/:siteId/takeoff"
+                  element={<RoleRoute element={<Suspense fallback={takeoffFallback}><TakeoffPage jobType="charge-up" /></Suspense>} allowed={["admin", "supervisor"]} redirectTo="/home" />}
                 />
 
                 <Route

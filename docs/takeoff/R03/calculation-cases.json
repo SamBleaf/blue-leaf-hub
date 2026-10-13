@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "units": "mm unless specified",
+  "measuredFlashing": [
+    {
+      "raw": 4312,
+      "finished": 4600
+    },
+    {
+      "raw": 4300,
+      "finished": 4500
+    },
+    {
+      "raw": 5800,
+      "finished": 6000
+    },
+    {
+      "raw": 5801,
+      "finished": 6100
+    },
+    {
+      "raw": 8800,
+      "finished": 9000
+    },
+    {
+      "raw": 8801,
+      "finished": 9100
+    }
+  ],
+  "manualFlashing": [
+    {
+      "length": 4312,
+      "quantity": 3,
+      "finished": 4312,
+      "totalLm": 12.936
+    }
+  ],
+  "thresholds": [
+    {
+      "finished": 6000,
+      "handlingFlag": false,
+      "ceilingExceeded": false
+    },
+    {
+      "finished": 6001,
+      "handlingFlag": true,
+      "ceilingExceeded": false
+    },
+    {
+      "finished": 9000,
+      "handlingFlag": true,
+      "ceilingExceeded": false
+    },
+    {
+      "finished": 9001,
+      "handlingFlag": true,
+      "ceilingExceeded": true
+    }
+  ],
+  "split": [
+    {
+      "requiredFinished": 7200,
+      "pieces": [
+        3700,
+        3700
+      ],
+      "laps": [
+        200
+      ],
+      "coverage": 7200,
+      "valid": true
+    },
+    {
+      "requiredFinished": 7200,
+      "pieces": [
+        3600,
+        3600
+      ],
+      "laps": [
+        200
+      ],
+      "coverage": 7000,
+      "valid": false
+    }
+  ],
+  "repeatedMembers": [
+    {
+      "run": 6000,
+      "centres": 600,
+      "count": 11
+    },
+    {
+      "run": 6100,
+      "centres": 600,
+      "count": 12
+    }
+  ],
+  "memberLength": [
+    {
+      "input": 4100,
+      "inputType": "projection",
+      "pitchDegrees": 22.5,
+      "trueLengthApprox": 4437.808021198815,
+      "stockIncrement": 600,
+      "orderLength": 4800
+    },
+    {
+      "input": 4100,
+      "inputType": "true",
+      "pitchDegrees": 22.5,
+      "stockIncrement": 600,
+      "orderLength": 4200
+    }
+  ],
+  "sheetWall": [
+    {
+      "wallLength": 6100,
+      "wallHeight": 2700,
+      "effectiveCover": 1200,
+      "sheetHeight": 2750,
+      "count": 6
+    }
+  ],
+  "areaToLinear": [
+    {
+      "areaM2": 27,
+      "effectiveCoverMm": 90,
+      "wastePercent": 0,
+      "linearMetres": 300
+    }
+  ],
+  "separateAxisCalibration": [
+    {
+      "sx": 20,
+      "sy": 25,
+      "dx": 300,
+      "dy": 400,
+      "lengthApprox": 11661.903789690601
+    }
+  ]
+}

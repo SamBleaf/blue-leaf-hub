@@ -1,0 +1,229 @@
+// =============================================================================
+// useTakeoffWorkspace — load, edit, autosave and recover one takeoff workspace.
+//
+// Server data is authoritative. Local edits accumulate in a change-set that is shown
+// optimistically (and computed with shared/takeoff), then committed ~500 ms after the last
+// completed edit with the revision it was based on (CAS) and a per-batch idempotency key.
+//   Saving… / Saved / Not synced / Conflict — never a "Saved" before the server confirms.
+//   409 keeps every local edit and asks the user (reload vs. apply mine) — never auto-overwrites.
+//   Network loss keeps edits visible and retries when back online.
+// Every completed edit is also written to the device recovery store immediately (not debounced)
+// so a reload, crash or service-worker update cannot lose it.
+// =============================================================================
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { computeWorkspace } from "../../../shared/takeoff/index.js";
+import { newId } from "../../lib/takeoffApi.js";
+import { clearRecovery, loadRecovery, rememberActor, saveRecovery } from "../../lib/takeoffRecovery.js";
+import { applyChanges, emptyChanges, fromPayload, isEmpty, mergeChanges, toPayload } from "./changeset.js";
+
+export const SAVE_DEBOUNCE_MS = 500;
+
+/** Everything not yet confirmed by the server: held + in-flight + queued (later wins). */
+function allPending(cur, queue) {
+  return mergeChanges(mergeChanges(cur.held?.changes || null, cur.inflight?.changes || null) || emptyChanges(), queue);
+}
+
+export function useTakeoffWorkspace(api, workspaceId) {
+  const [server, setServer] = useState(null);      // { snapshot, orderStatus, capabilities, jobLabel }
+  const [loadState, setLoadState] = useState({ loading: true, error: null, code: null });
+  const [queue, setQueue] = useState(emptyChanges); // edits not yet sent
+  const [inflight, setInflight] = useState(null);  // { changes, key, baseRevision }
+  // A batch whose send failed without a server verdict (network/5xx). It is resent UNCHANGED —
+  // same idempotency key, same base revision — so a commit whose response was lost replays
+  // instead of looking like someone else's save. Newer edits wait in the queue behind it.
+  const [held, setHeld] = useState(null);
+  // A batch the server REFUSED (4xx with a reason). It is taken out of the pending view so later
+  // edits keep saving; the user sees why and can discard it.
+  const [rejected, setRejected] = useState(null); // { changes, error }
+  const [status, setStatus] = useState("saved");    // saved | saving | unsynced | conflict | error
+  const [saveError, setSaveError] = useState(null);
+  const [recovery, setRecovery] = useState({ available: true, offer: null });
+  const timer = useRef(null);
+  const latest = useRef({});
+
+  const actorKey = server?.capabilities?.actorKey || null;
+  const baseRevision = server?.snapshot?.workspace?.revision ?? null;
+  // Ref mirror of the latest state for async callbacks (updated on render AND synchronously on edit).
+  latest.current = { ...latest.current, queue, inflight, held, server, actorKey, baseRevision, status };
+
+  const load = useCallback(async () => {
+    setLoadState({ loading: true, error: null, code: null });
+    const r = await api.workspace(workspaceId);
+    if (!r.ok) { setLoadState({ loading: false, error: r.error, code: r.code || (r.status === 403 ? "FORBIDDEN" : null) }); return null; }
+    const next = { snapshot: r.data.snapshot, orderStatus: r.data.orderStatus, capabilities: r.data.capabilities, jobLabel: r.data.jobLabel, jobAddress: r.data.jobAddress || null };
+    setServer(next);
+    setLoadState({ loading: false, error: null, code: null });
+    return next;
+  }, [api, workspaceId]);
+
+  // Initial load, THEN (authenticated + permitted) offer recovery.
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      const s = await load();
+      if (stop || !s?.capabilities?.actorKey) return;
+      rememberActor(s.capabilities.actorKey);
+      const rec = await loadRecovery(s.capabilities.actorKey, workspaceId);
+      if (stop) return;
+      if (!rec.ok) { setRecovery({ available: false, offer: null }); return; }
+      if (rec.record) {
+        setRecovery({ available: true, offer: { ...rec.record, sameBase: rec.record.baseRevision === s.snapshot.workspace.revision } });
+      }
+    })();
+    return () => { stop = true; };
+  }, [load, workspaceId]);
+
+  const pending = useMemo(() => mergeChanges(mergeChanges(held?.changes || null, inflight?.changes || null) || emptyChanges(), queue), [held, inflight, queue]);
+  const view = useMemo(() => applyChanges(server?.snapshot, pending), [server, pending]);
+  const computed = useMemo(() => {
+    if (!view) return null;
+    try { return computeWorkspace(view); } catch (e) { return { error: e.message, scheduleLines: [], contributions: [] }; }
+  }, [view]);
+  const dirty = !isEmpty(pending);
+
+  const persistRecovery = useCallback(async (changes) => {
+    const { actorKey: a, baseRevision: b } = latest.current;
+    if (!a) return;
+    const res = await saveRecovery({ actorKey: a, workspaceId, baseRevision: b, changes: toPayload(changes) });
+    setRecovery((r) => ({ ...r, available: res.ok }));
+  }, [workspaceId]);
+
+  /** Apply one completed edit (a partial change-set). */
+  const edit = useCallback((partial) => {
+    // Use the ref so several edits in one tick chain correctly; recovery is written immediately.
+    const next = mergeChanges(latest.current.queue, partial);
+    latest.current.queue = next;
+    setQueue(next);
+    persistRecovery(allPending(latest.current, next));
+    setStatus((st) => (st === "conflict" ? st : "unsynced"));
+  }, [persistRecovery]);
+
+  // ── commit loop ─────────────────────────────────────────────────────────────
+  const send = useCallback(async (batch) => {
+    const r = await api.commit(workspaceId, { expectedRevision: batch.baseRevision, idempotencyKey: batch.key, changes: toPayload(batch.changes) });
+    if (r.ok) {
+      setServer((s) => ({ ...s, snapshot: r.data.snapshot, orderStatus: r.data.orderStatus }));
+      latest.current.inflight = null;
+      setInflight(null);
+      setSaveError(null);
+      const rest = latest.current.queue;
+      if (isEmpty(rest)) {
+        setStatus("saved");
+        if (latest.current.actorKey) clearRecovery(latest.current.actorKey, workspaceId);
+      } else {
+        setStatus("unsynced");
+      }
+      return;
+    }
+    latest.current.inflight = null;
+    setInflight(null);
+    if (r.status === 409 || r.code === "CONFLICT") {
+      // A real verdict: fold the batch back in front of newer edits (nothing is lost) and ask the user.
+      latest.current.queue = mergeChanges(batch.changes, latest.current.queue);
+      setQueue(latest.current.queue);
+      setStatus("conflict"); setSaveError(r.error); return;
+    }
+    if (r.status >= 400 && r.status < 500) {
+      // A definite refusal (e.g. invalid value): park it, keep everything else flowing.
+      setRejected({ changes: batch.changes, error: r.error || "That change couldn't be saved." });
+      const rest = latest.current.queue;
+      setStatus(isEmpty(rest) ? "saved" : "unsynced");
+      setSaveError(null);
+      return;
+    }
+    // No verdict (network / server error): hold the batch to resend unchanged.
+    latest.current.held = batch;
+    setHeld(batch);
+    if (r.network || !r.status) { setStatus("unsynced"); setSaveError("No connection — your changes are kept on this device and will save when you're back online."); return; }
+    setStatus("error");
+    setSaveError(r.error || "Couldn't save.");
+  }, [api, workspaceId]);
+
+  const flush = useCallback(async () => {
+    const { queue: q, inflight: inf, held: h, server: srv, status: st } = latest.current;
+    if (inf || !srv || st === "conflict") return;
+    if (!srv.capabilities?.edit) { setStatus("error"); setSaveError("You can view this takeoff but not change it."); return; }
+    let batch;
+    if (h) {
+      batch = h; // resend the held batch exactly as it was
+      latest.current.held = null;
+      setHeld(null);
+    } else {
+      if (isEmpty(q)) return;
+      batch = { changes: q, key: `c-${newId()}`, baseRevision: srv.snapshot.workspace.revision };
+      latest.current.queue = emptyChanges();
+      setQueue(latest.current.queue);
+    }
+    latest.current.inflight = batch;
+    setInflight(batch);
+    setStatus("saving");
+    await send(batch);
+  }, [send]);
+
+  // debounce after each completed edit
+  useEffect(() => {
+    if ((isEmpty(queue) && !held) || inflight || status === "conflict" || status === "error") return undefined;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => { flush(); }, SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer.current);
+  }, [queue, held, inflight, status, flush]);
+
+  // retry when the network comes back
+  useEffect(() => {
+    const online = () => { if (latest.current.status === "unsynced") flush(); };
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, [flush]);
+
+  // recovery on hide / page exit (mobile: no beforeunload-only reliance)
+  useEffect(() => {
+    const save = () => { const all = allPending(latest.current, latest.current.queue); if (!isEmpty(all)) persistRecovery(all); };
+    const vis = () => { if (document.visibilityState === "hidden") save(); };
+    document.addEventListener("visibilitychange", vis);
+    window.addEventListener("pagehide", save);
+    return () => { document.removeEventListener("visibilitychange", vis); window.removeEventListener("pagehide", save); };
+  }, [persistRecovery]);
+
+  /** User chose: discard local edits and take the server version (local copy kept in recovery). */
+  const reloadFromServer = useCallback(async () => {
+    const all = allPending(latest.current, latest.current.queue);
+    if (!isEmpty(all)) await persistRecovery(all);
+    latest.current.held = null; setHeld(null);
+    latest.current.queue = emptyChanges();
+    setQueue(emptyChanges());
+    setStatus("saved"); setSaveError(null);
+    await load();
+  }, [load, persistRecovery]);
+
+  /** User chose: re-apply my edits on top of the latest server version. */
+  const applyMineOnLatest = useCallback(async () => {
+    const fresh = await load();
+    if (!fresh) return;
+    setStatus("unsynced"); setSaveError(null);
+  }, [load]);
+
+  /** Restore a recovery record into the queue (user action). */
+  const restoreRecovery = useCallback(async () => {
+    const offer = recovery.offer;
+    if (!offer) return;
+    setQueue((q) => mergeChanges(fromPayload(offer.changes), q));
+    setRecovery((r) => ({ ...r, offer: null }));
+    setStatus(offer.sameBase ? "unsynced" : "conflict");
+    if (!offer.sameBase) setSaveError("These recovered changes were made on an older version. Review, then choose how to apply them.");
+  }, [recovery.offer]);
+
+  const discardRecovery = useCallback(async () => {
+    if (latest.current.actorKey) await clearRecovery(latest.current.actorKey, workspaceId);
+    setRecovery((r) => ({ ...r, offer: null }));
+  }, [workspaceId]);
+
+  const retry = useCallback(() => { setStatus("unsynced"); setSaveError(null); }, []); // the held batch is resent first
+  const discardRejected = useCallback(() => setRejected(null), []);
+  const refreshServer = load;
+
+  return {
+    loadState, server, view, computed, pending, dirty, status, saveError, recovery, rejected, discardRejected,
+    capabilities: server?.capabilities || null,
+    edit, flush, retry, reloadFromServer, applyMineOnLatest, restoreRecovery, discardRecovery, refreshServer,
+  };
+}

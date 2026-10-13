@@ -251,6 +251,9 @@ Condensed view (key columns):
 | `margin_pct` (on charge_up_jobs) | Labour | Versioned (editable per site, director-only) | Charge Up detail (site Margin %) | mig 150 (supersedes mig 149's `charge_out_hourly`); a per-site TARGET GROSS MARGIN — charge-out = wage cost ÷ (1 − margin_pct/100), so realised margin == the value set. NULL = each worker's `charge_up_hourly`. Never alters approved hours or cost — charge-out $ stays derived | charge-up per-site + by-FY charge-out / margin (invoicing) | N | N | N |
 | `charge_up_job_id` (on site_tasks) | Task | Static (per task) | Charge Up site detail (Tasks tab) | mig 151; a `site_tasks` row owned by a charge-up SITE alone (`project_id` + `carpentry_job_id` NULL — the mig-151 3-way one-owner rule widens mig 107) so it never matches a parent-job reader. Reuses the same task table/component as a job. ON DELETE CASCADE | charge-up site tasks | N | N | N |
 | `task_assignments` (task_id, worker_id) | Task | Static (per membership) | Task assign picker (worker leading-hand / office) | mig 153; the many-to-many assignee join for `site_tasks` (a task can hold multiple workers). `site_tasks.assigned_to` is kept as a mirror of the FIRST assignee (back-compat + rollback); the server dual-reads/writes both. A worker sees a task iff it has NO assignees (shared) OR they are one. | worker task visibility + assignee display | N | N | N |
+| `revision_label` (on job_documents) | Document | Static (per document) | Hub Plans card upload (typed by the uploader) | mig 206; structured plan revision label for DISPLAY. Never inferred from a filename; NULL on legacy rows. Identity of a plan revision = the immutable `job_documents.id` + `content_sha256`, not this label | Plans card, takeoff plan picker, supplier-order provenance | N | N | N |
+| `content_sha256` / `byte_size` (on job_documents) | Document | Static | System (computed at upload) | mig 206; hash + size of the stored bytes. Takeoff calibrations/measurements/exports anchor to doc id + hash; the viewer verifies bytes against it | takeoff provenance, integrity check | N | N | N |
+| `archived_at` / `archived_by` (on job_documents) | Document | Static | Plan remove action when takeoff evidence references the plan | mig 206; a referenced plan is archived (status → superseded) instead of deleted; its bytes stay readable to authorised reviewers | takeoff history, plan lifecycle | N | N | N |
 | `carpentry_job_id` (on job_documents) | Document | Static | Hub Plans card (carpentry job upload) | mig 152; lets a plan (job_documents row) key to a carpentry job as well as a construction `jobs` row, so worker plans work for carpentry sites. A "plan" = document_type in the plan set + storage_provider='supabase' + status='current' + audience_layer in (site,worker) | worker-app plans list | N | N | N |
 | `charge_up_job_id` (on carpentry_site_diary) | Diary | Static (per entry) | Charge Up site detail (Diary tab) | mig 151; a `carpentry_site_diary` row owned by a charge-up SITE (`job_id` NULL — mig 151 drops its NOT NULL) so it never matches a parent-job diary read. Reuses the same diary table/component as a job. ON DELETE CASCADE | charge-up site diary | N | N | N |
 | `canonical_key` (on timesheet_entries) | Labour | Static (per entry) | Worker submit (PWA sub-task pick, required) | `carpentry_budget_line_items.canonical_key` (mig 147); the budget SUB-TASK an hour was worked on. Sub-task identity = (task_category, canonical_key) — the single spine shared by budget, schedule, PWA | per-sub-task actual + earned value (budget) | N | N | N |
@@ -588,3 +591,22 @@ The **Project Intelligence Engine** = the **building-facts** extractor (→ `pro
 ## 37. Roadmap impact
 
 Phase −1 **adds** the doc-correction sweep (docs only). Phase 0 scaffolding now registers **three spine keys** (`party_id` / `lead_id` / `job_id`) and **three event streams**, plus the **Config layer** — not just `job_id`. Everything else in §27 stands.
+
+## 38. Takeoff records (mig 206, 2026-10-13) — module records, NOT canonical job facts
+
+Registered so nobody re-stores them elsewhere (ADR: `docs/takeoff/ADR-001-hub-takeoff.md`). All key to exactly ONE job spine on the root
+(`takeoff_workspaces`: `job_id` | `carpentry_job_id` | `charge_up_job_id`, CHECK num_nonnulls = 1); children derive scope from the root.
+
+| Record | Type | Notes |
+|---|---|---|
+| `takeoff_workspaces` | Versioned (revision CAS) | One takeoff per job context; `primary_document_id`/`primary_page_index` are a job PREFERENCE, never an automatic scale for other pages |
+| `takeoff_calibrations` | Static (immutable revisions) | doc + hash + page + optional region + revision; both axis point pairs + known mm; server-computed sx/sy; verification evidence |
+| `takeoff_measurements` | Versioned | geometry in unrotated PDF user space; `raw_length_mm` is server-computed provenance; manual lengths carry no calibration |
+| `takeoff_material_presets` / `_revisions` | Versioned (immutable revisions) | company standards; optional sourced review (url/title/page/checkedAt/reviewedBy) — absent = user-entered, never "verified" |
+| `takeoff_job_materials` | Versioned | independent FULL copy on the job; edits never write back to a standard |
+| `takeoff_contributions` | Versioned | measurement → job material; optional explicit split (pieces + laps) that REPLACES the unsplit contribution |
+| `takeoff_orders` / `_order_lines` | Versioned (CAS) | one supplier per order; delivery details carry provenance (job vs entered) — the job address itself is not re-stored as a fact |
+| `takeoff_exports` | Static (frozen snapshot + hash) | what the supplier saw (company/supplier/job copied INTO the snapshot on purpose); artifact pending/ready/failed |
+| `takeoff_placements` / `_allocations` | Static (placed → cancelled only) | "placed externally" against one export; allocations to stable contributions; ordered/remaining derive from these only |
+
+Generated (never stored as editable): finished lengths, schedule lines, totals, required / ordered / remaining — always recomputed with `shared/takeoff`.

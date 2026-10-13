@@ -63,11 +63,21 @@ export function installUiReview() {
     pending += 1;
     markNotReady();
     try {
+      // Takeoff LOCAL SANDBOX (scripts/takeoff/sandbox.mjs): selected calls go to the real local
+      // sandbox server through the Vite proxy, with sandbox-only credentials. Review-only.
+      const passHeaders = window.__uiReviewPassthrough?.(url);
+      if (passHeaders) {
+        const headers = new Headers(opts.headers || {});
+        for (const [k, v] of Object.entries(passHeaders)) headers.set(k, v);
+        return await realFetch(input, { ...opts, headers });
+      }
       // Supabase auth endpoints — return a benign fake so supabase-js never errors.
       if (url.includes("/auth/v1/")) {
         return jsonResponse({ access_token: "ui-review", token_type: "bearer", expires_in: 3600, user: null });
       }
-      const matched = resolveReview(url, opts);
+      const matched = await resolveReview(url, opts);
+      if (matched instanceof Response) return matched; // binary fixtures (e.g. takeoff plan PDFs)
+      if (matched?.__status) return jsonResponse(matched.body, matched.__status);
       if (matched !== undefined) return jsonResponse(matched);
       // Safe defaults so an un-fixtured endpoint never crashes a view:
       //   Supabase REST → empty array;  our API → { ok: true } (empty success).

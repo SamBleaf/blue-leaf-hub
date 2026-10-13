@@ -108,7 +108,7 @@ Audit trail: `AUDIT_REPORT_2026-06-02.md`, `AUDIT_REPORT_2026-06-03.md` (+ a ful
 | Project Intelligence (building facts) | Hub stores · Bestimator extracts | `project_metrics` + facts service — **built** |
 | Scope Intelligence (trades/scope/packages) | **Bestimator** | Hub RFQ extractor = v1; Bestimator = v2 |
 | Building Element Engine (substructure/frame/bathrooms…) | **Bestimator** | the scope→quantity bridge; NOT a Hub concern |
-| Quantity Intelligence (takeoff) | **Bestimator / Buildxact** | remote |
+| Quantity Intelligence (takeoff) | **Bestimator / Buildxact** | remote — **except field flashing takeoff + order prep, which moved to the Hub on 2026-10-13 (`docs/takeoff/ADR-001-hub-takeoff.md`)** |
 | Recipe Intelligence (qty→materials/labour/subs) | **Buildxact** | Hub consumes |
 | Historical / Cost Intelligence (benchmarks, similar, trends) | **Hub** | **built** (Module 2 — Cost Intelligence) |
 | Cost Plan (pre-takeoff budget) | **Hub** | = the **Pre-Tender assistant** (built) |

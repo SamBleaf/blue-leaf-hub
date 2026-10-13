@@ -4,7 +4,6 @@
   "description": "Blue Leaf Building — workforce app",
   "scope": "/worker",
   "display": "standalone",
-  "orientation": "portrait",
   "theme_color": "#006c9b",
   "background_color": "#006c9b",
   "icons": [

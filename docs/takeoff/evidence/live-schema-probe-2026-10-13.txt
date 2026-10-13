@@ -1,0 +1,67 @@
+PRESENT  job_documents.id  (mig 069)
+PRESENT  job_documents.job_id  (mig 069)
+PRESENT  job_documents.document_type  (mig 069)
+PRESENT  job_documents.title  (mig 069)
+PRESENT  job_documents.version  (mig 069)
+PRESENT  job_documents.status  (mig 069)
+PRESENT  job_documents.storage_provider  (mig 069)
+PRESENT  job_documents.storage_path  (mig 069)
+PRESENT  job_documents.audience_layer  (mig 069)
+PRESENT  job_documents.supersedes_document_id  (mig 069)
+PRESENT  job_documents.uploaded_by  (mig 069)
+PRESENT  job_documents.uploaded_at  (mig 069)
+PRESENT  job_documents.carpentry_job_id  (mig 152)
+PRESENT  job_documents.charge_up_job_id  (mig 172)
+MISSING  job_documents.revision_label  (mig 206 (expected MISSING until applied)) — 42703
+MISSING  job_documents.content_sha256  (mig 206 (expected MISSING until applied)) — 42703
+MISSING  job_documents.byte_size  (mig 206 (expected MISSING until applied)) — 42703
+MISSING  job_documents.archived_at  (mig 206 (expected MISSING until applied)) — 42703
+MISSING  job_documents.archived_by  (mig 206 (expected MISSING until applied)) — 42703
+PRESENT  suppliers.id  (mig 085)
+PRESENT  suppliers.name  (mig 085)
+PRESENT  suppliers.email  (mig 085)
+PRESENT  suppliers.phone  (mig 085)
+PRESENT  suppliers.contact_name  (mig 085)
+PRESENT  suppliers.abn  (mig 085)
+PRESENT  suppliers.is_active  (mig 085)
+PRESENT  suppliers.updated_at  (mig 085)
+PRESENT  suppliers.is_preferred  (mig 092)
+PRESENT  suppliers.account_terms  (mig 092)
+MISSING  suppliers.address  (audit: selected by procurementRoutes.mjs but in NO migration) — 42703
+PRESENT  company_profile.name  (mig 069)
+PRESENT  company_profile.abn  (mig 069)
+PRESENT  company_profile.address  (mig 069)
+PRESENT  company_profile.phone  (mig 069)
+PRESENT  company_profile.email  (mig 069)
+PRESENT  company_profile.updated_at  (mig 069)
+PRESENT  carpentry_jobs.id  (mig 065)
+PRESENT  carpentry_jobs.address  (mig 065)
+PRESENT  carpentry_jobs.client_name  (mig 065)
+PRESENT  carpentry_jobs.status  (mig 065)
+PRESENT  projects.id  (core)
+PRESENT  projects.job_id  (core)
+PRESENT  projects.address  (core)
+PRESENT  projects.status  (core)
+PRESENT  charge_up_jobs.id  (mig 145)
+PRESENT  charge_up_jobs.carpentry_job_id  (mig 145)
+PRESENT  charge_up_jobs.status  (mig 145)
+PRESENT  charge_up_jobs.address  (mig 145)
+PRESENT  employees.id  (mig 059)
+PRESENT  employees.user_id  (mig 059)
+PRESENT  employees.is_leading_hand  (mig 059)
+PRESENT  employees.is_active  (mig 059)
+PRESENT  user_profiles.id  (core)
+PRESENT  user_profiles.role  (core)
+PRESENT  user_profiles.is_active  (core)
+PRESENT  timesheets.employee_id  (mig 059/065)
+PRESENT  timesheets.project_id  (mig 059/065)
+PRESENT  timesheets.carpentry_job_id  (mig 059/065)
+PRESENT  timesheets.date  (mig 059/065)
+MISSING  takeoff_workspaces.id  (mig 206 (expected MISSING until applied)) — PGRST205
+MISSING  takeoff_workspaces.revision  (mig 206 (expected MISSING until applied)) — PGRST205
+MISSING  takeoff_exports.id  (mig 206 (expected MISSING until applied)) — PGRST205
+MISSING  takeoff_exports.artifact_status  (mig 206 (expected MISSING until applied)) — PGRST205
+PRESENT  storage bucket job-plans (public=false)
+MISSING  storage bucket takeoff-exports
+
+10 column/table check(s) missing.

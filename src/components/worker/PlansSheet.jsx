@@ -2,8 +2,11 @@
 // PlansSheet — worker PWA bottom sheet listing a job's CURRENT plans (Feature 1).
 // Opened from Today's site card + the Tasks job card (no new route). Tap a plan →
 // server signed URL → device PDF viewer. Source of truth is the Hub upload (Supabase).
+// Leading hands also get a Takeoffs action (server-decided capability; hidden when the
+// takeoff feature is off or the worker may only view plans).
 // =============================================================================
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { workerFetch } from "../../lib/workerFetch.js";
 
 const TYPE_LABEL = {
@@ -15,6 +18,19 @@ export default function PlansSheet({ jobId, jobType = "carpentry", chargeUpJobId
   const [plans, setPlans] = useState(null);
   const [error, setError] = useState(null);
   const [openingId, setOpeningId] = useState(null);
+  const [canTakeoff, setCanTakeoff] = useState(false);
+  const navigate = useNavigate();
+  const takeoffType = chargeUpJobId ? "charge-up" : jobType;
+  const takeoffId = chargeUpJobId || jobId;
+
+  useEffect(() => {
+    let stop = false;
+    workerFetch(`/api/worker/takeoff/capabilities?jobType=${encodeURIComponent(takeoffType)}&jobId=${encodeURIComponent(takeoffId)}`)
+      .then((r) => r.json())
+      .then((j) => { if (!stop) setCanTakeoff(!!(j.ok && j.enabled && j.capabilities?.view)); })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [takeoffType, takeoffId]);
 
   useEffect(() => {
     let stop = false;
@@ -83,6 +99,12 @@ export default function PlansSheet({ jobId, jobType = "carpentry", chargeUpJobId
               </button>
             ))}
           </div>
+        )}
+        {canTakeoff && (
+          <button type="button" onClick={() => navigate(`/worker/takeoff/${takeoffType}/${takeoffId}`)}
+            className="mt-3 w-full min-h-[48px] rounded-lg bg-primary text-white text-sm font-semibold active:bg-primary/90">
+            Takeoffs — measure &amp; order flashings
+          </button>
         )}
         <p className="text-[11px] text-muted mt-3">Opens the current issued plan in your device&rsquo;s PDF viewer.</p>
       </div>

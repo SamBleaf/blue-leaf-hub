@@ -29,12 +29,14 @@ export async function apiFetch(url, options = {}) {
         ok: false,
         data: null,
         error: json?.error || `Request failed (HTTP ${res.status})`,
+        status: res.status,
+        code: json?.code || null,
       };
     }
 
-    return { ok: true, data: json, error: null };
+    return { ok: true, data: json, error: null, status: res.status };
   } catch (e) {
-    return { ok: false, data: null, error: e?.message || "Network error" };
+    return { ok: false, data: null, error: e?.message || "Network error", network: true };
   }
 }
 
@@ -52,6 +54,45 @@ export async function apiBlob(url, options = {}) {
     return { ok: true, blob: await res.blob(), error: null };
   } catch (e) {
     return { ok: false, blob: null, error: e?.message || "Network error" };
+  }
+}
+
+/**
+ * Authenticated binary download with progress + cancellation (e.g. a plan PDF for the takeoff
+ * viewer). Returns { ok, bytes: Uint8Array|null, error, status, code } — never throws, except an
+ * AbortError is reported as { ok:false, aborted:true }.
+ * onProgress(loadedBytes, totalBytes|null) is called as chunks arrive.
+ */
+export async function apiStream(url, { signal, onProgress, fetcher } = {}) {
+  try {
+    const res = await (fetcher || authFetch)(url, { signal });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      return { ok: false, bytes: null, status: res.status, code: j?.code || null, error: j?.error || `Request failed (HTTP ${res.status})` };
+    }
+    const total = Number(res.headers.get("content-length")) || null;
+    if (!res.body || !res.body.getReader) {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      onProgress?.(buf.length, total);
+      return { ok: true, bytes: buf, status: res.status, error: null };
+    }
+    const reader = res.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      onProgress?.(loaded, total);
+    }
+    const bytes = new Uint8Array(loaded);
+    let off = 0;
+    for (const c of chunks) { bytes.set(c, off); off += c.length; }
+    return { ok: true, bytes, status: res.status, error: null };
+  } catch (e) {
+    if (e?.name === "AbortError") return { ok: false, bytes: null, aborted: true, error: "Cancelled" };
+    return { ok: false, bytes: null, error: e?.message || "Network error" };
   }
 }
 

@@ -103,6 +103,7 @@ import { registerChargeUpRoutes } from "./lib/chargeUpRoutes.mjs";
 import { registerInternalCategoryRoutes } from "./lib/internalCategoryRoutes.mjs";
 import { registerTemplateRegistryRoutes } from "./lib/templateRegistryRoutes.mjs";
 import { registerProcurementRoutes } from "./lib/procurementRoutes.mjs";
+import { registerTakeoffRoutes } from "./lib/takeoff/takeoffRoutes.mjs";
 import { registerFactsRoutes } from "./lib/factsRoutes.mjs";
 import { registerControlTowerRoutes } from "./lib/controlTower/controlTowerRoutes.mjs";
 import { registerGeoRoutes } from "./lib/geoRoutes.mjs";
@@ -1047,6 +1048,7 @@ registerChargeUpRoutes(app);
 registerInternalCategoryRoutes(app);
 registerTemplateRegistryRoutes(app);
 registerProcurementRoutes(app);
+registerTakeoffRoutes(app); // Takeoffs (R03) — behind TAKEOFF_ENABLED; worker routes register inside registerWorkforceRoutes
 registerFactsRoutes(app);
 registerControlTowerRoutes(app);
 registerGeoRoutes(app);

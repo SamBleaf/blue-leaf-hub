@@ -187,3 +187,17 @@
 ---
 
 *Last updated: 2026-08-29. Total SOPs: 125. Run SOP audit (see SOP_MAINTENANCE.md) to check for gaps.*
+
+---
+
+**20 — Takeoffs (flashing takeoff from plans)** — added 2026-10-13 (7 SOPs, Total SOPs 158 → 165). Feature is behind the server flag `TAKEOFF_ENABLED` (default off) and migration 206 is not yet applied in production.
+
+| SOP ID | SOP Name | File | Module | User Role | Status | Test Status | Screenshots | Priority |
+|--------|----------|------|--------|-----------|--------|-------------|-------------|----------|
+| 20-01 | Takeoffs — overview, access & switching it on | [20-01_takeoff_overview.md](20_takeoff/20-01_takeoff_overview.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
+| 20-02 | Set up plans and scale a page | [20-02_set_up_and_scale_plans.md](20_takeoff/20-02_set_up_and_scale_plans.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
+| 20-03 | Measure runs and count pieces | [20-03_measure_runs_and_count.md](20_takeoff/20-03_measure_runs_and_count.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
+| 20-04 | Flashing profiles, materials and company standards | [20-04_profiles_materials_standards.md](20_takeoff/20-04_profiles_materials_standards.md) | Takeoffs | Admin, Supervisor, Leading hand (standards: Admin, Supervisor) | Draft | untested | Yes | High |
+| 20-05 | Length schedule and splitting long pieces | [20-05_length_schedule_and_split.md](20_takeoff/20-05_length_schedule_and_split.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
+| 20-06 | Export a supplier order and record it as placed | [20-06_export_and_record_orders.md](20_takeoff/20-06_export_and_record_orders.md) | Takeoffs | Admin, Supervisor, Leading hand (record placed: Admin/Director only) | Draft | untested | Yes | High |
+| 20-07 | Takeoff saving, recovery and conflicts | [20-07_saving_recovery_conflicts.md](20_takeoff/20-07_saving_recovery_conflicts.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |

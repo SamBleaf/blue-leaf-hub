@@ -16,6 +16,7 @@ import { recordTaskDeletion } from "./taskAudit.mjs";
 import { ensureCarpentryJobSwms } from "./whs/carpentrySwmsRoutes.mjs";
 import { loadAndComposePack } from "./whs/carpentryWhsPackRoutes.mjs";
 import { extractReceipt, saveReceiptCost, resolveReceiptLink, findPossibleDuplicate } from "./jobCostReceipts.mjs";
+import { registerTakeoffWorkerRoutes } from "./takeoff/takeoffRoutes.mjs";
 
 // The Hub role (admin/supervisor/employee) of a worker-token employee, via employees.user_id →
 // user_profiles.id = auth uid → role. Lets a Worker-PWA action be gated to directors (invoice
@@ -2661,6 +2662,10 @@ export function registerWorkforceRoutes(app) {
     return { found: true, allowed: workerMaySeeJob(vis, jobId, jobType) };
   }
 
+  // Takeoffs (R03) on the worker PWA — reuses these exact helpers (no semantic copy). Takeoff
+  // writes reject admin preview outright; there is no reorder-style exception.
+  registerTakeoffWorkerRoutes(app, { workerAuth, resolveWorkerEmployee, workerVisibleJobs, workerMaySeeJob, workerChargeUpSiteParent });
+
   app.get("/api/worker/jobs", workerAuth, async (req, res) => {
     const sb = getServiceSupabase();
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
@@ -2868,41 +2873,89 @@ export function registerWorkforceRoutes(app) {
 
   async function listCurrentPlans(sb, spine) {
     // NOTE: job_documents (mig 069) has NO created_at column — order/select by uploaded_at only.
+    // select("*") so mig-206 provenance columns (revision_label, content_sha256, byte_size) are
+    // returned when present without breaking a DB that hasn't applied 206 yet.
     let q = sb.from("job_documents")
-      .select("id, document_type, title, version, uploaded_at")
+      .select("*")
       .eq("status", "current").eq("storage_provider", "supabase").in("document_type", PLAN_DOC_TYPES);
     q = spine.chargeUpJobId ? q.eq("charge_up_job_id", spine.chargeUpJobId)
       : spine.carpentryJobId ? q.eq("carpentry_job_id", spine.carpentryJobId)
       : q.eq("job_id", spine.jobId);
     const { data, error } = await q.order("document_type").order("uploaded_at", { ascending: false });
     if (error) throw error;
-    return (data || []).map((r) => ({ docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at }));
+    return (data || []).map((r) => ({
+      docId: r.id, fileName: r.title, documentType: r.document_type, uploadedAt: r.uploaded_at,
+      version: r.version ?? 1, revisionLabel: r.revision_label ?? null, status: r.status, byteSize: r.byte_size ?? null,
+    }));
   }
+  // Plan upload (R03 §9): the stored object path is new + immutable; its sha256/size are recorded;
+  // supersession is validated (same job, target still current) and committed ATOMICALLY with the new
+  // row via takeoff_plan_insert (mig 206). On any DB failure only the just-uploaded object is removed
+  // and the old plan stays current. Before 206 is applied, a safe fallback inserts the new row FIRST
+  // and supersedes only after it exists (never the old supersede-then-insert order).
   async function uploadPlan(sb, spine, body, callerId) {
     const fileName = sanitizePlanName(body.fileName);
     const b64 = String(body.fileBase64 || "").replace(/^data:[^;]+;base64,/, "");
     if (!b64) throw new Error("No file provided");
     const buffer = Buffer.from(b64, "base64");
     const documentType = PLAN_DOC_TYPES.includes(body.documentType) ? body.documentType : "plan";
+    const supersedes = body.supersedesDocumentId && isUuid(body.supersedesDocumentId) ? body.supersedesDocumentId : null;
+    const sameSpine = (d) => (d.job_id || null) === (spine.jobId || null) && (d.carpentry_job_id || null) === (spine.carpentryJobId || null)
+      && (d.charge_up_job_id || null) === (spine.chargeUpJobId || null);
+    // Validate the supersession target BEFORE touching storage or the target row.
+    if (supersedes) {
+      const { data: old } = await sb.from("job_documents").select("*").eq("id", supersedes).maybeSingle(); // "*" — charge_up_job_id may predate mig 172
+      if (!old || !sameSpine(old)) throw Object.assign(new Error("A plan can only replace a plan on the same job."), { userFacing: 400 });
+      if (!PLAN_DOC_TYPES.includes(old.document_type) || old.storage_provider !== "supabase") throw Object.assign(new Error("Only an issued plan can be replaced by a plan upload."), { userFacing: 400 });
+      if (old.status !== "current") throw Object.assign(new Error("That plan has already been replaced — refresh and pick the current plan."), { userFacing: 409 });
+    }
     const dir = spine.chargeUpJobId ? `charge-up/${spine.chargeUpJobId}`
       : spine.carpentryJobId ? `carpentry/${spine.carpentryJobId}`
       : `job/${spine.jobId}`;
     const path = `${dir}/${todayYmd()}-${crypto.randomUUID().slice(0, 8)}-${fileName}`;
     const { error: upErr } = await sb.storage.from(PLANS_BUCKET).upload(path, buffer, { contentType: "application/pdf", upsert: false });
     if (upErr) throw upErr;
-    const supersedes = body.supersedesDocumentId && isUuid(body.supersedesDocumentId) ? body.supersedesDocumentId : null;
-    if (supersedes) await sb.from("job_documents").update({ status: "superseded" }).eq("id", supersedes);
-    const rev = String(body.revision || "").trim();
+    const rev = String(body.revision || "").trim().slice(0, 40);
+    const contentSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     const row = {
       job_id: spine.jobId || null, carpentry_job_id: spine.carpentryJobId || null, charge_up_job_id: spine.chargeUpJobId || null,
-      document_type: documentType, title: rev ? `${fileName} — ${rev}` : fileName,
-      storage_provider: "supabase", storage_path: `${PLANS_BUCKET}/${path}`, audience_layer: "worker",
-      status: "current", supersedes_document_id: supersedes, uploaded_by: callerId || null, uploaded_at: new Date().toISOString(),
+      document_type: documentType, title: rev ? `${fileName} — ${rev}` : fileName, revision_label: rev || null,
+      content_sha256: contentSha256, byte_size: buffer.length,
+      storage_path: `${PLANS_BUCKET}/${path}`, audience_layer: "worker", uploaded_by: callerId || null,
     };
-    const { data, error } = await sb.from("job_documents").insert(row).select("id, title").maybeSingle();
-    if (error) throw error;
-    return { docId: data?.id, title: data?.title };
+    const cleanup = () => sb.storage.from(PLANS_BUCKET).remove([path]).catch(() => {});
+    const { data: rpc, error: rpcErr } = await sb.rpc("takeoff_plan_insert", { p_row: row, p_supersedes: supersedes });
+    if (!rpcErr) {
+      const { data: d } = await sb.from("job_documents").select("id, title, version, revision_label, status").eq("id", rpc.docId).maybeSingle();
+      return { docId: rpc.docId, title: d?.title, version: d?.version ?? 1, revisionLabel: d?.revision_label ?? null, status: d?.status || "current" };
+    }
+    const rpcMissing = rpcErr.code === "PGRST202" || rpcErr.code === "42883" || /Could not find the function|does not exist/i.test(rpcErr.message || "");
+    if (!rpcMissing) {
+      await cleanup();
+      const m = /TAKEOFF_[A-Z]+:\s*(.*)$/.exec(rpcErr.message || "");
+      if (m) throw Object.assign(new Error(m[1].charAt(0).toUpperCase() + m[1].slice(1)), { userFacing: /CONFLICT/.test(rpcErr.message) ? 409 : 400 });
+      throw rpcErr;
+    }
+    // Pre-206 fallback: insert the new row first (legacy columns only), then supersede.
+    const legacy = {
+      job_id: row.job_id, carpentry_job_id: row.carpentry_job_id, charge_up_job_id: row.charge_up_job_id,
+      document_type: documentType, title: row.title, storage_provider: "supabase", storage_path: row.storage_path, audience_layer: "worker",
+      status: "current", supersedes_document_id: supersedes, uploaded_by: row.uploaded_by, uploaded_at: new Date().toISOString(),
+    };
+    const { data, error } = await sb.from("job_documents").insert(legacy).select("id, title").maybeSingle();
+    if (error) { await cleanup(); throw error; }
+    if (supersedes) {
+      const { error: supErr } = await sb.from("job_documents").update({ status: "superseded" }).eq("id", supersedes).eq("status", "current");
+      if (supErr) console.error("[plans] supersede after insert failed — both revisions are current:", supErr.message);
+    }
+    return { docId: data?.id, title: data?.title, version: 1, revisionLabel: rev || null, status: "current" };
   }
+  const planUploadError = (res, e, tag, migrationMsg) => {
+    if (e?.userFacing) return err(res, e.userFacing, e.message, e.userFacing === 409 ? "CONFLICT" : "INVALID");
+    if (isMissingPlanCol(e)) return err(res, 503, migrationMsg, "MIGRATION_PENDING");
+    console.error(tag, e?.message || e);
+    return err(res, 500, translateDbError(e));
+  };
   // 1-hour signed URL (matches completion photos). A short 60s expiry died mid-view: zooming/panning a
   // detailed plan re-fetches byte ranges from Supabase storage, which 403'd after a minute → repeated
   // viewer errors on the PWA. An hour covers a viewing session; re-open gets a fresh URL.
@@ -2929,7 +2982,7 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
     if (!isUuid(req.params.id)) return err(res, 400, "Invalid job id");
     try { return ok(res, await uploadPlan(sb, { carpentryJobId: req.params.id }, req.body || {}, req.caller?.id)); }
-    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Plans aren't enabled yet — apply migration 152", "MIGRATION_PENDING"); console.error("[plans POST carp]", e?.message || e); return err(res, 500, translateDbError(e)); }
+    catch (e) { return planUploadError(res, e, "[plans POST carp]", "Plans aren't enabled yet — apply migration 152"); }
   });
   // Admin/supervisor — construction project plans (resolve project → job_id)
   app.get("/api/projects/:id/plans", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
@@ -2946,7 +2999,7 @@ export function registerWorkforceRoutes(app) {
     const jobId = await resolveProjectJobId(sb, req.params.id);
     if (!jobId) return err(res, 409, "This project has no linked job to hold plans.");
     try { return ok(res, await uploadPlan(sb, { jobId }, req.body || {}, req.caller?.id)); }
-    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Plans aren't enabled yet — apply migration 152", "MIGRATION_PENDING"); console.error("[plans POST proj]", e?.message || e); return err(res, 500, translateDbError(e)); }
+    catch (e) { return planUploadError(res, e, "[plans POST proj]", "Plans aren't enabled yet — apply migration 152"); }
   });
   // Admin/supervisor — BLB Charge Up SITE plans (per-site, mig 172). A site owns its own plans just
   // like a normal job — same uploadPlan/listCurrentPlans, scoped by charge_up_job_id.
@@ -2960,24 +3013,39 @@ export function registerWorkforceRoutes(app) {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
     if (!isUuid(req.params.siteId)) return err(res, 400, "Invalid site id");
     try { return ok(res, await uploadPlan(sb, { chargeUpJobId: req.params.siteId }, req.body || {}, req.caller?.id)); }
-    catch (e) { if (isMissingPlanCol(e)) return err(res, 503, "Charge-up plans aren't enabled yet — apply migration 172", "MIGRATION_PENDING"); console.error("[plans POST charge-up]", e?.message || e); return err(res, 500, translateDbError(e)); }
+    catch (e) { return planUploadError(res, e, "[plans POST charge-up]", "Charge-up plans aren't enabled yet — apply migration 172"); }
   });
   // Admin/supervisor — remove a plan (storage object + row) and view (signed URL)
+  // Remove a plan from the field. R03 §9: a plan referenced by takeoff evidence (calibrations,
+  // measurements, exports) is ARCHIVED (status superseded + archived_at) and its bytes are kept for
+  // authorised reviewers. Otherwise the DB row is deleted FIRST and the stored object is removed only
+  // after that succeeded — storage is never removed while a row (or an FK) still points at it.
   app.delete("/api/job-plans/:docId", requireAuth, requireRole("admin", "supervisor"), async (req, res) => {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
-    const { data: doc } = await sb.from("job_documents").select("id, storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
+    if (!isUuid(req.params.docId)) return err(res, 400, "Invalid plan id");
+    const { data: doc } = await sb.from("job_documents").select("id, storage_path, storage_provider, document_type").eq("id", req.params.docId).maybeSingle();
     if (!doc) return err(res, 404, "Plan not found", "NOT_FOUND");
+    if (!PLAN_DOC_TYPES.includes(doc.document_type)) return err(res, 400, "That document is not a plan.");
+    const { data: arch, error: archErr } = await sb.rpc("takeoff_archive_if_referenced", { p_doc_id: doc.id, p_user_id: req.caller?.id || null });
+    const archMissing = archErr && (archErr.code === "PGRST202" || archErr.code === "42883" || /Could not find the function|does not exist/i.test(archErr.message || ""));
+    if (archErr && !archMissing) { console.error("[plans DELETE archive]", archErr.message); return err(res, 500, "Could not remove the plan."); }
+    if (arch?.archived) return ok(res, { archived: true, message: "This plan is used by a takeoff, so it was archived (hidden from the field) instead of deleted." });
+    const { error: delErr } = await sb.from("job_documents").delete().eq("id", doc.id);
+    if (delErr) {
+      if (delErr.code === "23503") return err(res, 409, "This plan is referenced by other records and can't be deleted.", "REFERENCED");
+      console.error("[plans DELETE]", delErr.message); return err(res, 500, "Could not remove the plan.");
+    }
     if (doc.storage_provider === "supabase" && doc.storage_path) {
       const [bucket, ...rest] = doc.storage_path.split("/");
       await sb.storage.from(bucket).remove([rest.join("/")]).catch(() => {});
     }
-    await sb.from("job_documents").delete().eq("id", req.params.docId);
-    return ok(res);
+    return ok(res, { archived: false });
   });
   app.get("/api/job-plans/:docId/download", requireAuth, async (req, res) => {
     const sb = getServiceSupabase(); if (!sb) return err(res, 503, "Database not configured");
-    const { data: doc } = await sb.from("job_documents").select("storage_path, storage_provider").eq("id", req.params.docId).maybeSingle();
-    if (!doc?.storage_path || doc.storage_provider !== "supabase") return err(res, 404, "Plan not available");
+    const { data: doc } = await sb.from("job_documents").select("storage_path, storage_provider, document_type").eq("id", req.params.docId).maybeSingle();
+    // Plans only — generated documents (e.g. takeoff supplier-order PDFs) have their own scoped routes.
+    if (!doc?.storage_path || doc.storage_provider !== "supabase" || !PLAN_DOC_TYPES.includes(doc.document_type)) return err(res, 404, "Plan not available");
     try { return ok(res, { signedUrl: await signPlan(sb, doc.storage_path), expiresIn: PLAN_URL_TTL }); }
     catch { return err(res, 500, "Could not generate a download link"); }
   });
@@ -3008,7 +3076,7 @@ export function registerWorkforceRoutes(app) {
     const emp = req.workerEmployee || await resolveWorkerEmployee(req.caller.id, sb);
     if (!emp) return err(res, 403, "No employee record found.");
     const { data: doc } = await sb.from("job_documents").select("*").eq("id", req.params.docId).maybeSingle();
-    if (!doc || doc.storage_provider !== "supabase" || !doc.storage_path) return err(res, 404, "Plan not available");
+    if (!doc || doc.storage_provider !== "supabase" || !doc.storage_path || !PLAN_DOC_TYPES.includes(doc.document_type)) return err(res, 404, "Plan not available");
     const vis = await workerVisibleJobs(sb, emp.id);
     if (vis.error) return err(res, 500, translateDbError(vis.error));
     let allowed = false;

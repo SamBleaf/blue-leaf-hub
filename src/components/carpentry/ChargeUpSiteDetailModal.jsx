@@ -162,7 +162,7 @@ export default function ChargeUpSiteDetailModal({ site, showCost, canModerate = 
 
             {tab === "diary" && <CarpentrySiteDiary diaryBase={`/api/carpentry/charge-up-jobs/${site.id}`} address={address} />}
 
-            {tab === "plans" && <div className="mt-3"><JobPlansCard base={`/api/charge-up/sites/${site.id}`} /></div>}
+            {tab === "plans" && <div className="mt-3"><JobPlansCard base={`/api/charge-up/sites/${site.id}`} takeoffPath={site.carpentryJobId ? `/carpentry/${site.carpentryJobId}/sites/${site.id}/takeoff` : undefined} /></div>}
           </div>
         )}
 
