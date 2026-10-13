@@ -35,6 +35,8 @@ Its known geometry is in `synthetic-plan-set.json`.
 | Manual finished pieces | 6 × 300 stop ends, pieces-only material (`finished_piece_count@1`) | `measurements` kind `manual` |
 | Worker actor | Runs, counts and manual pieces were committed through the **Worker** API as a leading hand | sandbox DB: `select kind, created_by_type, count(*) from takeoff_measurements group by 1,2` → run/count/manual = `employee` (the snapshot JSON does not carry actor columns) |
 | Orders | FO-001001: draft export 1 → order-ready export 2 → recorded **placed** (SO-EXAMPLE-1) | `orders-and-status.json` |
+| Perforated (R04) | "Vent flashing": COLORBOND Surfmist 0.55, round holes 3 mm @ 6 mm pitch, staggered rows, leg L2 only, 10 mm solid margin → spelled out on the PDF | `materials[]`; PDF group "Vent flashing (perforated)" |
+| Unpainted (R04) | "Capping": ZINCALUME 0.5 BMT, no colour → prints "natural (unpainted)" and a grey dashed reference side (no colour face) | PDF group "Capping (unpainted)" |
 | Cancellation | FO-001002 (pickup): exported, placed, then **cancelled** with a reason → its 6 stop ends show as remaining again | `orderStatus` |
 | Frozen exports | Each PDF footer carries the calc version and the snapshot sha256 prefix | PDF footers |
 

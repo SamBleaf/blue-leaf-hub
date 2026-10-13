@@ -1,11 +1,12 @@
 {
   "orders": [
     {
-      "id": "f676fad3-8f0a-4498-9be6-6113598ba553",
-      "workspaceId": "bcbdb915-aebd-4f35-8284-add2bbd9a8c7",
+      "id": "6f94974f-87f1-487f-87f9-88b4da28060e",
+      "workspaceId": "ca622c59-eb02-4f4f-8361-19afbaf1a4ff",
       "orderRef": "FO-001001",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
+        "asap": false,
         "notes": null,
         "method": "delivery",
         "address": "1 Example Street, Testville (synthetic)",
@@ -18,124 +19,141 @@
       "notes": "Example order — synthetic data",
       "status": "placed",
       "revision": 2,
-      "createdAt": "2026-10-14 00:02:05.081523+10:30",
-      "updatedAt": "2026-10-14 00:02:05.51302+10:30",
+      "createdAt": "2026-10-14 02:36:04.901808+10:30",
+      "updatedAt": "2026-10-14 02:36:05.313808+10:30",
       "lines": [
         {
-          "id": "cd2ee0b7-3546-4830-bc0e-4204a93f7421",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Basalt\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\"}|4400",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Basalt\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\"}",
-          "jobMaterialId": "3ab198f5-e923-4416-b093-3e14c0dc6545",
-          "finishedLengthMm": 4400,
-          "quantity": 1
+          "id": "907d36e6-5161-4b71-85a2-5a19c656af58",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.5,\"colour\":\"n/a\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"zincalume\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.5,\"colour\":\"n/a\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"zincalume\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "104a7193-4fe2-423a-bc05-114c33b5b9fc",
+          "finishedLengthMm": 2400,
+          "quantity": 3
         },
         {
-          "id": "bf5b2dc4-2f1c-47e4-9139-671b7a6af484",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|6100",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
-          "finishedLengthMm": 6100,
-          "quantity": 1
-        },
-        {
-          "id": "7c696b48-c2cd-45bb-bdff-433aba0b5292",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|4600",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+          "id": "5047c2c1-822d-4560-b5fd-16617b5afb9b",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
           "finishedLengthMm": 4600,
           "quantity": 2
         },
         {
-          "id": "f420cd39-7267-4943-b87b-55996cee145d",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|3200",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
-          "finishedLengthMm": 3200,
-          "quantity": 1
-        },
-        {
-          "id": "44f2adad-2fe3-44e2-99d1-fbd22ac3038c",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|4600",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
-          "finishedLengthMm": 4600,
-          "quantity": 2
-        },
-        {
-          "id": "08076a87-35e6-4ef0-a94f-d0a35c2c2c09",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|3700",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+          "id": "2dd35732-0b05-4685-9ca2-7ceb55213d7d",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3700",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
           "finishedLengthMm": 3700,
           "quantity": 2
         },
         {
-          "id": "8ccb92f4-fa5c-4d1d-8bf9-af5c855aa1b9",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|2400",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
-          "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+          "id": "49ef77b5-4fe5-487e-82db-aab73f8d64b2",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
           "finishedLengthMm": 2400,
           "quantity": 4
+        },
+        {
+          "id": "7afac138-0744-4fb8-9560-c38d68eb9a55",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|6100",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
+          "finishedLengthMm": 6100,
+          "quantity": 1
+        },
+        {
+          "id": "0c70980e-cf2c-4de1-ad34-9cefc47cb26d",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
+          "finishedLengthMm": 4600,
+          "quantity": 2
+        },
+        {
+          "id": "d74388f8-033c-4a2f-93cc-22ba915f20eb",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3200",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
+          "finishedLengthMm": 3200,
+          "quantity": 1
+        },
+        {
+          "id": "db95d112-694f-4f9b-b889-0c2c84113572",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"perforated\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":{\"arrangement\":\"staggered\",\"description\":null,\"extent\":\"selected_legs\",\"holeSizeMm\":3,\"legIds\":[\"L2\"],\"openAreaPct\":null,\"pattern\":\"round\",\"pitchMm\":6,\"solidMarginMm\":10,\"supplierProductCode\":null},\"product\":\"flashing\",\"productCode\":null}}|3000",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"perforated\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":{\"arrangement\":\"staggered\",\"description\":null,\"extent\":\"selected_legs\",\"holeSizeMm\":3,\"legIds\":[\"L2\"],\"openAreaPct\":null,\"pattern\":\"round\",\"pitchMm\":6,\"solidMarginMm\":10,\"supplierProductCode\":null},\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "81f10d3b-c7ed-4c62-86ef-8a09e40dd7e8",
+          "finishedLengthMm": 3000,
+          "quantity": 2
+        },
+        {
+          "id": "99e7bb86-ec53-4add-83e5-858417946b24",
+          "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"basalt\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4400",
+          "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"basalt\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+          "jobMaterialId": "64d9749a-3258-4e4f-b551-bf6001a422b4",
+          "finishedLengthMm": 4400,
+          "quantity": 1
         }
       ],
       "exports": [
         {
-          "id": "192ca80f-c790-4d64-91aa-f4c6c39c77f4",
-          "orderId": "f676fad3-8f0a-4498-9be6-6113598ba553",
+          "id": "d5ea93e9-a129-4edc-b67e-8aacd27fa6d3",
+          "orderId": "6f94974f-87f1-487f-87f9-88b4da28060e",
           "exportNo": 1,
           "isDraft": true,
-          "snapshotSha256": "5f098cd4607d87e199c09cba125e08b3549872dbc8a85083ff6ab5b862b1a9ce",
-          "calculationVersion": "takeoff-calc@1",
+          "snapshotSha256": "c0eb5c2df49ffbf138f1005e07f248d45b70b2bf9db48d7fcd3ff85f86954927",
+          "calculationVersion": "takeoff-calc@2",
           "workspaceRevision": 5,
           "orderRevision": 2,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "bb7242aa1a13338362e33856c35e96cbdb6203867a7a1b2de73eddffb03eb55e",
-          "rendererVersion": "takeoff-pdf@1",
-          "createdAt": "2026-10-14 00:02:05.100059+10:30"
+          "pdfSha256": "8c5328b9e5b393e37374f01077f6f0d8b1320fc5583f1f3592dd0fe4c510fc18",
+          "rendererVersion": "takeoff-pdf@2",
+          "createdAt": "2026-10-14 02:36:04.917051+10:30"
         },
         {
-          "id": "1e9ab474-12ba-43b2-8a4f-81b83d7de7c2",
-          "orderId": "f676fad3-8f0a-4498-9be6-6113598ba553",
+          "id": "68a57e9c-5927-43e1-8cc7-fbc0b4fa741d",
+          "orderId": "6f94974f-87f1-487f-87f9-88b4da28060e",
           "exportNo": 2,
           "isDraft": false,
-          "snapshotSha256": "40fcaff72fd4a237c78090889ceab23b62459e203c86fc4d2978400fd37d435a",
-          "calculationVersion": "takeoff-calc@1",
+          "snapshotSha256": "87c3c5a2646f11c041d97bf6ac9cb4190f145db6d32a57b75e1d906372499e6f",
+          "calculationVersion": "takeoff-calc@2",
           "workspaceRevision": 5,
           "orderRevision": 2,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "0cc86c32f77ee9a2bedea950aee85e5d5f0bd9270f551ac5350d7f139922415a",
-          "rendererVersion": "takeoff-pdf@1",
-          "createdAt": "2026-10-14 00:02:05.333852+10:30"
+          "pdfSha256": "09b75cbe5e224555effa05eaa03c651f6e06e2cb0f99ded82979a454e91831ac",
+          "rendererVersion": "takeoff-pdf@2",
+          "createdAt": "2026-10-14 02:36:05.139038+10:30"
         }
       ],
       "placements": [
         {
-          "id": "9830ca07-2a54-4eda-8eca-e980948d5f7e",
-          "orderId": "f676fad3-8f0a-4498-9be6-6113598ba553",
-          "exportId": "1e9ab474-12ba-43b2-8a4f-81b83d7de7c2",
+          "id": "e44d4185-9bd8-47ad-8d30-0fa95584948d",
+          "orderId": "6f94974f-87f1-487f-87f9-88b4da28060e",
+          "exportId": "68a57e9c-5927-43e1-8cc7-fbc0b4fa741d",
           "supplierReference": "SO-EXAMPLE-1",
           "placedOn": "2026-10-13",
           "status": "placed",
           "surplusAcknowledged": false,
           "cancelledAt": null,
           "cancelReason": null,
-          "createdAt": "2026-10-14 00:02:05.51302+10:30"
+          "createdAt": "2026-10-14 02:36:05.313808+10:30"
         }
       ]
     },
     {
-      "id": "2168c30f-bf62-47c8-a04f-da276126145f",
-      "workspaceId": "bcbdb915-aebd-4f35-8284-add2bbd9a8c7",
+      "id": "4d24d0b3-cf2e-445b-8101-52df2c88689e",
+      "workspaceId": "ca622c59-eb02-4f4f-8361-19afbaf1a4ff",
       "orderRef": "FO-001002",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
+        "asap": true,
         "notes": null,
         "method": "pickup",
         "address": null,
         "contactName": null,
-        "contactPhone": null,
+        "contactPhone": "0400 000 000",
         "pickupBranch": "Example branch",
         "requiredDate": null,
         "addressSource": null
@@ -143,107 +161,141 @@
       "notes": "Pickup example",
       "status": "cancelled",
       "revision": 2,
-      "createdAt": "2026-10-14 00:02:05.517014+10:30",
-      "updatedAt": "2026-10-14 00:02:05.695038+10:30",
+      "createdAt": "2026-10-14 02:36:05.316652+10:30",
+      "updatedAt": "2026-10-14 02:36:05.485749+10:30",
       "lines": [
         {
-          "id": "4e927d94-5113-4a7a-91cf-157ad2722b53",
-          "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"product\":\"Flashing\",\"productCode\":\"SE-EX\",\"profile\":null}|300",
-          "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"product\":\"Flashing\",\"productCode\":\"SE-EX\",\"profile\":null}",
-          "jobMaterialId": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+          "id": "547169fd-1dc6-469a-8c44-692d12b3a224",
+          "bucketKey": "{\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"profile\":null,\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":\"SE-EX\"}}|300",
+          "specKey": "{\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"profile\":null,\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":\"SE-EX\"}}",
+          "jobMaterialId": "45b94c18-967a-4e90-a509-79daf1e743f5",
           "finishedLengthMm": 300,
           "quantity": 6
         }
       ],
       "exports": [
         {
-          "id": "85d431fb-116a-40a2-a9f1-368082994502",
-          "orderId": "2168c30f-bf62-47c8-a04f-da276126145f",
+          "id": "9986bedd-784b-474b-99a8-0bfae4d47154",
+          "orderId": "4d24d0b3-cf2e-445b-8101-52df2c88689e",
           "exportNo": 1,
           "isDraft": false,
-          "snapshotSha256": "8e364ac04e5c66f89a2bc2a754ebbca4c344d50a6f68030438a29c0d7214ff58",
-          "calculationVersion": "takeoff-calc@1",
+          "snapshotSha256": "5976b0a817b0e1cceffaa386eefd299c69e6957c4b58b8e9959a71d14325802a",
+          "calculationVersion": "takeoff-calc@2",
           "workspaceRevision": 5,
           "orderRevision": 2,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "9357835bfdce0a1a351dbc769278febe66d2cd65a84c372d3d8f1f580e3c0c04",
-          "rendererVersion": "takeoff-pdf@1",
-          "createdAt": "2026-10-14 00:02:05.524555+10:30"
+          "pdfSha256": "f0937b3b91d9aff8cae45be34b685e9842951d24f816e62d27bc63cec72908eb",
+          "rendererVersion": "takeoff-pdf@2",
+          "createdAt": "2026-10-14 02:36:05.325178+10:30"
         }
       ],
       "placements": [
         {
-          "id": "56a64711-6e7c-4e2c-ad24-de9e5b335593",
-          "orderId": "2168c30f-bf62-47c8-a04f-da276126145f",
-          "exportId": "85d431fb-116a-40a2-a9f1-368082994502",
+          "id": "9f3e3bd1-0f98-4bef-ad8d-b0b645afaf54",
+          "orderId": "4d24d0b3-cf2e-445b-8101-52df2c88689e",
+          "exportId": "9986bedd-784b-474b-99a8-0bfae4d47154",
           "supplierReference": "SO-EXAMPLE-2",
           "placedOn": "2026-10-13",
           "status": "cancelled",
           "surplusAcknowledged": false,
-          "cancelledAt": "2026-10-14 00:02:05.695038+10:30",
+          "cancelledAt": "2026-10-14 02:36:05.485749+10:30",
           "cancelReason": "Example cancellation — supplier out of stock",
-          "createdAt": "2026-10-14 00:02:05.693108+10:30"
+          "createdAt": "2026-10-14 02:36:05.484195+10:30"
         }
       ]
     }
   ],
   "orderStatus": [
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Basalt\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\"}|4400",
-      "required": 1,
-      "ordered": 1,
-      "remaining": 0,
-      "surplus": 0
-    },
-    {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"product\":\"Flashing\",\"productCode\":\"SE-EX\",\"profile\":null}|300",
+      "bucketKey": "{\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"profile\":null,\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":\"SE-EX\"}}|300",
       "required": 6,
       "ordered": 0,
       "remaining": 6,
-      "surplus": 0
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|6100",
-      "required": 1,
-      "ordered": 1,
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.5,\"colour\":\"n/a\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"zincalume\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
+      "required": 3,
+      "ordered": 3,
       "remaining": 0,
-      "surplus": 0
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|4600",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
       "required": 2,
       "ordered": 2,
       "remaining": 0,
-      "surplus": 0
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|3200",
-      "required": 1,
-      "ordered": 1,
-      "remaining": 0,
-      "surplus": 0
-    },
-    {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|4600",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3700",
       "required": 2,
       "ordered": 2,
       "remaining": 0,
-      "surplus": 0
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|3700",
-      "required": 2,
-      "ordered": 2,
-      "remaining": 0,
-      "surplus": 0
-    },
-    {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|2400",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
       "required": 4,
       "ordered": 4,
       "remaining": 0,
-      "surplus": 0
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|6100",
+      "required": 1,
+      "ordered": 1,
+      "remaining": 0,
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
+      "required": 2,
+      "ordered": 2,
+      "remaining": 0,
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3200",
+      "required": 1,
+      "ordered": 1,
+      "remaining": 0,
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"perforated\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":{\"arrangement\":\"staggered\",\"description\":null,\"extent\":\"selected_legs\",\"holeSizeMm\":3,\"legIds\":[\"L2\"],\"openAreaPct\":null,\"pattern\":\"round\",\"pitchMm\":6,\"solidMarginMm\":10,\"supplierProductCode\":null},\"product\":\"flashing\",\"productCode\":null}}|3000",
+      "required": 2,
+      "ordered": 2,
+      "remaining": 0,
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"basalt\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4400",
+      "required": 1,
+      "ordered": 1,
+      "remaining": 0,
+      "surplus": 0,
+      "onExportedOrders": 0,
+      "exportedRefs": []
     }
   ]
 }

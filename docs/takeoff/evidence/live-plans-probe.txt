@@ -1,0 +1,16 @@
+current plan documents: 11
+by job spine: {"carpentry":10,"project":1}
+by type: {"architectural":6,"structural":3,"plan":1,"engineering":1}
+by storage provider: {"supabase":10,"null":1}
+
+sampled 8 most recent Supabase-stored current plans:
+  {"spine":"carpentry","type":"architectural","mb":4,"pdfHeader":true,"withinRenderLimit":true,"pages":22,"page1":"1191×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"architectural","mb":6.1,"pdfHeader":true,"withinRenderLimit":true,"pages":23,"page1":"1191×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"structural","mb":0.5,"pdfHeader":true,"withinRenderLimit":true,"pages":1,"page1":"1191×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"structural","mb":0.4,"pdfHeader":true,"withinRenderLimit":true,"pages":1,"page1":"1191×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"plan","mb":0.4,"pdfHeader":true,"withinRenderLimit":true,"pages":11,"page1":"595×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"architectural","mb":6.7,"pdfHeader":true,"withinRenderLimit":true,"pages":14,"page1":"1684×2384pt rot90","usable":true}
+  {"spine":"carpentry","type":"architectural","mb":5,"pdfHeader":true,"withinRenderLimit":true,"pages":37,"page1":"1191×842pt rot0","usable":true}
+  {"spine":"carpentry","type":"engineering","mb":0.6,"pdfHeader":true,"withinRenderLimit":true,"pages":4,"page1":"1191×842pt rot0","usable":true}
+
+usable by takeoff: 8/8

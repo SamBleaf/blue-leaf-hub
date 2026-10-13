@@ -7,7 +7,7 @@
 - Tables: 14; RLS on with no client policies and no anon/authenticated privileges: **PASS**
 - Functions: 16; SECURITY INVOKER, pinned search_path, EXECUTE only for service_role: **PASS**
 - Client-role access probes: **PASS (all denied)**
-- Generated: 2026-10-13T13:32:05.892Z in 0.1 s
+- Generated: 2026-10-13T16:06:05.698Z in 0.1 s
 
 > This is an isolated database. Migration 206 has NOT been applied to production — see the read-only live probe.
 

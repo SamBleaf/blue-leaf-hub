@@ -1,28 +1,28 @@
 {
   "workspace": {
-    "id": "bcbdb915-aebd-4f35-8284-add2bbd9a8c7",
+    "id": "ca622c59-eb02-4f4f-8361-19afbaf1a4ff",
     "name": "Example — flashings (seeded)",
     "revision": 5,
     "state": "active",
     "reviewReason": null,
-    "primaryDocumentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+    "primaryDocumentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
     "primaryPageIndex": 0,
     "owner": {
       "carpentryJobId": "5a4db0c5-0000-4000-8000-00000000a001"
     },
-    "createdAt": "2026-10-14 00:02:05.027185+10:30",
-    "updatedAt": "2026-10-14 00:02:05.0729+10:30"
+    "createdAt": "2026-10-14 02:36:04.846764+10:30",
+    "updatedAt": "2026-10-14 02:36:04.891304+10:30"
   },
   "documents": [
     {
-      "id": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "id": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "title": "synthetic-plan-set.pdf",
       "documentType": "architectural",
       "status": "current",
       "revisionLabel": null,
       "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
       "byteSize": "2146710",
-      "uploadedAt": "2026-10-14 00:01:51.168506+10:30",
+      "uploadedAt": "2026-10-14 02:35:50.020606+10:30",
       "version": 1,
       "supersedesDocumentId": null,
       "archivedAt": null
@@ -30,8 +30,8 @@
   ],
   "calibrations": [
     {
-      "id": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "id": "599d8137-7f7e-412a-ac62-4665949dd619",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
       "pageMeta": {
         "rotate": 0,
@@ -93,11 +93,11 @@
       },
       "status": "ready",
       "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-      "createdAt": "2026-10-14 00:02:05.035271+10:30"
+      "createdAt": "2026-10-14 02:36:04.853773+10:30"
     },
     {
-      "id": "d3d9416f-68bf-422b-9cab-2f20e8c23107",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "id": "0dbb1e99-3dc8-4d67-b296-d73e71f5c539",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 1,
       "pageMeta": {
         "rotate": 90,
@@ -159,16 +159,16 @@
       },
       "status": "ready",
       "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-      "createdAt": "2026-10-14 00:02:05.035271+10:30"
+      "createdAt": "2026-10-14 02:36:04.853773+10:30"
     }
   ],
   "measurements": [
     {
-      "id": "344d80dd-fc46-42f9-84eb-6dfca4c7a57e",
+      "id": "1bf76549-5095-4bff-b540-dbdbc52da1ad",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 148.3464566929134,
@@ -187,11 +187,11 @@
       "archived": false
     },
     {
-      "id": "75054ec6-3b0a-4eed-a874-5b921c915310",
+      "id": "21d4eb9c-4d96-464d-97ce-66c61e844e78",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 270.57637795275593,
@@ -210,11 +210,11 @@
       "archived": false
     },
     {
-      "id": "96047022-8c8f-4d0e-9671-7f3585548650",
+      "id": "5a093a72-5d7d-4f5e-aa5f-7f9a998156c6",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 120,
@@ -233,11 +233,11 @@
       "archived": false
     },
     {
-      "id": "8c795628-6eb6-4869-86e8-9862315a3e6a",
+      "id": "5da65e46-0e2f-4adf-9bf8-812d82eea3dc",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 134.17322834645668,
@@ -256,11 +256,11 @@
       "archived": false
     },
     {
-      "id": "43500c2a-2a1a-4907-b54b-671a32ec8051",
+      "id": "2111deea-9661-470d-bce7-ebeb7fb2d969",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 431.8110236220473,
@@ -279,11 +279,11 @@
       "archived": false
     },
     {
-      "id": "388cc880-8b90-4ffd-b9dd-2d19f4730f2e",
+      "id": "34bf730f-43ca-460d-9995-a070e97f0028",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 1,
-      "calibrationId": "d3d9416f-68bf-422b-9cab-2f20e8c23107",
+      "calibrationId": "0dbb1e99-3dc8-4d67-b296-d73e71f5c539",
       "points": [
         {
           "x": 178.3464566929134,
@@ -302,11 +302,11 @@
       "archived": false
     },
     {
-      "id": "7ddcc43b-70db-445b-9010-3e7539cd5207",
+      "id": "c2ed0484-7bfc-4a7a-ae81-fbd58c8bd8cf",
       "kind": "run",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
-      "calibrationId": "0d3c117f-65b2-4073-8905-5de8e3b233ba",
+      "calibrationId": "599d8137-7f7e-412a-ac62-4665949dd619",
       "points": [
         {
           "x": 176.69291338582678,
@@ -325,9 +325,9 @@
       "archived": false
     },
     {
-      "id": "0f224d33-04a9-4d16-b90a-2dd757e11bf0",
+      "id": "3bf61c66-8a39-46a2-82e6-7894ee625b4a",
       "kind": "count",
-      "documentId": "c134fd83-0774-4312-8bbe-4f851514ffb3",
+      "documentId": "aac0e5da-bd69-40af-988e-8d9c1f12c028",
       "pageIndex": 0,
       "calibrationId": null,
       "points": [
@@ -356,7 +356,7 @@
       "archived": false
     },
     {
-      "id": "2e7466c4-2174-464d-8704-12fded31a612",
+      "id": "01c34741-5623-4903-a9e3-f412ad180eb9",
       "kind": "manual",
       "documentId": null,
       "pageIndex": null,
@@ -368,23 +368,57 @@
       "quantity": 6,
       "revision": 1,
       "archived": false
+    },
+    {
+      "id": "3010be34-0f3f-4161-83e0-77076836ab06",
+      "kind": "manual",
+      "documentId": null,
+      "pageIndex": null,
+      "calibrationId": null,
+      "points": null,
+      "label": null,
+      "rawLengthMm": null,
+      "finishedLengthMm": 3000,
+      "quantity": 2,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "259cbb8e-53fd-4077-9c08-92c20091a5ae",
+      "kind": "manual",
+      "documentId": null,
+      "pageIndex": null,
+      "calibrationId": null,
+      "points": null,
+      "label": null,
+      "rawLengthMm": null,
+      "finishedLengthMm": 2400,
+      "quantity": 3,
+      "revision": 1,
+      "archived": false
     }
   ],
   "materials": [
     {
-      "id": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "id": "170333b1-67a7-4799-a855-2080d0821902",
       "name": "Apron flashing",
       "methodKey": "flashing_runs",
       "methodVersion": 1,
       "spec": {
+        "v": 2,
         "bmt": 0.55,
         "notes": null,
         "colour": "Monument",
         "finish": "COLORBOND",
         "product": "Flashing",
+        "finishId": "colorbond",
         "colourCode": null,
+        "perforation": null,
         "productCode": null,
-        "supplierName": null
+        "availability": "confirm_with_supplier",
+        "construction": "solid",
+        "supplierName": null,
+        "colourApplicable": true
       },
       "rules": {
         "allowanceMm": 200,
@@ -436,19 +470,25 @@
       "archived": false
     },
     {
-      "id": "73d2a890-6445-403c-9821-a76538a79935",
+      "id": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "name": "Barge flashing",
       "methodKey": "flashing_runs",
       "methodVersion": 1,
       "spec": {
+        "v": 2,
         "bmt": 0.55,
         "notes": null,
         "colour": "Surfmist",
         "finish": "COLORBOND",
         "product": "Flashing",
+        "finishId": "colorbond",
         "colourCode": null,
+        "perforation": null,
         "productCode": null,
-        "supplierName": null
+        "availability": "confirm_with_supplier",
+        "construction": "solid",
+        "supplierName": null,
+        "colourApplicable": true
       },
       "rules": {
         "allowanceMm": 200,
@@ -507,19 +547,25 @@
       "archived": false
     },
     {
-      "id": "3ab198f5-e923-4416-b093-3e14c0dc6545",
+      "id": "64d9749a-3258-4e4f-b551-bf6001a422b4",
       "name": "Std valley gutter (example)",
       "methodKey": "flashing_runs",
       "methodVersion": 1,
       "spec": {
+        "v": 2,
         "bmt": 0.55,
         "notes": null,
         "colour": "Basalt",
         "finish": "COLORBOND",
         "product": "Flashing",
+        "finishId": "colorbond",
         "colourCode": null,
+        "perforation": null,
         "productCode": null,
-        "supplierName": null
+        "availability": "confirm_with_supplier",
+        "construction": "solid",
+        "supplierName": null,
+        "colourApplicable": true
       },
       "rules": {
         "allowanceMm": 200,
@@ -549,15 +595,15 @@
         "units": "mm",
         "segments": [
           {
-            "id": "smv6pzwhe0",
+            "id": "smv6vhxz00",
             "lengthMm": 60
           },
           {
-            "id": "smv6pzwhe1",
+            "id": "smv6vhxz01",
             "lengthMm": 200
           },
           {
-            "id": "smv6pzwhe2",
+            "id": "smv6vhxz02",
             "lengthMm": 60
           }
         ],
@@ -565,25 +611,31 @@
         "schemaVersion": 1,
         "initialDirectionDeg": 0
       },
-      "fromPresetId": "6aa3c32b-4a5f-418e-8a4f-7fe8ae4d99db",
+      "fromPresetId": "033ed9e8-5c21-4978-a8fd-7ff67842683a",
       "fromPresetRevision": 1,
       "revision": 1,
       "archived": false
     },
     {
-      "id": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+      "id": "45b94c18-967a-4e90-a509-79daf1e743f5",
       "name": "Stop end (pieces)",
       "methodKey": "finished_piece_count",
       "methodVersion": 1,
       "spec": {
+        "v": 2,
         "bmt": 0.55,
         "notes": null,
         "colour": "Monument",
         "finish": "COLORBOND",
         "product": "Flashing",
+        "finishId": "colorbond",
         "colourCode": null,
+        "perforation": null,
         "productCode": "SE-EX",
-        "supplierName": null
+        "availability": "confirm_with_supplier",
+        "construction": "solid",
+        "supplierName": null,
+        "colourApplicable": true
       },
       "rules": {
         "allowanceMm": 200,
@@ -596,49 +648,209 @@
       "fromPresetRevision": null,
       "revision": 1,
       "archived": false
+    },
+    {
+      "id": "81f10d3b-c7ed-4c62-86ef-8a09e40dd7e8",
+      "name": "Vent flashing (perforated)",
+      "methodKey": "flashing_runs",
+      "methodVersion": 1,
+      "spec": {
+        "v": 2,
+        "bmt": 0.55,
+        "notes": null,
+        "colour": "Surfmist",
+        "finish": "COLORBOND",
+        "product": "Flashing",
+        "finishId": "colorbond",
+        "colourCode": null,
+        "perforation": {
+          "extent": "selected_legs",
+          "legIds": [
+            "a2"
+          ],
+          "pattern": "round",
+          "pitchMm": 6,
+          "holeSizeMm": 3,
+          "arrangement": "staggered",
+          "description": null,
+          "openAreaPct": null,
+          "solidMarginMm": 10,
+          "supplierProductCode": null
+        },
+        "productCode": null,
+        "availability": "confirm_with_supplier",
+        "construction": "perforated",
+        "supplierName": null,
+        "colourApplicable": true
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": {
+        "end": {
+          "side": "right",
+          "type": "closed_hem",
+          "widthMm": 10
+        },
+        "bends": [
+          {
+            "turnDeg": 90
+          },
+          {
+            "turnDeg": -90
+          }
+        ],
+        "start": {
+          "side": "left",
+          "type": "none",
+          "widthMm": 0
+        },
+        "units": "mm",
+        "segments": [
+          {
+            "id": "a1",
+            "lengthMm": 100
+          },
+          {
+            "id": "a2",
+            "lengthMm": 150
+          },
+          {
+            "id": "a3",
+            "lengthMm": 50
+          }
+        ],
+        "coatedFace": "left",
+        "schemaVersion": 1,
+        "initialDirectionDeg": 0
+      },
+      "fromPresetId": null,
+      "fromPresetRevision": null,
+      "revision": 1,
+      "archived": false
+    },
+    {
+      "id": "104a7193-4fe2-423a-bc05-114c33b5b9fc",
+      "name": "Capping (unpainted)",
+      "methodKey": "flashing_runs",
+      "methodVersion": 1,
+      "spec": {
+        "v": 2,
+        "bmt": 0.5,
+        "notes": null,
+        "colour": null,
+        "finish": "ZINCALUME",
+        "product": "Flashing",
+        "finishId": "zincalume",
+        "colourCode": null,
+        "perforation": null,
+        "productCode": null,
+        "availability": "confirm_with_supplier",
+        "construction": "solid",
+        "supplierName": null,
+        "colourApplicable": false
+      },
+      "rules": {
+        "allowanceMm": 200,
+        "incrementMm": 100,
+        "orderCeilingMm": 9000,
+        "handlingThresholdMm": 6000
+      },
+      "profile": {
+        "end": {
+          "side": "right",
+          "type": "closed_hem",
+          "widthMm": 12.5
+        },
+        "bends": [
+          {
+            "turnDeg": 90
+          },
+          {
+            "turnDeg": 45
+          },
+          {
+            "turnDeg": -90
+          }
+        ],
+        "start": {
+          "side": "left",
+          "type": "open_return",
+          "widthMm": 15
+        },
+        "units": "mm",
+        "segments": [
+          {
+            "id": "b1",
+            "lengthMm": 80
+          },
+          {
+            "id": "b2",
+            "lengthMm": 160
+          },
+          {
+            "id": "b3",
+            "lengthMm": 120
+          },
+          {
+            "id": "b4",
+            "lengthMm": 25
+          }
+        ],
+        "coatedFace": "right",
+        "schemaVersion": 1,
+        "initialDirectionDeg": 0
+      },
+      "fromPresetId": null,
+      "fromPresetRevision": null,
+      "revision": 1,
+      "archived": false
     }
   ],
   "contributions": [
     {
-      "id": "e4846f2a-4b51-4b02-887b-fa012c4c2b6c",
-      "measurementId": "344d80dd-fc46-42f9-84eb-6dfca4c7a57e",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "id": "a4167814-d524-4b00-9d2e-5262b5938a8c",
+      "measurementId": "1bf76549-5095-4bff-b540-dbdbc52da1ad",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "32a8e9c8-1ea8-4f34-b1ba-ea98e8ebe2b4",
-      "measurementId": "75054ec6-3b0a-4eed-a874-5b921c915310",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "id": "1a305b54-bc14-498a-8c52-11d587041a85",
+      "measurementId": "21d4eb9c-4d96-464d-97ce-66c61e844e78",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "0f139fee-190e-4134-9ca5-ebe5237c5ab0",
-      "measurementId": "43500c2a-2a1a-4907-b54b-671a32ec8051",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "id": "be331210-ffd0-4f0d-a0ec-463e907f1c7b",
+      "measurementId": "2111deea-9661-470d-bce7-ebeb7fb2d969",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "90341222-9ac2-41c1-aeaf-b194d7383b78",
-      "measurementId": "388cc880-8b90-4ffd-b9dd-2d19f4730f2e",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "id": "df8db20b-f015-4c7c-b0fa-6deeefeb69ca",
+      "measurementId": "34bf730f-43ca-460d-9995-a070e97f0028",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "cbbb0e6a-0a0d-4183-9fe3-d5568116e0ed",
-      "measurementId": "96047022-8c8f-4d0e-9671-7f3585548650",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "id": "b82445eb-d922-409e-84a9-ca39f7d08591",
+      "measurementId": "5a093a72-5d7d-4f5e-aa5f-7f9a998156c6",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "role": "primary",
       "split": {
         "laps": [
@@ -649,15 +861,17 @@
           3700
         ],
         "version": 1,
+        "originals": 1,
+        "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":7200,\"kind\":\"run\",\"quantity\":1,\"raw\":7000,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
         "sourceFinishedMm": 7200
       },
       "splitVersion": 1,
       "archived": false
     },
     {
-      "id": "49f2d308-c413-456e-85f2-56b1404a59de",
-      "measurementId": "8c795628-6eb6-4869-86e8-9862315a3e6a",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "id": "eb21c446-6de9-482f-b119-d0fbc250ba2b",
+      "measurementId": "5da65e46-0e2f-4adf-9bf8-812d82eea3dc",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "role": "primary",
       "split": {
         "laps": [
@@ -668,33 +882,53 @@
           4600
         ],
         "version": 1,
+        "originals": 1,
+        "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":9100,\"kind\":\"run\",\"quantity\":1,\"raw\":8801,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
         "sourceFinishedMm": 9100
       },
       "splitVersion": 1,
       "archived": false
     },
     {
-      "id": "f4405afc-8942-456b-abe4-a1ed182f0c03",
-      "measurementId": "0f224d33-04a9-4d16-b90a-2dd757e11bf0",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "id": "273bb47e-1bd2-4844-a452-ea4e0a3aa82c",
+      "measurementId": "3bf61c66-8a39-46a2-82e6-7894ee625b4a",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "292e4716-cceb-49e9-9db6-033d576dc74f",
-      "measurementId": "7ddcc43b-70db-445b-9010-3e7539cd5207",
-      "jobMaterialId": "3ab198f5-e923-4416-b093-3e14c0dc6545",
+      "id": "c4ac161f-df49-4f25-afcf-fcf10a4fd2cb",
+      "measurementId": "c2ed0484-7bfc-4a7a-ae81-fbd58c8bd8cf",
+      "jobMaterialId": "64d9749a-3258-4e4f-b551-bf6001a422b4",
       "role": "primary",
       "split": null,
       "splitVersion": 0,
       "archived": false
     },
     {
-      "id": "f8c13fe0-778f-4295-9a8f-6db654d88cea",
-      "measurementId": "2e7466c4-2174-464d-8704-12fded31a612",
-      "jobMaterialId": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+      "id": "b331cc73-ec65-4c49-9e04-7bc629dfe148",
+      "measurementId": "01c34741-5623-4903-a9e3-f412ad180eb9",
+      "jobMaterialId": "45b94c18-967a-4e90-a509-79daf1e743f5",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "77ed587b-d57f-42c6-acf0-04ee26419c9a",
+      "measurementId": "3010be34-0f3f-4161-83e0-77076836ab06",
+      "jobMaterialId": "81f10d3b-c7ed-4c62-86ef-8a09e40dd7e8",
+      "role": "primary",
+      "split": null,
+      "splitVersion": 0,
+      "archived": false
+    },
+    {
+      "id": "95da0f2c-c1a7-476d-a82e-37ebb30f6327",
+      "measurementId": "259cbb8e-53fd-4077-9c08-92c20091a5ae",
+      "jobMaterialId": "104a7193-4fe2-423a-bc05-114c33b5b9fc",
       "role": "primary",
       "split": null,
       "splitVersion": 0,

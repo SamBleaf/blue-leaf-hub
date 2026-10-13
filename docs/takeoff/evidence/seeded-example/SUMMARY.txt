@@ -1,24 +1,28 @@
 Seeded example takeoff (synthetic plan)
-Workspace bcbdb915-aebd-4f35-8284-add2bbd9a8c7 revision 5
+Workspace ca622c59-eb02-4f4f-8361-19afbaf1a4ff revision 5
 
 Length schedule:
-  1 ×   4400 mm         [Std valley gutter (example)]
   6 ×    300 mm         [Stop end (pieces)]
-  1 ×   6100 mm  LONG   [Apron flashing]
-  2 ×   4600 mm         [Apron flashing]
-  1 ×   3200 mm         [Apron flashing]
+  3 ×   2400 mm         [Capping (unpainted)]
   2 ×   4600 mm         [Barge flashing]
   2 ×   3700 mm         [Barge flashing]
   4 ×   2400 mm         [Barge flashing]
+  1 ×   6100 mm  LONG   [Apron flashing]
+  2 ×   4600 mm         [Apron flashing]
+  1 ×   3200 mm         [Apron flashing]
+  2 ×   3000 mm         [Vent flashing (perforated)]
+  1 ×   4400 mm         [Std valley gutter (example)]
 
 Required / ordered / remaining:
-required 1 · ordered 1 · remaining 0  (4400 mm)
 required 6 · ordered 0 · remaining 6  (300 mm)
-required 1 · ordered 1 · remaining 0  (6100 mm)
-required 2 · ordered 2 · remaining 0  (4600 mm)
-required 1 · ordered 1 · remaining 0  (3200 mm)
+required 3 · ordered 3 · remaining 0  (2400 mm)
 required 2 · ordered 2 · remaining 0  (4600 mm)
 required 2 · ordered 2 · remaining 0  (3700 mm)
 required 4 · ordered 4 · remaining 0  (2400 mm)
+required 1 · ordered 1 · remaining 0  (6100 mm)
+required 2 · ordered 2 · remaining 0  (4600 mm)
+required 1 · ordered 1 · remaining 0  (3200 mm)
+required 2 · ordered 2 · remaining 0  (3000 mm)
+required 1 · ordered 1 · remaining 0  (4400 mm)
 
 Exports: FO-001001-export-1-DRAFT.pdf, FO-001001-export-2.pdf, FO-001002-export-1.pdf

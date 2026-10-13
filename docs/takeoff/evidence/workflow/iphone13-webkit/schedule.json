@@ -1,0 +1,26 @@
+[
+  {
+    "spec": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+    "len": 4600,
+    "qty": 1,
+    "problems": []
+  },
+  {
+    "spec": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[75,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"left\\\"],\\\"turns\\\":[-90,-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+    "len": 4600,
+    "qty": 2,
+    "problems": []
+  },
+  {
+    "spec": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[75,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"left\\\"],\\\"turns\\\":[-90,-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+    "len": 3700,
+    "qty": 2,
+    "problems": []
+  },
+  {
+    "spec": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[75,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"left\\\"],\\\"turns\\\":[-90,-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+    "len": 3000,
+    "qty": 2,
+    "problems": []
+  }
+]

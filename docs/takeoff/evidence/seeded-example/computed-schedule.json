@@ -1,123 +1,153 @@
 {
-  "totalLm": 50.9,
+  "totalLm": 64.1,
   "orderReady": true,
   "scheduleLines": [
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Basalt\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\"}|4400",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Basalt\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"profile\":null,\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":\"SE-EX\"}}|300",
+      "specKey": "{\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"profile\":null,\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":\"SE-EX\"}}",
       "jobMaterialIds": [
-        "3ab198f5-e923-4416-b093-3e14c0dc6545"
-      ],
-      "finishedLengthMm": 4400,
-      "quantity": 1,
-      "contributionIds": [
-        "292e4716-cceb-49e9-9db6-033d576dc74f"
-      ],
-      "handlingFlag": false,
-      "ceilingExceeded": false,
-      "problems": []
-    },
-    {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"product\":\"Flashing\",\"productCode\":\"SE-EX\",\"profile\":null}|300",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":\"stop end (pieces)\",\"method\":\"finished_piece_count@1\",\"product\":\"Flashing\",\"productCode\":\"SE-EX\",\"profile\":null}",
-      "jobMaterialIds": [
-        "a39e1aed-f188-4def-b4be-8ecd3a23e571"
+        "45b94c18-967a-4e90-a509-79daf1e743f5"
       ],
       "finishedLengthMm": 300,
       "quantity": 6,
       "contributionIds": [
-        "f8c13fe0-778f-4295-9a8f-6db654d88cea"
+        "b331cc73-ec65-4c49-9e04-7bc629dfe148"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|6100",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.5,\"colour\":\"n/a\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"zincalume\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.5,\"colour\":\"n/a\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"zincalume\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "46581d06-f7d1-42bd-a2f7-dbca6979763e"
+        "104a7193-4fe2-423a-bc05-114c33b5b9fc"
+      ],
+      "finishedLengthMm": 2400,
+      "quantity": 3,
+      "contributionIds": [
+        "95da0f2c-c1a7-476d-a82e-37ebb30f6327"
+      ],
+      "handlingFlag": false,
+      "ceilingExceeded": false,
+      "problems": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+      "jobMaterialIds": [
+        "049f5e0b-cf66-46d2-b189-24e044f086bf"
+      ],
+      "finishedLengthMm": 4600,
+      "quantity": 2,
+      "contributionIds": [
+        "eb21c446-6de9-482f-b119-d0fbc250ba2b"
+      ],
+      "handlingFlag": false,
+      "ceilingExceeded": false,
+      "problems": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3700",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+      "jobMaterialIds": [
+        "049f5e0b-cf66-46d2-b189-24e044f086bf"
+      ],
+      "finishedLengthMm": 3700,
+      "quantity": 2,
+      "contributionIds": [
+        "b82445eb-d922-409e-84a9-ca39f7d08591"
+      ],
+      "handlingFlag": false,
+      "ceilingExceeded": false,
+      "problems": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|2400",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+      "jobMaterialIds": [
+        "049f5e0b-cf66-46d2-b189-24e044f086bf"
+      ],
+      "finishedLengthMm": 2400,
+      "quantity": 4,
+      "contributionIds": [
+        "273bb47e-1bd2-4844-a452-ea4e0a3aa82c"
+      ],
+      "handlingFlag": false,
+      "ceilingExceeded": false,
+      "problems": []
+    },
+    {
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|6100",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
+      "jobMaterialIds": [
+        "170333b1-67a7-4799-a855-2080d0821902"
       ],
       "finishedLengthMm": 6100,
       "quantity": 1,
       "contributionIds": [
-        "0f139fee-190e-4134-9ca5-ebe5237c5ab0"
+        "be331210-ffd0-4f0d-a0ec-463e907f1c7b"
       ],
       "handlingFlag": true,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|4600",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4600",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "46581d06-f7d1-42bd-a2f7-dbca6979763e"
+        "170333b1-67a7-4799-a855-2080d0821902"
       ],
       "finishedLengthMm": 4600,
       "quantity": 2,
       "contributionIds": [
-        "e4846f2a-4b51-4b02-887b-fa012c4c2b6c",
-        "90341222-9ac2-41c1-aeaf-b194d7383b78"
+        "a4167814-d524-4b00-9d2e-5262b5938a8c",
+        "df8db20b-f015-4c7c-b0fa-6deeefeb69ca"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}|3200",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Monument\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3200",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "46581d06-f7d1-42bd-a2f7-dbca6979763e"
+        "170333b1-67a7-4799-a855-2080d0821902"
       ],
       "finishedLengthMm": 3200,
       "quantity": 1,
       "contributionIds": [
-        "32a8e9c8-1ea8-4f34-b1ba-ea98e8ebe2b4"
+        "1a305b54-bc14-498a-8c52-11d587041a85"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|4600",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"perforated\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":{\"arrangement\":\"staggered\",\"description\":null,\"extent\":\"selected_legs\",\"holeSizeMm\":3,\"legIds\":[\"L2\"],\"openAreaPct\":null,\"pattern\":\"round\",\"pitchMm\":6,\"solidMarginMm\":10,\"supplierProductCode\":null},\"product\":\"flashing\",\"productCode\":null}}|3000",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[50,150,100],\\\"start\\\":[\\\"closed_hem\\\",10,\\\"right\\\"],\\\"turns\\\":[-90,90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"surfmist\",\"colourCode\":null,\"construction\":\"perforated\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":{\"arrangement\":\"staggered\",\"description\":null,\"extent\":\"selected_legs\",\"holeSizeMm\":3,\"legIds\":[\"L2\"],\"openAreaPct\":null,\"pattern\":\"round\",\"pitchMm\":6,\"solidMarginMm\":10,\"supplierProductCode\":null},\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "73d2a890-6445-403c-9821-a76538a79935"
+        "81f10d3b-c7ed-4c62-86ef-8a09e40dd7e8"
       ],
-      "finishedLengthMm": 4600,
+      "finishedLengthMm": 3000,
       "quantity": 2,
       "contributionIds": [
-        "49f2d308-c413-456e-85f2-56b1404a59de"
+        "77ed587b-d57f-42c6-acf0-04ee26419c9a"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|3700",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
+      "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"basalt\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|4400",
+      "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[60,200,60],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-60,-60],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"basalt\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "73d2a890-6445-403c-9821-a76538a79935"
+        "64d9749a-3258-4e4f-b551-bf6001a422b4"
       ],
-      "finishedLengthMm": 3700,
-      "quantity": 2,
+      "finishedLengthMm": 4400,
+      "quantity": 1,
       "contributionIds": [
-        "cbbb0e6a-0a0d-4183-9fe3-d5568116e0ed"
-      ],
-      "handlingFlag": false,
-      "ceilingExceeded": false,
-      "problems": []
-    },
-    {
-      "bucketKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}|2400",
-      "specKey": "{\"bmt\":0.55,\"colour\":\"Surfmist\",\"colourCode\":null,\"finish\":\"COLORBOND\",\"item\":null,\"method\":\"flashing_runs@1\",\"product\":\"Flashing\",\"productCode\":null,\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":[\\\"closed_hem\\\",12.5,\\\"left\\\"],\\\"legs\\\":[80,160,120,25],\\\"start\\\":[\\\"open_return\\\",15,\\\"right\\\"],\\\"turns\\\":[-90,-45,90],\\\"v\\\":1}\"}",
-      "jobMaterialIds": [
-        "73d2a890-6445-403c-9821-a76538a79935"
-      ],
-      "finishedLengthMm": 2400,
-      "quantity": 4,
-      "contributionIds": [
-        "f4405afc-8942-456b-abe4-a1ed182f0c03"
+        "c4ac161f-df49-4f25-afcf-fcf10a4fd2cb"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
@@ -126,9 +156,9 @@
   ],
   "contributions": [
     {
-      "contributionId": "e4846f2a-4b51-4b02-887b-fa012c4c2b6c",
-      "measurementId": "344d80dd-fc46-42f9-84eb-6dfca4c7a57e",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "contributionId": "a4167814-d524-4b00-9d2e-5262b5938a8c",
+      "measurementId": "1bf76549-5095-4bff-b540-dbdbc52da1ad",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -149,13 +179,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":4600,\"kind\":\"run\",\"quantity\":1,\"raw\":4312,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 4,312 + allowance 200 → order 4,600 mm"
     },
     {
-      "contributionId": "32a8e9c8-1ea8-4f34-b1ba-ea98e8ebe2b4",
-      "measurementId": "75054ec6-3b0a-4eed-a874-5b921c915310",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "contributionId": "1a305b54-bc14-498a-8c52-11d587041a85",
+      "measurementId": "21d4eb9c-4d96-464d-97ce-66c61e844e78",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -176,13 +207,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":3200,\"kind\":\"run\",\"quantity\":1,\"raw\":3000,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 3,000 + allowance 200 → order 3,200 mm"
     },
     {
-      "contributionId": "0f139fee-190e-4134-9ca5-ebe5237c5ab0",
-      "measurementId": "43500c2a-2a1a-4907-b54b-671a32ec8051",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "contributionId": "be331210-ffd0-4f0d-a0ec-463e907f1c7b",
+      "measurementId": "2111deea-9661-470d-bce7-ebeb7fb2d969",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -203,13 +235,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":6100,\"kind\":\"run\",\"quantity\":1,\"raw\":5900,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 5,900 + allowance 200 → order 6,100 mm"
     },
     {
-      "contributionId": "90341222-9ac2-41c1-aeaf-b194d7383b78",
-      "measurementId": "388cc880-8b90-4ffd-b9dd-2d19f4730f2e",
-      "jobMaterialId": "46581d06-f7d1-42bd-a2f7-dbca6979763e",
+      "contributionId": "df8db20b-f015-4c7c-b0fa-6deeefeb69ca",
+      "measurementId": "34bf730f-43ca-460d-9995-a070e97f0028",
+      "jobMaterialId": "170333b1-67a7-4799-a855-2080d0821902",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -230,13 +263,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"0dbb1e99-3dc8-4d67-b296-d73e71f5c539\",\"finished\":4600,\"kind\":\"run\",\"quantity\":1,\"raw\":4312,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 4,312 + allowance 200 → order 4,600 mm"
     },
     {
-      "contributionId": "cbbb0e6a-0a0d-4183-9fe3-d5568116e0ed",
-      "measurementId": "96047022-8c8f-4d0e-9671-7f3585548650",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "contributionId": "b82445eb-d922-409e-84a9-ca39f7d08591",
+      "measurementId": "5a093a72-5d7d-4f5e-aa5f-7f9a998156c6",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -272,6 +306,7 @@
         "valid": true,
         "problems": [],
         "stale": false,
+        "originals": 1,
         "version": 1
       },
       "pieces": [
@@ -288,13 +323,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":7200,\"kind\":\"run\",\"quantity\":1,\"raw\":7000,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 7,000 + allowance 200 → order 7,200 mm"
     },
     {
-      "contributionId": "49f2d308-c413-456e-85f2-56b1404a59de",
-      "measurementId": "8c795628-6eb6-4869-86e8-9862315a3e6a",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "contributionId": "eb21c446-6de9-482f-b119-d0fbc250ba2b",
+      "measurementId": "5da65e46-0e2f-4adf-9bf8-812d82eea3dc",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -330,6 +366,7 @@
         "valid": true,
         "problems": [],
         "stale": false,
+        "originals": 1,
         "version": 1
       },
       "pieces": [
@@ -346,13 +383,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":9100,\"kind\":\"run\",\"quantity\":1,\"raw\":8801,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 8,801 + allowance 200 → order 9,100 mm"
     },
     {
-      "contributionId": "f4405afc-8942-456b-abe4-a1ed182f0c03",
-      "measurementId": "0f224d33-04a9-4d16-b90a-2dd757e11bf0",
-      "jobMaterialId": "73d2a890-6445-403c-9821-a76538a79935",
+      "contributionId": "273bb47e-1bd2-4844-a452-ea4e0a3aa82c",
+      "measurementId": "3bf61c66-8a39-46a2-82e6-7894ee625b4a",
+      "jobMaterialId": "049f5e0b-cf66-46d2-b189-24e044f086bf",
       "kind": "count",
       "result": {
         "source": "count",
@@ -374,13 +412,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":null,\"finished\":2400,\"kind\":\"count\",\"quantity\":4,\"raw\":null,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Counted 4 × 2,400 mm (finished length, no allowance)"
     },
     {
-      "contributionId": "292e4716-cceb-49e9-9db6-033d576dc74f",
-      "measurementId": "7ddcc43b-70db-445b-9010-3e7539cd5207",
-      "jobMaterialId": "3ab198f5-e923-4416-b093-3e14c0dc6545",
+      "contributionId": "c4ac161f-df49-4f25-afcf-fcf10a4fd2cb",
+      "measurementId": "c2ed0484-7bfc-4a7a-ae81-fbd58c8bd8cf",
+      "jobMaterialId": "64d9749a-3258-4e4f-b551-bf6001a422b4",
       "kind": "run",
       "result": {
         "source": "measured",
@@ -401,13 +440,14 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":\"599d8137-7f7e-412a-ac62-4665949dd619\",\"finished\":4400,\"kind\":\"run\",\"quantity\":1,\"raw\":4200,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Measured 4,200 + allowance 200 → order 4,400 mm"
     },
     {
-      "contributionId": "f8c13fe0-778f-4295-9a8f-6db654d88cea",
-      "measurementId": "2e7466c4-2174-464d-8704-12fded31a612",
-      "jobMaterialId": "a39e1aed-f188-4def-b4be-8ecd3a23e571",
+      "contributionId": "b331cc73-ec65-4c49-9e04-7bc629dfe148",
+      "measurementId": "01c34741-5623-4903-a9e3-f412ad180eb9",
+      "jobMaterialId": "45b94c18-967a-4e90-a509-79daf1e743f5",
       "kind": "manual",
       "result": {
         "source": "manual",
@@ -429,8 +469,67 @@
           "ceilingExceeded": false
         }
       ],
+      "sourceSignature": "{\"calibration\":null,\"finished\":300,\"kind\":\"manual\",\"quantity\":6,\"raw\":null,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
       "problems": [],
       "explanation": "Entered 6 × 300 mm (finished length, no allowance)"
+    },
+    {
+      "contributionId": "77ed587b-d57f-42c6-acf0-04ee26419c9a",
+      "measurementId": "3010be34-0f3f-4161-83e0-77076836ab06",
+      "jobMaterialId": "81f10d3b-c7ed-4c62-86ef-8a09e40dd7e8",
+      "kind": "manual",
+      "result": {
+        "source": "manual",
+        "rawLengthMm": null,
+        "allowanceMm": 0,
+        "incrementMm": null,
+        "finishedLengthMm": 3000,
+        "quantity": 2,
+        "incrementMismatch": false,
+        "handlingFlag": false,
+        "ceilingExceeded": false
+      },
+      "split": null,
+      "pieces": [
+        {
+          "finishedLengthMm": 3000,
+          "quantity": 2,
+          "handlingFlag": false,
+          "ceilingExceeded": false
+        }
+      ],
+      "sourceSignature": "{\"calibration\":null,\"finished\":3000,\"kind\":\"manual\",\"quantity\":2,\"raw\":null,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
+      "problems": [],
+      "explanation": "Entered 2 × 3,000 mm (finished length, no allowance)"
+    },
+    {
+      "contributionId": "95da0f2c-c1a7-476d-a82e-37ebb30f6327",
+      "measurementId": "259cbb8e-53fd-4077-9c08-92c20091a5ae",
+      "jobMaterialId": "104a7193-4fe2-423a-bc05-114c33b5b9fc",
+      "kind": "manual",
+      "result": {
+        "source": "manual",
+        "rawLengthMm": null,
+        "allowanceMm": 0,
+        "incrementMm": null,
+        "finishedLengthMm": 2400,
+        "quantity": 3,
+        "incrementMismatch": false,
+        "handlingFlag": false,
+        "ceilingExceeded": false
+      },
+      "split": null,
+      "pieces": [
+        {
+          "finishedLengthMm": 2400,
+          "quantity": 3,
+          "handlingFlag": false,
+          "ceilingExceeded": false
+        }
+      ],
+      "sourceSignature": "{\"calibration\":null,\"finished\":2400,\"kind\":\"manual\",\"quantity\":3,\"raw\":null,\"rules\":{\"allowanceMm\":200,\"handlingThresholdMm\":6000,\"incrementMm\":100,\"orderCeilingMm\":9000}}",
+      "problems": [],
+      "explanation": "Entered 3 × 2,400 mm (finished length, no allowance)"
     }
   ]
 }
