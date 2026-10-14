@@ -25,7 +25,10 @@ import { makePgSupabase } from "../tests/lib/pgSupabaseShim.mjs";
 const args = process.argv.slice(2);
 const reset = args.includes("--reset");
 const inputs = args.filter((a) => !a.startsWith("--"));
-const HOME = join(homedir(), "Takeoff-Sandbox");
+// TAKEOFF_SANDBOX_DB / TAKEOFF_SANDBOX_HOME: an ISOLATED sandbox (e.g. automated evidence runs) that never touches
+// the owner's own sandbox database or files
+const DB_NAME = /^[a-z_][a-z0-9_]{0,62}$/.test(process.env.TAKEOFF_SANDBOX_DB || "") ? process.env.TAKEOFF_SANDBOX_DB : "blh_takeoff_sandbox";
+const HOME = process.env.TAKEOFF_SANDBOX_HOME ? resolve(process.env.TAKEOFF_SANDBOX_HOME) : join(homedir(), "Takeoff-Sandbox");
 const STORAGE = join(HOME, "storage");
 const API_PORT = Number(process.env.TAKEOFF_SANDBOX_API_PORT || 8788);
 const WEB_PORT = Number(process.env.TAKEOFF_SANDBOX_WEB_PORT || 5181);
@@ -40,7 +43,7 @@ const IDS = {
 };
 const TOKENS = { admin: "sandbox-admin", leadingHand: "sandbox-leading-hand" };
 
-const db = await persistentTakeoffDb("blh_takeoff_sandbox", { reset });
+const db = await persistentTakeoffDb(DB_NAME, { reset });
 if (db.skip) { console.error(`Sandbox needs local Postgres: ${db.skip}`); process.exit(1); }
 const pool = new pg.Pool({ connectionString: db.url, max: 8 });
 const sb = makePgSupabase(pool, { storageDir: STORAGE, signedUrlBase: "/api/sandbox-file" });
