@@ -109,6 +109,10 @@ function conditionNotes(p) {
   // site facts of the job a product was saved from (older products saved straight from a job) — never trusted here
   if (r.existing === true) out.push("supports marked as already existing (not purchased) — that was another job's site; check this job's walls");
   if (r.recipe?.authority?.ref) out.push(`project detail ${r.recipe.authority.ref} — recorded for another job; check it applies to this one`);
+  if (r.installConditions && typeof r.installConditions === "object" && Object.keys(r.installConditions).length) out.push("installation conditions (wind class, substrate …) from another job — check them against this site");
+  if (r.fixingScope?.status === "by-others" || r.fixingScope?.status === "exclude") out.push(`support fixings marked ${r.fixingScope.status === "exclude" ? "excluded" : "by others"} — that was another job's decision`);
+  if (r.joints && typeof r.joints === "object") out.push(`a board joint rule${r.joints.detailRef ? ` (${r.joints.detailRef})` : ""} — check it suits this job's supports`);
+  if (r.fixing && typeof r.fixing === "object") out.push(`a support fixing rule${r.fixing.ruleRef ? ` (${r.fixing.ruleRef})` : ""} — check it suits this job's wind class and frame`);
   return out;
 }
 
@@ -206,6 +210,8 @@ const FIELD_LABEL = {
   "rules.maxSpacingMm": "Max support spacing (mm)", "rules.spacingRef": "Spacing authority", "rules.adhesiveJointMm": "Adhesive joint (mm)", "rules.minStripMm": "Minimum cut strip (mm)",
   "rules.centresMm": "Centres (mm)", "rules.pitchDeg": "Pitch (°)", "rules.heightAllowanceMm": "Sheet height allowance (mm)", "rules.datumMm": "Layout datum (mm)",
   "rules.review.product.state": "Product review", "rules.review.ordering.state": "Ordering review", "rules.review.installation.state": "Installation review", "rules.assembly.label": "Company assembly",
+  "rules.route": "Fixing route", "rules.panelOrientation": "Panel orientation", "rules.joints.mode": "Board joints", "rules.joints.centresMm": "Board joint support centres (mm)",
+  "rules.joints.detailRef": "Board joint detail", "rules.fixing.ruleRef": "Support fixing rule", "rules.fixing.pitchMm": "Support fixing spacing (mm)", "rules.fixingScope.status": "Support fixings",
 };
 const SKIP = new Set(["spec.v", "rules.carried", "spec.product.id", "spec.product.skus", "spec.product.installationState"]);
 const flat = (o, prefix, out) => {

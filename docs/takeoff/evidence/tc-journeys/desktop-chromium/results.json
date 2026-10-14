@@ -1,0 +1,219 @@
+{
+  "project": "desktop-chromium",
+  "role": "director (Hub route, admin)",
+  "url": "<sandbox>/carpentry/5a4db0c5-0000-4000-8000-00000000a001/takeoff?reviewRole=admin",
+  "browser": "chromium 149.0.7827.55",
+  "viewport": "{\"width\":1440,\"height\":900}",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36",
+  "results": [
+    {
+      "id": "S0",
+      "title": "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
+      "status": "PASS",
+      "seconds": 10,
+      "observed": {
+        "calibration": {
+          "id": "930f2e13-5e94-4359-90df-f2bdefe272af",
+          "documentId": "1ec0bf05-2ded-49ff-918f-ccc7a86bead6",
+          "pageIndex": 0,
+          "pageMeta": {
+            "rotate": 0,
+            "viewBox": [
+              0,
+              0,
+              842,
+              595
+            ],
+            "userUnit": 1
+          },
+          "region": null,
+          "regionLabel": null,
+          "calibrationRevision": 1,
+          "supersedesCalibrationId": null,
+          "basisRotation": 0,
+          "mode": "uniform",
+          "sx": 35.277777777777764,
+          "sy": 35.277777777777764,
+          "measuredSx": 35.27777777777777,
+          "measuredSy": 35.27777777777776,
+          "discrepancy": 4.0282737775375773e-16,
+          "tolerance": 0.005,
+          "horizontal": {
+            "p1": {
+              "x": 119.99999999999999,
+              "y": 110.00000000000003
+            },
+            "p2": {
+              "x": 460.1574803149607,
+              "y": 110.00000000000003
+            },
+            "knownMm": 12000
+          },
+          "vertical": {
+            "p1": {
+              "x": 80,
+              "y": 149.99999999999997
+            },
+            "p2": {
+              "x": 80,
+              "y": 376.7716535433072
+            },
+            "knownMm": 8000
+          },
+          "verification": {
+            "p1": {
+              "x": 120.00000000000009,
+              "y": 406.77165354330725
+            },
+            "p2": {
+              "x": 205.03937007874015,
+              "y": 406.77165354330714
+            },
+            "error": 1.5158245029548805e-15,
+            "passed": true,
+            "expectedMm": 3000,
+            "observedMm": 2999.9999999999955
+          },
+          "status": "ready",
+          "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
+          "createdAt": "2026-10-14 19:45:22.484126+10:30"
+        }
+      }
+    },
+    {
+      "id": "J1",
+      "title": "Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800",
+      "status": "PASS",
+      "seconds": 13,
+      "observed": {
+        "projected": [
+          "18 piece · 90 × 45 MGP10 H3 — 5,400 mm length"
+        ],
+        "trueLength": [
+          "18 piece · 90 × 45 MGP10 H3 — 4,800 mm length"
+        ],
+        "pitchAfterSwitchBack": "30"
+      }
+    },
+    {
+      "id": "J2",
+      "title": "Cladding: Axon 133 smooth, wall 4,800 × 2,700 + 900 × 900 window → 4 sheets, net 12.15 m²; 4,801 → 5",
+      "status": "PASS",
+      "seconds": 5,
+      "observed": {
+        "materialName": "Axon 133 smooth",
+        "methodKey": "sheet_layout",
+        "assemblyId": "axon-vertical",
+        "at4800": {
+          "lines": [
+            "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+          ]
+        },
+        "at4801": [
+          "5 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+        ],
+        "final": [
+          "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+        ]
+      }
+    },
+    {
+      "id": "AL",
+      "title": "Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
+      "status": "PASS",
+      "seconds": 3,
+      "observed": {
+        "lines": [
+          "1 bar · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)"
+        ]
+      }
+    },
+    {
+      "id": "FL",
+      "title": "Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400",
+      "status": "FAIL",
+      "seconds": 33,
+      "error": "expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\nExpected: 1\nReceived: 0\nTimeout:  15000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 15000ms\n  - waiting for locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\n    34 × locator resolved to 0 elements\n       - unexpected value \"0\"\n",
+      "observed": {
+        "pathA": {
+          "tight": 2999.9999999999945
+        },
+        "pathB": {
+          "tight": 10000.000000000004
+        },
+        "storedSplit": {
+          "splitsMm": [
+            8800
+          ],
+          "splitAnchors": [
+            {
+              "x": 431.811,
+              "y": 257.717,
+              "stationMm": 8800
+            }
+          ]
+        },
+        "lines": [
+          "1 × 9100 (ceiling_exceeded,split_invalid)",
+          "1 × 3200",
+          "1 × 1400 (ceiling_exceeded,split_invalid)"
+        ],
+        "sheetAfterSave": "Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800.02 + 200 → 9,100 mm — over the maximum Piece 2: 1,200 + 200 → 1,400 mm 2 legs — corners are cut/folded on site; they add no pieces or allowances. Piece 1 orders 9,100 mm — over the 9,000 mm maximum. The red part is the overflow; tap it to split at the limit (8,800 mm along the run). Quantity: calculated · Installation: not specified · Procurement: draft — not ready to order Tap the start of the next run. Undo reopens this one.",
+        "engineCrossCheck": {
+          "storedAnchor": "1x1400(ceiling_exceeded,split_invalid) 1x3200 1x9100(ceiling_exceeded,split_invalid)",
+          "fullPrecisionAnchor": "1x1400 1x3200 1x9000",
+          "noAnchor": "1x1400 1x3200 1x9000"
+        }
+      }
+    },
+    {
+      "id": "J5",
+      "title": "Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back",
+      "status": "FAIL",
+      "seconds": 1,
+      "error": "Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run."
+    },
+    {
+      "id": "J5d",
+      "title": "DIAGNOSTIC (not J5): same order minus the blocked split-run flashing pieces → non-draft export + both PDFs read back",
+      "status": "PASS",
+      "seconds": 3,
+      "observed": {
+        "removedFromOrder": [
+          "9,100 mm · longneeds attention Flashing 1 · COLORBOND · Monu",
+          "1,400 mmneeds attention Flashing 1 · COLORBOND · Monument · "
+        ],
+        "ready": "Ready: 1 flashing pieces · 3.200 LM · 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "pdfChecksFailed": []
+      }
+    }
+  ],
+  "findings": [
+    {
+      "journey": "FL",
+      "id": "F1",
+      "severity": "blocking",
+      "text": "Split at the limit is changed by the save. Steps: scale page 1 (S0); Add flashing → New flashing → Details → Lengths; Run tool: tap (5,000, 1,000) → (11,000, 1,000) → (11,000, 5,000) (= 10,000 mm); tap the red part → \"Split at the limit (8,800 mm along the run). Pieces now 9,000 + 1,400 mm\"; Finish → after \"Saved\" the sheet reads: \"Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800.02 + 200 → 9,100 mm — over the maximum Piece 2: 1,200 + 200 …\" and still says \"tap it to split at the limit (8,800 mm along the run)\" (src/components/takeoff/measure/PathPanel.jsx:60) although the run is already split there. The server now computes 1 × 9100 (ceiling_exceeded,split_invalid) / 1 × 3200 / 1 × 1400 (ceiling_exceeded,split_invalid), and the order is blocked (\"A piece is longer than the order ceiling…\", \"The split pieces do not cover the run.\"). Cause: server/lib/takeoff/takeoffService.mjs:242 cleans inputs.splitAnchors x/y — PDF-point coordinates — with MM() (:204-208, Math.round(n * 1000) / 1000): stored [{\"x\":431.811,\"y\":257.717,\"stationMm\":8800}] vs the app's [{\"stationMm\":8800,\"x\":431.8110236220473,\"y\":257.7165354330707}]; shared/takeoff/engine/flashingPath.js:298 (checkSplits → locateOnPath) then rebuilds the station from the rounded anchor (8,800 → 8,800.02 → 9,000.02 → 9,100). Real-engine cross-check on the server's own snapshot: stored anchor → 1x1400(ceiling_exceeded,split_invalid) 1x3200 1x9100(ceiling_exceeded,split_invalid); full-precision anchor → 1x1400 1x3200 1x9000; no anchor → 1x1400 1x3200 1x9000. Rounding the other way would instead silently make piece 2 1,500 (any split at a whole-mm station is exposed)."
+    },
+    {
+      "journey": "J5d",
+      "id": "F2",
+      "severity": "minor (site appendix)",
+      "text": "Site appendix provenance is wrong for walls entered by numbers: server/lib/takeoff/takeoffPdf.mjs:214 hard-codes \"· Derived from plan + entered heights\" on every wall setout. The North wall was typed in (Walls → Wall by numbers); the wall editor labels it \"Entered\" and the schedule \"Entered length and heights\". Steps: J2 (wall by numbers) → Orders → export → Site appendix (cutting & setout)."
+    },
+    {
+      "journey": "J5d",
+      "id": "F3",
+      "severity": "minor (site appendix)",
+      "text": "Site appendix prints a literal \"?\" for \"≥\": \"shortest listed length ? its cut …\". The cladding explanation (shared/takeoff/engine/cladding.js:566) goes through winAnsi() (server/lib/takeoff/takeoffPdf.mjs:28-35), which maps only \"→\"; every other non-WinAnsi character becomes \"?\". Steps: J2 → Orders → export → Site appendix."
+    },
+    {
+      "journey": "J5d",
+      "id": "F4",
+      "severity": "minor (site appendix)",
+      "text": "Site appendix timber cut list names the rafters out of station order and only the first 12: \"Rafter @ 0, Rafter @ 10,000, Rafter @ 1,200, Rafter @ 1,800, Rafter @ 2,400, Rafter @ 3,000, Rafter @ 3,600, Rafter @ 4,200, Rafter @ 4,800, Rafter @ … +6 more\" — so a site reader can't tell which stations the 6 unnamed ones are. Labels are collected in the allocator's cut order (shared/takeoff/engine/dispatch.js:369-380; equal lengths tie-break on cut-id text: byLengthDesc, shared/takeoff/engine/allocator.js:512) and truncated at 12 (server/lib/takeoff/takeoffPdf.mjs:208). Steps: J1 → Orders → export → Site appendix."
+    }
+  ],
+  "consoleErrors": [],
+  "at": "2026-10-14T09:16:21.562Z"
+}

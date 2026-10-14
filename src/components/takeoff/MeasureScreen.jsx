@@ -12,8 +12,9 @@
 //   Run (timber/aluminium)  the same multi-point drawing, but a plan corner is a JOINT: finishing makes one straight
 //                   polyline (primary) per leg (near-collinear taps merge) — never one member bent round a corner.
 //   Member / Distribution (repeated timber, 03 T1)  the member line across the slope and the run the members are
-//                   spaced along; ticks at every member station with the count; tap a tick (Select) to remove,
-//                   duplicate or override its length.
+//                   spaced along; ticks at every member station with the count; the sheet reads count → stock
+//                   lengths → what each needs (engine allocation); tap a tick (Select) to remove, duplicate or
+//                   override its length; the run panel shows the last gap and flags one thinner than the member.
 //   Wall           tap along the wall run on the floor plan → one wall measurement (role "wall") per straight leg,
 //                  named "Wall N", N+1 … → the first one's elevation (a corner is never unfolded into one flat wall).
 //   Count          enter the FINISHED length first, then tap each occurrence (unchanged; no double-tap here).
@@ -23,7 +24,8 @@
 //   Pan            every drag navigates; nothing is placed.
 // highlightIds (schedule "Show on plan"): those measurements open selected + highlighted and the plan frames them;
 // any that live on another page / plan (or have no plan position) are named in the sheet instead.
-// Two fingers always navigate. Points must stay inside the scaled region. Measuring is blocked on a replaced plan
+// The plan keeps its zoom per plan page (PdfViewport viewKey): another material, a wall elevation and back re-open
+// at the same spot — only the first open (or Fit) fits the page. Two fingers always navigate. Points must stay inside the scaled region. Measuring is blocked on a replaced plan
 // (existing measurements stay visible for review). Every valid edit applies at once; Undo/Redo cover all of them.
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,11 +39,11 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtMm, fmtRaw } from "./format.js";
-import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, loadDraft, materialRecord, memberNoun, nextWallInputs, saveDraft, toolsFor, withOverride } from "./measure/tools.js";
+import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextWallInputs, saveDraft, stockForStation, toolsFor, withOverride } from "./measure/tools.js";
 import { HIT_PX, anchorsFor, distToPolyline, legMidpoints, pathLengthMm, safePointAt, screenDirectionAt, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
-import { DistributionPanel, MemberPanel, TickPanel } from "./measure/TimberPanel.jsx";
+import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
 import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js";
 
 const SHEET_TITLE = { run: "Measure runs", count: "Count pieces", wall: "Trace walls", member: "Member line", distribution: "Distribution run", pan: "Move around" };
@@ -789,6 +791,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   };
 
   const statusLine = results && <StatusRow status={results.status} />;
+  // repeated members: what the engine made of the member + distribution lines — count → stock → each needs (02 §2)
+  const timberResult = <TimberResult result={results} nounOf={(n) => memberNoun(material, n)} />;
   const problemList = (list) => list.length > 0 && (
     <ul className="space-y-0.5 text-xs text-amber-800" data-material-problems="">{list.slice(0, 3).map((p, i) => <li key={i}>{p.message}</li>)}</ul>
   );
@@ -846,6 +850,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           mode={mode === "pan" ? "pan" : "tap"} onTap={mode === "pan" ? undefined : onTap}
           onDoubleTap={PATH_TOOLS.has(mode) && canMeasure ? onDoubleTap : undefined}
           focus={focus}
+          viewKey={planDoc ? `${wsId}|${planDoc.id}|${pageIndex}` : null}
           className="min-h-0 flex-1"
           ariaLabel="Plan — tap to measure"
           overlay={({ toScreen: toScr }) => (
@@ -964,6 +969,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                     ? `Tap both ends of ONE ${memberNoun(material, 1)} across the roof slope, measured in plan (projected) — include the overhang.`
                     : `Tap both ends of ONE ${memberNoun(material, 1)}, measured in plan (projected).`}</p>
                 <MemberPanel lengthMm={len} lengthSource={src} pitchDeg={material?.rules?.pitchDeg} purpose={material?.spec?.purpose} canEdit={canEdit} onPitch={setPitch} />
+                {timberResult}
                 {statusLine}{problemLines}
               </div>
             );
@@ -972,6 +978,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           {mode === "distribution" && (
             <div className="space-y-2 text-sm">
               <p className="text-muted">{draft?.points.length ? "Tap the end of the distribution run." : `Tap the start of the distribution run — the line the ${noun} are spaced along (not the roof perimeter).`}</p>
+              {timberResult}
               <p className="text-[11px] text-muted">Ticks show each {memberNoun(material, 1)}. Switch to Select and tap a tick to remove, duplicate or change one.</p>
               {statusLine}{problemLines}
             </div>
@@ -1075,7 +1082,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             if (tick) {
               const ov = (sel.inputs?.overrides || []).find((o) => o.station === tick.stationId) || null;
               return (
-                <TickPanel tick={tick} override={ov} noun={tnoun} canEdit={canEdit}
+                <TickPanel tick={tick} override={ov} noun={tnoun} canEdit={canEdit} stock={stockForStation(selResult, tick.stationId)}
                   onRun={() => setSelTick(null)} runLabel={`Whole run${count != null ? ` — ${count} ${memberNoun(tm, count)}` : ""}: spacing, ends, offsets`}
                   onRemove={() => overridePatch(sel, tick.stationId, { removed: true })}
                   onRestore={() => overridePatch(sel, tick.stationId, { removed: false })}
@@ -1091,7 +1098,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                   inputs={sel.inputs} spacing={tm?.rules?.spacing} canEdit={canEdit} staleCount={info?.stale || 0} onInputs={(patch) => setDistInputs(sel, patch)}
                   onSpacing={tm ? (v) => setRule(tm, { spacing: v }) : null}
                   onClearStale={() => setDistInputs(sel, { overrides: (sel.inputs?.overrides || []).filter((o) => info.ticks.some((t) => t.stationId === o.station)) })}
-                  emptyNote={selBlocking.length ? "No members counted — see why below." : null} />
+                  emptyNote={selBlocking.length ? "No members counted — see why below." : null} ticks={info?.ticks || []} thicknessMm={memberThicknessMm(tm)} />
                 {selStatus}
                 <Btn kind="danger" onClick={removeSelected} disabled={!canEdit}>Remove</Btn>
               </div>

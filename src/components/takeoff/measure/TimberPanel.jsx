@@ -1,16 +1,36 @@
 // =============================================================================
 // measure/TimberPanel.jsx — sheet content for repeated timber members (TC-R04 02 §2, 03 T1/T2):
-//   TickPanel          one member station: remove / put back, duplicate, override its length (tied to its station)
-//   DistributionPanel  the run members are spaced along: count, offsets, endpoint inclusion, spacing
+//   TickPanel          one member station: remove / put back, duplicate, override its length (tied to its station),
+//                      and the stock length the engine cut it from
+//   DistributionPanel  the run members are spaced along: count, offsets, endpoint inclusion, spacing, the last gap
 //   MemberPanel        the member line: projected vs true length and the pitch (projected only)
+//   TimberResult       count → stock lengths → what each needs, exactly as the engine allocated it (02 §2 review)
 // Writes go back through MeasureScreen's undoable edits (distribution inputs.overrides / material rules).
 // =============================================================================
 import { Banner, Btn, NumberField } from "../ui.jsx";
 import { fmtMm, fmtRaw } from "../format.js";
+import { timberOrderSummary } from "./tools.js";
+
+const gapText = (mm) => (mm < 0.1 ? "less than 0.1 mm" : `${fmtRaw(mm)} mm`);
+
+/** "18 rafters → 18 × 5,400 mm stock (each needs 5,196.15 mm)" — the review line after a member / distribution line. */
+export function TimberResult({ result, nounOf }) {
+  const s = timberOrderSummary(result);
+  if (!s) return null;
+  const stock = s.stock.map(([L, n]) => `${n} × ${fmtMm(L)}`).join(" + ");
+  const parts = [stock ? `${stock} mm stock` : "", s.fromOffcuts ? `${s.fromOffcuts} from offcuts` : ""].filter(Boolean).join(" + ");
+  const needs = s.needs.length === 1 ? `each needs ${fmtMm(s.needs[0])} mm` : `needs ${fmtMm(s.needs[0])}–${fmtMm(s.needs[s.needs.length - 1])} mm`;
+  return (
+    <p className="text-sm text-ink" data-timber-result="">
+      <b>{s.members} {nounOf(s.members)}</b> → <b>{parts}</b> ({needs})
+    </p>
+  );
+}
 
 /** onRun: back to the whole distribution run (its count, offsets, endpoints, spacing). At ordinary zoom the ticks sit
- *  closer than a finger, so a tap on the run line always lands on a tick — this is the way to the run's settings. */
-export function TickPanel({ tick, override, noun, canEdit, onRemove, onRestore, onDuplicate, onRemoveCopy, onLength, onClearLength, onRun, runLabel }) {
+ *  closer than a finger, so a tap on the run line always lands on a tick — this is the way to the run's settings.
+ *  stock: stockForStation(...) for this tick — the stock length it is cut from (or the offcut), when allocated. */
+export function TickPanel({ tick, override, noun, canEdit, stock = null, onRemove, onRestore, onDuplicate, onRemoveCopy, onLength, onClearLength, onRun, runLabel }) {
   const dupWanted = override?.duplicate || 0;
   return (
     <div className="space-y-2 text-sm" data-tick-panel="">
@@ -18,7 +38,8 @@ export function TickPanel({ tick, override, noun, canEdit, onRemove, onRestore, 
       <p className="font-medium text-ink">{noun[0].toUpperCase() + noun.slice(1)} at {fmtRaw(tick.positionMm)} mm along the run</p>
       {tick.removed ? <p className="text-muted">Removed from the order.</p> : (
         <p className="text-ink">Needs <b>{fmtMm(tick.lengthNeededMm)} mm</b>{tick.lengthOverridden ? " (length changed for this one)" : ""}
-          {tick.pieces > 0 ? ` · ${tick.pieces} piece${tick.pieces === 1 ? "" : "s"} here` : ""}</p>
+          {tick.pieces > 0 ? ` · ${tick.pieces} piece${tick.pieces === 1 ? "" : "s"} here` : ""}
+          {stock?.stockMm ? <> · from <b>{fmtMm(stock.stockMm)} mm</b> stock</> : stock?.offcut ? ` · cut from offcut ${stock.offcut}` : ""}</p>
       )}
       {canEdit && (
         <div className="flex flex-wrap gap-2">
@@ -32,8 +53,9 @@ export function TickPanel({ tick, override, noun, canEdit, onRemove, onRestore, 
       )}
       {canEdit && !tick.removed && (
         <>
-          <NumberField label={`Length for this ${noun} only`} value={override?.lengthMm ?? null} min={1} max={30000} onCommit={onLength}
-            help="Overrides stay tied to this station; they're flagged if the run or spacing changes." />
+          <NumberField label={`Length for this ${noun} only`} value={override?.lengthMm ?? null} min={1} max={30000} optional
+            onCommit={(n) => (n == null ? onClearLength() : onLength(n))}
+            help="Overrides stay tied to this station; they're flagged if the run or spacing changes. Empty it to use the measured length." />
           {override?.lengthMm != null && <Btn kind="ghost" onClick={onClearLength}>Use the measured length</Btn>}
         </>
       )}
@@ -44,14 +66,25 @@ export function TickPanel({ tick, override, noun, canEdit, onRemove, onRestore, 
 /** emptyNote: why no members are counted when the engine said so (e.g. offsets longer than the run) — the generic
  *  "member line" hint is only for when nothing else is wrong.
  *  spacing / onSpacing: equal bays is a MATERIAL rule (the engine spaces every run of the material the same way), so
- *  it is shown and changed as such — never as a per-run input the calculation would ignore. */
-export function DistributionPanel({ lengthMm, count, noun, centresMm, inputs, spacing, canEdit, staleCount, onInputs, onSpacing, onClearStale, emptyNote = null }) {
+ *  it is shown and changed as such — never as a per-run input the calculation would ignore.
+ *  ticks / thicknessMm: the members' stations — the gap between the last two is always shown, and flagged when it is
+ *  thinner than the member itself (a run traced a hair past a multiple of the centres adds a member there). */
+export function DistributionPanel({ lengthMm, count, noun, centresMm, inputs, spacing, canEdit, staleCount, onInputs, onSpacing, onClearStale, emptyNote = null, ticks = [], thicknessMm = null }) {
   const i = inputs || {};
   const equal = spacing === "equal";
+  const at = (ticks || []).filter((t) => !t.removed).map((t) => t.positionMm).sort((a, b) => a - b);
+  const lastGap = at.length >= 2 ? at[at.length - 1] - at[at.length - 2] : null;
+  const tooClose = lastGap != null && lastGap < (thicknessMm ?? 1);
   return (
     <div className="space-y-2 text-sm" data-distribution-panel="">
       <p className="font-medium text-ink">Distribution run — {fmtRaw(lengthMm)} mm</p>
       <p className="text-ink">{count != null ? <><b>{count}</b> {noun} at {fmtMm(centresMm)} mm {equal ? "maximum centres (equal bays)" : "centres"}</> : emptyNote || "Members appear once the member line and its length are set."}</p>
+      {lastGap != null && <p className="text-[11px] text-muted" data-final-bay="">Last gap {gapText(lastGap)} (between the last two {noun}).</p>}
+      {tooClose && (
+        <div data-final-bay-warning="">
+          <Banner tone="warn">The last two {noun} are {lastGap < 0.1 ? "less than 0.1 mm" : `only ${fmtRaw(lastGap)} mm`} apart{thicknessMm ? ` — closer than one is thick (${fmtMm(thicknessMm)} mm)` : ""}. Check where the run ends{canEdit ? ", or untick “Member at the end”" : ""}.</Banner>
+        </div>
+      )}
       <p className="text-[11px] text-muted">This is the line the {noun} are spaced along — not the roof perimeter. Tap a tick to remove, duplicate or change one.</p>
       {staleCount > 0 && <Banner tone="warn" action={canEdit ? <Btn onClick={onClearStale}>Clear them</Btn> : null}>{staleCount} member change{staleCount === 1 ? " no longer matches" : "s no longer match"} a station (the run or spacing changed) — review.</Banner>}
       {canEdit && (
@@ -79,7 +112,7 @@ export function MemberPanel({ lengthMm, lengthSource, pitchDeg, purpose, canEdit
       {lengthMm != null && <p className="text-ink">Member line <b>{fmtRaw(lengthMm)} mm</b> {projected ? "measured in plan (projected)" : "measured as a true length — pitch not applied"}
         {trueLen ? <> → <b>{fmtRaw(trueLen)} mm</b> true at {pitchDeg}°</> : null}</p>}
       {lengthSource === "entered" && <Banner tone="info">This timber uses an entered cut length — a member line isn&apos;t needed.</Banner>}
-      {projected && canEdit && <NumberField label={rafters ? "Roof pitch" : "Pitch"} unit="°" value={pitchDeg ?? null} min={0} max={75} onCommit={onPitch}
+      {projected && canEdit && <NumberField label={rafters ? "Roof pitch" : "Pitch"} unit="°" value={pitchDeg ?? null} min={0} max={75} optional onCommit={onPitch}
         help={rafters ? "Applies to projected (plan) lengths only." : "Applies to projected (plan) lengths only — enter 0 for a level member."} />}
       {projected && !hasPitch && <p className="text-amber-800">Enter the pitch{rafters ? "" : " (0 if level)"} to get the true member length.</p>}
     </div>

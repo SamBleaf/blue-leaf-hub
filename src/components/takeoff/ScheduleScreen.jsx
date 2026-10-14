@@ -181,7 +181,9 @@ function describeBucket(bucketKey) {
   const k = parseBucketKey(bucketKey);
   const id = k?.head?.identity;
   if (id) {
-    const [unit, a, b] = k.rest;
+    // keys carry the material id after the material key (one bucket per material) — older keys don't
+    const rest = /^(piece|sheet|bar|lm|m2|box|bag|roll|pack|cartridge|ml)$/.test(k.rest[0]) ? k.rest : k.rest.slice(1);
+    const [unit, a, b] = rest;
     const what = id.family === "timber" ? [id.section?.depthMm && id.section?.widthMm ? `${id.section.depthMm} × ${id.section.widthMm}` : null, upper(id.grade), id.species, upper(id.treatment)].filter(Boolean).join(" ")
       : id.family === "aluminium" ? `${id.profile?.shape || "profile"} ${id.profile?.aMm} × ${id.profile?.bMm} × ${id.profile?.tMm}`
         : [id.manufacturer, id.name, id.sku ? `SKU ${id.sku}` : null].filter(Boolean).join(" ") || "Material";
@@ -199,7 +201,7 @@ function barsForLine(l, alloc) {
   if (!alloc || (l.unit !== "piece" && l.unit !== "bar")) return [];
   const out = [];
   for (const g of alloc.groups || []) for (const b of g.bars || []) {
-    if (b.source === "new" && `${l.materialKey}|${l.unit}|${b.stockLengthMm}|${g.identityKey}` === l.bucketKey) out.push(b);
+    if (b.source === "new" && `${l.materialKey}|${l.jobMaterialIds?.[0]}|${l.unit}|${b.stockLengthMm}|${g.identityKey}` === l.bucketKey) out.push(b);
   }
   return out;
 }

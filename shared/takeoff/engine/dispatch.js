@@ -402,10 +402,10 @@ const isUnresolved = (identity) => !identity || String(identity.family || "").st
 const timberText = (id) => [id.section ? String(id.section).replace("x", " × ") : "section?", id.grade, id.species, id.treatment].filter(Boolean).join(" ");
 
 /** What the supplier reads for a purchase line: the line's OWN item (never the parent product for a component). */
-function itemText(d, n, recipeLabels) {
+function itemText(d, n, recipeLabels, { thickness = false } = {}) {
   const id = d.identity || {};
   if (id.item) return `${recipeLabels.get(id.item) || id.item}${n.product?.name ? ` (${n.product.name})` : ""}`;
-  const named = [id.manufacturer, id.name, id.sku ? `SKU ${id.sku}` : null].filter(Boolean).join(" ");
+  const named = [id.manufacturer, id.name, id.sku ? `SKU ${id.sku}` : null, thickness && id.thicknessMm ? `${id.thicknessMm} thick` : null].filter(Boolean).join(" ");
   if (named) return named;
   if (id.family === "timber") return timberText(id);
   return describeIdentity(n);
@@ -494,7 +494,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     if (allocatable(d)) continue;
     if (d.kind === "linear" && d.unit === "lm") {
       // exact LM (incl. spare) is summed per material and rounded ONCE below — never per wall then again
-      add(`lm|${identityKey(d.identity)}`, "lm", d.exactLm ?? d.quantity, null, { description: `${itemText(d, n, recipeLabels)} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity);
+      add(`lm|${identityKey(d.identity)}`, "lm", d.exactLm ?? d.quantity, null, { description: `${itemText(d, n, recipeLabels, { thickness: true })} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity);
       continue;
     }
     if (d.kind === "linear") {
@@ -514,7 +514,8 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     }
     const u = d.unit || "piece";
     add(`${u}|${d.lengthMm ?? ""}|${identityKey(d.identity)}`, u, d.quantity, u === "piece" || u === "bar" ? d.lengthMm ?? null : null,
-      { description: d.itemDescription || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity);
+      // counted items keep their own entered label (e.g. "Cladding screws 8g × 40 (entered, quote Q-123)")
+      { description: d.itemDescription || (d.identity?.item ? itemText(d, n, recipeLabels) : d.label) || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity);
   }
   const all = [...lines.values()];
   for (const l of all) {

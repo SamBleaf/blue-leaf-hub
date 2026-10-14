@@ -94,6 +94,7 @@ export function SplitList({ path, canEdit, activeSplit, onActivate, onMove, onCo
   const [adding, setAdding] = useState(false);
   const [addKey, setAddKey] = useState(0);
   if (!path?.layout) return null;
+  // corners are numbered along the run (Corner 1 = the first bend); `i` stays the vertex index the engine moves to
   const corners = path.layout.vertexStationsMm.map((s, i) => ({ i, s })).slice(1, -1);
   const problemOf = (i) => path.problems.find((p) => p.refs?.some((r) => r.splitIndex === i));
   return (
@@ -123,7 +124,7 @@ export function SplitList({ path, canEdit, activeSplit, onActivate, onMove, onCo
                     <select className="mt-1 block min-h-[44px] w-full rounded-lg border border-hairline bg-white px-2 text-base text-ink" value=""
                       onChange={(e) => { if (e.target.value !== "") onCorner(i, Number(e.target.value)); }}>
                       <option value="">Corner…</option>
-                      {corners.map((c) => <option key={c.i} value={c.i}>Corner {c.i + 1} — {fmtRaw(c.s)} mm</option>)}
+                      {corners.map((c, k) => <option key={c.i} value={c.i}>Corner {k + 1} — {fmtRaw(c.s)} mm</option>)}
                     </select>
                   </label>
                 )}

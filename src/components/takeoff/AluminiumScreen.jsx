@@ -7,26 +7,32 @@
 //   onMeasure()  OPTIONAL — open the plan to measure straight runs for this material (hidden when absent)
 //
 // Builder workflow (11):
-//   Openings     add by numbers (label, W, H, count → that many standalone opening measurements, role
-//                "opening") or tick openings that already exist on walls (role "opening" contribution; the
+//   Openings     add by numbers — the opening exists as soon as its width and height are valid (no Add step,
+//                like the wall editor); "How many of this size" then adds copies inside the same undo step —
+//                or tick openings that already exist on walls (role "opening" contribution; the
 //                wall keeps owning the opening). Each opening shows its NOMINAL size and its FINISHED cuts
 //                separately. The cuts shown are the engine's own demands (materialResults.demands), so
 //                what is listed is exactly what is allocated.
-//   Extra cuts   manual measurements (finished length × quantity, role "primary").
+//   Extra cuts   manual measurements (finished length × quantity, role "primary"), added once the length is valid.
 //   Cutting      materialResults[materialId].allocation: buy N × stock, required length, cut loss, reusable
 //                remainder, scrap, objective, "minimum proven" vs "best plan found — minimum not proven",
 //                lower bound. Each bar expands to its ordered cuts and its PLANNED remainder (never stock).
 //                Tapping a cut highlights its opening. Pieces longer than stock block — never split.
 //   Offcuts      only pieces the builder records (kind "offcut", inputs.materialId) are stock; they can be
-//                marked consumed. A cutting plan never creates inventory.
+//                marked consumed. A cutting plan never creates inventory. Each piece is stamped with the
+//                profile + finish it was cut from (inputs.identityKey = stockIdentityKey(spec)); after the
+//                material's finish or section changes the engine stops offering it and the list says why.
 //   Ordered      bars already on PLACED orders (ws.server.orderStatus) are shown against the plan — still to
 //                order / covered / surplus. Frozen orders are never changed here.
-// Every valid edit auto-applies (ws.edit) with session undo/redo; invalid numbers stay in their field.
+// Every valid edit auto-applies (ws.edit) with session undo/redo; invalid numbers stay in their field. A number still
+// being typed is committed on Back / setup / app hide, never dropped. Undo clears what is still being typed first (an
+// unfinished entry, an invalid number, a number typed but not yet applied) — never an earlier edit (wall-editor rule).
 // View-only users (capabilities.edit false) see the same plan and exports, with no edit controls.
 // =============================================================================
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/index.js";
 import { genericMaterialKey } from "../../../shared/takeoff/engine/dispatch.js";
+import { stockIdentityKey } from "../../../shared/takeoff/engine/families.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, TextField } from "./ui.jsx";
@@ -54,6 +60,12 @@ const WRAP = "[overflow-wrap:anywhere]";
 /** A tap on a button can reach its click handler while a field is still focused (iOS keeps focus on the field):
  *  blur it first so the field's own blur commit lands before the form reads its values. */
 const commitFocusedField = () => { const el = document.activeElement; if (el instanceof HTMLElement && el.matches("input, textarea")) el.blur(); };
+const escapeRe = (t) => String(t ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Next free automatic opening number (W01, W02 …) after every W-number label already used. */
+const nextOpeningNo = (labels) => labels.reduce((a, l) => { const m = /^W(\d+)$/i.exec(l || ""); return m ? Math.max(a, Number(m[1])) : a; }, 0) + 1;
+const autoOpeningLabel = (k) => `W${String(k).padStart(2, "0")}`;
+/** Labels of an addition, short enough for one line: "W01, W02" or "W01 … W12 (12)". */
+const labelsText = (labels) => (labels.length <= 3 ? labels.join(", ") : `${labels[0]} … ${labels[labels.length - 1]} (${labels.length})`);
 
 /** Why a piece can't be cut, from the allocator's reason — never "longer than stock" when it isn't. */
 function unavailableText(u, n) {
@@ -135,7 +147,8 @@ function orderedVsPlan(material, materialId, lines, statusList) {
   if (!material || !statusList?.length) return null;
   let prefix;
   try { prefix = `${genericMaterialKey(material)}|`; } catch { return null; }
-  const lengthOf = (bucketKey) => Number(bucketKey.slice(prefix.length).split("|")[1]) || null;
+  // "<material key>|<material id>|bar|<stock length>|…" (older keys had no material id)
+  const lengthOf = (bucketKey) => { const parts = bucketKey.slice(prefix.length).split("|"); const i = parts.indexOf("bar"); return i >= 0 ? Number(parts[i + 1]) || null : null; };
   const mine = (lines || []).filter((l) => l.generic && l.unit === "bar" && l.jobMaterialIds?.includes(materialId));
   const byKey = new Map(statusList.map((x) => [x.bucketKey, x]));
   const rows = mine.map((l) => ({ lengthMm: l.item?.stockLengthMm ?? lengthOf(l.bucketKey), need: l.quantity || 0, ordered: byKey.get(l.bucketKey)?.ordered || 0 }));
@@ -217,16 +230,23 @@ function buildText(d, material, n, estimate) {
 }
 
 /**
- * Form values kept in a ref too, so a tap that blurs a field and presses Add in one go sees the commit.
- * `gen` changes on every reset: the number fields are keyed by it, so a reset gives them fresh, empty state in
- * the same render (see DraftNumber) — never a stale number left on screen that the form no longer holds.
+ * Form values kept in a ref too, so a commit and the check that follows it in the same event see the same values.
+ * `gen` changes on every reset: the number fields are keyed by it, so a reset gives them fresh, empty state in the
+ * same render (see DraftNumber) — never a stale number left on screen that the form no longer holds. A commit from a
+ * field of an EARLIER generation (a blur fired as the old field is removed) is ignored: `set` returns false.
  */
 function useForm(initial) {
   const [vals, setVals] = useState(initial);
   const [gen, setGen] = useState(0);
   const ref = useRef(initial);
-  const set = (patch) => { ref.current = { ...ref.current, ...patch }; setVals(ref.current); };
-  const reset = () => { ref.current = initial; setVals(initial); setGen((g) => g + 1); };
+  const genRef = useRef(0);
+  const set = (patch, g = genRef.current) => {
+    if (g !== genRef.current) return false;
+    ref.current = { ...ref.current, ...patch };
+    setVals(ref.current);
+    return true;
+  };
+  const reset = () => { ref.current = initial; genRef.current += 1; setVals(initial); setGen(genRef.current); };
   return [vals, set, ref, reset, gen];
 }
 
@@ -301,90 +321,85 @@ function Section({ id, title, aside, children }) {
   );
 }
 
-function AddOpeningForm({ onAdd }) {
-  const [v, set, ref, reset, gen] = useForm({ label: "", widthMm: null, heightMm: null, count: 1 });
-  const [err, setErr] = useState(null);
-  const submit = () => {
-    commitFocusedField();
+/**
+ * The last entry a form created, with how many of it there are. While the addition is still the last change the
+ * count joins its undo step (one Undo takes the whole addition back). Edits to one piece happen in its list row.
+ */
+function JustAdded({ testId, verb = "Added", text, countLabel, count, max, onCount }) {
+  return (
+    <div data-testid={testId} className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+      <p className={`text-sm text-emerald-900 ${WRAP}`} aria-live="polite"><b>{verb}</b> {text}</p>
+      <div className="grid grid-cols-2 items-end gap-2">
+        {countLabel && <NumberField label={countLabel} unit="pcs" integer min={1} max={max} value={count} onCommit={onCount} />}
+        <p className={`text-[11px] text-emerald-900 ${countLabel ? "" : "col-span-2"}`}>Change it in the list above. Undo takes {countLabel && count > 1 ? "them" : "it"} back.</p>
+      </div>
+    </div>
+  );
+}
+
+/** New opening by size: it is added the moment width AND height are valid (wall-editor rule, no Add step). */
+function AddOpeningForm({ onCreate }) {
+  const [v, set, ref, reset, gen] = useForm({ label: "", widthMm: null, heightMm: null });
+  const update = (patch, g) => {
+    if (!set(patch, g)) return;
     const x = ref.current;
-    if (!(x.widthMm > 0) || !(x.heightMm > 0)) { setErr("Enter the opening width and height first."); return; }
-    if (!(x.count >= 1)) { setErr("Enter how many openings of this size (1 to 50)."); return; }
-    setErr(null);
-    onAdd(x);
-    reset();
+    if (x.widthMm > 0 && x.heightMm > 0) { reset(); onCreate(x); }
   };
   return (
-    <fieldset className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
+    <fieldset data-alu-draft="" className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
       <legend className="px-1 text-xs font-semibold text-ink">Add openings by size</legend>
       <TextField label="Opening label (optional)" value={v.label} onChange={(t) => set({ label: t.slice(0, 32) })} placeholder="Blank = W01, W02 …" />
       <div className="grid grid-cols-2 gap-2">
-        <DraftNumber key={`w${gen}`} label="Opening width" onCommit={(x) => set({ widthMm: x })} />
-        <DraftNumber key={`h${gen}`} label="Opening height" onCommit={(x) => set({ heightMm: x })} />
+        <DraftNumber key={`w${gen}`} label="Opening width" onCommit={(x) => update({ widthMm: x }, gen)} />
+        <DraftNumber key={`h${gen}`} label="Opening height" onCommit={(x) => update({ heightMm: x }, gen)} />
       </div>
-      <div className="grid grid-cols-2 items-end gap-2">
-        <DraftNumber key={`n${gen}`} label="How many" unit="pcs" integer max={50} initial={1} onCommit={(x) => set({ count: x })} />
-        <Btn kind="primary" onClick={submit}>{v.count > 1 ? `Add ${v.count} openings` : "Add opening"}</Btn>
-      </div>
-      {err && <p role="alert" className="text-xs text-red-700">{err}</p>}
-      <p className="text-[11px] text-muted">Enter the window&apos;s nominal width × height. The finished cuts come from the window detail above — they appear straight away.</p>
+      <p className="text-[11px] text-muted">Enter the window&apos;s nominal width × height. It&apos;s added as soon as both are in — the finished cuts from the window detail above appear straight away.</p>
     </fieldset>
   );
 }
 
-function AddCutForm({ onAdd }) {
-  const [v, set, ref, reset, gen] = useForm({ label: "", lengthMm: null, quantity: 1 });
-  const [err, setErr] = useState(null);
-  const submit = () => {
-    commitFocusedField();
+/** New straight cut: added the moment its length is valid; the quantity is set on the added cut. */
+function AddCutForm({ onCreate }) {
+  const [v, set, ref, reset, gen] = useForm({ label: "", lengthMm: null });
+  const update = (patch, g) => {
+    if (!set(patch, g)) return;
     const x = ref.current;
-    if (!(x.lengthMm > 0)) { setErr("Enter the finished cut length first."); return; }
-    if (!(x.quantity >= 1)) { setErr("Enter how many pieces of this length (1 to 500)."); return; }
-    setErr(null);
-    onAdd(x);
-    reset();
+    if (x.lengthMm > 0) { reset(); onCreate(x); }
   };
   return (
-    <fieldset className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
+    <fieldset data-alu-draft="" className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
       <legend className="px-1 text-xs font-semibold text-ink">Add a straight cut</legend>
       <TextField label="Cut label (optional)" value={v.label} onChange={(t) => set({ label: t.slice(0, 60) })} placeholder="e.g. Garage door head" />
-      <div className="grid grid-cols-2 gap-2">
-        <DraftNumber key={`l${gen}`} label="Finished cut length" onCommit={(x) => set({ lengthMm: x })} />
-        <DraftNumber key={`q${gen}`} label="Cut quantity" unit="pcs" integer max={500} initial={1} onCommit={(x) => set({ quantity: x })} />
+      <div className="grid grid-cols-2 items-end gap-2">
+        <DraftNumber key={`l${gen}`} label="Finished cut length" onCommit={(x) => update({ lengthMm: x }, gen)} />
+        <p className="text-[11px] text-muted">Added as soon as the length is in.</p>
       </div>
-      <Btn kind="primary" className="w-full" onClick={submit}>Add cut</Btn>
-      {err && <p role="alert" className="text-xs text-red-700">{err}</p>}
       <p className="text-[11px] text-muted">Square cut, used exactly as entered — no allowance added. Each piece is one continuous length.</p>
     </fieldset>
   );
 }
 
-function OffcutForm({ seed, onAdd, onCancelSeed }) {
-  const [v, set, ref, reset, gen] = useForm({ label: seed?.label || "", lengthMm: null, location: "", count: 1 });
-  const [err, setErr] = useState(null);
-  const submit = () => {
-    commitFocusedField();
+/** Offcut on hand: recorded the moment its MEASURED length is valid (never taken from a plan). */
+function OffcutForm({ seed, onCreate, onCancelSeed }) {
+  const [v, set, ref, reset, gen] = useForm({ label: seed?.label || "", location: "", lengthMm: null });
+  const update = (patch, g) => {
+    if (!set(patch, g)) return;
     const x = ref.current;
-    if (!(x.lengthMm > 0)) { setErr("Enter the measured length of the offcut."); return; }
-    if (!seed && !(x.count >= 1)) { setErr("Enter how many identical pieces (1 to 50)."); return; }
-    setErr(null);
-    onAdd({ label: x.label.trim() || null, lengthMm: x.lengthMm, location: x.location.trim() || null, count: seed ? 1 : x.count });
-    reset();
+    if (x.lengthMm > 0) { reset(); onCreate({ label: x.label.trim() || null, lengthMm: x.lengthMm, location: x.location.trim() || null, seeded: !!seed }); }
   };
   return (
-    <fieldset id="alu-offcut-form" className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
+    <fieldset id="alu-offcut-form" data-alu-draft="" className="space-y-2 rounded-lg border border-dashed border-hairline p-2">
       <legend className="px-1 text-xs font-semibold text-ink">{seed ? "Record remaining offcut" : "Add an offcut you have"}</legend>
       {seed && <p className="text-[11px] text-amber-900">{seed.name}: planned remainder {mm(seed.plannedMm)}. Only record it after the bar is actually cut — measure the real piece. It then counts as stock for this material; cuts already taken from {seed.name} stay in the takeoff until you remove them, so the plan may reuse this piece for them.</p>}
-      <TextField label="Offcut label" value={v.label} onChange={(t) => set({ label: t.slice(0, 60) })} placeholder="e.g. Rack A" />
       <div className="grid grid-cols-2 gap-2">
-        <DraftNumber key={`l${gen}`} label="Measured offcut length" onCommit={(x) => set({ lengthMm: x })} />
+        <TextField label="Offcut label" value={v.label} onChange={(t) => set({ label: t.slice(0, 60) })} placeholder="e.g. Rack A" />
         <TextField label="Where it is (optional)" value={v.location} onChange={(t) => set({ location: t.slice(0, 80) })} placeholder="e.g. Ute" />
       </div>
       <div className="grid grid-cols-2 items-end gap-2">
-        {!seed && <DraftNumber key={`n${gen}`} label="Identical pieces" unit="pcs" integer max={50} initial={1} onCommit={(n) => set({ count: n })} />}
-        <Btn kind="primary" onClick={submit}>{!seed && v.count > 1 ? `Record ${v.count} offcuts` : "Record offcut"}</Btn>
-        {seed && <Btn onClick={onCancelSeed}>Cancel</Btn>}
+        <DraftNumber key={`l${gen}`} label="Measured offcut length" onCommit={(x) => update({ lengthMm: x }, gen)} />
+        {seed ? <Btn onClick={onCancelSeed}>Cancel</Btn> : <span />}
       </div>
-      {err && <p role="alert" className="text-xs text-red-700">{err}</p>}
+      <p className="text-[11px] text-muted">Recorded as soon as you enter the measured length — never taken from the plan. It is kept for this profile and finish only.</p>
     </fieldset>
   );
 }
@@ -415,6 +430,8 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
   const n = useMemo(() => { if (!material) return null; try { return normaliseFamilySpec(material.spec); } catch { return null; } }, [material]);
   const d = useMemo(() => derive(view, materialId, result), [view, materialId, result]);
   const estimate = !n || n.kerfMm == null || !n.kerfConfirmed;
+  // the profile + finish an offcut is stamped with when recorded (the engine offers it only to this same key)
+  const stockKey = useMemo(() => (material ? stockIdentityKey(material.spec) : null), [material]);
 
   // Session undo/redo (MeasureScreen pattern): each op holds the partial to re-apply and the one to revert
   // (or a function building it from the latest record, so undoing one field never reverts someone else's).
@@ -424,13 +441,51 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
   latestMaterial.current = material;
   const sync = () => setHist({ past: histRef.current.past.length, future: histRef.current.future.length });
   const run = (part) => ws.edit(typeof part === "function" ? part() : part);
+  // Typing not yet applied: the input typed into since the last applied edit. While Undo discards it, `discarding`
+  // is set so the field's own blur commit (fired as it lets go of focus) applies nothing.
+  const typingRef = useRef(null);
+  const discardingRef = useRef(false);
+  const [draftReset, setDraftReset] = useState(0); // bumped by Undo to drop what is being typed (fields remount)
   function record(op) {
-    if (!canEdit) return;
+    if (!canEdit || discardingRef.current) return;
+    typingRef.current = null;
     run(op.redo);
     histRef.current = { past: [...histRef.current.past, op].slice(-100), future: [] };
     sync();
   }
+  /** Record an edit — or, while the addition `key` is still the last change, fold it into that addition's undo
+   *  step (`merged` = the whole addition as it now stands), so one Undo takes the whole addition back. */
+  function amend(key, op, merged) {
+    if (!canEdit || discardingRef.current) return;
+    typingRef.current = null;
+    const h = histRef.current;
+    if (!key || h.past[h.past.length - 1]?.group !== key) { record(op); return; }
+    run(op.redo);
+    histRef.current = { past: [...h.past.slice(0, -1), { ...merged, group: key }], future: [] };
+    sync();
+  }
+  /** Something is still being typed: an unfinished entry in an add form (or a remainder being recorded), an invalid
+   *  number, or a field typed into and still focused (iOS keeps focus on the field when Undo is tapped). */
+  function typingInProgress() {
+    const box = scrollRef.current;
+    if (!box) return false;
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement && el.type !== "checkbox" && box.contains(el) && typingRef.current === el) return true;
+    if (offcutSeed) return true;
+    if (box.querySelector('input[aria-invalid="true"]')) return true;
+    return [...box.querySelectorAll("[data-alu-draft] input")].some((i) => i.value.trim() !== "");
+  }
+  /** Drop what is being typed: nothing is applied, and every field shows what is stored again. */
+  function discardTyping() {
+    discardingRef.current = true;
+    try { commitFocusedField(); } finally { discardingRef.current = false; }
+    typingRef.current = null;
+    setOffcutSeed(null);
+    setDraftReset((x) => x + 1);
+  }
   function undo() {
+    // what is still being typed is cleared first — never an earlier edit (as the wall editor)
+    if (typingInProgress()) { discardTyping(); return; }
     const h = histRef.current;
     if (!h.past.length) return;
     const op = h.past[h.past.length - 1];
@@ -453,8 +508,25 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
   const [offcutSeed, setOffcutSeed] = useState(null); // { key, name, label, plannedMm } from a bar
   const [presetErr, setPresetErr] = useState(null);
   const [copyMsg, setCopyMsg] = useState(null);
+  const [added, setAdded] = useState({});            // { opening | cut | offcut: { key, ids, base, seeded } } — last entry per form
 
   const scrollRef = useRef(null);
+  // A number still being typed counts when the screen is left (Back, setup, the plan) or the page is hidden (app
+  // switch, reload, the phone locking): blur the field so it commits — an opening / cut / offcut whose numbers are
+  // valid is added and reaches autosave + device recovery instead of being lost. Invalid text stays as it is.
+  const leave = (fn) => (...args) => { commitFocusedField(); fn?.(...args); };
+  useEffect(() => {
+    const commitTyped = () => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement && scrollRef.current?.contains(el)) el.blur();
+    };
+    const vis = () => { if (document.visibilityState === "hidden") commitTyped(); };
+    document.addEventListener("visibilitychange", vis, true);
+    window.addEventListener("pagehide", commitTyped, true);
+    return () => { document.removeEventListener("visibilitychange", vis, true); window.removeEventListener("pagehide", commitTyped, true); };
+  }, []);
+  // the field typed into since the last applied edit (what Undo clears first while it is still focused)
+  const noteTyping = (e) => { if (e.target instanceof HTMLInputElement && e.target.type !== "checkbox") typingRef.current = e.target; };
   const scrollTo = (id) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "smooth" }));
   // a tap already under way wins: never scroll the content out from under a finger that is pressing a button
   const fieldTimer = useRef(null);
@@ -492,17 +564,64 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
   }
 
   // ── edits (all auto-apply, all undoable) ───────────────────────────────────
-  function addOpenings({ label, widthMm, heightMm, count }) {
-    const base = label.trim();
-    let next = d.allOpeningLabels.reduce((a, l) => { const m = /^W(\d+)$/i.exec(l); return m ? Math.max(a, Number(m[1])) : a; }, 0) + 1;
-    const ms = [], cs = [];
-    for (let i = 0; i < count; i++) {
-      const lab = base ? (count > 1 ? `${base}-${i + 1}` : base) : `W${String(next++).padStart(2, "0")}`;
-      const id = newId();
-      ms.push({ id, kind: "opening", parentId: null, inputs: { xMm: 0, sillMm: 0, widthMm, heightMm, label: lab, type: "window" } });
-      cs.push({ id: newId(), measurementId: id, jobMaterialId: materialId, role: "opening" });
+  const contribsOf = (id) => view.contributions.filter((x) => x.measurementId === id && !x.archived);
+  const liveOf = (g) => (g ? g.ids.map((id) => d.meas.get(id)).filter(Boolean) : []);
+  /** A new opening by size (count 1 — "How many of this size" adds copies). One undo step. */
+  function addOpening({ label, widthMm, heightMm }) {
+    if (discardingRef.current) return;
+    const base = label.trim() || null;
+    const id = newId(), cid = newId();
+    const m = { id, kind: "opening", parentId: null, inputs: { xMm: 0, sillMm: 0, widthMm, heightMm, label: base || autoOpeningLabel(nextOpeningNo(d.allOpeningLabels)), type: "window" } };
+    record({ group: id, redo: partial({ measurements: [m], contributions: [{ id: cid, measurementId: id, jobMaterialId: materialId, role: "opening" }] }), undo: partial({ archive: { measurements: [id], contributions: [cid] } }) });
+    setAdded((a) => ({ ...a, opening: { key: id, ids: [id], base } }));
+  }
+  /**
+   * Change how many records the last entry made (openings of one size, identical offcut pieces): copies of the
+   * first, or the last ones archived; labels that still follow the entry's pattern are renumbered.
+   */
+  function resizeGroup(kind, n, relabel, copy) {
+    const g = added[kind];
+    const live = liveOf(g);
+    if (!canEdit || discardingRef.current || !live.length || !(n >= 1) || n === live.length) return;
+    const keep = live.slice(0, Math.min(n, live.length));
+    const relabelled = new Map();
+    keep.forEach((m, i) => { const r = relabel(m, i, n); if (r) relabelled.set(m.id, r); });
+    const addM = [], addC = [];
+    for (let i = live.length; i < n; i++) {
+      const m = copy(live[0], i, n);
+      addM.push(m);
+      addC.push({ id: newId(), measurementId: m.id, jobMaterialId: materialId, role: kind });
     }
-    record({ redo: partial({ measurements: ms, contributions: cs }), undo: partial({ archive: { measurements: ms.map((m) => m.id), contributions: cs.map((c) => c.id) } }) });
+    const gone = live.slice(n);
+    const goneC = gone.flatMap((m) => contribsOf(m.id));
+    const op = {
+      redo: partial({ measurements: [...relabelled.values(), ...addM], contributions: addC, archive: { measurements: gone.map((m) => m.id), contributions: goneC.map((c) => c.id) } }),
+      undo: partial({ measurements: [...keep.filter((m) => relabelled.has(m.id)), ...gone], contributions: goneC, archive: { measurements: addM.map((m) => m.id), contributions: addC.map((c) => c.id) } }),
+    };
+    const finalM = [...keep.map((m) => relabelled.get(m.id) || m), ...addM];
+    const finalC = [...keep.flatMap((m) => contribsOf(m.id)), ...addC];
+    amend(g.key, op, { redo: partial({ measurements: finalM, contributions: finalC }), undo: partial({ archive: { measurements: finalM.map((m) => m.id), contributions: finalC.map((c) => c.id) } }) });
+    if (addM.length) setAdded((a) => ({ ...a, [kind]: { ...g, ids: [...g.ids, ...addM.map((m) => m.id)] } }));
+  }
+  function setOpeningCount(n) {
+    const g = added.opening;
+    if (!g) return;
+    const own = (lab) => lab === g.base || new RegExp(`^${escapeRe(g.base)}-\\d+$`).test(lab || "");
+    const want = (i, total) => (total > 1 ? `${g.base}-${i + 1}` : g.base);
+    let next = nextOpeningNo(d.allOpeningLabels);
+    resizeGroup("opening", n,
+      (m, i, total) => (g.base && own(m.inputs?.label) && m.inputs.label !== want(i, total) ? { ...m, inputs: { ...m.inputs, label: want(i, total) } } : null),
+      (proto, i, total) => ({ id: newId(), kind: "opening", parentId: null, inputs: { ...proto.inputs, label: g.base ? want(i, total) : autoOpeningLabel(next++) } }));
+  }
+  function setOffcutCount(n) {
+    const g = added.offcut;
+    if (!g) return;
+    const stem = (g.base || "Offcut").slice(0, 48);
+    const own = (lab) => (lab ?? null) === g.base || new RegExp(`^${escapeRe(stem)} \\(\\d+ of \\d+\\)$`).test(lab || "");
+    const want = (i, total) => (total > 1 ? `${stem} (${i + 1} of ${total})` : g.base);
+    resizeGroup("offcut", n,
+      (m, i, total) => (own(m.inputs?.label) && (m.inputs?.label ?? null) !== want(i, total) ? { ...m, label: want(i, total), inputs: { ...m.inputs, label: want(i, total) } } : null),
+      (proto, i, total) => ({ id: newId(), kind: "offcut", label: want(i, total), inputs: { ...proto.inputs, label: want(i, total), status: "available" } }));
   }
   function updateMeasurement(m, next) {
     record({ redo: partial({ measurements: [next] }), undo: partial({ measurements: [m] }) });
@@ -525,26 +644,36 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
     const c = d.included.get(m.id);
     if (c) record({ redo: partial({ archive: { contributions: [c.id] } }), undo: partial({ contributions: [c] }) });
   }
-  function addCut({ label, lengthMm, quantity }) {
+  /** A new straight cut (quantity 1 — set on the added cut, inside the same undo step). */
+  function addCut({ label, lengthMm }) {
+    if (discardingRef.current) return;
     const id = newId(), cid = newId();
-    const meas = { id, kind: "manual", finishedLengthMm: lengthMm, quantity, label: label.trim() || null };
-    record({ redo: partial({ measurements: [meas], contributions: [{ id: cid, measurementId: id, jobMaterialId: materialId, role: "primary" }] }), undo: partial({ archive: { measurements: [id], contributions: [cid] } }) });
+    const meas = { id, kind: "manual", finishedLengthMm: lengthMm, quantity: 1, label: label.trim() || null };
+    record({ group: id, redo: partial({ measurements: [meas], contributions: [{ id: cid, measurementId: id, jobMaterialId: materialId, role: "primary" }] }), undo: partial({ archive: { measurements: [id], contributions: [cid] } }) });
+    setAdded((a) => ({ ...a, cut: { key: id, ids: [id] } }));
+  }
+  function setCutQuantity(q) {
+    const g = added.cut;
+    const m = liveOf(g)[0];
+    if (!m || !(q >= 1) || m.quantity === q) return;
+    const next = { ...m, quantity: q };
+    const cs = contribsOf(m.id);
+    amend(g.key, { redo: partial({ measurements: [next] }), undo: partial({ measurements: [m] }) },
+      { redo: partial({ measurements: [next], contributions: cs }), undo: partial({ archive: { measurements: [m.id], contributions: cs.map((c) => c.id) } }) });
   }
   function removeMeasurement(m) {
     const all = view.contributions.filter((x) => x.measurementId === m.id && !x.archived);
     record({ redo: partial({ archive: { measurements: [m.id], contributions: all.map((x) => x.id) } }), undo: partial({ measurements: [m], contributions: all }) });
     setEditing(null);
   }
-  function addOffcut({ label, lengthMm, location, count = 1 }) {
-    // each physical piece is its own record (used at most once by a plan); identical pieces get numbered labels
-    const ms = [], cs = [];
-    for (let i = 0; i < count; i++) {
-      const lab = count > 1 ? `${(label || "Offcut").slice(0, 48)} (${i + 1} of ${count})` : label;
-      const id = newId();
-      ms.push({ id, kind: "offcut", label: lab, inputs: { lengthMm, materialId, label: lab, location, status: "available" } });
-      cs.push({ id: newId(), measurementId: id, jobMaterialId: materialId, role: "offcut" });
-    }
-    record({ redo: partial({ measurements: ms, contributions: cs }), undo: partial({ archive: { measurements: ms.map((m) => m.id), contributions: cs.map((c) => c.id) } }) });
+  /** One physical piece (each is used at most once by a plan; "Identical pieces" adds numbered copies). It is
+   *  stamped with this material's profile + finish, so a later finish/section change never consumes it. */
+  function addOffcut({ label, lengthMm, location, seeded }) {
+    if (discardingRef.current) return;
+    const id = newId(), cid = newId();
+    const m = { id, kind: "offcut", label, inputs: { lengthMm, materialId, identityKey: stockKey, label, location, status: "available" } };
+    record({ group: id, redo: partial({ measurements: [m], contributions: [{ id: cid, measurementId: id, jobMaterialId: materialId, role: "offcut" }] }), undo: partial({ archive: { measurements: [id], contributions: [cid] } }) });
+    setAdded((a) => ({ ...a, offcut: { key: id, ids: [id], base: label, seeded } }));
     setOffcutSeed(null);
   }
   function setPreset(patch) {
@@ -597,6 +726,9 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
   }
 
   // ── derived display bits ───────────────────────────────────────────────────
+  const justOpenings = liveOf(added.opening).filter((m) => d.included.has(m.id));
+  const justCut = liveOf(added.cut).find((m) => m.kind === "manual") || null;
+  const justOffcuts = liveOf(added.offcut).filter((m) => m.kind === "offcut");
   const status = result?.status || null;
   const wp = n?.windowPreset || null;
   const handled = new Set(["kerf_unconfirmed", "unavailable_stock", "nothing_measured"]);
@@ -659,18 +791,18 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
     <FocusedWindow
       title={material.name}
       subtitle={describeFamilySpec(material.spec).line}
-      onClose={onClose} closeLabel="Back"
+      onClose={leave(onClose)} closeLabel="Back"
       actions={<>
         <SaveChip status={ws.status} />
         {canEdit && <Btn kind="ghost" className="min-w-[44px]" onClick={undo} disabled={!hist.past} aria-label="Undo">↶</Btn>}
         {canEdit && <Btn kind="ghost" className="min-w-[44px]" onClick={redo} disabled={!hist.future} aria-label="Redo">↷</Btn>}
       </>}
     >
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain" onFocus={keepFieldVisible} onPointerDown={cancelFieldScroll} data-testid="aluminium-screen">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain" onFocus={keepFieldVisible} onPointerDown={cancelFieldScroll} onInput={noteTyping} data-testid="aluminium-screen">
         <div className="mx-auto grid w-full max-w-6xl gap-3 p-3 pb-32 lg:grid-cols-2 lg:items-start [@media(pointer:coarse)]:pb-[45vh]">
           <div className="min-w-0 space-y-3">
             {/* ── summary ─────────────────────────────────────────── */}
-            <Section title="Summary" aside={canEdit && onSetup ? <Btn kind="ghost" onClick={() => onSetup(material)}>Profile &amp; cutting settings</Btn> : null}>
+            <Section title="Summary" aside={canEdit && onSetup ? <Btn kind="ghost" onClick={leave(() => onSetup(material))}>Profile &amp; cutting settings</Btn> : null}>
               {buyText ? (
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <p className="text-lg font-semibold text-ink" data-testid="alu-buy-summary">Buy {buyText}</p>
@@ -688,7 +820,7 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
               {statusChips}
               {estimate && n && (
                 <div data-testid="alu-kerf-estimate">
-                  <Banner tone="warn" action={canEdit && onSetup ? <Btn onClick={() => onSetup(material)}>Confirm saw kerf</Btn> : null}>
+                  <Banner tone="warn" action={canEdit && onSetup ? <Btn onClick={leave(() => onSetup(material))}>Confirm saw kerf</Btn> : null}>
                     <b>Estimate.</b> The saw kerf isn&apos;t confirmed{n?.kerfMm == null ? " — this plan uses 0 mm" : ` — this plan uses ${n.kerfMm} mm`}. Bars, cut loss and remainders can change. Confirm the real kerf before ordering.
                   </Banner>
                 </div>
@@ -713,7 +845,7 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                           className={`min-h-[44px] rounded-lg border px-3 text-sm ${wp[k] ? "border-primary bg-primary/10 font-semibold text-primary" : "border-hairline bg-white text-ink"}`}>{l}</button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div key={`wp-${draftReset}`} className="grid grid-cols-2 gap-2">
                       <NumberField label="Jamb allowance (total per jamb)" value={wp.jambAllowanceTotalMm} min={0} max={2000} onCommit={(x) => setPreset({ jambAllowanceTotalMm: x })} />
                       <NumberField label="Bottom allowance" value={wp.bottomAllowanceMm} min={0} max={2000} onCommit={(x) => setPreset({ bottomAllowanceMm: x })} />
                       {wp.head && <NumberField label="Head allowance" value={wp.headAllowanceMm} min={0} max={2000} onCommit={(x) => setPreset({ headAllowanceMm: x })} />}
@@ -747,7 +879,7 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                       {dems.length ? <ul className="mt-1 flex flex-wrap gap-1.5" data-testid="alu-cuts">{dems.map((x) => cutChip(x, m))}</ul>
                         : <p className="text-xs text-muted">No edges selected in the window detail.</p>}
                       {editing === m.id && (
-                        <div className="mt-2 space-y-2 border-t border-hairline pt-2">
+                        <div key={`ed-${draftReset}`} className="mt-2 space-y-2 border-t border-hairline pt-2">
                           {wall && <p className="text-[11px] text-amber-900">This opening belongs to wall {wallName(wall)} — size changes apply there too (other materials on that wall use it).</p>}
                           <LabelField label="Label" value={i.label || ""} onCommit={(t) => updateMeasurement(m, { ...m, inputs: { ...i, label: t || null } })} />
                           <div className="grid grid-cols-2 gap-2">
@@ -761,7 +893,11 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                   );
                 })}
               </ul>
-              {canEdit && <AddOpeningForm onAdd={addOpenings} />}
+              {canEdit && <AddOpeningForm key={`add-${draftReset}`} onCreate={addOpening} />}
+              {canEdit && justOpenings.length > 0 && (
+                <JustAdded key={`added-${draftReset}`} testId="alu-just-added-opening" text={`${labelsText(justOpenings.map(openingLabel))} · ${fmtMm(justOpenings[0].inputs?.widthMm)} × ${fmtMm(justOpenings[0].inputs?.heightMm)} mm`}
+                  countLabel="How many of this size" count={justOpenings.length} max={50} onCount={setOpeningCount} />
+              )}
               {d.wallOpenings.length > 0 && (
                 <fieldset className="space-y-1 rounded-lg border border-hairline p-2" data-testid="alu-wall-openings">
                   <legend className="px-1 text-xs font-semibold text-ink">Openings already on walls</legend>
@@ -800,7 +936,7 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                         {canEdit && <Btn kind="ghost" aria-expanded={editing === m.id} aria-label={`Edit cut ${m.label || mm(m.finishedLengthMm)}`} onClick={() => setEditing(editing === m.id ? null : m.id)}>{editing === m.id ? "Hide" : "Edit"}</Btn>}
                       </div>
                       {editing === m.id && (
-                        <div className="mt-2 space-y-2 border-t border-hairline pt-2">
+                        <div key={`ed-${draftReset}`} className="mt-2 space-y-2 border-t border-hairline pt-2">
                           <LabelField label="Label" maxLength={60} value={m.label || ""} onCommit={(t) => updateMeasurement(m, { ...m, label: t || null })} />
                           <div className="grid grid-cols-2 gap-2">
                             <NumberField label="Length" value={m.finishedLengthMm} min={1} max={30000} onCommit={(x) => updateMeasurement(m, { ...m, finishedLengthMm: x })} />
@@ -832,8 +968,12 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                   })}</ul>
                 </div>
               )}
-              {canEdit && <AddCutForm onAdd={addCut} />}
-              {canEdit && onMeasure && <Btn className="w-full" onClick={onMeasure}>Measure runs on the plan</Btn>}
+              {canEdit && <AddCutForm key={`add-${draftReset}`} onCreate={addCut} />}
+              {canEdit && justCut && (
+                <JustAdded key={`added-${draftReset}`} testId="alu-just-added-cut" text={`${mm(justCut.finishedLengthMm)}${justCut.label ? ` · ${justCut.label}` : ""}`}
+                  countLabel="Cut quantity" count={justCut.quantity} max={500} onCount={setCutQuantity} />
+              )}
+              {canEdit && onMeasure && <Btn className="w-full" onClick={leave(() => onMeasure())}>Measure runs on the plan</Btn>}
             </Section>
           </div>
 
@@ -963,12 +1103,16 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                   const i = m.inputs || {};
                   const consumed = i.status === "consumed";
                   const bar = d.offcutBar.get(m.id);
+                  // same test as the engine: a stamped piece is offered only to the profile + finish it was cut from
+                  const otherProduct = !!i.identityKey && i.identityKey !== stockKey;
                   return (
                     <li key={m.id} data-testid="alu-offcut" data-offcut={i.label || ""} className={`rounded-lg border p-2 ${consumed ? "border-hairline bg-page" : "border-hairline bg-white"}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`min-w-0 flex-1 text-sm text-ink ${WRAP}`}><b>{i.label || "Offcut"}</b> · {mm(i.lengthMm)}{i.location ? ` · ${i.location}` : ""}{m.pending ? <span className="text-[11px] text-muted"> · unsaved</span> : null}</p>
-                        <Chip tone={consumed ? "neutral" : bar ? "good" : "neutral"} data-testid="alu-offcut-status">{consumed ? "Consumed" : bar ? `In this plan: ${bar.cuts.map((c) => c.label).join(", ")}` : "Available — not used by this plan"}</Chip>
+                        <Chip tone={consumed ? "neutral" : otherProduct ? "warn" : bar ? "good" : "neutral"} data-testid="alu-offcut-status">{consumed ? "Consumed" : otherProduct ? "Not used — recorded for a different profile or finish" : bar ? `In this plan: ${bar.cuts.map((c) => c.label).join(", ")}` : "Available — not used by this plan"}</Chip>
                       </div>
+                      {otherProduct && !consumed && <p className="mt-1 text-[11px] text-amber-900" data-testid="alu-offcut-other">It was recorded for this material before its profile or finish changed, so it is never cut for {material.name} as it is now. Change the material back, or remove the offcut if it is gone.</p>}
+                      {!i.identityKey && !consumed && <p className="mt-1 text-[11px] text-amber-900" data-testid="alu-offcut-unstamped">Recorded without its profile and finish — check it is {describeFamilySpec(material.spec).line || "this profile"} before cutting.</p>}
                       {canEdit && (
                         <div className="mt-1 flex flex-wrap gap-2">
                           <Btn onClick={() => updateMeasurement(m, { ...m, inputs: { ...i, status: consumed ? "available" : "consumed" } })}>{consumed ? "Mark available" : "Mark consumed"}</Btn>
@@ -979,7 +1123,11 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                   );
                 })}
               </ul>
-              {canEdit && <OffcutForm key={offcutSeed?.key || "blank"} seed={offcutSeed} onAdd={addOffcut} onCancelSeed={() => setOffcutSeed(null)} />}
+              {canEdit && <OffcutForm key={`${offcutSeed?.key || "blank"}-${draftReset}`} seed={offcutSeed} onCreate={addOffcut} onCancelSeed={() => setOffcutSeed(null)} />}
+              {canEdit && justOffcuts.length > 0 && (
+                <JustAdded key={`added-${draftReset}`} testId="alu-just-added-offcut" verb="Recorded" text={`${labelsText(justOffcuts.map((m) => m.inputs?.label || "Offcut"))} · ${mm(justOffcuts[0].inputs?.lengthMm)}`}
+                  countLabel={added.offcut?.seeded ? null : "Identical pieces"} count={justOffcuts.length} max={50} onCount={setOffcutCount} />
+              )}
             </Section>
           </div>
         </div>

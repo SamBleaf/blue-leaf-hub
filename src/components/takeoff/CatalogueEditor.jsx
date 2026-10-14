@@ -74,6 +74,9 @@ function dropJobOnly(rules) {
     rules.recipe = recipe;
   }
   if (rules && "existing" in rules) { if (rules.existing === true) out.push("supports marked as already existing"); delete rules.existing; }
+  // the site's installation conditions (wind class, substrate …) and a job's "fixings by others / excluded" decision
+  if (rules?.installConditions && typeof rules.installConditions === "object") { if (Object.keys(rules.installConditions).length) out.push("installation conditions (wind class, substrate …)"); delete rules.installConditions; }
+  if (rules?.fixingScope) { out.push(`support fixings marked ${rules.fixingScope.status === "exclude" ? "excluded" : "by others"}`); delete rules.fixingScope; }
   return out;
 }
 
@@ -403,7 +406,7 @@ export default function CatalogueEditor({ value, onChange, onSave, onCancel, can
               <p className="text-[11px] text-muted">A published pack size doesn&apos;t mean full packs are required — tick it only when the supplier says so.</p>
             </>
           ) : <p className="text-sm text-muted">Each accessory item keeps its own stock lengths, roll or cartridge size — set them with the item in Installation.</p>}
-          <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => setSpec({ spareRate: n })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : "Recorded with the product — layout counts don't add spares yet. 0 doesn't mean no real waste."} />
+          <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => setSpec({ spareRate: n })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : "Added on top of each job's layout count and shown on its order lines (rounded up per line) — don't add spares by hand. 0 doesn't mean no real waste."} />
           <ReviewGroup group="ordering" label="Ordering" review={r.review?.ordering} sourceRefs={[s.supplierName].filter(Boolean)} onChange={(v) => setReview("ordering", v)} />
         </section>
       )}
@@ -498,6 +501,8 @@ function content(d) {
   const rules = clone(d.rules) || {};
   delete rules.carried;
   delete rules.jointRowsDraft; // an unfinished entry is never company data
+  delete rules.jointsDraft;
+  delete rules.fixingDraft;
   dropJobOnly(rules);
   if (rules.review) for (const g of Object.keys(rules.review)) if (!rules.review[g]) delete rules.review[g];
   const pr = rules.review?.product;

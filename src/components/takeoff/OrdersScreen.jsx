@@ -92,7 +92,10 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
     setData(o.data);
     if (s.ok) setSuppliers(s.data);
   }, [api, wsId]);
-  useEffect(() => { load(); }, [load]);
+  // the server's schedule is re-read whenever a newer workspace revision is saved (an edit that was still saving when
+  // this screen opened must not leave the order form on the old lines)
+  const savedRevision = ws.server?.snapshot?.workspace?.revision;
+  useEffect(() => { load(); }, [load, savedRevision]);
 
   const caps = ws.capabilities || {};
   const kbInset = useKeyboardInset(); // room to scroll the last quantity above an on-screen keyboard
@@ -267,7 +270,9 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
     const r = await api.previewOrder(order.id);
     if (r.ok) setPreview(r.data.preview);
   }, [api, order.id]);
-  useEffect(() => { loadPreview(); }, [loadPreview]);
+  // re-check readiness whenever a newer workspace revision is saved (an edit still saving when this opened)
+  const wsRevision = ws.server?.snapshot?.workspace?.revision;
+  useEffect(() => { loadPreview(); }, [loadPreview, wsRevision]);
 
   async function save() {
     setBusy(true); setMsg(null);

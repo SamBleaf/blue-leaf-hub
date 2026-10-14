@@ -8,7 +8,7 @@
 // their checks allow the tap tolerance but always prove one allowance per piece (never one per corner).
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { explainableMm, nextWallInputs, withOverride, toolsFor } from "../../src/components/takeoff/measure/tools.js";
+import { explainableMm, memberThicknessMm, nextWallInputs, stockForStation, timberOrderSummary, withOverride, toolsFor } from "../../src/components/takeoff/measure/tools.js";
 import { straightLegs } from "../../src/components/takeoff/measure/geometry.js";
 
 const meta = JSON.parse(readFileSync(new URL("../../src/ui-review/fixtures/takeoff/synthetic-plan-set.json", import.meta.url), "utf8"));
@@ -362,7 +362,7 @@ test.describe("finished runs — select, edit, splits (exact geometry: review se
     await expect(page.getByText(/longer than the maximum — the split can go up to 8,800 mm/)).toBeVisible();
     await expect(ten).toHaveAttribute("data-order", "5200+5200");
     // to a corner (6,000) — no automatic corner preference, only on request
-    await page.getByLabel("Move to a corner").selectOption({ label: "Corner 2 — 6,000 mm" });
+    await page.getByLabel("Move to a corner").selectOption({ label: "Corner 1 — 6,000 mm" }); // PH-21: corners count from 1 along the run
     await expect(ten).toHaveAttribute("data-order", "6200+4200");
     // remove → whole 10,000 flagged red; one tap on red → 8,800; Undo → flagged again
     await page.getByRole("button", { name: "Remove split 1" }).click();
@@ -809,6 +809,148 @@ test.describe("desktop", () => {
   });
 });
 
+// ── adversarial phone review (PH-xx): each reproduced on the phone, fixed, and kept fixed here ──────────────────
+test.describe("adversarial phone findings — measure", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const vpView = (page) => page.evaluate(() => document.querySelector("[data-takeoff-viewport]").takeoffViewport.view());
+  /** Screen offset of a PDF point from the centre of the plan viewport. */
+  async function offCentre(page, p) {
+    const s = await screenOf(page, p);
+    const b = await page.locator("[data-takeoff-viewport]").boundingBox();
+    return { dx: s.x - (b.x + b.width / 2), dy: s.y - (b.y + b.height / 2) };
+  }
+
+  test("PH-01 clearing the roof pitch means 'not entered' — never 0°: the engine asks for it and nothing is ready to order; Undo puts 30° back", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Rafters 90 × 45");
+    await page.getByRole("radio", { name: "Member" }).click();
+    const pitch = page.getByLabel("Roof pitch");
+    const panel = page.locator("[data-member-panel]");
+    await expect(pitch).toHaveValue("30");
+    await expect(panel).toContainText("true at 30°");
+    await pitch.fill(""); await pitch.press("Enter");
+    await expect(pitch).toHaveValue("");
+    await expect(panel).not.toContainText("at 0°");
+    await expect(panel).toContainText("Enter the pitch");
+    await expect(sheet(page).locator("[data-material-problems]")).toContainText("Pitch is required");
+    await expect(sheet(page).locator("[data-statuses]")).toContainText("Quantity: incomplete");
+    await expect(sheet(page).locator("[data-statuses]")).toContainText("Procurement: draft — not ready to order");
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(pitch).toHaveValue("30");
+    await expect(panel).toContainText("true at 30°");
+  });
+
+  test("PH-01 a cleared required number (min 0) stays a draft on blur — it is never saved as 0", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Rafters 90 × 45");
+    await page.getByRole("radio", { name: "Select" }).click();
+    const dist = page.locator('[data-measurement-id="m-dist"]');
+    await tapPdf(page, at(4950, 7000));
+    await page.getByRole("button", { name: /^‹ Whole run/ }).click();
+    const eo = page.getByLabel("End offset");
+    await eo.fill("1000"); await eo.press("Enter");
+    await expect(dist).toHaveAttribute("data-ticks", "16");                    // 9,000 usable → 16 rafters
+    await eo.fill(""); await eo.blur();
+    await expect(page.getByText("Enter a value.")).toBeVisible();
+    await expect(dist).toHaveAttribute("data-ticks", "16");                    // not re-laid out with a 0 offset (18)
+    await expect(eo).toHaveValue("");                                          // the draft is kept for the user to finish
+    await eo.fill("500"); await eo.blur();
+    await expect(page.getByText("Enter a value.")).toHaveCount(0);
+    await expect(dist).toHaveAttribute("data-ticks", "17");
+  });
+
+  test("PH-06 the run panel shows the last gap and warns when the last two members are closer than the member is thick", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Rafters 90 × 45");
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(4950, 7000));
+    await page.getByRole("button", { name: /^‹ Whole run/ }).click();
+    const panel = page.locator("[data-distribution-panel]");
+    await expect(panel.locator("[data-final-bay]")).toContainText("Last gap 400 mm");
+    await expect(panel.locator("[data-final-bay-warning]")).toHaveCount(0);
+    const eo = page.getByLabel("End offset");
+    await eo.fill("370"); await eo.press("Enter");                             // 9,630 usable: …9,600 then 9,630
+    await expect(panel.locator("[data-final-bay-warning]")).toContainText("last two rafters are only 30 mm apart");
+    await page.getByLabel("Member at the end").uncheck();
+    await expect(panel.locator("[data-final-bay-warning]")).toHaveCount(0);
+  });
+
+  test("PH-06 a run traced to a multiple of the centres ends once (no extra member from sub-0.001 mm tracing noise); its full last gap is shown", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Rafters 90 × 45");
+    await page.getByRole("radio", { name: "Distribution" }).click();
+    await tapPdf(page, at(500, 1720)); await tapPdf(page, at(7700, 1720));
+    const dist = page.locator('[data-kind="distribution"]').filter({ hasNot: page.locator("[data-tick-preview]") }).last();
+    await expect(dist).not.toHaveAttribute("data-ticks", "0");
+    await page.getByRole("radio", { name: "Select" }).click();
+    const t = dist.locator("[data-tick]").nth(1);
+    const tb = await t.boundingBox();
+    await page.touchscreen.tap(tb.x + tb.width / 2, tb.y + tb.height / 2);
+    await page.getByRole("button", { name: /^‹ Whole run/ }).click();
+    const panel = page.locator("[data-distribution-panel]");
+    // 03 T1: tracing noise far below 0.001 mm is not a bay — an exact multiple ends ONCE (7,200 / 600 → 13, not 14)
+    await expect(dist).toHaveAttribute("data-ticks", "13");
+    await expect(panel).toContainText("13 rafters at 600 mm centres");
+    await expect(panel.locator("[data-final-bay]")).toContainText("Last gap 600 mm");
+    await expect(panel.locator("[data-final-bay-warning]")).toHaveCount(0);
+  });
+
+  test("PH-10 changing material keeps the plan zoom and the spot you were working on; Fit still fits the page", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    const fit = (await vpView(page)).scale;
+    const P = at(8750, 5500);
+    await zoomOn(page, P, 6);
+    const zoomed = (await vpView(page)).scale;
+    expect(zoomed).toBeGreaterThan(fit * 5);
+    await page.getByRole("radio", { name: "Select" }).click();
+    for (const name of ["Barge flashing", "Rafters 90 × 45", "Apron flashing"]) {
+      await chooseMaterial(page, name);
+      expect(Math.abs((await vpView(page)).scale - zoomed), `${name}: zoom kept`).toBeLessThan(1e-6);
+      const o = await offCentre(page, P);
+      expect(Math.hypot(o.dx, o.dy), `${name}: still centred on the barge/apron area`).toBeLessThan(3);
+    }
+    await page.getByRole("button", { name: "Fit page" }).click();
+    await page.waitForTimeout(200);
+    expect(Math.abs((await vpView(page)).scale - fit)).toBeLessThan(1e-6);
+  });
+
+  test("PH-19 after a member or distribution line the sheet shows the count, the stock length and what each needs; a tick shows its stock", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Rafters 90 × 45");
+    await page.getByRole("radio", { name: "Distribution" }).click();
+    const result = sheet(page).locator("[data-timber-result]");
+    // seeded: 18 rafters, member 4,500 in plan at 30° → 5,196.15 mm each → 5,400 mm stock
+    await expect(result).toContainText("18 rafters → 18 × 5,400 mm stock (each needs 5,196.15 mm)");
+    await zoomOn(page, at(2850, 5000), 2.2);
+    await tapPdf(page, at(0, 5000)); await tapPdf(page, at(5700, 5000));
+    await expect(result).toContainText("29 rafters → 29 × 5,400 mm stock (each needs 5,196.15 mm)");
+    await page.getByRole("radio", { name: "Member" }).click();
+    await expect(result).toContainText("29 rafters → 29 × 5,400 mm stock");
+    await page.getByRole("radio", { name: "Select" }).click();
+    const tick = page.locator('[data-measurement-id="m-dist"] [data-tick]').nth(4);
+    const tb = await tick.boundingBox();
+    await page.touchscreen.tap(tb.x + tb.width / 2, tb.y + tb.height / 2);
+    await expect(page.locator("[data-tick-panel]")).toContainText(/Needs 5,196\.15 mm · 1 piece here · from 5,400 mm stock/);
+  });
+
+  test("PH-21 'Move to a corner' numbers the corners 1, 2, 3 along the run", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await page.getByRole("radio", { name: "Select" }).click();
+    await zoomOn(page, at(8750, 5750), 4);
+    await tapPdf(page, at(8400, 5000));                                         // first leg of m-pl2 (four 750 legs)
+    await expect(page.locator("[data-selected-run]")).toBeVisible();
+    await page.getByRole("button", { name: "Add a split by distance…" }).click();
+    const add = page.getByLabel("Add a split at (mm along the run)");
+    await add.fill("1000"); await add.press("Enter");
+    const row = page.locator("[data-split-row='0'] button").first();
+    if ((await row.getAttribute("aria-expanded")) !== "true") await row.click();
+    await expect(page.locator("[data-split-row='0'] select option")).toHaveText(["Corner…", "Corner 1 — 750 mm", "Corner 2 — 1,500 mm", "Corner 3 — 2,250 mm"]);
+    await page.getByLabel("Move to a corner").selectOption({ label: "Corner 1 — 750 mm" });
+    await expect(page.locator('[data-measurement-id="m-pl2"]')).toHaveAttribute("data-splits", "750");
+  });
+});
+
 test("pure helpers: wall naming + last height, member overrides, tools per material", () => {
   expect(nextWallInputs([])).toEqual({ kind: "rect", name: "Wall 1" });
   const walls = [{ kind: "wall", inputs: { name: "Wall 1", heightMm: 2400 } }, { kind: "wall", inputs: { name: "Wall 2" } }, { kind: "wall", archived: true, inputs: { name: "Wall 9", heightMm: 9 } }];
@@ -839,4 +981,20 @@ test("pure helpers: wall naming + last height, member overrides, tools per mater
   expect(keys({ family: "timber", purpose: "plates" }, "linear_stock")).toEqual(["wall", "run", "count", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "trim" }, "linear_stock")).toEqual(["run", "count", "select", "pan"]);
   expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["wall", "select", "pan"]);
+  // PH-06 / PH-19: the timber review reads the engine result as-is (never recalculated)
+  expect(memberThicknessMm({ spec: { section: { depthMm: 90, widthMm: 45 } } })).toBe(45);
+  expect(memberThicknessMm({ spec: { section: { depthMm: 45, widthMm: 90 } } })).toBe(45);
+  expect(memberThicknessMm({ spec: {} })).toBeNull();
+  const tick = (at, extra = {}) => ({ stationId: `d:@${at}`, positionMm: at, lengthNeededMm: 5196.152, duplicates: 0, removed: false, ...extra });
+  const cut = (at) => ({ demandId: `mat:rafter:d:@${at}:p1`, lengthMm: 5196.152 });
+  const res = {
+    problems: [], layouts: [{ kind: "repeated", ticks: [tick(0), tick(600, { duplicates: 1 }), tick(1200, { removed: true }), tick(1800, { lengthNeededMm: 4000 })] }],
+    allocation: { groups: [{ bars: [{ source: "new", stockLengthMm: 5400, cuts: [cut(0)] }, { source: "new", stockLengthMm: 5400, cuts: [cut(600)] }, { source: "new", stockLengthMm: 5400, cuts: [cut(600)] },
+      { source: "offcut", offcutLabel: "OC-1", stockLengthMm: 4200, cuts: [cut(1800)] }] }] },
+  };
+  expect(timberOrderSummary(res)).toEqual({ members: 4, stock: [[5400, 3]], fromOffcuts: 1, needs: [4000, 5196.15] });
+  expect(timberOrderSummary({ ...res, problems: [{ code: "invalid_input", message: "Pitch is required.", blocking: true }] })).toBeNull();
+  expect(stockForStation(res, "d:@600")).toEqual({ stockMm: 5400 });
+  expect(stockForStation(res, "d:@1800")).toEqual({ offcut: "OC-1" });
+  expect(stockForStation(res, "d:@60")).toBeNull();                         // "@60" never matches "@600"
 });

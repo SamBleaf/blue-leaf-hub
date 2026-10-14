@@ -132,6 +132,7 @@ async function mount(page, kind, init = {}) {
         const out = React.useMemo(() => compute(m), [m]);
         window.__tc.result = out.result;
         window.__tc.material = m;
+        window.__tc.setValue = setM; // a newer version arriving from outside (server normalisation, recovery)
         return React.createElement(mod.CladdingSetup, { value: m, result: out.result, lines: out.lines, onChange: (x) => { window.__tc.changes.push(x); setM({ ...m, ...x }); } });
       };
       root.render(React.createElement(Harness));
@@ -552,8 +553,8 @@ test("Timber setup: purpose, section, centres and pitch auto-apply; stock is the
   await enter(t.getByLabel("Section depth"), 90);
   await enter(t.getByLabel("Section width"), 45);
   await enter(t.getByLabel("Pitch"), 27);
-  await t.getByLabel("Grade (e.g. MGP10)").fill("MGP10");
-  await t.getByLabel("Treatment (e.g. H3)").fill("H3");
+  await enter(t.getByLabel("Grade (e.g. MGP10)"), "MGP10"); // text applies on Enter / blur — one change, not one per key (PH-03)
+  await enter(t.getByLabel("Treatment (e.g. H3)"), "H3");
   await expect.poll(async () => { const m = await genericMaterial(page); return [m.methodKey, m.spec.section, m.rules.pitchDeg, m.rules.centresMm, m.spec.grade, m.spec.treatment]; })
     .toEqual(["repeated_members", { depthMm: 90, widthMm: 45 }, 27, 600, "MGP10", "H3"]);
   // unavailable lengths may only REMOVE grid lengths — an off-grid entry is refused and nothing is saved
@@ -1329,4 +1330,272 @@ test("R14: an unfinished sheet joint-row entry is a recoverable draft — it sur
   await expect(rows).toContainText("Applied");
   await expect.poll(async () => { const m = await genericMaterial(page); return [m.rules.jointRows ?? null, m.rules.jointRowsDraft ?? null]; })
     .toEqual([{ atMm: [2400], gapMm: 10, detailRef: "H02 horizontal joint detail" }, null]);
+});
+
+// ── adversarial review (TC-R04 phone UI): setup cards ────────────────────────────────────────────────────────
+const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed";
+/** The mixed-procurement seed (rafters measured on plan, Axon + battens on a wall …), with one material's setup card open. */
+async function openMixedSetup(page, name) {
+  await page.goto(MIXED);
+  await ready(page);
+  await page.locator("li").filter({ hasText: name }).first().getByRole("button", { name: "Setup" }).click();
+}
+async function materialById(page, id) {
+  const s = await server(page);
+  return s.snapshot.materials.find((m) => m.id === id) || null;
+}
+async function hideApp(page) {
+  await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); });
+}
+async function showApp(page) {
+  await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange")); });
+}
+
+test("PH-03: text fields apply once on Enter / blur (one undo step); a cleared Name stays a draft and is never saved empty", async ({ page }) => {
+  await openTakeoff(page);
+  await page.getByRole("button", { name: "Add timber" }).click();
+  const t = page.locator('[data-setup="timber"]');
+  await expect.poll(async () => (await genericMaterial(page)).name).toBe("Timber");
+  const grade = t.getByLabel("Grade (e.g. MGP10)");
+  await grade.pressSequentially("MGP10", { delay: 80 });
+  await expect(t.locator("[data-undo-bar]")).toContainText("Not saved yet");
+  await page.waitForTimeout(900); // longer than the autosave debounce
+  expect((await genericMaterial(page)).spec.grade ?? null, "nothing is applied while typing").toBeNull();
+  await grade.press("Enter");
+  await expect.poll(async () => (await genericMaterial(page)).spec.grade).toBe("MGP10");
+  await expect(t.locator("[data-undo-bar]")).not.toContainText("Not saved yet");
+  await t.getByRole("button", { name: "Undo" }).click();
+  await expect(grade).toHaveValue("");
+  await expect(t.getByRole("button", { name: "Undo" }), "the whole word was ONE undo step").toBeDisabled();
+  await expect.poll(async () => (await genericMaterial(page)).spec.grade ?? null).toBeNull();
+
+  const name = t.getByLabel("Name", { exact: true });
+  await name.fill("");
+  await name.blur();
+  await expect(t.getByRole("alert").filter({ hasText: "Give the material a name." })).toBeVisible();
+  await page.waitForTimeout(900);
+  expect((await genericMaterial(page)).name, "an empty name is never sent").toBe("Timber");
+  await name.fill("Rafters 90 x 45");
+  await name.press("Enter");
+  await expect.poll(async () => (await genericMaterial(page)).name).toBe("Rafters 90 x 45");
+  await expect(t.getByRole("alert").filter({ hasText: "Give the material a name." })).toHaveCount(0);
+});
+
+test("PH-03: a newer value arriving from outside never overwrites the field being typed in", async ({ page }) => {
+  await openTakeoff(page);
+  await mount(page, "setup", { family: "cladding", groupId: P.axon133, methodKey: "sheet_layout", methodVersion: 2, wallMm: null });
+  const h = page.locator("#tc-harness");
+  const name = h.getByLabel("Name", { exact: true });
+  await name.fill("North wall Axon");
+  await page.evaluate(() => window.__tc.setValue((m) => ({ ...m, name: "Axon 133 smooth (server copy)" })));
+  await page.waitForTimeout(200);
+  await expect(name).toHaveValue("North wall Axon");
+  await name.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__tc.material.name)).toBe("North wall Axon");
+  // an untouched field does take the outside value
+  await page.evaluate(() => window.__tc.setValue((m) => ({ ...m, spec: { ...m.spec, supplierName: "Supplier B" } })));
+  await expect(h.getByLabel("Supplier", { exact: true })).toHaveValue("Supplier B");
+});
+
+test("PH-04: a number typed but not yet applied is applied when the app is hidden; until then the card says it isn't saved", async ({ page }) => {
+  await openTakeoff(page);
+  await page.getByRole("button", { name: "Add timber" }).click();
+  const t = page.locator('[data-setup="timber"]');
+  await expect.poll(async () => (await genericMaterial(page)).name).toBe("Timber");
+  await t.getByLabel("Pitch").fill("22.5"); // no Enter, no blur
+  await expect(t.locator("[data-undo-bar]")).toContainText("Not saved yet");
+  await hideApp(page); // app switch / phone locks
+  await expect.poll(async () => (await genericMaterial(page)).rules.pitchDeg ?? null).toBe(22.5);
+  await showApp(page);
+  await expect(t.locator("[data-undo-bar]")).not.toContainText("Not saved yet");
+});
+
+test("PH-11: the fixing route is an installation condition; the assembly's other conditions are entered in plain words until none is still needed", async ({ page }) => {
+  await openTakeoff(page);
+  await mount(page, "setup", { family: "cladding", groupId: P.axon133, methodKey: "sheet_layout", methodVersion: 2, wallMm: [4800, 2700] });
+  const h = page.locator("#tc-harness");
+  const missing = () => page.evaluate(() => window.__tc.result.problems.find((p) => p.code === "installation_selectors_missing")?.refs?.[0]?.missing || []);
+  expect(await missing()).toContain("direct-or-cavity");
+  // the calculation's list is shown in plain words, never as internal keys
+  await expect(h.locator("[data-engine-problems]")).toContainText("Installation conditions still needed: wind class");
+  await expect(h).not.toContainText("direct-or-cavity");
+  await expect(h).not.toContainText("on-or-off-stud");
+  await h.locator('[data-chips="route"]').getByRole("button", { name: "Direct fix" }).click();
+  await expect.poll(missing).not.toContain("direct-or-cavity");
+  const cond = h.locator("[data-install-conditions]");
+  await expect(cond).toContainText("4 still needed");
+  await cond.locator("summary").click();
+  await cond.getByLabel("Wind class").selectOption("N2");
+  await enter(cond.getByLabel("Substrate (what it fixes to)"), "Timber frame");
+  await cond.locator('[data-chips="cond-on-or-off-stud"]').getByRole("button", { name: "On studs" }).click();
+  await enter(cond.getByLabel("Fastener type"), "Nails");
+  await expect.poll(missing).toEqual([]);
+  await expect(cond).toContainText("All entered");
+  expect(await page.evaluate(() => window.__tc.material.rules.installConditions))
+    .toEqual({ "direct-or-cavity": "direct", wind: "N2", substrate: "Timber frame", "on-or-off-stud": "on-stud", "fixing-family": "Nails" });
+  // entering conditions never verifies anything: no reviewed rule row exists, installation stays source-pending
+  await expect(h.locator('[data-status="installation"]')).toHaveAttribute("data-value", "source-pending");
+  // the route condition follows the route: Cavity → cavity; a product change takes the route (and the conditions) away, flagged
+  await h.locator('[data-chips="route"]').getByRole("button", { name: "Cavity" }).click();
+  await expect.poll(() => page.evaluate(() => window.__tc.material.rules.installConditions["direct-or-cavity"])).toBe("cavity");
+  await pick(page, P.linea150);
+  await expect.poll(() => page.evaluate(() => window.__tc.material.rules.installConditions ?? null)).toBeNull();
+  await expect(h.locator('[data-carried-param="installConditions"]')).toContainText("Installation conditions");
+  await shot(page, "ph11-install-conditions");
+});
+
+test("PH-12: a measured material blocked by a missing value says 'No quantity yet — see why below'; projected rafters without a pitch ask for it", async ({ page }) => {
+  await openMixedSetup(page, "Rafters 90 × 45");
+  const t = page.locator('[data-setup="timber"]');
+  const pv = t.locator("[data-quantity-preview]");
+  await expect(pv).toContainText("18 pieces");
+  await enter(t.getByLabel("Pitch"), "");
+  await expect(pv).toContainText("No quantity yet — see why below.");
+  await expect(pv).not.toContainText("add this material to walls");
+  await expect(t.locator("[data-needs]")).toContainText("Enter the roof pitch");
+  await expect(t.locator("[data-engine-problems]")).toContainText("itch");
+});
+
+test("PH-02: support battens can reach an order — fixings from a rule, or By others / Exclude with a reason; the Needs row lists what's left", async ({ page }) => {
+  await openMixedSetup(page, "Cavity battens");
+  const b = page.locator('[data-setup="batten"]');
+  const fx = b.locator("[data-support-fixings]");
+  await expect(b.locator("[data-needs]")).toContainText("Support fixings");
+  await expect(b.locator("[data-engine-problems]")).toContainText("fixings not quantified");
+  await fx.locator('[data-chips="fixing-scope"]').getByRole("button", { name: "By others" }).click();
+  await expect(b.locator("[data-needs]")).toContainText("Record why the support fixings are by others.");
+  await enter(fx.getByLabel("Why they're by others"), "Framer supplies and fixes them");
+  await expect(b.locator("[data-needs]")).toHaveCount(0);
+  await expect(b.locator("[data-engine-problems]", { hasText: "fixings not quantified" })).toHaveCount(0);
+  await expect(b.locator('[data-status="procurement"]')).toHaveAttribute("data-value", "ready");
+  await expect.poll(async () => (await materialById(page, "mat-bat")).rules.fixingScope).toEqual({ status: "by-others", reason: "Framer supplies and fixes them" });
+  // or from a reviewed rule: fastener + pattern + reference → a fixings quantity
+  await fx.locator('[data-chips="fixing-scope"]').getByRole("button", { name: "From a rule" }).click();
+  await expect(b.locator("[data-needs]")).toContainText("Support fixings");
+  await enter(fx.getByLabel("Fastener material"), "Galvanised steel");
+  await enter(fx.getByLabel("Corrosion class"), "C3");
+  await enter(fx.getByLabel("Fastener length"), 65);
+  await enter(fx.getByLabel("Head"), "Bugle");
+  await enter(fx.getByLabel("Fixes into"), "Timber stud");
+  await fx.locator('[data-chips="fixing-mode"]').getByRole("button", { name: "Spacing along each batten" }).click();
+  await enter(fx.getByLabel("Fixing spacing"), 600);
+  await enter(fx.getByLabel("First fixing from the batten end"), 50);
+  await enter(fx.getByLabel("Last fixing from the batten end"), 50);
+  await enter(fx.getByLabel("Rule reference (guide / table / row or detail)"), "H02 Table 2 — SM");
+  await expect(b.locator("[data-needs]")).toHaveCount(0);
+  await expect(b.locator("[data-engine-problems]", { hasText: "fixings not quantified" })).toHaveCount(0);
+  await expect(b.locator("[data-quantity-preview] [data-preview-line]")).toHaveCount(2); // battens + fixings
+  await expect.poll(async () => { const m = await materialById(page, "mat-bat"); return [m.rules.fixingScope ?? null, m.rules.fixing]; }).toEqual([null, {
+    identity: { material: "Galvanised steel", corrosionClass: "C3", lengthMm: 65, head: "Bugle", substrate: "Timber stud" }, mode: "pitch", pitchMm: 600, edgeStartMm: 50, edgeEndMm: 50, ruleRef: "H02 Table 2 — SM" }]);
+  await shot(page, "ph02-batten-fixings");
+});
+
+test("F10: a board joint rule — over supports at given centres, or between supports for end-matched boards — lets long runs be laid out", async ({ page }) => {
+  await openTakeoff(page);
+  await mount(page, "setup", { family: "cladding", groupId: "James Hardie|Linea|180|16", methodKey: "course_layout", methodVersion: 1, wallMm: [6000, 2700] });
+  const h = page.locator("#tc-harness");
+  await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "incomplete");
+  const j = h.locator("[data-board-joints]");
+  await expect(j).toHaveAttribute("open", ""); // opened: runs are longer than the longest board
+  await expect(j.locator('[data-chips="joint-mode"]').getByRole("button", { name: "Between supports (end-matched)" })).toBeDisabled(); // Linea isn't end-matched
+  await j.locator('[data-chips="joint-mode"]').getByRole("button", { name: "Over supports" }).click();
+  await enter(j.getByLabel("Support centres"), 600);
+  await expect(j).toContainText("Kept as a draft");
+  await expect.poll(() => page.evaluate(() => [window.__tc.material.rules.joints ?? null, window.__tc.material.rules.jointsDraft ?? null])).toEqual([null, { mode: "on-support", centresMm: 600 }]);
+  await enter(j.getByLabel("Joint detail reference"), "H04 joint detail");
+  await expect(j).toContainText("Applied");
+  await expect.poll(() => page.evaluate(() => [window.__tc.material.rules.joints ?? null, window.__tc.material.rules.jointsDraft ?? null]))
+    .toEqual([{ orientation: "horizontal", mode: "on-support", centresMm: 600, detailRef: "H04 joint detail" }, null]);
+  await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]')).toContainText("36 pieces");
+  await shot(page, "f10-board-joints");
+  // end-matched timber boards may join between supports
+  const tc = { id: "mat-tc", name: "Spotted gum", methodKey: "course_layout", methodVersion: 1, rules: {},
+    spec: { family: "timber-cladding", layout: "course", orientation: "horizontal", supply: "fixed", endCondition: "end-matched", product: { name: "Spotted gum", widthMm: 140, thicknessMm: 19, effectiveCoverMm: 120, lengthsMm: [5400], lengthMm: 5400 } } };
+  await mount(page, "setup", { material: tc, wallMm: [8000, 2700] });
+  const j2 = page.locator("#tc-harness [data-board-joints]");
+  await j2.locator('[data-chips="joint-mode"]').getByRole("button", { name: "Between supports (end-matched)" }).click();
+  await enter(j2.getByLabel("Shortest piece allowed"), 450);
+  await enter(j2.getByLabel("Joint detail reference"), "T01 end-matched joints");
+  await expect.poll(() => page.evaluate(() => window.__tc.material.rules.joints ?? null)).toEqual({ orientation: "horizontal", mode: "off-support", minPieceMm: 450, detailRef: "T01 end-matched joints" });
+  await expect(page.locator('#tc-harness [data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
+});
+
+test("QO-13: non-square Matrix panels ask for portrait or landscape (only what the product lists) and then lay out", async ({ page }) => {
+  await openTakeoff(page);
+  await mount(page, "setup", { family: "cladding", groupId: "James Hardie|Matrix|590|8", methodKey: "panel_grid", methodVersion: 1, wallMm: [2390, 2990] });
+  const h = page.locator("#tc-harness");
+  await expect(h.locator("[data-needs]")).toContainText("Choose portrait or landscape panels.");
+  const o = h.locator('[data-chips="panel-orientation"]');
+  await expect(o.getByRole("button", { name: /^Landscape/ })).toBeDisabled();
+  await expect(h).toContainText("isn't listed for landscape installation");
+  await o.getByRole("button", { name: /^Portrait/ }).click();
+  await expect.poll(() => page.evaluate(() => window.__tc.material.rules.panelOrientation)).toBe("portrait");
+  await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="sheet"]')).toContainText("8 sheets");
+  await expect(h.locator("[data-needs]")).toHaveCount(0);
+  // a square panel lays out the same either way — nothing to choose
+  await pick(page, P.matrix1190);
+  await expect(h.locator('[data-chips="panel-orientation"]')).toHaveCount(0);
+  await expect(h).toContainText("Square panel");
+});
+
+test("F18: spares are added on top of the layout count and shown per order line — the help text says so", async ({ page }) => {
+  await openTakeoff(page);
+  await mount(page, "setup", { family: "cladding", groupId: P.axon133, methodKey: "sheet_layout", methodVersion: 2, wallMm: [4800, 2700] });
+  const h = page.locator("#tc-harness");
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="sheet"]')).toContainText("4 sheets");
+  await enter(h.getByLabel("Spares"), 10);
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="sheet"]')).toContainText("5 sheets");
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="sheet"]')).toContainText("incl. 1 spare");
+  await expect(h).toContainText("Added on top of the layout count");
+  await expect(h).not.toContainText("doesn't add spares yet");
+  await mount(page, "editor", { value: null });
+  await page.locator("#tc-harness").getByRole("tab", { name: "Ordering" }).click();
+  await expect(page.locator("#tc-harness")).toContainText("Added on top of each job's layout count");
+  await expect(page.locator("#tc-harness")).not.toContainText("don't add spares yet");
+});
+
+test("PH-18: an aluminium profile whose only gap is the saw kerf reads 'Kerf not confirmed' — not 'Missing product'", async ({ page }) => {
+  await openTakeoff(page);
+  await page.getByRole("button", { name: "Add aluminium" }).click();
+  const a = page.locator('[data-setup="aluminium"]');
+  await expect(a.locator('[data-status="procurement"]')).toContainText("Kerf not confirmed");
+  await expect(a.locator('[data-status="procurement"]')).not.toContainText("Missing product");
+  await enter(a.getByLabel("Saw kerf", { exact: true }), 3);
+  await a.getByLabel("The saw kerf above is confirmed for this job").check();
+  await expect(a.locator('[data-status="procurement"]')).not.toContainText("Kerf not confirmed");
+});
+
+test("Phone 375 px: installation conditions, board joints, panel orientation and support fixings fit with 44 px targets", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openTakeoff(page);
+  const check = async (what) => {
+    const m = await page.evaluate(() => {
+      const host = document.getElementById("tc-harness");
+      const small = [];
+      for (const el of host.querySelectorAll("button, input:not([type=checkbox]), select, summary, a")) {
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height && r.height < 43.5) small.push(`${el.tagName} ${(el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 30)} ${r.height}`);
+      }
+      return { doc: document.documentElement.scrollWidth, host: host.scrollWidth - host.clientWidth, small };
+    });
+    expect(m.doc, `page width — ${what}`).toBeLessThanOrEqual(375);
+    expect(m.host, `overflow — ${what}`).toBeLessThanOrEqual(0);
+    expect(m.small, `small targets — ${what}`).toEqual([]);
+  };
+  await mount(page, "setup", { family: "cladding", groupId: P.axon133, methodKey: "sheet_layout", methodVersion: 2, wallMm: [4800, 2700] });
+  await page.locator("#tc-harness [data-install-conditions] summary").click();
+  await check("installation conditions");
+  await page.locator("#tc-harness [data-engine-problems] summary").click().catch(() => {});
+  await check("calculation notes");
+  await mount(page, "setup", { family: "cladding", groupId: "James Hardie|Linea|180|16", methodKey: "course_layout", methodVersion: 1, wallMm: [6000, 2700] });
+  await page.locator('#tc-harness [data-chips="joint-mode"]').getByRole("button", { name: "Over supports" }).click();
+  await check("board joints");
+  await mount(page, "setup", { family: "cladding", groupId: "James Hardie|Matrix|590|8", methodKey: "panel_grid", methodVersion: 1, wallMm: [2390, 2990] });
+  await check("panel orientation");
+  await mount(page, "setup", { family: "batten", groupId: P.cavityBatten, methodKey: "support_grid", methodVersion: 1, wallMm: [4800, 2700], rules: { maxSpacingMm: 600 } });
+  await page.locator('#tc-harness [data-chips="fixing-mode"]').getByRole("button", { name: "Spacing along each batten" }).click();
+  await check("support fixings");
+  await shot(page, "phone-375-support-fixings");
 });

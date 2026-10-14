@@ -8,6 +8,9 @@
 //           wall only with ONE view at a time: Cladding | Supports | Accessories. Tap a cell / board / line
 //           for its stock selection and cut size. Gross / openings / net m², per-wall quantities and blocking
 //           problems shown in place. Nothing claims installation verification the engine didn't give.
+//           Setout datum is per WALL (rules.datumByWall); "every wall" is an explicit choice with a job-wide preview.
+//           Sheet joint rows: height + gap + detail or a draft (rules.jointRowsDraft) — the Setup card's rule.
+//           Stud walls: each opening's framing detail (opening.inputs.detail) is entered in its sheet.
 // Every valid edit applies at once (ws.edit) and is undoable; invalid input stays in its field as a draft.
 //
 // Props contract (fixed):
@@ -16,7 +19,7 @@
 //   wallId      wall measurement open in the editor (null = list)
 //   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose()
 // =============================================================================
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { newId } from "../../lib/takeoffApi.js";
@@ -46,7 +49,8 @@ const TONE = { ok: "bg-emerald-50 text-emerald-800 border-emerald-200", warn: "b
 
 const ROLE_LABEL = {
   sheet: "Sheets", panel: "Panels", "aac-panel": "AAC panels", "course-board": "Course boards", "vertical-board": "Vertical boards", "board-lm": "Random-length boards",
-  support: "Supports", stud: "Studs", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
+  support: "Supports", stud: "Studs", king: "King studs", jack: "Jack studs", trimmer: "Trimmers", lintel: "Lintels", "sill trimmer": "Sill trimmers",
+  "head trimmer": "Head trimmers", cripple: "Cripple studs", sill: "Sills", "below-sill": "Below-sill pieces", "above-head": "Above-head pieces", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
   "horizontal-joint": "Horizontal joint strips", "vertical-joint": "Vertical joint strips", rail: "Rails", "control-joint": "Control joints",
   coating: "Coating (net finish area)", basecoat: "Basecoat (net finish area)", "finish-coat": "Finish coat (net finish area)", "fixing-support-to-frame": "Support fixings",
 };
@@ -103,15 +107,39 @@ function scrollParent(el) {
   return null;
 }
 
+const isField = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+
+/** Scroll the focused field of `root` (+ its message line, + its group's live result when both fit) above the keyboard. */
+function revealFocused(root) {
+  const el = document.activeElement;
+  if (!root || !isField(el) || !root.contains(el)) return;
+  const vv = window.visualViewport;
+  const sc = scrollParent(el);
+  const top = Math.max(vv ? vv.offsetTop : 0, sc ? sc.getBoundingClientRect().top : 0), bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const f = el.getBoundingClientRect();
+  let r = { top: f.top, bottom: f.bottom + 40 }; // the field + its message line
+  const res = el.closest("[data-keyboard-group]")?.querySelector("[data-keyboard-result]")?.getBoundingClientRect();
+  if (res && res.height) {
+    const u = { top: Math.min(f.top, res.top), bottom: Math.max(f.bottom + 8, res.bottom + 8) };
+    if (u.bottom - u.top <= bottom - top - 16) r = u;
+  }
+  const below = r.bottom + 8 - bottom, above = top + 8 - r.top;
+  const delta = below > 0 ? below : above > 0 ? -above : 0;
+  if (sc && delta) sc.scrollTop += delta;
+}
+
 /**
  * Keep the focused numeric field (and its message line) above the on-screen keyboard: while a field inside this
  * container has focus, add the keyboard's height as scroll room and scroll the field up into the visual viewport.
  * A field inside [data-keyboard-group] also keeps that group's [data-keyboard-result] line in view when both fit,
  * so the live result of what is being typed is never under the keyboard either.
+ * The scroll runs in a layout effect AFTER the keyboard room is rendered (PH-09): a requestAnimationFrame straight
+ * after setPad ran before React rendered the room on WebKit, so the scroll was clamped and the field stayed covered.
  */
 function KeyboardSafe({ className, children }) {
   const ref = useRef(null);
   const [pad, setPad] = useState(0);
+  const [revealTick, setRevealTick] = useState(0);
   useEffect(() => {
     const root = ref.current;
     if (!root) return undefined;
@@ -119,22 +147,9 @@ function KeyboardSafe({ className, children }) {
     const reveal = () => {
       const el = document.activeElement;
       const vv = window.visualViewport;
-      if (!el || !root.contains(el) || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) { setPad(0); return; }
+      if (!isField(el) || !root.contains(el)) { setPad(0); return; }
       setPad(vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0);
-      requestAnimationFrame(() => {
-        const sc = scrollParent(el);
-        const top = Math.max(vv ? vv.offsetTop : 0, sc ? sc.getBoundingClientRect().top : 0), bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-        const f = el.getBoundingClientRect();
-        let r = { top: f.top, bottom: f.bottom + 40 }; // the field + its message line
-        const res = el.closest("[data-keyboard-group]")?.querySelector("[data-keyboard-result]")?.getBoundingClientRect();
-        if (res && res.height) {
-          const u = { top: Math.min(f.top, res.top), bottom: Math.max(f.bottom + 8, res.bottom + 8) };
-          if (u.bottom - u.top <= bottom - top - 16) r = u;
-        }
-        const below = r.bottom + 8 - bottom, above = top + 8 - r.top;
-        const delta = below > 0 ? below : above > 0 ? -above : 0;
-        if (sc && delta) sc.scrollTop += delta;
-      });
+      setRevealTick((n) => n + 1); // → the layout effect below, once the room is in the DOM
     };
     const soon = () => { clearTimeout(t); t = setTimeout(reveal, 120); };
     const off = () => { clearTimeout(t); t = setTimeout(() => { if (!root.contains(document.activeElement)) setPad(0); }, 150); };
@@ -143,6 +158,13 @@ function KeyboardSafe({ className, children }) {
     window.visualViewport?.addEventListener("resize", soon);
     return () => { clearTimeout(t); root.removeEventListener("focusin", soon); root.removeEventListener("focusout", off); window.visualViewport?.removeEventListener("resize", soon); };
   }, []);
+  useLayoutEffect(() => {
+    if (!revealTick) return undefined;
+    revealFocused(ref.current);
+    // and once more after paint, for a browser that settles the layout late (a no-op when already in view)
+    const raf = requestAnimationFrame(() => revealFocused(ref.current));
+    return () => cancelAnimationFrame(raf);
+  }, [revealTick]);
   return <div ref={ref} className={className}>{children}{pad > 0 && <div aria-hidden="true" style={{ height: pad }} />}</div>;
 }
 
@@ -155,9 +177,16 @@ function missingHeights(inp = {}) {
   return [];
 }
 
+/** Where the elevation came from, said the same way as the schedule and the order appendix (02 §3, UX02) — a traced
+ *  outline is never called "derived from plan", and nothing here is a surveyed elevation. */
+const isTracedOutline = (m) => isTraced(m) && m?.inputs?.kind === "polygon";
+const provenanceText = (m) => (isTracedOutline(m) ? "Traced elevation outline" : isTraced(m) ? "Derived from plan + entered heights" : "Entered");
+
 function tracedLengthMm(m, calibrations) {
   if (!isTraced(m)) return null;
   const cal = calibrations.find((c) => c.id === m.calibrationId);
+  // a traced OUTLINE's length is its width along the wall, never the length of the line around it
+  if (cal && isTracedOutline(m) && m.points.length >= 3) { const xs = m.points.map((p) => pointToMm(cal, m.points[0], p).x); return Math.max(...xs) - Math.min(...xs); }
   if (cal) return polylineLengthMm(cal, m.points);
   return m.inputs?.widthMm ?? null;
 }
@@ -697,6 +726,183 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
   );
 }
 
+// ── opening framing detail (03 T4 / TIM02): kings, jacks, trimmers, lintel, sill come ONLY from here ──────────
+const DETAIL_SOURCES = [["reviewed-detail", "Reviewed detail"], ["explicit", "Explicit quantities"]];
+const MEMBER_ROLES = [["king", "King stud"], ["jack", "Jack stud"], ["trimmer", "Trimmer"], ["lintel", "Lintel"], ["sill trimmer", "Sill trimmer"], ["head trimmer", "Head trimmer"], ["cripple", "Cripple stud"], ["sill", "Sill"]];
+const MEMBER_BASIS = [["stud", "Stud length"], ["openingWidth", "Opening width"], ["headLevel", "Head level"], ["sillLevel", "Sill level"], ["fixed", "Enter a length"]];
+const REGION_CHOICES = [[true, "Pieces required"], [false, "None"]];
+
+/** Stored opening.inputs.detail → the editor's state (member rows keep their stored ids). */
+function framingFromStored(d) {
+  const region = (r) => (r && typeof r.required === "boolean" ? { req: r.required, ded: r.required ? r.deductionMm ?? null : null } : { req: null, ded: null });
+  return {
+    source: d?.source || null, ref: d?.ref || "", below: region(d?.belowSill), above: region(d?.aboveHead),
+    members: (Array.isArray(d?.members) ? d.members : []).map((m) => ({ id: m.id, role: m.role || "", quantity: m.quantity ?? null,
+      basis: m.lengthMm != null ? "fixed" : m.lengthFrom || "", lengthMm: m.lengthMm ?? null, addMm: m.addMm ?? 0 })),
+    none: Array.isArray(d?.members) && d.members.length === 0,
+  };
+}
+
+/** What a member row still lacks (empty = complete). `refs` = the lengths it can follow (null when unknown). */
+function memberMissing(m, refs) {
+  const out = [];
+  if (!m.role) out.push("what it is");
+  if (!(Number.isInteger(m.quantity) && m.quantity >= 1 && m.quantity <= 50)) out.push("a quantity");
+  if (!m.basis || (m.basis === "fixed" && !(m.lengthMm >= 1))) out.push("its length");
+  else if (m.basis !== "fixed" && refs?.[m.basis] != null && refs[m.basis] + (m.addMm || 0) <= 0) out.push("a length above 0 (check the adjustment)");
+  return out;
+}
+
+/** The editor state → what is stored: only answered parts, only complete members (the engine reports the rest). */
+function framingToStored(s, refs) {
+  if (!s.source) return null;
+  const region = (r) => (r.req === false ? { required: false } : r.req === true && Number.isFinite(r.ded) ? { required: true, deductionMm: r.ded } : undefined);
+  const out = { source: s.source };
+  if (s.ref.trim()) out.ref = s.ref.trim().slice(0, 120);
+  const b = region(s.below), a = region(s.above);
+  if (b) out.belowSill = b;
+  if (a) out.aboveHead = a;
+  const done = s.members.filter((m) => !memberMissing(m, refs).length);
+  if (done.length || s.none) {
+    out.members = done.map((m) => ({ id: m.id, role: m.role, quantity: m.quantity,
+      ...(m.basis === "fixed" ? { lengthMm: m.lengthMm } : { lengthFrom: m.basis, addMm: m.addMm || 0 }), sameAsStud: true }));
+  }
+  return out;
+}
+
+const ENGINE_MEMBER = /\bm(\d+) (length|product)/g;
+/**
+ * An opening's framing detail on a stud wall: the source (reviewed detail + reference, or explicit quantities),
+ * whether below-sill / above-head pieces are required (with the detail's deduction), and the kings, jacks,
+ * trimmers, lintel and sill as explicit members. Every complete answer applies at once (undoable); an unfinished
+ * member row stays here as a draft and is never counted. The engine's own verdict is shown — quantities only,
+ * never a design check.
+ */
+function FramingDetail({ opening, stud, canEdit, onSave }) {
+  const uid = useId();
+  const stored = opening.rec.inputs?.detail || null;
+  const fr = stud?.layout?.openings?.find((x) => x.id === opening.id) || null; // the engine's framing state
+  const studLen = stud?.layout?.studLengthMm ?? null;
+  const sillH = fr ? fr.sillMm : opening.sillMm;
+  const headH = fr ? fr.headMm : (opening.sillMm || 0) + (opening.heightMm || 0);
+  const refs = { stud: studLen, openingWidth: opening.widthMm ?? null, headLevel: headH ?? null, sillLevel: sillH ?? null };
+  const askBelow = !(sillH <= 0);
+  const askAbove = studLen == null || studLen - headH > 0;
+  const storedNorm = JSON.stringify(framingToStored(framingFromStored(stored), refs));
+  const storedRef = useRef(stored);
+  storedRef.current = stored;
+  const [s, setS] = useState(() => framingFromStored(stored));
+  // undo / redo / another device changed what is stored → show it (a save round-trip that stores the same keeps drafts)
+  useEffect(() => {
+    setS((cur) => (JSON.stringify(framingToStored(cur, refs)) === storedNorm ? cur : framingFromStored(storedRef.current)));
+  }, [storedNorm]); // eslint-disable-line react-hooks/exhaustive-deps -- refs are folded into storedNorm
+  const change = (fn) => {
+    const next = fn(s);
+    setS(next);
+    const d = framingToStored(next, refs);
+    if (JSON.stringify(d) !== storedNorm) onSave(d);
+  };
+  const setMember = (id, patch) => change((x) => ({ ...x, members: x.members.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+  const addMember = () => change((x) => {
+    let n = x.members.length + 1;
+    const ids = new Set(x.members.map((m) => m.id));
+    while (ids.has(`m${n}`)) n++;
+    return { ...x, none: false, members: [...x.members, { id: `m${n}`, role: "", quantity: null, basis: "", lengthMm: null, addMm: 0 }] };
+  });
+  const memberNo = new Map(s.members.map((m, i) => [m.id, i + 1]));
+  const engineText = (t) => String(t).replace(ENGINE_MEMBER, (all, n, what) => (memberNo.has(`m${n}`) ? `member ${memberNo.get(`m${n}`)} ${what}` : all));
+
+  const status = !stud ? null : !fr ? <p className="text-xs text-muted" data-framing-state="none">The studs aren&apos;t calculated on this wall yet — finish the wall first.</p>
+    : fr.complete ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="complete">Framing entered — counted as quantities only, not checked as a design.</p>
+      : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Base studs only until the detail is complete — still needs {(fr.missing || []).map(engineText).join("; ")}.</p>;
+
+  if (!canEdit) {
+    return (
+      <section aria-label="Framing detail" className="space-y-1 rounded-lg border border-hairline p-2" data-framing-detail="">
+        <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
+        {status}
+        {stored?.source && <p className="text-xs text-ink">{stored.source === "reviewed-detail" ? `Reviewed detail ${stored.ref || ""}` : "Explicit quantities"} · {plural((stored.members || []).length, "member")}</p>}
+      </section>
+    );
+  }
+  const regionField = (key, legend, label) => {
+    const r = s[key];
+    return (
+      <div className="space-y-1">
+        <Chips label={legend} value={r.req} options={REGION_CHOICES} onChange={(v) => change((x) => ({ ...x, [key]: { req: v, ded: v ? x[key].ded : null } }))} />
+        {r.req === true && (
+          <NumberField label={label} value={r.ded} min={0} max={MAX_MM} onCommit={(n) => change((x) => ({ ...x, [key]: { ...x[key], ded: n } }))}
+            help="From the detail (e.g. the sill trimmer or lintel depth) — never defaulted." />
+        )}
+      </div>
+    );
+  };
+  return (
+    <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
+      <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
+      <p className="text-[11px] text-muted">Kings, jacks, trimmers, lintel and sill are never guessed — they come only from this detail.</p>
+      {status}
+      <Chips label="Framing comes from" value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
+      {s.source && (
+        <>
+          <CommitText label={s.source === "reviewed-detail" ? "Detail reference (needed)" : "Reference (optional)"} value={s.ref} maxLength={120} onCommit={(v) => change((x) => ({ ...x, ref: v }))} />
+          {askBelow && regionField("below", "Below the sill", "Below-sill deduction")}
+          {askAbove && regionField("above", "Above the head", "Above-head deduction")}
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-xs font-medium text-muted">Kings, jacks, trimmers, lintel, sill</legend>
+            {s.members.map((m, i) => {
+              const miss = memberMissing(m, refs);
+              return (
+                <div key={m.id} className="space-y-2 rounded-lg border border-hairline p-2" data-member-row={m.id}>
+                  <div className="flex items-end gap-2">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor={`${uid}-${m.id}-role`} className="mb-1 block text-xs font-medium text-muted">Member</label>
+                      <select id={`${uid}-${m.id}-role`} value={m.role} onChange={(e) => setMember(m.id, { role: e.target.value })}
+                        className="min-h-[44px] w-full rounded-lg border border-hairline bg-white px-2 text-base text-ink focus-ring">
+                        <option value="">Choose…</option>
+                        {MEMBER_ROLES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                      </select>
+                    </div>
+                    <Btn kind="ghost" className="min-w-[44px]" aria-label={`Remove member ${i + 1}`} onClick={() => change((x) => ({ ...x, members: x.members.filter((y) => y.id !== m.id) }))}>✕</Btn>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <NumberField label="Quantity" unit="pcs" integer value={m.quantity} min={1} max={50} onCommit={(n) => setMember(m.id, { quantity: n })} />
+                    <div>
+                      <label htmlFor={`${uid}-${m.id}-basis`} className="mb-1 block text-xs font-medium text-muted">Length from</label>
+                      <select id={`${uid}-${m.id}-basis`} value={m.basis} onChange={(e) => setMember(m.id, { basis: e.target.value })}
+                        className="min-h-[44px] w-full rounded-lg border border-hairline bg-white px-2 text-base text-ink focus-ring">
+                        <option value="">Choose…</option>
+                        {MEMBER_BASIS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {m.basis === "fixed" && <NumberField label="Cut length" value={m.lengthMm} min={1} max={MAX_MM} onCommit={(n) => setMember(m.id, { lengthMm: n })} />}
+                  {m.basis && m.basis !== "fixed" && (
+                    <NumberField label="Adjust" value={m.addMm ?? 0} min={-5000} max={5000} onCommit={(n) => setMember(m.id, { addMm: n })}
+                      help={`Added to the ${MEMBER_BASIS.find(([v]) => v === m.basis)?.[1].toLowerCase()}${refs[m.basis] != null ? ` (${fmtMm(refs[m.basis])} mm)` : ""} — 0 for exactly that length.`} />
+                  )}
+                  <p className={`text-[11px] ${miss.length ? "text-amber-800" : "text-muted"}`} data-member-state={miss.length ? "draft" : "applied"}>
+                    {miss.length ? `Draft — not counted until it has ${miss.join(", ")}.` : `Counted: ${m.quantity} × ${MEMBER_ROLES.find(([v]) => v === m.role)?.[1].toLowerCase() || m.role}, same section as the studs.`}
+                  </p>
+                </div>
+              );
+            })}
+            <div className="flex flex-wrap gap-2">
+              <Btn onClick={addMember}>Add a member</Btn>
+              {!s.members.length && (
+                <Btn aria-pressed={s.none} className={s.none ? "border-primary text-primary" : ""} onClick={() => change((x) => ({ ...x, none: !x.none }))}>
+                  {s.none ? "✓ The detail has no extra members" : "The detail has no extra members"}
+                </Btn>
+              )}
+            </div>
+          </fieldset>
+          {stored && <Btn kind="ghost" onClick={() => { setS(framingFromStored(null)); onSave(null); }}>Clear the framing detail</Btn>}
+        </>
+      )}
+    </section>
+  );
+}
+
 function ElementSheet({ item, index, total, onStep, onClose, onAction, canEdit }) {
   const info = item.info || {};
   return (
@@ -719,22 +925,48 @@ function ElementSheet({ item, index, total, onStep, onClose, onAction, canEdit }
   );
 }
 
-function JointRowSheet({ view, material, suggestionMm, onApply, onRemove, onClose }) {
+/** What a joint row entry still lacks before it can be a layout (the Setup card's rule: positions + gap + detail). */
+function jointRowMissing(row, horizontal) {
+  return [!(row?.atMm?.length > 0) && `the joint ${horizontal ? "position" : "height"}`, !Number.isFinite(row?.gapMm) && "the joint gap",
+    !String(row?.detailRef || "").trim() && "the detail reference"].filter(Boolean);
+}
+
+/**
+ * The material's joint row, edited from the wall (04 C2). Same completeness rule as Setup → Horizontal joint rows
+ * (FamilySetup JointRowsField): only height + gap + detail reference together become rules.jointRows; anything less
+ * is kept as rules.jointRowsDraft (the engine never reads it), so it survives closing the sheet or a reload.
+ */
+function JointRowSheet({ view, material, suggestionMm, onApply, onDraft, onRemove, onClose }) {
   const jr = material.rules?.jointRows || null;
-  const [atMm, setAt] = useState(jr?.atMm?.[0] ?? (Number.isFinite(suggestionMm) ? Math.floor(suggestionMm / SNAP_MM) * SNAP_MM : null));
-  const [gapMm, setGap] = useState(jr?.gapMm ?? null);
-  const [ref, setRef] = useState(jr?.detailRef || "");
+  const draft = material.rules?.jointRowsDraft || null;
+  const src = draft || jr;
+  const rest = src?.atMm?.slice(1) || []; // further rows set in Setup are kept as they are
+  const suggested = Number.isFinite(suggestionMm) ? Math.floor(suggestionMm / SNAP_MM) * SNAP_MM : null;
+  const [atMm, setAt] = useState(src?.atMm?.[0] ?? suggested);
+  const [gapMm, setGap] = useState(src?.gapMm ?? null);
+  const [ref, setRef] = useState(src?.detailRef || "");
+  // undo / redo / the Setup card change the stored rule: show what is stored now
+  const srcKey = JSON.stringify(src || null);
+  useEffect(() => {
+    const x = JSON.parse(srcKey);
+    setAt(x?.atMm?.[0] ?? suggested);
+    setGap(x?.gapMm ?? null);
+    setRef(x?.detailRef || "");
+  }, [srcKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the suggestion only fills an empty entry
   // the row applies to EVERY wall using this material: name the ones it would not fit inside
-  const misfits = atMm > 0 ? jointRowMisfits(view, material, { atMm: [atMm, ...(jr?.atMm?.slice(1) || [])], gapMm: Number.isFinite(gapMm) ? gapMm : 0 }) : [];
+  const misfits = atMm > 0 ? jointRowMisfits(view, material, { atMm: [atMm, ...rest], gapMm: Number.isFinite(gapMm) ? gapMm : 0 }) : [];
+  const horizontal = material.spec?.orientation === "horizontal";
   const apply = (patch) => {
     const v = { atMm, gapMm, ref, ...patch };
     if (patch.atMm !== undefined) setAt(patch.atMm);
     if (patch.gapMm !== undefined) setGap(patch.gapMm);
     if (patch.ref !== undefined) setRef(patch.ref);
-    if (v.atMm > 0 && Number.isFinite(v.gapMm) && v.gapMm >= 0) onApply({ atMm: [v.atMm, ...(jr?.atMm?.slice(1) || [])], gapMm: v.gapMm, ...(v.ref ? { detailRef: v.ref } : {}) });
+    const row = { atMm: v.atMm > 0 ? [v.atMm, ...rest] : [], ...(Number.isFinite(v.gapMm) && v.gapMm >= 0 ? { gapMm: v.gapMm } : {}), ...(String(v.ref || "").trim() ? { detailRef: String(v.ref).trim().slice(0, 60) } : {}) };
+    if (!jointRowMissing(row, horizontal).length) onApply(row);
+    else onDraft(row.atMm.length || row.gapMm != null || row.detailRef ? row : null);
   };
+  const missing = draft ? jointRowMissing(draft, horizontal) : [];
   // horizontal sheets run along the wall, so their joint row is a VERTICAL joint measured from the wall start
-  const horizontal = material.spec?.orientation === "horizontal";
   return (
     <Sheet title="Joint row" onClose={onClose} initialFocus={false}>
       <KeyboardSafe className="space-y-2"><div className="space-y-2" data-joint-row-form="">
@@ -744,28 +976,73 @@ function JointRowSheet({ view, material, suggestionMm, onApply, onRemove, onClos
           <NumberField label="Joint gap" value={gapMm} min={0} max={50} onCommit={(n) => apply({ gapMm: n })} help="From the selected detail — never defaulted" />
         </div>
         <CommitText label="Detail reference (drawing / guide)" value={ref} onCommit={(v) => apply({ ref: v })} />
-        {!jr && <p className="text-xs text-amber-800">Enter the joint gap from the detail to apply the joint row.</p>}
+        {draft ? (
+          <p className="text-xs text-amber-800" data-joint-row-draft="">Kept as a draft until the joint {horizontal ? "position" : "height"}, gap and detail are all entered — a &quot;joint allowed&quot; flag alone is never a layout. Still needed: {missing.join(", ")}.{jr ? " The joint row applied before stays in use until then." : ""}</p>
+        ) : jr ? <p className="text-xs text-muted">Applied: each band is its own course of sheets with its own cut.</p>
+          : <p className="text-xs text-amber-800">Enter the joint gap and the detail reference from the joint detail — the row applies once the height, gap and detail are all entered.</p>}
         {misfits.length > 0 && (
           <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-joint-row-misfit="">
             {misfits.map((m) => `${wallName(m.wall)} (${fmtMm(Math.round(m.extentMm))} mm)`).join(", ")} {misfits.length === 1 ? "is" : "are"} not {horizontal ? "long" : "tall"} enough for a joint at {fmtMm(atMm)} mm — the joint row doesn&apos;t apply there, so {misfits.length === 1 ? "it keeps" : "they keep"} a single course of sheets.
           </p>
         )}
-        {jr && <Btn kind="danger" onClick={onRemove}>Remove joint row</Btn>}
+        {(jr || draft) && <Btn kind="danger" onClick={onRemove}>{jr ? "Remove joint row" : "Remove draft joint row"}</Btn>}
       </div></KeyboardSafe>
     </Sheet>
   );
 }
 
+/**
+ * New wall by numbers. The wall is added (auto-apply, nothing to confirm) as soon as its length is entered AND the
+ * entry is finished: Enter in a field, a shape tapped after the length (that shape is used), or focus leaving the
+ * sheet. Moving from the length to the name or a shape of THIS sheet is part of the same entry (PH-14) — it never
+ * adds a Rectangle and loses the tap. Closing the sheet (✕) cancels.
+ */
 function NewWallSheet({ defaultName, onCreate, onClose }) {
   const [name, setName] = useState(defaultName);
   const [kind, setKind] = useState("rect");
+  const rootRef = useRef(null);
+  const lengthRef = useRef(null);  // the entered (valid) length, not yet a wall
+  const enterRef = useRef(false);  // the length commit came from Enter (not a blur)
+  const timer = useRef(null);
+  const latest = useRef({ name, kind });
+  latest.current = { name, kind };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const create = (patch = {}) => {
+    clearTimeout(timer.current);
+    if (!lengthRef.current) return false;
+    const v = { ...latest.current, ...patch };
+    const widthMm = lengthRef.current;
+    lengthRef.current = null;
+    onCreate({ name: (v.name || "").trim().slice(0, 60) || defaultName, kind: v.kind, widthMm });
+    return true;
+  };
+  // a blur: wait for the tap that caused it — a shape or the name in this sheet continues the entry
+  const createWhenLeft = () => {
+    clearTimeout(timer.current);
+    if (!lengthRef.current) return;
+    if (document.visibilityState === "hidden") { create(); return; } // app switch / phone locked: keep what was typed
+    timer.current = setTimeout(() => { if (!rootRef.current?.contains(document.activeElement)) create(); }, 400);
+  };
   return (
     <Sheet title="Wall by numbers" onClose={onClose} initialFocus={false}>
       <KeyboardSafe className="space-y-2">
-        <TextField label="Wall name" value={name} onChange={setName} />
-        <Chips label="Shape" value={kind} options={SHAPES} onChange={setKind} />
-        <NumberField label="Wall length" autoFocus value={null} min={1} max={MAX_MM} onCommit={(n) => onCreate({ name: (name || "").trim().slice(0, 60) || defaultName, kind, widthMm: n })}
-          help="Horizontal length along the wall. Heights come next — the elevation appears once they're entered." />
+        <div ref={rootRef} className="space-y-2"
+          onKeyDownCapture={(e) => { if (e.key === "Enter") enterRef.current = true; }}
+          onKeyDown={(e) => {
+            enterRef.current = false;
+            if (e.key !== "Enter" || !e.target.closest?.("[data-new-wall-name]")) return;
+            e.preventDefault();
+            if (!create()) rootRef.current?.querySelector("[data-new-wall-length] input")?.focus();
+          }}
+          onBlur={(e) => { if (!rootRef.current?.contains(e.relatedTarget)) createWhenLeft(); }}>
+          <div data-new-wall-name=""><TextField label="Wall name" value={name} onChange={setName} /></div>
+          <Chips label="Shape" value={kind} options={SHAPES} onChange={(k) => { setKind(k); create({ kind: k }); }} />
+          <div data-new-wall-length="">
+            <NumberField label="Wall length" autoFocus value={null} min={1} max={MAX_MM}
+              onCommit={(n) => { lengthRef.current = n; if (enterRef.current) create(); else createWhenLeft(); }}
+              help="Horizontal length along the wall. Heights come next — the elevation appears once they're entered." />
+          </div>
+        </div>
       </KeyboardSafe>
     </Sheet>
   );
@@ -819,7 +1096,7 @@ function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst 
       {kind === "polygon" ? <p className="text-sm text-ink">Shape: <b>traced outline</b> — heights come from the traced elevation.</p> : <Chips label="Shape" value={kind} options={SHAPES} onChange={setShape} />}
       {traced ? (
         <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-sm" data-field="widthMm">
-          <span className="block text-xs font-medium text-muted">Wall length (traced)</span>
+          <span className="block text-xs font-medium text-muted">{isTracedOutline(wall) ? "Outline width (traced)" : "Wall length (traced)"}</span>
           <span className="font-semibold text-ink" data-traced-length="">{fmtMm(Math.round((lengthMm || 0) * 10) / 10)} mm</span>
           <span className="block text-[11px] text-muted">Measured on the plan — retrace the wall to change it.{onTrace ? "" : " (No plan on this takeoff.)"}</span>
         </div>
@@ -959,11 +1236,17 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
       const cons = view.contributions.filter((c) => c.measurementId === o.id && !c.archived);
       record({ redo: partial({ archive: { measurements: [o.id], contributions: cons.map((c) => c.id) } }), undo: partial({ measurements: [mRec(o)], contributions: cons.map(cRec) }) });
     },
-    updateRules(patch, drop = []) {
+    /** @param {string[]} drop rule keys to remove  @param {string[]} settled "check these" flags (rules.carried) this edit answers */
+    updateRules(patch, drop = [], settled = []) {
       if (!material) return;
       const before = matRec(material);
       const rules = { ...(material.rules || {}), ...patch };
       for (const k of drop) delete rules[k];
+      if (settled.length && rules.carried) {
+        const carried = { ...rules.carried };
+        for (const k of settled) delete carried[k];
+        if (Object.keys(carried).length) rules.carried = carried; else delete rules.carried;
+      }
       record({ redo: partial({ materials: [{ ...before, rules }] }), undo: partial({ materials: [before] }) });
     },
   };
@@ -982,9 +1265,8 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
   ) : null;
 
   if (wall) {
-    const traced = isTraced(wall);
     return (
-      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${traced ? "Derived from plan + entered heights" : "Entered"}`} onClose={() => onOpenWall?.(null)} closeLabel="‹ Walls" actions={headerActions}>
+      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => onOpenWall?.(null)} closeLabel="‹ Walls" actions={headerActions}>
         <div ref={rootRef} className="contents">
           <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} saveBanner={saveBanner}
             draftReset={draftReset} clearDraftRef={clearDraftRef} />
@@ -1034,7 +1316,7 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
                         <span className="block truncate text-sm font-semibold text-ink">{wallName(w)}</span>
                         <span className="block text-[11px] text-muted">{SHAPE_LABEL[k]} · {fmtMm(Math.round((len || 0) * 10) / 10)} mm long{hText ? ` · ${hText}` : ""}{nOpen ? ` · ${plural(nOpen, "opening")}` : ""}</span>
                         <span className="mt-1 flex flex-wrap gap-1">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTraced(w) ? "From plan" : "Entered"}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTracedOutline(w) ? "Traced elevation" : isTraced(w) ? "From plan" : "Entered"}</span>
                           {needsHeights && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
                           {blocked && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-wall-blocked="">Needs attention</span>}
                           {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
@@ -1077,11 +1359,11 @@ function setoutFor(material) {
   const horizontal = material.spec?.orientation === "horizontal";
   if (material.methodKey === "sheet_layout") {
     return { unit: "sheet", what: "Sheets", min: 0, label: horizontal ? "Setout starts at (up from the wall base)" : "Setout starts at (from the wall start)",
-      help: "Default is the wall start. Applies to every wall using this material; panels are never re-centred automatically." };
+      help: "This wall only — other walls keep their own setout. Default is the wall start; panels are never re-centred automatically." };
   }
   if (material.methodKey === "course_layout") {
     return { unit: "piece", what: horizontal ? "Course boards" : "Boards", min: -MAX_MM, max: 0, label: horizontal ? "First course starts at (from the wall base)" : "First board starts at (from the wall start)",
-      help: "0 = the wall base/start. A negative value starts with a cut first course. Applies to every wall using this material — never re-centred automatically." };
+      help: "This wall only. 0 = the wall base/start; a negative value starts with a cut first course. Never re-centred automatically." };
   }
   return null;
 }
@@ -1096,6 +1378,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const [drag, setDrag] = useState(null);         // { id, xMm, sillMm } live preview while dragging
   const [focusToken, setFocusToken] = useState(0);
   const [datumChange, setDatumChange] = useState(null); // { before, datumMm, key } — shown only while still true
+  const [alignChange, setAlignChange] = useState(null); // the same for "Use this setout on every wall" (job-wide)
   const [autoFocusFirst] = useState(() => canEdit && missingHeights(wall.inputs || {}).length > 0);
   const elevRef = useRef(null);
   const drawingRef = useRef(null);
@@ -1134,6 +1417,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const cladEntries = entries.filter((e) => CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey));
   const shownClad = cladEntries.find((e) => e.material.id === pick) || cladEntries[0] || null;
   const accessoryEntries = entries.filter((e) => e.material.spec?.family === "accessory");
+  // a stud wall frames each opening from its framing detail (03 T4) — edited in the opening's sheet
+  const studEntry = entries.find((e) => (e.result?.methodKey || e.material.methodKey) === "wall_frame") || null;
 
   // elements of the ONE view shown
   let elements = { items: [], guides: [], notes: [], totals: null, sheetInfo: null };
@@ -1160,15 +1445,38 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   };
   const tooTall = blockingHere.find((p) => p.code === "sheet_too_tall" && p.materialId === material?.id);
 
-  // setout datum (sheets / courses) + its quantity change on THIS wall, shown only while it is still the reason
+  // setout datum (sheets / courses) — per WALL (rules.datumByWall[wallId], else the material default rules.datumMm;
+  // F14): changing it here moves this wall only, and its quantity change on THIS wall is shown only while it is
+  // still the reason. Moving every wall is the explicit "Use this setout on every wall" with a job-wide preview.
   const setout = setoutFor(material);
+  const defaultDatum = material?.rules?.datumMm ?? 0;
+  const datumOf = (w) => material?.rules?.datumByWall?.[w.id] ?? defaultDatum;
+  const datumHere = datumOf(wall);
+  const materialWallsHere = material ? materialWalls(view, material.id) : [];
+  const datumOthers = setout && attached ? materialWallsHere.filter((w) => w.id !== wall.id && datumOf(w) !== datumHere).map((w) => ({ wall: w, datumMm: datumOf(w) })) : [];
   const setoutQty = (() => {
     if (!material || !setout) return null;
     return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall)).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0);
   })();
-  const changeKeyFor = (rules) => { const r = { ...(rules || {}) }; delete r.datumMm; return JSON.stringify([inputs, openingsRaw.map((o) => o.inputs), r, material?.spec]); };
+  const materialQty = material && setout ? (results[material.id]?.demands || []).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0) : null;
+  const changeKeyFor = (rules) => {
+    const r = { ...(rules || {}) };
+    if (r.datumByWall) { r.datumByWall = { ...r.datumByWall }; delete r.datumByWall[wall.id]; if (!Object.keys(r.datumByWall).length) delete r.datumByWall; }
+    return JSON.stringify([inputs, openingsRaw.map((o) => o.inputs), r, material?.spec]);
+  };
   const changeKey = changeKeyFor(material?.rules);
-  const datumShown = datumChange && (material?.rules?.datumMm ?? 0) === datumChange.datumMm && datumChange.key === changeKey ? datumChange : null;
+  const datumShown = datumChange && datumHere === datumChange.datumMm && datumChange.key === changeKey ? datumChange : null;
+  const allKeyFor = (rules) => {
+    const r = { ...(rules || {}) };
+    delete r.datumMm; delete r.datumByWall;
+    return JSON.stringify([materialWallsHere.map((w) => [w.id, w.inputs, view.measurements.filter((m) => m.kind === "opening" && m.parentId === w.id && !m.archived).map((o) => o.inputs)]), r, material?.spec]);
+  };
+  const alignShown = alignChange && defaultDatum === alignChange.datumMm && !material?.rules?.datumByWall && alignChange.key === allKeyFor(material?.rules) ? alignChange : null;
+  function alignAll() {
+    setDatumChange(null);
+    setAlignChange({ before: materialQty, datumMm: datumHere, key: allKeyFor(material.rules) });
+    act.updateRules({ datumMm: datumHere }, ["datumByWall"]);
+  }
 
   // live result next to the wall fields (the elevation can be scrolled out of view while typing)
   const mine = material ? entries.find((e) => e.material.id === material.id) : null;
@@ -1274,7 +1582,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               ))}
             </div>
             <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted">
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" data-provenance="">{traced ? "Derived from plan + entered heights" : "Entered"}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" data-provenance="">{provenanceText(wall)}</span>
               <span>Setout aid — not a surveyed elevation.</span>
             </p>
             {tab === "cladding" && cladEntries.length > 1 && (
@@ -1375,16 +1683,30 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
           {tab === "cladding" && shownClad && shownClad.material.id === material?.id && setout && canEdit && (
             <section aria-label={material.methodKey === "sheet_layout" ? "Sheet setout" : "Course setout"} className="space-y-2 rounded-card border border-hairline bg-white p-3">
               <h3 className="text-sm font-semibold text-ink">{material.methodKey === "sheet_layout" ? "Sheet setout" : "Course setout"}</h3>
-              <NumberField key={draftReset} label={setout.label} value={material.rules?.datumMm ?? 0} min={setout.min} max={setout.max ?? MAX_MM}
+              <NumberField key={draftReset} label={setout.label} value={datumHere} min={setout.min} max={setout.max ?? MAX_MM}
                 onCommit={(n) => {
                   setDatumChange({ before: setoutQty, datumMm: n, key: changeKeyFor(material.rules) });
-                  act.updateRules({ datumMm: n });
+                  setAlignChange(null);
+                  // THIS wall only (rules.datumByWall); the same value as the material default needs no own entry
+                  const byWall = { ...(material.rules?.datumByWall || {}) };
+                  if (n === defaultDatum) delete byWall[wall.id]; else byWall[wall.id] = n;
+                  if (Object.keys(byWall).length) act.updateRules({ datumByWall: byWall }); else act.updateRules({}, ["datumByWall"]);
                 }}
                 help={setout.help} />
               {datumShown && <p className="text-xs text-ink" data-datum-change="">{setout.what} on this wall: {datumShown.before} → <b>{setoutQty}</b></p>}
+              {datumOthers.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-muted" data-datum-others="">Other walls using {material.name}: {datumOthers.map((o) => `${wallName(o.wall)} starts at ${fmtMm(o.datumMm)} mm`).join(" · ")}.</p>
+                  <Btn onClick={alignAll}>Use this setout on every wall using {material.name}</Btn>
+                </div>
+              )}
+              {alignShown && <p className="text-xs text-ink" data-datum-all-change="">{setout.what} on all {materialWallsHere.length} walls using {material.name}: {alignShown.before} → <b>{materialQty}</b></p>}
               {material.methodKey === "sheet_layout" && (material.rules?.jointRows ? (
-                <p className="text-xs text-ink">Joint row at {material.rules.jointRows.atMm.map((x) => fmtMm(x)).join(", ")} mm (gap {fmtMm(material.rules.jointRows.gapMm)} mm{material.rules.jointRows.detailRef ? `, ${material.rules.jointRows.detailRef}` : ""}) <Btn kind="ghost" onClick={() => setSel({ kind: "jointRow" })}>Edit</Btn></p>
-              ) : <Btn onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>)}
+                <p className="text-xs text-ink">Joint row at {material.rules.jointRows.atMm.map((x) => fmtMm(x)).join(", ")} mm (gap {fmtMm(material.rules.jointRows.gapMm)} mm{material.rules.jointRows.detailRef ? `, ${material.rules.jointRows.detailRef}` : ""}) <Btn kind="ghost" aria-label="Edit joint row" onClick={() => setSel({ kind: "jointRow" })}>Edit</Btn></p>
+              ) : material.rules?.jointRowsDraft ? null : <Btn onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>)}
+              {material.methodKey === "sheet_layout" && material.rules?.jointRowsDraft && (
+                <p className="text-xs text-amber-800" data-joint-row-draft="">Unfinished joint row — not applied (still needs {jointRowMissing(material.rules.jointRowsDraft, material.spec?.orientation === "horizontal").join(", ")}). <Btn kind="ghost" aria-label="Edit joint row" onClick={() => setSel({ kind: "jointRow" })}>Edit</Btn></p>
+              )}
             </section>
           )}
 
@@ -1468,6 +1790,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
+              {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}
             </div>
           )}
@@ -1477,7 +1800,9 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       {selItem && <ElementSheet item={selItem} index={hitItems.findIndex((it) => it.id === selItem.id)} total={hitItems.length} onStep={step} onClose={() => setSel(null)} onAction={(a) => a === "jointRow" && setSel({ kind: "jointRow" })} canEdit={canEdit} />}
       {sel?.kind === "jointRow" && material && (
         <JointRowSheet key={`joint-row-${draftReset}`} view={view} material={material} suggestionMm={tooTall?.suggestedJointAtMm} onClose={() => setSel(null)}
-          onApply={(jr) => act.updateRules({ jointRows: jr })} onRemove={() => { act.updateRules({}, ["jointRows"]); setSel(null); }} />
+          onApply={(jr) => act.updateRules({ jointRows: jr }, ["jointRowsDraft"], ["jointRows"])}
+          onDraft={(d) => { if (JSON.stringify(d) === JSON.stringify(material.rules?.jointRowsDraft ?? null)) return; if (d) act.updateRules({ jointRowsDraft: d }); else act.updateRules({}, ["jointRowsDraft"]); }}
+          onRemove={() => { act.updateRules({}, ["jointRows", "jointRowsDraft"], ["jointRows", "jointRowsDraft"]); setSel(null); }} />
       )}
     </>
   );

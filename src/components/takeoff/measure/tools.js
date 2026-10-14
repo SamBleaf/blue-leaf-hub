@@ -161,3 +161,46 @@ export function distributionInputs(rules) {
 /** The job-material record shape the takeoff upserts (same as TakeoffApp matRec). */
 export const materialRecord = (m) => ({ id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion || 1, spec: m.spec, rules: m.rules || {},
   profile: m.profile || null, fromPresetId: m.fromPresetId || null, fromPresetRevision: m.fromPresetRevision || null });
+
+// ── repeated timber review (TC-R04 02 §2, 03 T1): read straight from the engine result, never recalculated ──────
+
+/** The thickness a member takes up along its run (the smaller section dimension), or null when no section is set. */
+export function memberThicknessMm(material) {
+  const s = material?.spec?.section;
+  const d = Number(s?.depthMm), w = Number(s?.widthMm);
+  return d > 0 && w > 0 ? Math.min(d, w) : null;
+}
+
+/** Stock the engine allocated one member station from: { stockMm } | { offcut: label } | null (not allocated). */
+export function stockForStation(result, stationId) {
+  const tag = `:${stationId}:`;
+  for (const g of result?.allocation?.groups || []) {
+    for (const b of g.bars || []) {
+      if (!(b.cuts || []).some((c) => String(c.demandId || "").includes(tag))) continue;
+      return b.source === "new" ? { stockMm: b.stockLengthMm } : { offcut: b.offcutLabel || "an offcut" };
+    }
+  }
+  return null;
+}
+
+/**
+ * Members, stock and needed lengths of a repeated-member material from the engine result (no blocking problem only —
+ * otherwise the problems say what is missing and nothing here could be ordered).
+ * @returns {{ members:number, stock:Array<[number, number]>, fromOffcuts:number, needs:number[] } | null}
+ */
+export function timberOrderSummary(result) {
+  if (!result?.allocation || (result.problems || []).some((p) => p.blocking !== false)) return null;
+  const live = (result.layouts || []).flatMap((l) => (l?.kind === "repeated" ? l.ticks || [] : [])).filter((t) => !t.removed);
+  if (!live.length) return null;
+  const members = live.length + live.reduce((a, t) => a + (t.duplicates || 0), 0);
+  const byLen = new Map();
+  let fromOffcuts = 0;
+  for (const g of result.allocation.groups || []) {
+    for (const b of g.bars || []) {
+      if (b.source === "new") byLen.set(b.stockLengthMm, (byLen.get(b.stockLengthMm) || 0) + 1);
+      else fromOffcuts += 1;
+    }
+  }
+  const needs = [...new Set(live.map((t) => Math.round(t.lengthNeededMm * 100) / 100))].sort((a, b) => a - b);
+  return { members, stock: [...byLen].sort((a, b) => a[0] - b[0]), fromOffcuts, needs };
+}

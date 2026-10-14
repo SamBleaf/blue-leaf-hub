@@ -18,6 +18,9 @@
 //   and every tap is a plain tap.
 // * focus ({ key, points }): when given, the view frames those PDF points once per key (schedule "Show on plan")
 //   instead of the whole page — and re-frames them after a resize until the user moves the plan themselves.
+// * viewKey (opt-in): the view is remembered per key (e.g. workspace|plan|page) for this browser tab, so a viewer
+//   that re-opens — another material, a wall elevation and back — comes back at the same zoom, centred on the same
+//   spot (02 "preserve zoom while editing"). The page is fitted only on its first open, or when the user asks (Fit).
 // =============================================================================
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { applyMatrix, invertMatrix, totalRotation, viewportTransform } from "../../../shared/takeoff/index.js";
@@ -28,10 +31,12 @@ const LOUPE_PX = 132;
 const LOUPE_ZOOM = 3;
 
 const stats = { renders: 0, cancels: 0, lastRenderMs: 0, canvases: 0, maxBackingPixels: 0 };
+/** viewKey → { pageKey, scale, panX, panY, w, h } — the last view of each opted-in plan page (this tab only). */
+const VIEW_MEMORY = new Map();
 if (typeof window !== "undefined") window.__takeoffViewerStats = stats;
 
 const PdfViewport = forwardRef(function PdfViewport(
-  { doc, pageIndex, displayRotation = 0, mode = "tap", onTap, onDoubleTap, overlay, onViewChange, onPageMeta, focus = null, className = "", ariaLabel = "Plan" },
+  { doc, pageIndex, displayRotation = 0, mode = "tap", onTap, onDoubleTap, overlay, onViewChange, onPageMeta, focus = null, viewKey = null, className = "", ariaLabel = "Plan" },
   ref,
 ) {
   const wrapRef = useRef(null);
@@ -50,6 +55,12 @@ const PdfViewport = forwardRef(function PdfViewport(
   onPageMetaRef.current = onPageMeta;
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState(viewRef.current);
+  // view memory: written on every view change once this page has been fitted / restored (fittedKey = its page key)
+  const fittedKey = useRef(null);
+  const viewKeyRef = useRef(viewKey);
+  viewKeyRef.current = viewKey;
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   // R04 F08: press-and-hold magnifier — the point under the finger shown 3× above it with a crosshair
   const [loupe, setLoupe] = useState(null);
   const loupeRef = useRef(null);
@@ -121,6 +132,7 @@ const PdfViewport = forwardRef(function PdfViewport(
 
   const commitView = useCallback((v, { rerender = true } = {}) => {
     viewRef.current = v;
+    if (viewKeyRef.current && fittedKey.current) VIEW_MEMORY.set(viewKeyRef.current, { pageKey: fittedKey.current, ...v, w: sizeRef.current.w, h: sizeRef.current.h });
     setView(v);
     applyCssTransform();
     onViewChange?.(v);
@@ -135,6 +147,18 @@ const PdfViewport = forwardRef(function PdfViewport(
     const s = Math.min(size.w / base.width, size.h / base.height) * 0.96;
     fitRef.current = s;
     commitView({ scale: s, panX: (size.w - base.width * s) / 2, panY: (size.h - base.height * s) / 2 });
+  }, [size.w, size.h, commitView]);
+
+  /** Re-open at a remembered view: same zoom (within this size's limits), the same plan spot at the centre. */
+  const restore = useCallback((mem) => {
+    const meta = metaRef.current;
+    if (!meta || !size.w || !size.h) return false;
+    const base = viewportTransform(meta, { scale: 1, rotation: rotationRef.current });
+    fitRef.current = Math.min(size.w / base.width, size.h / base.height) * 0.96;
+    const cx = (mem.w / 2 - mem.panX) / mem.scale, cy = (mem.h / 2 - mem.panY) / mem.scale; // page px at scale 1
+    const s = clamp(mem.scale, fitRef.current * ZOOM_MIN_FACTOR, fitRef.current * ZOOM_MAX_FACTOR);
+    commitView({ scale: s, panX: size.w / 2 - s * cx, panY: size.h / 2 - s * cy });
+    return true;
   }, [size.w, size.h, commitView]);
 
   /** Frame a set of PDF points (padded, never past ZOOM_MAX_FACTOR or beyond `maxFactor` × fit for a single point). */
@@ -187,7 +211,6 @@ const PdfViewport = forwardRef(function PdfViewport(
   // keeps the user's zoom and only re-renders the bitmap for the new size.
   // A focus (points to frame) applies once per focus key after that fit, and again after a resize for as long as the
   // user hasn't moved the plan (the sheet settling must not leave the framed measurements half hidden).
-  const fittedKey = useRef(null);
   const focusRef = useRef(focus);
   focusRef.current = focus;
   const focusDone = useRef(null);   // { key, w, h } last applied
@@ -197,7 +220,12 @@ const PdfViewport = forwardRef(function PdfViewport(
     if (!pageMeta || !size.w || !size.h) return;
     const key = `${pageIndex}|${rotation}|${pageMeta.viewBox.join(",")}`;
     let framed = false;
-    if (fittedKey.current !== key) { fittedKey.current = key; fit(); framed = true; focusDone.current = null; }
+    if (fittedKey.current !== key) {
+      fittedKey.current = key;
+      const mem = viewKey ? VIEW_MEMORY.get(viewKey) : null;
+      if (!(mem && mem.pageKey === key && restore(mem))) fit();
+      framed = true; focusDone.current = null;
+    }
     const fd = focusDone.current;
     if (focusKey && (fd?.key !== focusKey || (!userMoved.current && (fd.w !== size.w || fd.h !== size.h)))) {
       if (fitTo(focusRef.current.points)) {
@@ -207,7 +235,7 @@ const PdfViewport = forwardRef(function PdfViewport(
       }
     }
     if (!framed) scheduleRender(0);
-  }, [pageMeta, pageIndex, rotation, size.w, size.h, fit, fitTo, scheduleRender, focusKey]);
+  }, [pageMeta, pageIndex, rotation, size.w, size.h, fit, fitTo, restore, scheduleRender, focusKey, viewKey]);
 
   // container size
   useEffect(() => {

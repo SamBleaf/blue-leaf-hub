@@ -1,0 +1,232 @@
+{
+  "config": {
+    "argv": [
+      "/usr/local/bin/node",
+      "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/node_modules/.bin/playwright",
+      "test",
+      "--config=playwright.tc-evidence.config.js",
+      "--project=iphone13-webkit"
+    ],
+    "configFile": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/playwright.tc-evidence.config.js",
+    "rootDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/desktop-chromium",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-chromium",
+        "name": "desktop-chromium",
+        "testDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+        "testIgnore": [],
+        "testMatch": [
+          "tc-journeys-sandbox.spec.js"
+        ],
+        "timeout": 600000
+      },
+      {
+        "outputDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "iphone13-webkit",
+        "name": "iphone13-webkit",
+        "testDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+        "testIgnore": [],
+        "testMatch": [
+          "tc-journeys-sandbox.spec.js"
+        ],
+        "timeout": 600000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "docs/takeoff/evidence/tc-journeys/_artifacts/results-iphone13-webkit.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tc-journeys-sandbox.spec.js",
+      "file": "tc-journeys-sandbox.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "TC-R04 real-stack journeys",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 600000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "iphone13-webkit",
+              "projectName": "iphone13-webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 73144,
+                  "error": {
+                    "message": "Error: journeys not passing\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 4\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"FL: FAIL expect(locator).toHaveCount(expected) failed\",\u001b[39m\n\u001b[31m+   \"J5: FAIL Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m",
+                    "stack": "Error: journeys not passing\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 4\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"FL: FAIL expect(locator).toHaveCount(expected) failed\",\u001b[39m\n\u001b[31m+   \"J5: FAIL Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:738:146",
+                    "location": {
+                      "file": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js",
+                      "column": 146,
+                      "line": 738
+                    },
+                    "snippet": "  736 |   writeSummary();\n  737 |\n> 738 |   expect(results.filter((r) => r.status !== \"PASS\").map((r) => `${r.id}: ${r.status} ${r.error?.split(\"\\n\")[0] || \"\"}`), \"journeys not passing\").toEqual([]);\n      |                                                                                                                                                  ^\n  739 | });\n  740 |\n  741 | /** SUMMARY.md across both projects (whichever have run). */"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js",
+                        "column": 146,
+                        "line": 738
+                      },
+                      "message": "Error: journeys not passing\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 4\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"FL: FAIL expect(locator).toHaveCount(expected) failed\",\u001b[39m\n\u001b[31m+   \"J5: FAIL Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n\n  736 |   writeSummary();\n  737 |\n> 738 |   expect(results.filter((r) => r.status !== \"PASS\").map((r) => `${r.id}: ${r.status} ${r.error?.split(\"\\n\")[0] || \"\"}`), \"journeys not passing\").toEqual([]);\n      |                                                                                                                                                  ^\n  739 | });\n  740 |\n  741 | /** SUMMARY.md across both projects (whichever have run). */\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:738:146"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "S0 — Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
+                      "duration": 10840
+                    },
+                    {
+                      "title": "J1 — Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800",
+                      "duration": 12585
+                    },
+                    {
+                      "title": "J2 — Cladding: Axon 133 smooth, wall 4,800 × 2,700 + 900 × 900 window → 4 sheets, net 12.15 m²; 4,801 → 5",
+                      "duration": 9192
+                    },
+                    {
+                      "title": "AL — Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
+                      "duration": 2483
+                    },
+                    {
+                      "title": "FL — Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400",
+                      "duration": 30440,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\nTimeout:  15000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\u001b[22m\n\u001b[2m    34 × locator resolved to 0 elements\u001b[22m\n\u001b[2m       - unexpected value \"0\"\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\nTimeout:  15000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')\u001b[22m\n\u001b[2m    34 × locator resolved to 0 elements\u001b[22m\n\u001b[2m       - unexpected value \"0\"\u001b[22m\n\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:496:103\n    at journey (/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:136:7)\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:401:3",
+                        "location": {
+                          "file": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js",
+                          "column": 103,
+                          "line": 496
+                        },
+                        "snippet": "  494 |     }\n  495 |     // after the save the run must still be 9,000 + 1,400 — on the plan and on the server\n> 496 |     await expect(page.locator('[data-kind=\"polyline\"][data-measurement-id][data-order=\"9000+1400\"]')).toHaveCount(1);\n      |                                                                                                       ^\n  497 |     expect(got).toEqual([\"1x1400\", \"1x3200\", \"1x9000\"]);\n  498 |     await toOverview();\n  499 |   }, [\"S0\"]);"
+                      }
+                    },
+                    {
+                      "title": "J5 — Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back",
+                      "duration": 1516,
+                      "error": {
+                        "message": "Error: Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run.",
+                        "stack": "Error: Order not ready to export — Not ready to order yet: A piece is longer than the order ceiling — split it or change the material rule. The split pieces do not cover the run.\n    at saveUntilReady (/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:545:13)\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:652:19\n    at journey (/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:136:7)\n    at /Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js:635:3",
+                        "location": {
+                          "file": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js",
+                          "column": 13,
+                          "line": 545
+                        },
+                        "snippet": "  543 |       await shot(\"order-not-ready\", `Order NOT ready (Export supplier PDF disabled): ${why.slice(0, 300)}`);\n  544 |       await expect(page.getByRole(\"button\", { name: \"Export supplier PDF\" })).toBeDisabled();\n> 545 |       throw new Error(`Order not ready to export — ${why}`);\n      |             ^\n  546 |     }\n  547 |     const t = await readyBanner.innerText();\n  548 |     await page.getByTestId(\"order-totals\").scrollIntoViewIfNeeded();"
+                      }
+                    },
+                    {
+                      "title": "J5d — DIAGNOSTIC (not J5): same order minus the blocked split-run flashing pieces → non-draft export + both PDFs read back",
+                      "duration": 4804
+                    }
+                  ],
+                  "startTime": "2026-10-14T09:16:26.358Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-2.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-1.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video.webm"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review/tc-journeys-sandbox.spec.js",
+                    "column": 146,
+                    "line": 738
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "39908a6f079d0eafc2ee-efaef938d80a5893f6e3",
+          "file": "tc-journeys-sandbox.spec.js",
+          "line": 45,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-14T09:16:26.127Z",
+    "duration": 73578.932,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

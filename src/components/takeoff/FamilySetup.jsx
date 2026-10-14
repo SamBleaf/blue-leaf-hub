@@ -20,7 +20,7 @@
 // old value is never silently applied (a Matrix joint gap is not carried onto Axon). The card flags each one
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, familyProblems, methodFor, normaliseFamilySpec } from "../../../shared/takeoff/index.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
@@ -31,6 +31,46 @@ const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const fmt = (n) => (isNum(n) ? n.toLocaleString("en-AU", { maximumFractionDigits: 1 }) : "?");
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 
+// ── typed-but-not-applied fields (PH-03 / PH-04) ─────────────────────────────────────────────────────────────
+// Every field below keeps its own text and applies it on Enter / blur (one change, one undo step). While a field has
+// focus and the user has typed, a newer value from outside (server normalisation, recovery, a colleague) never
+// overwrites the text; an untouched field follows it. A card shows "Not saved yet" while any field holds typed text
+// that isn't applied, and typed text is applied when the page is hidden (useKeepFieldVisible).
+const PendingContext = createContext(null);
+function usePendingFields() {
+  const [ids, setIds] = useState(() => new Set());
+  const report = useCallback((id, on) => setIds((cur) => {
+    if (cur.has(id) === on) return cur;
+    const n = new Set(cur);
+    if (on) n.add(id); else n.delete(id);
+    return n;
+  }), []);
+  return { pending: ids.size > 0, report };
+}
+function useDraftText(shown, commitFn) {
+  const [text, setText] = useState(shown);
+  const [edited, setEdited] = useState(false);
+  const st = useRef({ focused: false, edited: false });
+  const report = useContext(PendingContext);
+  const id = useId();
+  useEffect(() => { if (!(st.current.focused && st.current.edited)) setText(shown); }, [shown]);
+  const pending = edited && text.trim() !== shown;
+  useEffect(() => { report?.(id, pending); }, [report, id, pending]);
+  useEffect(() => () => report?.(id, false), [report, id]);
+  // a field removed while it still holds typed text (the card closed under it) applies that text, never drops it
+  const commitRef = useRef(commitFn);
+  commitRef.current = commitFn;
+  useEffect(() => () => { if (st.current.edited) { try { commitRef.current?.({ unmounting: true }); } catch { /* best effort */ } } }, []);
+  return {
+    text,
+    isEdited: () => st.current.edited,
+    type: (v) => { st.current.edited = true; setEdited(true); setText(v); },
+    /** the typed text was applied (or matched the value): follow the value again */
+    applied: (resync) => { st.current.edited = false; setEdited(false); if (resync) setText(shown); },
+    focusProps: { onFocus: () => { st.current.focused = true; }, onBlurCapture: () => { st.current.focused = false; } },
+  };
+}
+
 /**
  * Number input for values that may be NOT ENTERED. Emptying the field commits null — never 0 (a cleared adhesive
  * joint, kerf, joint gap or overlap must not silently become a real 0 mm value). Invalid text stays a draft with
@@ -39,27 +79,27 @@ const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max = Infinity, integer = false, help, autoFocus = false }) {
   const id = useId();
   const shown = isNum(value) ? String(value) : "";
-  const [text, setText] = useState(shown);
   const [err, setErr] = useState(null);
-  useEffect(() => { setText(shown); setErr(null); }, [shown]);
-  const commit = () => {
-    const t = text.trim().replace(/,/g, "");
+  const commit = (o = {}) => {
+    if (!d.isEdited()) { if (!o.unmounting) { d.applied(true); setErr(null); } return; }
+    const t = d.text.trim().replace(/,/g, "");
     // emptied: "not entered" (null). A field showing a default (e.g. centres 600) shows that default again.
-    if (t === "") { setErr(null); if (isNum(value)) onCommit(null); setText(shown); return; }
+    if (t === "") { if (!o.unmounting) { setErr(null); d.applied(true); } if (isNum(value)) onCommit(null); return; }
     const n = Number(t);
     if (!Number.isFinite(n) || n < min || (min > 0 && !integer && n <= 0) || (integer && !Number.isInteger(n))) {
-      setErr(integer ? `Enter a whole number of ${min} or more.` : min > 0 ? "Enter a number greater than 0." : "Enter a number of 0 or more.");
+      if (!o.unmounting) setErr(integer ? `Enter a whole number of ${min} or more.` : min > 0 ? "Enter a number greater than 0." : "Enter a number of 0 or more.");
       return;
     }
-    if (n > max) { setErr(`That's more than ${max.toLocaleString("en-AU")}${unit ? ` ${unit}` : ""} — check the number.`); return; }
-    setErr(null);
+    if (n > max) { if (!o.unmounting) setErr(`That's more than ${max.toLocaleString("en-AU")}${unit ? ` ${unit}` : ""} — check the number.`); return; }
+    if (!o.unmounting) { setErr(null); d.applied(n === value); }
     if (n !== value) onCommit(n);
   };
+  const d = useDraftText(shown, commit);
   return (
     <div>
       <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
       <div className="flex items-stretch rounded-lg border border-hairline bg-white focus-within:ring-2 focus-within:ring-primary">
-        <input id={id} autoFocus={autoFocus} inputMode={integer ? "numeric" : "decimal"} value={text} onChange={(e) => setText(e.target.value)} onBlur={commit}
+        <input id={id} autoFocus={autoFocus} inputMode={integer ? "numeric" : "decimal"} value={d.text} onChange={(e) => d.type(e.target.value)} onBlur={() => commit()} {...d.focusProps}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} aria-invalid={!!err} aria-describedby={err ? `${id}-err` : undefined}
           className="min-h-[44px] w-full min-w-0 rounded-l-lg border-0 px-3 text-base text-ink focus:ring-0" />
         {unit ? <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span> : null}
@@ -160,7 +200,7 @@ export function ReviewBadge({ state, prefix }) {
 const STATUS_TEXT = {
   quantity: { incomplete: "Incomplete", estimate: "Estimate", calculated: "Calculated", reviewed: "Reviewed", pending: "Not measured yet", schedule: "See the schedule" },
   installation: { unspecified: "Unspecified", "source-pending": "Source-pending", "supported-by-selected-rule": "Supported by selected rule", "project-detail-supplied": "Project detail supplied", "out-of-scope": "Out of scope" },
-  procurement: { draft: "Draft", "missing-product": "Missing product", "unavailable-stock": "Unavailable stock", stale: "Stale", ready: "Ready" },
+  procurement: { draft: "Draft", "missing-product": "Missing product", "unavailable-stock": "Unavailable stock", stale: "Stale", ready: "Ready", "kerf-unconfirmed": "Kerf not confirmed" },
 };
 const STATUS_TONE = { calculated: "ok", reviewed: "ok", ready: "ok", "supported-by-selected-rule": "ok", "project-detail-supplied": "ok", incomplete: "bad", "missing-product": "bad", "unavailable-stock": "bad", stale: "bad" };
 /** The three independent statuses (06) — never collapsed into one. */
@@ -195,51 +235,66 @@ export function Chips({ label, value, options, onChange, name, compact = false }
   );
 }
 
-/** Text input that applies on blur / Enter (one change, not one per keystroke). */
-export function CommitText({ label, value, onCommit, placeholder, maxLength = 80, help }) {
-  const [text, setText] = useState(value ?? "");
-  useEffect(() => { setText(value ?? ""); }, [value]);
-  const commit = () => { const t = text.trim(); if (t !== (value ?? "")) onCommit(t || null); };
+/**
+ * Text input that applies on blur / Enter (one change, not one per keystroke). `required` = the message shown when it
+ * is emptied: an empty value is then never applied — it stays an inline draft until something is entered.
+ */
+export function CommitText({ label, value, onCommit, placeholder, maxLength = 80, help, required }) {
+  const id = useId();
+  const shown = value ?? "";
+  const [err, setErr] = useState(null);
+  const commit = (o = {}) => {
+    if (!d.isEdited()) { if (!o.unmounting) { d.applied(true); setErr(null); } return; }
+    const t = d.text.trim();
+    if (!t && required) { if (!o.unmounting) setErr(required); return; }
+    if (!o.unmounting) { setErr(null); d.applied(t === shown); }
+    if (t !== shown) onCommit(t || null);
+  };
+  const d = useDraftText(shown, commit);
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      <input value={text} placeholder={placeholder} maxLength={maxLength} onChange={(e) => setText(e.target.value)} onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
+      <input id={id} value={d.text} placeholder={placeholder} maxLength={maxLength} onChange={(e) => d.type(e.target.value)} onBlur={() => commit()} {...d.focusProps}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} aria-invalid={!!err} aria-describedby={err ? `${id}-err` : undefined}
         className="min-h-[44px] w-full rounded-lg border border-hairline px-3 text-base text-ink focus-ring" />
       {help && <span className="mt-1 block text-[11px] text-muted">{help}</span>}
-    </label>
+      {err && <span id={`${id}-err`} role="alert" className="mt-1 block text-xs text-red-700">{err}</span>}
+    </div>
   );
 }
 
 /** Comma-separated list of lengths (mm). Applies on blur when every entry is a positive number. */
 export function LengthList({ label, values, onCommit, help, placeholder = "e.g. 2700, 3000, 3600", validate, allowEmpty = true }) {
+  const id = useId();
   const shown = (values || []).join(", ");
-  const [text, setText] = useState(shown);
   const [err, setErr] = useState(null);
-  useEffect(() => { setText(shown); }, [shown]);
-  const commit = () => {
-    const parts = text.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+  const commit = (o = {}) => {
+    if (!d.isEdited()) { if (!o.unmounting) { d.applied(true); setErr(null); } return; }
+    const parts = d.text.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
     const nums = parts.map(Number);
-    if (nums.some((n) => !Number.isFinite(n) || n <= 0 || n > 30000)) { setErr("Enter lengths in mm separated by commas, e.g. 2700, 3000."); return; }
-    if (!nums.length && !allowEmpty && (values || []).length) { setErr("Enter at least one length."); return; }
+    const fail = (m) => { if (!o.unmounting) setErr(m); };
+    if (nums.some((n) => !Number.isFinite(n) || n <= 0 || n > 30000)) { fail("Enter lengths in mm separated by commas, e.g. 2700, 3000."); return; }
+    if (!nums.length && !allowEmpty && (values || []).length) { fail("Enter at least one length."); return; }
     const next = [...new Set(nums)].sort((a, b) => a - b);
     const bad = validate ? validate(next) : null;
-    if (bad) { setErr(bad); return; }
-    setErr(null);
-    if (next.join(",") !== (values || []).join(",")) onCommit(next);
+    if (bad) { fail(bad); return; }
+    const same = next.join(",") === (values || []).join(",");
+    if (!o.unmounting) { setErr(null); d.applied(same); }
+    if (!same) onCommit(next);
   };
+  const d = useDraftText(shown, commit);
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
       <div className="flex items-stretch rounded-lg border border-hairline bg-white focus-within:ring-2 focus-within:ring-primary">
-        <input value={text} placeholder={placeholder} inputMode="decimal" onChange={(e) => setText(e.target.value)} onBlur={commit}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} aria-invalid={!!err}
+        <input id={id} value={d.text} placeholder={placeholder} inputMode="decimal" onChange={(e) => d.type(e.target.value)} onBlur={() => commit()} {...d.focusProps}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} aria-invalid={!!err} aria-describedby={err ? `${id}-err` : undefined}
           className="min-h-[44px] w-full min-w-0 rounded-l-lg border-0 px-3 text-base text-ink focus:ring-0" />
         <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">mm</span>
       </div>
       {help && <span className="mt-1 block text-[11px] text-muted">{help}</span>}
-      {err && <span role="alert" className="mt-1 block text-xs text-red-700">{err}</span>}
-    </label>
+      {err && <span id={`${id}-err`} role="alert" className="mt-1 block text-xs text-red-700">{err}</span>}
+    </div>
   );
 }
 
@@ -281,11 +336,24 @@ function useKeepFieldVisible() {
     };
     const soon = () => { clearTimeout(t); t = setTimeout(reveal, 120); };
     const off = () => { clearTimeout(t); t = setTimeout(() => { if (!root.contains(document.activeElement)) setPad(0); }, 150); };
+    // PH-04: a typed value counts once the page is hidden (app switch, reload, the phone locking): blur the field so it
+    // applies — and reaches autosave / device recovery — instead of being lost. Capture phase, so it runs before the
+    // workspace writes its recovery copy. Invalid text stays as typed, with its message.
+    const commitTyped = () => {
+      const el = document.activeElement;
+      if (el && root.contains(el) && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur();
+    };
+    const vis = () => { if (document.visibilityState === "hidden") commitTyped(); };
     root.addEventListener("focusin", soon);
     root.addEventListener("focusout", off);
     window.visualViewport?.addEventListener("resize", soon);
     window.addEventListener("resize", soon);
-    return () => { clearTimeout(t); root.removeEventListener("focusin", soon); root.removeEventListener("focusout", off); window.visualViewport?.removeEventListener("resize", soon); window.removeEventListener("resize", soon); };
+    document.addEventListener("visibilitychange", vis, true);
+    window.addEventListener("pagehide", commitTyped, true);
+    return () => {
+      clearTimeout(t); root.removeEventListener("focusin", soon); root.removeEventListener("focusout", off); window.visualViewport?.removeEventListener("resize", soon); window.removeEventListener("resize", soon);
+      document.removeEventListener("visibilitychange", vis, true); window.removeEventListener("pagehide", commitTyped, true);
+    };
   }, []);
   return { ref, pad };
 }
@@ -310,8 +378,9 @@ function useAutoApply(value, onChange) {
     const j = JSON.stringify(slim(value));
     if (j !== sent.current) { latest.current = value; sent.current = j; refresh(); }
   }, [value]);
-  const emit = (next) => {
+  const emit = (raw) => {
     let full;
+    const next = syncConditions(raw); // installConditions follow the route / coating / orientation chosen (PH-11)
     try {
       normaliseFamilySpec(next.spec);
       const m = methodFor(next.spec);
@@ -347,10 +416,10 @@ function useAutoApply(value, onChange) {
   return { cur: latest.current, update, patch, undo, redo, canUndo: hist.current.past.length > 0, canRedo: hist.current.future.length > 0, error };
 }
 
-function UndoBar({ d, note = "Changes save automatically to this job only." }) {
+function UndoBar({ d, pending = false, note = "Changes save automatically to this job only." }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-1 rounded-lg border border-hairline bg-page/95 px-2 shadow-[0_-12px_0_0_theme(colors.page)] backdrop-blur" data-undo-bar="">
-      <p className="min-w-0 flex-1 text-[11px] text-muted">{note}</p>
+    <div className="sticky top-0 z-10 flex items-center gap-1 rounded-lg border border-hairline bg-page/95 px-2 shadow-[0_-12px_0_0_theme(colors.page)] backdrop-blur" data-undo-bar="" data-pending={pending ? "true" : "false"}>
+      <p aria-live="polite" className={`min-w-0 flex-1 text-[11px] ${pending ? "font-semibold text-amber-800" : "text-muted"}`}>{pending ? "Not saved yet — press Enter or tap outside the field." : note}</p>
       <Btn kind="ghost" aria-label="Undo" title="Undo" disabled={!d.canUndo} onClick={d.undo} className="inline-flex min-w-[44px] items-center gap-1 px-2">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>
         <span className="text-xs">Undo</span>
@@ -461,6 +530,79 @@ export function orientationsFor(spec) {
 }
 const assemblyById = (id) => CATALOGUE_SEED.assemblyCandidates.find((a) => a.id === id) || null;
 
+// ── installation conditions (PH-11): rules.installConditions = { <assembly selector>: value } ──────────────────
+// The engine selects a guide rule row by these conditions (none is reviewed yet, so installation stays
+// source-pending). Each is the user's own entry for THIS job — never inferred (02: no wind class from the suburb).
+// Selectors already chosen elsewhere on the card are written from that choice: the fixing route (rules.route),
+// the foam coating and the board orientation.
+const WIND_CLASSES = ["N1", "N2", "N3", "N4", "N5", "N6", "C1", "C2", "C3", "C4"];
+const CONDITION_FIELDS = {
+  wind: { label: "Wind class", select: WIND_CLASSES.map((w) => [w, w]), help: "From this site's wind classification — never inferred from the suburb." },
+  "on-or-off-stud": { label: "Fixed on or off the studs", chips: [["on-stud", "On studs"], ["off-stud", "Off studs"]] },
+  "fixing-style": { label: "Fixing style", chips: [["face", "Face fixed"], ["concealed", "Concealed"]] },
+  substrate: { label: "Substrate (what it fixes to)", placeholder: "e.g. timber frame, steel frame" },
+  "fixing-family": { label: "Fastener type", placeholder: "e.g. nails, screws" },
+  "edge-zone": { label: "Edge zone (from the wind detail)" },
+  "profile-width": { label: "Profile width" },
+  "small-wall": { label: "Narrow-wall detail" },
+  "batten-joints": { label: "Batten joint detail" },
+  "exact-guide-applicability": { label: "Guide that covers this exact product" },
+  "support-detail": { label: "Support detail reference" },
+  grid: { label: "Panel grid detail" },
+  "joint-backing": { label: "Joint backing detail" },
+  "current-guide": { label: "Current guide (title and edition)" },
+  "storey-support": { label: "Storey / floor support detail" },
+  "rail-system": { label: "Rail system" },
+  "movement-joints": { label: "Movement joint detail" },
+  "exact-profile": { label: "Exact profile" },
+  "effective-cover": { label: "Effective cover source" },
+  species: { label: "Species" },
+  "butt-joints": { label: "Butt joint detail" },
+  drainage: { label: "Drainage detail" },
+  "exact-profile-cover": { label: "Exact profile and cover" },
+  "end-matching": { label: "End matching" },
+  "stock-policy": { label: "Stock length policy" },
+  "exact-system": { label: "Exact system" },
+  "panel-size": { label: "Panel size" },
+  thickness: { label: "Thickness" },
+  "joint-layout": { label: "Joint layout detail" },
+  "coating-scope": { label: "Coating scope" },
+  // written from another choice on the card
+  "direct-or-cavity": { label: "Fixing route (direct fix or cavity)", from: "route" },
+  cavity: { label: "Fixing route (direct fix or cavity)", from: "route" },
+  "factory-or-applicator-coated": { label: "Coating (factory or applicator)", from: "coating" },
+  orientation: { label: "Orientation", from: "orientation" },
+};
+const DERIVED_CONDITIONS = Object.keys(CONDITION_FIELDS).filter((k) => CONDITION_FIELDS[k].from);
+const conditionLabel = (k) => CONDITION_FIELDS[k]?.label || k.replace(/-/g, " ");
+const filled = (v) => v !== undefined && v !== null && v !== "";
+const withoutDerived = (ic) => {
+  if (!ic || typeof ic !== "object") return null;
+  const out = Object.fromEntries(Object.entries(ic).filter(([k, v]) => !DERIVED_CONDITIONS.includes(k) && filled(v)));
+  return Object.keys(out).length ? out : null;
+};
+/** The conditions written from other choices on the card, for the selected assembly's selectors only. */
+function derivedConditions(m) {
+  const req = new Set(assemblyById(m.spec?.assemblyId)?.requiredSelectors || []);
+  const r = m.rules || {}, s = m.spec || {}, out = {};
+  for (const k of ["direct-or-cavity", "cavity"]) if (req.has(k) && (r.route === "direct" || r.route === "cavity")) out[k] = r.route;
+  if (req.has("factory-or-applicator-coated") && (s.coating === "factory" || s.coating === "applicator")) out["factory-or-applicator-coated"] = s.coating;
+  if (req.has("orientation") && (s.orientation === "horizontal" || s.orientation === "vertical")) out.orientation = s.orientation;
+  return out;
+}
+const sameFlat = (a, b) => { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every((k) => a[k] === b[k]); };
+/** Keep rules.installConditions in step with the route / coating / orientation chosen on the card (never stale). */
+function syncConditions(m) {
+  if (!m?.rules && !m?.spec?.assemblyId) return m;
+  const r = m.rules || {};
+  const cur = r.installConditions && typeof r.installConditions === "object" ? r.installConditions : {};
+  const next = { ...(withoutDerived(cur) || {}), ...derivedConditions(m) };
+  if (sameFlat(cur, next)) return m;
+  const rules = { ...r };
+  if (Object.keys(next).length) rules.installConditions = next; else delete rules.installConditions;
+  return { ...m, rules };
+}
+
 // ── UX03: parameters that belong to a product / orientation / method ───────────────────────────────────────
 const PARAMS = {
   adhesiveJointMm: { label: "Adhesive joint", unit: "mm", methods: ["aac_panel_layout"], bound: "product" },
@@ -471,6 +613,11 @@ const PARAMS = {
   jointRowsDraft: { label: "Unfinished sheet joint rows", methods: ["sheet_layout"], bound: "product" },
   heightAllowanceMm: { label: "Sheet height allowance", unit: "mm", methods: ["sheet_layout"], bound: null },
   joints: { label: "Board joint rule", methods: ["course_layout"], bound: "orientation" },
+  jointsDraft: { label: "Unfinished board joint rule", methods: ["course_layout"], bound: "orientation" },
+  panelOrientation: { label: "Panel orientation", methods: ["panel_grid"], bound: "product" },
+  installConditions: { label: "Installation conditions", methods: ["sheet_layout", "course_layout", "panel_grid", "area_to_linear", "aac_panel_layout"], bound: "product" },
+  fixing: { label: "Support fixing rule", methods: ["support_grid"], bound: "product" },
+  fixingDraft: { label: "Unfinished support fixing rule", methods: ["support_grid"], bound: "product" },
   datumMm: { label: "Layout datum", unit: "mm", methods: ["sheet_layout", "course_layout"], bound: null },
   maxSpacingMm: { label: "Max support spacing", unit: "mm", methods: ["support_grid"], bound: "orientation" },
   spacingRef: { label: "Spacing authority", methods: ["support_grid"], bound: "orientation" },
@@ -486,13 +633,22 @@ const PARAMS = {
 };
 const BOUND_BY = { product: ["product", "orientation"], family: ["product", "orientation"], orientation: ["orientation"], supplier: ["supplier"], method: [] };
 const paramApplies = (key, methodKey) => !!PARAMS[key]?.methods.includes(methodKey);
-const readParam = (mat, key) => (PARAMS[key].target ? mat.spec?.product?.[PARAMS[key].target] ?? null : mat.rules?.[key] ?? null);
+const readParam = (mat, key) => {
+  if (PARAMS[key].target) return mat.spec?.product?.[PARAMS[key].target] ?? null;
+  // the route / coating / orientation conditions follow those choices — only the user's own entries are carried
+  if (key === "installConditions") return withoutDerived(mat.rules?.installConditions);
+  return mat.rules?.[key] ?? null;
+};
 function paramText(key, v) {
   const d = PARAMS[key];
   if ((key === "jointRows" || key === "jointRowsDraft") && v && typeof v === "object") return `at ${(v.atMm || []).map(fmt).join(", ") || "?"} mm, ${fmt(v.gapMm)} mm gap${v.detailRef ? ` (${v.detailRef})` : ""}`;
   if (key === "recipe" && v && typeof v === "object") return `(${(v.groups || []).length} item${(v.groups || []).length === 1 ? "" : "s"})`;
   if (key === "scope" && v && typeof v === "object") return `(${Object.keys(v).length} group${Object.keys(v).length === 1 ? "" : "s"})`;
   if (key === "route") return v === "cavity" ? "cavity" : "direct fix";
+  if ((key === "joints" || key === "jointsDraft") && v && typeof v === "object") return `(${v.mode === "off-support" ? "between supports" : `over supports${isNum(v.centresMm) ? ` at ${fmt(v.centresMm)} mm` : ""}`}${v.detailRef ? `, ${v.detailRef}` : ""})`;
+  if (key === "installConditions" && v && typeof v === "object") return `(${Object.entries(v).map(([k, x]) => `${conditionLabel(k).toLowerCase()} ${x}`).join("; ")})`;
+  if ((key === "fixing" || key === "fixingDraft") && v && typeof v === "object") return `(${v.ruleRef || "entered rule"})`;
+  if (key === "panelOrientation") return v === "landscape" ? "landscape" : "portrait";
   if (key === "assembly" && v && typeof v === "object") return `“${v.label || "Company version"}”${v.baseId ? ` (based on ${ASSEMBLY_LABEL[v.baseId] || v.baseId})` : ""}`;
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (v && typeof v === "object") return "set";
@@ -562,6 +718,7 @@ export function CarriedFlags({ cur, update, note }) {
     const reasons = k === "scope" ? clone(c.rules.carried.scope.reasons) : null;
     const rules = withoutCarried(c.rules, k);
     if (PARAMS[k].target) return { ...c, rules, spec: { ...c.spec, product: { ...c.spec.product, [PARAMS[k].target]: v } } };
+    if (k === "installConditions") return { ...c, rules: { ...rules, installConditions: { ...(rules.installConditions || {}), ...v } } };
     return { ...c, rules: { ...rules, [k]: v, ...(reasons ? { scopeReasons: reasons } : {}) } };
   });
   const dismiss = (k) => update((c) => ({ ...c, rules: withoutCarried(c.rules, k) }));
@@ -570,8 +727,9 @@ export function CarriedFlags({ cur, update, note }) {
       <p className="text-xs font-semibold">Check these — they belonged to the previous choice and are NOT being used:</p>
       {note && <p className="text-[11px]">{note}</p>}
       {keys.map((k) => {
-        const applies = paramApplies(k, mk);
         const { value, from } = carried[k];
+        const otherOrientation = (k === "joints" || k === "jointsDraft") && value?.orientation && value.orientation !== (cur.spec?.orientation || null);
+        const applies = paramApplies(k, mk) && !otherOrientation;
         return (
           <div key={k} data-carried-param={k} className="rounded-md bg-white/70 p-2">
             <p className="text-sm"><b>{PARAMS[k].label} {paramText(k, value)}</b> was set for {from}.{" "}
@@ -600,7 +758,34 @@ function NeedsRow({ needs }) {
 }
 
 const FOAM_PLACEHOLDER = "Rendex EPS (enter product)";
-function setupNeeds(cur) {
+/** Panel size of a panel-grid product: { w, l, square } (null until both are known). */
+function panelSize(spec) {
+  const p = spec?.product || {};
+  const w = p.widthMm, l = p.lengthMm ?? (p.lengthsMm || [])[0];
+  return isNum(w) && isNum(l) ? { w, l, square: w === l } : null;
+}
+// ── support fixings (PH-02): rules.fixing = { identity, mode, pitchMm | countPerLine, edgeStartMm, edgeEndMm, ruleRef },
+// rules.fixingScope = { status: "by-others" | "exclude", reason }. An unfinished rule is kept as rules.fixingDraft (the
+// engine never reads it) so a half-entered rule is never quantified.
+const FASTENER_FIELDS = [["material", "Fastener material", "e.g. galvanised steel"], ["corrosionClass", "Corrosion class", "e.g. C3"], ["head", "Head", "e.g. bugle, flat"], ["substrate", "Fixes into", "e.g. timber stud"]];
+function fixingGaps(f) {
+  const id = f?.identity || {}, gaps = [];
+  if (!(FASTENER_FIELDS.every(([k]) => filled(id[k])) && isNum(id.lengthMm))) gaps.push("the fastener (material, corrosion class, length, head, what it fixes into)");
+  if (f?.mode === "pitch") { if (!isNum(f.pitchMm) || f.pitchMm <= 0) gaps.push("the fixing spacing"); if (!isNum(f.edgeStartMm) || !isNum(f.edgeEndMm)) gaps.push("the first and last fixing distances"); }
+  else if (f?.mode === "pattern") { if (!(Number.isInteger(f.countPerLine) && f.countPerLine >= 1)) gaps.push("the number of fixings per batten"); }
+  else gaps.push("how they are spaced");
+  if (!filled(f?.ruleRef)) gaps.push("the rule reference");
+  return gaps;
+}
+function fixingNeeds(r) {
+  if (r.existing === true) return []; // existing supports are not purchased or fixed
+  const scope = r.fixingScope?.status || "include";
+  if (scope !== "include") return filled(r.fixingScope?.reason) ? [] : [`Record why the support fixings are ${SCOPE_WHY[scope]}.`];
+  if (r.fixing && !r.fixingDraft) return [];
+  const gaps = fixingGaps(r.fixingDraft || r.fixing || {});
+  return [`Support fixings: enter ${gaps.join(", ")} — or mark them by others / excluded.`];
+}
+function setupNeeds(cur, result) {
   const s = cur.spec || {}, r = cur.rules || {};
   const mk = methodFor(s)?.key;
   const out = [];
@@ -616,6 +801,11 @@ function setupNeeds(cur) {
   if (mk === "aac_panel_layout" && !isNum(r.adhesiveJointMm)) out.push("Enter the system's approved adhesive joint from the current guide for this exact system — it is never defaulted.");
   if (mk === "panel_grid" && !isNum(s.product?.gapMm) && !isNum(r.jointGapMm)) out.push("Enter the expressed-joint gap from the selected assembly.");
   if (mk === "support_grid" && !isNum(r.maxSpacingMm)) out.push("Enter the maximum support spacing from the selected rule or project detail — no default spacing is assumed.");
+  if (mk === "support_grid") out.push(...fixingNeeds(r));
+  if (mk === "panel_grid" && panelSize(s) && !panelSize(s).square && !["portrait", "landscape"].includes(r.panelOrientation)) out.push("Choose portrait or landscape panels.");
+  // 02 §2: projected rafter lengths need the roof pitch — it is never assumed (a cleared pitch is not 0°)
+  if (s.family === "timber" && ["rafters", "joists", "battens"].includes(s.purpose) && (r.lengthSource || "projected") === "projected" && !isNum(r.pitchDeg)) out.push("Enter the roof pitch — projected rafter lengths need it.");
+  if (mk === "course_layout" && !r.joints && (result?.problems || []).some((p) => p.code === "needs_layout")) out.push("Some runs are longer than the longest board — add the board joint rule (Board joints) from the detail.");
   if (s.family === "accessory") {
     const groups = Array.isArray(r.recipe?.groups) ? r.recipe.groups : [];
     if (!s.product?.name) out.push("Name the accessory set.");
@@ -654,7 +844,14 @@ function componentRows(s, r = {}) {
       ["Basecoat / finish coat", factory ? "Factory-coated: not ordered again on site." : s.coating === "applicator" ? "Net finish area shown; yield unresolved." : "Choose factory- or applicator-coated first.", factory ? "na" : "open"],
     ];
   }
-  if (s.family === "batten") return [["Supports", "From your walls once the maximum spacing is set: clipped at openings and rakes.", "ok"], ["Fixings", "Fixings not quantified — detail required.", "open"]];
+  if (s.family === "batten") {
+    const scope = r.fixingScope?.status || "include";
+    const fix = r.existing === true ? ["Fixings", "Existing supports — no fixings are ordered.", "na"]
+      : scope !== "include" ? ["Fixings", `${SCOPE_TEXT[scope]}${filled(r.fixingScope?.reason) ? ` — ${r.fixingScope.reason}` : " — record why"}. Recorded as omitted, not as zero.`, filled(r.fixingScope?.reason) ? "na" : "open"]
+        : r.fixing && !r.fixingDraft ? ["Fixings", `From ${r.fixing.ruleRef} — counted per batten on the order.`, "ok"]
+          : ["Fixings", "Fixings not quantified — detail required.", "open"];
+    return [["Supports", "From your walls once the maximum spacing is set: clipped at openings and rakes.", "ok"], fix];
+  }
   if (s.family === "accessory") return [];
   const supports = !needsRoute(a) || !r.route ? ["Supports", `${needsRoute(a) ? "Choose direct fix or cavity, then a" : "A"}dd a Support battens material for any cavity / support layer (or record existing framing).`, "open"]
     : r.route === "cavity" ? ["Supports", "Cavity: add a Support battens material for the cavity battens — spacing from the reviewed rule or project detail.", "open"]
@@ -728,34 +925,59 @@ function QuantityPreview({ lines, result }) {
   }, [text]);
   if (!lines) return null;
   const lmWorking = (result?.layouts || []).some((l) => /^area_to_linear/.test(l.method || "")) ? (result.explain || []).slice(0, 3) : [];
+  // measured, but a missing value stops the calculation (e.g. no pitch): say so — it isn't "add it to walls"
+  const probs = result?.problems || [];
+  const blocked = !probs.some((p) => p.code === "nothing_measured") && probs.some((p) => p.blocking !== false);
   return (
     <section className="rounded-lg border border-hairline bg-white px-3 py-2" data-quantity-preview="" aria-live="polite">
       <p className="text-xs font-semibold text-ink">On the order now (this job)</p>
       {mine.length ? (
         <ul className="mt-0.5 space-y-0.5 text-[12px] text-ink">
-          {mine.map((l) => <li key={l.bucketKey} data-preview-line={l.unit}><b>{qtyText(l)}</b> · {l.item?.description}{l.problems?.length ? <span className="text-amber-800"> · not orderable yet</span> : null}</li>)}
+          {mine.map((l) => (
+            <li key={l.bucketKey} data-preview-line={l.unit}><b>{qtyText(l)}</b>{l.spareQuantity ? <span data-preview-spare=""> (incl. {l.spareQuantity} spare)</span> : null} · {l.item?.description}
+              {l.problems?.length ? <span className="text-amber-800"> · not orderable yet</span> : null}</li>
+          ))}
         </ul>
-      ) : <p className="text-[12px] text-muted">Nothing yet — add this material to walls or measurements.</p>}
+      ) : blocked ? <p className="text-[12px] text-amber-900" data-preview-blocked="">No quantity yet — see why below.</p>
+        : <p className="text-[12px] text-muted">Nothing yet — add this material to walls or measurements.</p>}
       {lmWorking.length > 0 && <ul className="mt-1 space-y-0.5 text-[11px] text-muted" data-preview-working="">{lmWorking.map((e) => <li key={e}>{e}</li>)}</ul>}
       {was && <p className="mt-1 text-[11px] text-muted" data-preview-was="">Changed from: {was.split("\n").map((x) => x.split(" · ")[0]).join(", ")}</p>}
     </section>
   );
 }
 
-/** Problems the engine reported for this material (when the caller passes its materialResults entry). */
+/** An engine problem in plain words (the installation selectors are internal keys — say what they mean). */
+function problemText(p) {
+  const missing = p.code === "installation_selectors_missing" ? p.refs?.find((r) => Array.isArray(r?.missing))?.missing : null;
+  if (missing?.length) return `Installation conditions still needed: ${[...new Set(missing.map((k) => conditionLabel(k).toLowerCase()))].join(", ")}.`;
+  return p.message;
+}
+/** Problems the engine reported for this material (when the caller passes its materialResults entry). Blocking first. */
 function EngineProblems({ result }) {
-  const list = [...new Map((result?.problems || []).map((p) => [p.message, p])).values()];
+  const all = [...new Map((result?.problems || []).map((p) => [problemText(p), { text: problemText(p), blocking: p.blocking !== false }])).values()];
+  const list = [...all.filter((p) => p.blocking), ...all.filter((p) => !p.blocking)];
   if (!list.length) return null;
-  const shown = list.slice(0, 6);
+  const shown = list.slice(0, 6), rest = list.slice(6);
+  const item = (p) => <li key={p.text} className={p.blocking ? "" : "text-muted"}>{p.text}</li>;
   return (
     <div className="rounded-lg border border-hairline bg-white px-3 py-2" data-engine-problems="">
       <p className="text-xs font-semibold text-ink">From the calculation</p>
-      <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-ink">
-        {shown.map((p) => <li key={p.message} className={p.blocking === false ? "text-muted" : ""}>{p.message}</li>)}
-      </ul>
-      {list.length > shown.length && <p className="text-[11px] text-muted">and {list.length - shown.length} more on the schedule.</p>}
+      <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-ink">{shown.map(item)}</ul>
+      {rest.length > 0 && (
+        <details>
+          <summary className="flex min-h-[44px] cursor-pointer items-center text-[12px] text-primary">Show {rest.length} more</summary>
+          <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-ink">{rest.map(item)}</ul>
+        </details>
+      )}
     </div>
   );
+}
+
+/** The aluminium kerf is its own state — a complete profile isn't a "missing product" (PH-18). */
+function withKerfState(status, spec) {
+  if (!status || spec?.family !== "aluminium" || spec.kerfConfirmed) return status;
+  const other = familyProblems(spec).filter((p) => !/kerf/i.test(p.message));
+  return !other.length && ["missing-product", "draft"].includes(status.procurement) ? { ...status, procurement: "kerf-unconfirmed" } : status;
 }
 
 function SetupStatus({ cur, result, needs }) {
@@ -776,6 +998,7 @@ function AvailabilityChips({ value, onChange }) {
 export function TimberSetup({ value, onChange, result, lines }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
+  const pf = usePendingFields();
   const set = d.patch;
   const cur = d.cur, s = cur.spec || {}, r = cur.rules || {};
   const repeated = ["rafters", "joists", "battens"].includes(s.purpose);
@@ -787,17 +1010,18 @@ export function TimberSetup({ value, onChange, result, lines }) {
     if (["joists", "battens"].includes(v) && (rules.lengthSource || "projected") === "projected") rules.lengthSource = "true";
     return { ...c, spec: { ...c.spec, purpose: v }, rules };
   });
-  const needs = setupNeeds(cur);
+  const needs = setupNeeds(cur, result);
   return (
+    <PendingContext.Provider value={pf.report}>
     <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="timber">
-      <UndoBar d={d} />
-      <TextField label="Name" value={cur.name} onChange={(v) => set({ name: v })} placeholder="e.g. Rafters 90 × 45" />
+      <UndoBar d={d} pending={pf.pending} />
+      <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => set({ name: t })} placeholder="e.g. Rafters 90 × 45" />
       <Chips label="Purpose" name="purpose" value={s.purpose} options={TIMBER_PURPOSES.map((p) => [p, PURPOSE_LABEL[p]])} onChange={setPurpose} />
       <div className="grid grid-cols-2 gap-2">
         <NumberField label="Section depth" value={s.section?.depthMm} onCommit={(n) => set({ spec: { section: { ...s.section, depthMm: n } } })} />
         <NumberField label="Section width" value={s.section?.widthMm} onCommit={(n) => set({ spec: { section: { ...s.section, widthMm: n } } })} />
-        <TextField label="Grade (e.g. MGP10)" value={s.grade} onChange={(v) => set({ spec: { grade: v } })} />
-        <TextField label="Treatment (e.g. H3)" value={s.treatment} onChange={(v) => set({ spec: { treatment: v } })} />
+        <CommitText label="Grade (e.g. MGP10)" value={s.grade} maxLength={40} onCommit={(t) => set({ spec: { grade: t } })} />
+        <CommitText label="Treatment (e.g. H3)" value={s.treatment} maxLength={40} onCommit={(t) => set({ spec: { treatment: t } })} />
       </div>
       <p className="text-[11px] text-muted">Size: <b>manual selection</b>{s.sizing?.reference ? ` — ${s.sizing.reference}` : ""}. The app does not check structural adequacy.</p>
       {(repeated || studs) && (
@@ -852,8 +1076,8 @@ export function TimberSetup({ value, onChange, result, lines }) {
           <NumberField label="Plies" unit="" integer min={1} value={s.plies ?? 1} onCommit={(n) => set({ spec: { plies: n } })} />
           <Chips label="First member" value={r.includeStart !== false} options={[[true, "Included"], [false, "Excluded"]]} onChange={(v) => set({ rules: { includeStart: v } })} />
           <Chips label="Last member" value={r.includeEnd !== false} options={[[true, "Included"], [false, "Excluded"]]} onChange={(v) => set({ rules: { includeEnd: v } })} />
-          <TextField label="Supplier" value={s.supplierName} onChange={(v) => set({ spec: { supplierName: v } })} />
-          <TextField label="Size reference (schedule/drawing)" value={s.sizing?.reference} onChange={(v) => set({ spec: { sizing: { provenance: v ? "engineer-schedule" : "manual", reference: v } } })} />
+          <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => set({ spec: { supplierName: t } })} />
+          <CommitText label="Size reference (schedule/drawing)" value={s.sizing?.reference} onCommit={(t) => set({ spec: { sizing: { provenance: t ? "engineer-schedule" : "manual", reference: t } } })} />
           <div className="col-span-2"><AvailabilityChips value={s.availability} onChange={(v) => set({ spec: { availability: v } })} /></div>
         </div>
       </details>
@@ -861,10 +1085,11 @@ export function TimberSetup({ value, onChange, result, lines }) {
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
       <ReviewSummary rules={r} />
-      <StatusRow status={shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: "unspecified", procurement: needs.length ? "missing-product" : "draft" }}
+      <StatusRow status={shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }}
         note={result?.status ? "From the calculation for this job. Timber size is a manual selection." : `Timber size is a manual selection. ${NO_RESULT_NOTE}`} />
       {result?.status && <EngineProblems result={result} />}
     </div>
+    </PendingContext.Provider>
   );
 }
 
@@ -967,7 +1192,7 @@ function StockLengths({ spec, onChange }) {
 }
 
 const needsRoute = (a) => !!a && (a.requiredSelectors || []).some((x) => x === "direct-or-cavity" || x === "cavity");
-function AssemblyPicker({ spec, onSelect, rules, onRoute }) {
+function AssemblyPicker({ spec, onSelect, rules, onRoute, onCondition }) {
   const list = assemblyCandidates(spec);
   const company = rules?.assembly;
   const selected = assemblyById(spec.assemblyId);
@@ -1002,8 +1227,173 @@ function AssemblyPicker({ spec, onSelect, rules, onRoute }) {
       {needsRoute(selected) && onRoute && (
         <div className="mt-2"><Chips label="Fixing route (your choice — never assumed)" name="route" value={rules?.route ?? null} onChange={onRoute} options={[["direct", "Direct fix"], ["cavity", "Cavity"]]} /></div>
       )}
+      {selected && onCondition && <InstallConditions assembly={selected} spec={spec} rules={rules} onSet={onCondition} />}
       <p className="mt-1 text-[11px] text-muted">Installation rules are <b>source-pending</b>: supports and fixings stay a reviewed manual layout until a guide row is checked.</p>
       {spec.assemblyId && <div className="mt-1"><SourceRefs refs={assemblyById(spec.assemblyId)?.sourceRefs} label="Assembly sources" /></div>}
+    </fieldset>
+  );
+}
+
+const SPARES_HELP = "Added on top of the layout count and shown on each order line (rounded up per line) — don't add spares by hand. 0 doesn't mean no real waste.";
+
+/**
+ * The selected assembly's installation conditions (PH-11), in plain words. Each one is this job's own entry; the
+ * route / coating / orientation are written from those choices on the card. Entering them never verifies
+ * anything — with no reviewed guide row, installation stays source-pending.
+ */
+function InstallConditions({ assembly, spec, rules, onSet }) {
+  const req = assembly.requiredSelectors || [];
+  const ic = { ...(rules?.installConditions || {}), ...derivedConditions({ spec, rules }) };
+  const own = req.filter((k) => !DERIVED_CONDITIONS.includes(k));
+  const missing = req.filter((k) => !filled(ic[k]));
+  const elsewhere = missing.filter((k) => DERIVED_CONDITIONS.includes(k));
+  if (!req.length) return null;
+  return (
+    <details className="mt-2 rounded-lg border border-hairline bg-white px-2" data-install-conditions="" data-missing={missing.join(",")}>
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-sm text-ink">
+        Installation conditions —&nbsp;<b className={missing.length ? "text-amber-800" : "text-emerald-700"}>{missing.length ? `${missing.length} still needed` : "All entered"}</b>
+      </summary>
+      <div className="space-y-2 pb-2">
+        <p className="text-[11px] text-muted">This job&apos;s own site and drawing facts — never inferred. They pick the guide&apos;s rule row; no row is reviewed yet, so installation stays source-pending.</p>
+        {elsewhere.length > 0 && <p className="text-[12px] text-amber-900">Also needed above: {elsewhere.map((k) => conditionLabel(k).toLowerCase()).join(", ")}.</p>}
+        {own.map((k) => {
+          const f = CONDITION_FIELDS[k] || {};
+          const label = conditionLabel(k);
+          if (f.select) return <div key={k}><SelectField label={label} value={ic[k] ?? null} placeholder="Not entered" options={f.select} onChange={(v) => onSet(k, v)} />{f.help && <p className="mt-1 text-[11px] text-muted">{f.help}</p>}</div>;
+          if (f.chips) return <Chips key={k} label={label} name={`cond-${k}`} compact value={ic[k] ?? null} options={f.chips} onChange={(v) => onSet(k, v === ic[k] ? null : v)} />;
+          return <CommitText key={k} label={label} value={ic[k] ?? null} maxLength={60} placeholder={f.placeholder} onCommit={(t) => onSet(k, t)} />;
+        })}
+      </div>
+    </details>
+  );
+}
+
+/** Portrait / landscape for a non-square grid panel (QO-13): only what the product lists (unlisted = portrait only). */
+function PanelOrientation({ spec, value, onChange }) {
+  const size = panelSize(spec);
+  if (!size) return null;
+  if (size.square) return <p className="text-[11px] text-muted" data-panel-orientation="square">Square panel ({fmt(size.w)} × {fmt(size.l)}) — portrait and landscape lay out the same.</p>;
+  const listed = Array.isArray(spec.product?.permittedOrientations) ? spec.product.permittedOrientations : ["portrait"];
+  return (
+    <div data-panel-orientation="">
+      <Chips label="Panel orientation" name="panel-orientation" compact value={value ?? null} onChange={onChange}
+        options={[["portrait", `Portrait (${fmt(size.w)} wide)`, !listed.includes("portrait")], ["landscape", `Landscape (${fmt(size.l)} wide)`, !listed.includes("landscape")]]} />
+      <p className="mt-1 text-[11px] text-muted">
+        {!listed.includes("landscape") ? `${productLabel(spec)} isn't listed for landscape installation — only portrait can be chosen.` : "Choose how the panels are laid — it is never assumed."}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Board joint rule for a course layout (F10): where a run longer than the longest board may be joined — over
+ * supports at the given centres, or between supports for end-matched boards only — with the minimum piece, stagger,
+ * opening clearance and the detail it comes from. Unfinished entries are kept as rules.jointsDraft (the engine never
+ * reads it); only a complete rule becomes rules.joints, for the current orientation.
+ */
+function BoardJointsField({ spec, value, draft, needed, onApply, onDraft, onClear }) {
+  const endMatched = spec.endCondition === "end-matched" || spec.product?.endMatched === true;
+  const src = draft || value || {};
+  const [open, setOpen] = useState(!!(needed || value || draft));
+  useEffect(() => { if (needed) setOpen(true); }, [needed]);
+  const set = (p) => {
+    const next = { ...src, ...p };
+    for (const [k, v] of Object.entries(p)) if (v == null || v === false || v === "") delete next[k];
+    delete next.orientation;
+    if (next.mode !== "on-support") { delete next.centresMm; delete next.originMm; }
+    const complete = (next.mode === "off-support" || (next.mode === "on-support" && isNum(next.centresMm))) && filled(next.detailRef);
+    if (complete) onApply({ orientation: spec.orientation || "horizontal", ...next });
+    else onDraft(Object.keys(next).length ? next : null);
+  };
+  const incomplete = !!draft || !value;
+  return (
+    <details className="rounded-lg border border-hairline px-2 py-1" data-board-joints="" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-sm text-ink">Board joints (runs longer than the longest board)</summary>
+      <div className="space-y-2 pb-2">
+        <Chips label="Boards may join" name="joint-mode" compact value={src.mode ?? null} onChange={(v) => set({ mode: v })}
+          options={[["on-support", "Over supports"], ["off-support", "Between supports (end-matched)", !endMatched && src.mode !== "off-support"]]} />
+        {!endMatched && <p className="text-[11px] text-muted">Only end-matched boards may join between supports — ordinary boards join over a support.</p>}
+        {src.mode === "on-support" && (
+          <div className="grid grid-cols-2 gap-2">
+            <NumberField label="Support centres" value={isNum(src.centresMm) ? src.centresMm : null} min={1} max={3000} onCommit={(n) => set({ centresMm: n })} help="From the support layout or detail." />
+            <OptNumber label="First support from the wall start" value={src.originMm} max={3000} onCommit={(n) => set({ originMm: n })} help="Blank = at the wall start." />
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <OptNumber label="Shortest piece allowed" value={src.minPieceMm} max={6000} onCommit={(n) => set({ minPieceMm: n })} />
+          <OptNumber label="Stagger from the next course" value={src.minStaggerMm} max={6000} onCommit={(n) => set({ minStaggerMm: n })} />
+          <OptNumber label="Clear of openings" value={src.openingClearanceMm} max={3000} onCommit={(n) => set({ openingClearanceMm: n })} />
+        </div>
+        <label className="flex min-h-[44px] items-center gap-2 text-sm">
+          <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={src.factoryEndsAtJoints === true} onChange={(e) => set({ factoryEndsAtJoints: e.target.checked })} />
+          Factory ends at every joint (whole boards between joints)
+        </label>
+        <CommitText label="Joint detail reference" value={src.detailRef} maxLength={60} placeholder="e.g. H04 joint detail" onCommit={(t) => set({ detailRef: t })} />
+        {incomplete ? <p className="text-[11px] text-amber-800">Kept as a draft until the joint type{src.mode === "on-support" ? ", support centres" : ""} and detail reference are entered — joints are never assumed.{value ? " The rule applied before stays in use until then." : ""}</p>
+          : <p className="text-[11px] text-muted">Applied: long runs divide only at these joints ({spec.orientation || "horizontal"} boards).</p>}
+        {(value || draft) && <Btn kind="ghost" onClick={onClear}>Remove joint rule</Btn>}
+      </div>
+    </details>
+  );
+}
+
+/** Support-to-frame fixings for a batten layer (PH-02): a reviewed rule, or By others / Exclude with the reason. */
+function SupportFixings({ rules, update }) {
+  const r = rules || {};
+  const scope = r.fixingScope?.status || "include";
+  const src = r.fixingDraft || r.fixing || {};
+  const id = src.identity || {};
+  const setScope = (v) => update((c) => {
+    const rr = withoutCarried(c.rules, "fixingScope");
+    if (v === "include") delete rr.fixingScope;
+    else rr.fixingScope = { status: v, ...(c.rules?.fixingScope?.reason ? { reason: c.rules.fixingScope.reason } : {}) };
+    return { ...c, rules: rr };
+  });
+  const setReason = (t) => update((c) => ({ ...c, rules: { ...c.rules, fixingScope: { status: scope, ...(t ? { reason: t } : {}) } } }));
+  const setRule = (p) => update((c) => {
+    const cur = c.rules?.fixingDraft || c.rules?.fixing || {};
+    const next = { ...cur, ...p, identity: { ...(cur.identity || {}), ...(p.identity || {}) } };
+    for (const [k, v] of Object.entries(next.identity)) if (!filled(v)) delete next.identity[k];
+    for (const [k, v] of Object.entries(next)) if (v == null) delete next[k];
+    const rr = withoutCarried(withoutCarried(c.rules, "fixing"), "fixingDraft");
+    if (!fixingGaps(next).length) { rr.fixing = next; delete rr.fixingDraft; } else rr.fixingDraft = next;
+    return { ...c, rules: rr };
+  });
+  const clear = () => update((c) => { const rr = withoutCarried(withoutCarried(c.rules, "fixing"), "fixingDraft"); delete rr.fixing; delete rr.fixingDraft; return { ...c, rules: rr }; });
+  if (r.existing === true) return <p className="rounded-lg border border-hairline bg-white px-3 py-2 text-[12px] text-muted" data-support-fixings="existing">Support fixings: none — these supports already exist.</p>;
+  const gaps = fixingGaps(src);
+  return (
+    <fieldset className="space-y-2 rounded-lg border border-hairline p-2" data-support-fixings="">
+      <legend className="px-1 text-xs font-semibold text-ink">Support fixings (batten to frame)</legend>
+      <Chips label="Fixings" name="fixing-scope" compact value={scope} onChange={setScope} options={[["include", "From a rule"], ["by-others", "By others"], ["exclude", "Exclude"]]} />
+      {scope !== "include" ? (
+        <>
+          <CommitText label={`Why they're ${SCOPE_WHY[scope]}`} value={r.fixingScope?.reason} maxLength={60} placeholder="e.g. Framer supplies and fixes them" onCommit={setReason} />
+          <p className="text-[11px] text-muted">Recorded as omitted on the order — not as zero.</p>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {FASTENER_FIELDS.slice(0, 2).map(([k, label, ph]) => <CommitText key={k} label={label} value={id[k]} maxLength={40} placeholder={ph} onCommit={(t) => setRule({ identity: { [k]: t } })} />)}
+            <NumberField label="Fastener length" value={isNum(id.lengthMm) ? id.lengthMm : null} min={1} max={500} onCommit={(n) => setRule({ identity: { lengthMm: n } })} />
+            {FASTENER_FIELDS.slice(2).map(([k, label, ph]) => <CommitText key={k} label={label} value={id[k]} maxLength={40} placeholder={ph} onCommit={(t) => setRule({ identity: { [k]: t } })} />)}
+          </div>
+          <Chips label="Spaced" name="fixing-mode" compact value={src.mode ?? null} onChange={(v) => setRule({ mode: v })}
+            options={[["pitch", "Spacing along each batten"], ["pattern", "Set number per batten"]]} />
+          {src.mode === "pitch" && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="col-span-2"><NumberField label="Fixing spacing" value={isNum(src.pitchMm) ? src.pitchMm : null} min={1} max={3000} onCommit={(n) => setRule({ pitchMm: n })} /></div>
+              <NumberField label="First fixing from the batten end" value={isNum(src.edgeStartMm) ? src.edgeStartMm : null} max={1000} onCommit={(n) => setRule({ edgeStartMm: n })} />
+              <NumberField label="Last fixing from the batten end" value={isNum(src.edgeEndMm) ? src.edgeEndMm : null} max={1000} onCommit={(n) => setRule({ edgeEndMm: n })} />
+            </div>
+          )}
+          {src.mode === "pattern" && <NumberField label="Fixings per batten" unit="" integer min={1} max={200} value={Number.isInteger(src.countPerLine) ? src.countPerLine : null} onCommit={(n) => setRule({ countPerLine: n })} />}
+          <CommitText label="Rule reference (guide / table / row or detail)" value={src.ruleRef} maxLength={60} placeholder="e.g. H02 Table 2 — reviewer" onCommit={(t) => setRule({ ruleRef: t })} />
+          {gaps.length ? <p className="text-[11px] text-amber-800">Not counted until you enter {gaps.join(", ")}.{r.fixing && r.fixingDraft ? " The rule applied before stays in use until then." : ""}</p>
+            : <p className="text-[11px] text-muted">Counted per batten from this rule — not a default.</p>}
+          {(r.fixing || r.fixingDraft) && <Btn kind="ghost" onClick={clear}>Remove fixing rule</Btn>}
+        </>
+      )}
     </fieldset>
   );
 }
@@ -1469,7 +1859,8 @@ function OtherGroups({ rules, update }) {
 export function AccessorySetup({ value, onChange, result, lines }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
-  return <div ref={kb.ref} style={{ paddingBottom: kb.pad }} className="space-y-3"><UndoBar d={d} /><AccessoryFields d={d} result={result} lines={lines} /></div>;
+  const pf = usePendingFields();
+  return <PendingContext.Provider value={pf.report}><div ref={kb.ref} style={{ paddingBottom: kb.pad }} className="space-y-3"><UndoBar d={d} pending={pf.pending} /><AccessoryFields d={d} result={result} lines={lines} /></div></PendingContext.Provider>;
 }
 function AccessoryFields({ d, result, lines }) {
   const cur = d.cur, s = cur.spec || {}, r = cur.rules || {};
@@ -1477,15 +1868,16 @@ function AccessoryFields({ d, result, lines }) {
     const { authority, ...rest } = next;
     return { ...c, rules: { ...withoutCarried(c.rules, "recipe"), recipe: authority ? { ...rest, authority } : rest } };
   });
-  const needs = setupNeeds(cur);
+  const needs = setupNeeds(cur, result);
   const status = shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: r.recipe?.authority?.kind === "project-detail" ? "project-detail-supplied" : "unspecified", procurement: "draft" };
   return (
     <div className="space-y-3" data-setup="accessory">
       <Banner tone="warn"><b>Source-pending — manual quantities.</b> No accessory guide rows are reviewed, so nothing is assumed: each item follows its real route on the walls, and consumables need a reviewed yield or an entered quantity with its source.</Banner>
-      <TextField label="Accessory set (e.g. system or supplier pack)" value={s.product?.name} onChange={(v) => d.patch({ spec: { product: { ...s.product, name: v } } })} placeholder="e.g. Axon accessories — Supplier A" />
+      <CommitText label="Accessory set (e.g. system or supplier pack)" value={s.product?.name} placeholder="e.g. Axon accessories — Supplier A"
+        onCommit={(t) => d.update((c) => ({ ...c, spec: { ...c.spec, product: { ...(c.spec.product || {}), name: t } } }))} />
       <div className="grid grid-cols-2 gap-2">
-        <TextField label="Supplier" value={s.supplierName} onChange={(v) => d.patch({ spec: { supplierName: v } })} />
-        <TextField label="Supplier code" value={s.productCode} onChange={(v) => d.patch({ spec: { productCode: v } })} />
+        <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => d.patch({ spec: { supplierName: t } })} />
+        <CommitText label="Supplier code" value={s.productCode} maxLength={60} onCommit={(t) => d.patch({ spec: { productCode: t } })} />
       </div>
       <CarriedFlags cur={cur} update={d.update} />
       <AccessoryRecipeEditor recipe={r.recipe || null} onChange={setRecipe} result={result} />
@@ -1503,7 +1895,8 @@ function AccessoryFields({ d, result, lines }) {
 export function BattenSetup({ value, onChange, result, lines }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
-  return <div ref={kb.ref} style={{ paddingBottom: kb.pad }} className="space-y-3"><UndoBar d={d} /><BattenFields d={d} result={result} lines={lines} /></div>;
+  const pf = usePendingFields();
+  return <PendingContext.Provider value={pf.report}><div ref={kb.ref} style={{ paddingBottom: kb.pad }} className="space-y-3"><UndoBar d={d} pending={pf.pending} /><BattenFields d={d} result={result} lines={lines} /></div></PendingContext.Provider>;
 }
 function BattenFields({ d, result, lines }) {
   const cur = d.cur, s = cur.spec || {}, r = cur.rules || {};
@@ -1512,8 +1905,8 @@ function BattenFields({ d, result, lines }) {
   const setRule = (k, v) => d.update((c) => ({ ...c, rules: { ...withoutCarried(c.rules, k), [k]: v } }));
   const pick = (o) => d.update((c) => carry(c, { ...c, name: DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec) ? o.title : c.name, spec: { ...freshSpec("batten", c.spec), ...specFromGroup(o.group), family: "batten", orientation: c.spec.orientation || "vertical" } }, "product"));
   const goCustom = () => d.update((c) => carry(c, { ...c, spec: { ...freshSpec("batten", c.spec), orientation: c.spec.orientation || "vertical", product: { id: "custom-batten", name: null, sourceRefs: [] } } }, "product"));
-  const setP = (p) => d.patch({ spec: { product: { ...s.product, ...p } } });
-  const needs = setupNeeds(cur);
+  const setP = (p) => d.update((c) => ({ ...c, spec: { ...c.spec, product: { ...(c.spec.product || {}), ...p } } }));
+  const needs = setupNeeds(cur, result);
   return (
     <div className="space-y-3" data-setup="batten">
       <ProductPicker family="batten" spec={s} onPick={pick} />
@@ -1521,7 +1914,7 @@ function BattenFields({ d, result, lines }) {
       <CarriedFlags cur={cur} update={d.update} />
       {custom && (
         <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2"><TextField label="Batten (section, grade, treatment)" value={s.product?.name} onChange={(v) => setP({ name: v })} placeholder="e.g. 70 × 35 MGP10 H3 pine" /></div>
+          <div className="col-span-2"><CommitText label="Batten (section, grade, treatment)" value={s.product?.name} onCommit={(t) => setP({ name: t })} placeholder="e.g. 70 × 35 MGP10 H3 pine" /></div>
           <NumberField label="Width" value={s.product?.widthMm} onCommit={(n) => setP({ widthMm: n })} />
           <NumberField label="Thickness" value={s.product?.thicknessMm} onCommit={(n) => setP({ thicknessMm: n })} />
           <div className="col-span-2"><LengthList label="Stock lengths" values={s.product?.lengthsMm} onCommit={(v) => setP({ lengthsMm: v, lengthMm: v.length === 1 ? v[0] : null })}
@@ -1545,12 +1938,13 @@ function BattenFields({ d, result, lines }) {
           These supports already exist (layout only — not purchased)
         </label>
       </fieldset>
-      <TextField label="Supplier" value={s.supplierName} onChange={(v) => d.patch({ spec: { supplierName: v } })} />
+      <SupportFixings rules={r} update={d.update} />
+      <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => d.patch({ spec: { supplierName: t } })} />
       <AvailabilityChips value={s.availability} onChange={(v) => d.patch({ spec: { availability: v } })} />
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
-      <ComponentRows spec={s} />
+      <ComponentRows spec={s} rules={r} />
       <SetupStatus cur={cur} result={result} needs={needs} />
     </div>
   );
@@ -1559,6 +1953,7 @@ function BattenFields({ d, result, lines }) {
 export function CladdingSetup({ value, onChange, result, lines }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
+  const pf = usePendingFields();
   const cur = d.cur, s = cur.spec || {};
   const fam = s.family;
   const chooseFamily = (f) => {
@@ -1569,12 +1964,14 @@ export function CladdingSetup({ value, onChange, result, lines }) {
     });
   };
   return (
+    <PendingContext.Provider value={pf.report}>
     <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="cladding" data-family={fam}>
-      <UndoBar d={d} />
-      <TextField label="Name" value={cur.name} onChange={(v) => d.patch({ name: v })} />
+      <UndoBar d={d} pending={pf.pending} />
+      <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => d.patch({ name: t })} />
       <Chips label="Material" name="family" value={fam} options={CLADDING_FAMILIES} onChange={chooseFamily} />
       {fam === "batten" ? <BattenFields d={d} result={result} lines={lines} /> : fam === "accessory" ? <AccessoryFields d={d} result={result} lines={lines} /> : <CladdingFields d={d} result={result} lines={lines} />}
     </div>
+    </PendingContext.Provider>
   );
 }
 
@@ -1584,7 +1981,7 @@ function CladdingFields({ d, result, lines }) {
   const mk = methodFor(s)?.key;
   const g = groupOf(s);
   const setRule = (k, v) => d.update((c) => ({ ...c, rules: { ...withoutCarried(c.rules, k), [k]: v } }));
-  const setP = (p) => d.patch({ spec: { product: { ...s.product, ...p } } });
+  const setP = (p) => d.update((c) => ({ ...c, spec: { ...c.spec, product: { ...(c.spec.product || {}), ...p } } }));
   const pick = (o) => d.update((c) => {
     const base = specFromGroup(o.group, { sku: o.sku || undefined });
     const keep = { supplierName: c.spec.supplierName ?? null, spareRate: c.spec.spareRate ?? 0, notes: c.spec.notes ?? null };
@@ -1610,7 +2007,20 @@ function CladdingFields({ d, result, lines }) {
   const setCover = (n) => d.update((c) => ({ ...c, rules: withoutCarried(c.rules, "coverMm"), spec: { ...c.spec, product: { ...c.spec.product, effectiveCoverMm: n } } }));
   const courseOrientations = orientationsFor(s);
   const showOrientation = s.layout === "course" || fam === "timber-cladding";
-  const needs = setupNeeds(cur);
+  const needs = setupNeeds(cur, result);
+  const setCondition = (k, v) => d.update((c) => {
+    const ic = { ...(c.rules?.installConditions || {}) };
+    if (filled(v)) ic[k] = v; else delete ic[k];
+    const rules = { ...withoutCarried(c.rules, "installConditions") };
+    if (Object.keys(ic).length) rules.installConditions = ic; else delete rules.installConditions;
+    return { ...c, rules };
+  });
+  const setJoints = (applied, draft) => d.update((c) => {
+    const rules = withoutCarried(withoutCarried(c.rules, "joints"), "jointsDraft");
+    if (applied !== undefined) { if (applied) rules.joints = applied; else delete rules.joints; }
+    if (draft) rules.jointsDraft = draft; else delete rules.jointsDraft;
+    return { ...c, rules };
+  });
   return (
     <div className="space-y-3">
       {["cladding", "aac"].includes(fam) && <ProductPicker key={fam} family={fam} spec={s} onPick={pick} />}
@@ -1644,7 +2054,7 @@ function CladdingFields({ d, result, lines }) {
       )}
       {fam === "foam" && (
         <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2"><TextField label="Exact Rendex product / system" value={s.product?.name === FOAM_PLACEHOLDER ? "" : s.product?.name} onChange={(v) => setP({ name: v })} placeholder="From the current Rendex system document" /></div>
+          <div className="col-span-2"><CommitText label="Exact Rendex product / system" value={s.product?.name === FOAM_PLACEHOLDER ? "" : s.product?.name} onCommit={(t) => setP({ name: t })} placeholder="From the current Rendex system document" /></div>
           <NumberField label="Sheet length" value={s.product?.lengthMm} onCommit={(n) => setP({ lengthMm: n, lengthsMm: isNum(n) ? [n] : [] })} />
           <NumberField label="Sheet width" value={s.product?.widthMm} onCommit={(n) => setP({ widthMm: n, effectiveCoverMm: n })} />
           <NumberField label="Thickness" value={s.product?.thicknessMm} onCommit={(n) => setP({ thicknessMm: n })} />
@@ -1683,10 +2093,13 @@ function CladdingFields({ d, result, lines }) {
           options={[["horizontal", "Horizontal courses", !courseOrientations.has("horizontal")], ["vertical", "Vertical boards", !courseOrientations.has("vertical")]]} />
       )}
       {showOrientation && courseOrientations.size === 1 && <p className="-mt-2 text-[11px] text-muted">{productLabel(s)} is listed for {[...courseOrientations][0]} installation only.</p>}
-      {(fam !== "timber-cladding" || s.product?.name) && <AssemblyPicker spec={s} rules={r} onSelect={(id) => d.update((c) => carry(c, { ...c, spec: { ...c.spec, assemblyId: id } }, "assembly"))} onRoute={(v) => setRule("route", v)} />}
+      {mk === "panel_grid" && <PanelOrientation spec={s} value={r.panelOrientation} onChange={(v) => setRule("panelOrientation", v)} />}
+      {mk === "course_layout" && <BoardJointsField spec={s} value={r.joints || null} draft={r.jointsDraft || null} needed={(result?.problems || []).some((p) => p.code === "needs_layout")}
+        onApply={(v) => setJoints(v, null)} onDraft={(v) => setJoints(undefined, v)} onClear={() => setJoints(null, null)} />}
+      {(fam !== "timber-cladding" || s.product?.name) && <AssemblyPicker spec={s} rules={r} onSelect={(id) => d.update((c) => carry(c, { ...c, spec: { ...c.spec, assemblyId: id } }, "assembly"))} onRoute={(v) => setRule("route", v)} onCondition={setCondition} />}
       <div className="grid grid-cols-2 gap-2">
-        <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => d.patch({ spec: { spareRate: n } })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : "Recorded for the order — the layout count doesn't add spares yet. 0 doesn't mean no real waste."} />
-        {fam !== "timber-cladding" && <TextField label="Supplier" value={s.supplierName} onChange={(v) => d.patch({ spec: { supplierName: v } })} />}
+        <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => d.patch({ spec: { spareRate: n } })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : SPARES_HELP} />
+        {fam !== "timber-cladding" && <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => d.patch({ spec: { supplierName: t } })} />}
       </div>
       <AvailabilityChips value={s.availability} onChange={(v) => d.patch({ spec: { availability: v } })} />
       {["sheet_layout", "panel_grid", "aac_panel_layout"].includes(mk) && (
@@ -1717,20 +2130,22 @@ function CladdingFields({ d, result, lines }) {
 export function AluminiumSetup({ value, onChange, result, lines }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
+  const pf = usePendingFields();
   const set = d.patch;
   const cur = d.cur, s = cur.spec || {}, w = s.windowPreset || {};
-  const needs = setupNeeds(cur);
+  const needs = setupNeeds(cur, result);
   return (
+    <PendingContext.Provider value={pf.report}>
     <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="aluminium">
-      <UndoBar d={d} />
-      <TextField label="Name" value={cur.name} onChange={(v) => set({ name: v })} />
+      <UndoBar d={d} pending={pf.pending} />
+      <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => set({ name: t })} />
       <div className="grid grid-cols-3 gap-2">
         <NumberField label="Leg A" value={s.profile?.aMm} onCommit={(n) => set({ spec: { profile: { ...s.profile, aMm: n } } })} />
         <NumberField label="Leg B" value={s.profile?.bMm} onCommit={(n) => set({ spec: { profile: { ...s.profile, bMm: n } } })} />
         <NumberField label="Thickness" value={s.profile?.tMm} onCommit={(n) => set({ spec: { profile: { ...s.profile, tMm: n } } })} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <TextField label="Finish / colour" value={s.finish} onChange={(v) => set({ spec: { finish: v } })} />
+        <CommitText label="Finish / colour" value={s.finish} maxLength={60} onCommit={(t) => set({ spec: { finish: t } })} />
         <NumberField label="Stock length" value={s.stockLengthMm} onCommit={(n) => set({ spec: { stockLengthMm: n } })} help="Each required piece is ONE continuous length — never joined." />
       </div>
       <fieldset className="rounded-lg border border-hairline p-2">
@@ -1757,15 +2172,16 @@ export function AluminiumSetup({ value, onChange, result, lines }) {
         </div>
         <p className="text-[11px] text-muted">Example: a 600 × 2400 window → 2500 + 2500 + 600. Allowances are this job&apos;s detail, not a universal rule.</p>
       </fieldset>
-      <TextField label="Supplier" value={s.supplierName} onChange={(v) => set({ spec: { supplierName: v } })} />
+      <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => set({ spec: { supplierName: t } })} />
       <AvailabilityChips value={s.availability} onChange={(v) => set({ spec: { availability: v } })} />
       <SourceRefs refs={["OWNER-2026-10-14"]} label="Profile and stock source" />
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
-      <StatusRow status={shownStatus(result) || { quantity: "schedule", installation: "unspecified", procurement: needs.length ? "missing-product" : "draft" }}
+      <StatusRow status={withKerfState(shownStatus(result) || { quantity: "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }, s)}
         note={result?.status ? "From the cutting plan for this job." : "The cutting plan is worked out from this job's openings and runs."} />
       {result?.status && <EngineProblems result={result} />}
     </div>
+    </PendingContext.Provider>
   );
 }

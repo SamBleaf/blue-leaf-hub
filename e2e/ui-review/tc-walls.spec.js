@@ -3,7 +3,7 @@
 // in UI Review Mode (SYNTHETIC fixtures, the REAL shared/takeoff engine via computeWorkspace).
 //   UI_REVIEW_PORT=5192 npx playwright test --config=playwright.ui-review.config.js e2e/ui-review/tc-walls.spec.js
 // Phone viewport (390 × 844, touch). Evidence screenshots → docs/takeoff/evidence/ui/tc-walls-*.png
-import { test, expect } from "@playwright/test";
+import { test, expect, webkit, devices } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import { productGroups, specFromGroup } from "../../shared/takeoff/products/index.js";
 import { methodFor } from "../../shared/takeoff/index.js";
@@ -316,6 +316,8 @@ test.describe("TC walls — phone journeys", () => {
     await expect(form.getByLabel("Joint gap")).toHaveValue(""); // never defaulted
     await form.getByLabel("Joint gap").fill("10");
     await form.getByLabel("Joint gap").press("Enter");
+    await expect(cells(page, "blocked")).toHaveCount(5); // PH-07: no detail yet → still a draft
+    await form.getByLabel("Detail reference (drawing / guide)").fill("H02"); await form.getByLabel("Detail reference (drawing / guide)").press("Enter");
     await expect(problems).not.toContainText("tallest listed sheet");
     await expect(cells(page, "blocked")).toHaveCount(0);
     await expect(cells(page, "occupied")).toHaveCount(10); // two courses of 5
@@ -673,6 +675,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await expect(form.getByLabel("Joint height")).toHaveValue("3000");
     await expect(form.locator("[data-joint-row-misfit]")).toContainText("Low (2,700 mm) is not tall enough for a joint at 3,000 mm — the joint row doesn't apply there, so it keeps a single course");
     await form.getByLabel("Joint gap").fill("10"); await form.getByLabel("Joint gap").press("Enter");
+    await form.getByLabel("Detail reference (drawing / guide)").fill("H02"); await form.getByLabel("Detail reference (drawing / guide)").press("Enter");
     await expect(cells(page, "occupied")).toHaveCount(4); // Tall: 2 strips × 2 courses
     await page.getByRole("button", { name: "Close panel" }).click();
     await page.getByRole("button", { name: "‹ Walls" }).click();
@@ -878,29 +881,36 @@ test.describe("TC walls — review additions at 375 px", () => {
   });
 });
 
+/** A simulated on-screen keyboard: visualViewport shrinks by `kb` px ~20 ms after an input takes focus (as a phone's does). */
+function simulateKeyboard(page, kb) {
+  return page.addInitScript((KB) => {
+    const vv = new EventTarget();
+    let h = window.innerHeight;
+    Object.defineProperty(vv, "height", { get: () => h });
+    Object.defineProperty(vv, "offsetTop", { get: () => 0 });
+    Object.defineProperty(vv, "width", { get: () => window.innerWidth });
+    Object.defineProperty(vv, "scale", { get: () => 1 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, get: () => vv });
+    const upd = () => {
+      const el = document.activeElement;
+      const nh = window.innerHeight - (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) ? KB : 0);
+      if (nh !== h) { h = nh; vv.dispatchEvent(new Event("resize")); }
+    };
+    document.addEventListener("focusin", () => setTimeout(upd, 20));
+    document.addEventListener("focusout", () => setTimeout(upd, 20));
+    window.__kbTop = () => window.innerHeight - KB;
+  }, kb);
+}
+/** The element sits between the window header and the (simulated) keyboard's top edge. */
+const kbInView = (locator) => expect.poll(async () => {
+  const r = await locator.evaluate((el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, kb: window.__kbTop() }; });
+  return r.top >= 52 && r.bottom <= r.kb;
+}, { timeout: 5000 }).toBe(true);
+
 test.describe("TC walls — on-screen keyboard (simulated visualViewport)", () => {
   test("a 336 px keyboard never covers the focused field — nor the live result line under the wall fields", async ({ page }) => {
-    await page.addInitScript(() => {
-      const KB = 336;
-      const vv = new EventTarget();
-      let h = window.innerHeight;
-      Object.defineProperty(vv, "height", { get: () => h });
-      Object.defineProperty(vv, "offsetTop", { get: () => 0 });
-      Object.defineProperty(vv, "width", { get: () => window.innerWidth });
-      Object.defineProperty(window, "visualViewport", { configurable: true, get: () => vv });
-      const upd = () => {
-        const el = document.activeElement;
-        const nh = window.innerHeight - (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) ? KB : 0);
-        if (nh !== h) { h = nh; vv.dispatchEvent(new Event("resize")); }
-      };
-      document.addEventListener("focusin", () => setTimeout(upd, 20));
-      document.addEventListener("focusout", () => setTimeout(upd, 20));
-      window.__kbTop = () => window.innerHeight - KB;
-    });
-    const inView = (locator) => expect.poll(async () => {
-      const r = await locator.evaluate((el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, kb: window.__kbTop() }; });
-      return r.top >= 52 && r.bottom <= r.kb;
-    }, { timeout: 5000 }).toBe(true);
+    await simulateKeyboard(page, 336);
+    const inView = kbInView;
     await openMixedWalls(page);
     await page.getByRole("button", { name: "Open North wall" }).click();
     await page.getByLabel("Wall height").focus();
@@ -924,5 +934,223 @@ test.describe("TC walls — on-screen keyboard (simulated visualViewport)", () =
     const datum = page.getByRole("region", { name: "Sheet setout" }).getByLabel(/Setout starts at/);
     await datum.focus();
     await inView(datum);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Phone adversarial review, round 2 (PH-07, PH-09, PH-14, F09, F14, F17) — each test failed before its fix.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+test.describe("TC walls — phone review round 2", () => {
+  test("PH-09 WebKit (iPhone 13): the keyboard never covers the FIRST field focused in the opening sheet, the joint gap or the datum", async ({ baseURL }) => {
+    const browser = await webkit.launch();
+    try {
+      const context = await browser.newContext({ ...devices["iPhone 13"], baseURL });
+      const page = await context.newPage();
+      await simulateKeyboard(page, 300);
+      await openMixedWalls(page);
+      await page.getByRole("button", { name: "Open North wall" }).click();
+      await page.getByRole("button", { name: /^W1/ }).click();
+      const op = page.getByRole("region", { name: "Opening W1" });
+      // the first focus in a freshly opened sheet: the scroll must run AFTER the keyboard room exists
+      await op.getByLabel("Offset from wall start").focus();
+      await kbInView(op.getByLabel("Offset from wall start"));
+      await op.getByLabel("Offset from wall start").blur();
+      await page.getByRole("button", { name: "Close panel" }).click();
+      await page.getByRole("button", { name: "Add a joint row" }).click();
+      const gap = page.locator("[data-joint-row-form]").getByLabel("Joint gap");
+      await gap.focus();
+      await kbInView(gap);
+      await gap.blur();
+      await page.getByRole("button", { name: "Close panel" }).click();
+      const datum = page.getByRole("region", { name: "Sheet setout" }).getByLabel(/Setout starts at/);
+      await datum.focus();
+      await kbInView(datum);
+      await page.screenshot({ path: `${SHOTS}/tc-walls-keyboard-webkit-iphone13.png` });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test("PH-07 a joint row from the wall editor stays a draft until height, gap AND detail reference are entered (the Setup card's rule)", async ({ page }) => {
+    await openWalls(page, "axon");
+    await addWall(page, { name: "Tall", length: 6000, height: 3500 });
+    await expect(cells(page, "blocked")).toHaveCount(5);
+    await page.locator("[data-wall-problems]").getByRole("button", { name: "Add a joint row" }).click();
+    const form = page.locator("[data-joint-row-form]");
+    await form.getByLabel("Joint gap").fill("10"); await form.getByLabel("Joint gap").press("Enter");
+    // height + gap but no detail: NOT a layout — kept as a draft, still blocked
+    await expect(form.locator("[data-joint-row-draft]")).toContainText("Kept as a draft until");
+    await expect(cells(page, "blocked")).toHaveCount(5);
+    await expect(page.locator('[data-el-state="joint"]')).toHaveCount(0);
+    // the draft survives closing the sheet (stored with the material, never read by the engine)
+    await page.getByRole("button", { name: "Close panel" }).click();
+    const setout = page.getByRole("region", { name: "Sheet setout" });
+    await expect(setout.locator("[data-joint-row-draft]")).toContainText("not applied");
+    await setout.getByRole("button", { name: "Edit joint row" }).click();
+    await expect(form.getByLabel("Joint gap")).toHaveValue("10");
+    await expect(form.getByLabel("Joint height")).toHaveValue("3000");
+    // the detail completes it → applied at once
+    await form.getByLabel("Detail reference (drawing / guide)").fill("H02 horizontal joint");
+    await form.getByLabel("Detail reference (drawing / guide)").press("Enter");
+    await expect(cells(page, "blocked")).toHaveCount(0);
+    await expect(cells(page, "occupied")).toHaveCount(10);
+    await expect(form.locator("[data-joint-row-draft]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await expect(setout).toContainText("Joint row at 3,000 mm (gap 10 mm, H02 horizontal joint)");
+    // the fake server holds exactly what Setup would: jointRows complete, no draft left behind
+    await expect.poll(() => page.evaluate(async () => {
+      const ws = await (await fetch("/api/takeoff/workspaces/ws-1")).json();
+      const m = ws.snapshot.materials.find((x) => x.id === "mat-axon");
+      return JSON.stringify([m.rules.jointRows || null, m.rules.jointRowsDraft || null]);
+    })).toBe(JSON.stringify([{ atMm: [3000], gapMm: 10, detailRef: "H02 horizontal joint" }, null]));
+    // undo → back to the draft (blocked again), the draft intact
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(cells(page, "blocked")).toHaveCount(5);
+    await expect(setout.locator("[data-joint-row-draft]")).toBeVisible();
+  });
+
+  test("PH-14 wall by numbers: a shape tapped after typing the length is kept; tapping the name keeps the sheet open; leaving the sheet adds the wall", async ({ page }) => {
+    await openWalls(page, "axon");
+    await page.getByRole("button", { name: "Wall by numbers" }).click();
+    let sheet = page.getByRole("region", { name: "Wall by numbers" });
+    await sheet.getByLabel("Wall length").fill("6000"); // typed — no Enter
+    const gable = sheet.getByRole("button", { name: "Gable", exact: true });
+    const gb = await gable.boundingBox();
+    await page.touchscreen.tap(gb.x + gb.width / 2, gb.y + gb.height / 2);
+    await expect(page.getByRole("dialog", { name: "Wall 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Gable", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Eaves height")).toBeFocused();
+    await expect(page.getByLabel("Wall length")).toHaveValue("6000");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    // type the length, then go back to the name: the sheet stays open, the name is used
+    await page.getByRole("button", { name: "Wall by numbers" }).click();
+    sheet = page.getByRole("region", { name: "Wall by numbers" });
+    await sheet.getByLabel("Wall length").fill("4800");
+    const nb = await sheet.getByLabel("Wall name").boundingBox();
+    await page.touchscreen.tap(nb.x + nb.width / 2, nb.y + nb.height / 2);
+    await page.waitForTimeout(600);
+    await expect(sheet).toBeVisible();
+    await expect(page.locator("[data-wall-row]")).toHaveCount(1);
+    await sheet.getByLabel("Wall name").fill("Side");
+    await sheet.getByLabel("Wall name").press("Enter");
+    await expect(page.getByRole("dialog", { name: "Side" })).toBeVisible();
+    await expect(page.getByLabel("Wall length")).toHaveValue("4800");
+    await expect(page.getByRole("button", { name: "Rectangle", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    // typing a length and then tapping outside the sheet still adds the wall (auto-apply, nothing to confirm)
+    await page.getByRole("button", { name: "Wall by numbers" }).click();
+    sheet = page.getByRole("region", { name: "Wall by numbers" });
+    await sheet.getByLabel("Wall length").fill("3000");
+    const title = await page.getByRole("region", { name: "Material status" }).locator("h2").boundingBox();
+    await page.touchscreen.tap(title.x + 10, title.y + title.height / 2);
+    await expect(page.getByRole("dialog", { name: "Wall 3" })).toBeVisible();
+    await expect(page.getByLabel("Wall length")).toHaveValue("3000");
+  });
+
+  test("F14 a datum set on one wall moves only that wall; aligning every wall is an explicit choice with a job-wide preview", async ({ page }) => {
+    await openWalls(page, "axon", { walls: [{ name: "Alpha", length: 2400, height: 2700 }, { name: "Bravo", length: 3600, height: 2700 }] });
+    const row = (n) => page.locator("[data-wall-row]").filter({ hasText: n });
+    await expect(row("Alpha")).toContainText("2 sheets");
+    await expect(row("Bravo")).toContainText("3 sheets");
+    await page.getByRole("button", { name: "Open Alpha" }).click();
+    const setout = page.getByRole("region", { name: "Sheet setout" });
+    await expect(setout).toContainText("This wall only");
+    await setout.getByLabel(/Setout starts at/).fill("600"); await setout.getByLabel(/Setout starts at/).press("Enter");
+    await expect(setout.locator("[data-datum-change]")).toHaveText("Sheets on this wall: 2 → 3");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await expect(row("Alpha")).toContainText("3 sheets");
+    await expect(row("Bravo")).toContainText("3 sheets"); // untouched — before the fix it silently became 4
+    await page.getByRole("button", { name: "Open Bravo" }).click();
+    await expect(page.getByRole("region", { name: "Sheet setout" }).getByLabel(/Setout starts at/)).toHaveValue("0");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    // explicit "align all": the preview is job-wide
+    await page.getByRole("button", { name: "Open Alpha" }).click();
+    await setout.getByRole("button", { name: "Use this setout on every wall" }).click();
+    await expect(setout.locator("[data-datum-all-change]")).toHaveText("Sheets on all 2 walls using Axon 400 smooth: 6 → 7");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await expect(row("Bravo")).toContainText("4 sheets");
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(row("Bravo")).toContainText("3 sheets");
+    await expect(row("Alpha")).toContainText("3 sheets");
+  });
+
+  test("F17 a traced elevation outline is labelled 'Traced elevation outline' — never 'Derived from plan + entered heights'", async ({ page }) => {
+    const pts = [planPt(0, 3700), planPt(4000, 3700), planPt(4000, 1000), planPt(0, 1600)];
+    const outline = { id: "seed-outline-1", kind: "wall", documentId: "doc-plan-c", pageIndex: 0, calibrationId: "cal-1", points: pts, parentId: null, label: null,
+      inputs: { kind: "polygon", name: "Outline O", polygon: [{ x: 0, y: 0 }, { x: 4000, y: 0 }, { x: 4000, y: 2700 }, { x: 0, y: 2100 }] } };
+    await openWalls(page, "axon", { extraMeasurements: [outline], extraContributions: [{ id: "seed-con-outline", measurementId: outline.id, jobMaterialId: "mat-axon", role: "wall" }] });
+    await expect(page.locator("[data-wall-row]").filter({ hasText: "Outline O" })).toContainText("Traced outline");
+    await page.getByRole("button", { name: "Open Outline O" }).click();
+    const dlg = page.getByRole("dialog", { name: "Outline O" });
+    await expect(dlg).toContainText("Traced elevation outline");
+    await expect(page.locator("[data-provenance]")).toHaveText("Traced elevation outline");
+    await expect(dlg).not.toContainText("Derived from plan + entered heights");
+  });
+
+  test("F09 studs: an opening's framing detail is entered in its sheet (auto-applied, undoable) and clears 'opening framing incomplete'", async ({ page }) => {
+    const errs = consoleErrors(page);
+    await openWalls(page, "studs");
+    await addWall(page, { name: "Frame A", length: 3600, height: 2400 });
+    await addOpeningByNumbers(page, { x: 1000, sill: 900, width: 1200, height: 1200 });
+    await expect(page.locator("[data-wall-problems]")).toContainText("W1: base studs only");
+    await page.getByRole("button", { name: /^W1/ }).click();
+    const fd = page.locator("[data-framing-detail]");
+    await expect(fd).toContainText("its framing detail");
+    await fd.getByRole("button", { name: "Explicit quantities" }).click();
+    const below = fd.getByRole("group", { name: "Below the sill" });
+    await below.getByRole("button", { name: "Pieces required" }).click();
+    await fd.getByLabel("Below-sill deduction").fill("45"); await fd.getByLabel("Below-sill deduction").press("Enter");
+    const above = fd.getByRole("group", { name: "Above the head" });
+    await above.getByRole("button", { name: "Pieces required" }).click();
+    await fd.getByLabel("Above-head deduction").fill("190"); await fd.getByLabel("Above-head deduction").press("Enter");
+    // members: kings at the stud length, jacks to the head, a lintel 90 longer than the opening
+    const addMember = async (role, qty, lengthChoice, extra) => {
+      await fd.getByRole("button", { name: "Add a member" }).click();
+      const r = fd.locator("[data-member-row]").last();
+      await r.getByLabel("Member", { exact: true }).selectOption({ label: role });
+      await r.getByLabel("Quantity", { exact: true }).fill(String(qty)); await r.getByLabel("Quantity", { exact: true }).press("Enter");
+      await r.getByLabel("Length from", { exact: true }).selectOption({ label: lengthChoice });
+      if (extra) { await r.getByLabel(extra[0]).fill(String(extra[1])); await r.getByLabel(extra[0]).press("Enter"); }
+      await expect(r.locator("[data-member-state]")).toHaveAttribute("data-member-state", "applied");
+    };
+    await addMember("King stud", 2, "Stud length");
+    await expect(fd.locator("[data-framing-state]")).toHaveAttribute("data-framing-state", "complete");
+    await addMember("Jack stud", 2, "Head level");
+    await addMember("Lintel", 1, "Opening width", ["Adjust", 90]);
+    await expect(page.locator("[data-wall-problems]")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Elevation" })).toContainText("studs with explicit opening framing");
+    const qty = page.getByRole("region", { name: "Quantities on this wall" });
+    await expect(qty).toContainText("Lintel");
+    await expect(qty).toContainText("King");
+    await expect(qty.locator('[data-status="quantity"]')).not.toHaveAttribute("data-value", "incomplete");
+    await noHorizontalScroll(page);
+    const small = await page.evaluate(() => [...document.querySelectorAll("[data-framing-detail] button, [data-framing-detail] input, [data-framing-detail] select")]
+      .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 43.5 || r.width < 43.5); }).map((el) => el.outerHTML.slice(0, 80)));
+    expect(small).toEqual([]);
+    await page.screenshot({ path: `${SHOTS}/tc-walls-opening-framing-390x844.png` });
+    // undo takes back the last change only (the lintel's adjustment) — still complete
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(fd.locator("[data-member-row]").last().getByLabel("Adjust")).toHaveValue("0");
+    await page.getByRole("button", { name: "Redo" }).click();
+    await expect(fd.locator("[data-member-row]").last().getByLabel("Adjust")).toHaveValue("90");
+    // close + reopen: the stored detail comes back as entered
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await page.getByRole("button", { name: /^W1/ }).click();
+    await expect(fd.getByRole("button", { name: "Explicit quantities" })).toHaveAttribute("aria-pressed", "true");
+    await expect(fd.locator("[data-member-row]")).toHaveCount(3);
+    await expect(fd.getByLabel("Below-sill deduction")).toHaveValue("45");
+    // the engine never claims a design check
+    await expect(fd).toContainText("not checked as a design");
+    // what is saved is exactly the server's opening.inputs.detail contract (explicit members, same section as the studs)
+    await expect.poll(() => page.evaluate(async () => {
+      const ws = await (await fetch("/api/takeoff/workspaces/ws-1")).json();
+      const o = ws.snapshot.measurements.find((m) => m.kind === "opening" && m.inputs?.label === "W1" && !m.archived);
+      return JSON.stringify(o?.inputs?.detail || null);
+    })).toBe(JSON.stringify({ source: "explicit", belowSill: { required: true, deductionMm: 45 }, aboveHead: { required: true, deductionMm: 190 }, members: [
+      { id: "m1", role: "king", quantity: 2, lengthFrom: "stud", addMm: 0, sameAsStud: true },
+      { id: "m2", role: "jack", quantity: 2, lengthFrom: "headLevel", addMm: 0, sameAsStud: true },
+      { id: "m3", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 90, sameAsStud: true }] }));
+    expect(errs).toEqual([]);
   });
 });

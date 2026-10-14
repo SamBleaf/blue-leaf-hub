@@ -98,17 +98,25 @@ export function Btn({ kind = "secondary", className = "", ...p }) {
 /**
  * Direct numeric entry with a visible unit. Commits on Enter/blur (one undoable command);
  * invalid text shows an inline message and never commits.
+ * An EMPTIED field is never a number (Number("") is 0 — a cleared pitch or gap must not become a real 0):
+ *   optional  → commits null ("not entered"; the calculation then asks for it, or uses its own default);
+ *   otherwise → stays a draft with "Enter a value." and the saved value is untouched (Undo / typing recovers it).
  */
-export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max = Infinity, step = "any", integer = false, autoFocus = false, help, error: extError }) {
+export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max = Infinity, step = "any", integer = false, optional = false, autoFocus = false, help, error: extError }) {
   const id = useId();
   const [text, setText] = useState(value == null ? "" : String(value));
   const [err, setErr] = useState(null);
   // re-sync the text only when the VALUE really changes (not on every re-render with an equal value), so an
-  // unrelated save never wipes what the user is typing
+  // unrelated save never wipes what the user is typing; a value changed from outside (Undo) replaces any draft
   const [shownValue, setShownValue] = useState(value);
-  if (!Object.is(value, shownValue)) { setShownValue(value); setText(value == null ? "" : String(value)); }
+  if (!Object.is(value, shownValue)) { setShownValue(value); setText(value == null ? "" : String(value)); setErr(null); }
   function commit() {
-    if (text.trim() === "" && value == null) return;
+    if (text.trim() === "") {
+      if (value == null) { setErr(null); return; }
+      if (optional) { setErr(null); onCommit(null); return; }
+      setErr("Enter a value.");
+      return;
+    }
     const n = Number(text.replace(/,/g, ""));
     if (!Number.isFinite(n) || n < min || (min > 0 && !integer && n <= 0) || (integer && !Number.isInteger(n))) {
       setErr(integer ? `Enter a whole number of ${min} or more.` : min > 0 ? "Enter a number greater than 0." : "Enter a number of 0 or more.");

@@ -54,18 +54,25 @@ async function num(scope, label, v) {
   await f.fill(String(v));
   await f.press("Enter");
 }
+/** Openings by size apply as soon as width and height are valid (no Add step); more of a size go on the added card. */
 async function addOpening(screen, { label = "", w, h, count = 1 }) {
   if (label) await screen.getByLabel("Opening label (optional)").fill(label);
   await num(screen, "Opening width", w);
   await num(screen, "Opening height", h);
-  if (count !== 1) await num(screen, "How many", count);
-  await screen.getByRole("button", { name: count > 1 ? `Add ${count} openings` : "Add opening" }).click();
+  if (count !== 1) await num(screen.getByTestId("alu-just-added-opening"), "How many of this size", count);
 }
+/** A straight cut is added once its length is valid; the quantity is set on the added cut. */
 async function addCut(screen, { len, qty = 1, label = "" }) {
   if (label) await screen.getByLabel("Cut label (optional)").fill(label);
   await num(screen, "Finished cut length", len);
-  if (qty !== 1) await num(screen, "Cut quantity", qty);
-  await screen.getByRole("button", { name: "Add cut" }).click();
+  if (qty !== 1) await num(screen.getByTestId("alu-just-added-cut"), "Cut quantity", qty);
+}
+/** An offcut is recorded once its measured length is valid; identical pieces go on the recorded card. */
+async function recordOffcut(screen, { label, location, len, count = 1 }) {
+  if (label != null) await screen.getByLabel("Offcut label").fill(label);
+  if (location) await screen.getByLabel("Where it is (optional)").fill(location);
+  await num(screen, "Measured offcut length", len);
+  if (count !== 1) await num(screen.getByTestId("alu-just-added-offcut"), "Identical pieces", count);
 }
 const opening = (screen, label) => screen.locator(`[data-testid="alu-opening"][data-label="${label}"]`);
 
@@ -208,10 +215,7 @@ test.describe("TC-R04 aluminium cutting (phone)", () => {
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 1 × 6,500 mm");
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(0);
 
-    await screen.getByLabel("Offcut label").fill("Rack A");
-    await num(screen, "Measured offcut length", 891);
-    await screen.getByLabel("Where it is (optional)").fill("Ute");
-    await screen.getByRole("button", { name: "Record offcut" }).click();
+    await recordOffcut(screen, { label: "Rack A", location: "Ute", len: 891 });
     const rack = screen.locator('[data-testid="alu-offcut"][data-offcut="Rack A"]');
     await expect(rack).toContainText("891 mm · Ute");
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy nothing new");
@@ -235,11 +239,13 @@ test.describe("TC-R04 aluminium cutting (phone)", () => {
     await expect(form).toContainText("Bar 1: planned remainder 5,897 mm");
     await expect(form.getByLabel("Offcut label")).toHaveValue("Bar 1 remainder");
     await expect(form.getByLabel("Measured offcut length")).toHaveValue("");
-    await form.getByRole("button", { name: "Record offcut" }).click();
-    await expect(form.getByRole("alert")).toHaveText("Enter the measured length of the offcut."); // never assumed from the plan
+    // nothing is recorded until the real piece is measured — never assumed from the plan
+    await expect(form).toContainText("Recorded as soon as you enter the measured length — never taken from the plan.");
+    await expect(screen.getByTestId("alu-offcut")).toHaveCount(1);
     await num(form, "Measured offcut length", 5890);
-    await form.getByRole("button", { name: "Record offcut" }).click();
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(2);
+    await expect(screen.getByTestId("alu-just-added-offcut")).toContainText("Recorded Bar 1 remainder · 5,890 mm");
+    await expect(screen.getByTestId("alu-just-added-offcut").getByLabel("Identical pieces")).toHaveCount(0); // one real piece
     await expect(screen.locator('[data-testid="alu-offcut"][data-offcut="Bar 1 remainder"]')).toContainText("5,890 mm");
     await page.screenshot({ path: info.outputPath("aluminium-offcuts-390.png"), fullPage: true });
   });
@@ -314,6 +320,14 @@ test.describe("TC-R04 aluminium cutting (phone)", () => {
     await expect(screen.getByTestId("alu-opening").getByRole("button", { name: / Head / })).toHaveCount(3);
     await screen.getByRole("button", { name: "Undo" }).click();
     await expect(screen.getByTestId("alu-opening").getByRole("button", { name: / Head / })).toHaveCount(0);
+
+    // a labelled size: copies are numbered from the label, and going back to one restores the plain label
+    await addOpening(screen, { label: "Bay", w: 600, h: 600, count: 2 });
+    await expect(opening(screen, "Bay-1")).toHaveCount(1);
+    await expect(opening(screen, "Bay-2")).toHaveCount(1);
+    await num(screen.getByTestId("alu-just-added-opening"), "How many of this size", 1);
+    await expect(opening(screen, "Bay")).toHaveCount(1);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(4);
   });
 
   test("AL-6 site cutting sheet export: CSV cut-to-opening lookup and copied text agree with the plan", async ({ page, context, browserName }) => {
@@ -477,26 +491,18 @@ test.describe("TC-R04 aluminium review regressions (phone)", () => {
     await expect(st.locator('[data-status="procurement"]')).toHaveText("Ordering: unavailable stock · saw kerf not confirmed");
   });
 
-  test("AL-12 375 px with long unbroken labels: nothing overflows and every control is ≥ 44 px; Add still commits when the tap doesn't blur the field (iOS); duplicate labels are flagged", async ({ page }) => {
+  test("AL-12 375 px with long unbroken labels: nothing overflows and every control is ≥ 44 px; entries apply from the keyboard's return key (no Add step); duplicate labels are flagged", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await openTakeoff(page);
     const screen = await addAluminium(page, { kerf: 3 });
     const LONG = "NORTHELEVATIONGARAGEWINDOWSETABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
-    // iOS can deliver the button's click while the field still has focus: fill WITHOUT Enter, click without moving focus
-    await screen.getByLabel("Opening label (optional)").fill(LONG);
-    await num(screen, "Opening width", 600);
-    await screen.getByLabel("Opening height", { exact: true }).fill("2400");
-    await screen.getByRole("button", { name: "Add opening" }).dispatchEvent("click");
+    // the phone keyboard's return key (Enter) commits each number; the entry applies at once
+    await addOpening(screen, { label: LONG, w: 600, h: 2400 });
     await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
     await expect(screen.getByTestId("alu-nominal")).toContainText("Opening 600 × 2,400 mm");
-    await screen.getByLabel("Cut label (optional)").fill(LONG);
-    await screen.getByLabel("Finished cut length", { exact: true }).fill("1200");
-    await screen.getByRole("button", { name: "Add cut" }).dispatchEvent("click");
+    await addCut(screen, { label: LONG, len: 1200 });
     await expect(screen.getByTestId("alu-extra-cut")).toHaveCount(1);
-    await screen.getByLabel("Offcut label").fill(LONG);
-    await screen.getByLabel("Where it is (optional)").fill(LONG);
-    await screen.getByLabel("Measured offcut length", { exact: true }).fill("891");
-    await screen.getByRole("button", { name: "Record offcut" }).dispatchEvent("click");
+    await recordOffcut(screen, { label: LONG, location: LONG, len: 891 });
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(1);
     await expect(screen.getByTestId("alu-offcut")).toContainText("891 mm");
     await addCut(screen, { len: 7000, label: LONG });
@@ -593,9 +599,7 @@ test.describe("TC-R04 aluminium review regressions (phone)", () => {
   test("AL-16 an offcut recorded for one aluminium is never used by a different-finish aluminium (11 acceptance 4)", async ({ page }) => {
     await openTakeoff(page);
     let screen = await addAluminium(page, { kerf: 3 });
-    await screen.getByLabel("Offcut label").fill("Rack A");
-    await num(screen, "Measured offcut length", 891);
-    await screen.getByRole("button", { name: "Record offcut" }).click();
+    await recordOffcut(screen, { label: "Rack A", len: 891 });
     await addCut(screen, { len: 600 });
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy nothing new");
     await screen.getByRole("button", { name: "Back" }).click();
@@ -621,17 +625,15 @@ test.describe("TC-R04 aluminium offcut pieces (phone)", () => {
     const screen = await addAluminium(page, { kerf: 3 });
     await addCut(screen, { len: 600, qty: 2 });
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 1 × 6,500 mm");
-    await screen.getByLabel("Offcut label").fill("Rack C");
-    await num(screen, "Measured offcut length", 891);
-    await num(screen, "Identical pieces", 2);
-    await screen.getByRole("button", { name: "Record 2 offcuts" }).click();
+    await recordOffcut(screen, { label: "Rack C", len: 891, count: 2 });
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(2);
     await expect(screen.locator('[data-testid="alu-offcut"][data-offcut="Rack C (1 of 2)"]')).toContainText("891 mm");
     await expect(screen.locator('[data-testid="alu-offcut"][data-offcut="Rack C (2 of 2)"]')).toContainText("891 mm");
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy nothing new");
     await expect(screen.getByTestId("alu-offcuts-used")).toHaveText("+ uses 2 existing offcuts");
     await expect(screen.getByTestId("alu-offcut-status").filter({ hasText: /^In this plan: Cut 600$/ })).toHaveCount(2);
-    await expect(screen.getByRole("button", { name: "Record offcut" })).toBeVisible(); // the form is back to one piece
+    await expect(screen.getByLabel("Measured offcut length", { exact: true })).toHaveValue(""); // the form is ready for the next piece
+    await expect(screen.getByTestId("alu-just-added-offcut")).toContainText("Recorded Rack C (1 of 2), Rack C (2 of 2) · 891 mm");
     await screen.getByRole("button", { name: "Undo" }).click();
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(0);
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 1 × 6,500 mm");
@@ -659,46 +661,42 @@ async function placeOrderInReviewBackend(page, materialId, quantity) {
 test.describe("TC-R04 aluminium second review (phone)", () => {
   test.use(PHONE);
 
-  test("AL-18 add forms never lose or leave behind a number: iOS tap-without-blur empties every field, fast repeated entry adds every opening, a cleared field is not secretly used", async ({ page }) => {
+  test("AL-18 add forms never lose or leave behind a number: an entry applies when the field is left (tap elsewhere) and the form is visibly empty again, fast repeated entry adds every opening, a cleared field is not secretly used", async ({ page }) => {
     await openTakeoff(page);
     const screen = await addAluminium(page, { kerf: 3 });
     const field = (label) => screen.getByLabel(label, { exact: true });
-    // iOS: the tap reaches Add while a field still has focus → added AND the form is visibly empty again
-    // (before: the height kept showing 2400 while the form held nothing, so the next Add was refused)
+    // leaving the field (no Enter) applies the entry AND empties the form — no number left showing that it no longer holds
     await num(screen, "Opening width", 600);
     await field("Opening height").fill("2400");
-    await screen.getByRole("button", { name: "Add opening" }).dispatchEvent("click");
+    await field("Opening height").blur();
     await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
     await expect(field("Opening width")).toHaveValue("");
     await expect(field("Opening height")).toHaveValue("");
-    await expect(field("How many")).toHaveValue("1");
+    await expect(field("How many of this size")).toHaveValue("1");
     await field("Finished cut length").fill("1200");
-    await screen.getByRole("button", { name: "Add cut" }).dispatchEvent("click");
+    await field("Finished cut length").blur();
     await expect(screen.getByTestId("alu-extra-cut")).toHaveCount(1);
     await expect(field("Finished cut length")).toHaveValue("");
     await expect(field("Cut quantity")).toHaveValue("1");
     await field("Measured offcut length").fill("891");
-    await screen.getByRole("button", { name: "Record offcut" }).dispatchEvent("click");
+    await field("Measured offcut length").blur();
     await expect(screen.getByTestId("alu-offcut")).toHaveCount(1);
     await expect(field("Measured offcut length")).toHaveValue("");
 
-    // fast entry straight after each Add (before: the form's reset could land after the next number was typed and wipe it)
+    // fast entry straight after each one (before: the form's reset could land after the next number was typed and wipe it)
     for (let i = 0; i < 6; i++) await addOpening(screen, { label: "Fast", w: 900, h: 1200 });
     await expect(opening(screen, "Fast")).toHaveCount(6);
     await expect(screen.getByTestId("alu-opening").filter({ hasText: "Opening 900 × 1,200 mm" })).toHaveCount(6);
 
-    // a cleared or invalid field is empty, not the last number: Add refuses instead of using a value no longer shown
+    // a cleared or invalid field is empty, not the last number: nothing is added from a value no longer shown
     await num(screen, "Opening width", 700);
-    await num(screen, "Opening height", 800);
     await num(screen, "Opening width", "");
-    await screen.getByRole("button", { name: "Add opening" }).click();
-    await expect(screen.getByText("Enter the opening width and height first.")).toBeVisible();
+    await num(screen, "Opening height", 800);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(7);
     await num(screen, "Opening width", "abc");
     await expect(screen.getByText("Enter a number greater than 0.")).toBeVisible();
-    await screen.getByRole("button", { name: "Add opening" }).click();
     await expect(screen.getByTestId("alu-opening")).toHaveCount(7);
     await num(screen, "Opening width", 700);
-    await screen.getByRole("button", { name: "Add opening" }).click();
     await expect(screen.getByTestId("alu-opening")).toHaveCount(8);
     await expect(screen.getByTestId("alu-opening").filter({ hasText: "Opening 700 × 800 mm" })).toHaveCount(1);
     await expect(screen.getByRole("alert").filter({ hasText: /^Enter (the opening|a number)/ })).toHaveCount(0);
@@ -790,5 +788,161 @@ test.describe("TC-R04 aluminium second review (phone)", () => {
     await expect(plan).toBeVisible();
     await plan.getByRole("button", { name: "Done" }).click();
     await expect(aluScreen(page, /Window angle/).getByTestId("alu-required")).toHaveText("7,300 mm");
+  });
+});
+
+// ── third adversarial review (TC-R04 phone + engine) — each test proves a defect found in review and fixed ────────
+const hideApp = (page) => page.evaluate(() => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  document.dispatchEvent(new Event("visibilitychange"));
+});
+const recoveryCount = (page) => page.evaluate(() => new Promise((res) => {
+  const req = indexedDB.open("blh-takeoff-recovery");
+  req.onsuccess = () => { try { const t = req.result.transaction("drafts", "readonly").objectStore("drafts").count(); t.onsuccess = () => res(t.result); t.onerror = () => res(0); } catch { res(0); } };
+  req.onerror = () => res(0);
+}));
+const openCutting = async (page, name = /Aluminium angle/) => {
+  await page.getByRole("listitem").filter({ hasText: name }).getByRole("button", { name: "Cutting" }).click();
+  const screen = aluScreen(page, name);
+  await expect(screen.getByTestId("aluminium-screen")).toBeVisible();
+  return screen;
+};
+
+test.describe("TC-R04 aluminium third review (phone)", () => {
+  test.use(PHONE);
+
+  test("AL-24 PH-05 an opening by size applies as soon as width and height are valid (no Add step): kept on Back with the field still focused, kept when the app is hidden mid-typing (reload → Restore), undoable; 'How many of this size' joins the same undo step", async ({ page }) => {
+    await openTakeoff(page);
+    let screen = await addAluminium(page, { kerf: 3 });
+    const field = (label) => screen.getByLabel(label, { exact: true });
+    await num(screen, "Opening width", 900);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(0); // a width alone is not an opening
+    await num(screen, "Opening height", 1200);
+    // before: nothing happened until "Add opening" was pressed
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
+    await expect(opening(screen, "W01").getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+    await expect(opening(screen, "W01").getByRole("button", { name: /^W01 Left jamb 1,300 mm/ })).toBeVisible();
+    await expect(field("Opening width")).toHaveValue(""); // ready for the next opening
+    await expect(field("Opening height")).toHaveValue("");
+    await expect(screen.getByRole("button", { name: /^Add (\d+ )?openings?$/ })).toHaveCount(0); // no Apply/Add step
+    const card = screen.getByTestId("alu-just-added-opening");
+    await expect(card).toContainText("Added W01 · 900 × 1,200 mm");
+    // more of the same size: the copies join the addition's undo step
+    await num(card, "How many of this size", 3);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(3);
+    for (const l of ["W01", "W02", "W03"]) await expect(opening(screen, l).getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+    await screen.getByRole("button", { name: "Undo" }).click();
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(0);
+    await expect(screen.getByTestId("alu-just-added-opening")).toHaveCount(0);
+    await screen.getByRole("button", { name: "Redo" }).click();
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(3);
+
+    // valid numbers typed, then straight to Back with the height field still focused (the ph-07 probe). iOS delivers
+    // the tap without moving focus off the field: dispatch the click so the field is NOT blurred first. Kept.
+    await field("Opening width").fill("600");
+    await field("Opening height").fill("2400");
+    await screen.getByRole("button", { name: "Back" }).dispatchEvent("click");
+    screen = await openCutting(page);
+    await expect(screen.getByRole("heading", { name: "Openings (4)" })).toBeVisible();
+    await expect(opening(screen, "W04").getByTestId("alu-nominal")).toContainText("Opening 600 × 2,400 mm");
+
+    // the app is hidden mid-typing while offline (the ph-14 probe): the opening reaches device recovery and is restored
+    await page.evaluate(() => { window.__takeoffReviewOffline = true; });
+    await field("Opening width").fill("1200");
+    await field("Opening height").fill("1500");
+    await hideApp(page);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(5);
+    await expect.poll(() => recoveryCount(page)).toBeGreaterThan(0);
+    await page.reload();
+    await ready(page);
+    await expect(page.getByText(/Unsaved changes from .* were found on this device\./)).toBeVisible();
+    await page.getByRole("button", { name: "Restore" }).click();
+    screen = await openCutting(page);
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(5);
+    await expect(opening(screen, "W05").getByTestId("alu-nominal")).toContainText("Opening 1,200 × 1,500 mm");
+  });
+
+  test("AL-25 F04 a recorded offcut keeps the profile and finish it was cut from (11 acceptance 4): after the finish or the section changes it is not used and says why; changing back uses it again", async ({ page }) => {
+    await openTakeoff(page);
+    let screen = await addAluminium(page, { kerf: 3 });
+    await addCut(screen, { len: 600 });
+    await recordOffcut(screen, { label: "OC1", len: 891 });
+    const oc = screen.locator('[data-testid="alu-offcut"][data-offcut="OC1"]');
+    await expect(oc).toContainText("891 mm");
+    await expect(screen.getByTestId("alu-buy")).toHaveText("Buy nothing new");
+    await expect(oc.getByTestId("alu-offcut-status")).toHaveText("In this plan: Cut 600");
+
+    // a different finish: the mill offcut is not used — a bar is bought — and the offcut says why
+    await screen.getByRole("button", { name: "Profile & cutting settings" }).click();
+    const finish = setupDialog(page).getByLabel("Finish / colour");
+    const original = await finish.inputValue();
+    await finish.fill("Black anodised");
+    screen = await toCutting(page);
+    // before: "Buy nothing new" — the plan still cut the 600 from the mill offcut
+    await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 1 × 6,500 mm");
+    await expect(screen.getByTestId("alu-offcuts-used")).toHaveCount(0);
+    await expect(oc.getByTestId("alu-offcut-status")).toHaveText("Not used — recorded for a different profile or finish");
+
+    // back to the original finish: the same piece is used again
+    await screen.getByRole("button", { name: "Profile & cutting settings" }).click();
+    await setupDialog(page).getByLabel("Finish / colour").fill(original);
+    screen = await toCutting(page);
+    await expect(screen.getByTestId("alu-buy")).toHaveText("Buy nothing new");
+    await expect(oc.getByTestId("alu-offcut-status")).toHaveText("In this plan: Cut 600");
+
+    // a smaller section (50 × 50 × 2): not used either
+    await screen.getByRole("button", { name: "Profile & cutting settings" }).click();
+    await num(setupDialog(page), "Thickness", 2);
+    screen = await toCutting(page);
+    await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 1 × 6,500 mm");
+    await expect(oc.getByTestId("alu-offcut-status")).toHaveText("Not used — recorded for a different profile or finish");
+  });
+
+  test("AL-26 PH-05 recheck: Undo clears what is still being typed first — never an earlier opening (wall-editor rule); a number typed but not applied is dropped, not applied later", async ({ page }) => {
+    await openTakeoff(page);
+    const screen = await addAluminium(page, { kerf: 3 });
+    const field = (label) => screen.getByLabel(label, { exact: true });
+    const undoBtn = screen.getByRole("button", { name: "Undo" });
+    await addOpening(screen, { w: 900, h: 1200 });
+    await expect(opening(screen, "W01").getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+
+    // the next opening typed (height still focused — iOS keeps focus on the field when Undo is tapped), then Undo.
+    // Before: Undo removed W01 (900 × 1,200) and the typed 600 × 2,400 was then added as W01 when the field let go.
+    await num(screen, "Opening width", 600);
+    await field("Opening height").fill("2400");
+    await undoBtn.dispatchEvent("click");
+    await expect(field("Opening width")).toHaveValue("");
+    await expect(field("Opening height")).toHaveValue("");
+    await screen.getByRole("heading", { name: /^Openings/ }).click(); // tap elsewhere: nothing left to apply
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
+    await expect(opening(screen, "W01").getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+
+    // half an opening (width only, applied to the form with return): Undo clears it, W01 stays; the next Undo removes W01
+    await num(screen, "Opening width", 700);
+    await undoBtn.click();
+    await expect(field("Opening width")).toHaveValue("");
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
+    await undoBtn.click();
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(0);
+    await screen.getByRole("button", { name: "Redo" }).click();
+    await expect(opening(screen, "W01").getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+
+    // an existing opening's width typed but not applied (still focused), then Undo: the stored width shows again
+    const w01 = opening(screen, "W01");
+    await w01.getByRole("button", { name: "Edit W01" }).click();
+    await w01.getByLabel("Width", { exact: true }).fill("1111");
+    await undoBtn.dispatchEvent("click");
+    await expect(w01.getByLabel("Width", { exact: true })).toHaveValue("900");
+    await screen.getByRole("heading", { name: /^Openings/ }).click();
+    await expect(w01.getByTestId("alu-nominal")).toContainText("Opening 900 × 1,200 mm");
+    await expect(w01.getByRole("button", { name: /^W01 Left jamb 1,300 mm/ })).toBeVisible();
+
+    // an invalid number: Undo clears the draft and its message, the opening is not undone
+    await num(w01, "Height", "abc");
+    await expect(w01.getByRole("alert")).toHaveText("Enter a number greater than 0.");
+    await undoBtn.click();
+    await expect(w01.getByRole("alert")).toHaveCount(0);
+    await expect(w01.getByLabel("Height", { exact: true })).toHaveValue("1200");
+    await expect(screen.getByTestId("alu-opening")).toHaveCount(1);
   });
 });

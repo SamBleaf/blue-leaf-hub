@@ -1,0 +1,88 @@
+                                                                                                                                   MATERIAL ORDER
+                                                                                                                               FO-001001 · export 1 · 2026-10-14
+
+
+
+
+FROM                                                        SUPPLIER                                                   JOB
+Blue Leaf Building (sandbox)                                Fielders (SANDBOX — not a real                             Sandbox job — your drawings (Takeoff
+Sandbox address                                             contact)                                                   test)
+00 0000 0000                                                Attn: Sandbox orders                                       Deliver to:
+office@example.invalid                                      00 0000 0000                                               1 Sandbox Street, Testville SA (test only)
+                                                            orders@example.invalid                                     Required: 2026-10-21
+                                                                                                                       Site contact: Sandbox site lead 0400
+                                                                                                                       000 000
+
+Notes: TC-R04 evidence run — sandbox only, not a real order
+All dimensions in mm. Flashing lengths are FINISHED order lengths. Girth is indicative only (no bend deduction) — supplier fabrication instructions take
+precedence. Timber, aluminium and board lengths are the STOCK lengths to supply; site cut lists and setout are in the separate site appendix, not part of
+this order.
+
+
+ P1 — Flashing 1                                                                                                   COLORBOND · Monument · 0.55 BMT · solid
+ Confirm availability with supplier
+                                                                                               DIMENSIONS
+               90°
+                                                                                               L1 100 mm
+                                                                                               L2 120 mm
+                                       L2 120                                                  B1 90° fold right
+                                                                                               Start: plain
+                                                                                               End: plain
+                                                                                               Indicative girth 220 mm
+                      L1 100
+
+
+
+
+        Painted (colour) face — left side travelling L1 -> L2
+
+
+ QTY                             FINISHED LENGTH (mm)                                LM                      HANDLING
+ 1×                              3,200                                               3.200                   -
+                                                                                                                                              1 piece · 3.200 LM
+
+
+ M1 — Aluminium angle 50 × 50 × 3                                                                                     equal-angle 50 × 50 × 3 · 6500 mm lengths
+ Cutting: 3 mm kerf, 0 mm end trim
+
+ QTY                      UNIT              SUPPLY                                                                      NOTE
+ 1×                       bar               equal-angle 50 × 50 × 3 — 6,500 mm length (no                               -
+                                            joins)
+                                                                                                                                                            1 bar
+
+
+ M2 — Axon 133 smooth                                                       James Hardie · Axon 133 smooth · 9 thick · 1200 wide · cover 1200 · vertical
+ Installation: source-pending (axon-vertical)
+
+ QTY                      UNIT              SUPPLY                                                                      NOTE
+ 4×                       sheet             James Hardie Axon 133 smooth SKU 403932 —                                   -
+                                            2,750 × 1,200 mm
+                                                                                                                                                        4 sheets
+
+
+
+
+                                                FO-001001 · takeoff-pdf@3 · takeoff-calc@2 · snapshot f39a1b1ff503 · page 1 of 2
+                                                                                                                               MATERIAL ORDER
+                                                                                                           FO-001001 · export 1 · 2026-10-14 (continued)
+
+
+
+
+ M3 — Rafters 90 × 45                                                                                                                   90 × 45 · MGP10 · H3
+ Size: manual selection (not structurally checked)
+
+ QTY                     UNIT              SUPPLY                                                                   NOTE
+ 18 ×                    piece             90 × 45 MGP10 H3 — 5,400 mm length                                       -
+
+                                                                                                                                                       18 pieces
+
+Order total: 1 flashing piece · 3.200 LM · 1 bar · 18 pieces · 4 sheets
+This document lists quantities and profiles only. It is not a price or a contract. Confirm product availability, colour and fabrication allowances with the
+supplier.
+
+
+
+
+                                            FO-001001 · takeoff-pdf@3 · takeoff-calc@2 · snapshot f39a1b1ff503 · page 2 of 2
+

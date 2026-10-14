@@ -305,7 +305,9 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     const title = fam === "timber" ? "Timber" : fam === "aluminium" ? "Aluminium" : fam === "batten" ? "Support battens" : fam === "accessory" ? "Accessories" : "Cladding";
     const families = fam === "timber" ? ["timber"] : fam === "aluminium" ? ["aluminium"] : ["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"];
     return (
-      <FocusedWindow title={title} subtitle={`${m.name} · this job only`} onClose={leaveEditor} closeLabel="Close" actions={<SaveChip status={ws.status} />}>
+      // the next step sits in the header: a field saving on blur can reflow the card, never move this button
+      <FocusedWindow title={title} subtitle={`${m.name} · this job only`} onClose={leaveEditor} closeLabel="Close"
+        actions={<><SaveChip status={ws.status} /><Btn kind="primary" onClick={() => toLengths(m)}>{fam === "timber" ? "Measure members" : fam === "aluminium" ? "Openings & cutting" : "Walls"}</Btn></>}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {caps.edit && (
             <div className="mb-3">
@@ -318,9 +320,6 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
           )}
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
-          <div className="mt-3 grid grid-cols-1 gap-2">
-            <Btn kind="primary" onClick={() => toLengths(m)}>{m.spec?.family === "timber" ? "Measure members" : m.spec?.family === "aluminium" ? "Openings & cutting" : "Walls"}</Btn>
-          </div>
         </div>
       </FocusedWindow>
     );

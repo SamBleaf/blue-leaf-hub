@@ -91,7 +91,8 @@ test.describe("TC-R04 schedule", () => {
     const bat = group(page, "mat-bat");
     await expect(bat.getByRole("alert")).toContainText("Needs before ordering:");
     await expect(bat.getByRole("alert")).toContainText("fixings not quantified — detail required");
-    await expect(bat.locator('[data-status="procurement"]')).toHaveText("Ordering: Product details missing");
+    // the batten product itself is complete (no cladding cover asked of a batten) — its fixings keep it a draft
+    await expect(bat.locator('[data-status="procurement"]')).toHaveText("Ordering: Draft");
     await expect(bat.locator('[data-status="quantity"]')).toHaveText("Quantity: Incomplete");
     // per-material totals are per unit — never "pieces + sheets"
     await expect(axon.locator("p.text-right")).toHaveText("4 sheets");

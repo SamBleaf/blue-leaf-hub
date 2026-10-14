@@ -20,7 +20,7 @@ import { route } from "../registry.js";
 import { reviewRole } from "../config.js";
 import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
-  normaliseFlashingRules, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
+  normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
@@ -215,7 +215,7 @@ function exportSnapshot(order) {
   let pieces = 0, totalMm = 0;
   for (const l of order.lines) {
     const st = orderLineState(l, computed, mats);
-    if (st.stale) problems.push(PROBLEM_TEXT[st.problem]);
+    if (st.stale) problems.push((l.item ? ITEM_STALE_TEXT : PROBLEM_TEXT)[st.problem]); // as the server
     const s = st.current;
     if (!s?.generic) {
       // flashing: exactly the previous review behaviour (length × pieces)
