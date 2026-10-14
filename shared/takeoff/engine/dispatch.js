@@ -13,10 +13,10 @@
 // turned into demands is a missing requirement (blocks ordering), never zero.
 // Pure: same function on client (live preview) and server (authoritative). No DB/DOM/network/eval.
 // =============================================================================
-import { formatMm, stableStringify } from "../units.js";
+import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
-import { FAMILIES, familyIdentity, familyProblems, normaliseFamilySpec } from "./families.js";
+import { FAMILIES, familyIdentity, familyProblems, normaliseFamilySpec, stockIdentityKey } from "./families.js";
 import { computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
@@ -27,7 +27,29 @@ import { accessoryRoutes } from "./accessories.js";
 import { CATALOGUE_SEED } from "../products/seed.js";
 
 const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pack", "cartridge"]);
+/**
+ * Generated pieces per takeoff (06 proposed 5,000 per wall / 50,000 per job "from evidence"). Measured 2026-10-14:
+ * 49,510 generated studs take ~2.4 s per calculation on the server, and a save calculates up to three times — so the
+ * job limit is 20,000 (~1 s). Excess is refused with split guidance, never truncated.
+ */
+export const JOB_GENERATED_LIMIT = 20000;
 const fmt = (mm) => formatMm(mm, 1);
+
+/** Measurement kinds each generic method READS. Anything else assigned to the material would be silently ignored —
+ *  so it is refused by the server and flagged by the engine (never dropped). */
+export function methodReads(mat) {
+  const fam = mat?.spec?.family;
+  if (fam === "timber") {
+    if (mat.methodKey === "repeated_members") return ["distribution", "run", "polyline", "member", "manual", "count"];
+    if (mat.methodKey === "wall_frame") return ["wall", "manual", "count"];
+    const purpose = mat.spec?.purpose;
+    if (purpose === "plates") return ["wall", "run", "polyline", "manual", "count"];
+    if (purpose === "noggins") return ["wall", "manual", "count"];
+    return ["run", "polyline", "manual", "count"];
+  }
+  if (fam === "aluminium") return ["opening", "run", "polyline", "manual", "offcut"];
+  return ["wall"];
+}
 
 /** Is this a TC-R04 family material (anything but flashing)? */
 export function isGenericMaterial(mat) {
@@ -120,6 +142,49 @@ function overridesFrom(list) {
   return out;
 }
 
+/**
+ * Distribution runs → engine segments. Runs that meet end-to-end (same page, endpoints within 1 mm, collinear) are ONE
+ * run (03 T1: a shared end is one member, one grid); a run that retraces another on the same line is flagged — it would
+ * double every member. Each remaining run restarts its own grid.
+ */
+function connectedRuns(ms, ctx, sink, lengthOf) {
+  const geo = ms.map((m) => {
+    const cal = m.calibrationId ? ctx.calibrationsById.get(m.calibrationId) : null;
+    const pts = Array.isArray(m.points) && m.points.length >= 2 ? [m.points[0], m.points[m.points.length - 1]] : null;
+    const mm = cal && pts ? pts.map((p) => pointToMm(cal, pts[0], p)) : null;
+    return { m, cal, pts, L: lengthOf(m), dir: mm ? Math.atan2(mm[1].y - mm[0].y, mm[1].x - mm[0].x) : null };
+  }).filter((g) => g.L != null);
+  const near = (g, p, q) => g.cal && g.cal.id && (() => { const d = pointToMm(g.cal, p, q); return Math.hypot(d.x, d.y) <= 1; })();
+  const parallel = (a, b) => { const d = Math.abs(((a - b + 3 * Math.PI) % (2 * Math.PI)) - Math.PI); return d < 0.01 || Math.abs(d - Math.PI) < 0.01; };
+  const used = new Set(), out = [];
+  for (const g of geo) {
+    if (used.has(g.m.id)) continue;
+    used.add(g.m.id);
+    const chain = [g];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const h of geo) {
+        if (used.has(h.m.id) || !h.pts || !g.pts || h.m.calibrationId !== g.m.calibrationId || !parallel(h.dir, g.dir)) continue;
+        const ends = chain.flatMap((c) => c.pts);
+        if (h.pts.some((p) => ends.some((e) => near(h, p, e)))) { chain.push(h); used.add(h.m.id); grew = true; }
+      }
+    }
+    if (chain.length === 1) out.push({ id: g.m.id, measurementId: g.m.id, runMm: g.L, ...(g.m.inputs ? { startOffsetMm: g.m.inputs.startOffsetMm, endOffsetMm: g.m.inputs.endOffsetMm, includeStart: g.m.inputs.includeStart, includeEnd: g.m.inputs.includeEnd } : {}) });
+    else out.push({ id: chain.map((c) => c.m.id).join("+"), parts: chain.map((c) => ({ measurementId: c.m.id, runMm: c.L })) });
+  }
+  // a run lying ON another run (same line, overlapping) would count its members twice
+  for (let i = 0; i < geo.length; i++) for (let j = i + 1; j < geo.length; j++) {
+    const a = geo[i], b = geo[j];
+    if (!a.cal || !b.cal || a.m.calibrationId !== b.m.calibrationId || !parallel(a.dir, b.dir)) continue;
+    const mid = { x: (b.pts[0].x + b.pts[1].x) / 2, y: (b.pts[0].y + b.pts[1].y) / 2 };
+    const ab = pointToMm(a.cal, a.pts[0], a.pts[1]), am = pointToMm(a.cal, a.pts[0], mid);
+    const len = Math.hypot(ab.x, ab.y), t = (am.x * ab.x + am.y * ab.y) / (len * len), off = Math.abs(am.x * ab.y - am.y * ab.x) / len;
+    if (off <= 5 && t > 0.001 && t < 0.999) sink.problems.push({ code: "distribution_overlap", message: "Two distribution runs lie on top of each other — every member there would be counted twice. Remove the duplicate run.", blocking: true });
+  }
+  return out;
+}
+
 function runTimber(mat, n, items, ctx, sink) {
   const rules = mat.rules || {};
   const identity = timberId(n);
@@ -129,22 +194,24 @@ function runTimber(mat, n, items, ctx, sink) {
   const results = [];
   const lengthOf = (m) => { const t = tracedLength(m, ctx); sink.measProblems.set(m.id, t.problems); return t.lengthMm; };
   const legsOf = (m) => { const t = tracedLength(m, ctx); sink.measProblems.set(m.id, t.problems); return t.legs || []; };
+  const manualItems = items.filter((x) => x.m.kind === "manual" || x.m.kind === "count");
   if (mat.methodKey === "repeated_members") {
     const dist = items.filter((x) => x.role === "distribution" || (x.role === "primary" && ["run", "polyline", "distribution"].includes(x.m.kind)));
     const member = items.find((x) => x.role === "member" || x.m.kind === "member")?.m || null;
-    if (!dist.length) { sink.problems.push({ code: "distribution_missing", message: "Draw the distribution run the members are spaced along.", blocking: true }); return results; }
-    const mem = memberInput(n, rules, member, ctx, sink);
-    if (!mem) return results;
-    const segments = dist.map(({ m }) => ({ id: m.id, measurementId: m.id, runMm: lengthOf(m), ...(m.inputs ? { startOffsetMm: m.inputs.startOffsetMm, endOffsetMm: m.inputs.endOffsetMm, includeStart: m.inputs.includeStart, includeEnd: m.inputs.includeEnd } : {}) }))
-      .filter((s) => s.runMm != null);
-    if (!segments.length) return results;
-    const overrides = Object.assign({}, ...dist.map(({ m }) => overridesFrom(m.inputs?.overrides)));
-    results.push(computeRepeatedMembers({ ...base, purpose: PURPOSE_ROLE[n.purpose] || "member", segments, centresMm: rules.centresMm ?? 600, spacing: rules.spacing || "fixed",
-      startOffsetMm: rules.startOffsetMm ?? 0, endOffsetMm: rules.endOffsetMm ?? 0, includeStart: rules.includeStart !== false, includeEnd: rules.includeEnd !== false,
-      plies: n.plies || 1, member: mem, overrides }));
-    return results;
-  }
-  if (mat.methodKey === "wall_frame") {
+    if (!dist.length) {
+      // entered lengths alone are a valid takeoff ("Add lengths"); a member line without its run is not
+      if (!manualItems.length || member) sink.problems.push({ code: "distribution_missing", message: "Draw the distribution run the members are spaced along.", blocking: true });
+    } else {
+      const mem = memberInput(n, rules, member, ctx, sink);
+      const segments = mem ? connectedRuns(dist.map(({ m }) => m), ctx, sink, lengthOf) : [];
+      if (segments.length) {
+        const overrides = Object.assign({}, ...dist.map(({ m }) => overridesFrom(m.inputs?.overrides)));
+        results.push(computeRepeatedMembers({ ...base, purpose: PURPOSE_ROLE[n.purpose] || "member", segments, centresMm: rules.centresMm ?? 600, spacing: rules.spacing || "fixed",
+          startOffsetMm: rules.startOffsetMm ?? 0, endOffsetMm: rules.endOffsetMm ?? 0, includeStart: rules.includeStart !== false, includeEnd: rules.includeEnd !== false,
+          plies: n.plies || 1, member: mem, overrides }));
+      }
+    }
+  } else if (mat.methodKey === "wall_frame") {
     for (const { m } of items.filter((x) => x.m.kind === "wall")) {
       const w = resolveWall(m, ctx);
       sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
@@ -164,40 +231,41 @@ function runTimber(mat, n, items, ctx, sink) {
         plies: n.plies || 1, allowanceMm: n.endAllowanceMm || 0, height,
         openings: w.openings.map((o) => ({ id: o.id, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.detail ? { detail: o.detail } : {}) })) }));
     }
-    return results;
+  } else {
+    // linear_stock@1 — plates / noggins / trim / other members + manual/count entries
+    const walls = items.filter((x) => x.m.kind === "wall");
+    const runs = items.filter((x) => ["run", "polyline"].includes(x.m.kind));
+    if (n.purpose === "plates") {
+      const layers = (Array.isArray(rules.plateLayers) && rules.plateLayers.length ? rules.plateLayers : ["bottom", "top"]).map((tag) => ({ tag: String(tag) }));
+      for (const { m } of walls) {
+        const runMm = resolveWall(m, ctx).wall.widthMm;
+        if (runMm) results.push(computePlates({ ...base, wallId: m.id, measurementId: m.id, runMm, layers, allowanceMm: n.endAllowanceMm || 0 }));
+      }
+      for (const { m } of runs) {
+        const legs = legsOf(m);
+        legs.forEach((runMm, k) => results.push(computePlates({ ...base, wallId: legs.length > 1 ? `${m.id}:${k + 1}` : m.id, measurementId: m.id, runMm, layers, allowanceMm: n.endAllowanceMm || 0 })));
+      }
+    } else if (n.purpose === "noggins") {
+      if (!n.section?.widthMm) sink.problems.push({ code: "material_incomplete", message: "Enter the stud/noggin section so the clear bays can be worked out.", blocking: true });
+      for (const { m } of n.section?.widthMm ? walls : []) {
+        const w = resolveWall(m, ctx);
+        if (!w.wall.widthMm) continue;
+        const pos = repeatedPositions({ runMm: w.wall.widthMm, centresMm: rules.centresMm ?? 600, includeStart: true, includeEnd: true });
+        results.push(computeNoggins({ ...base, wallId: m.id, stations: pos.map((p) => ({ positionMm: p, widthMm: n.section.widthMm })),
+          rows: rules.nogginRows ?? undefined, rowsSource: rules.nogginRows ? "entered" : undefined,
+          openings: w.openings.map((o) => ({ id: o.id, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm })), allowanceMm: n.endAllowanceMm || 0 }));
+      }
+    } else if (runs.length) {
+      const segments = [];
+      for (const { m } of runs) {
+        const legs = legsOf(m);
+        legs.forEach((L, k) => segments.push({ id: legs.length > 1 ? `${m.id}:${k + 1}` : m.id, measurementId: m.id, lengthMm: L }));
+      }
+      if (segments.length) results.push(computeTrim({ ...base, segments, joinsAllowed: rules.joinsAllowed === true, cutAllocation: rules.cutAllocation === true }));
+    }
   }
-  // linear_stock@1 — plates / noggins / trim / other members + manual/count entries
-  const walls = items.filter((x) => x.m.kind === "wall");
-  const runs = items.filter((x) => ["run", "polyline"].includes(x.m.kind));
-  if (n.purpose === "plates") {
-    const layers = (rules.plateLayers || ["bottom", "top"]).map((tag) => ({ tag }));
-    for (const { m } of walls) {
-      const runMm = resolveWall(m, ctx).wall.widthMm;
-      if (runMm) results.push(computePlates({ ...base, wallId: m.id, measurementId: m.id, runMm, layers, allowanceMm: n.endAllowanceMm || 0 }));
-    }
-    for (const { m } of runs) {
-      const legs = legsOf(m);
-      legs.forEach((runMm, k) => results.push(computePlates({ ...base, wallId: legs.length > 1 ? `${m.id}:${k + 1}` : m.id, measurementId: m.id, runMm, layers, allowanceMm: n.endAllowanceMm || 0 })));
-    }
-  } else if (n.purpose === "noggins") {
-    if (!n.section?.widthMm) sink.problems.push({ code: "material_incomplete", message: "Enter the stud/noggin section so the clear bays can be worked out.", blocking: true });
-    for (const { m } of n.section?.widthMm ? walls : []) {
-      const w = resolveWall(m, ctx);
-      if (!w.wall.widthMm) continue;
-      const pos = repeatedPositions({ runMm: w.wall.widthMm, centresMm: rules.centresMm ?? 600, includeStart: true, includeEnd: true });
-      results.push(computeNoggins({ ...base, wallId: m.id, stations: pos.map((p) => ({ positionMm: p, widthMm: n.section.widthMm })),
-        rows: rules.nogginRows ?? undefined, rowsSource: rules.nogginRows ? "entered" : undefined,
-        openings: w.openings.map((o) => ({ id: o.id, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm })), allowanceMm: n.endAllowanceMm || 0 }));
-    }
-  } else if (runs.length) {
-    const segments = [];
-    for (const { m } of runs) {
-      const legs = legsOf(m);
-      legs.forEach((L, k) => segments.push({ id: legs.length > 1 ? `${m.id}:${k + 1}` : m.id, measurementId: m.id, lengthMm: L }));
-    }
-    if (segments.length) results.push(computeTrim({ ...base, segments, joinsAllowed: rules.joinsAllowed === true, cutAllocation: rules.cutAllocation === true }));
-  }
-  const manual = items.filter((x) => x.m.kind === "manual" || x.m.kind === "count");
+  // entered / counted lengths are valid for EVERY timber method (extra members, trimmers …) — never silently dropped
+  const manual = manualItems;
   if (manual.length) {
     results.push(computeManualTimber({ ...base, role: n.purpose, allowanceMm: n.endAllowanceMm || 0, entries: manual.map(({ m }) => (m.kind === "count"
       ? { id: m.id, kind: "count", measurementId: m.id, lengthMm: m.finishedLengthMm, markers: (m.points || []).map((_, i) => ({ id: `${m.id}:${i}` })) }
@@ -273,19 +341,26 @@ function runWallMethod(mat, n, items, ctx, sink) {
     const installation = { assembly, conditions: rules.installConditions, projectDetail: rules.projectDetail, outOfScope: rules.installationOutOfScope === true };
     const opts = { materialId: mat.id, wallId: tag, orientation: n.orientation, installation };
     let r;
-    if (mat.methodKey === "sheet_layout") r = sheetLayout(wallGeom, w.openings, variants, { ...opts, datumMm: rules.datumMm, heightAllowanceMm: rules.heightAllowanceMm, jointRows: rowsFor(rules.jointRows, built.bbox, n.orientation === "horizontal") });
-    else if (mat.methodKey === "course_layout") r = courseLayout(wallGeom, w.openings, variants, { ...opts, datumMm: rules.datumMm, joints: rules.joints });
-    else if (mat.methodKey === "panel_grid") r = panelGrid(wallGeom, w.openings, variants[0], { ...opts, orientation: undefined, jointGapMm: n.product?.gapMm ?? rules.jointGapMm, minStripMm: rules.minStripMm });
+    // a datum set on ONE wall applies to that wall only (rules.datumByWall); rules.datumMm is the material default
+    const datumMm = rules.datumByWall?.[m.id] ?? rules.datumMm;
+    if (mat.methodKey === "sheet_layout") r = sheetLayout(wallGeom, w.openings, variants, { ...opts, datumMm, heightAllowanceMm: rules.heightAllowanceMm, jointRows: rowsFor(rules.jointRows, built.bbox, n.orientation === "horizontal") });
+    else if (mat.methodKey === "course_layout") r = courseLayout(wallGeom, w.openings, variants, { ...opts, datumMm, joints: rules.joints });
+    else if (mat.methodKey === "panel_grid") r = panelGrid(wallGeom, w.openings, variants[0], { ...opts, orientation: ["portrait", "landscape"].includes(rules.panelOrientation) ? rules.panelOrientation : undefined, jointGapMm: n.product?.gapMm ?? rules.jointGapMm, minStripMm: rules.minStripMm });
     else if (mat.methodKey === "aac_panel_layout") r = aacPanelLayout(wallGeom, w.openings, variants, { ...opts, adhesiveJointMm: rules.adhesiveJointMm, minStripMm: rules.minStripMm,
       controlJoints: rules.controlJoints, rails: rules.rails, reviewedComponents: rules.reviewedComponents });
     else if (mat.methodKey === "area_to_linear") {
       const areas = wallAreas(wallGeom, w.openings);
       r = areaToLinear({ materialId: mat.id, sourceId: m.id, netAreaM2: areas.netM2, product: variants[0], spareRate: (n.spareRate || 0) / 100, orderIncrementM: n.orderIncrementM ?? undefined,
         orientation: n.orientation, sourceRefs: [{ measurementId: m.id, wallId: m.id }] });
+      // the exact LM (with spare) travels on the demand: the material's total is rounded once, not per wall
+      for (const d of r.demands || []) if (d.unit === "lm" && Number.isFinite(r.layout?.withSpareLm)) d.exactLm = r.layout.withSpareLm;
     } else if (mat.methodKey === "support_grid") {
       r = supportGrid({ id: tag, polygon: built.polygon }, w.openings, { id: mat.id, materialId: mat.id, orientation: n.orientation === "horizontal" ? "horizontal" : "vertical",
         identity: familyIdentity(n), stockPolicy: n.product?.lengthsMm?.length ? { kind: "list", lengthsMm: n.product.lengthsMm, sharePieces: false } : undefined,
-        maxSpacingMm: rules.maxSpacingMm, startOffsetMm: rules.startOffsetMm, endOffsetMm: rules.endOffsetMm, requiredStationsMm: rules.requiredStationsMm,
+        maxSpacingMm: rules.maxSpacingMm, startOffsetMm: rules.startOffsetMm, endOffsetMm: rules.endOffsetMm,
+        // stations the cladding NEEDS (its vertical sheet joints on this wall) plus any entered ones — never snapped away
+        requiredStationsMm: [...(Array.isArray(rules.requiredStationsMm) ? rules.requiredStationsMm : []),
+          ...(n.orientation === "horizontal" ? [] : sink.sheetJointsFor(m.id).map((atMm) => ({ atMm, ref: "sheet joint" })))],
         existing: rules.existing === true, fixing: rules.fixing, fixingScope: rules.fixingScope }, {});
     } else if (mat.methodKey === "accessory_routes") {
       // B5: the recipe's groups follow this wall's real routes; joints come from the cladding laid out on the SAME wall
@@ -323,14 +398,32 @@ function describeIdentity(n) {
   return [p.manufacturer, p.name, p.sku ? `SKU ${p.sku}` : null, p.thicknessMm ? `${p.thicknessMm} thick` : null].filter(Boolean).join(" ");
 }
 
+const isUnresolved = (identity) => !identity || String(identity.family || "").startsWith("unresolved:");
+const timberText = (id) => [id.section ? String(id.section).replace("x", " × ") : "section?", id.grade, id.species, id.treatment].filter(Boolean).join(" ");
+
+/** What the supplier reads for a purchase line: the line's OWN item (never the parent product for a component). */
+function itemText(d, n, recipeLabels) {
+  const id = d.identity || {};
+  if (id.item) return `${recipeLabels.get(id.item) || id.item}${n.product?.name ? ` (${n.product.name})` : ""}`;
+  const named = [id.manufacturer, id.name, id.sku ? `SKU ${id.sku}` : null].filter(Boolean).join(" ");
+  if (named) return named;
+  if (id.family === "timber") return timberText(id);
+  return describeIdentity(n);
+}
+
 /**
  * Turn one material's demands into purchase lines: allocate linear stock (one allocator), keep sheets by size,
- * sum everything else per (identity, unit). Returns lines + the allocation + the cut-list appendix.
+ * sum everything else per (identity, unit). Then spares (once per material, shown) and full packs. Demands whose
+ * product is not selected (identity "unresolved:…") are never bought as something else: they are listed as NOT on
+ * the order. Returns lines + the allocation + the cut-list appendix + the omitted items.
  */
 function purchaseLines(mat, n, demands, matKey, sink) {
   const lines = new Map();
+  const demById = new Map(demands.map((d) => [d.id, d]));
+  const recipeLabels = new Map((mat.rules?.recipe?.groups || []).map((g) => [g.id, g.label || g.kind || g.id]));
   const add = (key, unit, qty, finishedLengthMm, item, demandIds, identity) => {
-    const bucketKey = `${matKey}|${key}`;
+    // the material id is part of the bucket: two materials with the same product never share (or corrupt) a line
+    const bucketKey = `${matKey}|${mat.id}|${key}`;
     let l = lines.get(bucketKey);
     if (!l) {
       l = { bucketKey, specKey: stableStringify({ material: matKey, identity: identityKey(identity ?? null), unit }), materialKey: matKey, generic: true, family: n.family, unit,
@@ -340,29 +433,44 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     l.exact += qty;
     for (const d of demandIds) l.demandIds.push(d);
   };
+  const omitted = [];
+  const usable = demands.filter((d) => {
+    if (!isUnresolved(d.identity)) return true;
+    omitted.push(d.label || d.role || "item");
+    return false;
+  });
   const allocatable = (d) => d.kind === "linear" && d.stockPolicy && d.stockPolicy.kind !== "random" && d.lengthKind !== "orderedStock" && d.unit !== "lm";
-  const linear = demands.filter(allocatable);
+  const linear = usable.filter(allocatable);
   const appendix = { aluminium: [], timber: [], layouts: [] };
   let allocation = null;
-  const barOwner = new Map(); // purchase bucket → demand ids of the cuts it carries (for contribution attribution)
   if (linear.length) {
-    const offcuts = sink.offcuts.filter((o) => o.materialId === mat.id).map((o) => ({ id: o.id, lengthMm: o.lengthMm, identity: linear[0].identity, label: o.label }));
+    // an offcut is offered only to the product it was cut from (identity stamped when recorded) and never longer
+    // than the stock it came from — a typo can't zero the bar order
+    const maxStock = n.family === "aluminium" ? n.stockLengthMm : n.stock?.maxMm ?? null;
+    const offcuts = [];
+    for (const o of sink.offcuts.filter((x) => x.materialId === mat.id)) {
+      if (o.identityKey && o.identityKey !== stockIdentityKey(mat.spec)) { sink.problems.push({ code: "offcut_other_product", message: `Offcut ${o.label} was recorded for a different profile or finish — it isn't used for ${mat.name}.`, blocking: false }); continue; }
+      if (maxStock && o.lengthMm > maxStock) { sink.problems.push({ code: "offcut_too_long", message: `Offcut ${o.label} (${fmt(o.lengthMm)} mm) is longer than the ${fmt(maxStock)} mm stock it came from — check the length.`, blocking: true }); continue; }
+      offcuts.push({ id: o.id, lengthMm: o.lengthMm, identity: linear[0].identity, label: o.label });
+    }
+    const offcutById = new Map(offcuts.map((o) => [o.id, o]));
     allocation = allocateLinear(linear, { existingOffcuts: offcuts });
     const unit = n.family === "aluminium" ? "bar" : "piece";
     for (const g of allocation.groups) {
-      for (const u of g.unavailable || []) sink.problems.push({ code: "unavailable_stock", message: `${demands.find((d) => d.id === u.demandId)?.label || u.demandId}: ${u.message || u.reason}`, blocking: true });
+      for (const u of g.unavailable || []) sink.problems.push({ code: "unavailable_stock", message: `${demById.get(u.demandId)?.label || u.demandId}: ${u.message || u.reason}`, blocking: true });
       for (const b of g.bars) {
         if (b.source !== "new") continue;
         const ids = b.cuts.map((c) => c.demandId);
-        add(`${unit}|${b.stockLengthMm}|${g.identityKey}`, unit, 1, b.stockLengthMm, { description: `${describeIdentity(n)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, linear.find((d) => d.id === ids[0])?.identity);
-        barOwner.set(`${unit}|${b.stockLengthMm}|${g.identityKey}`, [...(barOwner.get(`${unit}|${b.stockLengthMm}|${g.identityKey}`) || []), ids[0]]);
+        const first = demById.get(ids[0]);
+        add(`${unit}|${b.stockLengthMm}|${g.identityKey}`, unit, 1, b.stockLengthMm,
+          { description: `${itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity);
       }
     }
     if (n.family === "aluminium") {
       for (const g of allocation.groups) {
         appendix.aluminium.push({ stockLengthMm: n.stockLengthMm, kerfMm: n.kerfMm, kerfConfirmed: !!n.kerfConfirmed, endTrimMm: n.endTrimMm || 0, barCount: g.barCount,
-          lowerBound: g.lowerBound ?? null, proven: !!g.proven, unavailable: (g.unavailable || []).map((u) => ({ demandId: u.demandId, reason: u.message || u.reason, label: demands.find((d) => d.id === u.demandId)?.label })),
-          bars: g.bars.map((b, i) => ({ n: i + 1, source: b.source, offcutLabel: b.offcutId ? offcuts.find((o) => o.id === b.offcutId)?.label : null, cuts: b.cuts.map((c) => ({ label: c.label, lengthMm: c.lengthMm })),
+          lowerBound: g.lowerBound ?? null, proven: !!g.proven, unavailable: (g.unavailable || []).map((u) => ({ demandId: u.demandId, reason: u.message || u.reason, label: demById.get(u.demandId)?.label })),
+          bars: g.bars.map((b, i) => ({ n: i + 1, source: b.source, offcutLabel: b.offcutId ? offcutById.get(b.offcutId)?.label : null, cuts: b.cuts.map((c) => ({ label: c.label, lengthMm: c.lengthMm })),
             residualMm: b.residualMm, residualUsable: !!b.residualUsable, kerfLossMm: b.kerfLossMm })) });
       }
     } else {
@@ -374,16 +482,19 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         rows.set(k, r);
       }
       for (const g of allocation.groups) for (const u of g.unavailable || []) {
-        const d = demands.find((x) => x.id === u.demandId);
+        const d = demById.get(u.demandId);
         rows.set(`u|${u.demandId}`, { cutMm: d?.lengthMm, stockMm: null, qty: d?.quantity || 1, labels: [d?.label].filter(Boolean) });
       }
-      appendix.timber.push({ rows: [...rows.values()].sort((a, b) => b.cutMm - a.cutMm) });
+      // labels in natural order ("Rafter @ 600" before "@ 1,200") so a site reader can follow the stations
+      const natural = (a, b) => String(a).localeCompare(String(b), "en", { numeric: true });
+      appendix.timber.push({ rows: [...rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm) });
     }
   }
-  for (const d of demands) {
+  for (const d of usable) {
     if (allocatable(d)) continue;
     if (d.kind === "linear" && d.unit === "lm") {
-      add(`lm|${identityKey(d.identity)}`, "lm", d.quantity, null, { description: `${describeIdentity(n)} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity);
+      // exact LM (incl. spare) is summed per material and rounded ONCE below — never per wall then again
+      add(`lm|${identityKey(d.identity)}`, "lm", d.exactLm ?? d.quantity, null, { description: `${itemText(d, n, recipeLabels)} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity);
       continue;
     }
     if (d.kind === "linear") {
@@ -392,34 +503,62 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       if (d.lengthKind !== "orderedStock" && d.stockPolicy == null && n.family === "timber") {
         const s = selectStock(L, { kind: "grid", minMm: 1200, incrementMm: 600, maxMm: n.stock?.maxMm ?? null, unavailableMm: n.stock?.unavailableMm || [] });
         if (s.stockMm == null) { sink.problems.push({ code: "unavailable_stock", message: `${d.label || "A piece"}: ${s.message}`, blocking: true }); continue; }
-        add(`piece|${s.stockMm}|${identityKey(d.identity)}`, "piece", d.quantity, s.stockMm, { description: `${describeIdentity(n)} — ${fmt(s.stockMm)} mm length`, stockLengthMm: s.stockMm }, [d.id], d.identity);
-      } else add(`piece|${L}|${identityKey(d.identity)}`, d.unit === "bar" ? "bar" : "piece", d.quantity, L, { description: `${describeIdentity(n)} — ${fmt(L)} mm length${d.lengthKind === "orderedStock" ? " (as entered)" : ""}`, stockLengthMm: L }, [d.id], d.identity);
+        add(`piece|${s.stockMm}|${identityKey(d.identity)}`, "piece", d.quantity, s.stockMm, { description: `${itemText(d, n, recipeLabels)} — ${fmt(s.stockMm)} mm length`, stockLengthMm: s.stockMm }, [d.id], d.identity);
+      } else add(`piece|${L}|${identityKey(d.identity)}`, d.unit === "bar" ? "bar" : "piece", d.quantity, L, { description: `${itemText(d, n, recipeLabels)} — ${fmt(L)} mm length${d.lengthKind === "orderedStock" ? " (as entered)" : ""}`, stockLengthMm: L }, [d.id], d.identity);
       continue;
     }
     if (d.unit === "sheet" || d.kind === "sheet") {
       const L = d.identity?.stockLengthMm ?? d.heightMm, Wd = d.identity?.stockWidthMm ?? d.widthMm;
-      const what = [d.identity?.manufacturer, d.identity?.name, d.identity?.sku ? `SKU ${d.identity.sku}` : null].filter(Boolean).join(" ") || describeIdentity(n);
-      add(`sheet|${L}|${Wd}|${identityKey(d.identity)}`, "sheet", d.quantity, L ?? null, { description: `${what}${L ? ` — ${fmt(L)}${Wd ? ` × ${fmt(Wd)}` : ""} mm` : ""}`, stockLengthMm: L ?? null, widthMm: Wd ?? null, sku: d.identity?.sku || null }, [d.id], d.identity);
+      add(`sheet|${L}|${Wd}|${identityKey(d.identity)}`, "sheet", d.quantity, L ?? null, { description: `${itemText(d, n, recipeLabels)}${L ? ` — ${fmt(L)}${Wd ? ` × ${fmt(Wd)}` : ""} mm` : ""}`, stockLengthMm: L ?? null, widthMm: Wd ?? null, sku: d.identity?.sku || null }, [d.id], d.identity);
       continue;
     }
     const u = d.unit || "piece";
     add(`${u}|${d.lengthMm ?? ""}|${identityKey(d.identity)}`, u, d.quantity, u === "piece" || u === "bar" ? d.lengthMm ?? null : null,
-      { description: d.itemDescription || d.label || describeIdentity(n), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity);
+      { description: d.itemDescription || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity);
   }
-  const spareRate = n.spareRate > 0 ? n.spareRate / 100 : 0;
-  for (const l of lines.values()) {
-    // purchase quantities are whole units; LM rounds up to whole metres after any supplier increment (never down)
-    l.quantity = Math.max(UNIT_INTEGER.has(l.unit) ? 1 : 0, Math.ceil(l.exact - 1e-9));
-    // spares (02 §6): added on top of the layout quantity and SHOWN separately — never hidden in the layout count.
-    // Random-length LM already carries its spare from area_to_linear.
-    if (spareRate && UNIT_INTEGER.has(l.unit)) {
-      l.spareQuantity = Math.ceil(l.quantity * spareRate - 1e-9);
-      if (l.spareQuantity) { l.quantity += l.spareQuantity; l.item = { ...l.item, note: [l.item?.note, `incl. ${l.spareQuantity} spare (${n.spareRate}%)`].filter(Boolean).join(" · ") }; }
-    }
-    if (l.unit === "lm" && Math.abs(l.quantity - l.exact) > 1e-9) l.item = { ...l.item, note: `${l.exact.toFixed(2)} LM calculated, ordered as ${l.quantity} LM` };
+  const all = [...lines.values()];
+  for (const l of all) {
+    if (l.unit === "lm") {
+      // one rounding for the job: supplier increment first, then whole metres (order lines hold whole units)
+      const inc = n.orderIncrementM > 0 ? n.orderIncrementM : null;
+      const byInc = inc ? Math.ceil(l.exact / inc - 1e-9) * inc : l.exact;
+      l.quantity = Math.ceil(byInc - 1e-9);
+      if (Math.abs(l.quantity - l.exact) > 1e-9) l.item = { ...l.item, note: `${l.exact.toFixed(2)} LM calculated${inc ? ` → ${byInc.toFixed(2)} LM in ${inc} m steps` : ""}, ordered as ${l.quantity} LM` };
+    } else l.quantity = Math.max(UNIT_INTEGER.has(l.unit) ? 1 : 0, Math.ceil(l.exact - 1e-9));
     if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null) l.problems.push("A timber line has no stock length.");
   }
-  return { lines: [...lines.values()], allocation, appendix, barOwner };
+  // spares (02 §6): ONE spare count for the material (ceil of total × rate), spread over its lines by largest share —
+  // shown separately, never hidden in the layout count. Random-length LM already carries its spare.
+  const spareRate = n.spareRate > 0 ? n.spareRate / 100 : 0;
+  const spareable = all.filter((l) => UNIT_INTEGER.has(l.unit));
+  if (spareRate && spareable.length) {
+    const byUnit = new Map();
+    for (const l of spareable) byUnit.set(l.unit, [...(byUnit.get(l.unit) || []), l]);
+    for (const group of byUnit.values()) {
+      const total = group.reduce((a, l) => a + l.quantity, 0);
+      let left = Math.ceil(total * spareRate - 1e-9);
+      const shares = group.map((l) => ({ l, raw: (left * l.quantity) / total })).sort((a, b) => (b.raw - Math.floor(b.raw)) - (a.raw - Math.floor(a.raw)) || b.l.quantity - a.l.quantity || (a.l.bucketKey < b.l.bucketKey ? -1 : 1));
+      for (const sh of shares) { sh.n = Math.floor(sh.raw); left -= sh.n; }
+      for (const sh of shares) { if (left <= 0) break; sh.n += 1; left -= 1; }
+      for (const sh of shares) {
+        if (!sh.n) continue;
+        sh.l.spareQuantity = sh.n; sh.l.quantity += sh.n;
+        sh.l.item = { ...sh.l.item, note: [sh.l.item?.note, `incl. ${sh.n} spare (${n.spareRate}% of the material)`].filter(Boolean).join(" · ") };
+      }
+    }
+  }
+  // full packs only when the supplier requires them (a published pack size alone never forces it — 06)
+  const pack = n.product?.fullPackRequired && n.product?.packQuantity > 1 ? n.product.packQuantity : null;
+  if (pack) for (const l of spareable) {
+    const packed = Math.ceil(l.quantity / pack - 1e-9) * pack;
+    if (packed !== l.quantity) { l.item = { ...l.item, note: [l.item?.note, `rounded up to full packs of ${pack} (+${packed - l.quantity})`].filter(Boolean).join(" · ") }; l.quantity = packed; }
+  }
+  if (omitted.length) {
+    const names = [...new Set(omitted)];
+    sink.problems.push({ code: "component_not_selected", blocking: false,
+      message: `Not on this order — product not selected: ${names.slice(0, 6).join("; ")}${names.length > 6 ? ` +${names.length - 6} more` : ""}. Order these separately or choose their products.` });
+  }
+  return { lines: all, allocation, appendix, omitted: [...new Set(omitted)] };
 }
 
 // ── dependency key (06 identity & invalidation) ──────────────────────────────
@@ -431,14 +570,14 @@ const fnv = (str) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) 
  * (geometry + inputs + scale), the openings of its walls and its recorded offcuts. A draft order line made under one
  * key is stale under another — even when the totals happen to come out the same.
  */
-function dependencyKey(mat, items, ctx, openingsByWall, offcuts) {
+function dependencyKey(mat, items, ctx, openingsByWall, offcuts, extra = null) {
   const cal = (id) => { const c = id ? ctx.calibrationsById.get(id) : null; return c ? { id: c.id, sx: c.sx, sy: c.sy, status: c.status } : null; };
   const meas = items.map(({ m, role }) => ({ id: m.id, role, kind: m.kind, points: m.points || null, inputs: m.inputs || null, cal: cal(m.calibrationId),
     finishedLengthMm: m.finishedLengthMm ?? null, quantity: m.quantity ?? null,
     openings: m.kind === "wall" ? (openingsByWall.get(m.id) || []).map((o) => ({ id: o.id, inputs: o.inputs })) : undefined }))
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   return fnv(stableStringify({ method: `${mat.methodKey}@${mat.methodVersion}`, spec: mat.spec, rules: mat.rules || {}, meas,
-    offcuts: offcuts.filter((o) => o.materialId === mat.id) }));
+    offcuts: offcuts.filter((o) => o.materialId === mat.id), extra }));
 }
 
 // ── workspace entry point ─────────────────────────────────────────────────────
@@ -455,18 +594,22 @@ export function computeGenericMaterials(materials, contributions, ctx) {
   const offcuts = [];
   for (const m of ctx.measurementsById.values()) {
     if (m.kind === "opening" && m.parentId) openingsByWall.set(m.parentId, [...(openingsByWall.get(m.parentId) || []), m]);
-    if (m.kind === "offcut" && m.inputs?.status !== "consumed") offcuts.push({ id: m.id, materialId: m.inputs?.materialId, lengthMm: m.inputs?.lengthMm, label: m.inputs?.label || m.label || "offcut" });
+    if (m.kind === "offcut" && m.inputs?.status !== "consumed") offcuts.push({ id: m.id, materialId: m.inputs?.materialId, lengthMm: m.inputs?.lengthMm, label: m.inputs?.label || m.label || "offcut", identityKey: m.inputs?.identityKey || null });
   }
   const c2 = { ...ctx, openingsByWall };
   const out = { contributions: [], lines: [], unplaced: [], results: {} };
   // actual layout joints per wall measurement (from cladding already computed) — feed accessory joint routes
   const jointsByWall = new Map();
   const layoutInfoFor = (wallMeasId) => ({ joints: jointsByWall.get(wallMeasId) || [] });
-  const ordered = [...materials].sort((a, b) => Number(a.spec?.family === "accessory") - Number(b.spec?.family === "accessory"));
+  // supports then accessories run AFTER the cladding on the same wall: they take its real panel joints
+  const rank = (m) => (m.spec?.family === "accessory" ? 2 : m.spec?.family === "batten" ? 1 : 0);
+  const ordered = [...materials].sort((a, b) => rank(a) - rank(b));
+  const sheetJointsByWall = new Map(); // wall measurement → vertical sheet-joint x positions (support stations, 05 B1)
+  let generated = 0;
   for (const mat of ordered) {
     const mine = contributions.filter((c) => c.jobMaterialId === mat.id);
     const items = mine.map((c) => ({ c, role: c.role || "primary", m: ctx.measurementsById.get(c.measurementId) })).filter((x) => x.m);
-    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor };
+    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [] };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
     for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
     let n = null, methodResults = [];
@@ -479,21 +622,42 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       else if (n.family === "aluminium") methodResults = runAluminium(mat, n, items, c2, sink);
       else methodResults = runWallMethod(mat, n, items, c2, sink);
     } catch (e) {
-      if (e?.name !== "TakeoffValidationError") throw e;
-      sink.problems.push({ code: "invalid_input", message: e.message, blocking: true });
+      // a malformed setting (wrong type from an old/edited record) is a problem on THIS material, never a crash
+      if (e?.name !== "TakeoffValidationError" && !(e instanceof TypeError) && !(e instanceof RangeError)) throw e;
+      sink.problems.push({ code: "invalid_input", message: e?.name === "TakeoffValidationError" ? e.message : `${mat.name}: a setting has the wrong form and couldn't be worked out — check its setup.`, blocking: true });
     }
     const demands = methodResults.flatMap((r) => r.demands || []);
+    generated += demands.reduce((a, d) => a + (UNIT_INTEGER.has(d.unit) && d.kind !== "volume" && d.kind !== "area" ? Math.max(1, Math.ceil(d.quantity || 1)) : 1), 0);
+    if (generated > JOB_GENERATED_LIMIT) {
+      throw new TakeoffValidationError(`This takeoff generates more than ${JOB_GENERATED_LIMIT.toLocaleString("en-AU")} pieces (stopped at ${mat.name}) — check the centres and lengths, or split the job into more than one takeoff.`);
+    }
+    // a measurement this method doesn't read is a missing requirement, never a silent zero
+    const reads = new Set(methodReads(mat));
+    for (const { m } of items) {
+      if (reads.has(m.kind)) continue;
+      sink.measProblems.set(m.id, [...(sink.measProblems.get(m.id) || []), "measurement_unused"]);
+      sink.problems.push({ code: "measurement_unused", message: `A ${m.kind} measurement is assigned to ${mat.name} but this material can't use it — remove it or assign it to the right material.`, blocking: true });
+    }
     for (const r of methodResults) {
       const wid = r.layout?.wallMeasurementId;
+      // vertical sheets: every boundary between strips is a joint that must land on a support
+      if (wid && r.layout?.method === "sheet_layout@2" && r.layout.orientation !== "horizontal" && Array.isArray(r.layout.columns)) {
+        sheetJointsByWall.set(wid, [...(sheetJointsByWall.get(wid) || []), ...r.layout.columns.slice(0, -1).map((c) => c.zoneEnd)]);
+      }
       if (!wid || !Array.isArray(r.layout?.joints)) continue;
       const list = jointsByWall.get(wid) || [];
       for (const j of r.layout.joints) (j.segments || []).forEach((sg, k) => list.push({ id: `${mat.id.slice(0, 6)}-j${j.index}-${k}`, orientation: j.orientation, kind: "joint", atMm: j.atMm, fromMm: sg.startMm, toMm: sg.endMm }));
       jointsByWall.set(wid, list);
     }
-    const methodProblems = methodResults.flatMap((r) => r.problems || []);
+    // "base studs only; opening framing incomplete" (T4) does not stop ordering the BASE studs — it stays visible on the
+    // line and keeps the quantity status incomplete; the opening framing is added once its detail is entered
+    const methodProblems = methodResults.flatMap((r) => r.problems || []).map((p) => (p.code === "opening_framing_incomplete" ? { ...p, blocking: false, framingGap: true } : p));
     const matKey = genericMaterialKey(mat);
-    const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts);
-    let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, barOwner: new Map() };
+    // accessories also depend on the cladding layout joints of their walls
+    const wallsOf = items.filter((x) => x.m.kind === "wall").map((x) => x.m.id);
+    const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts, mat.spec?.family === "accessory" ? wallsOf.map((id) => jointsByWall.get(id) || [])
+      : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || []) : null);
+    let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, omitted: [] };
     if (n) {
       try { pl = purchaseLines(mat, n, demands, matKey, sink); } catch (e) {
         if (e?.name !== "TakeoffValidationError") throw e;
@@ -507,7 +671,11 @@ export function computeGenericMaterials(materials, contributions, ctx) {
           const k = d.itemDescription || d.label || describeIdentity(n);
           if (d.unit === "sheet" || d.kind === "sheet") counts.set(k, (counts.get(k) || 0) + d.quantity);
         }
-        pl.appendix.layouts.push({ wallLabel: r.layout.wallLabel, grossM2: r.layout.areas?.grossM2 ?? null, openingM2: r.layout.areas?.openingM2 ?? null, netM2: r.layout.areas?.netM2 ?? null,
+        // where the elevation came from, said plainly (same wording as the wall editor) — never "surveyed"
+        const wm = ctx.measurementsById.get(r.layout.wallMeasurementId);
+        const traced = Array.isArray(wm?.points) && wm.points.length >= 2;
+        const source = wm?.inputs?.kind === "polygon" && traced ? "Traced elevation outline" : traced ? "Derived from plan + entered heights" : "Entered length and heights";
+        pl.appendix.layouts.push({ wallLabel: r.layout.wallLabel, source, grossM2: r.layout.areas?.grossM2 ?? null, openingM2: r.layout.areas?.openingM2 ?? null, netM2: r.layout.areas?.netM2 ?? null,
           rows: [...counts.entries()].map(([description, qty]) => ({ description, qty })), notes: (r.explain || []).slice(0, 6) });
       }
     }
@@ -524,7 +692,9 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       for (const p of advisory) l.notes.push(p.message);
     }
     // contribution attribution: each purchase unit belongs to the contribution of the (first) demand it serves
-    const demandMeas = new Map(demands.map((d) => [d.id, d.sourceRefs?.[0]?.measurementId || d.sourceRefs?.[0]?.wallId || null]));
+    // wall-level demands (supports, accessories, sheets) name their wall by its readable TAG — map it back to the wall
+    const tagToMeas = new Map([...sink.wallTags.entries()].map(([id, tag]) => [tag, id]));
+    const demandMeas = new Map(demands.map((d) => { const r = d.sourceRefs?.[0] || {}; return [d.id, r.measurementId || tagToMeas.get(r.wallId) || r.wallId || null]; }));
     const contribOfMeas = new Map(mine.map((c) => [c.measurementId, c.id]));
     const perContribution = new Map(mine.map((c) => [c.id, []]));
     for (const l of pl.lines) {
@@ -556,7 +726,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       // a measurement that should feed purchases but produced none (and has problems) is a missing requirement
       if (!pieces.length && problems.length) out.unplaced.push({ contributionId: c.id, jobMaterialId: mat.id, specKey: matKey, problems, explanation: null });
     }
-    const quantityStatus = blocking.length || !demands.length ? "incomplete" : methodResults.some((r) => r.status?.quantity === "estimate") ? "estimate" : "calculated";
+    const quantityStatus = blocking.length || !demands.length || methodProblems.some((p) => p.framingGap) ? "incomplete" : methodResults.some((r) => r.status?.quantity === "estimate") ? "estimate" : "calculated";
     const installs = methodResults.map((r) => r.status?.installation).filter(Boolean);
     // before anything is measured: a SELECTED (unreviewed) assembly is source-pending; no assembly is unspecified
     if (!installs.length && n?.assemblyId) installs.push("source-pending");

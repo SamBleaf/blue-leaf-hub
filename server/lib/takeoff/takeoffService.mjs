@@ -19,6 +19,7 @@ import {
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { methodReads } from "../../../shared/takeoff/engine/dispatch.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
 import { docInOwner, isUuid, ownerColumns, ownerFromRow, scopeQuery } from "./takeoffAccess.mjs";
 
@@ -166,17 +167,20 @@ export async function loadSnapshotFresh(sb, wsId) {
 // bounded, strings short, keys plain identifiers, nesting ≤ 6 levels, arrays ≤ 50 items, objects ≤ 60 keys.
 function cleanRuleValue(v, d) {
   if (typeof v === "boolean") return v;
-  if (typeof v === "number") return isFiniteNumber(v) && Math.abs(v) <= 1e6 ? Math.round(v * 1000) / 1000 : undefined;
+  if (typeof v === "number") { must(isFiniteNumber(v) && Math.abs(v) <= 1e6, "A material setting is out of range."); return Math.round(v * 1000) / 1000; }
   if (typeof v === "string") return optStr(v, 120) ?? undefined;
-  if (d >= 6 || v == null) return undefined;
-  if (Array.isArray(v)) return v.slice(0, 50).map((x) => cleanRuleValue(x, d + 1)).filter((x) => x !== undefined);
+  if (v == null) return undefined;
+  must(d < 6, "Material settings are nested too deeply.");
+  if (Array.isArray(v)) { must(v.length <= 50, "A material setting list is too long (50 at most)."); return v.map((x) => cleanRuleValue(x, d + 1)).filter((x) => x !== undefined); }
   if (typeof v === "object") return cleanGenericRules(v, d + 1);
   return undefined;
 }
 function cleanGenericRules(r, d = 0) {
   const out = {};
-  for (const [k, v] of Object.entries(r).slice(0, 60)) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(k)) continue;
+  const entries = Object.entries(r);
+  must(entries.length <= 60, "A material has too many settings (60 at most).");
+  for (const [k, v] of entries) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(k) || k === "__proto__" || k === "constructor" || k === "prototype") continue;
     const c = cleanRuleValue(v, d);
     if (c !== undefined) out[k] = c;
   }
@@ -220,26 +224,32 @@ function cleanInputs(kind, inp, tracedLengthMm) {
     if (wk === "gable" && out.eavesHeightMm && out.apexHeightMm) must(out.apexXMm != null && out.apexXMm <= out.widthMm && out.apexHeightMm > out.eavesHeightMm, "The apex must sit within the wall and above the eaves.");
     if (wk === "polygon" && i.polygon != null) {
       must(Array.isArray(i.polygon) && i.polygon.length >= 3 && i.polygon.length <= 200, "A wall outline needs 3–200 points.");
-      out.polygon = i.polygon.map((p) => ({ x: MM(p.x, "Outline x", { min: -100000, allowNull: false }), y: MM(p.y, "Outline y", { min: -100000, allowNull: false }) }));
+      out.polygon = i.polygon.map((p) => { must(p && typeof p === "object", "A wall outline point is invalid."); return { x: MM(p.x, "Outline x", { min: -100000, allowNull: false }), y: MM(p.y, "Outline y", { min: -100000, allowNull: false }) }; });
     }
     return out;
   }
   if (kind === "opening") {
     return { xMm: MM(i.xMm, "Opening offset", { allowNull: false }), sillMm: MM(i.sillMm, "Sill height", { allowNull: false }),
       widthMm: MM(i.widthMm, "Opening width", { min: 1, allowNull: false }), heightMm: MM(i.heightMm, "Opening height", { min: 1, allowNull: false }),
-      label: optStr(i.label, 40), type: ["window", "door", "other"].includes(i.type) ? i.type : "window" };
+      label: optStr(i.label, 40), type: ["window", "door", "other"].includes(i.type) ? i.type : "window",
+      ...(i.detail != null ? { detail: cleanOpeningDetail(i.detail) } : {}) };
   }
   if (kind === "offcut") {
     return { lengthMm: MM(i.lengthMm, "Offcut length", { min: 1, allowNull: false }), materialId: isUuid(i.materialId) ? i.materialId : null,
+      identityKey: optStr(i.identityKey, 600),
       label: optStr(i.label, 60), location: optStr(i.location, 80), status: ["available", "consumed"].includes(i.status) ? i.status : "available" };
   }
   if (kind === "polyline") {
+    must(!Array.isArray(i.splitsMm) || i.splitsMm.length <= 20, "A run can have at most 20 splits.");
     const splits = Array.isArray(i.splitsMm) ? i.splitsMm.map((x) => MM(x, "Split position", { min: 0.001, allowNull: false })) : [];
     for (let k = 1; k < splits.length; k++) must(splits[k] > splits[k - 1], "Split positions must increase along the run.");
     if (tracedLengthMm != null) must(splits.every((x) => x < tracedLengthMm), "A split must be inside the run.");
     // approved plan location of each split (13): stations are rebuilt from it after geometry edits
+    // plan location kept at FULL precision: rounding a PDF coordinate moves the rebuilt station (8,800 → 8,800.02 mm
+    // orders 9,100) — the station itself is rounded exactly like splitsMm so the two still pair up
+    const coord = (v, label) => { if (v == null) return null; const n = Number(v); must(isFiniteNumber(n) && Math.abs(n) <= 1e6, `${label} is not a plan position.`); return n; };
     const anchors = Array.isArray(i.splitAnchors) ? i.splitAnchors.slice(0, 20).map((a) => ({ stationMm: MM(a?.stationMm, "Split station", { min: 0, allowNull: false }),
-      x: a?.x == null ? null : MM(a.x, "Split x", { min: -1e6, allowNull: false }), y: a?.y == null ? null : MM(a.y, "Split y", { min: -1e6, allowNull: false }) })) : null;
+      x: coord(a?.x, "Split x"), y: coord(a?.y, "Split y") })) : null;
     // anchors only count when they describe exactly these splits (a mismatched set is dropped, never guessed)
     const keep = anchors && anchors.length === splits.length && anchors.length > 0;
     return splits.length || i.role ? { splitsMm: splits, ...(keep ? { splitAnchors: anchors } : {}), role: optStr(i.role, 30) } : null;
@@ -248,6 +258,7 @@ function cleanInputs(kind, inp, tracedLengthMm) {
     return { startOffsetMm: MM(i.startOffsetMm, "Start offset") ?? 0, endOffsetMm: MM(i.endOffsetMm, "End offset") ?? 0,
       includeStart: i.includeStart !== false, includeEnd: i.includeEnd !== false, spacing: i.spacing === "equal" ? "equal" : "fixed",
       overrides: Array.isArray(i.overrides) ? i.overrides.slice(0, 500).map((o) => {
+        must(o && typeof o === "object", "A member change is invalid.");
         const dup = o.duplicate == null ? 0 : Number(o.duplicate);
         must(Number.isInteger(dup) && dup >= 0 && dup <= 20, "A member can be duplicated 0–20 times.");
         return { station: String(o.station).slice(0, 40), removed: o.removed === true, lengthMm: MM(o.lengthMm, "Override length", { min: 1 }), ...(dup ? { duplicate: dup } : {}) };
@@ -264,6 +275,26 @@ const ROLE_KINDS = Object.freeze({
   distribution: ["run", "polyline", "distribution"], member: ["run", "member"], wall: ["wall"], opening: ["opening"],
   path: ["polyline"], surface: ["area", "wall"], offcut: ["offcut"],
 });
+
+/** A stud-wall opening's framing detail (03 T4): explicit quantities or a reviewed detail — data only, bounded. */
+function cleanOpeningDetail(d) {
+  must(d && typeof d === "object" && !Array.isArray(d), "The framing detail is invalid.");
+  must(["reviewed-detail", "explicit"].includes(d.source), "Say whether the framing comes from a reviewed detail or explicit quantities.");
+  const region = (r, label) => (r == null ? undefined : (must(typeof r === "object" && typeof r.required === "boolean", `Say whether ${label} pieces are required.`),
+    { required: r.required, ...(r.required ? { deductionMm: MM(r.deductionMm, `${label} deduction`, { allowNull: false }) } : {}) }));
+  must(d.members == null || (Array.isArray(d.members) && d.members.length <= 30), "A framing detail can list at most 30 members.");
+  const FROM = ["stud", "openingWidth", "headLevel", "sillLevel"];
+  const members = (d.members || []).map((m, k) => {
+    must(m && typeof m === "object", "A framing member is invalid.");
+    const q = Number(m.quantity);
+    must(Number.isInteger(q) && q >= 1 && q <= 50, "Each framing member needs a quantity of 1–50.");
+    return { id: optStr(m.id, 40) || `m${k + 1}`, role: optStr(m.role, 40), quantity: q,
+      ...(m.lengthMm != null ? { lengthMm: MM(m.lengthMm, "Member length", { min: 1, allowNull: false }) } : {}),
+      ...(FROM.includes(m.lengthFrom) ? { lengthFrom: m.lengthFrom, addMm: MM(m.addMm ?? 0, "Member adjustment", { min: -5000 }) ?? 0 } : {}),
+      sameAsStud: m.sameAsStud !== false };
+  });
+  return { source: d.source, ref: optStr(d.ref, 120), belowSill: region(d.belowSill, "below-sill"), aboveHead: region(d.aboveHead, "above-head"), members };
+}
 
 /** Validate + normalise a material's content (method, rules, profile, spec). */
 export function cleanMaterialContent(m) {
@@ -389,6 +420,7 @@ export async function commitWorkspace(sb, ctx, body) {
   // materials
   const mats = new Map(snapshot.materials.map((m) => [m.id, m]));
   for (const m of ch.materials?.upsert || []) {
+    must(m && typeof m === "object", "A material in the change is invalid.");
     must(isUuid(m.id), "Invalid material id.");
     let content;
     let fromPresetId = mats.get(m.id)?.fromPresetId || null, fromPresetRevision = mats.get(m.id)?.fromPresetRevision || null;
@@ -408,6 +440,7 @@ export async function commitWorkspace(sb, ctx, body) {
   // measurements
   const meas = new Map(snapshot.measurements.map((m) => [m.id, m]));
   for (const m of ch.measurements?.upsert || []) {
+    must(m && typeof m === "object", "A measurement in the change is invalid.");
     must(isUuid(m.id), "Invalid measurement id.");
     const isNew = !meas.has(m.id);
     const label = optStr(m.label, 120);
@@ -464,10 +497,15 @@ export async function commitWorkspace(sb, ctx, body) {
         if (isNew) must(d.status === "current", "This plan has been replaced — trace on the current revision.");
       }
       if (pts && cal && !pointsWithinCalibration(cal, pts)) throw bad("This wall goes outside the scaled region.", "OUTSIDE_REGION");
+      // a wall run traced on a FLOOR plan is one straight wall (2 points); round a corner = two walls. Only a traced
+      // elevation OUTLINE (kind polygon) has more points — never one elevation unfolded across corners
+      if (m.kind === "wall" && pts) must(pts.length === 2 || m.inputs?.kind === "polygon", "Trace one straight wall at a time — a corner starts the next wall.");
+      if (m.kind === "opening" || m.kind === "offcut") must(!pts, "Openings and offcuts are entered by numbers.");
       // an opening may stand alone (aluminium window trims) or belong to a wall of THIS takeoff
       const parentId = m.kind === "opening" && m.parentId != null ? m.parentId : null;
       if (parentId) must(isUuid(parentId) && meas.has(parentId) && meas.get(parentId).kind === "wall", "An opening must belong to a wall in this takeoff.");
       const inputs = cleanInputs(m.kind, m.inputs, pts && cal ? polylineLengthMm(cal, pts) : null);
+      if (m.kind === "offcut") must(inputs.materialId && mats.has(inputs.materialId) && mats.get(inputs.materialId).spec?.family, "An offcut must belong to a timber or aluminium material in this takeoff.");
       rec = { id: m.id, kind: m.kind, documentId: d?.id || null, pageIndex: cal ? cal.pageIndex : null, calibrationId: cal?.id || null,
         geometry: { v: 2, ...(pts ? { points: pts } : {}), inputs, ...(parentId ? { parentId } : {}) }, label,
         rawLengthMm: pts && cal ? polylineLengthMm(cal, pts) : null, finishedLengthMm: null, quantity: null };
@@ -485,6 +523,7 @@ export async function commitWorkspace(sb, ctx, body) {
   const contribs = new Map(snapshot.contributions.map((c) => [c.id, c]));
   const changedSplits = [];
   for (const c of ch.contributions?.upsert || []) {
+    must(c && typeof c === "object", "An assignment in the change is invalid.");
     must(isUuid(c.id), "Invalid assignment id.");
     must(meas.has(c.measurementId), "That measurement is not in this takeoff.");
     must(mats.has(c.jobMaterialId), "That material is not in this takeoff.");
@@ -518,6 +557,20 @@ export async function commitWorkspace(sb, ctx, body) {
     contribs.set(c.id, rec);
   }
   for (const id of ch.contributions?.archive || []) { must(isUuid(id), "Invalid assignment id."); out.contributions.archive.push(id); contribs.delete(id); }
+
+  // every LIVE assignment must still fit after this change (a measurement's kind or a material's method may have
+  // changed under an existing assignment) — and a generic material must actually READ the measurement kind
+  for (const c of contribs.values()) {
+    const mm = meas.get(c.measurementId), cm = mats.get(c.jobMaterialId);
+    if (!mm || !cm) continue;
+    const role = c.role || "primary";
+    must(ROLE_KINDS[role]?.includes(mm.kind), "A measurement is assigned in a way its kind doesn't allow — remove that assignment first.");
+    const gm = getMethod(cm.methodKey, Number(cm.methodVersion || 1));
+    if (gm.generic) {
+      must(methodReads(cm).includes(mm.kind), `${cm.name} can't use a ${mm.kind} measurement — assign it to the right material.`);
+      if (mm.kind === "offcut") must(mm.inputs?.materialId === cm.id, "An offcut can only be assigned to the material it was recorded for.");
+    } else must(role === "primary" && ["run", "polyline", "count", "manual"].includes(mm.kind), "A flashing takes runs, paths or finished pieces.");
+  }
 
   // Recompute the merged state; newly applied splits must be valid now.
   const merged = {

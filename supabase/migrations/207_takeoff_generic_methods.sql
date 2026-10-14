@@ -52,9 +52,11 @@ ALTER TABLE public.takeoff_order_lines ALTER COLUMN finished_length_mm DROP NOT 
 ALTER TABLE public.takeoff_order_lines DROP CONSTRAINT IF EXISTS takeoff_order_lines_unit_check;
 ALTER TABLE public.takeoff_order_lines ADD CONSTRAINT takeoff_order_lines_unit_check
   CHECK (unit IN ('piece','lm','m2','sheet','bar','box','bag','roll','pack','cartridge','ml'));
+-- a BAR is always a stock length; a "piece" may be a counted item with no length (screws, clips, a set) — flashing
+-- pieces always carry their finished length from the schedule
 ALTER TABLE public.takeoff_order_lines DROP CONSTRAINT IF EXISTS takeoff_order_lines_len_for_pieces;
 ALTER TABLE public.takeoff_order_lines ADD CONSTRAINT takeoff_order_lines_len_for_pieces
-  CHECK (unit NOT IN ('piece','bar') OR finished_length_mm IS NOT NULL);
+  CHECK (unit <> 'bar' OR finished_length_mm IS NOT NULL);
 
 ALTER TABLE public.takeoff_placement_allocations ADD COLUMN IF NOT EXISTS unit text NOT NULL DEFAULT 'piece';
 ALTER TABLE public.takeoff_placement_allocations ALTER COLUMN finished_length_mm DROP NOT NULL;

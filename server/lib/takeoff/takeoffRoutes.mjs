@@ -241,7 +241,8 @@ function mount(app, P, adapter) {
 
   app.get(`${P}/orders/:orderId/preview`, ...mw, gate, wrap(async (req, res, sb) => {
     const ctx = await orderCtx(req, sb, req.params.orderId);
-    const p = await previewExport(sb, ctx, ctx.orderRow, await ownerLabel(sb, ctx.owner));
+    // the supplier sees the job ADDRESS only — never the client's name (SEC-12)
+    const p = await previewExport(sb, ctx, ctx.orderRow, await ownerAddress(sb, ctx.owner));
     if (!ctx.caps.viewSupplierContacts && p.snapshot.supplier) p.snapshot.supplier = { id: p.snapshot.supplier.id, name: p.snapshot.supplier.name };
     return ok(res, { preview: p });
   }));
@@ -249,7 +250,7 @@ function mount(app, P, adapter) {
   app.post(`${P}/orders/:orderId/exports`, ...mw, gate, wrap(async (req, res, sb) => {
     const ctx = await orderCtx(req, sb, req.params.orderId);
     requireEdit(req, ctx);
-    return ok(res, { export: await createExport(sb, ctx, ctx.orderRow, req.body || {}, await ownerLabel(sb, ctx.owner)) });
+    return ok(res, { export: await createExport(sb, ctx, ctx.orderRow, req.body || {}, await ownerAddress(sb, ctx.owner)) });
   }));
 
   const exportCtx = async (req, sb, exportId) => {

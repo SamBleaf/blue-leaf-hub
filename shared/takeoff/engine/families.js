@@ -10,6 +10,7 @@
 // (11), manufactured cladding = listed product sizes (never the timber grid), random timber LM increment.
 // =============================================================================
 import { TakeoffValidationError, isFiniteNumber } from "../units.js";
+import { identityKey as identityKeyOf } from "./contract.js";
 
 export const FAMILIES = Object.freeze(["timber", "cladding", "aac", "foam", "timber-cladding", "batten", "aluminium", "accessory"]);
 export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "plates", "noggins", "battens", "trim", "other"]);
@@ -119,6 +120,12 @@ export function familyIdentity(spec) {
     finish: p.finish?.toLowerCase() || null, orientation: n.orientation, endCondition: n.endCondition, coating: n.coating, productCode: n.productCode };
 }
 
+/** The procurement identity key a recorded OFFCUT is stamped with (a later finish/section change never lets it be
+ *  consumed by a different product). Same key the allocator partitions by. */
+export function stockIdentityKey(spec) {
+  try { return identityKeyOf({ family: normaliseFamilySpec(spec).family, ...familyIdentity(spec) }); } catch { return null; }
+}
+
 /** Completeness problems that block ordering (drafts can hold them). */
 export function familyProblems(spec) {
   let n;
@@ -132,6 +139,11 @@ export function familyProblems(spec) {
   } else if (n.family === "aluminium") {
     need(n.profile.aMm && n.profile.bMm && n.profile.tMm, "Enter the profile size (e.g. 50 × 50 × 3).");
     need(n.kerfMm != null && n.kerfConfirmed, "Confirm the saw kerf for the cutting plan (an estimate can use 0, ordering can't).");
+  } else if (n.family === "batten") {
+    // a support layer: product/section and stock lengths — never a cladding "effective cover" (05 B1/B3)
+    need(n.product.name, "Choose the batten / rail product.");
+    need(n.product.widthMm && n.product.thicknessMm, "Enter the batten section (width × thickness).");
+    need(n.product.lengthMm || n.product.lengthsMm.length, "Enter the stock length(s).");
   } else if (n.family === "accessory") {
     // an accessory SET (starters, trims, sealant, fixings …): each item carries its own identity in the recipe
     need(n.product.name, "Name this accessory set.");

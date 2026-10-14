@@ -285,7 +285,7 @@ await t("207 contribution roles: generic roles accepted, unknown rejected", asyn
   await c.query("INSERT INTO takeoff_contributions (id, workspace_id, measurement_id, job_material_id, role) VALUES ($1,$2,$3,$4,'wall')", [id(), ws, m, mat]);
   await rejects(`INSERT INTO takeoff_contributions (id, workspace_id, measurement_id, job_material_id, role) VALUES ('${id()}','${ws}','${m}','${mat}','bogus')`, [], /takeoff_contrib_role_207/);
 });
-await t("207 order lines: unit + item; sheets/boxes need no length, pieces/bars do; save_order writes them", async () => {
+await t("207 order lines: unit + item; sheets/boxes/counted pieces need no length, bars do; save_order writes them", async () => {
   // the earlier "206 re-applies" test commits 206 again (its own BEGIN/COMMIT), which restores the 206 save_order —
   // exactly what an operator re-running 206 after 207 would do. 207 must then be re-run; do that here.
   await c.query(readFileSync(new URL("../../supabase/migrations/207_takeoff_generic_methods.sql", import.meta.url), "utf8"));
@@ -299,7 +299,10 @@ await t("207 order lines: unit + item; sheets/boxes need no length, pieces/bars 
   const rows = (await c.query("SELECT unit, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY unit", [o])).rows;
   assert.deepEqual(rows.map((x) => x.unit), ["box", "sheet"]); assert.equal(rows[1].finished_length_mm, null); assert.equal(rows[1].item.sku, "403931");
   await rejects("SELECT public.takeoff_save_order($1, 2, NULL, $2::jsonb)", [o, JSON.stringify([{ bucketKey: "x", specKey: "x", jobMaterialId: mat, quantity: 1, unit: "bar" }])], /len_for_pieces/);
-  await rejects("SELECT public.takeoff_save_order($1, 2, NULL, $2::jsonb)", [o, JSON.stringify([{ bucketKey: "x", specKey: "x", jobMaterialId: mat, quantity: 1, unit: "furlong" }])], /unit_check/);
+  // a counted piece (e.g. a set of clips) has no length and must still save (F13/SEC-09)
+  const r2 = await one("SELECT public.takeoff_save_order($1, 2, NULL, $2::jsonb) AS r", [o, JSON.stringify([{ bucketKey: "clips|piece", specKey: "clips", jobMaterialId: mat, quantity: 4, unit: "piece", item: { description: "Clips" } }])]);
+  assert.equal(r2.r.lineCount, 1);
+  await rejects("SELECT public.takeoff_save_order($1, 3, NULL, $2::jsonb)", [o, JSON.stringify([{ bucketKey: "x", specKey: "x", jobMaterialId: mat, quantity: 1, unit: "furlong" }])], /unit_check/);
   const f = await one("SELECT has_function_privilege('anon', 'public.takeoff_save_order(uuid,integer,jsonb,jsonb)', 'EXECUTE') AS a");
   assert.equal(f.a, false);
 });

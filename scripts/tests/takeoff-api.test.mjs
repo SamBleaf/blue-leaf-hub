@@ -776,6 +776,90 @@ await t("TC aluminium + continuous flashing over HTTP; generic order lines keep 
   assert.notEqual(other.status, 200); // the appendix is behind the same export access as the PDF
 });
 
+await t("TC F1: a split at the limit with its plan anchor survives the server round-trip (10,000 → 9,000 + 1,400, never 9,100)", async () => {
+  const { pointAtStation } = await import("../../shared/takeoff/engine/flashingPath.js");
+  const snap = (await S(`/workspaces/${w5}`)).data.snapshot;
+  const cal = snap.calibrations.find((c) => c.id === t5.cal);
+  const pts = [{ x: 200, y: 300 }, { x: 200 + 5000 * k, y: 300 }, { x: 200 + 5000 * k, y: 300 + 5000 * k }];
+  const at = pointAtStation(pts, cal, 8800);
+  const pid = id(), cid = id();
+  const r = await SP(`/workspaces/${w5}/commit`, { expectedRevision: snap.workspace.revision, changes: {
+    measurements: { upsert: [{ id: pid, kind: "polyline", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: pts, inputs: { splitsMm: [8800], splitAnchors: [{ stationMm: 8800, x: at.x, y: at.y }] } }] },
+    contributions: { upsert: [{ id: cid, measurementId: pid, jobMaterialId: t5.fl }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const stored = r.data.snapshot.measurements.find((m) => m.id === pid).inputs.splitAnchors[0];
+  assert.equal(stored.x, at.x); assert.equal(stored.y, at.y); // full precision kept
+  const c = r.data.computed.contributions.find((x) => x.contributionId === cid);
+  assert.deepEqual(c.pieces.map((p) => p.finishedLengthMm), [9000, 1400]);
+  assert.deepEqual(c.problems, []);
+});
+
+// ── adversarial review fixes (server) ─────────────────────────────────────────
+await t("QO-01/F01/SEC-01: placing an order allocates timber/sheet/bar lines too — 'already ordered' reconciles", async () => {
+  const oid = id();
+  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  const sched = (await S(`/workspaces/${w5}/orders`)).data.scheduleLines.filter((l) => l.generic && !l.problems.length);
+  assert.ok(sched.some((l) => l.unit === "sheet"));
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  assert.equal(pr.status, 200, JSON.stringify(pr.data));
+  const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "tc-place-exp", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await w5rev(), acknowledgeSurplus: true });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  const pl = await SP(`/orders/${oid}/placements`, { exportId: e.data.export.exportId, placedOn: "2026-10-14", idempotencyKey: "tc-place-1", acknowledgeSurplus: true });
+  assert.equal(pl.status, 200, JSON.stringify(pl.data));
+  const sheet = sched.find((l) => l.unit === "sheet");
+  const st = (await S(`/workspaces/${w5}/orders`)).data.orderStatus.find((x) => x.bucketKey === sheet.bucketKey);
+  assert.equal(st.ordered, sheet.quantity); assert.equal(st.remaining, 0);
+  const alloc = await q("SELECT sum(quantity)::int n FROM takeoff_placement_allocations WHERE bucket_key=$1 AND contribution_id IS NOT NULL", [sheet.bucketKey]);
+  assert.equal(alloc.rows[0].n, sheet.quantity); // attributed to the wall's contribution, not surplus
+});
+await t("SEC-08/SEC-02: a measurement's kind can't change under an existing assignment; a method can't take a kind it doesn't read", async () => {
+  const snap = (await S(`/workspaces/${w5}`)).data.snapshot;
+  const wall = snap.measurements.find((m) => m.id === t5.wall);
+  const r = await SP(`/workspaces/${w5}/commit`, { expectedRevision: snap.workspace.revision, changes: { measurements: { upsert: [{ id: t5.wall, kind: "opening", inputs: { xMm: 0, sillMm: 0, widthMm: 600, heightMm: 600 } }] } } });
+  assert.equal(r.status, 400, JSON.stringify(r.data)); void wall;
+  const man = id();
+  const r2 = await SP(`/workspaces/${w5}/commit`, { expectedRevision: snap.workspace.revision, changes: {
+    measurements: { upsert: [{ id: man, kind: "manual", finishedLengthMm: 1200, quantity: 2 }] }, contributions: { upsert: [{ id: id(), measurementId: man, jobMaterialId: t5.clad }] } } });
+  assert.equal(r2.status, 400); assert.match(r2.data.error, /can't use a manual measurement/);
+});
+await t("F15/SEC-05/SEC-07/SEC-10/SEC-11: multi-point plan walls, >20 splits, foreign offcuts, null entries and oversize rules are 400s (never 500)", async () => {
+  const snap = (await S(`/workspaces/${w5}`)).data.snapshot, rev = snap.workspace.revision;
+  const send = (changes) => SP(`/workspaces/${w5}/commit`, { expectedRevision: rev, changes });
+  const corner = await send({ measurements: { upsert: [{ id: id(), kind: "wall", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: [{ x: 200, y: 200 }, { x: 300, y: 200 }, { x: 300, y: 260 }], inputs: { kind: "rect", heightMm: 2700 } }] } });
+  assert.equal(corner.status, 400); assert.match(corner.data.error, /one straight wall at a time/);
+  const splits = Array.from({ length: 21 }, (_, i) => 100 * (i + 1));
+  const many = await send({ measurements: { upsert: [{ id: id(), kind: "polyline", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: runPts(8000, 380), inputs: { splitsMm: splits } }] } });
+  assert.equal(many.status, 400); assert.match(many.data.error, /at most 20 splits/);
+  const foreign = await send({ measurements: { upsert: [{ id: id(), kind: "offcut", inputs: { lengthMm: 900, materialId: id(), label: "x" } }] } });
+  assert.equal(foreign.status, 400); assert.match(foreign.data.error, /offcut must belong/);
+  for (const bad of [{ materials: { upsert: [null] } }, { measurements: { upsert: [{ id: id(), kind: "wall", inputs: { kind: "polygon", polygon: [null, null, null] } }] } }]) {
+    const r = await send(bad);
+    assert.equal(r.status, 400, JSON.stringify(r.data));
+  }
+  const deep = {}; let cur = deep; for (let i = 0; i < 8; i++) { cur.a = {}; cur = cur.a; }
+  const tooDeep = await send({ materials: { upsert: [{ id: t5.tim, name: "Rafters", methodKey: "repeated_members", methodVersion: 2, spec: timberSpec, rules: { centresMm: 600, x: deep } }] } });
+  assert.equal(tooDeep.status, 400); assert.match(tooDeep.data.error, /nested too deeply/);
+  const tooLong = await send({ materials: { upsert: [{ id: t5.tim, name: "Rafters", methodKey: "repeated_members", methodVersion: 2, spec: timberSpec, rules: { centresMm: 600, list: Array.from({ length: 51 }, (_, i) => i) } }] } });
+  assert.equal(tooLong.status, 400);
+});
+await t("SEC-12: the supplier export shows the job ADDRESS only — never the client's name", async () => {
+  await q("UPDATE carpentry_jobs SET client_name='Jane Citizen' WHERE id=$1", [J.carpA]);
+  const oid = id();
+  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "B", asap: true, contactPhone: "0400 000 000" } });
+  const prev = await S(`/orders/${oid}/preview`);
+  assert.equal(prev.status, 200, JSON.stringify(prev.data));
+  assert.equal(JSON.stringify(prev.data).includes("Jane Citizen"), false);
+  await q("UPDATE carpentry_jobs SET client_name=NULL WHERE id=$1", [J.carpA]);
+  void o;
+});
+await t("SEC-13: the site appendix is behind the same access as the PDF on the WORKER route too", async () => {
+  const ex = (await q("SELECT e.id FROM takeoff_exports e JOIN takeoff_orders o ON o.id=e.order_id WHERE o.workspace_id=$1 AND e.is_draft=false LIMIT 1", [w5])).rows[0];
+  const lh = await W(`/exports/${ex.id}/appendix`, { worker: "wt-lh" });
+  assert.equal(lh.status, 200, String(lh.status)); assert.equal(lh.data.subarray(0, 4).toString(), "%PDF");
+  const ordinary = await W(`/exports/${ex.id}/appendix`, { worker: "wt-w" });
+  assert.notEqual(ordinary.status, 200);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

@@ -318,10 +318,20 @@ function bandWidth(pts, y0, y1) {
 // ── Group handlers ───────────────────────────────────────────────────────────────────────────────────────────
 
 /** Split a cut longer than the longest stock only where the detail permits an overlap joint. */
+/** Pieces one accessory run may be cut into (a 100 m wall of 300 mm stock is ~340) — far above any real detail. */
+const MAX_PIECES_PER_RUN = 1000;
+
 function splitWithOverlap(lengthMm, maxStock, overlapMm) {
   if (maxStock === null || !(lengthMm > maxStock + EPS_MM)) return { parts: [lengthMm], needsJoint: false };
   if (overlapMm === undefined || overlapMm === null) return { parts: [lengthMm], needsJoint: true };
   if (!(finite(overlapMm) && overlapMm >= 0 && overlapMm < maxStock)) throw new TakeoffValidationError("Joint overlap must be 0 or more and shorter than the stock length.");
+  // bounded BEFORE looping: a sub-millimetre stock or an overlap close to the stock length would otherwise generate
+  // millions of pieces (and exhaust memory) — refuse it with the count instead
+  const advance = maxStock - overlapMm;
+  const pieces = Math.ceil((lengthMm - maxStock) / advance - 1e-9) + 1;
+  if (!(advance >= 1) || pieces > MAX_PIECES_PER_RUN) {
+    throw new TakeoffValidationError(`A ${Math.round(lengthMm)} mm run would need ${Number.isFinite(pieces) ? pieces.toLocaleString("en-AU") : "too many"} pieces of ${maxStock} mm stock with a ${overlapMm} mm overlap — check the stock length and overlap.`);
+  }
   const parts = [];
   let rem = lengthMm;
   while (rem > maxStock + EPS_MM) { parts.push(maxStock); rem = rem - maxStock + overlapMm; }

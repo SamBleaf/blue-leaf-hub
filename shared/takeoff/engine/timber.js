@@ -22,6 +22,9 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 
+/** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
+const GEOM_TOL_MM = 0.001;
+
 /** Owner-confirmed timber stock grid (12): 1200 mm then 600 mm steps for every supplier. Not configurable. */
 export const TIMBER_STOCK_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 600 });
 
@@ -103,12 +106,14 @@ function layoutRun({ runMm, centresMm, startOffsetMm, endOffsetMm, includeStart,
   if (R === 0) fail("The usable run is zero — choose “single member” to place one member there.", "singleMember");
   const c = num(centresMm, "Centres", { min: EPS_MM, above: true });
   if (spacing !== "fixed" && spacing !== "equal") fail('Spacing must be "fixed" or "equal".', "spacing");
-  const bays = Math.ceil((R - EPS_MM) / c);
+  // stations use the 06 GEOMETRIC precision (0.001 mm): a traced run 0.000006 mm past a multiple of the centres is
+  // transformed-coordinate noise, not an extra bay — a REAL overrun (≥ 0.001 mm) still gets its shorter final bay
+  const bays = Math.ceil((R - GEOM_TOL_MM) / c);
   if (bays + 1 > MAX_GENERATED_PER_WALL) fail(`That run makes ${bays + 1} members — split it (limit ${MAX_GENERATED_PER_WALL}).`, "segments");
   const raw = [];
   if (spacing === "equal") for (let i = 0; i <= bays; i++) raw.push(i === bays ? R : (i * R) / bays);
   else {
-    for (let i = 0; i * c < R - EPS_MM; i++) raw.push(i * c);
+    for (let i = 0; i * c < R - GEOM_TOL_MM; i++) raw.push(i * c);
     raw.push(R);
   }
   return {
@@ -495,6 +500,11 @@ export function computeRepeatedMembers(input) {
           : spacing === "equal" ? `${run.bays} equal bays of ${fmt(run.usableMm / run.bays)} mm (≤ ${fmt(input.centresMm)})`
             : `${run.bays + 1} members at ${fmt(input.centresMm)} mm centres, final bay ${fmt(run.finalBayMm)} mm`)
         + (run.excluded.length ? `; ${run.excluded.join(" and ")} member excluded → ${positions.length}` : ""));
+      // a final bay of a few mm is almost always the run end tapped just past a multiple of the centres — the extra
+      // member is real by the rule (T1), so it's kept, but it is named so the run end can be checked
+      if (spacing === "fixed" && run.bays > 0 && run.finalBayMm < Math.min(50, input.centresMm / 4)) {
+        ctx.problems.push(problem("final_bay_tiny", `Run ${seg.id}: the last two members are only ${fmt(run.finalBayMm)} mm apart — check where the run ends (or exclude the end member).`, { blocking: false, refs: [{ measurementId: seg.parts[0]?.measurementId }] }));
+      }
       for (const x of positions) {
         const stationId = demandId(seg.id, posKey(x));
         stationIds.add(stationId);

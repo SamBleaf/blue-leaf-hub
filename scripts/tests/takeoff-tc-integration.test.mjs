@@ -194,7 +194,7 @@ await t("06 dependency staleness: a draft line goes stale when its inputs change
 await t("spares are added on top of the layout quantity and shown separately", () => {
   const w = j2(); w.materials[0].spec = { ...w.materials[0].spec, spareRate: 10 };
   const l = linesOf(computeWorkspace(w), "clad")[0];
-  assert.equal(l.quantity, 5); assert.equal(l.spareQuantity, 1); assert.match(l.item.note, /incl\. 1 spare \(10%\)/);
+  assert.equal(l.quantity, 5); assert.equal(l.spareQuantity, 1); assert.match(l.item.note, /incl\. 1 spare \(10% of the material\)/);
 });
 await t("a timber trim run with a corner is TWO pieces (one per straight leg), never one bent member", () => {
   const trim = { id: "tr", name: "Trim", methodKey: "linear_stock", methodVersion: 1, spec: { family: "timber", purpose: "trim", section: { depthMm: 42, widthMm: 19 }, grade: "Merbau", treatment: "untreated" }, rules: {} };
@@ -216,6 +216,98 @@ await t("accessory set: recipe runs on the wall's real routes; a set needs only 
   const rec = { groups: [{ id: "starter", kind: "starter", routes: ["base"], stockPolicy: { kind: "list", lengthsMm: [6000], sharePieces: true, kerfMm: 0 } }] };
   const c = computeWorkspace(ws({ materials: [acc({ recipe: rec })], measurements: base.measurements, contributions: [con("c", "wall", "acc", "wall")] }));
   assert.deepEqual(summary(linesOf(c, "acc")), ["1 piece @6000"]);
+});
+
+// ── adversarial review fixes (engine) ─────────────────────────────────────────
+const sumBy = (c, bucket) => c.contributions.reduce((a, x) => a + x.pieces.filter((p) => p.bucketKey === bucket).reduce((b, p) => b + p.quantity, 0), 0);
+await t("QO-02/SEC-03: two materials with the same product never share a bucket", () => {
+  const a = j2(); const b = j2();
+  const w = ws({ materials: [a.materials[0], { ...b.materials[0], id: "clad2", name: "Axon B" }],
+    measurements: [...a.measurements, { ...a.measurements[0], id: "wall2" }, { ...a.measurements[1], id: "win2", parentId: "wall2" }],
+    contributions: [con("c1", "wall", "clad", "wall"), con("c2", "wall2", "clad2", "wall")] });
+  const c = computeWorkspace(w);
+  const keys = c.scheduleLines.map((l) => l.bucketKey);
+  assert.equal(new Set(keys).size, keys.length);
+  for (const l of c.scheduleLines) assert.equal(sumBy(c, l.bucketKey), l.quantity); // conservation per bucket
+});
+await t("QO-03/SEC-02: entered lengths on rafters are ordered; a kind the method can't read is a blocking problem (never dropped)", () => {
+  const w = j1(); w.measurements.push({ id: "man", kind: "manual", finishedLengthMm: 2000, quantity: 2 }); w.contributions.push(con("cm2", "man", "tim"));
+  const c = computeWorkspace(w);
+  assert.deepEqual(summary(linesOf(c, "tim")), ["18 piece @5400", "2 piece @2400"]);
+  const w2 = j1(); w2.measurements.push({ id: "wl", kind: "wall", inputs: { kind: "rect", widthMm: 3000, heightMm: 2400 } }); w2.contributions.push(con("cw", "wl", "tim", "wall"));
+  const c2 = computeWorkspace(w2);
+  assert.ok(c2.materialResults.tim.problems.some((p) => p.code === "measurement_unused" && p.blocking));
+  assert.equal(c2.orderReady, false);
+});
+await t("QO-04/QO-05/F02/F03: an unselected joint accessory is never bought as the cladding product — named as NOT on the order", () => {
+  const w = j2(); w.measurements[0].inputs = { kind: "rect", widthMm: 4800, heightMm: 4000, name: "North" };
+  w.materials[0].rules = { jointRows: { atMm: [2400], gapMm: 10, detailRef: "D1" } };
+  const c = computeWorkspace(w);
+  const ls = linesOf(c, "clad");
+  assert.ok(ls.every((l) => l.unit === "sheet"), JSON.stringify(ls.map((l) => l.item.description)));
+  assert.ok(c.materialResults.clad.problems.some((p) => p.code === "component_not_selected" && /Not on this order/.test(p.message)));
+});
+await t("QO-11: battens on two walls attribute each wall's pieces to that wall's contribution", () => {
+  const bat = { id: "bt", name: "Battens", methodKey: "support_grid", methodVersion: 1, spec: { family: "batten", orientation: "vertical", product: { name: "Batten 70x35", widthMm: 70, thicknessMm: 35, lengthsMm: [3000] } }, rules: { maxSpacingMm: 600, fixingScope: { status: "by-others", reason: "framer" } } };
+  const w = ws({ materials: [bat], measurements: [{ id: "N", kind: "wall", inputs: { kind: "rect", widthMm: 4800, heightMm: 2700, name: "North" } }, { id: "S", kind: "wall", inputs: { kind: "rect", widthMm: 3000, heightMm: 2700, name: "South" } }],
+    contributions: [con("cN", "N", "bt", "wall"), con("cS", "S", "bt", "wall")] });
+  const c = computeWorkspace(w);
+  const n = c.contributions.find((x) => x.contributionId === "cN").pieces.reduce((a, p) => a + p.quantity, 0);
+  const sth = c.contributions.find((x) => x.contributionId === "cS").pieces.reduce((a, p) => a + p.quantity, 0);
+  assert.equal(n, 9); assert.equal(sth, 6);
+});
+await t("QO-08: random-length LM is rounded ONCE per material (not per wall then again)", () => {
+  const tcm = { id: "tc", name: "Shiplap", methodKey: "area_to_linear", methodVersion: 2, spec: { family: "timber-cladding", layout: "course", orientation: "horizontal", supply: "random", orderIncrementM: 1,
+    product: { name: "Shiplap", widthMm: 135, thicknessMm: 19, effectiveCoverMm: 120 } }, rules: {} };
+  const walls = ["A", "B", "C"].map((id) => ({ id, kind: "wall", inputs: { kind: "rect", widthMm: 1010, heightMm: 1000, name: id } }));
+  const c = computeWorkspace(ws({ materials: [tcm], measurements: walls, contributions: walls.map((w) => con(`c${w.id}`, w.id, "tc", "wall")) }));
+  // 3 × 1.01 m² ÷ 0.12 = 25.25 LM → 26 LM once (per-wall rounding would give 3 × 9 = 27)
+  assert.deepEqual(summary(linesOf(c, "tc")), ["26 lm"]);
+});
+await t("QO-09/F12: full packs only when the supplier requires them; QO-14: spare % is per material, not per line", () => {
+  const w = j2(); w.materials[0].spec = { ...w.materials[0].spec, product: { ...w.materials[0].spec.product, packQuantity: 3, fullPackRequired: true } };
+  assert.deepEqual(summary(linesOf(computeWorkspace(w), "clad")), ["6 sheet @2750"]);
+  const w2 = j2(); w2.materials[0].spec = { ...w2.materials[0].spec, spareRate: 10 };
+  const ls = linesOf(computeWorkspace(w2), "clad");
+  assert.equal(ls.reduce((a, l) => a + (l.spareQuantity || 0), 0), 1); // ceil(4 × 10 %) = 1 for the whole material
+});
+await t("QO-10/PH-06: connected collinear runs are one grid (18, not 20); a run traced twice is blocked; noise past a multiple adds no member", () => {
+  const two = j1(); two.measurements[0] = line("d1", "distribution", 5000); two.measurements.push({ ...line("d2", "distribution", 5000), points: [{ x: 1 + 5000 / U, y: 1 }, { x: 1 + 10000 / U, y: 1 }] });
+  two.contributions = [con("c1", "d1", "tim", "distribution"), con("c2", "d2", "tim", "distribution"), con("c-mem", "mem", "tim", "member")];
+  assert.deepEqual(summary(linesOf(computeWorkspace(two), "tim")), ["18 piece @5400"]);
+  const dup = j1(); dup.measurements.push({ ...line("dist2", "distribution", 10000) }); dup.contributions.push(con("c-d2", "dist2", "tim", "distribution"));
+  const cd = computeWorkspace(dup);
+  assert.ok(cd.materialResults.tim.problems.some((p) => p.code === "distribution_overlap" && p.blocking));
+  const noise = j1(); noise.measurements[0] = line("dist", "distribution", 7200.000006);
+  assert.deepEqual(summary(linesOf(computeWorkspace(noise), "tim")), ["13 piece @5400"]);
+});
+await t("F04/SEC-07: an offcut stamped for another finish isn't used; one longer than the stock is refused, never zeroing the order", () => {
+  const mk = (inputs) => computeWorkspace(ws({ materials: [alu()], measurements: [opening("o1", 600, 2400, "W01"), { id: "off", kind: "offcut", inputs: { materialId: "alu", label: "Rack", ...inputs } }],
+    contributions: [con("c1", "o1", "alu", "opening"), con("co", "off", "alu", "offcut")] }));
+  const other = mk({ lengthMm: 6000, identityKey: "{\"family\":\"aluminium\",\"finish\":\"black\"}" });
+  assert.deepEqual(summary(linesOf(other, "alu")), ["1 bar @6500"]);
+  assert.ok(other.materialResults.alu.problems.some((p) => p.code === "offcut_other_product"));
+  const huge = mk({ lengthMm: 100000 });
+  assert.ok(huge.materialResults.alu.problems.some((p) => p.code === "offcut_too_long" && p.blocking));
+});
+await t("SEC-04/F05: a takeoff over the job limit is refused; a sub-millimetre accessory stock can't exhaust memory", () => {
+  const meas = [], cons = [];
+  for (let i = 0; i < 6; i++) { meas.push({ id: `w${i}`, kind: "wall", inputs: { kind: "rect", widthMm: 99000, heightMm: 2700, name: `W${i}` } }); cons.push(con(`c${i}`, `w${i}`, "st", "wall")); }
+  const studs = { id: "st", name: "Studs", methodKey: "wall_frame", methodVersion: 1, spec: { family: "timber", purpose: "studs", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2" }, rules: { centresMm: 20, studHeightMm: 2400 } };
+  assert.throws(() => computeWorkspace(ws({ materials: [studs], measurements: meas, contributions: cons })), /more than 20,000 pieces/);
+  const acc = { id: "acc", name: "Acc", methodKey: "accessory_routes", methodVersion: 1, spec: { family: "accessory", product: { name: "A" } },
+    rules: { recipe: { groups: [{ id: "s", kind: "starter", identity: { n: 1 }, routes: ["base"], stockPolicy: { kind: "list", lengthsMm: [0.002] }, jointOverlapMm: 0.001 }] } } };
+  const t0 = Date.now();
+  const c = computeWorkspace(ws({ materials: [acc], measurements: [{ id: "w", kind: "wall", inputs: { kind: "rect", widthMm: 100000, heightMm: 2700, name: "N" } }], contributions: [con("c", "w", "acc", "wall")] }));
+  assert.ok(Date.now() - t0 < 2000);
+  assert.ok(c.materialResults.acc.problems.some((p) => /pieces of 0.002 mm stock/.test(p.message)));
+});
+await t("F08: support battens land on the cladding's vertical sheet joints (required stations)", () => {
+  const a = j2(); a.measurements.pop();
+  const bat = { id: "bt", name: "Battens", methodKey: "support_grid", methodVersion: 1, spec: { family: "batten", orientation: "vertical", product: { name: "Batten", widthMm: 70, thicknessMm: 35, lengthsMm: [5400] } }, rules: { maxSpacingMm: 900 } };
+  const c = computeWorkspace(ws({ materials: [a.materials[0], bat], measurements: a.measurements, contributions: [con("c1", "wall", "clad", "wall"), con("c2", "wall", "bt", "wall")] }));
+  const at = c.materialResults.bt.layouts[0].stations.map((s) => s.atMm);
+  for (const j of [1200, 2400, 3600]) assert.ok(at.includes(j), `no support at sheet joint ${j}: ${at}`);
 });
 
 console.log(`takeoff-tc-integration: ${pass} passed, ${fail} failed`);

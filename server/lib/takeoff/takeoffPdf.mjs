@@ -30,6 +30,9 @@ export function winAnsi(s) {
     const c = ch.codePointAt(0);
     if ((c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.has(ch) || ch === "\n") return ch;
     if (ch === "→") return "->";
+    if (ch === "≥") return ">=";
+    if (ch === "≤") return "<=";
+    if (ch === "−") return "-";
     return "?";
   });
 }
@@ -205,13 +208,14 @@ function drawAppendix(doc, snap, opts) {
   for (const tb of a.timber || []) {
     any = true;
     title(`${tb.materialName} — timber cut list`);
-    for (const r of tb.rows || []) line(`${r.qty} × cut ${fmt(r.cutMm)} mm from ${r.stockMm ? `${fmt(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}${r.labels?.length ? ` — ${r.labels.slice(0, 12).join(", ")}${r.labels.length > 12 ? ` +${r.labels.length - 12} more` : ""}` : ""}`);
+    // every member is named (wrapping) — a site reader must be able to tell which ones are which
+    for (const r of tb.rows || []) line(`${r.qty} × cut ${fmt(r.cutMm)} mm from ${r.stockMm ? `${fmt(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}${r.labels?.length ? ` — ${r.labels.join(", ")}` : ""}`);
     y += 6;
   }
   for (const sh of a.layouts || []) {
     any = true;
     title(`${sh.materialName} — ${sh.wallLabel || "wall"} setout`);
-    line(`Gross ${sh.grossM2 != null ? sh.grossM2.toFixed(2) : "-"} m² · openings ${sh.openingM2 != null ? sh.openingM2.toFixed(2) : "-"} m² · net ${sh.netM2 != null ? sh.netM2.toFixed(2) : "-"} m² · Derived from plan + entered heights`, { muted: true });
+    line(`Gross ${sh.grossM2 != null ? sh.grossM2.toFixed(2) : "-"} m² · openings ${sh.openingM2 != null ? sh.openingM2.toFixed(2) : "-"} m² · net ${sh.netM2 != null ? sh.netM2.toFixed(2) : "-"} m² · ${sh.source || "Derived from plan + entered heights"}`, { muted: true });
     for (const r of sh.rows || []) line(`${r.qty} × ${r.description}`);
     for (const n of sh.notes || []) line(n, { muted: true, indent: 10 });
     y += 6;

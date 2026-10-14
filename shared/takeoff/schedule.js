@@ -46,6 +46,7 @@ export const PROBLEM_TEXT = Object.freeze({
   ceiling_unknown: "This flashing has no maximum orderable length set up — set it up before ordering.",
   path_in_progress: "This run is still being drawn — finish it before ordering.",
   wall_incomplete: "A wall is missing its length or heights.",
+  measurement_unused: "A measurement assigned to this material can't be used by it — remove it or assign it to the right material.",
   line_stale_inputs: "What this line was worked out from has changed (measurements, openings, product or rules) — review it and update the line.",
 });
 

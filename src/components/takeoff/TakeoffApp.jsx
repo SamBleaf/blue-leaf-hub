@@ -58,7 +58,7 @@ export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
 
   async function create() {
     setBusy(true);
-    const r = await api.createWorkspace(jobType, jobId, { id: newId(), name: "Flashings" });
+    const r = await api.createWorkspace(jobType, jobId, { id: newId(), name: "Takeoff" });
     setBusy(false);
     if (!r.ok) { setError(r.error); return; }
     await load();
@@ -418,7 +418,14 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
             <button key={m.id} type="button" onClick={() => { setActiveMaterial(m.id); setWin("measure"); }} aria-pressed={m.id === activeMaterial}
               className={`flex min-h-[52px] w-full items-center rounded-card border px-3 text-left text-sm ${m.id === activeMaterial ? "border-primary bg-primary/5" : "border-hairline bg-white"}`}>{m.name}</button>
           ))}
-          {caps.edit && <Btn kind="primary" className="w-full" onClick={() => setWin("pick")}>Add flashing</Btn>}
+          {caps.edit && (
+            <div className="grid grid-cols-2 gap-2">
+              <Btn kind="primary" onClick={() => setWin("pick")}>Add flashing</Btn>
+              <Btn onClick={addTimber}>Add timber</Btn>
+              <Btn onClick={addCladding}>Add cladding</Btn>
+              <Btn onClick={addAluminium}>Add aluminium</Btn>
+            </div>
+          )}
         </div>
       </FocusedWindow>
     );
@@ -450,7 +457,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   const offer = ws.recovery.offer;
   const lines = ws.computed?.scheduleLines || [];
   return (
-    <div className="mx-auto max-w-3xl space-y-3 p-3">
+    <div className="mx-auto max-w-3xl space-y-3 p-3 pb-28">
       <div className="flex flex-wrap items-center gap-2">
         {onBack && <Btn kind="ghost" onClick={onBack}>‹ Takeoffs</Btn>}
         <div className="min-w-0 flex-1">
@@ -582,7 +589,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
                     </ul>
                   );
                 })()}
-                {manualFor === m.id && <ManualLengths onAdd={(len, qty) => {
+                {manualFor === m.id && <ManualLengths timber={fam === "timber"} onAdd={(len, qty) => {
                   const mid = newId();
                   ws.edit(partial({ measurements: [{ id: mid, kind: "manual", finishedLengthMm: len, quantity: qty }], contributions: [{ id: newId(), measurementId: mid, jobMaterialId: m.id }] }));
                 }} />}
@@ -595,7 +602,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
       <section className="space-y-2 rounded-card border border-hairline bg-white p-3">
         <div className="flex items-center gap-2">
           <h2 className="flex-1 text-sm font-semibold text-ink">Length schedule</h2>
-          <span className="text-xs text-muted">{lines.reduce((a, l) => a + l.quantity, 0)} pcs · {fmtLm(ws.computed?.totalLm)} LM</span>
+          <span className="text-xs text-muted" data-overview-totals="">{unitTotals(lines, ws.computed?.totalLm)}</span>
         </div>
         {lines.some((l) => l.problems.length) && <Banner tone="warn">Some lengths need attention before they can be ordered.</Banner>}
         <div className="flex flex-wrap gap-2">
@@ -607,12 +614,25 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   );
 }
 
-function ManualLengths({ onAdd }) {
+const UNIT_TEXT = { piece: ["piece", "pieces"], sheet: ["sheet", "sheets"], bar: ["bar", "bars"], box: ["box", "boxes"], bag: ["bag", "bags"], roll: ["roll", "rolls"],
+  pack: ["pack", "packs"], cartridge: ["cartridge", "cartridges"], lm: ["LM", "LM"], m2: ["m²", "m²"], ml: ["ml", "ml"] };
+/** "6 flashing pieces · 22.600 LM · 18 pieces · 4 sheets · 1 bar" — units are never added together. */
+function unitTotals(lines, flashingLm) {
+  const flash = lines.filter((l) => !l.generic);
+  const parts = flash.length ? [`${flash.reduce((a, l) => a + l.quantity, 0)} flashing pieces · ${fmtLm(flashingLm)} LM`] : [];
+  const byUnit = new Map();
+  for (const l of lines.filter((x) => x.generic)) byUnit.set(l.unit, (byUnit.get(l.unit) || 0) + l.quantity);
+  for (const [u, n] of byUnit) { const [one, many] = UNIT_TEXT[u] || [u, u]; parts.push(`${n.toLocaleString("en-AU")} ${n === 1 ? one : many}`); }
+  return parts.join(" · ") || "Nothing measured yet";
+}
+
+function ManualLengths({ onAdd, timber = false }) {
   const [len, setLen] = useState(null);
   const [qty, setQty] = useState(1);
   return (
     <div className="grid grid-cols-[1fr_7rem_auto] items-end gap-2 rounded-lg bg-page p-2">
-      <NumberField label="Finished length" value={len} max={30000} onCommit={setLen} help="Entered lengths are used exactly — no allowance or rounding." />
+      <NumberField label={timber ? "Cut length" : "Finished length"} value={len} max={30000} onCommit={setLen}
+        help={timber ? "Each cut is bought as the next stock length (1200, 1800, 2400 …) — the cut itself isn't changed." : "Entered lengths are used exactly — no allowance or rounding."} />
       <NumberField label="Qty" unit="pcs" integer min={1} max={10000} value={qty} onCommit={setQty} />
       <Btn kind="primary" disabled={!len || !qty} onClick={() => { onAdd(len, qty); setLen(null); setQty(1); }}>Add</Btn>
     </div>

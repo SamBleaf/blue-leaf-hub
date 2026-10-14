@@ -12,4 +12,4 @@ export * from "./engine/contract.js";
 export * from "./engine/families.js";
 
 /** Bumped when any calculation in this package changes behaviour; frozen into exports. */
-export const CALCULATION_VERSION = "takeoff-calc@2"; // @2: spec v2 identity (construction/finish/perforation), split provenance, manual/count splits
+export const CALCULATION_VERSION = "takeoff-calc@3"; // @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits

@@ -50,7 +50,9 @@ export function describeTakeoffError(e) {
     return { status, message: text.charAt(0).toUpperCase() + text.slice(1), code };
   }
   if (e?.code === "23505") return { status: 409, message: "That was already saved.", code: "DUPLICATE" };
-  return { status: 500, message: translateDbError(e), code: null };
+  // a database error gets the plain-English DB translation; anything else is NOT called a database error
+  const dbish = typeof e?.code === "string" || /relation|column|violates|syntax|PGRST/i.test(msg);
+  return { status: 500, message: dbish ? translateDbError(e) : "Something went wrong working out this takeoff — nothing was saved. Try again.", code: null };
 }
 
 export function sendTakeoffError(res, e, logTag = "[takeoff]") {

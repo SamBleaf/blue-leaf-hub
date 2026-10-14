@@ -31,7 +31,9 @@ async function loadOrderBundle(sb, orderRow) {
   const company = await q(sb.from("company_profile").select("name, abn, address, phone, email, updated_at").order("updated_at", { ascending: false }).limit(1).maybeSingle());
   return {
     order: { id: orderRow.id, orderRef: orderRow.order_ref, delivery: orderRow.delivery || {}, notes: orderRow.notes, revision: orderRow.revision, status: orderRow.status },
-    lines: lines.map((l) => ({ bucketKey: l.bucket_key, specKey: l.spec_key, jobMaterialId: l.job_material_id, finishedLengthMm: l.finished_length_mm, quantity: l.quantity })),
+    // unit + item travel with the line: generic (TC-R04) staleness and wording depend on them
+    lines: lines.map((l) => ({ bucketKey: l.bucket_key, specKey: l.spec_key, jobMaterialId: l.job_material_id, finishedLengthMm: l.finished_length_mm, quantity: l.quantity,
+      unit: l.unit || "piece", item: l.item || null })),
     supplier, company,
   };
 }
@@ -194,8 +196,10 @@ export async function placeOrder(sb, ctx, orderRow, body) {
   let surplus = 0;
   const used = new Map();
   for (const c of commitments) if (c.contributionId) used.set(`${c.contributionId}|${c.bucketKey}`, (used.get(`${c.contributionId}|${c.bucketKey}`) || 0) + c.quantity);
-  for (const g of ex.snapshot.groups || []) {
-    for (const l of g.lines) {
+  // flashing groups AND generic purchase items (timber, sheets, bars …) — every exported line is allocated
+  const exportedLines = [...(ex.snapshot.groups || []).flatMap((g) => g.lines), ...(ex.snapshot.items || []).flatMap((g) => g.lines)];
+  {
+    for (const l of exportedLines) {
       let left = l.quantity;
       for (const r of requirements.filter((x) => x.bucketKey === l.bucketKey).sort((a, b) => (a.contributionId < b.contributionId ? -1 : 1))) {
         const k = `${r.contributionId}|${r.bucketKey}`;

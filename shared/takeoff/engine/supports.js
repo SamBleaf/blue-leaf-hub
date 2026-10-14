@@ -457,7 +457,9 @@ function fixingRuleGaps(rule) {
  */
 export function fixingsDemand({ id, materialId, role, label, lines, rule }) {
   const gaps = fixingRuleGaps(rule);
-  if (gaps.length) return { demand: null, perLine: [], problems: [problem("fixings-not-quantified", `${label}: ${FIXINGS_NOT_QUANTIFIED} (missing ${gaps.join(", ")}).`, { refs: [{ role }] })] };
+  // plain English: "no fixing rule selected" is said as it is (not "missing no fixing rule selected")
+  const why = gaps.map((g) => (/^no /.test(g) ? g : `${g} missing`)).join("; ");
+  if (gaps.length) return { demand: null, perLine: [], problems: [problem("fixings-not-quantified", `${label}: ${FIXINGS_NOT_QUANTIFIED} (${why}).`, { refs: [{ role }] })] };
   if (!lines?.length) return { demand: null, perLine: [], problems: [] };
   const perPoint = rule.perPoint ?? 1, extra = rule.extraPerLine ?? 0, omit = rule.omitPerLine ?? 0;
   const targets = rule.mode === "intersections" ? [...rule.targetsMm].sort((a, b) => a - b).filter((t, i, s) => i === 0 || t - s[i - 1] > EPS_MM) : null;

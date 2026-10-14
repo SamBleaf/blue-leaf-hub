@@ -669,7 +669,13 @@ function StatusSummary({ view, material, result, computedError, canEdit, onSetup
 
 function OpeningForm({ value, onField, canEdit, focusToken }) {
   const ref = useRef(null);
-  useEffect(() => { if (focusToken) ref.current?.querySelector('[data-field="widthMm"] input')?.focus({ preventScroll: false }); }, [focusToken]);
+  // after a TAP on the elevation, iOS fires compatibility mouse events that would steal focus straight back to the
+  // drawing — focus Width once they have passed, so the keyboard opens on the field
+  useEffect(() => {
+    if (!focusToken) return undefined;
+    const t = setTimeout(() => ref.current?.querySelector('[data-field="widthMm"] input')?.focus({ preventScroll: false }), 350);
+    return () => clearTimeout(t);
+  }, [focusToken]);
   if (!canEdit) {
     return <p className="text-sm text-ink">{value.label || "Opening"} · {value.type} · {fmtMm(value.widthMm)} × {fmtMm(value.heightMm)} mm · sill {fmtMm(value.sillMm)} · from start {fmtMm(value.xMm)}</p>;
   }
