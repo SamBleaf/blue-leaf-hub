@@ -3,7 +3,6 @@
 // Status "research-seed-not-direct-import": published product DIMENSIONS are quantity seeds; installation rows
 // are source-pending and supplier availability is unconfirmed. Do not edit by hand — regenerate from the pack.
 // =============================================================================
-/* eslint-disable */
 export const CATALOGUE_SEED = Object.freeze({
  "schemaVersion": 1,
  "status": "research-seed-not-direct-import",
