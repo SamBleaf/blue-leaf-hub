@@ -5,7 +5,7 @@
 //   npm run takeoff:sandbox -- --reset "/path/to/drawings" (start again from an empty takeoff)
 //
 // What runs (all on this Mac):
-//   * a private Postgres 17 database `blh_takeoff_sandbox` with migration 206 (persistent between runs)
+//   * a private Postgres 17 database `blh_takeoff_sandbox` with migrations 206 + 207 (persistent between runs; additive ones re-applied)
 //   * the REAL takeoff + plan routes (server/lib/takeoff, workforceRoutes) on 127.0.0.1:8788 —
 //     real calculations, database rules, supplier-PDF renderer; files kept in ~/Takeoff-Sandbox/storage
 //   * the app in UI Review Mode on port 5181 (also on your Wi-Fi for an iPhone), with ONLY the

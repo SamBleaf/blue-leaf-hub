@@ -23,6 +23,7 @@ import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, sheetLayout } from "./cladding.js";
 import { supportGrid } from "./supports.js";
+import { accessoryRoutes } from "./accessories.js";
 
 const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pack", "cartridge"]);
 const fmt = (mm) => formatMm(mm, 1);
@@ -263,8 +264,14 @@ function runWallMethod(mat, n, items, ctx, sink) {
         identity: familyIdentity(n), stockPolicy: n.product?.lengthsMm?.length ? { kind: "list", lengthsMm: n.product.lengthsMm, sharePieces: false } : undefined,
         maxSpacingMm: rules.maxSpacingMm, startOffsetMm: rules.startOffsetMm, endOffsetMm: rules.endOffsetMm, requiredStationsMm: rules.requiredStationsMm,
         existing: rules.existing === true, fixing: rules.fixing, fixingScope: rules.fixingScope }, {});
+    } else if (mat.methodKey === "accessory_routes") {
+      // B5: the recipe's groups follow this wall's real routes; joints come from the cladding laid out on the SAME wall
+      const recipe = rules.recipe && Array.isArray(rules.recipe.groups) ? rules.recipe : null;
+      if (!recipe || !recipe.groups.length) { sink.problems.push({ code: "recipe_missing", message: "Add the accessory items (starters, trims, joints, sealant …) and their routes.", blocking: true }); continue; }
+      const groups = recipe.groups.map((g) => ({ ...g, materialId: mat.id, identity: g.identity || { ...familyIdentity(n), item: g.id, kind: g.kind } }));
+      r = accessoryRoutes({ id: tag, polygon: built.polygon }, w.openings, sink.layoutInfoFor(m.id), { ...recipe, id: recipe.id || mat.id, groups });
     } else { sink.problems.push({ code: "method_unavailable", message: "This calculation isn't available yet.", blocking: true }); continue; }
-    r.layout = { ...(r.layout || {}), wallId: m.id, wallLabel: w.label, heightSource: w.heightSource, wall: { polygon: built.polygon, bbox: built.bbox }, openings: w.openings,
+    r.layout = { ...(r.layout || {}), wallId: m.id, wallMeasurementId: m.id, wallLabel: w.label, heightSource: w.heightSource, wall: { polygon: built.polygon, bbox: built.bbox }, openings: w.openings,
       areas: r.layout?.areas || safeAreas(wallGeom, w.openings) };
     results.push(r);
   }
@@ -395,10 +402,14 @@ export function computeGenericMaterials(materials, contributions, ctx) {
   }
   const c2 = { ...ctx, openingsByWall };
   const out = { contributions: [], lines: [], unplaced: [], results: {} };
-  for (const mat of materials) {
+  // actual layout joints per wall measurement (from cladding already computed) — feed accessory joint routes
+  const jointsByWall = new Map();
+  const layoutInfoFor = (wallMeasId) => ({ joints: jointsByWall.get(wallMeasId) || [] });
+  const ordered = [...materials].sort((a, b) => Number(a.spec?.family === "accessory") - Number(b.spec?.family === "accessory"));
+  for (const mat of ordered) {
     const mine = contributions.filter((c) => c.jobMaterialId === mat.id);
     const items = mine.map((c) => ({ c, role: c.role || "primary", m: ctx.measurementsById.get(c.measurementId) })).filter((x) => x.m);
-    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map() };
+    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
     for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
     let n = null, methodResults = [];
@@ -413,6 +424,13 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       sink.problems.push({ code: "invalid_input", message: e.message, blocking: true });
     }
     const demands = methodResults.flatMap((r) => r.demands || []);
+    for (const r of methodResults) {
+      const wid = r.layout?.wallMeasurementId;
+      if (!wid || !Array.isArray(r.layout?.joints)) continue;
+      const list = jointsByWall.get(wid) || [];
+      for (const j of r.layout.joints) (j.segments || []).forEach((sg, k) => list.push({ id: `${mat.id.slice(0, 6)}-j${j.index}-${k}`, orientation: j.orientation, kind: "joint", atMm: j.atMm, fromMm: sg.startMm, toMm: sg.endMm }));
+      jointsByWall.set(wid, list);
+    }
     const methodProblems = methodResults.flatMap((r) => r.problems || []);
     const matKey = genericMaterialKey(mat);
     let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, barOwner: new Map() };
