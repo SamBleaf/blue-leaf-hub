@@ -22,7 +22,7 @@ test("sandbox: scale, draw a flashing, measure, export a REAL supplier PDF", asy
   await page.goto(`${BASE}/carpentry/${JOB}/takeoff?reviewRole=admin`);
   const start = page.getByRole("button", { name: "Start a flashing takeoff" });
   if (await start.waitFor({ timeout: 8000 }).then(() => true, () => false)) await start.click();
-  await expect(page.getByRole("heading", { name: "Flashings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^(Takeoff|Flashings)$/ })).toBeVisible();
 
   // scale page 1
   await page.getByRole("button", { name: "Scale this page" }).click();

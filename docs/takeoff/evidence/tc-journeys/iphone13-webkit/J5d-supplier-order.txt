@@ -1,16 +1,15 @@
                                                                                                                                 MATERIAL ORDER
-                                                                                                                            FO-001001 · export 1 · 2026-10-14
+                                                                                                                            FO-001001 · export 2 · 2026-10-14
 
 
 
 
 FROM                                                     SUPPLIER                                                  JOB
-Blue Leaf Building (sandbox)                             Fielders (SANDBOX — not a real                            Sandbox job — your drawings (Takeoff
-Sandbox address                                          contact)                                                  test)
-00 0000 0000                                             Attn: Sandbox orders                                      Pickup
-office@example.invalid                                   00 0000 0000                                              Branch: Sandbox branch (test only)
-                                                         orders@example.invalid                                    Site contact: Sandbox site lead 0400
-                                                                                                                   000 000
+Blue Leaf Building (sandbox)                             Fielders (SANDBOX — not a real                            Sandbox job — your drawings
+Sandbox address                                          contact)                                                  Pickup
+00 0000 0000                                             Attn: Sandbox orders                                      Branch: Sandbox branch (test only)
+office@example.invalid                                   00 0000 0000                                              Site contact: Sandbox site lead 0400
+                                                         orders@example.invalid                                    000 000
 
 Notes: TC-R04 evidence run — sandbox only, not a real order
 All dimensions in mm. Flashing lengths are FINISHED order lengths. Girth is indicative only (no bend deduction) — supplier fabrication instructions take
@@ -61,9 +60,9 @@ this order.
 
 
 
-                                             FO-001001 · takeoff-pdf@3 · takeoff-calc@2 · snapshot 21aafce5a4ad · page 1 of 2
+                                             FO-001001 · takeoff-pdf@3 · takeoff-calc@3 · snapshot c1fe006dda88 · page 1 of 2
                                                                                                                                MATERIAL ORDER
-                                                                                                           FO-001001 · export 1 · 2026-10-14 (continued)
+                                                                                                           FO-001001 · export 2 · 2026-10-14 (continued)
 
 
 
@@ -83,5 +82,5 @@ supplier.
 
 
 
-                                            FO-001001 · takeoff-pdf@3 · takeoff-calc@2 · snapshot 21aafce5a4ad · page 2 of 2
+                                            FO-001001 · takeoff-pdf@3 · takeoff-calc@3 · snapshot c1fe006dda88 · page 2 of 2
 

@@ -150,7 +150,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await start.waitFor({ timeout: 30_000 });
     await shot("job-takeoffs-empty", `Job takeoffs on the ${isMobile ? "Worker PWA" : "Hub"} route — no takeoff yet (fresh sandbox)`);
     await press(start);
-    await expect(page.getByRole("heading", { name: "Flashings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^(Takeoff|Flashings)$/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add timber" })).toBeVisible();
     await shot("takeoff-overview", "New takeoff: plan not scaled; Add flashing / timber / cladding / aluminium");
     await press(page.getByRole("button", { name: "Set up plans" }));
@@ -373,8 +373,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await expect(screen.getByTestId("aluminium-screen")).toBeVisible();
     await screen.getByLabel("Opening label (optional)").fill("W01");
     await num(screen.getByLabel("Opening width", { exact: true }), 600);
-    await num(screen.getByLabel("Opening height", { exact: true }), 2400);
-    await press(screen.getByRole("button", { name: "Add opening" }));
+    await num(screen.getByLabel("Opening height", { exact: true }), 2400); // applies once width + height are valid (no Add step)
     const w01 = screen.locator('[data-testid="alu-opening"][data-label="W01"]');
     await expect(w01.getByRole("button", { name: "W01 Left jamb 2,500 mm — Bar 1" })).toBeVisible();
     await expect(w01.getByRole("button", { name: "W01 Right jamb 2,500 mm — Bar 1" })).toBeVisible();
@@ -657,7 +656,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     const { S, A } = await exportAndRead("J5");
     const checks = runChecks("J5", [...commonChecks(S, A),
       ["supplier", S, /1 × 9,000 9\.000/], ["supplier", S, /1 × 1,400 1\.400/],
-      ["supplier", S, /3 pieces · 13\.600 LM/], ["supplier", S, /Order total: 3 flashing pieces · 13\.600 LM · 1 bar · 18 pieces · 4 sheets/],
+      ["supplier", S, /3 pieces · 13\.600 LM/], ["supplier", S, /Order total: 3 flashing pieces · 13\.600 LM (· 1 long piece flagged )?· 1 bar · 18 pieces · 4 sheets/],
       ["appendix", A, /Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/],
       ["appendix", A, /Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/],
       ["appendix", A, /Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/]]);

@@ -1,0 +1,137 @@
+[
+  {
+    "doc": "supplier",
+    "expect": "/MATERIAL ORDER/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/18 × piece 90 × 45 MGP10 H3 — 5,400 mm length/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/4 × sheet James Hardie Axon 133 smooth SKU \\d+ — 2,750 × 1,200 mm/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/1 × bar equal-angle 50 × 50 × 3 — 6,500 mm length \\(no joins\\)/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/1 × 3,200 3\\.200/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/Deliver to: 1 Sandbox Street, Testville SA \\(test only\\) Required: \\d{4}-\\d\\d-\\d\\d/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/Site contact: Sandbox site lead 0400 000 000/",
+    "ok": true
+  },
+  {
+    "doc": "supplier (no DRAFT watermark)",
+    "expect": "/^(?![\\s\\S]*DRAFT)/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/SITE APPENDIX — CUTTING & SETOUT/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Aluminium angle 50 × 50 × 3 — cutting sheet \\(6,500 mm bars\\)/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Kerf 3 mm · end trim 0 mm · 1 new bar\\(s\\) · lower bound 1 · proven minimum/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Bar 1: ?W01 left jamb 2,500 \\| ?W01 right jamb 2,500 \\| ?W01 bottom 600/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Remainder 891 mm — keep \\(reusable offcut\\) · kerf loss 9 mm/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Rafters 90 × 45 — timber cut list/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/18 × cut 5,296(\\.\\d+)? mm from 5,400 mm stock/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/North wall setout/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Gross 12\\.96 m² · openings 0\\.81 m² · net 12\\.15 m²/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/4 occupied cell\\(s\\) = 4 sheet\\(s\\)/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Piece 1: 0–3,000 mm along the run (→|->) tight 3,000 (→|->) order 3,200 mm/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/1 × 9,000 9\\.000/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/1 × 1,400 1\\.400/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/3 pieces · 13\\.600 LM/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/Order total: 3 flashing pieces · 13\\.600 LM (· 1 long piece flagged )?· 1 bar · 18 pieces · 4 sheets/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/",
+    "ok": true
+  },
+  {
+    "doc": "appendix",
+    "expect": "/Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/",
+    "ok": true
+  }
+]

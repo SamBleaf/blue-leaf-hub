@@ -1,5 +1,5 @@
 SITE APPENDIX — CUTTING & SETOUT
-FO-001001 · export 1 · Sandbox job — your drawings (Takeoff test)
+FO-001001 · export 2 · Sandbox job — your drawings
 
 For site use. Not part of the supplier order. Quantities are calculated from the plan and entered values; installation details marked source-pending are not
 verified.
@@ -10,25 +10,26 @@ verified.
    Remainder 891 mm — keep (reusable offcut) · kerf loss 9 mm
 
  Rafters 90 × 45 — timber cut list
- 18 × cut 5,296.15 mm from 5,400 mm stock — Rafter @ 0, Rafter @ 10,000, Rafter @ 1,200, Rafter @ 1,800, Rafter @ 2,400,
- Rafter @ 3,000, Rafter @ 3,600, Rafter @ 4,200, Rafter @ 4,800, Rafter @ 5,400, Rafter @ 6,000, Rafter @ 600 +6 more
+ 18 × cut 5,296.15 mm from 5,400 mm stock — Rafter @ 0, Rafter @ 1,200, Rafter @ 1,800, Rafter @ 2,400, Rafter @ 3,000, Rafter
+ @ 3,600, Rafter @ 4,200, Rafter @ 4,800, Rafter @ 5,400, Rafter @ 6,000, Rafter @ 6,600, Rafter @ 7,200, Rafter @ 7,800, Rafter
+ @ 8,400, Rafter @ 9,000, Rafter @ 9,600, Rafter @ 10,000, Rafter @ 600
 
  Axon 133 smooth — North wall setout
- Gross 12.96 m² · openings 0.81 m² · net 12.15 m² · Derived from plan + entered heights
+ Gross 12.96 m² · openings 0.81 m² · net 12.15 m² · Entered length and heights
  1 × North wall strip 1 — 403932 2,750 mm
  1 × North wall strip 2 — 403932 2,750 mm
  1 × North wall strip 3 — 403932 2,750 mm
  1 × North wall strip 4 — 403932 2,750 mm
     North wall: 4 strip(s) at 1,200 mm effective cover × 1 course(s) -> 4 occupied cell(s) = 4 sheet(s); empty cells use none.
-    Each strip takes the shortest listed length ? its cut + 0 mm allowance; a raked strip is sized by its highest point.
+    Each strip takes the shortest listed length >= its cut + 0 mm allowance; a raked strip is sized by its highest point.
     No offcut reuse: potential offcuts are listed separately. Spares and pack rounding are applied at purchase level.
 
- Flashing 1 — continuous run R-2b27be8f
+ Flashing 1 — continuous run R-4b991706
  Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm. Corners are site cuts/folds, not supplier bends.
     Piece 1: 0–3,000 mm along the run -> tight 3,000 -> order 3,200 mm
 
 
 
 
-                                           FO-001001 · site appendix · takeoff-pdf@3 · snapshot f39a1b1ff503 · page 1 of 1
+                                           FO-001001 · site appendix · takeoff-pdf@3 · snapshot 661992f31c67 · page 1 of 1
 

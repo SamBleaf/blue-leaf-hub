@@ -1,0 +1,40 @@
+SITE APPENDIX — CUTTING & SETOUT
+FO-001001 · export 1 · Sandbox job — your drawings
+
+For site use. Not part of the supplier order. Quantities are calculated from the plan and entered values; installation details marked source-pending are not
+verified.
+
+ Aluminium angle 50 × 50 × 3 — cutting sheet (6,500 mm bars)
+ Kerf 3 mm · end trim 0 mm · 1 new bar(s) · lower bound 1 · proven minimum
+ Bar 1: W01 left jamb 2,500 | W01 right jamb 2,500 | W01 bottom 600
+   Remainder 891 mm — keep (reusable offcut) · kerf loss 9 mm
+
+ Rafters 90 × 45 — timber cut list
+ 18 × cut 5,296.15 mm from 5,400 mm stock — Rafter @ 0, Rafter @ 1,200, Rafter @ 1,800, Rafter @ 2,400, Rafter @ 3,000, Rafter
+ @ 3,600, Rafter @ 4,200, Rafter @ 4,800, Rafter @ 5,400, Rafter @ 6,000, Rafter @ 6,600, Rafter @ 7,200, Rafter @ 7,800, Rafter
+ @ 8,400, Rafter @ 9,000, Rafter @ 9,600, Rafter @ 10,000, Rafter @ 600
+
+ Axon 133 smooth — North wall setout
+ Gross 12.96 m² · openings 0.81 m² · net 12.15 m² · Entered length and heights
+ 1 × North wall strip 1 — 403932 2,750 mm
+ 1 × North wall strip 2 — 403932 2,750 mm
+ 1 × North wall strip 3 — 403932 2,750 mm
+ 1 × North wall strip 4 — 403932 2,750 mm
+    North wall: 4 strip(s) at 1,200 mm effective cover × 1 course(s) -> 4 occupied cell(s) = 4 sheet(s); empty cells use none.
+    Each strip takes the shortest listed length >= its cut + 0 mm allowance; a raked strip is sized by its highest point.
+    No offcut reuse: potential offcuts are listed separately. Spares and pack rounding are applied at purchase level.
+
+ Flashing 1 — continuous run R-76c5bcf3
+ Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm. Corners are site cuts/folds, not supplier bends.
+    Piece 1: 0–3,000 mm along the run -> tight 3,000 -> order 3,200 mm
+
+ Flashing 1 — continuous run R-57f8968e
+ Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm. Corners are site cuts/folds, not supplier bends.
+    Piece 1: 0–8,800 mm along the run -> tight 8,800 -> order 9,000 mm
+    Piece 2: 8,800–10,000 mm along the run -> tight 1,200 -> order 1,400 mm
+
+
+
+
+                                          FO-001001 · site appendix · takeoff-pdf@3 · snapshot 431274062a4b · page 1 of 1
+

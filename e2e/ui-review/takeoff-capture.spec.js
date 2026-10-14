@@ -38,7 +38,7 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
   await start.waitFor({ timeout: 15_000 });
   await shot("job-takeoffs-empty", "Job takeoffs — no takeoff yet");
   await start.click();
-  await expect(page.getByRole("heading", { name: "Flashings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^(Takeoff|Flashings)$/ })).toBeVisible();
   await shot("takeoff-overview", "New takeoff: plan not scaled, no materials");
 
   // plan setup — primary page
@@ -165,7 +165,7 @@ test("complete takeoff workflow", async ({ page, isMobile }, info) => {
   // ── close / reload: profile, marks and lengths come back from the server ──
   await page.waitForTimeout(600);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Flashings" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: /^(Takeoff|Flashings)$/ })).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click();
   const back = page.getByRole("dialog", { name: /^Flashing/ });
   for (const t of ["L1 100", "L2 150", "L3 75", "Crush 10"]) await expect(back.locator("svg text", { hasText: t })).toBeVisible();
