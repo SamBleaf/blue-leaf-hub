@@ -62,7 +62,7 @@ export function specFromGroup(group, { orientation, assemblyId, sku } = {}) {
     product: {
       id: group.id, manufacturer: group.manufacturer, name: group.name, sku: chosen?.sku || null,
       lengthMm: chosen?.lengthMm || null, lengthsMm: chosen ? [chosen.lengthMm] : group.lengthsMm,
-      skus: (chosen ? [chosen] : group.skus).map((x) => ({ sku: x.sku, lengthMm: x.lengthMm })),
+      skus: (chosen ? [chosen] : group.skus).map((x) => ({ sku: x.sku || null, lengthMm: x.lengthMm, id: x.id })),
       widthMm: group.widthMm, thicknessMm: group.thicknessMm, effectiveCoverMm: group.effectiveCoverMm,
       gapMm: group.layout === "grid" ? 10 : null, sourceRefs: group.sourceRefs, installationState: group.installationState,
       packQuantity: chosen?.packQuantity ?? null, fullPackRequired: false,

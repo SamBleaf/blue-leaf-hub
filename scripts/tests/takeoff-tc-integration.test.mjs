@@ -177,5 +177,46 @@ await t("J5: order snapshot → MATERIAL ORDER PDF (bars/sheets/pieces) + separa
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });
 
+// ── follow-ups from the UI reviews ─────────────────────────────────────────────
+await t("06 dependency staleness: a draft line goes stale when its inputs change even if the totals don't (refresh clears it)", () => {
+  const w = j2(); const c0 = computeWorkspace(w);
+  const sl = c0.scheduleLines.find((l) => l.jobMaterialIds.includes("clad"));
+  const order = { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: "clad", finishedLengthMm: sl.finishedLengthMm, quantity: sl.quantity, unit: sl.unit, item: sl.item };
+  assert.equal(orderLineState(order, c0, w.materials).stale, false);
+  const w2 = j2(); w2.measurements[1].inputs = { ...w2.measurements[1].inputs, xMm: 1400 }; // window moved; still 4 sheets
+  const c1 = computeWorkspace(w2);
+  assert.deepEqual(summary(linesOf(c1, "clad")), ["4 sheet @2750"]);
+  const st = orderLineState(order, c1, w2.materials);
+  assert.equal(st.problem, "line_stale_inputs");
+  assert.equal(st.suggestion.bucketKey, order.bucketKey); // explicit update to the same bucket
+  assert.equal(orderLineState({ ...order, item: st.suggestion.item }, c1, w2.materials).stale, false);
+});
+await t("spares are added on top of the layout quantity and shown separately", () => {
+  const w = j2(); w.materials[0].spec = { ...w.materials[0].spec, spareRate: 10 };
+  const l = linesOf(computeWorkspace(w), "clad")[0];
+  assert.equal(l.quantity, 5); assert.equal(l.spareQuantity, 1); assert.match(l.item.note, /incl\. 1 spare \(10%\)/);
+});
+await t("a timber trim run with a corner is TWO pieces (one per straight leg), never one bent member", () => {
+  const trim = { id: "tr", name: "Trim", methodKey: "linear_stock", methodVersion: 1, spec: { family: "timber", purpose: "trim", section: { depthMm: 42, widthMm: 19 }, grade: "Merbau", treatment: "untreated" }, rules: {} };
+  const c = computeWorkspace(ws({ materials: [trim], measurements: [path("p", [3000, 2000])], contributions: [con("c", "p", "tr")] }));
+  assert.deepEqual(summary(linesOf(c, "tr")), ["1 piece @2400", "1 piece @3000"]);
+});
+await t("a raked wall may start at 0 mm (triangle) — only an absent height is missing", () => {
+  const w = j2(); w.measurements[0].inputs = { kind: "rake", widthMm: 4800, startHeightMm: 0, endHeightMm: 2700, name: "Tri" }; w.measurements.pop();
+  const c = computeWorkspace(w);
+  assert.ok(!c.materialResults.clad.problems.some((p) => p.code === "wall_incomplete"), JSON.stringify(c.materialResults.clad.problems));
+  assert.ok(linesOf(c, "clad").length > 0);
+});
+await t("accessory set: recipe runs on the wall's real routes; a set needs only its name; missing recipe blocks", () => {
+  const acc = (rules) => ({ id: "acc", name: "Starters", methodKey: "accessory_routes", methodVersion: 1, spec: { family: "accessory", product: { name: "Starter set" } }, rules });
+  const base = j2();
+  const none = computeWorkspace(ws({ materials: [acc({})], measurements: base.measurements, contributions: [con("c", "wall", "acc", "wall")] }));
+  assert.ok(none.materialResults.acc.problems.some((p) => p.code === "recipe_missing"));
+  assert.ok(!none.materialResults.acc.problems.some((p) => p.code === "material_incomplete"));
+  const rec = { groups: [{ id: "starter", kind: "starter", routes: ["base"], stockPolicy: { kind: "list", lengthsMm: [6000], sharePieces: true, kerfMm: 0 } }] };
+  const c = computeWorkspace(ws({ materials: [acc({ recipe: rec })], measurements: base.measurements, contributions: [con("c", "wall", "acc", "wall")] }));
+  assert.deepEqual(summary(linesOf(c, "acc")), ["1 piece @6000"]);
+});
+
 console.log(`takeoff-tc-integration: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -15,7 +15,7 @@ import {
   buildCalibration, verifyCalibration, normalisePageMeta, normaliseRect, validatePoints, pointsWithinCalibration,
   segmentLengthMm, getMethod, normaliseFlashingRules, normaliseProfile, computeWorkspace, orderStatus,
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
-  normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm,
+  normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm, ITEM_STALE_TEXT,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
@@ -162,15 +162,23 @@ export async function loadSnapshotFresh(sb, wsId) {
 
 // ── Commit ────────────────────────────────────────────────────────────────────
 /** Generic method settings: bounded scalars only (centres, pitch, allowances, kerf …). */
-function cleanGenericRules(r) {
+// Generic method rules are DATA (centres, heights, joint rows, accessory recipes …), never code: scalars are
+// bounded, strings short, keys plain identifiers, nesting ≤ 6 levels, arrays ≤ 50 items, objects ≤ 60 keys.
+function cleanRuleValue(v, d) {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return isFiniteNumber(v) && Math.abs(v) <= 1e6 ? Math.round(v * 1000) / 1000 : undefined;
+  if (typeof v === "string") return optStr(v, 120) ?? undefined;
+  if (d >= 6 || v == null) return undefined;
+  if (Array.isArray(v)) return v.slice(0, 50).map((x) => cleanRuleValue(x, d + 1)).filter((x) => x !== undefined);
+  if (typeof v === "object") return cleanGenericRules(v, d + 1);
+  return undefined;
+}
+function cleanGenericRules(r, d = 0) {
   const out = {};
   for (const [k, v] of Object.entries(r).slice(0, 60)) {
-    if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k)) continue;
-    if (typeof v === "boolean") out[k] = v;
-    else if (typeof v === "number" && isFiniteNumber(v) && Math.abs(v) <= 1e6) out[k] = Math.round(v * 1000) / 1000;
-    else if (typeof v === "string") out[k] = optStr(v, 60);
-    else if (v && typeof v === "object" && !Array.isArray(v)) out[k] = cleanGenericRules(v);
-    else if (Array.isArray(v)) out[k] = v.slice(0, 50).filter((x) => typeof x === "number" && isFiniteNumber(x)).map((x) => Math.round(x * 1000) / 1000);
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(k)) continue;
+    const c = cleanRuleValue(v, d);
+    if (c !== undefined) out[k] = c;
   }
   return out;
 }
@@ -229,12 +237,21 @@ function cleanInputs(kind, inp, tracedLengthMm) {
     const splits = Array.isArray(i.splitsMm) ? i.splitsMm.map((x) => MM(x, "Split position", { min: 0.001, allowNull: false })) : [];
     for (let k = 1; k < splits.length; k++) must(splits[k] > splits[k - 1], "Split positions must increase along the run.");
     if (tracedLengthMm != null) must(splits.every((x) => x < tracedLengthMm), "A split must be inside the run.");
-    return splits.length || i.role ? { splitsMm: splits, role: optStr(i.role, 30) } : null;
+    // approved plan location of each split (13): stations are rebuilt from it after geometry edits
+    const anchors = Array.isArray(i.splitAnchors) ? i.splitAnchors.slice(0, 20).map((a) => ({ stationMm: MM(a?.stationMm, "Split station", { min: 0, allowNull: false }),
+      x: a?.x == null ? null : MM(a.x, "Split x", { min: -1e6, allowNull: false }), y: a?.y == null ? null : MM(a.y, "Split y", { min: -1e6, allowNull: false }) })) : null;
+    // anchors only count when they describe exactly these splits (a mismatched set is dropped, never guessed)
+    const keep = anchors && anchors.length === splits.length && anchors.length > 0;
+    return splits.length || i.role ? { splitsMm: splits, ...(keep ? { splitAnchors: anchors } : {}), role: optStr(i.role, 30) } : null;
   }
   if (kind === "distribution") {
     return { startOffsetMm: MM(i.startOffsetMm, "Start offset") ?? 0, endOffsetMm: MM(i.endOffsetMm, "End offset") ?? 0,
       includeStart: i.includeStart !== false, includeEnd: i.includeEnd !== false, spacing: i.spacing === "equal" ? "equal" : "fixed",
-      overrides: Array.isArray(i.overrides) ? i.overrides.slice(0, 500).map((o) => ({ station: String(o.station).slice(0, 40), removed: o.removed === true, lengthMm: MM(o.lengthMm, "Override length", { min: 1 }) })) : [] };
+      overrides: Array.isArray(i.overrides) ? i.overrides.slice(0, 500).map((o) => {
+        const dup = o.duplicate == null ? 0 : Number(o.duplicate);
+        must(Number.isInteger(dup) && dup >= 0 && dup <= 20, "A member can be duplicated 0–20 times.");
+        return { station: String(o.station).slice(0, 40), removed: o.removed === true, lengthMm: MM(o.lengthMm, "Override length", { min: 1 }), ...(dup ? { duplicate: dup } : {}) };
+      }) : [] };
   }
   if (kind === "member") return { mode: ["projected", "true"].includes(i.mode) ? i.mode : "projected" };
   return null;
@@ -719,7 +736,8 @@ export async function saveOrder(sb, ctx, orderRow, body) {
       // An unchanged existing line is kept exactly as chosen — even if it has gone stale — so editing
       // other lines never silently relinks it. Stale lines are shown and block order-ready exports.
       const keep = storedByKey.get(`${l.bucketKey}#${l.jobMaterialId || ""}`);
-      if (keep) return { bucketKey: keep.bucket_key, specKey: keep.spec_key, jobMaterialId: keep.job_material_id, finishedLengthMm: keep.finished_length_mm, quantity,
+      // …unless the user explicitly UPDATES it (refresh): then it is re-taken from the current schedule line
+      if (keep && !l.refresh) return { bucketKey: keep.bucket_key, specKey: keep.spec_key, jobMaterialId: keep.job_material_id, finishedLengthMm: keep.finished_length_mm, quantity,
         unit: keep.unit || "piece", item: keep.item || null };
       const sl = byKey.get(l.bucketKey);
       must(sl, "A selected length is no longer in the takeoff — refresh the schedule.");
@@ -760,7 +778,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   for (const l of lines) {
     const st = orderLineState(l, computed, mats);
     const sl = st.current;
-    if (st.stale) problems.push(PROBLEM_TEXT[st.problem]);
+    if (st.stale) problems.push((l.item ? ITEM_STALE_TEXT : PROBLEM_TEXT)[st.problem]);
     if (!sl) continue;
     if (sl.generic) {
       const mat = mats.get(l.jobMaterialId) || mats.get(sl.jobMaterialIds[0]);

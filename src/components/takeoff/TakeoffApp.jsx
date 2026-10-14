@@ -18,7 +18,8 @@ import { useTakeoffWorkspace } from "./useTakeoffWorkspace.js";
 import { usePlanDocument } from "./usePlanDocument.js";
 import CalibrationScreen from "./CalibrationScreen.jsx";
 import MeasureScreen from "./MeasureScreen.jsx";
-import MaterialPicker from "./MaterialPicker.jsx";
+import MaterialPicker, { FamilyPresetPicker, PresetUpdateReview } from "./MaterialPicker.jsx";
+import CatalogueEditor from "./CatalogueEditor.jsx";
 import MaterialSheet from "./MaterialSheet.jsx";
 import ProfileEditor from "./ProfileEditor.jsx";
 import { AluminiumSetup, CladdingSetup, TimberSetup } from "./FamilySetup.jsx";
@@ -30,6 +31,10 @@ import PlanSetup from "./PlanSetup.jsx";
 import RescaleReview from "./RescaleReview.jsx";
 import { AsyncState, Banner, Btn, FocusedWindow, FocusMode, NumberField, SaveChip } from "./ui.jsx";
 import { docLabel, fmtLm, fmtMm } from "./format.js";
+
+// "return to where I was" applies to a real page RELOAD only, once per page load (not to a fresh visit or an in-app reopen)
+let placeRestoreSpent = false;
+const isReload = () => { try { return performance.getEntriesByType("navigation")[0]?.type === "reload"; } catch { return false; } };
 
 // materials measured as walls (+ openings) rather than plan lines
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
@@ -107,6 +112,9 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   const [openWall, setOpenWall] = useState(null); // wall measurement open in the elevation editor
   const [highlightIds, setHighlightIds] = useState(null); // schedule "show on plan" → measurements to select
   const [editing, setEditing] = useState(null); // { material, isNew, next }
+  const [setupFrom, setSetupFrom] = useState(null); // window a family setup card was opened from (returns there)
+  const [catalogue, setCatalogue] = useState(null); // company product editor: { preset|null, value }
+  const [reviewUpdate, setReviewUpdate] = useState(null); // job material id whose newer company version is being reviewed
   const [presets, setPresets] = useState([]);
   const [manualFor, setManualFor] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -136,6 +144,27 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     setPageIndex(view.workspace.primaryPageIndex ?? 0);
   }, [view, docId, primaryDoc, plans, scalePlan, scaleHandled]);
   useEffect(() => { if (!activeMaterial && view?.materials?.length) setActiveMaterial(view.materials[0].id); }, [view, activeMaterial]);
+  // a reload (or a PWA restart) returns to the wall / cutting sheet / schedule the user had open, if it still exists
+  const placeKey = wsId ? `takeoff-place:${wsId}` : null;
+  const [placeRestored, setPlaceRestored] = useState(false);
+  useEffect(() => {
+    if (!view || placeRestored || !placeKey || !ws.recoveryChecked) return;
+    setPlaceRestored(true);
+    // never ahead of the "unsaved changes found on this device" offer — that decision comes first
+    if (placeRestoreSpent || !isReload() || ws.recovery?.offer) { placeRestoreSpent = true; return; }
+    placeRestoreSpent = true;
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(placeKey) || "null"); } catch { saved = null; }
+    if (!saved || !["walls", "aluminium", "schedule", "orders"].includes(saved.win)) return;
+    if (saved.activeMaterial && !view.materials.some((x) => x.id === saved.activeMaterial)) return;
+    if (saved.activeMaterial) setActiveMaterial(saved.activeMaterial);
+    if (saved.openWall && view.measurements.some((x) => x.id === saved.openWall && !x.archived)) setOpenWall(saved.openWall);
+    setWin(saved.win);
+  }, [view, placeRestored, placeKey, ws.recovery, ws.recoveryChecked]);
+  useEffect(() => {
+    if (!placeKey || !placeRestored) return;
+    try { sessionStorage.setItem(placeKey, JSON.stringify({ win, activeMaterial, openWall })); } catch { /* private mode: nothing kept */ }
+  }, [placeKey, placeRestored, win, activeMaterial, openWall]);
   useEffect(() => { let stop = false; api.presets().then((r) => { if (!stop && r.ok) setPresets(r.data.presets || []); }); return () => { stop = true; }; }, [api]);
 
   const needsPdf = ["setup", "calibrate", "measure"].includes(win);
@@ -184,6 +213,9 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   }
 
   async function saveAsStandard(m) {
+    // generic families go through the catalogue editor (Product / Ordering / Installation) — never posted raw,
+    // so job-only facts, open flags and drafts don't leak into company data
+    if (m.spec?.family) { setCatalogue({ preset: null, value: { name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion, spec: m.spec, rules: m.rules } }); return; }
     const same = presets.find((p) => p.name.trim().toLowerCase() === m.name.trim().toLowerCase());
     let body = { content: { name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion, spec: m.spec, rules: m.rules, profile: m.profile } };
     if (same) {
@@ -195,7 +227,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     else setNotice({ tone: "error", text: r.error });
   }
 
-  const leaveEditor = () => { setEditing(null); setWin("overview"); setTimeout(refreshDrafts, 50); };
+  const leaveEditor = () => { setEditing(null); setWin(setupFrom || "overview"); setSetupFrom(null); setTimeout(refreshDrafts, 50); };
   const toLengths = (m) => {
     setActiveMaterial(m.id); setEditing(null);
     setWin(m.spec?.family === "aluminium" ? "aluminium" : usesWalls(m) ? "walls" : docId ? "measure" : "overview");
@@ -235,14 +267,57 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
       document.body,
     );
   }
+  if (catalogue) {
+    return (
+      <FocusedWindow title={catalogue.preset ? `Company product — ${catalogue.preset.name}` : "New company product"} onClose={() => setCatalogue(null)} closeLabel="Cancel">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <CatalogueEditor value={catalogue.value} canEditStandards={caps.editStandards}
+            onChange={(v) => setCatalogue((c) => ({ ...c, value: v }))} onCancel={() => setCatalogue(null)}
+            onSave={async (content) => {
+              const r = await api.savePreset(catalogue.preset ? { presetId: catalogue.preset.id, expectedRevision: catalogue.preset.revision, content } : { content });
+              if (!r.ok) { setNotice({ tone: "error", text: r.error }); return; }
+              const x = await api.presets(); if (x.ok) setPresets(x.data.presets || []);
+              setNotice({ tone: "ok", text: `Saved “${content.name}” to the company catalogue. Jobs keep their own copies until you update them.` });
+              setCatalogue(null);
+            }} />
+        </div>
+      </FocusedWindow>
+    );
+  }
+  if (reviewUpdate) {
+    const m = view.materials.find((x) => x.id === reviewUpdate);
+    const std = m && presets.find((p) => p.id === m.fromPresetId);
+    if (m && std) {
+      const close = () => setReviewUpdate(null);
+      return (
+        <FocusedWindow title="Company product updated" subtitle={m.name} onClose={close} closeLabel="Back">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <PresetUpdateReview material={m} preset={std} snapshot={view} onUpdate={(rec) => { ws.edit(partial({ materials: [rec] })); close(); }} onKeep={close} />
+          </div>
+        </FocusedWindow>
+      );
+    }
+  }
   if (editing?.stage === "family") {
     const m = currentMat(editing.material);
-    const Setup = m.spec?.family === "timber" ? TimberSetup : m.spec?.family === "aluminium" ? AluminiumSetup : CladdingSetup;
-    const title = m.spec?.family === "timber" ? "Timber" : m.spec?.family === "aluminium" ? "Aluminium" : "Cladding";
+    const fam = m.spec?.family;
+    const Setup = fam === "timber" ? TimberSetup : fam === "aluminium" ? AluminiumSetup : CladdingSetup;
+    const title = fam === "timber" ? "Timber" : fam === "aluminium" ? "Aluminium" : fam === "batten" ? "Support battens" : fam === "accessory" ? "Accessories" : "Cladding";
+    const families = fam === "timber" ? ["timber"] : fam === "aluminium" ? ["aluminium"] : ["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"];
     return (
       <FocusedWindow title={title} subtitle={`${m.name} · this job only`} onClose={leaveEditor} closeLabel="Close" actions={<SaveChip status={ws.status} />}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <Setup key={m.id} value={m} onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
+          {caps.edit && (
+            <div className="mb-3">
+              <FamilyPresetPicker api={api} families={families} canEditStandards={caps.editStandards} reloadToken={presets}
+                // a company product is COPIED onto this job material (same id: its measurements stay attached)
+                onUse={(rec) => { const next = { ...rec, id: m.id }; ws.edit(partial({ materials: [next] })); setEditing({ material: next, stage: "family" }); }}
+                onEdit={(pr) => setCatalogue({ preset: pr, value: pr })}
+                onNew={(f) => setCatalogue({ preset: null, value: { spec: { family: f } } })} />
+            </div>
+          )}
+          <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
+            onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
           <div className="mt-3 grid grid-cols-1 gap-2">
             <Btn kind="primary" onClick={() => toLengths(m)}>{m.spec?.family === "timber" ? "Measure members" : m.spec?.family === "aluminium" ? "Openings & cutting" : "Walls"}</Btn>
           </div>
@@ -322,16 +397,16 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
   }
   if (win === "walls") {
     return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} onOpenWall={setOpenWall}
-      onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => setEditing({ material: m, stage: "family" })} onClose={() => { setOpenWall(null); setWin("overview"); }} />;
+      onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }} />;
   }
   if (win === "aluminium") {
-    return <AluminiumScreen ws={ws} materialId={activeMaterial} onSetup={(m) => setEditing({ material: m, stage: "family" })}
+    return <AluminiumScreen ws={ws} materialId={activeMaterial} onSetup={(m) => { setSetupFrom("aluminium"); setEditing({ material: m, stage: "family" }); }}
       onMeasure={docId ? () => setWin("measure") : null} onClose={() => setWin("overview")} />;
   }
   if (win === "measure") {
     return <MeasureScreen ws={ws} doc={plan.doc} document={planDoc} pageIndex={pageIndex} displayRotation={rotation} materialId={activeMaterial}
-      onChangeMaterial={() => setWin("materials")} onScale={caps.edit ? () => setWin("calibrate") : null}
-      onOpenWall={(id) => { setOpenWall(id); setWin("walls"); }}
+      onChangeMaterial={() => { setHighlightIds(null); setWin("materials"); }} onScale={caps.edit ? () => setWin("calibrate") : null}
+      onOpenWall={(id) => { setHighlightIds(null); setOpenWall(id); setWin("walls"); }}
       highlightIds={highlightIds}
       onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
   }
@@ -349,14 +424,18 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     );
   }
   if (win === "schedule") {
-    return <FocusedWindow title="Schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api}
+    return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api}
       onShowSource={({ materialId, measurementIds }) => {
         // a wall (or its openings) opens the elevation; plan-traced lines open the plan with them selected
         setActiveMaterial(materialId);
         const ms = view.measurements.filter((x) => measurementIds.includes(x.id));
         const wall = ms.find((x) => x.kind === "wall") || view.measurements.find((x) => x.id === ms.find((y) => y.kind === "opening")?.parentId);
         if (wall && !ms.some((x) => x.documentId && x.kind !== "wall")) { setOpenWall(wall.id); setWin("walls"); }
-        else { setHighlightIds(measurementIds); setWin("measure"); }
+        else {
+          const onPlan = ms.find((x) => x.documentId && x.points?.length);
+          if (onPlan) { setDocId(onPlan.documentId); setPageIndex(onPlan.pageIndex ?? 0); }
+          setHighlightIds(measurementIds); setWin("measure");
+        }
       }} /></div></FocusedWindow>;
   }
   if (win === "rescale") {
@@ -485,7 +564,8 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
                   }}>Remove</Btn>}
                 </div>
                 {std && std.revision > (m.fromPresetRevision || 0) && caps.edit && (
-                  <Banner tone="info" action={<Btn onClick={() => ws.edit(partial({ materials: [{ ...m, fromPreset: { presetId: std.id, revision: std.revision }, name: std.name, spec: std.spec, rules: std.rules, profile: std.profile }] }))}>Update this job&apos;s copy</Btn>}>
+                  <Banner tone="info" action={fam ? <Btn onClick={() => setReviewUpdate(m.id)}>Review update</Btn>
+                    : <Btn onClick={() => ws.edit(partial({ materials: [{ ...m, fromPreset: { presetId: std.id, revision: std.revision }, name: std.name, spec: std.spec, rules: std.rules, profile: std.profile }] }))}>Update this job&apos;s copy</Btn>}>
                     The company standard was updated (rev {std.revision}). This job still uses rev {m.fromPresetRevision}.
                   </Banner>
                 )}

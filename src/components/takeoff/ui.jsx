@@ -103,7 +103,10 @@ export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max 
   const id = useId();
   const [text, setText] = useState(value == null ? "" : String(value));
   const [err, setErr] = useState(null);
-  useEffect(() => { setText(value == null ? "" : String(value)); }, [value]);
+  // re-sync the text only when the VALUE really changes (not on every re-render with an equal value), so an
+  // unrelated save never wipes what the user is typing
+  const [shownValue, setShownValue] = useState(value);
+  if (!Object.is(value, shownValue)) { setShownValue(value); setText(value == null ? "" : String(value)); }
   function commit() {
     if (text.trim() === "" && value == null) return;
     const n = Number(text.replace(/,/g, ""));

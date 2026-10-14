@@ -46,6 +46,15 @@ export const PROBLEM_TEXT = Object.freeze({
   ceiling_unknown: "This flashing has no maximum orderable length set up — set it up before ordering.",
   path_in_progress: "This run is still being drawn — finish it before ordering.",
   wall_incomplete: "A wall is missing its length or heights.",
+  line_stale_inputs: "What this line was worked out from has changed (measurements, openings, product or rules) — review it and update the line.",
+});
+
+/** Stale-line wording for purchase lines (timber, sheets, bars, LM …) — PROBLEM_TEXT talks about flashing lengths. */
+export const ITEM_STALE_TEXT = Object.freeze({
+  line_stale_missing: "This line is no longer in the takeoff (its measurements, product or stock changed) — update or remove it.",
+  line_stale_material: "What this line buys has changed (product, section, grade, finish or stock) — update or remove it.",
+  line_stale_quantity: "Fewer are needed now than this line orders — update the quantity.",
+  line_stale_inputs: PROBLEM_TEXT.line_stale_inputs,
 });
 
 // continuous-path problem codes (engine/flashingPath.js) → the schedule's blocking codes
@@ -324,8 +333,12 @@ export function orderLineState(line, computed, materials) {
   if (!sl) problem = "line_stale_missing";
   else if (line.jobMaterialId && (!mat || ownKey !== keyOf(sl) || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";
   else if (line.specKey && line.specKey !== sl.specKey) problem = "line_stale_material";
+  // generic lines (06): ANY change to what the quantity was worked out from invalidates the draft line, even when the
+  // totals come out the same — the line is updated explicitly (same bucket), never silently
+  else if (sl.generic && line.item?.dependencyKey && sl.dependencyKey && line.item.dependencyKey !== sl.dependencyKey) problem = "line_stale_inputs";
   else if (line.quantity > sl.quantity) problem = "line_stale_quantity";
-  return { stale: !!problem, problem, current: sl, suggestion: suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
+  return { stale: !!problem, problem, current: sl,
+    suggestion: problem === "line_stale_inputs" ? sl : suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
 }
 
 /**

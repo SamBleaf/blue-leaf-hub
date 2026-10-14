@@ -13,7 +13,11 @@
 //   shared/takeoff/geometry.js, which matches pdf.js's PageViewport exactly (tested).
 // * Gestures: shared gestures.js — tap places (tap mode), drag pans, two fingers pinch.
 //   touch-action:none applies to this element only; data-takeoff-viewport tells the AppShell
-//   edge-swipe to ignore touches that start here.
+//   edge-swipe to ignore touches that start here. onDoubleTap is opt-in per mode: pass it only
+//   while a double-tap means something (finishing a continuous run) — otherwise it is undefined
+//   and every tap is a plain tap.
+// * focus ({ key, points }): when given, the view frames those PDF points once per key (schedule "Show on plan")
+//   instead of the whole page — and re-frames them after a resize until the user moves the plan themselves.
 // =============================================================================
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { applyMatrix, invertMatrix, totalRotation, viewportTransform } from "../../../shared/takeoff/index.js";
@@ -27,7 +31,7 @@ const stats = { renders: 0, cancels: 0, lastRenderMs: 0, canvases: 0, maxBacking
 if (typeof window !== "undefined") window.__takeoffViewerStats = stats;
 
 const PdfViewport = forwardRef(function PdfViewport(
-  { doc, pageIndex, displayRotation = 0, mode = "tap", onTap, overlay, onViewChange, onPageMeta, className = "", ariaLabel = "Plan" },
+  { doc, pageIndex, displayRotation = 0, mode = "tap", onTap, onDoubleTap, overlay, onViewChange, onPageMeta, focus = null, className = "", ariaLabel = "Plan" },
   ref,
 ) {
   const wrapRef = useRef(null);
@@ -55,6 +59,8 @@ const PdfViewport = forwardRef(function PdfViewport(
 
   modeRef.current = mode;
   onTapRef.current = onTap;
+  const onDoubleTapRef = useRef(onDoubleTap);
+  onDoubleTapRef.current = onDoubleTap;
   const rotation = pageMeta ? totalRotation(pageMeta, displayRotation) : 0;
   const rotationRef = useRef(rotation);
   rotationRef.current = rotation;
@@ -131,6 +137,23 @@ const PdfViewport = forwardRef(function PdfViewport(
     commitView({ scale: s, panX: (size.w - base.width * s) / 2, panY: (size.h - base.height * s) / 2 });
   }, [size.w, size.h, commitView]);
 
+  /** Frame a set of PDF points (padded, never past ZOOM_MAX_FACTOR or beyond `maxFactor` × fit for a single point). */
+  const fitTo = useCallback((points, { padPx = 56, maxFactor = 6 } = {}) => {
+    const meta = metaRef.current;
+    const pts = (points || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+    if (!meta || !size.w || !size.h || !pts.length) return false;
+    const base = viewportTransform(meta, { scale: 1, rotation: rotationRef.current });
+    const qs = pts.map((p) => applyMatrix(base.matrix, p)); // page px at scale 1 (screen = scale × q + pan)
+    const xs = qs.map((q) => q.x), ys = qs.map((q) => q.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const pad = Math.min(padPx, size.w / 4, size.h / 4);
+    const want = Math.min((size.w - 2 * pad) / Math.max(x1 - x0, 1e-9), (size.h - 2 * pad) / Math.max(y1 - y0, 1e-9));
+    const fitS = fitRef.current;
+    const s = clamp(want, fitS * ZOOM_MIN_FACTOR, fitS * Math.min(maxFactor, ZOOM_MAX_FACTOR));
+    commitView({ scale: s, panX: size.w / 2 - s * (x0 + x1) / 2, panY: size.h / 2 - s * (y0 + y1) / 2 });
+    return true;
+  }, [size.w, size.h, commitView]);
+
   const zoomAt = useCallback((factor, center) => {
     const v = viewRef.current;
     const s = clamp(v.scale * factor, fitRef.current * ZOOM_MIN_FACTOR, fitRef.current * ZOOM_MAX_FACTOR);
@@ -162,13 +185,29 @@ const PdfViewport = forwardRef(function PdfViewport(
 
   // Fit once per page/rotation. A later resize (rotation of the phone, the keyboard opening)
   // keeps the user's zoom and only re-renders the bitmap for the new size.
+  // A focus (points to frame) applies once per focus key after that fit, and again after a resize for as long as the
+  // user hasn't moved the plan (the sheet settling must not leave the framed measurements half hidden).
   const fittedKey = useRef(null);
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+  const focusDone = useRef(null);   // { key, w, h } last applied
+  const userMoved = useRef(false);  // any pan / pinch / wheel / key / zoom by the user since the last automatic framing
+  const focusKey = focus?.points?.length ? `${focus.key}` : null;
   useLayoutEffect(() => {
     if (!pageMeta || !size.w || !size.h) return;
     const key = `${pageIndex}|${rotation}|${pageMeta.viewBox.join(",")}`;
-    if (fittedKey.current !== key) { fittedKey.current = key; fit(); }
-    else scheduleRender(0);
-  }, [pageMeta, pageIndex, rotation, size.w, size.h, fit, scheduleRender]);
+    let framed = false;
+    if (fittedKey.current !== key) { fittedKey.current = key; fit(); framed = true; focusDone.current = null; }
+    const fd = focusDone.current;
+    if (focusKey && (fd?.key !== focusKey || (!userMoved.current && (fd.w !== size.w || fd.h !== size.h)))) {
+      if (fitTo(focusRef.current.points)) {
+        focusDone.current = { key: focusKey, w: size.w, h: size.h };
+        userMoved.current = false;
+        framed = true;
+      }
+    }
+    if (!framed) scheduleRender(0);
+  }, [pageMeta, pageIndex, rotation, size.w, size.h, fit, fitTo, scheduleRender, focusKey]);
 
   // container size
   useEffect(() => {
@@ -179,34 +218,48 @@ const PdfViewport = forwardRef(function PdfViewport(
     return () => ro.disconnect();
   }, []);
 
-  // gestures + wheel + keyboard
+  // gestures + wheel + keyboard. ONE tracker for the viewer's lifetime: it reads the current transforms through a
+  // ref, so a resize (the sheet growing, the keyboard, rotation) never re-creates it mid-gesture — that would drop a
+  // half-finished double-tap or pinch (TC-R04 13).
+  const fnRef = useRef(null);
+  fnRef.current = { toPdf, commitView, scheduleRender, zoomAt };
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return undefined;
+    const fn = () => fnRef.current;
     const tracker = createGestureTracker({
       mode: () => modeRef.current,
-      onTap: (pt) => { if (metaRef.current) onTapRef.current?.(toPdf(pt), pt); },
-      onPan: (dx, dy) => { const v = viewRef.current; commitView({ ...v, panX: v.panX + dx, panY: v.panY + dy }, { rerender: false }); },
+      onTap: (pt) => { if (metaRef.current) onTapRef.current?.(fn().toPdf(pt), pt); },
+      onPan: (dx, dy) => { userMoved.current = true; const v = viewRef.current; fn().commitView({ ...v, panX: v.panX + dx, panY: v.panY + dy }, { rerender: false }); },
       onPinch: (f, c, dx, dy) => {
+        userMoved.current = true;
         const v = viewRef.current;
         const s = clamp(v.scale * f, fitRef.current * ZOOM_MIN_FACTOR, fitRef.current * ZOOM_MAX_FACTOR);
         const k = s / v.scale;
-        commitView({ scale: s, panX: c.x - (c.x - v.panX) * k + dx, panY: c.y - (c.y - v.panY) * k + dy }, { rerender: false });
+        fn().commitView({ scale: s, panX: c.x - (c.x - v.panX) * k + dx, panY: c.y - (c.y - v.panY) * k + dy }, { rerender: false });
       },
-      onGestureEnd: () => scheduleRender(),
+      onGestureEnd: () => fn().scheduleRender(),
       shouldIgnore: (ev) => !!ev.target?.closest?.("[data-takeoff-handle]"),
       onPrecise: (phase, pt) => setLoupe(phase === "start" || phase === "move" ? pt : null),
+      // TC-R04 13: double-tap is recognised ONLY while the parent passes onDoubleTap for the current mode (e.g. while
+      // drawing a continuous flashing run). The tracker reads this getter at every tap, so without the prop two quick
+      // taps stay two taps (Count never loses a mark) and no synthetic-mouse filtering applies.
+      get onDoubleTap() {
+        if (!onDoubleTapRef.current || modeRef.current === "pan") return undefined;
+        return (pt) => { if (metaRef.current) onDoubleTapRef.current?.(fn().toPdf(pt), pt); };
+      },
     });
     const detach = tracker.attach(el);
     const wheel = (e) => {
       e.preventDefault();
+      userMoved.current = true;
       const r = el.getBoundingClientRect();
-      if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), { x: e.clientX - r.left, y: e.clientY - r.top });
-      else { const v = viewRef.current; commitView({ ...v, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY }); }
+      if (e.ctrlKey || e.metaKey) fn().zoomAt(Math.exp(-e.deltaY * 0.01), { x: e.clientX - r.left, y: e.clientY - r.top });
+      else { const v = viewRef.current; fn().commitView({ ...v, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY }); }
     };
     el.addEventListener("wheel", wheel, { passive: false });
     return () => { detach(); el.removeEventListener("wheel", wheel); };
-  }, [toPdf, commitView, scheduleRender, zoomAt]);
+  }, []);
 
   // cleanup render resources on unmount
   useEffect(() => () => {
@@ -225,6 +278,7 @@ const PdfViewport = forwardRef(function PdfViewport(
       toScreen: (p) => toScreen(p), toPdf: (p) => toPdf(p), view: () => ({ ...viewRef.current }), rotation: () => rotationRef.current,
       /** Zoom by `factor` on PDF point `p` (as a pinch there would), then centre it. */
       zoomOn: (p, factor) => {
+        userMoved.current = true;
         zoomAt(factor, toScreen(p));
         const sc = toScreen(p), v = viewRef.current;
         commitView({ ...v, panX: v.panX + size.w / 2 - sc.x, panY: v.panY + size.h / 2 - sc.y });
@@ -233,9 +287,11 @@ const PdfViewport = forwardRef(function PdfViewport(
   }, [toScreen, toPdf, zoomAt, commitView, size.w, size.h]);
 
   useImperativeHandle(ref, () => ({
-    fit, zoomBy: (f) => zoomAt(f, { x: size.w / 2, y: size.h / 2 }),
+    fit: () => { userMoved.current = true; fit(); }, zoomBy: (f) => { userMoved.current = true; zoomAt(f, { x: size.w / 2, y: size.h / 2 }); },
+    /** Frame these PDF points (e.g. "Show them again" after panning away). */
+    fitTo: (points, opts) => { const ok = fitTo(points, opts); if (ok) userMoved.current = true; return ok; },
     getView: () => viewRef.current, toScreen, toPdf, pageMeta: () => metaRef.current, rotation: () => rotationRef.current,
-    centerOn: (p) => { const s = toScreen(p); const v = viewRef.current; commitView({ ...v, panX: v.panX + size.w / 2 - s.x, panY: v.panY + size.h / 2 - s.y }); },
+    centerOn: (p) => { userMoved.current = true; const s = toScreen(p); const v = viewRef.current; commitView({ ...v, panX: v.panX + size.w / 2 - s.x, panY: v.panY + size.h / 2 - s.y }); },
     /** Draw a magnified sample of the CURRENT bitmap around a screen point (loupe). */
     drawLoupe(ctx, screenPt, outSize, zoom = 2.5) {
       const c = frontRef.current, r = renderedRef.current, v = viewRef.current;
@@ -247,10 +303,11 @@ const PdfViewport = forwardRef(function PdfViewport(
       ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, outSize, outSize);
       ctx.drawImage(c, (bx - half) * dpr, (by - half) * dpr, 2 * half * dpr, 2 * half * dpr, 0, 0, outSize, outSize);
     },
-  }), [fit, zoomAt, size.w, size.h, toScreen, toPdf, commitView]);
+  }), [fit, fitTo, zoomAt, size.w, size.h, toScreen, toPdf, commitView]);
 
   const onKey = (e) => {
     const v = viewRef.current;
+    if (["+", "=", "-", "0"].includes(e.key) || (e.key.startsWith("Arrow") && !e.altKey)) userMoved.current = true;
     if (e.key === "+" || e.key === "=") { zoomAt(1.25, { x: size.w / 2, y: size.h / 2 }); e.preventDefault(); }
     else if (e.key === "-") { zoomAt(0.8, { x: size.w / 2, y: size.h / 2 }); e.preventDefault(); }
     else if (e.key === "0") { fit(); e.preventDefault(); }

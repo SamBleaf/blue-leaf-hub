@@ -42,6 +42,7 @@ export function useTakeoffWorkspace(api, workspaceId) {
   const [status, setStatus] = useState("saved");    // saved | saving | unsynced | conflict | error
   const [saveError, setSaveError] = useState(null);
   const [recovery, setRecovery] = useState({ available: true, offer: null });
+  const [recoveryChecked, setRecoveryChecked] = useState(false); // device recovery looked at (offer shown or none)
   const timer = useRef(null);
   const latest = useRef({});
 
@@ -65,14 +66,16 @@ export function useTakeoffWorkspace(api, workspaceId) {
     let stop = false;
     (async () => {
       const s = await load();
-      if (stop || !s?.capabilities?.actorKey) return;
+      if (stop) return;
+      if (!s?.capabilities?.actorKey) { setRecoveryChecked(true); return; }
       rememberActor(s.capabilities.actorKey);
       const rec = await loadRecovery(s.capabilities.actorKey, workspaceId);
       if (stop) return;
-      if (!rec.ok) { setRecovery({ available: false, offer: null }); return; }
+      if (!rec.ok) { setRecovery({ available: false, offer: null }); setRecoveryChecked(true); return; }
       if (rec.record) {
         setRecovery({ available: true, offer: { ...rec.record, sameBase: rec.record.baseRevision === s.snapshot.workspace.revision } });
       }
+      setRecoveryChecked(true);
     })();
     return () => { stop = true; };
   }, [load, workspaceId]);
@@ -253,10 +256,15 @@ export function useTakeoffWorkspace(api, workspaceId) {
     setStatus("unsynced"); setSaveError(null);
   }, []);
   const refreshServer = load;
+  // placed/cancelled orders change "already ordered" without a workspace commit — refresh just that, quietly
+  const refreshOrderStatus = useCallback(async () => {
+    const r = await api.workspace(workspaceId);
+    if (r.ok) setServer((s) => (s ? { ...s, orderStatus: r.data.orderStatus } : s));
+  }, [api, workspaceId]);
 
   return {
-    loadState, server, view, computed, pending, dirty, status, saveError, recovery, rejected, discardRejected, retryRejected,
+    loadState, server, view, computed, pending, dirty, status, saveError, recovery, recoveryChecked, rejected, discardRejected, retryRejected,
     capabilities: server?.capabilities || null,
-    edit, flush, retry, reloadFromServer, applyMineOnLatest, restoreRecovery, discardRecovery, refreshServer,
+    edit, flush, retry, reloadFromServer, applyMineOnLatest, restoreRecovery, discardRecovery, refreshServer, refreshOrderStatus,
   };
 }

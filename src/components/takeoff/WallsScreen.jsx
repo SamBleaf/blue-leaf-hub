@@ -1,0 +1,1478 @@
+// =============================================================================
+// WallsScreen — walls + openings + generated elevation for wall-based materials (TC-R04 02 §3–4, 04 C0–C6,
+// 05 B1/B5, 03 T4).
+//   List    the takeoff's walls, which materials use each, the material's three statuses and problems,
+//           "Wall by numbers" / "Trace on plan", attach/detach the current material, remove (undoable).
+//   Editor  numeric wall fields (authoritative, auto-applied), openings (tap the elevation then type sizes;
+//           drag the selected opening — snaps to 10 mm, the numbers follow), the generated elevation of THIS
+//           wall only with ONE view at a time: Cladding | Supports | Accessories. Tap a cell / board / line
+//           for its stock selection and cut size. Gross / openings / net m², per-wall quantities and blocking
+//           problems shown in place. Nothing claims installation verification the engine didn't give.
+// Every valid edit applies at once (ws.edit) and is undoable; invalid input stays in its field as a draft.
+//
+// Props contract (fixed):
+//   ws          useTakeoffWorkspace() result (view, computed, edit, capabilities, status)
+//   materialId  the job material being set up (cladding / batten / accessory / timber studs, plates, noggins)
+//   wallId      wall measurement open in the editor (null = list)
+//   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose()
+// =============================================================================
+import { useEffect, useRef, useState } from "react";
+import { describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
+import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
+import { newId } from "../../lib/takeoffApi.js";
+import { partial } from "./changeset.js";
+import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
+import { fmtMm } from "./format.js";
+import WallElevation from "./WallElevation.jsx";
+
+const MAX_MM = 100000;
+const SNAP_MM = 10;
+const CLADDING_METHODS = new Set(["sheet_layout", "course_layout", "panel_grid", "aac_panel_layout", "area_to_linear"]);
+const SHAPES = [["rect", "Rectangle"], ["rake", "Sloping top"], ["gable", "Gable"]];
+const SHAPE_LABEL = { rect: "Rectangle", rake: "Sloping top", gable: "Gable", polygon: "Traced outline" };
+const VIEWS = [["cladding", "Cladding"], ["supports", "Supports"], ["accessories", "Accessories"]];
+const OPENING_TYPES = [["window", "Window"], ["door", "Door"], ["other", "Other"]];
+const END_LABEL = { cut: "cut end", joint: "joint", "joint-factory": "joint (factory end)" };
+
+const STATUS_TEXT = {
+  quantity: { incomplete: ["Incomplete", "warn"], estimate: ["Estimate only", "info"], calculated: ["Calculated", "ok"], reviewed: ["Reviewed", "ok"], nothing: ["Nothing measured yet", "muted"] },
+  installation: {
+    unspecified: ["Not specified", "muted"], "source-pending": ["Source pending — not verified", "warn"], "supported-by-selected-rule": ["Reviewed rule selected", "ok"],
+    "project-detail-supplied": ["Project detail supplied", "ok"], "out-of-scope": ["Out of scope", "muted"],
+  },
+  procurement: { draft: ["Draft — not ready to order", "warn"], "missing-product": ["Product details missing", "warn"], "unavailable-stock": ["Stock doesn't fit", "error"], stale: ["Out of date", "warn"], ready: ["Ready to order", "ok"] },
+};
+const TONE = { ok: "bg-emerald-50 text-emerald-800 border-emerald-200", warn: "bg-amber-50 text-amber-900 border-amber-200", error: "bg-red-50 text-red-700 border-red-200", info: "bg-sky-50 text-sky-800 border-sky-200", muted: "bg-slate-50 text-slate-700 border-slate-200" };
+
+const ROLE_LABEL = {
+  sheet: "Sheets", panel: "Panels", "aac-panel": "AAC panels", "course-board": "Course boards", "vertical-board": "Vertical boards", "board-lm": "Random-length boards",
+  support: "Supports", stud: "Studs", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
+  "horizontal-joint": "Horizontal joint strips", "vertical-joint": "Vertical joint strips", rail: "Rails", "control-joint": "Control joints",
+  coating: "Coating (net finish area)", basecoat: "Basecoat (net finish area)", "finish-coat": "Finish coat (net finish area)", "fixing-support-to-frame": "Support fixings",
+};
+const roleLabel = (r) => ROLE_LABEL[r] || (r ? `${r.charAt(0).toUpperCase()}${r.slice(1).replace(/-/g, " ")}` : "Items");
+const UNIT_WORD = { sheet: ["sheet", "sheets"], piece: ["piece", "pieces"], bar: ["bar", "bars"], box: ["box", "boxes"], bag: ["bag", "bags"], roll: ["roll", "rolls"], pack: ["pack", "packs"], cartridge: ["cartridge", "cartridges"] };
+
+/** Plain English for the measurement-level (scale / plan) problem codes a traced wall can carry. */
+const MEAS_PROBLEM = {
+  calibration_missing: "The plan scale this wall was traced on is missing — retrace it.",
+  outside_region: "The traced wall goes outside the scaled region of the plan.",
+  calibration_superseded: "The plan page was re-scaled after this wall was traced — check the length.",
+  calibration_not_ready: "The plan scale hasn't passed its check, so the traced length can't be ordered yet.",
+  plan_superseded: "The plan was replaced — retrace this wall on the current revision.",
+  measurement_invalid: "The traced wall isn't valid — retrace it.",
+};
+
+// ── small helpers ──────────────────────────────────────────────────────────────────────────────────────────
+const snap = (v) => Math.round(v / SNAP_MM) * SNAP_MM;
+const fmtM2 = (n) => (Number.isFinite(n) ? n.toFixed(2) : "—");
+const plural = (n, one, many = `${one}s`) => `${n.toLocaleString("en-AU")} ${n === 1 ? one : many}`;
+const isTraced = (m) => Array.isArray(m?.points) && m.points.length >= 2;
+const wallName = (m) => m?.inputs?.name || m?.label || "Wall";
+const mRec = (m) => ({ id: m.id, kind: m.kind, documentId: m.documentId ?? null, pageIndex: m.pageIndex ?? null, calibrationId: m.calibrationId ?? null,
+  points: m.points ?? null, parentId: m.parentId ?? null, label: m.label ?? null, inputs: m.inputs ? { ...m.inputs } : null });
+const cRec = (c) => ({ id: c.id, measurementId: c.measurementId, jobMaterialId: c.jobMaterialId, role: c.role || "primary" });
+const matRec = (m) => ({ id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion || 1, spec: m.spec, rules: m.rules || {}, profile: m.profile || null,
+  fromPresetId: m.fromPresetId || null, fromPresetRevision: m.fromPresetRevision || null });
+const dedupe = (list) => { const seen = new Set(); return list.filter((p) => (seen.has(p.message) ? false : (seen.add(p.message), true))); };
+
+/** Opening geometry problems: blocking ones are listed with the wall's problems AND next to the opening. */
+const OPENING_GEOMETRY = new Set(["opening_invalid", "opening_duplicate", "opening_outside_wall", "opening_clipped"]);
+/** Engine text names openings by id — show the opening's label instead. */
+function readableTextFor(view) {
+  const labels = view.measurements.filter((m) => m.kind === "opening" && m.inputs?.label).map((m) => [m.id, m.inputs.label]);
+  return (text) => {
+    let s = String(text ?? "");
+    for (const [id, label] of labels) if (s.includes(id)) s = s.split(id).join(label);
+    return s;
+  };
+}
+function readableFor(view) {
+  const text = readableTextFor(view);
+  return (p) => {
+    const message = text(p.message);
+    return message === p.message ? p : { ...p, message };
+  };
+}
+
+function scrollParent(el) {
+  for (let p = el?.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+}
+
+/**
+ * Keep the focused numeric field (and its message line) above the on-screen keyboard: while a field inside this
+ * container has focus, add the keyboard's height as scroll room and scroll the field up into the visual viewport.
+ * A field inside [data-keyboard-group] also keeps that group's [data-keyboard-result] line in view when both fit,
+ * so the live result of what is being typed is never under the keyboard either.
+ */
+function KeyboardSafe({ className, children }) {
+  const ref = useRef(null);
+  const [pad, setPad] = useState(0);
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return undefined;
+    let t = null;
+    const reveal = () => {
+      const el = document.activeElement;
+      const vv = window.visualViewport;
+      if (!el || !root.contains(el) || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) { setPad(0); return; }
+      setPad(vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0);
+      requestAnimationFrame(() => {
+        const sc = scrollParent(el);
+        const top = Math.max(vv ? vv.offsetTop : 0, sc ? sc.getBoundingClientRect().top : 0), bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        const f = el.getBoundingClientRect();
+        let r = { top: f.top, bottom: f.bottom + 40 }; // the field + its message line
+        const res = el.closest("[data-keyboard-group]")?.querySelector("[data-keyboard-result]")?.getBoundingClientRect();
+        if (res && res.height) {
+          const u = { top: Math.min(f.top, res.top), bottom: Math.max(f.bottom + 8, res.bottom + 8) };
+          if (u.bottom - u.top <= bottom - top - 16) r = u;
+        }
+        const below = r.bottom + 8 - bottom, above = top + 8 - r.top;
+        const delta = below > 0 ? below : above > 0 ? -above : 0;
+        if (sc && delta) sc.scrollTop += delta;
+      });
+    };
+    const soon = () => { clearTimeout(t); t = setTimeout(reveal, 120); };
+    const off = () => { clearTimeout(t); t = setTimeout(() => { if (!root.contains(document.activeElement)) setPad(0); }, 150); };
+    root.addEventListener("focusin", soon);
+    root.addEventListener("focusout", off);
+    window.visualViewport?.addEventListener("resize", soon);
+    return () => { clearTimeout(t); root.removeEventListener("focusin", soon); root.removeEventListener("focusout", off); window.visualViewport?.removeEventListener("resize", soon); };
+  }, []);
+  return <div ref={ref} className={className}>{children}{pad > 0 && <div aria-hidden="true" style={{ height: pad }} />}</div>;
+}
+
+/** Which heights a wall still needs (the engine reports the same as wall_incomplete). */
+function missingHeights(inp = {}) {
+  const k = inp.kind || "rect";
+  if (k === "rect") return inp.heightMm ? [] : ["heightMm"];
+  if (k === "rake") return ["startHeightMm", "endHeightMm"].filter((f) => !inp[f]);
+  if (k === "gable") return ["eavesHeightMm", "apexHeightMm", "apexXMm"].filter((f) => inp[f] == null || inp[f] === "");
+  return [];
+}
+
+function tracedLengthMm(m, calibrations) {
+  if (!isTraced(m)) return null;
+  const cal = calibrations.find((c) => c.id === m.calibrationId);
+  if (cal) return polylineLengthMm(cal, m.points);
+  return m.inputs?.widthMm ?? null;
+}
+
+/** The wall polygon in local mm: the engine's own (from any layout of this wall), else built the same way. */
+function wallGeometry(m, calibrations, layouts) {
+  const fromLayout = layouts.find((l) => Array.isArray(l?.wall?.polygon) && l.wall.polygon.length >= 3)?.wall;
+  if (fromLayout) return { polygon: fromLayout.polygon, message: null };
+  const inp = m.inputs || {};
+  let widthMm = inp.widthMm, points = inp.polygon;
+  if (isTraced(m)) {
+    const cal = calibrations.find((c) => c.id === m.calibrationId);
+    if (cal && inp.kind === "polygon" && m.points.length >= 3) {
+      const q = m.points.map((p) => pointToMm(cal, m.points[0], p));
+      const minX = Math.min(...q.map((p) => p.x)), maxY = Math.max(...q.map((p) => p.y));
+      points = q.map((p) => ({ x: p.x - minX, y: maxY - p.y }));
+    } else if (cal) widthMm = polylineLengthMm(cal, m.points);
+  }
+  const built = buildWall({ kind: inp.kind || "rect", widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
+    eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points });
+  return built.polygon ? { polygon: built.polygon, message: null } : { polygon: null, message: built.problems?.[0]?.message || null };
+}
+
+function areasFor(polygon, openings) {
+  if (!polygon) return null;
+  const w = buildWall({ kind: "polygon", points: polygon });
+  if (!w.polygon) return null;
+  return wallAreas(w, openings.map((o) => ({ id: o.id, xMm: o.xMm, sillMm: o.sillMm, widthMm: o.widthMm, heightMm: o.heightMm })));
+}
+
+/** The walls a material uses (each contribution once, as dispatch.js sees them). */
+function materialWalls(view, materialId) {
+  return view.contributions.filter((c) => c.jobMaterialId === materialId && !c.archived)
+    .map((c) => view.measurements.find((m) => m.id === c.measurementId)).filter((m) => m?.kind === "wall" && !m.archived);
+}
+
+/** The readable per-material wall tag the engine names cells/demands/problems with (dispatch.js wallTags). */
+function wallTag(view, materialId, wall) {
+  const names = materialWalls(view, materialId).map(wallName);
+  const n = wallName(wall);
+  return names.filter((x) => x === n).length > 1 ? `${n} (${String(wall.id).slice(0, 4)})` : n;
+}
+
+function demandsForWall(result, wallId, tag) {
+  return (result?.demands || []).filter((d) => (d.sourceRefs || []).some((r) => r && (r.measurementId === wallId || r.wallId === wallId || (tag && r.wallId === tag))));
+}
+
+/** A wall's bounding box in local mm (null until its size is complete). */
+function wallBox(view, wall) {
+  const g = wallGeometry(wall, view.calibrations, []);
+  if (!g.polygon) return null;
+  const xs = g.polygon.map((p) => p.x), ys = g.polygon.map((p) => p.y);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+/**
+ * Joint rows are a MATERIAL rule (dispatch passes rules.jointRows to every wall). A row that isn't strictly inside a
+ * wall leaves that wall without a sheet layout, and the engine's message names no wall — work out which walls.
+ * @param {object} rows candidate { atMm: number[], gapMm } (default: the material's own)
+ */
+function jointRowMisfits(view, material, rows = material?.rules?.jointRows) {
+  if (!material || material.methodKey !== "sheet_layout" || !rows || !Array.isArray(rows.atMm) || !rows.atMm.length || !Number.isFinite(rows.gapMm)) return [];
+  const lo = Math.min(...rows.atMm), hi = Math.max(...rows.atMm) + rows.gapMm;
+  const horizontal = material.spec?.orientation === "horizontal";
+  const out = [];
+  for (const w of materialWalls(view, material.id)) {
+    const b = wallBox(view, w);
+    if (!b) continue;
+    const [a, z] = horizontal ? [b.x0, b.x1] : [b.y0, b.y1];
+    if (!(lo > a + 0.001 && hi < z - 0.001)) out.push({ wall: w, extentMm: z - a });
+  }
+  return out;
+}
+const jointRowText = (rows) => `${rows.atMm.map((x) => fmtMm(x)).join(", ")} mm`;
+function misfitProblem(material, misfit) {
+  return {
+    code: "joint_rows_invalid", blocking: true, refs: [{ wallId: misfit.wall.id }],
+    message: `${wallName(misfit.wall)}: the joint row at ${jointRowText(material.rules.jointRows)} is set for every wall using ${material.name}, and it isn't inside this wall (${fmtMm(Math.round(misfit.extentMm))} mm${material.spec?.orientation === "horizontal" ? " long" : " high"}) — so this wall has no sheet layout. ${material.spec?.orientation === "horizontal" ? "Move the joint row, or put the longer walls" : "Lower the joint row, or put the taller walls"} on their own material.`,
+  };
+}
+
+/**
+ * Assign one material's problems to its walls: by ref (wall id / tag / measurement id), else by the wall tag that
+ * PREFIXES the message — the longest one wins, so "North" never takes "North wall: …". Joint-row problems (no wall
+ * named) go to the walls the row doesn't fit. Returns { byWall: Map(wallId → problems), general: problems }.
+ */
+function attributeProblems(view, material, result) {
+  const walls = material ? materialWalls(view, material.id) : [];
+  const byWall = new Map(walls.map((w) => [w.id, []]));
+  const general = [];
+  const keys = walls.map((w) => ({ w, keys: [...new Set([wallTag(view, material.id, w), wallName(w)])] }));
+  const misfits = material ? jointRowMisfits(view, material) : [];
+  const parentOf = new Map(view.measurements.filter((m) => m.kind === "opening").map((m) => [m.id, m.parentId]));
+  for (const p of result?.problems || []) {
+    if (p.code === "joint_rows_invalid" && misfits.length) {
+      for (const m of misfits) byWall.get(m.wall.id)?.push(misfitProblem(material, m));
+      continue;
+    }
+    // an opening's problem belongs to the wall that owns the opening
+    const refHits = keys.filter(({ w, keys: ks }) => (p.refs || []).some((r) => r && (r.wallId === w.id || r.measurementId === w.id || ks.includes(r.wallId)
+      || (r.openingId && parentOf.get(r.openingId) === w.id))));
+    if (refHits.length) { for (const { w } of refHits) byWall.get(w.id).push(p); continue; }
+    const msg = typeof p.message === "string" ? p.message : "";
+    let best = 0, hits = [];
+    for (const { w, keys: ks } of keys) {
+      for (const k of ks) {
+        if (!k || !(msg.startsWith(`${k}:`) || msg.startsWith(`${k} `))) continue;
+        if (k.length > best) { best = k.length; hits = [w]; } else if (k.length === best && !hits.includes(w)) hits.push(w);
+      }
+    }
+    if (hits.length) for (const w of hits) byWall.get(w.id).push(p);
+    else general.push(p);
+  }
+  for (const [k, v] of byWall) byWall.set(k, dedupe(v));
+  return { byWall, general: dedupe(general) };
+}
+
+function problemsForWall(view, material, result, wall) {
+  return attributeProblems(view, material, result).byWall.get(wall.id) || [];
+}
+
+/** demandId → the stock piece it is cut from (the ONE allocator's plan). */
+function allocationMap(result) {
+  const map = new Map();
+  for (const g of result?.allocation?.groups || []) {
+    for (const b of g.bars || []) for (const c of b.cuts || []) if (!map.has(c.demandId)) map.set(c.demandId, { stockLengthMm: b.stockLengthMm, source: b.source, offcutLabel: b.offcutLabel || null });
+    for (const u of g.unavailable || []) map.set(u.demandId, { unavailable: true, message: u.message || u.reason });
+  }
+  return map;
+}
+
+/** Per-wall quantities for one material: layout stock grouped by what is bought (before spares). */
+function wallQuantities(result, wallId, tag) {
+  const alloc = allocationMap(result);
+  const groups = new Map();
+  for (const d of demandsForWall(result, wallId, tag)) {
+    let key, text;
+    const id = d.identity || {};
+    if (d.unit === "sheet" || d.kind === "sheet") {
+      key = `sheet|${d.role}|${id.sku}|${id.stockLengthMm}|${id.stockWidthMm}`;
+      const what = [id.name, id.sku ? `SKU ${id.sku}` : null].filter(Boolean).join(" ");
+      text = `${roleLabel(d.role)} — ${what ? `${what} ` : ""}${id.stockLengthMm ? `${fmtMm(id.stockLengthMm)}${id.stockWidthMm ? ` × ${fmtMm(id.stockWidthMm)}` : ""} mm` : ""}`.trim();
+    } else if (d.kind === "linear" && d.unit !== "lm") {
+      const a = alloc.get(d.id);
+      const stock = a?.unavailable ? null : a?.stockLengthMm ?? id.stockLengthMm ?? null;
+      key = `piece|${d.role}|${stock}|${a?.unavailable ? "x" : ""}`;
+      text = `${roleLabel(d.role)} — ${a?.unavailable ? "no stock length fits" : stock ? `cut from ${fmtMm(stock)} mm lengths` : "stock not chosen yet"}`;
+    } else {
+      key = `${d.unit}|${d.role}`;
+      text = roleLabel(d.role);
+    }
+    const g = groups.get(key) || { key, text, unit: d.unit === "sheet" || d.kind === "sheet" ? "sheet" : d.kind === "linear" && d.unit !== "lm" ? "piece" : d.unit, qty: 0, lenMm: 0 };
+    g.qty += d.quantity || 0;
+    if (d.kind === "linear" && Number.isFinite(d.lengthMm)) g.lenMm += d.lengthMm * (d.quantity || 1);
+    groups.set(key, g);
+  }
+  return [...groups.values()].map((g) => {
+    let qtyText;
+    if (g.unit === "lm") qtyText = `${g.qty.toFixed(1)} LM (estimate)`;
+    else if (g.unit === "m2") qtyText = `${fmtM2(g.qty)} m²`;
+    else if (g.unit === "ml") qtyText = `${Math.round(g.qty).toLocaleString("en-AU")} ml`;
+    else if (UNIT_WORD[g.unit]) qtyText = plural(Math.round(g.qty), ...UNIT_WORD[g.unit]);
+    else qtyText = `${Math.round(g.qty).toLocaleString("en-AU")}`;
+    if (g.unit === "piece" && g.lenMm) qtyText += ` · ${(g.lenMm / 1000).toFixed(2)} m installed`;
+    return { key: g.key, text: g.text, qtyText, unit: g.unit, qty: g.qty };
+  });
+}
+
+/** Compact per-unit totals for a wall row / result line ("4 sheets", "11 pieces", "22.0 LM (estimate)"). */
+function qtyChips(rows) {
+  const by = new Map();
+  for (const r of rows) if (r.unit === "sheet" || r.unit === "piece" || r.unit === "lm") by.set(r.unit, (by.get(r.unit) || 0) + r.qty);
+  return [...by.entries()].map(([u, q]) => (u === "lm" ? `${q.toFixed(1)} LM (estimate)` : plural(Math.round(q), ...UNIT_WORD[u])));
+}
+
+// ── elevation elements per view ─────────────────────────────────────────────────────────────────────────────
+
+function jointLine(j, seg, k, prefix) {
+  const at = j.atMm + (j.gapMm || 0) / 2;
+  const horiz = j.orientation === "horizontal";
+  return {
+    id: `${prefix}j-${j.orientation}-${j.index}-${k}`, kind: "line", state: "joint",
+    a: horiz ? { x: seg.startMm, y: at } : { x: at, y: seg.startMm }, b: horiz ? { x: seg.endMm, y: at } : { x: at, y: seg.endMm },
+    info: { title: `${horiz ? "Horizontal" : "Vertical"} joint ${j.index + 1}`, rows: [["Length", `${fmtMm(seg.endMm - seg.startMm)} mm`], ["Joint gap", `${fmtMm(j.gapMm)} mm`], ...(j.detailRef ? [["Detail", j.detailRef]] : [])],
+      note: "Joint strips / backing come from the selected joint accessory." },
+  };
+}
+
+/** Does this layout hold anything to draw (an engine-blocked wall still gets its outline-only layout)? */
+function layoutHasParts(layout, method) {
+  if (!layout) return false;
+  if (method === "area_to_linear") return true;
+  if (method === "course_layout") return (layout.courses || []).length > 0;
+  if (method === "aac_panel_layout") return (layout.columns || []).length > 0;
+  return (layout.cells || []).length > 0;
+}
+
+function claddingElements(entry, bbox, wallProblems) {
+  const { layout, result } = entry;
+  const method = result?.methodKey || entry.material.methodKey;
+  const items = [], guides = [], notes = [];
+  let sheetInfo = null;
+  if (!layout) return { items, guides, notes, sheetInfo };
+  const demandOf = (() => {
+    const map = new Map();
+    for (const d of demandsForWall(result, entry.wallId, entry.tag)) { const c = d.sourceRefs?.[0]?.cell; if (c && !map.has(c)) map.set(c, d); }
+    return (id) => map.get(id) || null;
+  })();
+  const narrowRefs = wallProblems.filter((p) => p.code === "narrow_strip").flatMap((p) => p.refs || []);
+  if (method === "sheet_layout") {
+    const cols = new Map((layout.columns || []).map((c) => [c.index, c]));
+    const multi = (layout.courses || []).length > 1;
+    const tallest = Math.max(0, ...(layout.stockLengthsMm || []));
+    for (const c of layout.cells || []) {
+      const name = `Strip ${c.col + 1}${multi ? `, course ${c.row + 1}` : ""}`;
+      if (!c.occupied) { items.push({ id: c.id, kind: "rect", rect: c.rect, state: "empty", info: { title: name, rows: [["Sheet", "None — no cladding in this cell"]], note: "Empty cells use no sheet." } }); continue; }
+      const col = cols.get(c.col);
+      const sheetW = demandOf(c.id)?.identity?.stockWidthMm ?? null;
+      const tooTall = c.stockLengthMm == null;
+      items.push({
+        id: c.id, kind: "rect", rect: c.rect, state: tooTall ? "blocked" : col?.kind === "cut" ? "cut" : "occupied", mark: tooTall ? "!" : null,
+        info: {
+          title: name, tone: tooTall ? "error" : null, action: tooTall ? "jointRow" : null,
+          rows: [
+            ["Stock", tooTall ? `None fits — needs ${fmtMm(c.requiredLengthMm)} mm; ${layout.orientation === "horizontal" ? "longest" : "tallest"} listed is ${fmtMm(tallest)} mm` : `${c.sku ? `SKU ${c.sku} · ` : ""}${fmtMm(c.stockLengthMm)}${sheetW ? ` × ${fmtMm(sheetW)}` : ""} mm sheet`],
+            ["Cut size", `${fmtMm(c.cutWidthMm)} × ${fmtMm(c.cutLengthMm)} mm`],
+            ...(layout.heightAllowanceMm ? [["Needed", `${fmtMm(c.requiredLengthMm)} mm incl. ${fmtMm(layout.heightAllowanceMm)} allowance`]] : []),
+          ],
+          note: tooTall ? (layout.orientation === "horizontal" ? "Longer than the longest listed sheet — add a joint row with its detail, or choose a longer listed sheet." : "Taller than the tallest listed sheet — add a joint row with its detail, or choose a taller listed sheet.") : col?.kind === "cut" ? `Cut strip: ${fmtMm(col.widthMm)} mm of the ${fmtMm(layout.coverMm)} mm cover.` : null,
+        },
+      });
+    }
+    for (const j of layout.joints || []) j.segments.forEach((s, k) => items.push(jointLine(j, s, k, "")));
+    guides.push({ axis: layout.orientation === "horizontal" ? "y" : "x", at: layout.datumMm, label: "datum" });
+    // C0/C1: strips, cut strips (a 1 mm strip still takes a whole sheet), layout-cut vs stock area, potential offcuts
+    const cutCols = (layout.columns || []).filter((c) => c.kind !== "full");
+    const sheets = (layout.cells || []).filter((c) => c.occupied && c.stockLengthMm != null).length;
+    if ((layout.cells || []).length) {
+      sheetInfo = {
+        strips: (layout.columns || []).length, cutWidths: cutCols.map((c) => c.widthMm), courses: (layout.courses || []).length, sheets,
+        empty: (layout.cells || []).filter((c) => !c.occupied).length, layoutCutM2: layout.areas?.layoutCutM2, stockM2: layout.areas?.stockM2,
+        offcuts: (layout.potentialOffcuts || []).map((o) => ({ ...o, cell: (layout.cells || []).find((c) => c.id === o.cellId) })),
+      };
+    }
+  } else if (method === "course_layout") {
+    for (const c of layout.courses || []) {
+      const horiz = c.axis === "y";
+      const what = horiz ? "Course" : "Board column";
+      const rectOf = (a, b) => (horiz ? { x0: a, x1: b, y0: c.bandStartMm, y1: c.bandEndMm } : { x0: c.bandStartMm, x1: c.bandEndMm, y0: a, y1: b });
+      if (c.empty) { items.push({ id: `k${c.index}`, kind: "rect", rect: rectOf(horiz ? bbox.x0 : bbox.y0, horiz ? bbox.x1 : bbox.y1), state: "empty", info: { title: `${what} ${c.index + 1}`, rows: [["Boards", "None — no cladding in this band"]] } }); continue; }
+      const ripped = (c.baseCutMm || 0) + (c.topCutMm || 0);
+      c.segments.forEach((s, si) => {
+        if (!s.pieces.length) {
+          items.push({ id: `k${c.index}s${si}`, kind: "rect", rect: rectOf(s.startMm, s.endMm), state: "blocked", mark: "!",
+            info: { title: `${what} ${c.index + 1}`, tone: "error", rows: [["Run", `${fmtMm(s.lengthMm)} mm`]], note: "Longer than the longest listed board and no permitted joint position — needs layout." } });
+          return;
+        }
+        s.pieces.forEach((p, pi) => items.push({
+          id: p.id, kind: "rect", rect: rectOf(p.startMm, p.endMm), state: ripped > 0 ? "cut" : "occupied",
+          info: {
+            title: `${what} ${c.index + 1}, piece ${pi + 1}`,
+            rows: [["Stock", `${p.sku ? `SKU ${p.sku} · ` : ""}${fmtMm(p.stockLengthMm)} mm board`], ["Cut size", `${fmtMm(p.lengthMm)} mm long × ${fmtMm(c.coverMm - ripped)} mm${ripped ? " (ripped)" : " cover"}`],
+              ["Ends", `${END_LABEL[p.startEnd] || p.startEnd} / ${END_LABEL[p.endEnd] || p.endEnd}`]],
+            note: c.notchOpeningIds?.length ? "Notched around an opening that doesn't span the full course." : null,
+          },
+        }));
+      });
+    }
+    guides.push({ axis: layout.orientation === "horizontal" ? "y" : "x", at: layout.datumMm, label: "datum" });
+  } else if (method === "panel_grid") {
+    const g = layout.grid || {};
+    for (const c of layout.cells || []) {
+      const name = `Panel column ${c.col + 1}, row ${c.row + 1}`;
+      if (!c.occupied) { items.push({ id: c.id, kind: "rect", rect: c.rect, state: "empty", info: { title: name, rows: [["Panel", "None — no cladding in this cell"]] } }); continue; }
+      const narrow = narrowRefs.some((r) => (r.axis === "width" && r.band === c.col) || (r.axis === "height" && r.band === c.row));
+      const cut = c.colKind !== "full" || c.rowKind !== "full";
+      items.push({
+        id: c.id, kind: "rect", rect: c.rect, state: narrow ? "narrow" : cut ? "cut" : "occupied",
+        info: { title: name, rows: [["Stock", `${g.sku ? `SKU ${g.sku} · ` : ""}${fmtMm(g.panelWidthMm)} × ${fmtMm(g.panelHeightMm)} mm panel`], ["Cut size", `${fmtMm(c.cutWidthMm)} × ${fmtMm(c.cutHeightMm)} mm`]],
+          note: narrow ? "Narrow strip — needs the system's minimum-piece / edge-fixing review." : cut ? "Cut panel — needs the minimum-piece / edge-fixing check." : null, tone: narrow ? "warn" : null },
+      });
+    }
+    for (const j of layout.joints || []) j.segments.forEach((s, k) => items.push(jointLine(j, s, k, "")));
+  } else if (method === "aac_panel_layout") {
+    for (const col of layout.columns || []) {
+      const narrow = narrowRefs.some((r) => r.axis === "width" && r.band === col.index);
+      if (!col.panels.length) { items.push({ id: `s${col.segment}c${col.index}`, kind: "rect", rect: { x0: col.zoneStartMm, x1: col.zoneEndMm, y0: bbox.y0, y1: bbox.y1 }, state: "empty", info: { title: `Panel column ${col.index + 1}`, rows: [["Panel", "None — no wall in this column"]] } }); continue; }
+      for (const p of col.panels) {
+        const tooTall = p.stockLengthMm == null;
+        items.push({
+          id: p.id, kind: "rect", rect: { x0: col.zoneStartMm, x1: col.zoneEndMm, y0: p.startMm, y1: p.endMm }, state: tooTall ? "blocked" : narrow ? "narrow" : col.kind !== "full" ? "cut" : "occupied", mark: tooTall ? "!" : null,
+          info: { title: `Panel column ${col.index + 1}`, tone: tooTall ? "error" : null,
+            rows: [["Stock", tooTall ? "None fits — longer than the longest listed panel" : `${p.sku ? `SKU ${p.sku} · ` : ""}${fmtMm(layout.panelWidthMm)} × ${fmtMm(p.stockLengthMm)} mm panel`], ["Cut size", `${fmtMm(p.cutWidthMm)} × ${fmtMm(p.lengthMm)} mm`]],
+            note: tooTall ? "Stacking needs the system's exact horizontal-joint detail." : narrow ? "Narrow strip — review the system detail." : null },
+        });
+      }
+    }
+    for (const [i, cj] of (layout.controlJoints || []).entries()) items.push({ id: `cj${i}`, kind: "line", state: "joint", a: { x: cj.atMm, y: bbox.y0 }, b: { x: cj.atMm, y: bbox.y1 }, clip: true, info: { title: `Control joint ${i + 1}`, rows: [["Position", `${fmtMm(cj.atMm)} mm from the start`], ["Width", `${fmtMm(cj.widthMm)} mm`]] } });
+  } else if (method === "area_to_linear") {
+    notes.push(`Area estimate (random lengths): ${Number.isFinite(layout.orderLm) ? `${layout.orderLm.toFixed(1)} LM to order` : Number.isFinite(layout.withSpareLm) ? `${layout.withSpareLm.toFixed(1)} LM before the supplier increment` : "LM not calculated yet"} — no board layout is drawn. Use fixed lengths for a board-by-board layout.`);
+  }
+  return { items, guides, notes, sheetInfo };
+}
+
+/** Lowest / highest y of the wall outline on the vertical line x (for members that run base → top). */
+function spanAtX(polygon, x) {
+  const ys = [];
+  polygon.forEach((a, i) => {
+    const b = polygon[(i + 1) % polygon.length];
+    if (x < Math.min(a.x, b.x) - 0.5 || x > Math.max(a.x, b.x) + 0.5) return;
+    if (Math.abs(b.x - a.x) < 0.5) ys.push(a.y, b.y);
+    else ys.push(a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x));
+  });
+  return ys.length ? { lo: Math.min(...ys), hi: Math.max(...ys) } : null;
+}
+
+function supportElements(entries, bbox, polygon) {
+  const items = [], notes = [];
+  for (const e of entries) {
+    const l = e.layout;
+    if (!l) continue;
+    const prefix = `${String(e.material.id).slice(0, 6)}-`;
+    const alloc = allocationMap(e.result);
+    if (Array.isArray(l.lines) && (e.result?.methodKey === "support_grid" || l.method?.startsWith?.("support_grid"))) {
+      l.lines.forEach((ln, i) => {
+        if (ln.atMm == null) return;
+        const vert = ln.orientation === "vertical";
+        const a = alloc.get(ln.demandId);
+        items.push({
+          id: `${prefix}s${i}`, kind: "line", state: ln.existing ? "existing" : "support",
+          a: vert ? { x: ln.atMm, y: ln.fromMm } : { x: ln.fromMm, y: ln.atMm }, b: vert ? { x: ln.atMm, y: ln.toMm } : { x: ln.toMm, y: ln.atMm },
+          info: {
+            title: `${e.material.name}: ${e.readable ? e.readable(ln.label) : ln.label}`,
+            rows: [["Length", `${fmtMm(ln.lengthMm)} mm`], ["Stock", ln.existing ? "Existing support — not purchased" : a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `Cut from a ${fmtMm(a.stockLengthMm)} mm length${a.source === "offcut" ? ` (offcut ${a.offcutLabel || ""})` : ""}` : "Stock length not chosen yet"],
+              ...(Number.isFinite(ln.fixings) ? [["Fixings", String(ln.fixings)]] : [])],
+          },
+        });
+      });
+      if (!l.lines.length) notes.push(`${e.material.name}: no support pieces on this wall yet — see the problems above.`);
+    } else if (l.kind === "studWall") {
+      const studDemands = new Map(demandsForWall(e.result, e.wallId, e.tag).filter((d) => d.role === "stud").map((d) => [d.sourceRefs?.[0]?.station, d]));
+      for (const t of l.ticks || []) {
+        const d = studDemands.get(t.positionMm);
+        const a = d ? alloc.get(d.id) : null;
+        const opening = t.openingId ? e.openingLabel(t.openingId) : null;
+        const span = spanAtX(polygon, t.positionMm) || { lo: bbox.y0, hi: bbox.y1 };
+        items.push({
+          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : "full",
+          a: { x: t.positionMm, y: span.lo }, b: { x: t.positionMm, y: span.hi },
+          info: {
+            title: `Stud @ ${fmtMm(t.positionMm)} mm`,
+            rows: t.state === "removed" ? [["Status", `Removed — inside ${opening || "an opening"}`]]
+              : [["Cut length", `${fmtMm(d?.lengthMm ?? l.studLengthMm)} mm`], ["Stock", a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `${fmtMm(a.stockLengthMm)} mm length` : "—"], ...(l.plies > 1 ? [["Plies", String(l.plies)]] : [])],
+            note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
+          },
+        });
+      }
+      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed").length, "stud")} at ${fmtMm(l.studLengthMm)} mm — ${l.scope}.`);
+    } else if (l.kind === "plates") {
+      notes.push(`${e.material.name}: ${(l.layers || []).map((x) => `${x.tag} plate ${x.piecesMm.map((p) => fmtMm(p)).join(" + ")} mm`).join("; ")}.`);
+    } else if (Array.isArray(l.bays)) {
+      notes.push(`${e.material.name}: noggins — see the schedule for each bay's cut length.`);
+    }
+  }
+  return { items, notes };
+}
+
+function accessoryElements(polygon, openings, claddingEntries) {
+  const items = [], totals = [];
+  const y0 = Math.min(...polygon.map((p) => p.y));
+  const xs = polygon.map((p) => p.x), minX = Math.min(...xs), maxX = Math.max(...xs);
+  // base (starter / base trim): bottom edges, less door openings that sit on the base
+  let base = [];
+  polygon.forEach((a, i) => { const b = polygon[(i + 1) % polygon.length]; if (Math.abs(a.y - y0) < 0.5 && Math.abs(b.y - y0) < 0.5 && Math.abs(a.x - b.x) > 0.5) base.push([Math.min(a.x, b.x), Math.max(a.x, b.x)]); });
+  for (const o of openings) if (o.sillMm <= y0 + 0.5) base = base.flatMap(([s, e]) => [[s, Math.min(e, o.xMm)], [Math.max(s, o.xMm + o.widthMm), e]].filter(([p, q]) => q - p > 0.5));
+  base.forEach(([s, e], i) => items.push({ id: `base${i}`, kind: "line", state: "edge", a: { x: s, y: y0 }, b: { x: e, y: y0 }, info: { title: "Wall base", rows: [["Length", `${fmtMm(e - s)} mm`]], note: "Starter / base trim route (doors on the base are left out)." } }));
+  totals.push(["Base (less doors)", base.reduce((t, [s, e]) => t + (e - s), 0)]);
+  // wall ends (corner / end trims)
+  for (const [x, label] of [[minX, "Wall start"], [maxX, "Wall end"]]) {
+    const ys = polygon.filter((p) => Math.abs(p.x - x) < 0.5).map((p) => p.y);
+    if (ys.length < 2) continue;
+    const top = Math.max(...ys), bot = Math.min(...ys);
+    items.push({ id: `end-${label}`, kind: "line", state: "end", a: { x, y: bot }, b: { x, y: top }, info: { title: label, rows: [["Height", `${fmtMm(top - bot)} mm`]], note: "Corner or end trim route — corner type is chosen with the accessory, not inferred." } });
+  }
+  // opening edges (head / sill / jambs)
+  let perimeter = 0;
+  for (const o of openings) {
+    const x1 = o.xMm + o.widthMm, y1 = o.sillMm + o.heightMm, name = o.label || "Opening";
+    const edges = [["head", "Head", { x: o.xMm, y: y1 }, { x: x1, y: y1 }, o.widthMm], ["sill", "Sill", { x: o.xMm, y: o.sillMm }, { x: x1, y: o.sillMm }, o.widthMm],
+      ["jamb-left", "Left jamb", { x: o.xMm, y: o.sillMm }, { x: o.xMm, y: y1 }, o.heightMm], ["jamb-right", "Right jamb", { x: x1, y: o.sillMm }, { x: x1, y: y1 }, o.heightMm]];
+    for (const [k, label, a, b, len] of edges) {
+      if (k === "sill" && o.sillMm <= y0 + 0.5) continue; // a door has no sill edge on the base
+      perimeter += len;
+      items.push({ id: `${o.id}:${k}`, kind: "line", state: "edge", a, b, info: { title: `${name} ${label.toLowerCase()}`, rows: [["Length", `${fmtMm(len)} mm`]], note: "Edge length only — head/sill/jamb flashings and trims link to the opening's reviewed detail." } });
+    }
+  }
+  totals.push(["Opening edges", perimeter]);
+  // joints from the cladding layouts on this wall
+  let jointLen = 0;
+  for (const e of claddingEntries) {
+    const l = e.layout;
+    if (!l) continue;
+    const prefix = `${String(e.material.id).slice(0, 6)}-`;
+    for (const j of l.joints || []) j.segments.forEach((s, k) => { jointLen += s.endMm - s.startMm; items.push(jointLine(j, s, k, prefix)); });
+    for (const c of l.courses || []) {
+      if (!c.segments) continue;
+      const horiz = c.axis === "y";
+      for (const s of c.segments) for (const p of s.pieces || []) {
+        if (!String(p.endEnd).startsWith("joint")) continue;
+        jointLen += c.bandEndMm - c.bandStartMm;
+        items.push({ id: `${prefix}${p.id}-joint`, kind: "line", state: "joint", a: horiz ? { x: p.endMm, y: c.bandStartMm } : { x: c.bandStartMm, y: p.endMm }, b: horiz ? { x: p.endMm, y: c.bandEndMm } : { x: c.bandEndMm, y: p.endMm },
+          info: { title: `Board joint — course ${c.index + 1}`, rows: [["Position", `${fmtMm(p.endMm)} mm`], ["Type", END_LABEL[p.endEnd] || p.endEnd]] } });
+      }
+    }
+    for (const [i, cj] of (l.controlJoints || []).entries()) { jointLen += polygon.length ? Math.max(...polygon.map((p) => p.y)) - y0 : 0; items.push({ id: `${prefix}cj${i}`, kind: "line", state: "joint", clip: true, a: { x: cj.atMm, y: y0 }, b: { x: cj.atMm, y: Math.max(...polygon.map((p) => p.y)) }, info: { title: `Control joint ${i + 1}`, rows: [["Width", `${fmtMm(cj.widthMm)} mm`]] } }); }
+  }
+  totals.push(["Joints", jointLen]);
+  return { items, totals };
+}
+
+const LEGEND = {
+  cladding: [["occupied", "In use", "bg-blue-100 border-[#006c9b]"], ["cut", "Cut strip", "bg-amber-100 border-amber-700"], ["narrow", "Narrow — review", "bg-red-200 border-red-700"],
+    ["blocked", "No stock fits", "bg-red-300 border-red-800"], ["empty", "Empty — none used", "bg-white border-slate-400 border-dashed"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
+  supports: [["support", "Support", "bg-teal-700 border-teal-700"], ["existing", "Existing (not bought)", "bg-slate-400 border-slate-500 border-dashed"], ["full", "Stud", "bg-amber-800 border-amber-800"], ["removed", "Removed stud", "bg-slate-300 border-slate-400 border-dashed"]],
+  accessories: [["edge", "Base / opening edge", "bg-orange-600 border-orange-600"], ["end", "Wall end", "bg-sky-700 border-sky-700"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
+};
+
+// ── small UI pieces ─────────────────────────────────────────────────────────────────────────────────────────
+
+function Chips({ label, value, options, onChange, disabled }) {
+  return (
+    <fieldset>
+      {label && <legend className="mb-1 text-xs font-medium text-muted">{label}</legend>}
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(([v, text]) => (
+          <button key={String(v)} type="button" aria-pressed={value === v} disabled={disabled} onClick={() => onChange(v)}
+            className={`min-h-[44px] rounded-lg border px-3 text-sm disabled:opacity-50 ${value === v ? "border-primary bg-primary/10 font-semibold text-primary" : "border-hairline bg-white text-ink"}`}>{text}</button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Text that commits on blur / Enter (one undoable edit, not one per keystroke). */
+function CommitText({ label, value, onCommit, maxLength = 60, disabled }) {
+  const [text, setText] = useState(value || "");
+  useEffect(() => { setText(value || ""); }, [value]);
+  const commit = () => { const v = text.trim().slice(0, maxLength); if (v !== (value || "")) onCommit(v); };
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      <input value={text} maxLength={maxLength} disabled={disabled} onChange={(e) => setText(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+        className="min-h-[44px] w-full rounded-lg border border-hairline px-3 text-base text-ink focus-ring disabled:bg-page" />
+    </label>
+  );
+}
+
+function StatusChip({ group, value }) {
+  const [text, tone] = STATUS_TEXT[group]?.[value] || [value || "—", "muted"];
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${TONE[tone]}`} data-status={group} data-value={value || ""}>{text}</span>;
+}
+
+function StatusSummary({ view, material, result, computedError, canEdit, onSetup, readable }) {
+  const [all, setAll] = useState(false);
+  // joint-row problems name the walls the row doesn't fit (the engine's own message names none)
+  const { byWall, general } = attributeProblems(view, material, result);
+  const problems = [...general, ...[...byWall.values()].flat()].map(readable);
+  const blocking = dedupe(problems.filter((p) => p.blocking !== false));
+  const notes = dedupe(problems.filter((p) => p.blocking === false));
+  const shown = all ? blocking : blocking.slice(0, 4);
+  const st = { ...(result?.status || {}) };
+  // a material with no wall yet is "nothing measured", never "Calculated"
+  if (!materialWalls(view, material.id).length && (st.quantity === "calculated" || st.quantity === "incomplete")) st.quantity = "nothing";
+  return (
+    <section aria-label="Material status" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-semibold text-ink">{material.name}</h2>
+          <p className="text-[11px] text-muted">{describeFamilySpec(material.spec).line}</p>
+        </div>
+        {canEdit && onSetup && <Btn onClick={() => onSetup(material)}>Setup</Btn>}
+      </div>
+      <dl className="grid grid-cols-[6.5rem_1fr] items-center gap-x-2 gap-y-1 text-xs">
+        <dt className="text-muted">Quantity</dt><dd><StatusChip group="quantity" value={st.quantity} /></dd>
+        <dt className="text-muted">Installation</dt><dd><StatusChip group="installation" value={st.installation} /></dd>
+        <dt className="text-muted">Ordering</dt><dd><StatusChip group="procurement" value={st.procurement} /></dd>
+      </dl>
+      {st.installation !== "supported-by-selected-rule" && st.installation !== "project-detail-supplied" && (
+        <p className="text-[11px] text-muted">The app has not verified installation (supports, fixings, wind zones). Quantities are for ordering only.</p>
+      )}
+      {computedError && <Banner tone="error">The calculation stopped: {computedError}</Banner>}
+      {blocking.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" data-problems="blocking">
+          <p className="font-semibold">Needs attention before ordering</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">{shown.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
+          {blocking.length > 4 && <Btn kind="ghost" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${blocking.length}`}</Btn>}
+        </div>
+      )}
+      {notes.length > 0 && (
+        <details className="rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900">
+          <summary className="min-h-[44px] cursor-pointer py-3">{plural(notes.length, "note")} (not blocking)</summary>
+          <ul className="list-disc space-y-0.5 pb-2 pl-4">{notes.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function OpeningForm({ value, onField, canEdit, focusToken }) {
+  const ref = useRef(null);
+  useEffect(() => { if (focusToken) ref.current?.querySelector('[data-field="widthMm"] input')?.focus({ preventScroll: false }); }, [focusToken]);
+  if (!canEdit) {
+    return <p className="text-sm text-ink">{value.label || "Opening"} · {value.type} · {fmtMm(value.widthMm)} × {fmtMm(value.heightMm)} mm · sill {fmtMm(value.sillMm)} · from start {fmtMm(value.xMm)}</p>;
+  }
+  // compact: the elevation stays visible above this sheet while the opening is dragged
+  return (
+    <div ref={ref} className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div data-field="widthMm"><NumberField label="Width" value={value.widthMm} min={1} max={MAX_MM} onCommit={(n) => onField("widthMm", n)} /></div>
+        <div data-field="heightMm"><NumberField label="Height" value={value.heightMm} min={1} max={MAX_MM} onCommit={(n) => onField("heightMm", n)} /></div>
+        <div data-field="sillMm"><NumberField label="Sill height" value={value.sillMm} min={0} max={MAX_MM} onCommit={(n) => onField("sillMm", n)} /></div>
+        <div data-field="xMm"><NumberField label="Offset from wall start" value={value.xMm} min={0} max={MAX_MM} onCommit={(n) => onField("xMm", n)} /></div>
+      </div>
+      <p className="text-[11px] text-muted">Sill is up from the wall base; offset is to the opening&apos;s left edge.</p>
+      <div className="grid grid-cols-[5.5rem_1fr] items-end gap-2">
+        <CommitText label="Label" value={value.label} maxLength={40} onCommit={(v) => onField("label", v)} />
+        <Chips label="Type" value={value.type} options={OPENING_TYPES} onChange={(v) => onField("type", v)} />
+      </div>
+    </div>
+  );
+}
+
+function ElementSheet({ item, index, total, onStep, onClose, onAction, canEdit }) {
+  const info = item.info || {};
+  return (
+    <Sheet title={info.title || "Selected"} onClose={onClose} initialFocus={false}>
+      <dl className="space-y-1 text-sm" data-element-info={item.id}>
+        {(info.rows || []).map(([k, v]) => (
+          <div key={k} className="flex gap-2"><dt className="w-24 shrink-0 text-muted">{k}</dt><dd className="min-w-0 flex-1 font-medium text-ink">{v}</dd></div>
+        ))}
+      </dl>
+      {info.note && <p className={`mt-2 text-xs ${info.tone === "error" ? "text-red-700" : info.tone === "warn" ? "text-amber-800" : "text-muted"}`}>{info.note}</p>}
+      {info.action === "jointRow" && canEdit && <Btn kind="primary" className="mt-2" onClick={() => onAction("jointRow")}>Add a joint row</Btn>}
+      {total > 1 && (
+        <div className="mt-2 flex items-center gap-2">
+          <Btn onClick={() => onStep(-1)} aria-label="Previous element">‹ Previous</Btn>
+          <span className="flex-1 text-center text-xs text-muted">{index + 1} of {total}</span>
+          <Btn onClick={() => onStep(1)} aria-label="Next element">Next ›</Btn>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+function JointRowSheet({ view, material, suggestionMm, onApply, onRemove, onClose }) {
+  const jr = material.rules?.jointRows || null;
+  const [atMm, setAt] = useState(jr?.atMm?.[0] ?? (Number.isFinite(suggestionMm) ? Math.floor(suggestionMm / SNAP_MM) * SNAP_MM : null));
+  const [gapMm, setGap] = useState(jr?.gapMm ?? null);
+  const [ref, setRef] = useState(jr?.detailRef || "");
+  // the row applies to EVERY wall using this material: name the ones it would not fit inside
+  const misfits = atMm > 0 ? jointRowMisfits(view, material, { atMm: [atMm, ...(jr?.atMm?.slice(1) || [])], gapMm: Number.isFinite(gapMm) ? gapMm : 0 }) : [];
+  const apply = (patch) => {
+    const v = { atMm, gapMm, ref, ...patch };
+    if (patch.atMm !== undefined) setAt(patch.atMm);
+    if (patch.gapMm !== undefined) setGap(patch.gapMm);
+    if (patch.ref !== undefined) setRef(patch.ref);
+    if (v.atMm > 0 && Number.isFinite(v.gapMm) && v.gapMm >= 0) onApply({ atMm: [v.atMm, ...(jr?.atMm?.slice(1) || [])], gapMm: v.gapMm, ...(v.ref ? { detailRef: v.ref } : {}) });
+  };
+  // horizontal sheets run along the wall, so their joint row is a VERTICAL joint measured from the wall start
+  const horizontal = material.spec?.orientation === "horizontal";
+  return (
+    <Sheet title="Joint row" onClose={onClose} initialFocus={false}>
+      <KeyboardSafe className="space-y-2"><div className="space-y-2" data-joint-row-form="">
+        <p className="text-xs text-muted">A second course of sheets needs an explicit {horizontal ? "vertical" : "horizontal"} joint and its detail. It applies to every wall using <b>{material.name}</b>, measured {horizontal ? "along from each wall's start" : "up from each wall's base"}.</p>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label={horizontal ? "Joint position" : "Joint height"} value={atMm} min={1} max={MAX_MM} onCommit={(n) => apply({ atMm: n })} help={horizontal ? "From the wall start" : "From the wall base"} />
+          <NumberField label="Joint gap" value={gapMm} min={0} max={50} onCommit={(n) => apply({ gapMm: n })} help="From the selected detail — never defaulted" />
+        </div>
+        <CommitText label="Detail reference (drawing / guide)" value={ref} onCommit={(v) => apply({ ref: v })} />
+        {!jr && <p className="text-xs text-amber-800">Enter the joint gap from the detail to apply the joint row.</p>}
+        {misfits.length > 0 && (
+          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-joint-row-misfit="">
+            {misfits.map((m) => `${wallName(m.wall)} (${fmtMm(Math.round(m.extentMm))} mm)`).join(", ")} {misfits.length === 1 ? "is" : "are"} not {horizontal ? "long" : "tall"} enough for a joint at {fmtMm(atMm)} mm — the joint row doesn&apos;t apply there, so {misfits.length === 1 ? "it keeps" : "they keep"} a single course of sheets.
+          </p>
+        )}
+        {jr && <Btn kind="danger" onClick={onRemove}>Remove joint row</Btn>}
+      </div></KeyboardSafe>
+    </Sheet>
+  );
+}
+
+function NewWallSheet({ defaultName, onCreate, onClose }) {
+  const [name, setName] = useState(defaultName);
+  const [kind, setKind] = useState("rect");
+  return (
+    <Sheet title="Wall by numbers" onClose={onClose} initialFocus={false}>
+      <KeyboardSafe className="space-y-2">
+        <TextField label="Wall name" value={name} onChange={setName} />
+        <Chips label="Shape" value={kind} options={SHAPES} onChange={setKind} />
+        <NumberField label="Wall length" autoFocus value={null} min={1} max={MAX_MM} onCommit={(n) => onCreate({ name: (name || "").trim().slice(0, 60) || defaultName, kind, widthMm: n })}
+          help="Horizontal length along the wall. Heights come next — the elevation appears once they're entered." />
+      </KeyboardSafe>
+    </Sheet>
+  );
+}
+
+/** Numeric wall fields — authoritative; incoherent combinations stay in the field as a draft with a message. */
+function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst }) {
+  const inp = wall.inputs || {};
+  const kind = inp.kind || "rect";
+  const traced = isTraced(wall);
+  const [errs, setErrs] = useState({});
+  const W = traced ? lengthMm : inp.widthMm;
+  const check = (next, field) => {
+    const width = field === "widthMm" ? next.widthMm : W;
+    if (kind === "gable") {
+      if (next.apexXMm != null && width && (next.apexXMm <= 0 || next.apexXMm >= width)) return [field === "widthMm" ? "widthMm" : "apexXMm", `The apex must sit between the two wall ends (more than 0 and less than ${fmtMm(width)} mm).`];
+      if (next.apexHeightMm != null && next.eavesHeightMm != null && next.apexHeightMm <= next.eavesHeightMm) return [field, "The apex must be higher than the eaves."];
+    }
+    return null;
+  };
+  const commit = (field, n) => {
+    const next = { ...inp, [field]: n };
+    const bad = check(next, field);
+    if (bad) { setErrs({ [bad[0]]: bad[1] }); return; }
+    setErrs({});
+    onPatch({ [field]: n });
+  };
+  const setShape = (k) => {
+    if (k === kind) return;
+    const h = inp.heightMm ?? (Math.max(inp.startHeightMm || 0, inp.endHeightMm || 0) || inp.eavesHeightMm || null);
+    const patch = { kind: k };
+    if (k === "rect" && inp.heightMm == null && h) patch.heightMm = h;
+    if (k === "rake") { if (inp.startHeightMm == null && h) patch.startHeightMm = h; if (inp.endHeightMm == null && h) patch.endHeightMm = h; }
+    if (k === "gable" && inp.eavesHeightMm == null && h) patch.eavesHeightMm = h;
+    setErrs({});
+    onPatch(patch);
+  };
+  const missing = missingHeights(inp);
+  const af = (f) => autoFocusFirst && missing[0] === f;
+  const nf = (field, label, help) => (
+    <div data-field={field}>
+      <NumberField label={label} value={inp[field] ?? null} min={field === "apexXMm" ? 0 : 1} max={MAX_MM} autoFocus={af(field)} onCommit={(n) => commit(field, n)} error={errs[field]} help={help} />
+    </div>
+  );
+  if (!canEdit) {
+    return <p className="text-sm text-ink" data-wall-summary="">{SHAPE_LABEL[kind]} · {fmtMm(W)} mm long · {heightsText(inp) || "heights not entered"}</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <CommitText label="Wall name" value={wallName(wall)} onCommit={(v) => onPatch({ name: v || null })} />
+      {kind === "polygon" ? <p className="text-sm text-ink">Shape: <b>traced outline</b> — heights come from the traced elevation.</p> : <Chips label="Shape" value={kind} options={SHAPES} onChange={setShape} />}
+      {traced ? (
+        <div className="rounded-lg border border-hairline bg-page px-3 py-2 text-sm" data-field="widthMm">
+          <span className="block text-xs font-medium text-muted">Wall length (traced)</span>
+          <span className="font-semibold text-ink" data-traced-length="">{fmtMm(Math.round((lengthMm || 0) * 10) / 10)} mm</span>
+          <span className="block text-[11px] text-muted">Measured on the plan — retrace the wall to change it.{onTrace ? "" : " (No plan on this takeoff.)"}</span>
+        </div>
+      ) : (
+        <div data-field="widthMm"><NumberField label="Wall length" value={inp.widthMm ?? null} min={1} max={MAX_MM} onCommit={(n) => commit("widthMm", n)} error={errs.widthMm} /></div>
+      )}
+      {kind === "rect" && nf("heightMm", "Wall height", "Cladding boundary height — not automatically slab-to-ceiling")}
+      {kind === "rake" && <div className="grid grid-cols-2 gap-2">{nf("startHeightMm", "Height at start")}{nf("endHeightMm", "Height at end")}</div>}
+      {kind === "gable" && (
+        <div className="grid grid-cols-2 gap-2">
+          {nf("eavesHeightMm", "Eaves height")}
+          {nf("apexHeightMm", "Apex height")}
+          <div className="col-span-2">{nf("apexXMm", "Apex position from start", "Entered — roof pitch is never inferred from the plan")}
+            {W > 0 && <Btn kind="ghost" onClick={() => commit("apexXMm", Math.round(W / 2))}>Centre ({fmtMm(Math.round(W / 2))})</Btn>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function heightsText(inp = {}) {
+  const k = inp.kind || "rect";
+  if (k === "rect") return inp.heightMm ? `${fmtMm(inp.heightMm)} high` : null;
+  if (k === "rake") return inp.startHeightMm && inp.endHeightMm ? `${fmtMm(inp.startHeightMm)} → ${fmtMm(inp.endHeightMm)} high` : null;
+  if (k === "gable") return inp.eavesHeightMm && inp.apexHeightMm ? `eaves ${fmtMm(inp.eavesHeightMm)} · apex ${fmtMm(inp.apexHeightMm)}` : null;
+  return "traced outline";
+}
+
+// ── the screen ──────────────────────────────────────────────────────────────────────────────────────────────
+
+export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrace, onSetup, onClose }) {
+  const view = ws.view;
+  const canEdit = !!ws.capabilities?.edit;
+  const material = view.materials.find((m) => m.id === materialId) || null;
+  const results = ws.computed?.materialResults || {};
+  const result = material ? results[material.id] || null : null;
+  const histRef = useRef({ past: [], future: [] });
+  const [hist, setHist] = useState({ past: 0, future: 0 });
+  const [notice, setNotice] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [draftReset, setDraftReset] = useState(0); // bumped by Undo to drop invalid field drafts (fields remount)
+  const rootRef = useRef(null);
+  const clearDraftRef = useRef(null);              // the editor's "cancel the unfinished new opening" (true when it did)
+
+  const walls = view.measurements.filter((m) => m.kind === "wall" && !m.archived);
+  const wall = wallId ? walls.find((w) => w.id === wallId) || null : null;
+  useEffect(() => { if (wallId && !wall) onOpenWall?.(null); }, [wallId, wall, onOpenWall]);
+
+  // A typed number counts once the page is hidden (app switch, reload, the phone locking): blur the field so it
+  // commits — and is written to device recovery — instead of being lost. Invalid text stays as it is.
+  useEffect(() => {
+    const commitTyped = () => {
+      const el = document.activeElement;
+      if (el && rootRef.current?.contains(el) && el.tagName === "INPUT") el.blur();
+    };
+    const vis = () => { if (document.visibilityState === "hidden") commitTyped(); };
+    document.addEventListener("visibilitychange", vis, true);
+    window.addEventListener("pagehide", commitTyped, true);
+    return () => { document.removeEventListener("visibilitychange", vis, true); window.removeEventListener("pagehide", commitTyped, true); };
+  }, []);
+
+  // session undo/redo — each op stores the partial change-set to re-apply and to revert (as MeasureScreen)
+  const sync = () => setHist({ past: histRef.current.past.length, future: histRef.current.future.length });
+  function record(op) {
+    ws.edit(op.redo);
+    histRef.current = { past: [...histRef.current.past, op].slice(-100), future: [] };
+    sync();
+  }
+  function undo() {
+    // An invalid field draft, or an unfinished new opening, is what Undo clears first — never an earlier edit.
+    if (rootRef.current?.querySelector('input[aria-invalid="true"]')) { setDraftReset((n) => n + 1); return; }
+    if (clearDraftRef.current?.()) return;
+    const h = histRef.current;
+    if (!h.past.length) return;
+    const op = h.past[h.past.length - 1];
+    ws.edit(op.undo);
+    histRef.current = { past: h.past.slice(0, -1), future: [op, ...h.future] };
+    setNotice(null);
+    sync();
+  }
+  function redo() {
+    const h = histRef.current;
+    if (!h.future.length) return;
+    const [op, ...rest] = h.future;
+    ws.edit(op.redo);
+    histRef.current = { past: [...h.past, op], future: rest };
+    sync();
+  }
+
+  const openingsOf = (wid) => view.measurements.filter((m) => m.kind === "opening" && m.parentId === wid && !m.archived);
+  const act = {
+    createWall({ name, kind, widthMm }) {
+      const id = newId(), cid = newId();
+      const meas = { id, kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, inputs: { kind, widthMm, name } };
+      const con = material ? [{ id: cid, measurementId: id, jobMaterialId: material.id, role: "wall" }] : [];
+      record({ redo: partial({ measurements: [meas], contributions: con }), undo: partial({ archive: { measurements: [id], contributions: con.map((c) => c.id) } }) });
+      setAdding(false);
+      setNotice(null);
+      onOpenWall?.(id);
+    },
+    updateWall(w, patch) {
+      const before = mRec(w);
+      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(w.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+    },
+    removeWall(w) {
+      const ops = openingsOf(w.id);
+      const ids = new Set([w.id, ...ops.map((o) => o.id)]);
+      const cons = view.contributions.filter((c) => ids.has(c.measurementId) && !c.archived);
+      // the wall goes for EVERY material using it (or its openings) — say which others lost it
+      const others = [...new Set(cons.map((c) => c.jobMaterialId))].filter((id) => id !== material?.id).map((id) => view.materials.find((m) => m.id === id)?.name).filter(Boolean);
+      record({ redo: partial({ archive: { measurements: [...ids], contributions: cons.map((c) => c.id) } }), undo: partial({ measurements: [mRec(w), ...ops.map(mRec)], contributions: cons.map(cRec) }) });
+      setNotice(`Removed ${wallName(w)}${ops.length ? ` and its ${plural(ops.length, "opening")}` : ""}.${others.length ? ` Also gone from ${others.join(", ")}.` : ""}`);
+      onOpenWall?.(null);
+    },
+    setAttached(w, on) {
+      if (!material) return;
+      if (on) {
+        const con = { id: newId(), measurementId: w.id, jobMaterialId: material.id, role: "wall" };
+        record({ redo: partial({ contributions: [con] }), undo: partial({ archive: { contributions: [con.id] } }) });
+      } else {
+        const cons = view.contributions.filter((c) => c.measurementId === w.id && c.jobMaterialId === material.id && !c.archived);
+        record({ redo: partial({ archive: { contributions: cons.map((c) => c.id) } }), undo: partial({ contributions: cons.map(cRec) }) });
+      }
+    },
+    createOpening(w, inputs) {
+      const id = newId();
+      const meas = { id, kind: "opening", parentId: w.id, documentId: null, pageIndex: null, calibrationId: null, points: null, label: null, inputs };
+      record({ redo: partial({ measurements: [meas] }), undo: partial({ archive: { measurements: [id] } }) });
+      return id;
+    },
+    updateOpening(o, patch) {
+      const before = mRec(o);
+      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(o.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+    },
+    removeOpening(o) {
+      const cons = view.contributions.filter((c) => c.measurementId === o.id && !c.archived);
+      record({ redo: partial({ archive: { measurements: [o.id], contributions: cons.map((c) => c.id) } }), undo: partial({ measurements: [mRec(o)], contributions: cons.map(cRec) }) });
+    },
+    updateRules(patch, drop = []) {
+      if (!material) return;
+      const before = matRec(material);
+      const rules = { ...(material.rules || {}), ...patch };
+      for (const k of drop) delete rules[k];
+      record({ redo: partial({ materials: [{ ...before, rules }] }), undo: partial({ materials: [before] }) });
+    },
+  };
+
+  const headerActions = (
+    <>
+      <SaveChip status={ws.status} />
+      <Btn kind="ghost" className="min-w-[44px]" onClick={undo} disabled={!hist.past} aria-label="Undo">↶</Btn>
+      <Btn kind="ghost" className="min-w-[44px]" onClick={redo} disabled={!hist.future} aria-label="Redo">↷</Btn>
+    </>
+  );
+  const saveBanner = ws.saveError ? (
+    <Banner tone={ws.status === "unsynced" ? "warn" : "error"} action={ws.rejected ? <div className="flex gap-1"><Btn onClick={ws.retryRejected}>Try again</Btn><Btn kind="ghost" onClick={ws.discardRejected}>Discard</Btn></div> : null}>
+      {ws.rejected ? `Not saved: ${ws.saveError}` : ws.saveError}
+    </Banner>
+  ) : null;
+
+  if (wall) {
+    const traced = isTraced(wall);
+    return (
+      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${traced ? "Derived from plan + entered heights" : "Entered"}`} onClose={() => onOpenWall?.(null)} closeLabel="‹ Walls" actions={headerActions}>
+        <div ref={rootRef} className="contents">
+          <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} saveBanner={saveBanner}
+            draftReset={draftReset} clearDraftRef={clearDraftRef} />
+        </div>
+      </FocusedWindow>
+    );
+  }
+
+  const nextName = (() => { let n = walls.length + 1; const names = new Set(walls.map(wallName)); while (names.has(`Wall ${n}`)) n++; return `Wall ${n}`; })();
+  const attribution = material ? attributeProblems(view, material, result) : null;
+  return (
+    <FocusedWindow title={material?.name || "Walls"} subtitle="Walls" onClose={onClose} closeLabel="Back" actions={headerActions}>
+      <div ref={rootRef} className="contents">
+      <KeyboardSafe className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl space-y-3 p-3">
+          {!material && <Banner tone="warn">This material is no longer in the takeoff. Go back and choose one.</Banner>}
+          {material && <StatusSummary view={view} material={material} result={result} computedError={ws.computed?.error} canEdit={canEdit} onSetup={onSetup} readable={readableFor(view)} />}
+          {notice && <Banner tone="info" action={hist.past ? <Btn onClick={undo}>Undo</Btn> : null}>{notice}</Banner>}
+          <section aria-label="Walls" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="flex-1 text-sm font-semibold text-ink">Walls <span className="font-normal text-muted">({walls.length})</span></h2>
+            </div>
+            {canEdit && material && (
+              <div className="grid grid-cols-2 gap-2">
+                <Btn kind="primary" onClick={() => { setNotice(null); setAdding(true); }}>Wall by numbers</Btn>
+                {onTrace ? <Btn onClick={onTrace}>Trace on plan</Btn> : <span />}
+              </div>
+            )}
+            {!walls.length && <p className="text-sm text-muted">No walls yet. Add one by numbers (length and heights), or trace its run on the plan and enter the heights.</p>}
+            <ul className="divide-y divide-hairline">
+              {walls.map((w) => {
+                const inp = w.inputs || {};
+                const k = inp.kind || "rect";
+                const len = isTraced(w) ? tracedLengthMm(w, view.calibrations) : inp.widthMm;
+                const hText = heightsText(inp);
+                const users = [...new Set(view.contributions.filter((c) => c.measurementId === w.id && !c.archived).map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
+                const attached = !!material && users.some((m) => m.id === material.id);
+                const nOpen = openingsOf(w.id).length;
+                const tag = attached ? wallTag(view, material.id, w) : null;
+                const q = attached ? qtyChips(wallQuantities(result, w.id, tag)) : [];
+                const needsHeights = missingHeights(inp).length > 0;
+                const blocked = attached && !needsHeights && (attribution?.byWall.get(w.id) || []).some((p) => p.blocking !== false);
+                return (
+                  <li key={w.id} className="py-2" data-wall-row={w.id}>
+                    <button type="button" onClick={() => onOpenWall?.(w.id)} className="flex min-h-[48px] w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-page" aria-label={`Open ${wallName(w)}`}>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-ink">{wallName(w)}</span>
+                        <span className="block text-[11px] text-muted">{SHAPE_LABEL[k]} · {fmtMm(Math.round((len || 0) * 10) / 10)} mm long{hText ? ` · ${hText}` : ""}{nOpen ? ` · ${plural(nOpen, "opening")}` : ""}</span>
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTraced(w) ? "From plan" : "Entered"}</span>
+                          {needsHeights && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
+                          {blocked && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-wall-blocked="">Needs attention</span>}
+                          {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
+                          {q.map((t) => <span key={t} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">{t}</span>)}
+                        </span>
+                      </span>
+                      <span aria-hidden="true" className="text-muted">›</span>
+                    </button>
+                    {canEdit && material && (
+                      <div className="mt-1 flex flex-wrap gap-2 pl-1">
+                        <Btn aria-pressed={attached} onClick={() => act.setAttached(w, !attached)} aria-label={attached ? `Stop using ${material.name} on ${wallName(w)}` : `Use ${material.name} on ${wallName(w)}`}
+                          className={attached ? "border-primary text-primary" : ""}>{attached ? "✓ Uses this material" : "Use this material"}</Btn>
+                        <Btn kind="danger" onClick={() => act.removeWall(w)} aria-label={`Remove ${wallName(w)}`}>Remove</Btn>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+          {saveBanner}
+        </div>
+      </KeyboardSafe>
+      {adding && canEdit && <NewWallSheet key={draftReset} defaultName={nextName} onCreate={act.createWall} onClose={() => setAdding(false)} />}
+      </div>
+    </FocusedWindow>
+  );
+}
+
+// ── wall editor ─────────────────────────────────────────────────────────────────────────────────────────────
+
+const ACCESSORY_SCOPE_LABEL = { starter: "Starter / base trim", corners: "Corner trims", joints: "Joint / backing strips", openings: "Opening head / sill / jamb", membrane: "Membrane / wrap",
+  tape: "Tape", sealant: "Sealant", fixings: "Fixings", mesh: "Mesh / render" };
+const SCOPE_TEXT = { include: "Include", "by-others": "By others", exclude: "Exclude", unresolved: "Not decided" };
+const GROUP_STATE_TEXT = { calculated: "calculated", manual: "entered", estimate: "estimate", unresolved: "not resolved", omitted: "not ordered" };
+
+/** The setout fields this method takes (sheet strips from the wall start; courses / boards from 0 or below). */
+function setoutFor(material) {
+  if (!material) return null;
+  const horizontal = material.spec?.orientation === "horizontal";
+  if (material.methodKey === "sheet_layout") {
+    return { unit: "sheet", what: "Sheets", min: 0, label: horizontal ? "Setout starts at (up from the wall base)" : "Setout starts at (from the wall start)",
+      help: "Default is the wall start. Applies to every wall using this material; panels are never re-centred automatically." };
+  }
+  if (material.methodKey === "course_layout") {
+    return { unit: "piece", what: horizontal ? "Course boards" : "Boards", min: -MAX_MM, max: 0, label: horizontal ? "First course starts at (from the wall base)" : "First board starts at (from the wall start)",
+      help: "0 = the wall base/start. A negative value starts with a cut first course. Applies to every wall using this material — never re-centred automatically." };
+  }
+  return null;
+}
+
+function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, saveBanner, draftReset, clearDraftRef }) {
+  const fam = material?.spec?.family;
+  const [tab, setTab] = useState(fam === "batten" || fam === "timber" ? "supports" : fam === "accessory" ? "accessories" : "cladding");
+  const [pick, setPick] = useState(null);
+  const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
+  const [placing, setPlacing] = useState(false);
+  const [draft, setDraft] = useState(null);       // new opening before it is valid
+  const [drag, setDrag] = useState(null);         // { id, xMm, sillMm } live preview while dragging
+  const [focusToken, setFocusToken] = useState(0);
+  const [datumChange, setDatumChange] = useState(null); // { before, datumMm, key } — shown only while still true
+  const [autoFocusFirst] = useState(() => canEdit && missingHeights(wall.inputs || {}).length > 0);
+  const elevRef = useRef(null);
+  const drawingRef = useRef(null);
+  const showDrawing = () => setTimeout(() => { try { (drawingRef.current || elevRef.current)?.scrollIntoView({ block: "start" }); } catch { /* old browser */ } }, 0);
+
+  const inputs = wall.inputs || {};
+  const traced = isTraced(wall);
+  const lengthMm = traced ? tracedLengthMm(wall, view.calibrations) : inputs.widthMm;
+  const openingsRaw = view.measurements.filter((m) => m.kind === "opening" && m.parentId === wall.id && !m.archived);
+  const openings = openingsRaw.map((o) => {
+    const x = o.inputs || {};
+    const d = drag && drag.id === o.id ? drag : null;
+    return { id: o.id, xMm: d ? d.xMm : x.xMm, sillMm: d ? d.sillMm : x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm, label: x.label || "", type: x.type || "window", rec: o };
+  });
+  const contribs = view.contributions.filter((c) => c.measurementId === wall.id && !c.archived);
+  const onWall = [...new Set(contribs.map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
+  const attached = !!material && onWall.some((m) => m.id === material.id);
+  const openingLabel = (id) => openings.find((o) => o.id === id)?.label || "an opening";
+  const readableText = readableTextFor(view);
+  const entries = onWall.map((m) => {
+    const r = results[m.id] || null;
+    return { material: m, result: r, layout: r?.layouts?.find((l) => l.wallId === wall.id) || null, tag: wallTag(view, m.id, wall), wallId: wall.id, openingLabel, readable: readableText };
+  }).sort((a, b) => (a.material.id === material?.id ? -1 : b.material.id === material?.id ? 1 : 0));
+  const geom = wallGeometry(wall, view.calibrations, entries.map((e) => e.layout).filter(Boolean));
+  const polygon = geom.polygon;
+  const bbox = polygon ? { x0: Math.min(...polygon.map((p) => p.x)), x1: Math.max(...polygon.map((p) => p.x)), y0: Math.min(...polygon.map((p) => p.y)), y1: Math.max(...polygon.map((p) => p.y)) } : null;
+  const areas = areasFor(polygon, openings);
+  // C0 display: which openings stick out past the wall (only the on-wall part is deducted) or miss it entirely
+  const openingIssue = (id) => {
+    const p = (areas?.problems || []).find((x) => (x.refs || []).some((r) => r.openingId === id));
+    return !p ? null : p.code === "opening_outside_wall" ? "outside" : p.code === "opening_clipped" ? "clipped" : "invalid";
+  };
+  const drawnOpenings = openings.map((o) => ({ ...o, issue: openingIssue(o.id) === "invalid" ? null : openingIssue(o.id) }));
+
+  const wallProblemsByMat = new Map(entries.map((e) => [e.material.id, problemsForWall(view, e.material, e.result, wall)]));
+  const cladEntries = entries.filter((e) => CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey));
+  const shownClad = cladEntries.find((e) => e.material.id === pick) || cladEntries[0] || null;
+  const accessoryEntries = entries.filter((e) => e.material.spec?.family === "accessory");
+
+  // elements of the ONE view shown
+  let elements = { items: [], guides: [], notes: [], totals: null, sheetInfo: null };
+  if (polygon && tab === "cladding" && shownClad) elements = { ...claddingElements(shownClad, bbox, wallProblemsByMat.get(shownClad.material.id) || []), totals: null };
+  if (polygon && tab === "supports") { const s = supportElements(entries.filter((e) => !CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey) && e.material.spec?.family !== "accessory"), bbox, polygon); elements = { items: s.items, guides: [], notes: s.notes, totals: null }; }
+  if (polygon && tab === "accessories") { const a = accessoryElements(polygon, openings, cladEntries); elements = { items: a.items, guides: [], notes: [], totals: a.totals }; }
+  const hitItems = elements.items.filter((it) => it.hit !== false);
+  const selItem = sel?.kind === "item" ? hitItems.find((it) => it.id === sel.id) || null : null;
+  const selOpening = sel?.kind === "opening" ? openings.find((o) => o.id === sel.id) || null : null;
+  const legend = (LEGEND[tab] || []).filter(([state]) => elements.items.some((it) => it.state === state));
+
+  // problems shown in place: everything blocking on this wall (incl. openings off the wall); a clipped opening is a
+  // note on its own row only
+  const measProblems = [...new Set((ws.computed?.contributions || []).filter((c) => c.measurementId === wall.id).flatMap((c) => c.problems || []))].map((code) => MEAS_PROBLEM[code]).filter(Boolean);
+  const readable = readableFor(view);
+  const inPlace = entries.flatMap((e) => (wallProblemsByMat.get(e.material.id) || []).filter((p) => p.code !== "opening_clipped")
+    .map((p) => ({ ...readable(p), materialName: OPENING_GEOMETRY.has(p.code) ? null : e.material.name, materialId: e.material.id })));
+  const blockingHere = dedupe(inPlace.filter((p) => p.blocking !== false));
+  const notesHere = dedupe(inPlace.filter((p) => p.blocking === false));
+  const blockingFor = (id) => blockingHere.some((p) => p.materialId === id);
+  const openingProblem = (id) => {
+    const k = openingIssue(id);
+    return !k ? null : k === "outside" ? "Outside the wall — move it onto the wall." : k === "clipped" ? "Extends past the wall edge — only the part on the wall is deducted." : "Needs a width, height, sill and offset.";
+  };
+  const tooTall = blockingHere.find((p) => p.code === "sheet_too_tall" && p.materialId === material?.id);
+
+  // setout datum (sheets / courses) + its quantity change on THIS wall, shown only while it is still the reason
+  const setout = setoutFor(material);
+  const setoutQty = (() => {
+    if (!material || !setout) return null;
+    return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall)).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0);
+  })();
+  const changeKeyFor = (rules) => { const r = { ...(rules || {}) }; delete r.datumMm; return JSON.stringify([inputs, openingsRaw.map((o) => o.inputs), r, material?.spec]); };
+  const changeKey = changeKeyFor(material?.rules);
+  const datumShown = datumChange && (material?.rules?.datumMm ?? 0) === datumChange.datumMm && datumChange.key === changeKey ? datumChange : null;
+
+  // live result next to the wall fields (the elevation can be scrolled out of view while typing)
+  const mine = material ? entries.find((e) => e.material.id === material.id) : null;
+  const mineQty = mine ? qtyChips(wallQuantities(mine.result, wall.id, mine.tag)) : [];
+  const resultLine = areas ? `Net ${fmtM2(areas.netM2)} m² of ${fmtM2(areas.grossM2)} m²${mine ? ` · ${mine.material.name}: ${blockingFor(mine.material.id) ? "needs attention (see problems)" : mineQty.length ? mineQty.join(", ") : "nothing calculated yet"}` : ""}` : null;
+
+  // ── handlers ──
+  const nextLabel = (type) => {
+    const p = type === "door" ? "D" : type === "other" ? "O" : "W";
+    const used = new Set(openings.map((o) => o.label));
+    let n = 1;
+    while (used.has(`${p}${n}`)) n++;
+    return `${p}${n}`;
+  };
+  // a tapped position centres the opening there, kept on the wall when it fits; typed numbers always win
+  const draftValues = (d) => {
+    if (!d) return null;
+    const w = d.widthMm ?? null, h = d.heightMm ?? null;
+    const fit = (v, lo, hi, size) => (bbox && size > 0 && hi - lo >= size ? Math.min(Math.max(v, lo), hi - size) : Math.max(lo ?? 0, v));
+    const xMm = d.xMm ?? (Number.isFinite(d.tapX) ? fit(snap(d.tapX - (w || 0) / 2), Math.max(0, bbox?.x0 ?? 0), bbox?.x1, w) : null);
+    const sillMm = d.sillMm ?? (d.type === "door" ? 0 : Number.isFinite(d.tapY) ? fit(snap(d.tapY - (h || 0) / 2), Math.max(0, bbox?.y0 ?? 0), bbox?.y1, h) : null);
+    return { label: d.label, type: d.type, widthMm: w, heightMm: h, xMm, sillMm };
+  };
+  function startAddOpening() {
+    setDraft({ label: nextLabel("window"), labelAuto: true, type: "window" });
+    setSel({ kind: "newOpening" });
+    if (polygon) { setPlacing(true); showDrawing(); } else setFocusToken((n) => n + 1);
+  }
+  function cancelAdd() { setDraft(null); setPlacing(false); setSel(null); }
+  // Undo clears an unfinished new opening first (WallsScreen asks through this ref)
+  useEffect(() => {
+    clearDraftRef.current = () => { if (draft || placing || sel?.kind === "newOpening") { cancelAdd(); return true; } return false; };
+  });
+  useEffect(() => () => { clearDraftRef.current = null; }, [clearDraftRef]);
+  function onDraftField(field, v) {
+    const next = { ...draft, [field]: v };
+    if (field === "label") next.labelAuto = false;
+    if (field === "type" && draft.labelAuto) next.label = nextLabel(v);
+    const val = draftValues(next);
+    if (val.widthMm >= 1 && val.heightMm >= 1 && Number.isFinite(val.xMm) && val.xMm >= 0 && Number.isFinite(val.sillMm) && val.sillMm >= 0) {
+      const id = act.createOpening(wall, { xMm: val.xMm, sillMm: val.sillMm, widthMm: val.widthMm, heightMm: val.heightMm, label: val.label || null, type: val.type || "window" });
+      setDraft(null); setPlacing(false); setSel({ kind: "opening", id });
+      return;
+    }
+    setDraft(next);
+  }
+  function onOpeningField(o, field, v) {
+    const cur = o.rec.inputs || {};
+    if (cur[field] === v || (field === "label" && (cur.label || "") === v)) return;
+    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v });
+  }
+  function onTap({ xMm, yMm, hit }) {
+    if (placing) {
+      setDraft((d) => ({ ...(d || { label: nextLabel("window"), labelAuto: true, type: "window" }), tapX: snap(xMm), tapY: snap(yMm) }));
+      setSel({ kind: "newOpening" });
+      setFocusToken((n) => n + 1);
+      return;
+    }
+    if (hit?.kind === "opening") setSel({ kind: "opening", id: hit.id });
+    else if (hit?.kind === "item") setSel({ kind: "item", id: hit.id });
+    else setSel(null);
+  }
+  function onDragOpening(id, pos, commit) {
+    if (!pos) { setDrag(null); return; }
+    if (!commit) { setDrag({ id, ...pos }); return; }
+    setDrag(null);
+    const o = openingsRaw.find((x) => x.id === id);
+    if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm });
+  }
+  const selectOpening = (id) => { setPlacing(false); setDraft(null); setSel({ kind: "opening", id }); showDrawing(); };
+  const step = (dir) => {
+    if (!selItem) return;
+    const i = hitItems.findIndex((it) => it.id === selItem.id);
+    setSel({ kind: "item", id: hitItems[(i + dir + hitItems.length) % hitItems.length].id });
+  };
+
+  const sheetOpen = !!sel;
+  const maxH = Math.round(Math.min((typeof window !== "undefined" ? window.innerHeight : 800) * (sheetOpen ? 0.3 : 0.42), 380));
+  const dv = sel?.kind === "newOpening" ? draftValues(draft) : null;
+  const shownDraft = dv && draft ? { ...dv, tapX: draft.tapX, tapY: draft.tapY } : null;
+  const shownLayoutEmpty = !!shownClad && !layoutHasParts(shownClad.layout, shownClad.result?.methodKey || shownClad.material.methodKey);
+  const si = elements.sheetInfo;
+
+  const dims = (
+    // one DOM position (no remount → focus/keyboard kept); shown first until the elevation can be generated
+    <section aria-label="Wall dimensions" data-keyboard-group="" className={`space-y-2 rounded-card border border-hairline bg-white p-3 ${polygon ? "" : "order-first"}`}>
+      <h3 className="text-sm font-semibold text-ink">Wall</h3>
+      <WallFields key={draftReset} wall={wall} canEdit={canEdit} lengthMm={lengthMm} onPatch={(p) => act.updateWall(wall, p)} onTrace={onTrace} autoFocusFirst={autoFocusFirst} />
+      {resultLine && <p className="rounded-lg bg-page px-3 py-2 text-xs font-medium text-ink" data-wall-result="" data-keyboard-result="" aria-live="polite">{resultLine}</p>}
+    </section>
+  );
+
+  return (
+    <>
+      <KeyboardSafe className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-3">
+          {measProblems.map((t) => <Banner key={t} tone="warn">{t}</Banner>)}
+          <section ref={elevRef} aria-label="Elevation" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+            <div role="radiogroup" aria-label="Elevation view" className="flex rounded-lg border border-hairline p-0.5">
+              {VIEWS.map(([k, label]) => (
+                <button key={k} type="button" role="radio" aria-checked={tab === k} onClick={() => { setTab(k); if (sel?.kind === "item") setSel(null); }}
+                  className={`min-h-[44px] flex-1 rounded-md px-2 text-sm font-medium ${tab === k ? "bg-primary text-white" : "text-ink"}`}>{label}</button>
+              ))}
+            </div>
+            <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" data-provenance="">{traced ? "Derived from plan + entered heights" : "Entered"}</span>
+              <span>Setout aid — not a surveyed elevation.</span>
+            </p>
+            {tab === "cladding" && cladEntries.length > 1 && (
+              <Chips label="Show" value={shownClad?.material.id} options={cladEntries.map((e) => [e.material.id, e.material.name])} onChange={(id) => { setPick(id); setSel(null); }} />
+            )}
+            {placing && (
+              <Banner tone="info" action={<Btn onClick={cancelAdd}>Cancel</Btn>}>Tap the elevation where the opening is — or type its numbers below.</Banner>
+            )}
+            {polygon ? (
+              <div ref={drawingRef} className="scroll-mt-1">
+              <WallElevation polygon={polygon} openings={drawnOpenings} items={elements.items} guides={elements.guides} selectedId={selItem?.id || null}
+                selectedOpeningId={selOpening?.id || null} placing={placing} draft={shownDraft} editable={canEdit} maxHeightPx={maxH}
+                onTap={onTap} onDragOpening={onDragOpening}
+                ariaLabel={`${wallName(wall)} elevation, ${tab} view — ${openings.length} opening(s). Tap an element for details.`} />
+              </div>
+            ) : (
+              <p className="rounded-lg bg-page px-3 py-6 text-center text-sm text-muted" data-elevation-pending="">{geom.message && (lengthMm || inputs.kind === "polygon") ? `${geom.message} ` : ""}Enter the wall {lengthMm ? "heights" : "length and heights"} to generate the elevation.</p>
+            )}
+            {polygon && legend.length > 0 && (
+              <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted" aria-label="Legend">
+                {legend.map(([state, text, cls]) => <li key={state} className="flex items-center gap-1"><span className={`inline-block h-3 w-3 rounded-sm border ${cls}`} />{text}</li>)}
+              </ul>
+            )}
+            {polygon && drawnOpenings.some((o) => o.issue) && (
+              <p className="flex items-center gap-1 text-[11px] text-muted" data-off-wall-legend=""><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-red-600 bg-red-100" />Past the wall edge — not deducted</p>
+            )}
+            {polygon && tab === "cladding" && !shownClad && <p className="text-sm text-muted">No cladding material on this wall. Attach a cladding to see its sheets, courses or panels.</p>}
+            {polygon && tab === "cladding" && shownClad && shownLayoutEmpty && (
+              <p className="text-sm text-red-700" data-layout-empty="">{shownClad.material.name}: no layout on this wall — {blockingFor(shownClad.material.id) ? "fix the problems below first." : "check the wall size."}</p>
+            )}
+            {si && (
+              <div className="space-y-1 text-xs text-ink" data-sheet-summary="">
+                <p>{plural(si.strips, "strip")}{si.cutWidths.length ? ` (${si.cutWidths.length} cut: ${si.cutWidths.map((w) => `${fmtMm(Math.round(w * 10) / 10)} mm`).join(", ")} wide)` : ""} × {plural(si.courses, "course")} → <b>{plural(si.sheets, "sheet")}</b>{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}. A cut strip still uses a whole sheet.</p>
+                {Number.isFinite(si.layoutCutM2) && <p className="text-muted">Layout cut {fmtM2(si.layoutCutM2)} m² · sheet stock {fmtM2(si.stockM2)} m² (spares are added in the schedule).</p>}
+                {si.offcuts.length > 0 && (
+                  <details className="rounded-lg border border-hairline px-3" data-offcuts="">
+                    <summary className="min-h-[44px] cursor-pointer py-3 text-xs">{plural(si.offcuts.length, "potential offcut")} — listed only, never reused automatically</summary>
+                    <ul className="list-disc space-y-0.5 pb-2 pl-4 text-muted">
+                      {si.offcuts.map((o, i) => <li key={`${o.cellId}-${i}`}>Strip {(o.cell?.col ?? 0) + 1}{si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""}: {fmtMm(Math.round(o.widthMm))} × {fmtMm(Math.round(o.lengthMm))} mm</li>)}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+            {polygon && tab === "supports" && !elements.items.length && !elements.notes.length && (
+              <p className="text-sm text-muted" data-supports-empty="">No support layer on this wall. Battens and rails are their own material — add one and attach it to this wall.{cladEntries.length ? " Support spacing for the cladding stays source-pending until a reviewed rule or project detail is recorded — it is not calculated here." : ""}</p>
+            )}
+            {elements.notes.map((n) => <p key={n} className="text-xs text-ink">{n}</p>)}
+            {polygon && tab === "accessories" && elements.totals && (
+              <dl className="grid grid-cols-[1fr_auto] gap-x-3 text-xs" aria-label="Accessory routes">
+                {elements.totals.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="text-right font-semibold text-ink">{fmtMm(Math.round(v))} mm</dd></div>)}
+                <p className="col-span-2 mt-1 text-[11px] text-muted">Route lengths only. Accessory quantities come from the accessory material and its reviewed details.</p>
+              </dl>
+            )}
+            {tab === "accessories" && accessoryEntries.map((e) => {
+              const scope = e.material.rules?.scope || {};
+              const groups = Array.isArray(e.layout?.groups) ? e.layout.groups : null;
+              return (
+                <div key={e.material.id} className="space-y-1 rounded-lg border border-hairline p-2" data-accessory-scopes={e.material.id}>
+                  <p className="text-xs font-semibold text-ink">{e.material.name} — selected scope</p>
+                  <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                    {groups ? groups.map((g) => (
+                      <div key={g.id} className="contents"><dt className="text-muted">{g.id}</dt><dd className="text-right font-medium text-ink">{SCOPE_TEXT[g.scope] || g.scope}{g.scope === "include" ? ` · ${GROUP_STATE_TEXT[g.state] || g.state}` : g.reason ? ` · ${g.reason}` : ""}</dd></div>
+                    )) : Object.keys(ACCESSORY_SCOPE_LABEL).map((k) => (
+                      <div key={k} className="contents"><dt className="text-muted">{ACCESSORY_SCOPE_LABEL[k]}</dt><dd className="text-right font-medium text-ink" data-scope={k}>{SCOPE_TEXT[scope[k] || "unresolved"]}</dd></div>
+                    ))}
+                  </dl>
+                  <p className="text-[11px] text-muted">{groups ? "Each group follows this wall's own routes." : "No accessory routes are calculated for this material yet — quantities come from a reviewed detail."} “Not decided” is not the same as excluded.</p>
+                </div>
+              );
+            })}
+            {areas && (
+              <dl className="grid grid-cols-3 gap-2 rounded-lg bg-page p-2 text-center" aria-label="Areas">
+                <div><dt className="text-[11px] text-muted">Gross</dt><dd className="text-sm font-semibold text-ink" data-area="gross">{fmtM2(areas.grossM2)} m²</dd></div>
+                <div><dt className="text-[11px] text-muted">Openings</dt><dd className="text-sm font-semibold text-ink" data-area="openings">{fmtM2(areas.openingM2)} m²</dd></div>
+                <div><dt className="text-[11px] text-muted">Net</dt><dd className="text-sm font-semibold text-ink" data-area="net">{fmtM2(areas.netM2)} m²</dd></div>
+              </dl>
+            )}
+          </section>
+
+          {(blockingHere.length > 0 || notesHere.length > 0) && (
+            <section aria-label="Problems on this wall" className="space-y-2" data-wall-problems="">
+              {blockingHere.map((p) => (
+                <Banner key={p.message} tone="error" action={p.code === "sheet_too_tall" && canEdit && p.materialId === material?.id ? <Btn kind="primary" onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>
+                  : p.code === "joint_rows_invalid" && canEdit && p.materialId === material?.id ? <Btn onClick={() => setSel({ kind: "jointRow" })}>Edit joint row</Btn> : null}>
+                  {onWall.length > 1 && p.materialName ? <b>{p.materialName}: </b> : null}{p.message}
+                </Banner>
+              ))}
+              {notesHere.length > 0 && (
+                <details className="rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900">
+                  <summary className="min-h-[44px] cursor-pointer py-3">{plural(notesHere.length, "note")} for this wall (not blocking)</summary>
+                  <ul className="list-disc space-y-0.5 pb-2 pl-4">{notesHere.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
+                </details>
+              )}
+            </section>
+          )}
+
+          {tab === "cladding" && shownClad && shownClad.material.id === material?.id && setout && canEdit && (
+            <section aria-label={material.methodKey === "sheet_layout" ? "Sheet setout" : "Course setout"} className="space-y-2 rounded-card border border-hairline bg-white p-3">
+              <h3 className="text-sm font-semibold text-ink">{material.methodKey === "sheet_layout" ? "Sheet setout" : "Course setout"}</h3>
+              <NumberField key={draftReset} label={setout.label} value={material.rules?.datumMm ?? 0} min={setout.min} max={setout.max ?? MAX_MM}
+                onCommit={(n) => {
+                  setDatumChange({ before: setoutQty, datumMm: n, key: changeKeyFor(material.rules) });
+                  act.updateRules({ datumMm: n });
+                }}
+                help={setout.help} />
+              {datumShown && <p className="text-xs text-ink" data-datum-change="">{setout.what} on this wall: {datumShown.before} → <b>{setoutQty}</b></p>}
+              {material.methodKey === "sheet_layout" && (material.rules?.jointRows ? (
+                <p className="text-xs text-ink">Joint row at {material.rules.jointRows.atMm.map((x) => fmtMm(x)).join(", ")} mm (gap {fmtMm(material.rules.jointRows.gapMm)} mm{material.rules.jointRows.detailRef ? `, ${material.rules.jointRows.detailRef}` : ""}) <Btn kind="ghost" onClick={() => setSel({ kind: "jointRow" })}>Edit</Btn></p>
+              ) : <Btn onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>)}
+            </section>
+          )}
+
+          {entries.length > 0 && (
+            <section aria-label="Quantities on this wall" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+              <h3 className="text-sm font-semibold text-ink">On this wall</h3>
+              {entries.map((e) => {
+                const rows = wallQuantities(e.result, wall.id, e.tag);
+                return (
+                  <div key={e.material.id} data-wall-qty={e.material.id} className="space-y-1">
+                    <p className="text-xs font-semibold text-ink">{e.material.name}</p>
+                    {e.result?.status && (
+                      <p className="flex flex-wrap gap-1" aria-label={`${e.material.name} statuses`}>
+                        <StatusChip group="quantity" value={e.result.status.quantity} />
+                        <StatusChip group="installation" value={e.result.status.installation} />
+                        <StatusChip group="procurement" value={e.result.status.procurement} />
+                      </p>
+                    )}
+                    {rows.length ? (
+                      <ul className="text-sm">{rows.map((r) => <li key={r.key} className="flex gap-2"><span className="min-w-0 flex-1 text-muted">{r.text}</span><b className="shrink-0 text-ink" data-qty-unit={r.unit}>{r.qtyText}</b></li>)}</ul>
+                    ) : <p className="text-sm text-muted">{blockingFor(e.material.id) ? "No quantities until the problems above are fixed." : "Nothing calculated for this wall yet."}</p>}
+                  </div>
+                );
+              })}
+              <p className="text-[11px] text-muted">Layout quantities before spares and pack rounding — the schedule adds those.</p>
+            </section>
+          )}
+
+          {dims}
+
+          <section aria-label="Openings" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+            <div className="flex items-center gap-2">
+              <h3 className="flex-1 text-sm font-semibold text-ink">Openings <span className="font-normal text-muted">({openings.length})</span></h3>
+              {canEdit && <Btn kind="primary" onClick={startAddOpening} disabled={placing}>Add opening</Btn>}
+            </div>
+            {!openings.length && <p className="text-sm text-muted">No openings. Windows and doors are deducted from the cladding by layout, never twice.</p>}
+            <ul className="divide-y divide-hairline">
+              {openings.map((o) => {
+                const prob = openingProblem(o.id);
+                return (
+                  <li key={o.id} data-opening-row={o.id}>
+                    <button type="button" onClick={() => selectOpening(o.id)} aria-pressed={selOpening?.id === o.id}
+                      className={`flex min-h-[48px] w-full items-center gap-2 px-1 text-left text-sm ${selOpening?.id === o.id ? "bg-amber-50" : ""}`}>
+                      <span className="w-10 shrink-0 font-semibold text-ink">{o.label || "—"}</span>
+                      <span className="min-w-0 flex-1 text-muted">{o.type === "door" ? "Door" : o.type === "other" ? "Other" : "Window"} · {fmtMm(o.widthMm)} × {fmtMm(o.heightMm)} · sill {fmtMm(o.sillMm)} · from start {fmtMm(o.xMm)}
+                        {prob && <span className="block text-xs font-semibold text-red-700">{prob}</span>}</span>
+                      <span aria-hidden="true" className="text-muted">›</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          <section aria-label="Materials on this wall" className="space-y-2 rounded-card border border-hairline bg-white p-3">
+            <h3 className="text-sm font-semibold text-ink">Materials on this wall</h3>
+            {!onWall.length && <p className="text-sm text-muted">No material uses this wall yet.</p>}
+            <ul className="space-y-1 text-sm">{onWall.map((m) => <li key={m.id} className="text-ink">{m.name} <span className="text-[11px] text-muted">· {describeFamilySpec(m.spec).line}</span></li>)}</ul>
+            {canEdit && material && (
+              <div className="flex flex-wrap gap-2">
+                <Btn aria-pressed={attached} onClick={() => act.setAttached(wall, !attached)} className={attached ? "border-primary text-primary" : ""}>{attached ? `✓ Uses ${material.name}` : `Use ${material.name} here`}</Btn>
+                <Btn kind="danger" onClick={() => act.removeWall(wall)}>Remove wall</Btn>
+              </div>
+            )}
+          </section>
+          {saveBanner}
+        </div>
+      </KeyboardSafe>
+
+      {(sel?.kind === "opening" && selOpening) || sel?.kind === "newOpening" ? (
+        <Sheet key="opening-sheet" title={sel.kind === "newOpening" ? "New opening" : `Opening ${selOpening.label || ""}`.trim()} onClose={() => (sel.kind === "newOpening" ? cancelAdd() : setSel(null))} initialFocus={false}>
+          <KeyboardSafe>
+          <OpeningForm key={`opening-form-${draftReset}`} canEdit={canEdit} focusToken={focusToken}
+            value={sel.kind === "newOpening" ? dv : { label: selOpening.label, type: selOpening.type, widthMm: selOpening.widthMm, heightMm: selOpening.heightMm, sillMm: selOpening.sillMm, xMm: selOpening.xMm }}
+            onField={(f, v) => (sel.kind === "newOpening" ? onDraftField(f, v) : onOpeningField(selOpening, f, v))} />
+          {sel.kind === "newOpening" ? (
+            <p className="mt-2 text-xs text-muted" data-opening-hint="">{placing && !Number.isFinite(draft?.tapX) ? "Tap its approximate position on the elevation, then enter the width and height." : "Enter the width and height — the opening is added as soon as its numbers are complete."}</p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-ink" data-opening-edges="">Edges: head {fmtMm(selOpening.widthMm)} · sill {selOpening.sillMm > 0 ? fmtMm(selOpening.widthMm) : "none (on the base)"} · jambs 2 × {fmtMm(selOpening.heightMm)} mm · head at {fmtMm((selOpening.sillMm || 0) + (selOpening.heightMm || 0))} mm</p>
+              <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
+              {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
+              {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
+              {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}
+            </div>
+          )}
+          </KeyboardSafe>
+        </Sheet>
+      ) : null}
+      {selItem && <ElementSheet item={selItem} index={hitItems.findIndex((it) => it.id === selItem.id)} total={hitItems.length} onStep={step} onClose={() => setSel(null)} onAction={(a) => a === "jointRow" && setSel({ kind: "jointRow" })} canEdit={canEdit} />}
+      {sel?.kind === "jointRow" && material && (
+        <JointRowSheet key={`joint-row-${draftReset}`} view={view} material={material} suggestionMm={tooTall?.suggestedJointAtMm} onClose={() => setSel(null)}
+          onApply={(jr) => act.updateRules({ jointRows: jr })} onRemove={() => { act.updateRules({}, ["jointRows"]); setSel(null); }} />
+      )}
+    </>
+  );
+}

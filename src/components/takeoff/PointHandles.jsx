@@ -1,7 +1,8 @@
 // =============================================================================
 // PointHandles — draggable endpoint handles with an offset magnifier (loupe) so the finger
-// never hides the point being placed. Desktop: select a handle, then arrow keys nudge it by
-// 1 screen px (Shift = 10 px). Used by calibration and measurement on top of PdfViewport.
+// never hides the point being placed. Desktop: select a handle, then Alt+Arrow nudges it by
+// 1 screen px (Shift = 10 px) — never while a text / number field has the keyboard.
+// Used by calibration and measurement on top of PdfViewport.
 // Handles carry data-takeoff-handle so the viewport's gesture tracker leaves them alone.
 // =============================================================================
 import { useEffect, useRef, useState } from "react";
@@ -10,12 +11,15 @@ const LOUPE = 112;
 const DRAG_SLOP_PX = 3;
 
 /**
- * @param {{ points: Array<{id:string, p:{x:number,y:number}, color?:string, label?:string}>,
+ * Each handle's touch target is a 44 CSS px circle (data-handle-id = its id). variant "split" draws a split handle
+ * (a diamond on the run) instead of a point — used for continuous-flashing split stations (TC-R04 13), whose
+ * constrain() keeps the handle on the run.
+ * @param {{ points: Array<{id:string, p:{x:number,y:number}, color?:string, label?:string, variant?:"point"|"split"}>,
  *           toScreen: Function, viewportRef: React.RefObject, onMove:(id, pdfPoint)=>void,
  *           onCommit:(id, pdfPoint)=>void, selectedId?:string, onSelect?:(id)=>void,
- *           constrain?:(id, pdfPoint)=>pdfPoint }} props
+ *           constrain?:(id, pdfPoint)=>pdfPoint, onCancel?:(id)=>void }} props
  */
-export function PointHandlesLayer({ points, toScreen, viewportRef, onMove, onCommit, selectedId, onSelect, constrain }) {
+export function PointHandlesLayer({ points, toScreen, viewportRef, onMove, onCommit, selectedId, onSelect, constrain, onCancel }) {
   const [drag, setDrag] = useState(null); // { id, screen }
   const loupeRef = useRef(null);
 
@@ -33,6 +37,8 @@ export function PointHandlesLayer({ points, toScreen, viewportRef, onMove, onCom
     if (!selectedId) return undefined;
     const onKey = (e) => {
       if (!e.altKey || !e.key.startsWith("Arrow")) return; // Alt+Arrow nudges; plain arrows pan the plan
+      // typing in a field (Option+Arrow moves the caret by word / line on a Mac) never moves the selected point
+      if (e.defaultPrevented || e.target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
       const pt = points.find((x) => x.id === selectedId);
       if (!pt) return;
       const d = e.shiftKey ? 10 : 1;
@@ -54,9 +60,12 @@ export function PointHandlesLayer({ points, toScreen, viewportRef, onMove, onCom
         const sel = pt.id === selectedId;
         return (
           <g key={pt.id}>
-            <circle cx={s.x} cy={s.y} r={sel ? 7 : 5} fill="#fff" stroke={pt.color || "#006c9b"} strokeWidth={sel ? 3 : 2} />
+            {pt.variant === "split"
+              ? <rect x={s.x - (sel ? 8 : 6.5)} y={s.y - (sel ? 8 : 6.5)} width={sel ? 16 : 13} height={sel ? 16 : 13} transform={`rotate(45 ${s.x} ${s.y})`}
+                  fill={sel ? "#f59e0b" : "#fff"} stroke={pt.color || "#0f172a"} strokeWidth={2.5} />
+              : <circle cx={s.x} cy={s.y} r={sel ? 7 : 5} fill="#fff" stroke={pt.color || "#006c9b"} strokeWidth={sel ? 3 : 2} />}
             <circle
-              data-takeoff-handle=""
+              data-takeoff-handle="" data-handle-id={pt.id}
               cx={s.x} cy={s.y} r={22} fill="transparent" style={{ pointerEvents: "auto", cursor: "move", touchAction: "none" }}
               aria-label={pt.label || "Point handle"}
               onPointerDown={(e) => {
@@ -81,7 +90,7 @@ export function PointHandlesLayer({ points, toScreen, viewportRef, onMove, onCom
                 if (drag?.id === pt.id && drag.moved && drag.p) onCommit(pt.id, drag.p); // a touch without a drag changes nothing
                 setDrag(null);
               }}
-              onPointerCancel={() => setDrag(null)}
+              onPointerCancel={() => { setDrag(null); onCancel?.(pt.id); }}
             />
           </g>
         );

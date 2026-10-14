@@ -93,7 +93,7 @@ export function normaliseFamilySpec(spec) {
   return { ...base,
     product: { id: txt(p.id, 80), manufacturer: txt(p.manufacturer), name: txt(p.name), sku: txt(p.sku, 40), ...dims,
       lengthsMm: lengthsList(p.lengthsMm, "Available length"),   // sheet heights / board lengths of the same profile
-      skus: Array.isArray(p.skus) ? p.skus.slice(0, 40).map((x) => ({ sku: txt(x?.sku, 40), lengthMm: num(x?.lengthMm, "SKU length") })).filter((x) => x.sku && x.lengthMm) : [],
+      skus: Array.isArray(p.skus) ? p.skus.slice(0, 40).map((x) => ({ sku: txt(x?.sku, 40), lengthMm: num(x?.lengthMm, "SKU length"), ...(x?.id ? { id: txt(x.id, 80) } : {}) })).filter((x) => (x.sku || x.id) && x.lengthMm) : [],
       effectiveCoverMm: num(p.effectiveCoverMm, "Effective cover"), gapMm: p.gapMm == null ? null : num(p.gapMm, "Joint gap", { min: -1e-9, max: 50 }),
       finish: txt(p.finish, 60), sourceRefs: Array.isArray(p.sourceRefs) ? p.sourceRefs.map((x) => txt(x, 20)).filter(Boolean) : [],
       packQuantity: p.packQuantity == null ? null : Math.round(Number(p.packQuantity)) || null, fullPackRequired: p.fullPackRequired === true,
@@ -132,13 +132,16 @@ export function familyProblems(spec) {
   } else if (n.family === "aluminium") {
     need(n.profile.aMm && n.profile.bMm && n.profile.tMm, "Enter the profile size (e.g. 50 × 50 × 3).");
     need(n.kerfMm != null && n.kerfConfirmed, "Confirm the saw kerf for the cutting plan (an estimate can use 0, ordering can't).");
+  } else if (n.family === "accessory") {
+    // an accessory SET (starters, trims, sealant, fixings …): each item carries its own identity in the recipe
+    need(n.product.name, "Name this accessory set.");
   } else {
     need(n.product.name, "Choose the product.");
     need(n.product.widthMm && n.product.thicknessMm, "Product width and thickness are needed.");
     if (n.layout !== "grid" && n.family !== "aac") need(n.product.effectiveCoverMm, "Effective cover is needed (supplier/product value — not the nominal width).");
     if (n.family === "foam") need(n.coating, "Choose factory-coated or applicator-coated.");
     if (n.family === "timber-cladding" && n.supply === "random") need(n.orderIncrementM, "Enter the supplier's LM ordering increment.");
-    need(n.product.lengthMm || n.product.lengthsMm.length, "Enter the stock length(s) or sheet height(s).");
+    if (!(n.family === "timber-cladding" && n.supply === "random")) need(n.product.lengthMm || n.product.lengthsMm.length, "Enter the stock length(s) or sheet height(s).");
   }
   return out;
 }

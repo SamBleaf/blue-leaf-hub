@@ -49,6 +49,8 @@ function makeApi(base, send, fetcher, extras = {}) {
     /** Plan bytes for the viewer (authorised each open; never a stored signed URL). */
     planBytes: (docId, opts) => apiStream(`${base}/documents/${docId}/content`, { ...opts, fetcher }),
     exportPdf: (exportId, opts) => apiStream(`${base}/exports/${exportId}/pdf`, { ...opts, fetcher }),
+    /** Site appendix (cutting & setout) for an export — rendered from the same frozen snapshot, never part of the supplier PDF. */
+    exportAppendix: (exportId, opts) => apiStream(`${base}/exports/${exportId}/appendix`, { ...opts, fetcher }),
     ...extras.more?.({ get, post, patch }),
   };
 }
