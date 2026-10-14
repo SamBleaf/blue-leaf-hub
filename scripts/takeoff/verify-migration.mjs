@@ -1,4 +1,4 @@
-// Migration 206 verification on an ISOLATED Postgres (never Supabase). Writes a Markdown report.
+// Migration 206 + 207 verification on an ISOLATED Postgres (never Supabase). Writes a Markdown report.
 //   node scripts/takeoff/verify-migration.mjs [report.md]
 // Steps: fresh DB → Supabase-shaped stub → apply 206 → re-apply 206 (idempotency) → catalog audit
 // (tables, RLS, grants, function security/search_path/EXECUTE, triggers, constraints) → live access
@@ -20,6 +20,11 @@ const q = async (s, p) => (await c.query(s, p)).rows;
 const version = (await q("select version()"))[0].version;
 let reapply = "PASS";
 try { await c.query(sql); } catch (e) { reapply = `FAIL — ${e.message}`; }
+// 207 is additive on 206 and must follow it (206 re-creates the older commit/save-order functions)
+const sql207 = readFileSync(new URL("../../supabase/migrations/207_takeoff_generic_methods.sql", import.meta.url), "utf8");
+let reapply207 = "PASS";
+try { await c.query(sql207); await c.query(sql207); } catch (e) { reapply207 = `FAIL — ${e.message}`; }
+const roleWrites = (await q("select position($1 in pg_get_functiondef('public.takeoff_commit(uuid,integer,jsonb,jsonb,text)'::regprocedure)) > 0 as ok", ["item->>'role'"]))[0].ok;
 
 const tables = await q(`select c.relname as table, c.relrowsecurity as rls,
   (select count(*) from pg_policies p where p.tablename=c.relname)::int as policies,
@@ -63,6 +68,7 @@ lines.push(`# Migration 206 verification (isolated Postgres)`, "",
   `- Database: ${version}`, `- Migration file: \`supabase/migrations/206_takeoff_foundation.sql\` sha256 \`${createHash("sha256").update(sql).digest("hex")}\``,
   `- Applied to a fresh database with the Supabase-shaped base stub (\`scripts/tests/fixtures/takeoff-db-stub.sql\`): **PASS**`,
   `- Re-applied on top of itself (idempotency): **${reapply}**`,
+  `- 207 (sha256 \`${createHash("sha256").update(sql207).digest("hex")}\`) applied after 206, twice (idempotency): **${reapply207}**; takeoff_commit writes the contribution role: **${roleWrites ? "PASS" : "FAIL"}**`,
   `- Tables: ${tables.length}; RLS on with no client policies and no anon/authenticated privileges: **${allRls ? "PASS" : "FAIL"}**`,
   `- Functions: ${funcs.length}; SECURITY INVOKER, pinned search_path, EXECUTE only for service_role: **${allFns ? "PASS" : "FAIL"}**`,
   `- Client-role access probes: **${allProbes ? "PASS (all denied)" : "FAIL"}**`,
@@ -79,4 +85,4 @@ lines.push(`# Migration 206 verification (isolated Postgres)`, "",
   "## Client-role access probes", "", "| role | attempt | result |", "|---|---|---|", ...probes.map((p) => `| ${p.role} | ${p.label} | ${p.result} |`), "");
 writeFileSync(out, lines.join("\n"));
 console.log(lines.slice(0, 12).join("\n"));
-process.exit(allRls && allFns && allProbes && reapply === "PASS" ? 0 : 1);
+process.exit(allRls && allFns && allProbes && reapply === "PASS" && reapply207 === "PASS" && roleWrites ? 0 : 1);

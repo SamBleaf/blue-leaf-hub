@@ -120,7 +120,7 @@ export async function finishArtifact(sb, ctx, exportId) {
     const docRow = {
       ...ownerColumns(ws.charge_up_job_id ? { chargeUpJobId: ws.charge_up_job_id } : ws.carpentry_job_id ? { carpentryJobId: ws.carpentry_job_id } : { jobId: ws.job_id }),
       document_type: "purchase_order", direction: "outbound", source: "generated",
-      title: `${order.order_ref} flashing order${ex.is_draft ? " (draft)" : ""} — export ${ex.export_no}`,
+      title: `${order.order_ref} ${(ex.snapshot?.items || []).length ? "material" : "flashing"} order${ex.is_draft ? " (draft)" : ""} — export ${ex.export_no}`,
       template_key: "takeoff_supplier_order", template_version: RENDERER_VERSION,
       storage_provider: "supabase", storage_path: `${EXPORTS_BUCKET}/${path}`, audience_layer: "management", status: "current",
       content_sha256: pdfSha, byte_size: pdf.length,

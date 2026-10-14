@@ -1,0 +1,1133 @@
+{
+  "schemaVersion": 1,
+  "status": "research-seed-not-direct-import",
+  "units": "mm",
+  "researchDate": "2026-10-14",
+  "sourceRegister": "09-SOURCE-REGISTER.md",
+  "products": [
+    {
+      "id": "axon-403931",
+      "name": "Axon 133 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403931",
+      "dimensionsMm": {
+        "length": 2450,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-403932",
+      "name": "Axon 133 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403932",
+      "dimensionsMm": {
+        "length": 2750,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-403933",
+      "name": "Axon 133 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403933",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-404417",
+      "name": "Axon 400 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404417",
+      "dimensionsMm": {
+        "length": 2450,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-404418",
+      "name": "Axon 400 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404418",
+      "dimensionsMm": {
+        "length": 2750,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-404419",
+      "name": "Axon 400 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404419",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-404979",
+      "name": "Axon 133 smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404979",
+      "dimensionsMm": {
+        "length": 3600,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "axon-404512",
+      "name": "Axon 133 grained",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404512",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 1200,
+        "thickness": 9
+      },
+      "effectiveCoverMm": 1200,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "linea-403930",
+      "name": "Linea",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403930",
+      "dimensionsMm": {
+        "length": 4200,
+        "width": 150,
+        "thickness": 16
+      },
+      "effectiveCoverMm": 120,
+      "publishedPackQuantity": 90,
+      "sourceRefs": [
+        "H03"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "linea-403912",
+      "name": "Linea",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403912",
+      "dimensionsMm": {
+        "length": 4200,
+        "width": 180,
+        "thickness": 16
+      },
+      "effectiveCoverMm": 150,
+      "publishedPackQuantity": 90,
+      "sourceRefs": [
+        "H03"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-405504",
+      "name": "Stria smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "405504",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 325,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 300,
+      "publishedPackQuantity": 60,
+      "sourceRefs": [
+        "H05"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-404063",
+      "name": "Stria smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404063",
+      "dimensionsMm": {
+        "length": 4200,
+        "width": 325,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 300,
+      "publishedPackQuantity": 60,
+      "sourceRefs": [
+        "H05"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-405505",
+      "name": "Stria smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "405505",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 405,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 380,
+      "publishedPackQuantity": 40,
+      "sourceRefs": [
+        "H05"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-404413",
+      "name": "Stria smooth",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404413",
+      "dimensionsMm": {
+        "length": 4200,
+        "width": 405,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 380,
+      "publishedPackQuantity": 40,
+      "sourceRefs": [
+        "H05"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-405571",
+      "name": "Stria Fine Texture",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "405571",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 325,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 295,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H11"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "stria-405570",
+      "name": "Stria Fine Texture",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "405570",
+      "dimensionsMm": {
+        "length": 4200,
+        "width": 325,
+        "thickness": 14
+      },
+      "effectiveCoverMm": 295,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H11"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "matrix-403810",
+      "name": "Matrix",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403810",
+      "dimensionsMm": {
+        "length": 2390,
+        "width": 590,
+        "thickness": 8
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H09"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "matrix-403811",
+      "name": "Matrix",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "403811",
+      "dimensionsMm": {
+        "length": 1190,
+        "width": 1190,
+        "thickness": 8
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H09"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "matrix-404169",
+      "name": "Matrix",
+      "manufacturer": "James Hardie",
+      "family": "cladding",
+      "sku": "404169",
+      "dimensionsMm": {
+        "length": 2990,
+        "width": 1190,
+        "thickness": 8
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 30,
+      "sourceRefs": [
+        "H09"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hardie-306250",
+      "name": "Hardie Structural Batten castellated H3",
+      "manufacturer": "James Hardie",
+      "family": "batten",
+      "sku": "306250",
+      "dimensionsMm": {
+        "length": 2700,
+        "width": 70,
+        "thickness": 35
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H08"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hardie-405307",
+      "name": "Hardie Cavity Batten",
+      "manufacturer": "James Hardie",
+      "family": "batten",
+      "sku": "405307",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 70,
+        "thickness": 19
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": null,
+      "sourceRefs": [
+        "H02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebel50-99939",
+      "name": "PowerPanel50",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "99939",
+      "dimensionsMm": {
+        "length": 2400,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebel50-133805",
+      "name": "PowerPanel50",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "133805",
+      "dimensionsMm": {
+        "length": 2550,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebel50-162758",
+      "name": "PowerPanel50",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "162758",
+      "dimensionsMm": {
+        "length": 2700,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebel50-162756",
+      "name": "PowerPanel50",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "162756",
+      "dimensionsMm": {
+        "length": 2850,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebel50-162760",
+      "name": "PowerPanel50",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "162760",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A01"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118014",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118014",
+      "dimensionsMm": {
+        "length": 2400,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118015",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118015",
+      "dimensionsMm": {
+        "length": 2550,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118016",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118016",
+      "dimensionsMm": {
+        "length": 2700,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118017",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118017",
+      "dimensionsMm": {
+        "length": 2800,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118019",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118019",
+      "dimensionsMm": {
+        "length": 2850,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-118020",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "118020",
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "hebelxl-126504",
+      "name": "PowerPanelXL",
+      "manufacturer": "Hebel",
+      "family": "aac",
+      "sku": "126504",
+      "dimensionsMm": {
+        "length": 3300,
+        "width": 600,
+        "thickness": 75
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 10,
+      "sourceRefs": [
+        "A02"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-2200",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 2200,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 20,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-2400",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 2400,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-2550",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 2550,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-2700",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 2700,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-2850",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 2850,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "walsc50-3000",
+      "name": "External Wall System 50",
+      "manufacturer": "Walsc",
+      "family": "aac",
+      "sku": null,
+      "dimensionsMm": {
+        "length": 3000,
+        "width": 600,
+        "thickness": 50
+      },
+      "effectiveCoverMm": null,
+      "publishedPackQuantity": 15,
+      "sourceRefs": [
+        "A04"
+      ],
+      "quantityEvidence": "published-dimensions",
+      "installationState": "source-pending",
+      "supplierAvailability": "unconfirmed",
+      "fullPackRequired": null
+    },
+    {
+      "id": "blueleaf-ali-angle-50x50x3",
+      "name": "Aluminium equal angle 50 \u00d7 50 \u00d7 3",
+      "manufacturer": null,
+      "family": "aluminium-profile",
+      "sku": null,
+      "sectionMm": {
+        "legA": 50,
+        "legB": 50,
+        "thickness": 3
+      },
+      "stockLengthsMm": [
+        6500
+      ],
+      "noJoinsPerDemand": true,
+      "sourceRefs": [
+        "OWNER-2026-10-14"
+      ],
+      "quantityEvidence": "owner-supplied-example",
+      "supplierAvailability": "unconfirmed",
+      "finish": null,
+      "alloyTemper": null,
+      "kerfMm": null,
+      "endTrimMm": null,
+      "allocationRequired": true
+    }
+  ],
+  "assemblyCandidates": [
+    {
+      "id": "axon-vertical",
+      "method": "sheet_layout@2",
+      "sourceRefs": [
+        "H02"
+      ],
+      "requiredSelectors": [
+        "wind",
+        "substrate",
+        "direct-or-cavity",
+        "on-or-off-stud",
+        "fixing-family"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "linea-horizontal",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "H04"
+      ],
+      "requiredSelectors": [
+        "wind",
+        "edge-zone",
+        "substrate",
+        "cavity",
+        "fixing-family"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "stria-smooth-horizontal",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "H06"
+      ],
+      "requiredSelectors": [
+        "profile-width",
+        "wind",
+        "edge-zone",
+        "fixing-style"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "stria-smooth-vertical",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "H07",
+        "H08"
+      ],
+      "requiredSelectors": [
+        "profile-width",
+        "wind",
+        "fixing-style",
+        "small-wall",
+        "batten-joints"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "stria-fine-texture",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "H11"
+      ],
+      "requiredSelectors": [
+        "exact-guide-applicability",
+        "orientation",
+        "wind",
+        "support-detail"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "matrix-grid",
+      "method": "panel_grid@1",
+      "sourceRefs": [
+        "H10"
+      ],
+      "requiredSelectors": [
+        "wind",
+        "on-or-off-stud",
+        "fixing-family",
+        "grid",
+        "joint-backing"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "hebel50",
+      "method": "aac_panel_layout@1",
+      "sourceRefs": [
+        "A01",
+        "A06"
+      ],
+      "requiredSelectors": [
+        "current-guide",
+        "storey-support",
+        "wind",
+        "substrate",
+        "rail-system",
+        "movement-joints"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "hebelxl",
+      "method": "aac_panel_layout@1",
+      "sourceRefs": [
+        "A02",
+        "A07"
+      ],
+      "requiredSelectors": [
+        "current-guide",
+        "storey-support",
+        "wind",
+        "substrate",
+        "rail-system",
+        "movement-joints"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "walsc50",
+      "method": "aac_panel_layout@1",
+      "sourceRefs": [
+        "A04",
+        "A05"
+      ],
+      "requiredSelectors": [
+        "current-guide",
+        "storey-support",
+        "wind",
+        "substrate",
+        "rail-system",
+        "movement-joints"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "pentarch-horizontal",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "T01"
+      ],
+      "requiredSelectors": [
+        "exact-profile",
+        "effective-cover",
+        "species",
+        "support-detail",
+        "butt-joints"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "pentarch-vertical",
+      "method": "course_layout@1",
+      "sourceRefs": [
+        "T01"
+      ],
+      "requiredSelectors": [
+        "exact-profile",
+        "effective-cover",
+        "species",
+        "drainage",
+        "support-detail"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "trendplank",
+      "method": "area_to_linear@2",
+      "sourceRefs": [
+        "T02",
+        "T03"
+      ],
+      "requiredSelectors": [
+        "exact-profile-cover",
+        "orientation",
+        "end-matching",
+        "support-detail",
+        "stock-policy"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    },
+    {
+      "id": "rendex-eps",
+      "method": "sheet_layout@2",
+      "family": "eps-cladding",
+      "sourceRefs": [
+        "F01",
+        "F02"
+      ],
+      "requiredSelectors": [
+        "exact-system",
+        "panel-size",
+        "thickness",
+        "factory-or-applicator-coated",
+        "direct-or-cavity",
+        "substrate",
+        "support-detail",
+        "wind",
+        "joint-layout",
+        "coating-scope"
+      ],
+      "reviewState": "candidate",
+      "activeInstallationRows": [],
+      "automaticFixingsEnabled": false
+    }
+  ],
+  "customTimberProfile": {
+    "required": [
+      "supplier",
+      "profile",
+      "species",
+      "nominal-width-mm",
+      "effective-cover-mm",
+      "thickness-mm",
+      "end-condition",
+      "ordering-policy"
+    ],
+    "doNotInferCoverFromNominalWidth": true,
+    "initialEffectiveCoverOptionsMm": [
+      70,
+      90,
+      120,
+      140
+    ],
+    "effectiveCoverEditablePerSupplierProduct": true
+  },
+  "notes": [
+    "Published product dimensions only; field sources apply to dimensions, SKU and published pack quantity, not unspecified properties.",
+    "Null means unknown/not supplied, never zero. Confirm catalogue variants and supply before ordering.",
+    "AAC width is physical; joint module belongs to an independently reviewed assembly.",
+    "Matrix joint width 10 mm is a sourced assembly parameter H10, not added to panel dimensions.",
+    "Fine Texture cover 295 mm must not inherit smooth cover 300 mm.",
+    "Timber profiles are user-configured until actual supplier and effective cover are confirmed."
+  ],
+  "timberOrderingPolicy": {
+    "minLengthMm": 1200,
+    "incrementMm": 600,
+    "rounding": "up",
+    "scope": "all-suppliers-timber",
+    "maxLengthMm": null,
+    "availabilityMayRestrictGrid": true,
+    "sourceRefs": [
+      "OWNER-2026-10-14"
+    ]
+  },
+  "preferredSystems": {
+    "aac": "Walsc",
+    "foam": "Rendex"
+  }
+}

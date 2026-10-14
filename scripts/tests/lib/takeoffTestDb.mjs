@@ -16,7 +16,7 @@ import pg from "pg";
 
 const ROOT = new URL("../../../", import.meta.url);
 const STUB = new URL("scripts/tests/fixtures/takeoff-db-stub.sql", ROOT);
-const MIGRATIONS = ["supabase/migrations/206_takeoff_foundation.sql"];
+const MIGRATIONS = ["supabase/migrations/206_takeoff_foundation.sql", "supabase/migrations/207_takeoff_generic_methods.sql"];
 
 function findBin(name) {
   for (const dir of ["/opt/homebrew/bin", "/opt/homebrew/opt/postgresql@17/bin", "/usr/local/bin", "/usr/lib/postgresql/17/bin", "/usr/lib/postgresql/16/bin", "/usr/bin"]) {
@@ -91,13 +91,16 @@ export async function persistentTakeoffDb(name = "blh_takeoff_sandbox", { reset 
   if (!exists) await admin.query(`CREATE DATABASE ${name}`);
   await admin.end();
   const url = adminUrl.replace(/\/[^/?]+(\?|$)/, `/${name}$1`);
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
   if (!exists) {
-    const c = new pg.Client({ connectionString: url });
-    await c.connect();
     await c.query(readFileSync(STUB, "utf8"));
     for (const m of MIGRATIONS) await c.query(readFileSync(new URL(m, ROOT), "utf8"));
-    await c.end();
+  } else {
+    // an existing sandbox keeps its data; later ADDITIVE migrations (safe to re-run, e.g. 207) are brought up to date
+    for (const m of MIGRATIONS.slice(1)) await c.query(readFileSync(new URL(m, ROOT), "utf8"));
   }
+  await c.end();
   return { url, created: !exists };
 }
 

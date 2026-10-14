@@ -185,12 +185,17 @@ await t("review #10: a plan upload cannot supersede a non-plan document", async 
   await c.query("INSERT INTO job_documents (id, carpentry_job_id, document_type, title, status, storage_provider) VALUES ($1,$2,'purchase_order','po','current','supabase')", [po, carp]);
   await rejects("SELECT public.takeoff_plan_insert($1::jsonb, $2)", [JSON.stringify({ carpentry_job_id: carp, document_type: "architectural", title: "x", storage_path: "p" }), po], /only an issued plan/);
 });
-await t("review #7: contribution role is 'primary' only; one active (measurement, material)", async () => {
+await t("review #7 (+207): contribution role defaults to 'primary', unknown roles rejected; one active (measurement, material)", async () => {
   const mid = id(), mat = id();
+  // 207: an unknown role is REJECTED by the role check (206 silently stored 'primary')
+  await rejects("SELECT public.takeoff_commit($1, 1, $2::jsonb, $3::jsonb, NULL)", [ws, JSON.stringify({
+    materials: { upsert: [{ id: mat, name: "M", methodKey: "flashing_runs", methodVersion: 1 }] },
+    measurements: { upsert: [{ id: mid, kind: "manual", finishedLengthMm: 100, quantity: 1 }] },
+    contributions: { upsert: [{ id: id(), measurementId: mid, jobMaterialId: mat, role: "extra" }] } }), actor], /takeoff_contrib_role_207/);
   await c.query("SELECT public.takeoff_commit($1, 1, $2::jsonb, $3::jsonb, NULL)", [ws, JSON.stringify({
     materials: { upsert: [{ id: mat, name: "M", methodKey: "flashing_runs", methodVersion: 1 }] },
     measurements: { upsert: [{ id: mid, kind: "manual", finishedLengthMm: 100, quantity: 1 }] },
-    contributions: { upsert: [{ id: id(), measurementId: mid, jobMaterialId: mat, role: "extra" }] } }), actor]);
+    contributions: { upsert: [{ id: id(), measurementId: mid, jobMaterialId: mat }] } }), actor]);
   assert.equal((await one("SELECT role FROM takeoff_contributions WHERE measurement_id=$1", [mid])).role, "primary");
   await rejects("SELECT public.takeoff_commit($1, 2, $2::jsonb, $3::jsonb, NULL)", [ws, JSON.stringify({ contributions: { upsert: [{ id: id(), measurementId: mid, jobMaterialId: mat }] } }), actor], /duplicate key|unique/);
 });
@@ -256,6 +261,51 @@ await t("migration 206 re-applies cleanly (idempotent)", async () => {
   await c.query("ROLLBACK");
   await c.query(readFileSync(new URL("../../supabase/migrations/206_takeoff_foundation.sql", import.meta.url), "utf8"));
   await c.query("BEGIN");
+});
+
+// ── 207: generic methods ─────────────────────────────────────────────────────
+await t("207 new measurement kinds: entered walls need inputs, traced kinds need a scale, finished length only for count/manual", async () => {
+  const mat = id();
+  await c.query("INSERT INTO takeoff_job_materials (id, workspace_id, name, method_key, method_version) VALUES ($1,$2,'Cladding','sheet_layout',2)", [mat, ws]);
+  const ins = (kind, extra = {}) => c.query(`INSERT INTO takeoff_measurements (id, workspace_id, kind, document_id, calibration_id, geometry, finished_length_mm, quantity, created_by_type, created_by_user_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'staff',$9)`, [id(), ws, kind, extra.doc || null, extra.cal || null, extra.geometry ? JSON.stringify(extra.geometry) : null, extra.len || null, extra.qty || null, user]);
+  await ins("wall", { geometry: { v: 2, inputs: { kind: "rect", widthMm: 4800, heightMm: 2700 } } });              // entered wall: ok
+  await ins("opening", { geometry: { v: 2, inputs: { widthMm: 900, heightMm: 900, xMm: 600, sillMm: 900 }, parentId: id() } });
+  await ins("offcut", { geometry: { v: 2, inputs: { lengthMm: 891 } } });
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','wall','staff','${user}')`, [], /takeoff_meas_entered_inputs/);
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','polyline','{"points":[]}','staff','${user}')`, [], /takeoff_meas_run_has_cal/);
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','wall','{"points":[{"x":1,"y":1}]}','staff','${user}')`, [], /takeoff_meas_traced_has_cal/);
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, quantity, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','manual',1,'staff','${user}')`, [], /takeoff_meas_count_len/);
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','sketch','{}','staff','${user}')`, [], /takeoff_meas_kind_207/);
+});
+await t("207 contribution roles: generic roles accepted, unknown rejected", async () => {
+  const mat = id(), m = id();
+  await c.query("INSERT INTO takeoff_job_materials (id, workspace_id, name, method_key, method_version) VALUES ($1,$2,'Rafters','repeated_members',2)", [mat, ws]);
+  await c.query("INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ($1,$2,'wall','{\"inputs\":{}}','staff',$3)", [m, ws, user]);
+  await c.query("INSERT INTO takeoff_contributions (id, workspace_id, measurement_id, job_material_id, role) VALUES ($1,$2,$3,$4,'wall')", [id(), ws, m, mat]);
+  await rejects(`INSERT INTO takeoff_contributions (id, workspace_id, measurement_id, job_material_id, role) VALUES ('${id()}','${ws}','${m}','${mat}','bogus')`, [], /takeoff_contrib_role_207/);
+});
+await t("207 order lines: unit + item; sheets/boxes need no length, pieces/bars do; save_order writes them", async () => {
+  // the earlier "206 re-applies" test commits 206 again (its own BEGIN/COMMIT), which restores the 206 save_order —
+  // exactly what an operator re-running 206 after 207 would do. 207 must then be re-run; do that here.
+  await c.query(readFileSync(new URL("../../supabase/migrations/207_takeoff_generic_methods.sql", import.meta.url), "utf8"));
+  const mat = id(), o = id();
+  await c.query("INSERT INTO takeoff_job_materials (id, workspace_id, name, method_key, method_version) VALUES ($1,$2,'Axon','sheet_layout',2)", [mat, ws]);
+  await c.query("INSERT INTO takeoff_orders (id, workspace_id, order_ref, created_by_type, created_by_user_id) VALUES ($1,$2,'FO-207',  'staff',$3)", [o, ws, user]);
+  const lines = [{ bucketKey: "axon|sheet|2450x1200", specKey: "axon", jobMaterialId: mat, quantity: 5, unit: "sheet", item: { sku: "403931", lengthMm: 2450, widthMm: 1200 } },
+    { bucketKey: "nails|box", specKey: "nails", jobMaterialId: mat, quantity: 2, unit: "box", item: { boxSize: 500 } }];
+  const r = await one("SELECT public.takeoff_save_order($1, 1, NULL, $2::jsonb) AS r", [o, JSON.stringify(lines)]);
+  assert.equal(r.r.lineCount, 2);
+  const rows = (await c.query("SELECT unit, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY unit", [o])).rows;
+  assert.deepEqual(rows.map((x) => x.unit), ["box", "sheet"]); assert.equal(rows[1].finished_length_mm, null); assert.equal(rows[1].item.sku, "403931");
+  await rejects("SELECT public.takeoff_save_order($1, 2, NULL, $2::jsonb)", [o, JSON.stringify([{ bucketKey: "x", specKey: "x", jobMaterialId: mat, quantity: 1, unit: "bar" }])], /len_for_pieces/);
+  await rejects("SELECT public.takeoff_save_order($1, 2, NULL, $2::jsonb)", [o, JSON.stringify([{ bucketKey: "x", specKey: "x", jobMaterialId: mat, quantity: 1, unit: "furlong" }])], /unit_check/);
+  const f = await one("SELECT has_function_privilege('anon', 'public.takeoff_save_order(uuid,integer,jsonb,jsonb)', 'EXECUTE') AS a");
+  assert.equal(f.a, false);
+});
+await t("207 re-applies cleanly (idempotent) and leaves 206 flashing rules intact", async () => {
+  await c.query(readFileSync(new URL("../../supabase/migrations/207_takeoff_generic_methods.sql", import.meta.url), "utf8"));
+  await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','run','{"points":[]}','staff','${user}')`, [], /takeoff_meas_run_has_cal/);
 });
 
 await db.close();

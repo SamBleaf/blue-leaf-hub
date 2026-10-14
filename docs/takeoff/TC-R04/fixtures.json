@@ -1,0 +1,507 @@
+{
+  "description": "Synthetic arithmetic examples. Installation eligibility, edge offsets, waste policy and supplier availability are not approved by these examples. Production acceptance tests must additionally exercise geometry, UI, persistence, auth and export.",
+  "cases": [
+    {
+      "id": "TIM-run-6000",
+      "kind": "repeated",
+      "input": {
+        "run": 6000,
+        "centres": 600
+      },
+      "expected": 11
+    },
+    {
+      "id": "TIM-run-6100",
+      "kind": "repeated",
+      "input": {
+        "run": 6100,
+        "centres": 600
+      },
+      "expected": 12
+    },
+    {
+      "id": "TIM-run-10000",
+      "kind": "repeated",
+      "input": {
+        "run": 10000,
+        "centres": 600
+      },
+      "expected": 18
+    },
+    {
+      "id": "TIM-offsets",
+      "kind": "repeated",
+      "input": {
+        "run": 6100,
+        "startOffset": 50,
+        "endOffset": 50,
+        "centres": 600
+      },
+      "expected": 11
+    },
+    {
+      "id": "TIM-pitched",
+      "kind": "memberStock",
+      "input": {
+        "mode": "projected",
+        "length": 4500,
+        "pitch": 30,
+        "allowance": 100,
+        "increment": 600
+      },
+      "expected": 5400
+    },
+    {
+      "id": "TIM-true-no-double-pitch",
+      "kind": "memberStock",
+      "input": {
+        "mode": "true",
+        "length": 4500,
+        "pitch": 30,
+        "allowance": 100,
+        "increment": 600
+      },
+      "expected": 4800
+    },
+    {
+      "id": "STOCK-4200",
+      "kind": "stock",
+      "input": {
+        "need": 4200,
+        "increment": 600
+      },
+      "expected": 4200
+    },
+    {
+      "id": "STOCK-4200.1",
+      "kind": "stock",
+      "input": {
+        "need": 4200.1,
+        "increment": 600
+      },
+      "expected": 4800
+    },
+    {
+      "id": "STOCK-availability-skips4800",
+      "kind": "stock",
+      "input": {
+        "need": 4300,
+        "available": [
+          2400,
+          3000,
+          4200,
+          5400
+        ]
+      },
+      "expected": 5400
+    },
+    {
+      "id": "STOCK-overlimit",
+      "kind": "stock",
+      "input": {
+        "need": 7000,
+        "increment": 600,
+        "max": 6000
+      },
+      "expected": null
+    },
+    {
+      "id": "TIM-cover-to-lm",
+      "kind": "linear",
+      "input": {
+        "areaM2": 24,
+        "coverMm": 120,
+        "spareRate": 0.1
+      },
+      "expected": 220
+    },
+    {
+      "id": "SHEET-exact",
+      "kind": "sheets",
+      "input": {
+        "walls": [
+          4800
+        ],
+        "cover": 1200
+      },
+      "expected": 4
+    },
+    {
+      "id": "SHEET-over",
+      "kind": "sheets",
+      "input": {
+        "walls": [
+          4801
+        ],
+        "cover": 1200
+      },
+      "expected": 5
+    },
+    {
+      "id": "SHEET-separate-walls",
+      "kind": "sheets",
+      "input": {
+        "walls": [
+          1300,
+          1300
+        ],
+        "cover": 1200
+      },
+      "expected": 4
+    },
+    {
+      "id": "MATRIX-2390",
+      "kind": "panelGrid",
+      "input": {
+        "width": 2390,
+        "height": 2390,
+        "panel": 1190,
+        "gap": 10
+      },
+      "expected": 4
+    },
+    {
+      "id": "MATRIX-2400",
+      "kind": "panelGrid",
+      "input": {
+        "width": 2400,
+        "height": 2400,
+        "panel": 1190,
+        "gap": 10
+      },
+      "expected": 9
+    },
+    {
+      "id": "COURSE-smooth",
+      "kind": "courses",
+      "input": {
+        "height": 3000,
+        "cover": 300
+      },
+      "expected": 10
+    },
+    {
+      "id": "COURSE-fine-texture",
+      "kind": "courses",
+      "input": {
+        "height": 3000,
+        "cover": 295
+      },
+      "expected": 11
+    },
+    {
+      "id": "COURSE-linea180",
+      "kind": "courses",
+      "input": {
+        "height": 3000,
+        "cover": 150
+      },
+      "expected": 20
+    },
+    {
+      "id": "BATTEN-quantity-primitive",
+      "kind": "supports",
+      "input": {
+        "width": 4800,
+        "centres": 600,
+        "height": 2700
+      },
+      "expected": 24300
+    },
+    {
+      "id": "SEALANT-geometric",
+      "kind": "sealant",
+      "input": {
+        "diameter": 6,
+        "length": 10000
+      },
+      "expected": 282.7433388230814
+    },
+    {
+      "id": "CUT-kerf-prevents-fit",
+      "kind": "fit",
+      "input": {
+        "cuts": [
+          2400,
+          2400
+        ],
+        "stock": 4800,
+        "kerf": 3
+      },
+      "expected": false
+    },
+    {
+      "id": "CUT-fits",
+      "kind": "fit",
+      "input": {
+        "cuts": [
+          2390,
+          2390
+        ],
+        "stock": 4800,
+        "kerf": 3
+      },
+      "expected": true
+    },
+    {
+      "id": "WALL-net-area",
+      "kind": "netArea",
+      "input": {
+        "width": 4800,
+        "height": 2700,
+        "openingWidth": 900,
+        "openingHeight": 900
+      },
+      "expected": 12.15
+    },
+    {
+      "id": "ALI-window",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          2500,
+          2500,
+          600
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": 891
+    },
+    {
+      "id": "ALI-extra800",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          2500,
+          2500,
+          600,
+          800
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": 88
+    },
+    {
+      "id": "ALI-extra900",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          2500,
+          2500,
+          600,
+          900
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": null
+    },
+    {
+      "id": "ALI-offcut",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          600
+        ],
+        "stock": 891,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": 288
+    },
+    {
+      "id": "ALI-no-two3400",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          3400,
+          3400
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": null
+    },
+    {
+      "id": "ALI-exact-last",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          2500,
+          2500,
+          1494
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": true
+      },
+      "expected": 0
+    },
+    {
+      "id": "ALI-last-needs-cut",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          2500,
+          2500,
+          1494
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": false
+      },
+      "expected": null
+    },
+    {
+      "id": "ALI-overlength",
+      "kind": "aliSequence",
+      "input": {
+        "cuts": [
+          6501
+        ],
+        "stock": 6500,
+        "kerf": 3,
+        "finalEndAcceptable": true
+      },
+      "expected": null
+    },
+    {
+      "id": "TIM-min-grid-500",
+      "kind": "stock",
+      "input": {
+        "need": 500,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 1200
+    },
+    {
+      "id": "TIM-min-grid-1199",
+      "kind": "stock",
+      "input": {
+        "need": 1199,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 1200
+    },
+    {
+      "id": "TIM-min-grid-1200",
+      "kind": "stock",
+      "input": {
+        "need": 1200,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 1200
+    },
+    {
+      "id": "TIM-min-grid-1200.1",
+      "kind": "stock",
+      "input": {
+        "need": 1200.1,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 1800
+    },
+    {
+      "id": "TIM-min-grid-1800",
+      "kind": "stock",
+      "input": {
+        "need": 1800,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 1800
+    },
+    {
+      "id": "TIM-min-grid-1800.1",
+      "kind": "stock",
+      "input": {
+        "need": 1800.1,
+        "increment": 600,
+        "min": 1200
+      },
+      "expected": 2400
+    },
+    {
+      "id": "TIM-cover90",
+      "kind": "linear",
+      "input": {
+        "areaM2": 24,
+        "coverMm": 90,
+        "spareRate": 0
+      },
+      "expected": 266.6666666666667
+    },
+    {
+      "id": "FLASH-corners-one-piece",
+      "kind": "flashingPieces",
+      "input": {
+        "tightPieces": [
+          3000
+        ],
+        "allowance": 200,
+        "increment": 100
+      },
+      "expected": 3200
+    },
+    {
+      "id": "FLASH-exact-max",
+      "kind": "flashingPieces",
+      "input": {
+        "tightPieces": [
+          8800
+        ],
+        "allowance": 200,
+        "increment": 100
+      },
+      "expected": 9000
+    },
+    {
+      "id": "FLASH-over-max",
+      "kind": "flashingPieces",
+      "input": {
+        "tightPieces": [
+          8801
+        ],
+        "allowance": 200,
+        "increment": 100
+      },
+      "expected": 9100
+    },
+    {
+      "id": "FLASH-split-at-limit",
+      "kind": "flashingPieces",
+      "input": {
+        "tightPieces": [
+          8800,
+          1200
+        ],
+        "allowance": 200,
+        "increment": 100
+      },
+      "expected": 10400
+    },
+    {
+      "id": "FLASH-split-earlier",
+      "kind": "flashingPieces",
+      "input": {
+        "tightPieces": [
+          5000,
+          5000
+        ],
+        "allowance": 200,
+        "increment": 100
+      },
+      "expected": 10400
+    }
+  ]
+}

@@ -15,9 +15,10 @@ import {
   buildCalibration, verifyCalibration, normalisePageMeta, normaliseRect, validatePoints, pointsWithinCalibration,
   segmentLengthMm, getMethod, normaliseFlashingRules, normaliseProfile, computeWorkspace, orderStatus,
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
-  normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey,
+  normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
+import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
 import { docInOwner, isUuid, ownerColumns, ownerFromRow, scopeQuery } from "./takeoffAccess.mjs";
 
@@ -53,7 +54,8 @@ const mapCal = (r) => ({
 });
 const mapMeas = (r) => ({
   id: r.id, kind: r.kind, documentId: r.document_id, pageIndex: r.page_index, calibrationId: r.calibration_id,
-  points: r.geometry?.points || null, label: r.label, rawLengthMm: r.raw_length_mm, finishedLengthMm: r.finished_length_mm,
+  points: r.geometry?.points || null, inputs: r.geometry?.inputs || null, parentId: r.geometry?.parentId || null,
+  label: r.label, rawLengthMm: r.raw_length_mm, finishedLengthMm: r.finished_length_mm,
   quantity: r.quantity, revision: r.revision, archived: !!r.archived_at,
 });
 const mapMat = (r) => ({
@@ -159,6 +161,20 @@ export async function loadSnapshotFresh(sb, wsId) {
 }
 
 // ── Commit ────────────────────────────────────────────────────────────────────
+/** Generic method settings: bounded scalars only (centres, pitch, allowances, kerf …). */
+function cleanGenericRules(r) {
+  const out = {};
+  for (const [k, v] of Object.entries(r).slice(0, 60)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k)) continue;
+    if (typeof v === "boolean") out[k] = v;
+    else if (typeof v === "number" && isFiniteNumber(v) && Math.abs(v) <= 1e6) out[k] = Math.round(v * 1000) / 1000;
+    else if (typeof v === "string") out[k] = optStr(v, 60);
+    else if (v && typeof v === "object" && !Array.isArray(v)) out[k] = cleanGenericRules(v);
+    else if (Array.isArray(v)) out[k] = v.slice(0, 50).filter((x) => typeof x === "number" && isFiniteNumber(x)).map((x) => Math.round(x * 1000) / 1000);
+  }
+  return out;
+}
+
 function cleanSpec(spec) {
   // Spec v2 (construction, finish id, BMT, colour applicability, perforation). Legacy v1 specs are upgraded:
   // missing construction = solid, finish text → finish id, "N/A" colour on unpainted = not applicable.
@@ -173,12 +189,81 @@ function cleanSourceReview(r) {
   };
 }
 
+/**
+ * Entered inputs for the TC-R04 measurement kinds — bounded numbers only, unknown keys dropped (never trusted
+ * as calculated totals). Wall kinds: rect | rake | gable | polygon (06 C0).
+ */
+const MM = (v, label, { min = 0, max = 100000, allowNull = true } = {}) => {
+  if (v === "" || v === null || v === undefined) { if (allowNull) return null; throw bad(`${label} is required.`); }
+  const n = Number(v);
+  must(isFiniteNumber(n) && n >= min && n <= max, `${label} must be between ${min} and ${max.toLocaleString("en-AU")} mm.`);
+  return Math.round(n * 1000) / 1000;
+};
+function cleanInputs(kind, inp, tracedLengthMm) {
+  const i = inp || {};
+  if (kind === "wall") {
+    const wk = ["rect", "rake", "gable", "polygon"].includes(i.kind) ? i.kind : "rect";
+    const out = { kind: wk, widthMm: tracedLengthMm != null ? Math.round(tracedLengthMm * 1000) / 1000 : MM(i.widthMm, "Wall length", { min: 1, allowNull: false }),
+      heightMm: MM(i.heightMm, "Wall height", { min: 1 }), startHeightMm: MM(i.startHeightMm, "Start height", { min: 1 }), endHeightMm: MM(i.endHeightMm, "End height", { min: 1 }),
+      eavesHeightMm: MM(i.eavesHeightMm, "Eaves height", { min: 1 }), apexXMm: MM(i.apexXMm, "Apex position"), apexHeightMm: MM(i.apexHeightMm, "Apex height", { min: 1 }),
+      heightSource: tracedLengthMm != null ? "plan+entered" : "entered", name: optStr(i.name, 60), floor: optStr(i.floor, 40) };
+    // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
+    // incomplete; values that ARE present must be coherent
+    if (wk === "gable" && out.eavesHeightMm && out.apexHeightMm) must(out.apexXMm != null && out.apexXMm <= out.widthMm && out.apexHeightMm > out.eavesHeightMm, "The apex must sit within the wall and above the eaves.");
+    if (wk === "polygon" && i.polygon != null) {
+      must(Array.isArray(i.polygon) && i.polygon.length >= 3 && i.polygon.length <= 200, "A wall outline needs 3–200 points.");
+      out.polygon = i.polygon.map((p) => ({ x: MM(p.x, "Outline x", { min: -100000, allowNull: false }), y: MM(p.y, "Outline y", { min: -100000, allowNull: false }) }));
+    }
+    return out;
+  }
+  if (kind === "opening") {
+    return { xMm: MM(i.xMm, "Opening offset", { allowNull: false }), sillMm: MM(i.sillMm, "Sill height", { allowNull: false }),
+      widthMm: MM(i.widthMm, "Opening width", { min: 1, allowNull: false }), heightMm: MM(i.heightMm, "Opening height", { min: 1, allowNull: false }),
+      label: optStr(i.label, 40), type: ["window", "door", "other"].includes(i.type) ? i.type : "window" };
+  }
+  if (kind === "offcut") {
+    return { lengthMm: MM(i.lengthMm, "Offcut length", { min: 1, allowNull: false }), materialId: isUuid(i.materialId) ? i.materialId : null,
+      label: optStr(i.label, 60), location: optStr(i.location, 80), status: ["available", "consumed"].includes(i.status) ? i.status : "available" };
+  }
+  if (kind === "polyline") {
+    const splits = Array.isArray(i.splitsMm) ? i.splitsMm.map((x) => MM(x, "Split position", { min: 0.001, allowNull: false })) : [];
+    for (let k = 1; k < splits.length; k++) must(splits[k] > splits[k - 1], "Split positions must increase along the run.");
+    if (tracedLengthMm != null) must(splits.every((x) => x < tracedLengthMm), "A split must be inside the run.");
+    return splits.length || i.role ? { splitsMm: splits, role: optStr(i.role, 30) } : null;
+  }
+  if (kind === "distribution") {
+    return { startOffsetMm: MM(i.startOffsetMm, "Start offset") ?? 0, endOffsetMm: MM(i.endOffsetMm, "End offset") ?? 0,
+      includeStart: i.includeStart !== false, includeEnd: i.includeEnd !== false, spacing: i.spacing === "equal" ? "equal" : "fixed",
+      overrides: Array.isArray(i.overrides) ? i.overrides.slice(0, 500).map((o) => ({ station: String(o.station).slice(0, 40), removed: o.removed === true, lengthMm: MM(o.lengthMm, "Override length", { min: 1 }) })) : [] };
+  }
+  if (kind === "member") return { mode: ["projected", "true"].includes(i.mode) ? i.mode : "projected" };
+  return null;
+}
+
+/** Contribution role → measurement kinds it may use (207). A wall feeds cladding/supports/accessories/studs;
+ *  timber repeated members take a distribution + a member line; aluminium takes openings. */
+const ROLE_KINDS = Object.freeze({
+  primary: ["run", "count", "manual", "polyline", "wall", "opening", "member", "distribution", "area"],
+  distribution: ["run", "polyline", "distribution"], member: ["run", "member"], wall: ["wall"], opening: ["opening"],
+  path: ["polyline"], surface: ["area", "wall"], offcut: ["offcut"],
+});
+
 /** Validate + normalise a material's content (method, rules, profile, spec). */
 export function cleanMaterialContent(m) {
   const methodKey = str(m.methodKey, 60) || "flashing_runs";
   const methodVersion = Number(m.methodVersion || 1);
   const method = getMethod(methodKey, methodVersion);
   if (method.status !== "production") throw bad("That material method isn't available yet.");
+  if (method.generic) {
+    // TC-R04 families: spec normalised per family; flashing rules/profile don't apply
+    let spec;
+    try { spec = normaliseFamilySpec(m.spec); } catch (e) { throw bad(e.message); }
+    must(method.families.includes(spec.family), "That calculation method doesn't fit this material.");
+    const gname = str(m.name);
+    must(gname, "Give the material a name.");
+    const rules = m.rules && typeof m.rules === "object" ? cleanGenericRules(m.rules) : {};
+    return { name: gname, methodKey, methodVersion, rules, profile: null, spec };
+  }
   const rules = normaliseFlashingRules(m.rules || {});
   const profile = m.profile ? normaliseProfile(m.profile) : null;
   if (profile && profile.segments.length > LIMITS.profileSegments) throw bad(`A profile can have at most ${LIMITS.profileSegments} legs.`);
@@ -333,12 +418,48 @@ export async function commitWorkspace(sb, ctx, body) {
       rec = { id: m.id, kind: "manual", documentId: null, pageIndex: null, calibrationId: null, geometry: null, label, rawLengthMm: null,
         finishedLengthMm: requirePositive(m.finishedLengthMm, "Finished length"), quantity: requireQuantity(m.quantity) };
       must(rec.quantity <= 10000, "Quantity looks too large.");
+    } else if (["polyline", "distribution", "member", "area"].includes(m.kind)) {
+      // plan-traced geometry on ONE scaled page (TC-R04): continuous flashing/trim paths, timber distribution
+      // runs and member lines, traced areas. Lengths are server-computed from the calibration, never trusted.
+      const minPts = m.kind === "area" ? 3 : 2;
+      const maxPts = m.kind === "polyline" || m.kind === "area" ? LIMITS.pointsPerGeometry : 2;
+      const pts = validatePoints(m.points, { min: minPts, max: maxPts });
+      const cal = cals.get(m.calibrationId);
+      if (!cal) throw bad("Scale this plan page before measuring.");
+      const d = await docRow(m.documentId);
+      must(cal.documentId === d.id && cal.pageIndex === Number(m.pageIndex), "That scale belongs to a different plan page.");
+      if (isNew) must(d.status === "current", "This plan has been replaced — measure on the current revision.");
+      if (!pointsWithinCalibration(cal, pts)) throw bad("This measurement goes outside the scaled region.", "OUTSIDE_REGION");
+      const rawLengthMm = m.kind === "area" ? null : polylineLengthMm(cal, pts);
+      if (rawLengthMm != null) requirePositive(rawLengthMm, "Measured length");
+      const inputs = cleanInputs(m.kind, m.inputs, rawLengthMm);
+      rec = { id: m.id, kind: m.kind, documentId: d.id, pageIndex: cal.pageIndex, calibrationId: cal.id,
+        geometry: { v: 2, points: pts, ...(inputs ? { inputs } : {}) }, label, rawLengthMm, finishedLengthMm: null, quantity: null };
+    } else if (m.kind === "wall" || m.kind === "opening" || m.kind === "offcut") {
+      // entered (or traced) wall surfaces, their openings, and recorded physical offcuts
+      let pts = null, cal = null, d = null;
+      if (Array.isArray(m.points) && m.points.length) {
+        pts = validatePoints(m.points, { min: 2, max: 200 });
+        cal = cals.get(m.calibrationId);
+        if (!cal) throw bad("Scale this plan page before tracing a wall.");
+        d = await docRow(m.documentId);
+        must(cal.documentId === d.id && cal.pageIndex === Number(m.pageIndex), "That scale belongs to a different plan page.");
+        if (isNew) must(d.status === "current", "This plan has been replaced — trace on the current revision.");
+      }
+      if (pts && cal && !pointsWithinCalibration(cal, pts)) throw bad("This wall goes outside the scaled region.", "OUTSIDE_REGION");
+      // an opening may stand alone (aluminium window trims) or belong to a wall of THIS takeoff
+      const parentId = m.kind === "opening" && m.parentId != null ? m.parentId : null;
+      if (parentId) must(isUuid(parentId) && meas.has(parentId) && meas.get(parentId).kind === "wall", "An opening must belong to a wall in this takeoff.");
+      const inputs = cleanInputs(m.kind, m.inputs, pts && cal ? polylineLengthMm(cal, pts) : null);
+      rec = { id: m.id, kind: m.kind, documentId: d?.id || null, pageIndex: cal ? cal.pageIndex : null, calibrationId: cal?.id || null,
+        geometry: { v: 2, ...(pts ? { points: pts } : {}), inputs, ...(parentId ? { parentId } : {}) }, label,
+        rawLengthMm: pts && cal ? polylineLengthMm(cal, pts) : null, finishedLengthMm: null, quantity: null };
     } else {
       throw bad("Unknown measurement type.");
     }
     must(rec.finishedLengthMm == null || rec.finishedLengthMm <= 30000, "Finished length looks too large (over 30 m).");
     out.measurements.upsert.push(rec);
-    meas.set(m.id, { ...rec, points: rec.geometry?.points || null });
+    meas.set(m.id, { ...rec, points: rec.geometry?.points || null, inputs: rec.geometry?.inputs || null, parentId: rec.geometry?.parentId || null });
   }
   for (const id of ch.measurements?.archive || []) { must(isUuid(id), "Invalid measurement id."); out.measurements.archive.push(id); meas.delete(id); }
   must(meas.size <= LIMITS.measurementsPerWorkspace, `A takeoff can hold at most ${LIMITS.measurementsPerWorkspace} measurements.`);
@@ -350,7 +471,14 @@ export async function commitWorkspace(sb, ctx, body) {
     must(isUuid(c.id), "Invalid assignment id.");
     must(meas.has(c.measurementId), "That measurement is not in this takeoff.");
     must(mats.has(c.jobMaterialId), "That material is not in this takeoff.");
-    must(c.role == null || c.role === "primary", "Unknown assignment role.");
+    const role = c.role == null ? "primary" : c.role;
+    must(Object.hasOwn(ROLE_KINDS, role), "Unknown assignment role.");
+    must(ROLE_KINDS[role].includes(meas.get(c.measurementId).kind), "That measurement can't be used that way.");
+    const cm = mats.get(c.jobMaterialId);
+    if (!getMethod(cm.methodKey || cm.method_key, Number(cm.methodVersion || cm.method_version || 1)).generic) {
+      // flashing takes runs, continuous paths and finished pieces only
+      must(role === "primary" && ["run", "polyline", "count", "manual"].includes(meas.get(c.measurementId).kind), "A flashing takes runs, paths or finished pieces.");
+    }
     let split = null;
     if (c.split) {
       must(!Array.isArray(c.split.pieces) || c.split.pieces.length <= 20, "A split can have at most 20 pieces.");
@@ -367,7 +495,8 @@ export async function commitWorkspace(sb, ctx, body) {
       if (same && Number(prev.version || 1) === split.version) split.sourceSignature = prev.sourceSignature;
       else changedSplits.push(c.id);
     }
-    const rec = { id: c.id, measurementId: c.measurementId, jobMaterialId: c.jobMaterialId, role: "primary", split };
+    must(!split || role === "primary", "Only a plain run can be split this way.");
+    const rec = { id: c.id, measurementId: c.measurementId, jobMaterialId: c.jobMaterialId, role, split };
     out.contributions.upsert.push(rec);
     contribs.set(c.id, rec);
   }
@@ -443,7 +572,8 @@ const mapOrder = (r) => ({
   id: r.id, workspaceId: r.workspace_id, orderRef: r.order_ref, supplierId: r.supplier_id, delivery: r.delivery || {}, notes: r.notes,
   status: r.status, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at,
 });
-const mapLine = (r) => ({ id: r.id, bucketKey: r.bucket_key, specKey: r.spec_key, jobMaterialId: r.job_material_id, finishedLengthMm: r.finished_length_mm, quantity: r.quantity });
+const mapLine = (r) => ({ id: r.id, bucketKey: r.bucket_key, specKey: r.spec_key, jobMaterialId: r.job_material_id, finishedLengthMm: r.finished_length_mm, quantity: r.quantity,
+  unit: r.unit || "piece", item: r.item || null });
 const mapExport = (r) => ({
   id: r.id, orderId: r.order_id, exportNo: r.export_no, isDraft: r.is_draft, snapshotSha256: r.snapshot_sha256,
   calculationVersion: r.calculation_version, workspaceRevision: r.workspace_revision, orderRevision: r.order_revision,
@@ -589,11 +719,14 @@ export async function saveOrder(sb, ctx, orderRow, body) {
       // An unchanged existing line is kept exactly as chosen — even if it has gone stale — so editing
       // other lines never silently relinks it. Stale lines are shown and block order-ready exports.
       const keep = storedByKey.get(`${l.bucketKey}#${l.jobMaterialId || ""}`);
-      if (keep) return { bucketKey: keep.bucket_key, specKey: keep.spec_key, jobMaterialId: keep.job_material_id, finishedLengthMm: keep.finished_length_mm, quantity };
+      if (keep) return { bucketKey: keep.bucket_key, specKey: keep.spec_key, jobMaterialId: keep.job_material_id, finishedLengthMm: keep.finished_length_mm, quantity,
+        unit: keep.unit || "piece", item: keep.item || null };
       const sl = byKey.get(l.bucketKey);
       must(sl, "A selected length is no longer in the takeoff — refresh the schedule.");
       must(!l.jobMaterialId || sl.jobMaterialIds.includes(l.jobMaterialId), "That material doesn't supply this length — choose the line again.");
-      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: l.jobMaterialId || sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm, quantity };
+      // generic lines (TC-R04) carry their purchase unit and what is supplied; flashing stays length × piece
+      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: l.jobMaterialId || sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm ?? null, quantity,
+        unit: sl.unit || "piece", item: sl.item || null };
     });
   }
   const { data, error } = await sb.rpc("takeoff_save_order", { p_order_id: orderRow.id, p_expected_revision: expected, p_fields: fields, p_lines: lines });
@@ -623,11 +756,32 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   if (!lines.length) problems.push("Add at least one length to the order.");
   if (wsSnapshot.workspace.state === "needs_review") problems.push("A plan used by this takeoff was replaced or removed — review the takeoff and mark it reviewed.");
   const groups = new Map();
+  const items = new Map(); // generic purchase groups (TC-R04), by spec key
   for (const l of lines) {
     const st = orderLineState(l, computed, mats);
     const sl = st.current;
     if (st.stale) problems.push(PROBLEM_TEXT[st.problem]);
     if (!sl) continue;
+    if (sl.generic) {
+      const mat = mats.get(l.jobMaterialId) || mats.get(sl.jobMaterialIds[0]);
+      if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
+      for (const p of sl.problems) problems.push(`${mat.name}: ${PROBLEM_TEXT[p] || p}`);
+      if (l.quantity < 1) problems.push("Quantities must be 1 or more.");
+      const cv = cover?.get(sl.bucketKey);
+      if (cv && cv.placed + cv.exported + l.quantity > sl.quantity && !acknowledgeSurplus) {
+        const left = Math.max(0, sl.quantity - cv.placed - cv.exported);
+        problems.push(`${mat.name} — ${sl.item?.description || sl.unit}: ${cv.placed + cv.exported} of ${sl.quantity} are already on ${cv.refs.length ? cv.refs.join(", ") : "a placed order"}${cv.placed ? " (placed)" : " (exported)"} — only ${left} more needed. Reduce this line or remove it.`);
+      }
+      let g = items.get(mat.id);
+      if (!g) {
+        const mr = computed.materialResults?.[mat.id] || null;
+        g = { materialId: mat.id, family: mat.spec?.family, materialName: mat.name, specText: describeFamilySpec(mat.spec), statuses: mr?.status || null, lines: [] };
+        items.set(mat.id, g);
+      }
+      g.lines.push({ bucketKey: sl.bucketKey, unit: sl.unit, quantity: l.quantity, required: sl.quantity, description: sl.item?.description || sl.unit,
+        finishedLengthMm: sl.finishedLengthMm ?? null, stockLengthMm: sl.item?.stockLengthMm ?? null, note: sl.item?.note || null, stale: st.stale, problem: sl.problems.length > 0 });
+      continue;
+    }
     // Print exactly what the bucket is: a material whose CURRENT spec key equals the bucket's.
     const mat = sl.jobMaterialIds.map((id) => mats.get(id)).find((m) => m && materialSpecKey(m) === sl.specKey);
     if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
@@ -657,6 +811,20 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     const totalMm = g.lines.reduce((a, l) => a + l.finishedLengthMm * l.quantity, 0);
     return { ...g, profileId: `P${i + 1}`, totalLm: Number((totalMm / 1000).toFixed(3)), pieces: g.lines.reduce((a, l) => a + l.quantity, 0) };
   });
+  const itemList = [...items.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.materialId < b.materialId ? -1 : 1)).map((g, i) => {
+    const byUnit = {};
+    for (const l of g.lines) byUnit[l.unit] = (byUnit[l.unit] || 0) + l.quantity;
+    return { ...g, groupId: `M${i + 1}`, totals: { byUnit } };
+  });
+  const byUnitAll = {};
+  for (const g of itemList) for (const [u, n] of Object.entries(g.totals.byUnit)) byUnitAll[u] = (byUnitAll[u] || 0) + n;
+  // the site appendix travels in the same frozen snapshot (never part of the supplier order itself)
+  const appendix = { aluminium: [], timber: [], layouts: [], flashingRuns: [] };
+  for (const g of itemList) {
+    const ap = computed.materialResults?.[g.materialId]?.appendix;
+    if (!ap) continue;
+    for (const k of ["aluminium", "timber", "layouts"]) for (const x of ap[k] || []) appendix[k].push({ ...x, materialName: g.materialName });
+  }
   const usedDocIds = new Set();
   const usedCalIds = new Set();
   const lineKeys = new Set(lines.map((l) => l.bucketKey));
@@ -664,6 +832,12 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     const sl = computed.scheduleLines.find((s) => s.contributionIds.includes(c.contributionId) && lineKeys.has(s.bucketKey));
     if (!sl) continue;
     const m = wsSnapshot.measurements.find((x) => x.id === c.measurementId);
+    if (c.path && !sl.generic) {
+      // continuous flashing run: site reference only (corners are site cuts/folds, never supplier bends)
+      appendix.flashingRuns.push({ ref: `R-${String(c.measurementId).slice(0, 8)}`, materialName: mats.get(c.jobMaterialId)?.name || "Flashing",
+        tightMm: c.path.tightTotalMm, cornersMm: c.path.cornersMm || [], splitsMm: c.path.splitsMm || [],
+        pieces: (c.path.pieces || []).map((p) => ({ fromMm: p.fromMm, toMm: p.toMm, tightMm: p.tightMm, orderMm: p.orderMm })) });
+    }
     if (m?.documentId) usedDocIds.add(m.documentId);
     if (m?.calibrationId) usedCalIds.add(m.calibrationId);
   }
@@ -681,7 +855,10 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     delivery: d,
     notes: order.notes || null,
     groups: groupList,
+    items: itemList,
+    appendix,
     totals: {
+      byUnit: byUnitAll,
       pieces: groupList.reduce((a, g) => a + g.pieces, 0),
       totalLm: Number((groupList.reduce((a, g) => a + g.totalLm * 1000, 0) / 1000).toFixed(3)),
       handlingFlags: groupList.reduce((a, g) => a + g.lines.filter((l) => l.handlingFlag).reduce((x, l) => x + l.quantity, 0), 0),

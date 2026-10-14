@@ -190,12 +190,29 @@ const areaToLinear = {
   },
 };
 
+// ── TC-R04 generic methods (calculation in shared/takeoff/engine/*, dispatched by engine/dispatch.js) ──
+// Registry entries declare roles, families and outputs only. Historical versions above are NOT redefined.
+const generic = (key, version, label, families, roles, outputs) => Object.freeze({ key, version, status: "production", label, families, roles, fields: [], outputs, generic: true });
+const GENERIC = [
+  generic("repeated_members", 2, "Timber — repeated members (rafters, joists, battens)", ["timber"], ["distribution", "member", "manual", "count"], ["linearDemands"]),
+  generic("wall_frame", 1, "Timber — stud wall frame", ["timber"], ["wall", "opening", "distribution", "manual"], ["linearDemands"]),
+  generic("linear_stock", 1, "Linear stock — plates, noggins, trim, aluminium profiles", ["timber", "aluminium"], ["primary", "path", "opening", "wall", "manual", "count", "offcut"], ["linearDemands", "allocation"]),
+  generic("sheet_layout", 2, "Cladding — sheet layout (Axon, Rendex)", ["cladding", "foam"], ["wall", "opening", "surface"], ["sheetDemands", "layout"]),
+  generic("course_layout", 1, "Cladding — horizontal/vertical courses (Linea, Stria, timber boards)", ["cladding", "timber-cladding"], ["wall", "opening", "surface"], ["linearDemands", "layout"]),
+  generic("panel_grid", 1, "Cladding — expressed-joint panel grid (Matrix)", ["cladding"], ["wall", "opening", "surface"], ["sheetDemands", "layout"]),
+  generic("aac_panel_layout", 1, "AAC panels (Walsc, Hebel)", ["aac"], ["wall", "opening", "surface"], ["sheetDemands", "layout"]),
+  generic("area_to_linear", 2, "Timber cladding — area to LM (random lengths)", ["timber-cladding"], ["wall", "opening", "surface", "manual"], ["lmDemand"]),
+  generic("support_grid", 1, "Supports / battens for a wall", ["batten", "timber"], ["wall", "opening"], ["linearDemands", "layout"]),
+  generic("accessory_routes", 1, "Accessories (trims, membrane, tape, sealant, fixings)", ["accessory"], ["wall", "opening"], ["mixedDemands"]),
+];
+
 export const METHODS = Object.freeze({
   "flashing_runs@1": flashingRuns,
   "finished_piece_count@1": finishedPieceCount,
   "repeated_members@1": repeatedMembers,
   "sheet_wall@1": sheetWall,
   "area_to_linear@1": areaToLinear,
+  ...Object.fromEntries(GENERIC.map((m) => [`${m.key}@${m.version}`, m])),
 });
 
 export function methodId(key, version) {

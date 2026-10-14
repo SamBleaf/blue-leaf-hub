@@ -687,6 +687,95 @@ await t("R04 A03: a perforated company standard copies into two jobs with every 
   assert.equal(std.spec.perforation.holeSizeMm, 3); assert.equal(std.spec.colour, "Surfmist"); assert.equal(std.revision, 1);
 });
 
+// ── TC-R04 generic methods over HTTP (migration 207) ─────────────────────────
+const w5 = id();
+const D5 = await storePlan({ carpentryJobId: J.carpA }, "TC-plan.pdf"); // earlier tests replace D.a
+const t5 = { cal: id(), tim: id(), dist: id(), mem: id(), cd: id(), cm: id(), clad: id(), wall: id(), win: id(), cw: id(), alu: id(), op: id(), co: id(), fl: id(), path: id(), cp: id() };
+async function w5rev() { return (await S(`/workspaces/${w5}`)).data.snapshot.workspace.revision; }
+const timberSpec = { family: "timber", purpose: "rafters", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H3", endAllowanceMm: 100 };
+await t("TC J1 over HTTP: distribution + member roles persist; the SERVER computes 18 × 5,400 (client totals ignored)", async () => {
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w5, name: "TC" });
+  const r = await SP(`/workspaces/${w5}/commit`, { expectedRevision: 1, changes: {
+    calibrations: { insert: [{ id: t5.cal, documentId: D5, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: t5.tim, name: "Rafters", methodKey: "repeated_members", methodVersion: 2, spec: timberSpec, rules: { centresMm: 600, lengthSource: "projected", pitchDeg: 30 } }] },
+    measurements: { upsert: [
+      { id: t5.dist, kind: "distribution", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: runPts(10000), inputs: { startOffsetMm: 0, endOffsetMm: 0, includeStart: true, includeEnd: true, spacing: "fixed", overrides: [] }, rawLengthMm: 1 },
+      { id: t5.mem, kind: "member", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: runPts(4500, 340), inputs: { mode: "projected" } },
+    ] },
+    contributions: { upsert: [{ id: t5.cd, measurementId: t5.dist, jobMaterialId: t5.tim, role: "distribution" }, { id: t5.cm, measurementId: t5.mem, jobMaterialId: t5.tim, role: "member" }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const roles = await q("SELECT role FROM takeoff_contributions WHERE job_material_id=$1 ORDER BY role", [t5.tim]);
+  assert.deepEqual(roles.rows.map((x) => x.role), ["distribution", "member"]);
+  const m = r.data.snapshot.measurements.find((x) => x.id === t5.dist);
+  assert.ok(Math.abs(m.rawLengthMm - 10000) < 1e-6, `server length ${m.rawLengthMm}`);
+  const ls = r.data.computed.scheduleLines.filter((l) => l.jobMaterialIds.includes(t5.tim));
+  assert.deepEqual(ls.map((l) => `${l.quantity} ${l.unit} @${l.finishedLengthMm}`), ["18 piece @5400"]);
+});
+await t("TC: role ↔ kind enforced (a wall can't be a distribution; a flashing can't take a wall)", async () => {
+  const fl = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: {
+    materials: { upsert: [{ id: t5.fl, name: "Barge", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec, profile }] },
+    measurements: { upsert: [{ id: t5.wall, kind: "wall", inputs: { kind: "rect", widthMm: 4800, heightMm: 2700, name: "North" } }] } } });
+  assert.equal(fl.status, 200, JSON.stringify(fl.data));
+  const bad1 = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { contributions: { upsert: [{ id: id(), measurementId: t5.wall, jobMaterialId: t5.tim, role: "distribution" }] } } });
+  assert.equal(bad1.status, 400); assert.match(bad1.data.error, /can't be used that way/);
+  const bad2 = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { contributions: { upsert: [{ id: id(), measurementId: t5.wall, jobMaterialId: t5.fl, role: "wall" }] } } });
+  assert.equal(bad2.status, 400);
+  const bad3 = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { contributions: { upsert: [{ id: id(), measurementId: t5.wall, jobMaterialId: t5.tim, role: "bogus" }] } } });
+  assert.equal(bad3.status, 400);
+});
+await t("TC J2 over HTTP: Axon wall + window → 4 sheets; an opening must name a wall of THIS takeoff (or none)", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const axon = productGroups({ family: "cladding" }).find((g) => g.name === "Axon 133 smooth");
+  const foreign = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { measurements: { upsert: [{ id: id(), kind: "opening", parentId: id(), inputs: { xMm: 0, sillMm: 0, widthMm: 600, heightMm: 600 } }] } } });
+  assert.equal(foreign.status, 400);
+  const r = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: {
+    materials: { upsert: [{ id: t5.clad, name: "Axon", methodKey: "sheet_layout", methodVersion: 2, spec: specFromGroup(axon), rules: {} }] },
+    measurements: { upsert: [{ id: t5.win, kind: "opening", parentId: t5.wall, inputs: { xMm: 1350, sillMm: 900, widthMm: 900, heightMm: 900, label: "W01" } }] },
+    contributions: { upsert: [{ id: t5.cw, measurementId: t5.wall, jobMaterialId: t5.clad, role: "wall" }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const ls = r.data.computed.scheduleLines.filter((l) => l.jobMaterialIds.includes(t5.clad));
+  assert.deepEqual(ls.map((l) => `${l.quantity} ${l.unit} @${l.finishedLengthMm}`), ["4 sheet @2750"]);
+});
+await t("TC aluminium + continuous flashing over HTTP; generic order lines keep unit/item; export freezes items + appendix; appendix PDF served", async () => {
+  const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
+  const pts = [{ x: 200, y: 400 }, { x: 200 + 750 * k, y: 400 }, { x: 200 + 750 * k, y: 400 + 750 * k }, { x: 200 + 1500 * k, y: 400 + 750 * k }, { x: 200 + 1500 * k, y: 400 + 1500 * k }];
+  let r = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: {
+    materials: { upsert: [{ id: t5.alu, name: "Angle 50x50x3", methodKey: "linear_stock", methodVersion: 1, spec: { ...aluminiumPreset(), kerfMm: 3, kerfConfirmed: true }, rules: {} }] },
+    measurements: { upsert: [{ id: t5.op, kind: "opening", inputs: { xMm: 0, sillMm: 0, widthMm: 600, heightMm: 2400, label: "W01" } },
+      { id: t5.path, kind: "polyline", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: pts, inputs: { splitsMm: [] } }] },
+    contributions: { upsert: [{ id: t5.co, measurementId: t5.op, jobMaterialId: t5.alu, role: "opening" }, { id: t5.cp, measurementId: t5.path, jobMaterialId: t5.fl }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const sl = r.data.computed.scheduleLines;
+  assert.deepEqual(sl.filter((l) => l.jobMaterialIds.includes(t5.alu)).map((l) => `${l.quantity} ${l.unit} @${l.finishedLengthMm}`), ["1 bar @6500"]);
+  assert.deepEqual(sl.filter((l) => l.jobMaterialIds.includes(t5.fl)).map((l) => `${l.quantity}×${l.finishedLengthMm}`), ["1×3200"]);
+  // a split station beyond the run is rejected server-side
+  const badSplit = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { measurements: { upsert: [{ id: t5.path, kind: "polyline", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: pts, inputs: { splitsMm: [5000] } }] } } });
+  assert.equal(badSplit.status, 400);
+  const oid = id();
+  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  const sched = (await S(`/workspaces/${w5}/orders`)).data.scheduleLines;
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  assert.equal(pr.status, 200, JSON.stringify(pr.data));
+  const stored = await q("SELECT unit, quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY unit", [oid]);
+  assert.deepEqual(stored.rows.map((x) => x.unit).sort(), ["bar", "piece", "piece", "sheet"]);
+  const sheetRow = stored.rows.find((x) => x.unit === "sheet");
+  assert.equal(sheetRow.quantity, 4); assert.match(sheetRow.item.description, /Axon 133 smooth/);
+  const wsRev = await w5rev();
+  const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "tc-exp-1", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: wsRev });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
+  assert.deepEqual(snap.totals.byUnit, { piece: 18, sheet: 4, bar: 1 });
+  assert.equal(snap.appendix.aluminium[0].bars[0].cuts.length, 3);
+  assert.equal(snap.appendix.flashingRuns.length, 1);
+  const pdf = await S(`/exports/${e.data.export.exportId}/pdf`);
+  assert.equal(pdf.data.subarray(0, 4).toString(), "%PDF");
+  const app = await S(`/exports/${e.data.export.exportId}/appendix`);
+  assert.equal(app.status, 200); assert.equal(app.data.subarray(0, 4).toString(), "%PDF");
+  const other = await S(`/exports/${e.data.export.exportId}/appendix`, { worker: "wt-w" });
+  assert.notEqual(other.status, 200); // the appendix is behind the same export access as the PDF
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

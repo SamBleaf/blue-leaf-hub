@@ -114,6 +114,22 @@ export function polylineLengthMm(cal, points) {
   return t;
 }
 
+/** A PDF point → real-world mm relative to `origin` (x along the scale's horizontal, y up). Asymmetric X/Y scales apply. */
+export function pointToMm(cal, origin, p) {
+  const { dx, dy } = deltaInBasis(p.x - origin.x, p.y - origin.y, cal.basisRotation);
+  if (cal.mode === CALIBRATION_MODES.SEPARATE) return { x: dx * cal.sx, y: dy * cal.sy };
+  return { x: dx * cal.sx, y: dy * cal.sx };
+}
+
+/** Real-world area (mm²) of a traced polygon (shoelace on calibrated coordinates; both axes scaled). */
+export function polygonAreaMm2(cal, points) {
+  if (!Array.isArray(points) || points.length < 3) return 0;
+  const q = points.map((p) => pointToMm(cal, points[0], p));
+  let a = 0;
+  for (let i = 0; i < q.length; i++) { const j = (i + 1) % q.length; a += q[i].x * q[j].y - q[j].x * q[i].y; }
+  return Math.abs(a) / 2;
+}
+
 /**
  * Independent check against a third printed dimension. <= tolerance → ready; otherwise
  * needs_review (visual inspection allowed, order-ready measured results blocked).

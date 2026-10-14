@@ -23,6 +23,7 @@ import {
   listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
+import { renderSiteAppendixPdf } from "./takeoffPdf.mjs";
 
 const DISABLED = { status: 404, message: "Takeoffs aren't switched on yet.", code: "FEATURE_DISABLED" };
 
@@ -274,6 +275,17 @@ function mount(app, P, adapter) {
     res.setHeader("Content-Length", String(buf.length));
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("Content-Disposition", `inline; filename="${ctx.orderRow.order_ref}-export-${ctx.ex.export_no}${ctx.ex.is_draft ? "-draft" : ""}.pdf"`);
+    return res.end(buf);
+  }));
+
+  // site appendix (cutting/setout) — rendered from the SAME frozen snapshot, never part of the supplier PDF
+  app.get(`${P}/exports/:exportId/appendix`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await exportCtx(req, sb, req.params.exportId);
+    const buf = await renderSiteAppendixPdf(ctx.ex.snapshot, { exportNo: ctx.ex.export_no, snapshotSha256: ctx.ex.snapshot_sha256 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Disposition", `inline; filename="${ctx.orderRow.order_ref}-export-${ctx.ex.export_no}-site-appendix.pdf"`);
     return res.end(buf);
   }));
 

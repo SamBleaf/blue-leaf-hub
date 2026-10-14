@@ -16,7 +16,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
-export const RENDERER_VERSION = "takeoff-pdf@2"; // @2: spec v2 text, perforation detail, crush wording, painted/reference face
+export const RENDERER_VERSION = "takeoff-pdf@3"; // @3: generic purchase lines (timber/cladding/aluminium) + separate site appendix
 const BRAND = "#006c9b";
 const INK = "#1A1A2E";
 const MUTED = "#64748b";
@@ -140,6 +140,99 @@ export function drawProfile(doc, profile, box, fonts, { painted = true } = {}) {
   void headings;
 }
 
+const UNIT_WORD = { piece: "piece", lm: "LM", m2: "m²", sheet: "sheet", bar: "bar", box: "box", bag: "bag", roll: "roll", pack: "pack", cartridge: "cartridge", ml: "ml" };
+/** "12 pieces · 9 sheets · 3 bars" — units are never added together. */
+export function unitSummary(byUnit) {
+  return Object.entries(byUnit || {}).filter(([, n]) => n > 0)
+    .map(([u, n]) => (u === "lm" || u === "m2" || u === "ml" ? `${n} ${UNIT_WORD[u]}` : u === "box" ? `${n} ${n === 1 ? "box" : "boxes"}` : plural(n, UNIT_WORD[u] || u))).join(" · ");
+}
+
+/**
+ * The SITE appendix (02 §6): cutting and setout from the same frozen snapshot — aluminium bars and cuts,
+ * timber cut list (cut → stock), sheet/course layout per wall and continuous flashing runs (corner stations
+ * and split positions). Separate from the supplier order: never sent as part of it.
+ * @returns {Promise<Buffer>}
+ */
+export async function renderSiteAppendixPdf(snapshot, opts = {}) {
+  const { default: PDFDocument } = await import("pdfkit");
+  return await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true,
+      info: { Title: T(`Site appendix ${snapshot.orderRef}`), Author: T(snapshot.company?.name || "Blue Leaf Building"), Creator: RENDERER_VERSION } });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    try { drawAppendix(doc, snapshot, opts); doc.end(); } catch (e) { reject(e); }
+  });
+}
+
+function drawAppendix(doc, snap, opts) {
+  const fonts = pickFont(doc);
+  const W = doc.page.width, M = 40, CW = W - M * 2;
+  const bottom = () => doc.page.height - 56;
+  const a = snap.appendix || {};
+  let y = 40;
+  const header = (cont) => {
+    y = 36;
+    doc.font(fonts.bold).fontSize(14).fillColor(INK).text(T("SITE APPENDIX — CUTTING & SETOUT"), M, y, { width: CW });
+    doc.font(fonts.regular).fontSize(8.5).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""} · ${snap.job?.label || ""}${cont ? " (continued)" : ""}`), M, y + 18, { width: CW });
+    y += 36;
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("For site use. Not part of the supplier order. Quantities are calculated from the plan and entered values; installation details marked source-pending are not verified."), M, y, { width: CW });
+    y = doc.y + 8;
+  };
+  const need = (h) => { if (y + h > bottom()) { doc.addPage(); header(true); } };
+  const title = (t) => { need(40); doc.save().rect(M, y, CW, 18).fill("#eef5f9").restore(); doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(t), M + 6, y + 4, { width: CW - 12, lineBreak: false, ellipsis: true, height: 12 }); y += 22; };
+  const line = (t, { muted = false, bold = false, indent = 0 } = {}) => {
+    doc.font(bold ? fonts.bold : fonts.regular).fontSize(8.5);
+    const h = doc.heightOfString(T(t), { width: CW - 12 - indent }) + 2;
+    need(h);
+    doc.fillColor(muted ? MUTED : INK).text(T(t), M + 6 + indent, y, { width: CW - 12 - indent });
+    y += h;
+  };
+  header(false);
+  let any = false;
+  for (const al of a.aluminium || []) {
+    any = true;
+    title(`${al.materialName} — cutting sheet (${fmt(al.stockLengthMm)} mm bars)`);
+    line(`Kerf ${al.kerfMm == null ? "NOT CONFIRMED" : `${fmt(al.kerfMm)} mm${al.kerfConfirmed ? "" : " (unconfirmed)"}`} · end trim ${fmt(al.endTrimMm || 0)} mm · ${al.barCount} new bar(s)${al.lowerBound != null ? ` · lower bound ${al.lowerBound}` : ""} · ${al.proven ? "proven minimum" : "best found (not proven minimum)"}`, { muted: true });
+    for (const b of al.bars || []) {
+      line(`Bar ${b.n}${b.source === "offcut" ? ` (existing offcut ${b.offcutLabel || ""})` : ""}: ${b.cuts.map((c) => `${c.label ? `${c.label} ` : ""}${fmt(c.lengthMm)}`).join(" | ")}`, { bold: true });
+      line(`Remainder ${fmt(b.residualMm)} mm${b.residualUsable ? " — keep (reusable offcut)" : " — waste"} · kerf loss ${fmt(b.kerfLossMm || 0)} mm`, { muted: true, indent: 10 });
+    }
+    for (const u of al.unavailable || []) line(`Cannot be cut from stock: ${u.label || u.demandId} — ${u.reason}`, { bold: true });
+    y += 6;
+  }
+  for (const tb of a.timber || []) {
+    any = true;
+    title(`${tb.materialName} — timber cut list`);
+    for (const r of tb.rows || []) line(`${r.qty} × cut ${fmt(r.cutMm)} mm from ${r.stockMm ? `${fmt(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}${r.labels?.length ? ` — ${r.labels.slice(0, 12).join(", ")}${r.labels.length > 12 ? ` +${r.labels.length - 12} more` : ""}` : ""}`);
+    y += 6;
+  }
+  for (const sh of a.layouts || []) {
+    any = true;
+    title(`${sh.materialName} — ${sh.wallLabel || "wall"} setout`);
+    line(`Gross ${sh.grossM2 != null ? sh.grossM2.toFixed(2) : "-"} m² · openings ${sh.openingM2 != null ? sh.openingM2.toFixed(2) : "-"} m² · net ${sh.netM2 != null ? sh.netM2.toFixed(2) : "-"} m² · Derived from plan + entered heights`, { muted: true });
+    for (const r of sh.rows || []) line(`${r.qty} × ${r.description}`);
+    for (const n of sh.notes || []) line(n, { muted: true, indent: 10 });
+    y += 6;
+  }
+  for (const fr of a.flashingRuns || []) {
+    any = true;
+    title(`${fr.materialName} — continuous run ${fr.ref}`);
+    line(`Tight ${fmt(fr.tightMm)} mm along the path · corners at ${fr.cornersMm.length ? fr.cornersMm.map(fmt).join(", ") : "none"} mm · splits at ${fr.splitsMm.length ? fr.splitsMm.map(fmt).join(", ") : "none"} mm. Corners are site cuts/folds, not supplier bends.`, { muted: true });
+    fr.pieces.forEach((p, i) => line(`Piece ${i + 1}: ${fmt(p.fromMm)}–${fmt(p.toMm)} mm along the run → tight ${fmt(p.tightMm)} → order ${fmt(p.orderMm)} mm`, { indent: 10 }));
+    y += 6;
+  }
+  if (!any) line("No cutting or setout detail for the materials on this order.", { muted: true });
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    doc.page.margins.bottom = 0;
+    doc.font(fonts.regular).fontSize(6.5).fillColor(MUTED)
+      .text(T(`${snap.orderRef} · site appendix · ${RENDERER_VERSION} · snapshot ${String(opts.snapshotSha256 || "").slice(0, 12)} · page ${i - range.start + 1} of ${range.count}`), M, doc.page.height - 34, { width: CW, align: "center", lineBreak: false });
+  }
+}
+
 /**
  * Render the frozen snapshot. opts: { exportNo, isDraft, snapshotSha256 }.
  * @returns {Promise<Buffer>}
@@ -171,7 +264,8 @@ function draw(doc, snap, opts) {
   const header = (cont) => {
     y = 36;
     if (fs.existsSync(LOGO)) { try { doc.image(LOGO, M, y, { width: 120 }); } catch { /* logo optional */ } }
-    doc.font(fonts.bold).fontSize(15).fillColor(INK).text(T(opts.isDraft ? "DRAFT FLASHING ORDER" : "FLASHING ORDER"), M, y, { width: CW, align: "right" });
+    const kind = (snap.items || []).length ? "MATERIAL ORDER" : "FLASHING ORDER";
+    doc.font(fonts.bold).fontSize(15).fillColor(INK).text(T(opts.isDraft ? `DRAFT ${kind}` : kind), M, y, { width: CW, align: "right" });
     doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""}${snap.issuedOn ? ` · ${snap.issuedOn}` : ""}${cont ? " (continued)" : ""}`), M, y + 19, { width: CW, align: "right" });
     y += 78; // clear the wordmark on every page (it is taller than the title block)
     if (opts.isDraft) {
@@ -217,7 +311,8 @@ function draw(doc, snap, opts) {
     y = doc.y + 6;
   }
   doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED)
-    .text(T("All dimensions in mm. Lengths are FINISHED order lengths. Girth is indicative only (no bend deduction) — supplier fabrication instructions take precedence."), M, y, { width: CW });
+    .text(T([(snap.groups || []).length ? "All dimensions in mm. Flashing lengths are FINISHED order lengths. Girth is indicative only (no bend deduction) — supplier fabrication instructions take precedence." : "All dimensions in mm.",
+      (snap.items || []).length ? "Timber, aluminium and board lengths are the STOCK lengths to supply; site cut lists and setout are in the separate site appendix, not part of this order." : null].filter(Boolean).join(" ")), M, y, { width: CW });
   y = doc.y + 10;
 
   // profiles
@@ -307,9 +402,46 @@ function draw(doc, snap, opts) {
     y = doc.y + 14;
   }
 
+  // generic purchase lines (TC-R04): one table per material — quantity, unit and what to supply
+  for (const g of snap.items || []) {
+    const rowH = 15;
+    need(Math.min(bottom() - 120, 60 + Math.min(g.lines.length, 12) * rowH));
+    doc.save().rect(M, y, CW, 20).fill("#eef5f9").restore();
+    doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`${g.groupId} — ${g.materialName}`), M + 6, y + 5, { width: CW * 0.42 - 6, lineBreak: false, ellipsis: true, height: 12 });
+    doc.font(fonts.regular).fontSize(8.5).fillColor(INK).text(T(g.specText?.line || ""), M + CW * 0.42, y + 6, { width: CW * 0.58 - 6, align: "right", lineBreak: false, ellipsis: true, height: 11 });
+    y += 24;
+    if (g.specText?.installation) { doc.font(fonts.regular).fontSize(7).fillColor(MUTED).text(T(g.specText.installation), M + 6, y, { width: CW - 12 }); y = doc.y + 3; }
+    const head = (cont) => {
+      doc.save().rect(M, y, CW, rowH).fill("#f3f5f7").restore();
+      doc.font(fonts.bold).fontSize(8).fillColor(MUTED);
+      doc.text(T(`QTY${cont ? "  (continued)" : ""}`), M + 6, y + 4, { width: 70, lineBreak: false });
+      doc.text("UNIT", M + 80, y + 4, { width: 50, lineBreak: false });
+      doc.text("SUPPLY", M + 135, y + 4, { width: CW - 300, lineBreak: false });
+      doc.text("NOTE", M + CW - 160, y + 4, { width: 154, lineBreak: false });
+      y += rowH;
+    };
+    if (y + rowH * 3 > bottom()) { newPage(); } head(false);
+    for (const l of g.lines) {
+      // long descriptions wrap (never clipped); the row grows to fit
+      doc.font(fonts.regular).fontSize(9);
+      const h = Math.max(rowH, doc.heightOfString(T(l.description), { width: CW - 300 }) + 5, doc.heightOfString(T(l.note || "-"), { width: 154 }) + 5);
+      if (y + h > bottom()) { newPage(); doc.font(fonts.bold).fontSize(9).fillColor(INK).text(T(`${g.groupId} — ${g.materialName}`), M, y); y = doc.y + 4; head(true); }
+      doc.font(fonts.regular).fontSize(9).fillColor(INK);
+      doc.text(T(`${l.quantity} ×`), M + 6, y + 3, { width: 70, lineBreak: false });
+      doc.text(T(l.unit), M + 80, y + 3, { width: 50, lineBreak: false });
+      doc.text(T(l.description), M + 135, y + 3, { width: CW - 300 });
+      doc.fontSize(8).fillColor(l.problem ? "#b45309" : MUTED).text(T(l.note || "-"), M + CW - 160, y + 3, { width: 154 });
+      doc.save().moveTo(M, y + h).lineTo(M + CW, y + h).lineWidth(0.4).strokeColor(HAIR).stroke().restore();
+      y += h;
+    }
+    doc.font(fonts.bold).fontSize(9).fillColor(INK).text(T(unitSummary(g.totals?.byUnit)), M, y + 4, { width: CW, align: "right" });
+    y = doc.y + 14;
+  }
+
   need(40);
   const t = snap.totals || {};
-  doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`Order total: ${plural(t.pieces || 0, "piece")} · ${(t.totalLm || 0).toFixed(3)} LM${t.handlingFlags ? ` · ${plural(t.handlingFlags, "long piece")} flagged` : ""}`), M, y, { width: CW });
+  const flashTotal = (snap.groups || []).length ? `${plural(t.pieces || 0, (snap.items || []).length ? "flashing piece" : "piece")} · ${(t.totalLm || 0).toFixed(3)} LM${t.handlingFlags ? ` · ${plural(t.handlingFlags, "long piece")} flagged` : ""}` : null;
+  doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`Order total: ${[flashTotal, (snap.items || []).length ? unitSummary(t.byUnit) : null].filter(Boolean).join(" · ") || "nothing selected"}`), M, y, { width: CW });
   y = doc.y + 4;
   doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("This document lists quantities and profiles only. It is not a price or a contract. Confirm product availability, colour and fabrication allowances with the supplier."), M, y, { width: CW });
 

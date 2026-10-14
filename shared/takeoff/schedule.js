@@ -12,10 +12,13 @@
 //   bucket        (spec key, finished length) — the unit of required / ordered / remaining.
 // =============================================================================
 import { TakeoffValidationError, stableStringify, totalLinearMetres } from "./units.js";
-import { calibrationOrderReady, latestPageCalibrations, pointsWithinCalibration, segmentLengthMm } from "./calibration.js";
+import { calibrationOrderReady, latestPageCalibrations, pointsWithinCalibration, polylineLengthMm, segmentLengthMm } from "./calibration.js";
 import { evaluateSplit, lengthFlags, manualPieceResult, measuredRunResult, normaliseFlashingRules } from "./flashing.js";
 import { profileGeometryKey, profileProblems } from "./profile.js";
 import { fabricationIdentity, specProblems } from "./catalogue.js";
+import { computeFlashingPath } from "./engine/flashingPath.js";
+import { computeGenericMaterials, genericMaterialKey, isGenericMaterial } from "./engine/dispatch.js";
+import { familyProblems } from "./engine/families.js";
 
 export const LIMITS = Object.freeze({
   measurementsPerWorkspace: 500,
@@ -40,11 +43,23 @@ export const PROBLEM_TEXT = Object.freeze({
   line_stale_material: "This line's material changed (colour, finish, BMT, perforation or shape) — update or remove the line.",
   line_stale_quantity: "Fewer pieces are needed now than this line orders — update the quantity.",
   measurement_invalid: "This measurement is invalid.",
+  ceiling_unknown: "This flashing has no maximum orderable length set up — set it up before ordering.",
+  path_in_progress: "This run is still being drawn — finish it before ordering.",
+  wall_incomplete: "A wall is missing its length or heights.",
 });
+
+// continuous-path problem codes (engine/flashingPath.js) → the schedule's blocking codes
+const PATH_CODE = {
+  outside_region: "outside_region", calibration_not_ready: "calibration_not_ready", calibration_missing: "calibration_missing",
+  piece_over_max: "ceiling_exceeded", no_legal_split: "ceiling_exceeded", max_unknown: "ceiling_unknown", capacity_invalid: "ceiling_unknown",
+  path_zero_length: "measurement_invalid", path_incomplete: "measurement_invalid", path_in_progress: "path_in_progress",
+  allowance_overcommitted: "split_invalid",
+};
 
 /** Spec identity for grouping: method + full fabrication spec (construction, finish, BMT, colour,
  *  perforation) + profile geometry incl. coated face. Anything that changes what is made changes the key. */
 export function materialSpecKey(material) {
+  if (isGenericMaterial(material)) return genericMaterialKey(material);
   let profileKey = null;
   if (material.profile) {
     try { profileKey = profileGeometryKey(material.profile); } catch { profileKey = `invalid:${material.id}`; }
@@ -73,6 +88,7 @@ export function bucketKey(specKey, finishedLengthMm) {
 
 /** Material-level problems (profile + spec completeness, perforation definition). */
 export function materialProblems(material) {
+  if (isGenericMaterial(material)) return familyProblems(material.spec).length ? ["material_incomplete"] : [];
   let out;
   try { out = specProblems(material.spec, material.profile); } catch { out = ["material_incomplete"]; }
   if (material.methodKey === "flashing_runs" || material.profile) {
@@ -124,6 +140,29 @@ export function computeContribution(contribution, ctx) {
       const raw = segmentLengthMm(cal, m.points[0], m.points[1]);
       result = measuredRunResult(raw, rules);
       result.calibration = cal;
+    } else if (m.kind === "polyline") {
+      // continuous flashing run (TC-R04 13): ONE path, corners are site cuts/folds; explicit splits only
+      if (mat.methodKey === "finished_piece_count") throw new TakeoffValidationError("This material only takes finished lengths — enter or count pieces instead of measuring runs.");
+      const cal = m.calibrationId ? calibrationsById.get(m.calibrationId) : null;
+      if (!cal) return { ...base, pieces: [], problems: ["calibration_missing"], explanation: null };
+      if (ctx.latestCalibration && ctx.latestCalibration(cal)?.id !== cal.id) problems.push("calibration_superseded");
+      const doc = documentsById?.get(m.documentId);
+      if (doc && doc.status !== "current") problems.push("plan_superseded");
+      const path = computeFlashingPath({ points: m.points, calibration: cal, splitsMm: m.inputs?.splitsMm || [], splitAnchors: m.inputs?.splitAnchors || undefined,
+        rules, runId: m.id, materialId: mat.id, complete: true });
+      for (const p of path.problems) {
+        if (p.blocking === false) continue;
+        const code = PATH_CODE[p.code] || (String(p.code).startsWith("split_") ? "split_invalid" : "measurement_invalid");
+        if (!problems.includes(code)) problems.push(code);
+      }
+      const pieces = path.pieces.map((pc) => ({ finishedLengthMm: pc.orderMm, quantity: 1, handlingFlag: !!pc.handlingFlag, ceilingExceeded: !!pc.overMax }));
+      const vs = path.layout?.vertexStationsMm || [];
+      const result = { source: "path", rawLengthMm: path.tightTotalMm, finishedLengthMm: pieces.length === 1 ? pieces[0].finishedLengthMm : null, quantity: pieces.length, allowanceMm: rules.allowanceMm };
+      const signature = splitSourceSignature(m, cal, rules, result);
+      return { ...base, kind: m.kind, result, split: null, pieces, sourceSignature: signature, problems: [...new Set(problems)], explanation: path.explain.join(" "),
+        path: { tightTotalMm: path.tightTotalMm, cornersMm: vs.slice(1, -1), splitsMm: path.splitsMm, splits: path.splits, overflow: path.overflow, layout: path.layout,
+          pieces: path.pieces.map((pc) => ({ fromMm: pc.fromMm, toMm: pc.toMm, tightMm: pc.tightMm, orderMm: pc.orderMm, overMax: !!pc.overMax, handlingFlag: !!pc.handlingFlag, legalSplitMm: pc.legalSplitMm ?? null, redFromMm: pc.redFromMm ?? null })),
+          problems: path.problems } };
     } else if (m.kind === "count") {
       const qty = Array.isArray(m.points) ? m.points.length : 0;
       if (qty < 1) throw new TakeoffValidationError("Tap at least one occurrence.");
@@ -216,7 +255,12 @@ export function computeWorkspace(ws) {
   if (ctx.measurementsById.size > LIMITS.measurementsPerWorkspace) {
     throw new TakeoffValidationError(`A takeoff can hold at most ${LIMITS.measurementsPerWorkspace} measurements.`);
   }
-  const contributions = (ws.contributions || []).filter((c) => !c.archived).map((c) => computeContribution(c, ctx));
+  const live = (ws.contributions || []).filter((c) => !c.archived);
+  const generic = [...ctx.materialsById.values()].filter(isGenericMaterial);
+  const genericIds = new Set(generic.map((m) => m.id));
+  const contributions = live.filter((c) => !genericIds.has(c.jobMaterialId)).map((c) => computeContribution(c, ctx));
+  // TC-R04 families: method dispatch → demands → one allocator → purchase lines (engine/dispatch.js)
+  const gen = computeGenericMaterials(generic, live.filter((c) => genericIds.has(c.jobMaterialId)), ctx);
   const matProblems = new Map();
   for (const mat of ctx.materialsById.values()) matProblems.set(mat.id, materialProblems(mat));
   const lines = new Map();
@@ -239,19 +283,24 @@ export function computeWorkspace(ws) {
       for (const pr of matProblems.get(mat.id) || []) if (!line.problems.includes(pr)) line.problems.push(pr);
     }
   }
-  const scheduleLines = [...lines.values()].sort((a, b) => (a.specKey === b.specKey ? b.finishedLengthMm - a.finishedLengthMm : a.specKey < b.specKey ? -1 : 1));
+  const flashingLines = [...lines.values()].sort((a, b) => (a.specKey === b.specKey ? b.finishedLengthMm - a.finishedLengthMm : a.specKey < b.specKey ? -1 : 1));
+  const genericLines = gen.lines.sort((a, b) => (a.materialKey === b.materialKey ? (a.unit === b.unit ? (b.finishedLengthMm || 0) - (a.finishedLengthMm || 0) : a.unit < b.unit ? -1 : 1) : a.materialKey < b.materialKey ? -1 : 1));
+  const scheduleLines = [...flashingLines, ...genericLines];
   // a measurement that produced NO pieces (invalid run, no scale, …) is a missing requirement, not zero:
   // it is listed and blocks ordering of that material (R04b R1)
   const unplaced = contributions.filter((c) => !c.pieces.length && c.problems.length).map((c) => {
     const mat = ctx.materialsById.get(c.jobMaterialId);
     return { contributionId: c.contributionId, jobMaterialId: c.jobMaterialId, specKey: mat ? materialSpecKey(mat) : null, problems: c.problems, explanation: c.explanation };
   });
+  unplaced.push(...gen.unplaced);
   return {
-    contributions,
+    contributions: [...contributions, ...gen.contributions],
     scheduleLines,
     unplaced,
     materialProblems: Object.fromEntries(matProblems),
-    totalLm: totalLinearMetres(scheduleLines),
+    materialResults: gen.results,
+    // LM is a flashing total; other units are never added together (see materialResults / line units)
+    totalLm: totalLinearMetres(flashingLines),
     orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0) && !unplaced.length,
   };
 }
@@ -267,10 +316,13 @@ export function orderLineState(line, computed, materials) {
   const sl = computed.scheduleLines.find((x) => x.bucketKey === line.bucketKey) || null;
   const mat = line.jobMaterialId ? mats.get(line.jobMaterialId) : null;
   const ownKey = mat ? materialSpecKey(mat) : null;
-  const suggestion = mat ? computed.scheduleLines.find((x) => x.specKey === ownKey && x.jobMaterialIds.includes(mat.id) && x.finishedLengthMm === line.finishedLengthMm) || null : null;
+  // generic lines (TC-R04) key the MATERIAL separately from the purchase identity/unit/stock
+  const keyOf = (x) => (x.generic ? x.materialKey : x.specKey);
+  const suggestion = mat ? computed.scheduleLines.find((x) => keyOf(x) === ownKey && x.jobMaterialIds.includes(mat.id) && x.finishedLengthMm === line.finishedLengthMm
+    && (x.unit || "piece") === (line.unit || "piece")) || null : null;
   let problem = null;
   if (!sl) problem = "line_stale_missing";
-  else if (line.jobMaterialId && (!mat || ownKey !== sl.specKey || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";
+  else if (line.jobMaterialId && (!mat || ownKey !== keyOf(sl) || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";
   else if (line.specKey && line.specKey !== sl.specKey) problem = "line_stale_material";
   else if (line.quantity > sl.quantity) problem = "line_stale_quantity";
   return { stale: !!problem, problem, current: sl, suggestion: suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
@@ -353,7 +405,7 @@ export function contributionPiecesForBucket(computed, line) {
   const out = [];
   for (const c of computed.contributions) {
     if (!line.contributionIds.includes(c.contributionId)) continue;
-    const q = c.pieces.filter((p) => bucketKey(line.specKey, p.finishedLengthMm) === line.bucketKey).reduce((a, p) => a + p.quantity, 0);
+    const q = c.pieces.filter((p) => (p.bucketKey ? p.bucketKey === line.bucketKey : bucketKey(line.specKey, p.finishedLengthMm) === line.bucketKey)).reduce((a, p) => a + p.quantity, 0);
     if (q) out.push({ contributionId: c.contributionId, quantity: q });
   }
   return out.sort((a, b) => (a.contributionId < b.contributionId ? -1 : 1));
@@ -365,15 +417,18 @@ export function rescaleCandidates(view) {
   const byMeasurement = new Map(view.contributions.map((c) => [c.measurementId, c]));
   const out = [];
   for (const m of view.measurements) {
-    if (m.kind !== "run" || m.archived) continue;
+    if ((m.kind !== "run" && m.kind !== "polyline") || m.archived) continue;
     const cur = view.calibrations.find((c) => c.id === m.calibrationId);
     if (!cur) continue;
     const newest = latestPageCalibrations(view.calibrations, cur.documentId, cur.pageIndex).find((c) => (c.regionLabel || "") === (cur.regionLabel || ""));
     if (!newest || newest.id === cur.id) continue;
-    const rules = mats.get(byMeasurement.get(m.id)?.jobMaterialId)?.rules;
+    const mat = mats.get(byMeasurement.get(m.id)?.jobMaterialId);
+    if (mat && isGenericMaterial(mat)) { out.push({ measurement: m, from: cur, to: newest, before: null, after: null }); continue; }
+    const rules = mat?.rules;
+    const len = (cal) => (m.kind === "polyline" ? polylineLengthMm(cal, m.points) : segmentLengthMm(cal, m.points[0], m.points[1]));
     let before = null, after = null;
-    try { before = measuredRunResult(segmentLengthMm(cur, m.points[0], m.points[1]), rules); } catch { /* invalid under old */ }
-    try { after = measuredRunResult(segmentLengthMm(newest, m.points[0], m.points[1]), rules); } catch { /* invalid under new */ }
+    try { before = measuredRunResult(len(cur), rules); } catch { /* invalid under old */ }
+    try { after = measuredRunResult(len(newest), rules); } catch { /* invalid under new */ }
     out.push({ measurement: m, from: cur, to: newest, before, after });
   }
   return out;
