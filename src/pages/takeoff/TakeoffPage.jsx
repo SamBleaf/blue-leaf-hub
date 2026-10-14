@@ -5,13 +5,16 @@
 //   /operations/:projectId/takeoff            → construction project (resolves to its job)
 //   /carpentry/:jobId/sites/:siteId/takeoff   → BLB Charge Up site
 // =============================================================================
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { resetScrollLocks } from "../../components/takeoff/focusMode.js";
 import { Link, useParams } from "react-router-dom";
 import TakeoffApp from "../../components/takeoff/TakeoffApp.jsx";
 import { createStaffTakeoffApi } from "../../lib/takeoffApi.js";
 import { apiFetch } from "../../lib/apiFetch.js";
 
 export default function TakeoffPage({ jobType }) {
+  // leaving the takeoff route always gives the page its scrolling back, even mid-overlay
+  useEffect(() => () => resetScrollLocks(), []);
   const params = useParams();
   const api = useMemo(() => createStaffTakeoffApi(), []);
   const jobId = jobType === "project" ? params.projectId : jobType === "charge-up" ? params.siteId : params.jobId;

@@ -369,6 +369,23 @@ test.describe("journeys", () => {
     await expect(page.getByText(/girth 360 mm/).first()).toBeVisible();
   });
 
+  test("PWA scroll: opening and closing the editor, details, schedule and orders never leaves the page scroll-locked", async ({ page }) => {
+    await page.goto("/worker/takeoff/carpentry/cjb-1");
+    await ready(page);
+    const locked = () => page.evaluate(() => document.body.style.overflow === "hidden" || document.body.classList.contains("takeoff-focus-open"));
+    expect(await locked()).toBe(false);
+    for (const [open, close] of [
+      [() => page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click(), () => page.getByRole("dialog").getByRole("button", { name: "Close" }).first().click()],
+      [() => page.getByRole("button", { name: "Open schedule" }).click(), () => page.getByRole("dialog", { name: "Length schedule" }).getByRole("button", { name: "Back" }).click()],
+      [() => page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click(), async () => { await page.getByRole("button", { name: "Details" }).click(); await page.getByRole("button", { name: "Close" }).first().click(); }],
+    ]) {
+      await open(); await page.waitForTimeout(250);
+      expect(await locked()).toBe(true);
+      await close(); await page.waitForTimeout(250);
+      expect(await locked()).toBe(false);
+    }
+  });
+
   test("ordinary worker sees no takeoff access", async ({ page }) => {
     await page.goto("/worker/takeoff/carpentry/cjb-1?takeoffWorker=ordinary");
     await ready(page);

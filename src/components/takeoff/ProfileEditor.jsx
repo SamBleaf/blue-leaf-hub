@@ -29,6 +29,7 @@ import {
 } from "./profileEditorModel.js";
 import { loadEditorDraft, saveEditorDraft, clearEditorDraft } from "../../lib/takeoffRecovery.js";
 import { SaveChip } from "./ui.jsx";
+import { acquireScrollLock } from "./focusMode.js";
 
 const FIT_INSET = { top: 16 };
 const AUTOSAVE_MS = 400;
@@ -375,9 +376,7 @@ export default function ProfileEditor({
     return () => ro.disconnect();
   }, []);
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
+    return acquireScrollLock(); // shared, reference-counted (see focusMode.js)
   }, []);
 
   // ── leave / publish ────────────────────────────────────────────────────────
