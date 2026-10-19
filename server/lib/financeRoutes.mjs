@@ -44,7 +44,6 @@ function looksLikeInvoiceEmail({ subject = "", from = "", filename = "" }) {
   if (/newsletter|unsubscribe|webinar|e-?news|promotion|% off|survey|statement of account|monthly statement|quotation\b|purchase order|remittance advice/.test(s)) return false;
   return true;
 }
-const MODEL_SLOW = process.env.CLAUDE_MODEL || "claude-sonnet-4-6"; // Tier 3: ambiguous only
 const FINANCE_INBOX_PATH = `${DROPBOX_PRIVATE_INTERNAL_BASE}/FINANCE INBOX`;
 const AUTO_APPROVE_THRESHOLD = Number(process.env.FINANCE_AUTO_APPROVE_BELOW ?? 0);
 
@@ -401,11 +400,7 @@ function regexExtract(text) {
   return result;
 }
 
-function criticalFieldCount(data) {
-  return [data.supplier_name, data.amount_total, data.invoice_date].filter(Boolean).length;
-}
-
-// ── Tier 2 — Haiku vision OCR (fast, cheap; handles images + PDFs) ────────────
+// ── Haiku vision OCR (fast, cheap; handles images + PDFs) ─────────────────────
 
 const EXTRACT_PROMPT = `Extract structured data from this document. Return ONLY a JSON object:
 
@@ -445,10 +440,10 @@ async function claudeExtract(base64, mime, model) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
-// ── 3-tier extraction cascade ─────────────────────────────────────────────────
+// ── Extraction cascade ────────────────────────────────────────────────────────
 // Tier 1: Regex  (free, instant)
-// Tier 2: Haiku  (fast, cheap — OCR + fill gaps)
-// Tier 3: Sonnet (only when Haiku result is still incomplete)
+// Tier 2: Haiku  (fast, cheap — OCR + fill gaps). ONE Claude call per invoice read;
+//         no Sonnet escalation (token-conservative — Sam's call).
 
 async function extractDocument(fileBase64, mimeType) {
   const isPdf = mimeType === "application/pdf";
@@ -487,16 +482,8 @@ async function extractDocument(fileBase64, mimeType) {
     if (!extracted.extracted_po_number && rx.extracted_po_number) extracted.extracted_po_number = rx.extracted_po_number;
   }
 
-  // Tier 3 — Sonnet (only if critical fields still missing after Haiku)
-  if (!extracted || criticalFieldCount(extracted) < 2) {
-    console.log("[finance] Escalating to Sonnet — Haiku result incomplete");
-    try {
-      extracted = await claudeExtract(base64, mime, MODEL_SLOW) || extracted;
-    } catch (e) {
-      console.error("[finance] Sonnet extraction error", e?.message);
-    }
-  }
-
+  // Haiku-only (token-conservative, Sam's call): no Sonnet escalation — exactly ONE Claude call per
+  // invoice read. If Haiku leaves a field blank the operator fills it in at the confirm step.
   return extracted || { supplier_name: null };
 }
 
@@ -1474,19 +1461,20 @@ export function registerFinanceRoutes(app) {
     });
   });
 
-  // Auto-poll every 15 minutes.
-  // INVOICE_IMAP_POLL_ENABLED=false disables this invoice poller without touching credentials
-  // (e.g. an isolated/staging smoke run on a shared .env). Defaults to ON to preserve production
-  // behaviour. NOTE: this is a SEPARATE flag from the quote-reply poller's IMAP_POLL_ENABLED —
-  // this poller previously ignored that flag, so a full boot started it regardless.
+  // Auto-poll every 12 hours (Sam's call — invoices aren't time-critical). A poll that finds no new mail
+  // costs ZERO Claude calls (the looksLikeInvoiceEmail pre-filter is pure heuristics); each NEW invoice-like
+  // PDF costs exactly one Haiku OCR call. Override the cadence with INVOICE_IMAP_POLL_HOURS.
+  // INVOICE_IMAP_POLL_ENABLED=false disables this poller without touching credentials (e.g. a staging smoke
+  // run on a shared .env). Defaults to ON. Separate flag from the quote-reply poller's IMAP_POLL_ENABLED.
   const invoicePollEnabled = String(process.env.INVOICE_IMAP_POLL_ENABLED ?? "true").toLowerCase() !== "false";
+  const invoicePollHours = Number(process.env.INVOICE_IMAP_POLL_HOURS) || 12;
   if (invoiceImapConfigs().length && invoicePollEnabled) {
-    console.log("[blue-leaf-api] INVOICE_IMAP_POLL_ENABLED: polling invoice inbox every 15 min.");
+    console.log(`[blue-leaf-api] INVOICE_IMAP_POLL_ENABLED: polling invoice inbox every ${invoicePollHours}h.`);
     setTimeout(async () => {
       try { await pollInvoiceEmails(); } catch { /* ignore */ }
       setInterval(async () => {
         try { await pollInvoiceEmails(); } catch { /* ignore */ }
-      }, 15 * 60 * 1000);
+      }, invoicePollHours * 60 * 60 * 1000);
     }, 10_000);
   }
 
