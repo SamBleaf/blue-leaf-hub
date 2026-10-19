@@ -21,6 +21,7 @@ import { reviewRole } from "../config.js";
 import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
+  SECTION_VALUES, SECTION_LABEL, materialSection,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
@@ -352,7 +353,8 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       return { ok: true, orders: state.orders, orderStatus: orderStatusWithCover, scheduleLines: computeWorkspace(snapshot()).scheduleLines, workspaceRevision: state.revision };
     });
     route("POST", `${base}/workspaces/:id/orders`, ({ bodyJson }) => {
-      const o = { id: bodyJson.id, workspaceId: "ws-1", orderRef: `FO-00${1000 + state.orders.length + 1}`, supplierId: bodyJson.supplierId, delivery: bodyJson.delivery || {}, notes: null, status: "draft", revision: 1, lines: [], exports: [], placements: [], createdAt: now() };
+      const o = { id: bodyJson.id, workspaceId: "ws-1", orderRef: `FO-00${1000 + state.orders.length + 1}`, supplierId: bodyJson.supplierId, delivery: bodyJson.delivery || {}, notes: null, category: bodyJson.category || null, status: "draft", revision: 1, lines: [], exports: [], placements: [], createdAt: now() };
+      if (!SECTION_VALUES.includes(bodyJson.category)) return fail(400, "Choose whether this is a Flashings or a Timber and cladding order (reload the app if you don't see that choice).", "INVALID");
       state.orders.push(o);
       return { ok: true, order: o };
     });
@@ -373,6 +375,9 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
           if (keep && !l.refresh) { next.push({ ...keep, quantity: l.quantity }); continue; } // refresh = explicit update (as the server)
           const s = sl.find((x) => x.bucketKey === l.bucketKey);
           if (!s) return fail(400, "A selected length is no longer in the takeoff — refresh the schedule.", "INVALID");
+          // HUB 007 (as the server): a line from the other section never lands on this order
+          const mat = state.materials.find((m) => m.id === (l.jobMaterialId || s.jobMaterialIds[0]));
+          if (o.category && mat && materialSection(mat) !== o.category) return fail(400, `${mat.name} goes on a ${SECTION_LABEL[materialSection(mat)]} order, not this ${SECTION_LABEL[o.category]} order.`, "INVALID");
           next.push({ bucketKey: s.bucketKey, specKey: s.specKey, jobMaterialId: l.jobMaterialId || s.jobMaterialIds[0], finishedLengthMm: s.finishedLengthMm ?? null, quantity: l.quantity,
             unit: s.unit || "piece", item: s.item || null });
         }

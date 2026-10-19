@@ -15,7 +15,7 @@
 // =============================================================================
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { ITEM_STALE_TEXT, PROBLEM_TEXT, describeFamilySpec, describeSpec, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
+import { GROUP_LABEL, ITEM_STALE_TEXT, accessorySupplierConflict, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { AccessoryScopeReview, StatusChips } from "./ScheduleScreen.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -76,7 +76,7 @@ async function openPdf(api, exportId, setMsg, kind = "pdf") {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts = [] }) {
+export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts = [], section = SECTIONS.FLASHINGS }) {
   const wsId = ws.view?.workspace?.id;
   const [data, setData] = useState(null);
   const [suppliers, setSuppliers] = useState(null);
@@ -100,15 +100,22 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
   const caps = ws.capabilities || {};
   const kbInset = useKeyboardInset(); // room to scroll the last quantity above an on-screen keyboard
   const status = useMemo(() => new Map((data?.orderStatus || []).map((x) => [x.bucketKey, x])), [data]);
-  const drafts = (data?.orders || []).filter((o) => o.status === "draft");
+  // HUB 007: this is ONE section's orders — Flashings, or Timber and cladding. Lines never cross between them.
+  const mats = useMemo(() => new Map((ws.view?.materials || []).map((m) => [m.id, m])), [ws.view]);
+  const sectionData = useMemo(() => (data ? { ...data, scheduleLines: (data.scheduleLines || []).filter((l) => lineSection(l, mats) === section) } : data), [data, mats, section]);
+  // older orders have no category: they show in the section of their lines
+  const sectionOrders = (data?.orders || []).filter((o) => (o.category || (o.lines?.length ? lineSection(o.lines[0], mats) : SECTIONS.FLASHINGS)) === section);
+  const drafts = sectionOrders.filter((o) => o.status === "draft");
   const active = drafts.find((o) => o.id === activeId) || drafts[0] || null;
 
   async function newOrder() {
     setBusy(true); setMsg(null);
-    const r = await api.createOrder(wsId, { id: newId(), supplierId: suppliers?.defaultSupplierId || null, delivery: { method: "delivery", address: jobAddress || "", addressSource: jobAddress ? "job" : null } });
+    const r = await api.createOrder(wsId, { id: newId(), category: section, supplierId: suppliers?.defaultSupplierId || null, delivery: { method: "delivery", address: jobAddress || "", addressSource: jobAddress ? "job" : null } });
     if (!r.ok) { setMsg(friendly(r)); setBusy(false); return; }
     // still needed = required − placed − already on another exported (sent-able) order (R04b R8)
-    const lines = (data?.scheduleLines || []).map((l) => { const st = status.get(l.bucketKey); return { bucketKey: l.bucketKey, quantity: Math.max(0, (st?.remaining ?? l.quantity) - (st?.onExportedOrders || 0)) }; }).filter((l) => l.quantity > 0);
+    // an accessory from a different supplier is left for its own order — never silently mixed in (HUB 007)
+    const supName = (suppliers?.suppliers || []).find((x) => x.id === suppliers?.defaultSupplierId)?.name;
+    const lines = (sectionData?.scheduleLines || []).filter((l) => !accessorySupplierConflict(mats.get(l.jobMaterialIds[0]), supName)).map((l) => { const st = status.get(l.bucketKey); return { bucketKey: l.bucketKey, quantity: Math.max(0, (st?.remaining ?? l.quantity) - (st?.onExportedOrders || 0)) }; }).filter((l) => l.quantity > 0);
     if (lines.length) {
       const s = await api.saveOrder(r.data.order.id, { expectedRevision: r.data.order.revision, lines });
       if (!s.ok) setMsg(s.error);
@@ -122,7 +129,7 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
     <div className="space-y-4" onFocus={keepFieldInView}>
       <div className="flex items-center gap-2">
         {onBack && <Btn kind="ghost" onClick={onBack}>‹ Back</Btn>}
-        <h2 className="flex-1 text-base font-semibold text-ink">Orders</h2>
+        <h2 className="flex-1 text-base font-semibold text-ink">{SECTION_LABEL[section]} orders</h2>
         {caps.export && <Btn kind="primary" onClick={newOrder} disabled={busy || !data || ws.dirty}>New order</Btn>}
       </div>
       <Banner tone="info">Exporting makes a PDF for you to send — it doesn&apos;t send or place anything. Send it to the supplier yourself, then record it as placed.</Banner>
@@ -130,10 +137,10 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
       {msg && <Banner tone="error">{msg}</Banner>}
       <AsyncState loading={!data && !error} error={error} onRetry={load}>
         {active && (
-          <DraftOrder key={`${active.id}:${active.revision}`} api={api} order={active} data={data} status={status} suppliers={suppliers} ws={ws}
+          <DraftOrder key={`${active.id}:${active.revision}`} api={api} order={active} data={sectionData} section={section} status={status} suppliers={suppliers} ws={ws}
             onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} deviceDrafts={deviceDrafts} />
         )}
-        <OrderHistory api={api} orders={data?.orders || []} caps={caps} onChanged={async () => { await load(); await ws.refreshOrderStatus?.(); }} setMsg={setMsg} />
+        <OrderHistory api={api} orders={sectionOrders} caps={caps} onChanged={async () => { await load(); await ws.refreshOrderStatus?.(); }} setMsg={setMsg} />
       </AsyncState>
       {kbInset > 0 && <div aria-hidden="true" data-keyboard-spacer="" style={{ height: kbInset }} />}
     </div>
@@ -168,7 +175,7 @@ function AddSupplier({ api, onAdded, onCancel }) {
   );
 }
 
-function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [] }) {
+function DraftOrder({ api, order, data, section, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [] }) {
   const [extra, setExtra] = useState(false); // explicit "order more than is still needed" (spares)
   // unsaved changes typed on this device before a reload (same order, same saved revision only)
   const [restored, setRestored] = useState(() => readOrderDraft(order));
@@ -179,6 +186,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
   // HUB 008: office staff add the supplier right here (staff app only — the worker adapter has no createSupplier)
   const canAddSupplier = !!ws.capabilities?.editStandards && typeof api.createSupplier === "function";
   const [addingSupplier, setAddingSupplier] = useState(false);
+  const supplierName = (suppliers?.suppliers || []).find((x) => x.id === supplierId)?.name || null;
   const [delivery, setDelivery] = useState(start.delivery || saved.delivery);
   const [notes, setNotes] = useState(start.notes ?? saved.notes);
   // a restored quantity only for a line that is still on the order or in the takeoff (never a vanished bucket)
@@ -273,20 +281,22 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
     const rank = (id) => { const i = (ws.view?.materials || []).findIndex((m) => m.id === id); return i < 0 ? 1e9 : i; };
     for (const [id, e] of [...byMat].sort((a, b) => rank(a[0]) - rank(b[0]))) {   // the job's material order
       const parts = e.flashing ? [`${e.pieces} ${e.pieces === 1 ? "piece" : "pieces"}`] : [...e.units].sort(byUnitOrder).map(([u, n]) => qtyText(n, u));
-      out.push({ key: id, text: `${mats.get(id)?.name || "A material"} — ${parts.join(" · ")}` });
+      const other = accessorySupplierConflict(mats.get(id), supplierName);
+      out.push({ key: id, text: `${mats.get(id)?.name || "A material"} — ${parts.join(" · ")}${other ? ` — from ${other}: start a separate order for it` : ""}` });
     }
     const results = ws.computed?.materialResults || {};
-    for (const m of ws.view?.materials || []) {
+    const own = (ws.view?.materials || []).filter((m) => materialSection(m) === section);
+    for (const m of own) {
       const r = results[m.id];
       if (!r || lines.some((l) => l.jobMaterialIds.includes(m.id))) continue;
       const need = (r.problems || []).find((p) => p.blocking !== false);
       out.push({ key: `none-${m.id}`, text: `${m.name} — nothing to order yet${need ? ` (${need.message})` : ""}` });
     }
-    for (const m of ws.view?.materials || []) {
+    for (const m of own) {
       if (results[m.id]?.status?.installation === "out-of-scope") out.push({ key: `oos-${m.id}`, text: `${m.name} — by others / out of scope` });
     }
     return out;
-  }, [lines, status, qty, mats, ws.computed, ws.view, order.exports, order.lines]);
+  }, [lines, status, qty, mats, ws.computed, ws.view, order.exports, order.lines, section, supplierName]);
   // the server words a stale line as a flashing "length"; for timber / sheets / bars say what it is
   const previewProblems = (preview?.problems || []).map((p) => {
     const code = STALE_CODES.find((c) => PROBLEM_TEXT[c] === p);
@@ -434,35 +444,44 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
           })}
         </ul>}
         {genericGroups.length > 0 && <p className="mb-1 mt-3 text-xs font-medium text-muted">Materials on this order</p>}
-        <div className="space-y-2">
-          {genericGroups.map((g) => (
-            <div key={g.id} className="rounded-lg border border-hairline" data-order-group={g.id}>
-              <div className="space-y-1 border-b border-hairline px-2 py-1.5">
-                <p className="text-sm font-medium text-ink">{g.mat?.name || "Material"}<span className="block text-[11px] font-normal text-muted">{g.mat ? describeFamilySpec(g.mat.spec).line : ""}</span></p>
-                <StatusChips status={ws.computed?.materialResults?.[g.id]?.status} lines={g.lines} />
+        {/* HUB 007: one timber-and-cladding order, in two parts */}
+        {["timber", "cladding"].map((part) => {
+          const gs = genericGroups.filter((g) => (materialGroup(g.mat) === "timber" ? "timber" : "cladding") === part);
+          return gs.length > 0 && (
+            <div key={part} className="mt-2" data-order-part={part}>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{GROUP_LABEL[part]}</p>
+              <div className="space-y-2">
+                {gs.map((g) => (
+                  <div key={g.id} className="rounded-lg border border-hairline" data-order-group={g.id}>
+                    <div className="space-y-1 border-b border-hairline px-2 py-1.5">
+                      <p className="text-sm font-medium text-ink">{g.mat?.name || "Material"}<span className="block text-[11px] font-normal text-muted">{g.mat ? describeFamilySpec(g.mat.spec).line : ""}</span></p>
+                      <StatusChips status={ws.computed?.materialResults?.[g.id]?.status} lines={g.lines} />
+                    </div>
+                    <ul className="divide-y divide-hairline">
+                      {g.lines.map((l) => {
+                        const st = status.get(l.bucketKey);
+                        const n = qty[l.bucketKey] ?? 0;
+                        const need = st?.required ?? l.quantity;
+                        return (
+                          <li key={l.bucketKey} className="space-y-1.5 px-2 py-2 text-sm" data-order-line={l.bucketKey} data-unit={l.unit}>
+                            <p className="break-words text-ink">{l.item?.description || unitWord(l.unit, 2)}
+                              {l.unit === "lm" && <span className="ml-1 inline-block rounded bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800">estimate — not a piece count</span>}
+                              {l.problems.length > 0 && <span className="ml-1 inline-block rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700">needs attention</span>}
+                              <span className="block text-[11px] text-muted">need {qtyText(need, l.unit)} · ordered {qtyText(st?.ordered ?? 0, l.unit)} · left {st?.remaining ?? l.quantity}</span>
+                            </p>
+                            {/* a line can't order more than the takeoff needs (the supplier export refuses it) — no hidden over-order */}
+                            <QtyStepper label="Order quantity" hint={l.item?.description} unit={l.unit} value={n} max={Math.max(need, n)}
+                              overMessage={`The takeoff needs ${qtyText(need, l.unit)} — an order line can't be more than that.`} onChange={(v) => setQty((q) => ({ ...q, [l.bucketKey]: v }))} />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
               </div>
-              <ul className="divide-y divide-hairline">
-                {g.lines.map((l) => {
-                  const st = status.get(l.bucketKey);
-                  const n = qty[l.bucketKey] ?? 0;
-                  const need = st?.required ?? l.quantity;
-                  return (
-                    <li key={l.bucketKey} className="space-y-1.5 px-2 py-2 text-sm" data-order-line={l.bucketKey} data-unit={l.unit}>
-                      <p className="break-words text-ink">{l.item?.description || unitWord(l.unit, 2)}
-                        {l.unit === "lm" && <span className="ml-1 inline-block rounded bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800">estimate — not a piece count</span>}
-                        {l.problems.length > 0 && <span className="ml-1 inline-block rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700">needs attention</span>}
-                        <span className="block text-[11px] text-muted">need {qtyText(need, l.unit)} · ordered {qtyText(st?.ordered ?? 0, l.unit)} · left {st?.remaining ?? l.quantity}</span>
-                      </p>
-                      {/* a line can't order more than the takeoff needs (the supplier export refuses it) — no hidden over-order */}
-                      <QtyStepper label="Order quantity" hint={l.item?.description} unit={l.unit} value={n} max={Math.max(need, n)}
-                        overMessage={`The takeoff needs ${qtyText(need, l.unit)} — an order line can't be more than that.`} onChange={(v) => setQty((q) => ({ ...q, [l.bucketKey]: v }))} />
-                    </li>
-                  );
-                })}
-              </ul>
             </div>
-          ))}
-        </div>
+          );
+        })}
         {orderTotals.length > 0 && <p className="mt-2 text-xs text-ink" data-testid="order-totals"><span className="font-medium">On this order:</span> {orderTotals.join(" · ")}</p>}
       </div>
       {invalidFields > 0 && (
@@ -475,7 +494,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
         </div>
       )}
       {/* 02 §6: accessory groups by others, excluded or not decided are named in the review — never silently zero */}
-      <AccessoryScopeReview materials={ws.view?.materials} results={ws.computed?.materialResults} />
+      <AccessoryScopeReview materials={(ws.view?.materials || []).filter((m) => materialSection(m) === section)} results={ws.computed?.materialResults} />
       {dirtyForm && <Btn kind="primary" className="w-full" onClick={save} disabled={busy || invalidFields > 0}>Save order details</Btn>}
       {invalidDrafts.length > 0 && (
         <Banner tone="warn">{invalidDrafts.map((x) => x.name).join(", ")}: a size typed on this device isn&apos;t valid yet, so the drawing on this order may be out of date. Open the flashing and fix it before sending.</Banner>

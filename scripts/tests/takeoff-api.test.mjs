@@ -302,7 +302,7 @@ await t("A10 standard copied into job; job edit never writes back; worker cannot
 let orderId, orderRev, readyExportId, firstExportPdfSha;
 await t("order: create + lines; order-ready export blocked until supplier/delivery complete", async () => {
   orderId = id();
-  const o = await SP(`/workspaces/${wsId}/orders`, { id: orderId, supplierId: supplier });
+  const o = await SP(`/workspaces/${wsId}/orders`, { category: "flashings", id: orderId, supplierId: supplier });
   assert.equal(o.status, 200); assert.match(o.data.order.orderRef, /^FO-\d{6}$/); orderRev = o.data.order.revision;
   const sched = (await S(`/workspaces/${wsId}/orders`)).data.scheduleLines.filter((l) => l.problems.length === 0 && l.finishedLengthMm === 4600);
   const pr = await call("PATCH", `/api/takeoff/orders/${orderId}`, { body: { expectedRevision: orderRev, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
@@ -373,7 +373,7 @@ async function exportReady(oid, key, extra = {}) {
 }
 async function newOrder(qty) {
   const oid = id();
-  const o = await SP(`/workspaces/${ws2}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
+  const o = await SP(`/workspaces/${ws2}/orders`, { category: "flashings", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
   const line = (await S(`/workspaces/${ws2}/orders`)).data.scheduleLines[0];
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: qty }] } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
@@ -482,7 +482,7 @@ await t("review #1: a shrunk requirement never locks out later, unrelated placem
     contributions: { upsert: [{ id: c1, measurementId: m1, jobMaterialId: mat }, { id: c2, measurementId: m2, jobMaterialId: mat }] } } });
   const place = async (bucketLen, qty, key) => {
     const oid = id();
-    const o = await SP(`/workspaces/${w3}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
+    const o = await SP(`/workspaces/${w3}/orders`, { category: "flashings", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
     const line = (await S(`/workspaces/${w3}/orders`)).data.scheduleLines.find((l) => l.finishedLengthMm === bucketLen);
     await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: qty }] } });
     const ord = (await S(`/workspaces/${w3}/orders`)).data.orders.find((x) => x.id === oid);
@@ -574,7 +574,7 @@ await t("R04 F01: changing the colour of a line's material makes the saved line 
     contributions: { upsert: [{ id: r4.ca, measurementId: r4.a, jobMaterialId: r4.m1 }, { id: r4.cb, measurementId: r4.b, jobMaterialId: r4.m2 }] } } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const oid = id();
-  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
+  const o = await SP(`/workspaces/${w4}/orders`, { category: "flashings", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Test branch", asap: true, contactPhone: "0400 000 000" } });
   const line = (await S(`/workspaces/${w4}/orders`)).data.scheduleLines[0];
   r = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 1, jobMaterialId: r4.m1 }] } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -660,7 +660,7 @@ await t("R04b R9: 'Review split' (re-apply, version+1) re-stamps a stale split a
 });
 await t("R04b R13 + R8: order-ready needs branch / date / contact; open exported orders are reported per length", async () => {
   const oid = id();
-  const o = await SP(`/workspaces/${w4}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup" } });
+  const o = await SP(`/workspaces/${w4}/orders`, { category: "flashings", id: oid, supplierId: supplier, delivery: { method: "pickup" } });
   const line = (await S(`/workspaces/${w4}/orders`)).data.scheduleLines.find((l) => /surfmist/.test(l.bucketKey));
   await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 1 }] } });
   const pv = (await S(`/orders/${oid}/preview`)).data.preview.problems.join(" ");
@@ -752,22 +752,37 @@ await t("TC aluminium + continuous flashing over HTTP; generic order lines keep 
   const badSplit = await SP(`/workspaces/${w5}/commit`, { expectedRevision: await w5rev(), changes: { measurements: { upsert: [{ id: t5.path, kind: "polyline", documentId: D5, pageIndex: 0, calibrationId: t5.cal, points: pts, inputs: { splitsMm: [5000] } }] } } });
   assert.equal(badSplit.status, 400);
   const oid = id();
-  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  const o = await SP(`/workspaces/${w5}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
   assert.equal(o.status, 200, JSON.stringify(o.data));
   const sched = (await S(`/workspaces/${w5}/orders`)).data.scheduleLines;
-  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  // HUB 007: the flashing never rides on the timber-and-cladding order
+  const mixed = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  assert.equal(mixed.status, 400); assert.match(mixed.data.error, /goes on a Flashings order, not this Timber and cladding order/);
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.filter((l) => l.generic).map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = await q("SELECT unit, quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY unit", [oid]);
-  assert.deepEqual(stored.rows.map((x) => x.unit).sort(), ["bar", "piece", "piece", "sheet"]);
+  assert.deepEqual(stored.rows.map((x) => x.unit).sort(), ["bar", "piece", "sheet"]);
   const sheetRow = stored.rows.find((x) => x.unit === "sheet");
   assert.equal(sheetRow.quantity, 4); assert.match(sheetRow.item.description, /Axon 133 smooth/);
   const wsRev = await w5rev();
   const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "tc-exp-1", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: wsRev });
   assert.equal(e.status, 200, JSON.stringify(e.data));
   const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
+  assert.equal(snap.category, "timber_cladding");
   assert.deepEqual(snap.totals.byUnit, { piece: 18, sheet: 4, bar: 1 });
+  assert.deepEqual([...new Set(snap.items.map((g) => g.groupLabel))], ["Timber", "Cladding"]); // Timber part first, then Cladding (aluminium sits there)
+  assert.equal(snap.groups.length, 0);
   assert.equal(snap.appendix.aluminium[0].bars[0].cuts.length, 3);
-  assert.equal(snap.appendix.flashingRuns.length, 1);
+  assert.equal(snap.appendix.flashingRuns.length, 0);
+  // the flashing goes on its own Flashings order, which carries the run reference
+  const fid = id();
+  const fo = await SP(`/workspaces/${w5}/orders`, { category: "flashings", id: fid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  const fpr = await call("PATCH", `/api/takeoff/orders/${fid}`, { body: { expectedRevision: fo.data.order.revision, lines: sched.filter((l) => !l.generic).map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  assert.equal(fpr.status, 200, JSON.stringify(fpr.data));
+  const fe = await SP(`/orders/${fid}/exports`, { isDraft: true, idempotencyKey: "tc-exp-1f", expectedOrderRevision: fpr.data.result.revision, expectedWorkspaceRevision: wsRev });
+  assert.equal(fe.status, 200, JSON.stringify(fe.data));
+  const fsnap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [fe.data.export.exportId])).rows[0].snapshot;
+  assert.equal(fsnap.category, "flashings"); assert.equal(fsnap.items.length, 0); assert.equal(fsnap.appendix.flashingRuns.length, 1);
   const pdf = await S(`/exports/${e.data.export.exportId}/pdf`);
   assert.equal(pdf.data.subarray(0, 4).toString(), "%PDF");
   const app = await S(`/exports/${e.data.export.exportId}/appendix`);
@@ -797,7 +812,7 @@ await t("TC F1: a split at the limit with its plan anchor survives the server ro
 // ── adversarial review fixes (server) ─────────────────────────────────────────
 await t("QO-01/F01/SEC-01: placing an order allocates timber/sheet/bar lines too — 'already ordered' reconciles", async () => {
   const oid = id();
-  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  const o = await SP(`/workspaces/${w5}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
   const sched = (await S(`/workspaces/${w5}/orders`)).data.scheduleLines.filter((l) => l.generic && !l.problems.length);
   assert.ok(sched.some((l) => l.unit === "sheet"));
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
@@ -845,7 +860,7 @@ await t("F15/SEC-05/SEC-07/SEC-10/SEC-11: multi-point plan walls, >20 splits, fo
 await t("SEC-12: the supplier export shows the job ADDRESS only — never the client's name", async () => {
   await q("UPDATE carpentry_jobs SET client_name='Jane Citizen' WHERE id=$1", [J.carpA]);
   const oid = id();
-  const o = await SP(`/workspaces/${w5}/orders`, { id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "B", asap: true, contactPhone: "0400 000 000" } });
+  const o = await SP(`/workspaces/${w5}/orders`, { category: "flashings", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "B", asap: true, contactPhone: "0400 000 000" } });
   const prev = await S(`/orders/${oid}/preview`);
   assert.equal(prev.status, 200, JSON.stringify(prev.data));
   assert.equal(JSON.stringify(prev.data).includes("Jane Citizen"), false);
@@ -864,10 +879,13 @@ await t("HUB 009: a new order's site contact defaults to whoever creates it (nam
   const empId = id();
   await q("INSERT INTO employees (id, name, phone, is_active) VALUES ($1, 'Sam Office', '0412 345 678', true)", [empId]);
   await q("UPDATE user_profiles SET full_name='Sam Morris', employee_id=$2 WHERE id=$1", [U.admin, empId]);
-  const a = await SP(`/workspaces/${w5}/orders`, { id: id(), delivery: { method: "pickup" } });
+  // HUB 007: a new order must say which section it is for
+  const none = await SP(`/workspaces/${w5}/orders`, { id: id(), delivery: { method: "pickup" } });
+  assert.equal(none.status, 400); assert.match(none.data.error, /Flashings or a Timber and cladding order/);
+  const a = await SP(`/workspaces/${w5}/orders`, { category: "flashings", id: id(), delivery: { method: "pickup" } });
   assert.equal(a.status, 200, JSON.stringify(a.data));
   assert.equal(a.data.order.delivery.contactName, "Sam Morris"); assert.equal(a.data.order.delivery.contactPhone, "0412 345 678");
-  const b = await SP(`/workspaces/${w5}/orders`, { id: id(), delivery: { method: "pickup", contactName: "Site lead", contactPhone: "0499 999 999" } });
+  const b = await SP(`/workspaces/${w5}/orders`, { category: "flashings", id: id(), delivery: { method: "pickup", contactName: "Site lead", contactPhone: "0499 999 999" } });
   assert.equal(b.data.order.delivery.contactName, "Site lead"); assert.equal(b.data.order.delivery.contactPhone, "0499 999 999");
 });
 

@@ -15,8 +15,9 @@ const meta = JSON.parse(readFileSync(new URL("../../src/ui-review/fixtures/takeo
 const k = meta.pages[0].pdfUnitsPerMm;
 const BX = 120, BY = 150;
 const at = (xMm, yMm) => ({ x: BX + xMm * k, y: BY + yMm * k });
-const HUB = "/carpentry/cjb-1/takeoff?reviewRole=admin";
-const MIXED = `${HUB}&takeoffSeed=mixed`;
+const HUB = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings";
+const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=mixed";
+const MIXED_FL = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings&takeoffSeed=mixed";   // HUB 002: flashings are their own section
 const orderOf = (tight) => Math.ceil((tight + 200) / 100) * 100;
 
 async function ready(page) {
@@ -609,8 +610,8 @@ test.describe("wall run on the floor plan (02 §3)", () => {
 
 test.describe("schedule \"Show on plan\" (highlightIds)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
-  const openSchedule = async (page) => {
-    await page.goto(MIXED);
+  const openSchedule = async (page, url = MIXED) => {
+    await page.goto(url);
     await ready(page);
     await page.getByRole("button", { name: "Open schedule" }).tap();
   };
@@ -635,7 +636,7 @@ test.describe("schedule \"Show on plan\" (highlightIds)", () => {
   }
 
   test("a flashing line's run opens selected + highlighted and the plan frames it (zoomed in on the small run)", async ({ page }) => {
-    await openSchedule(page);
+    await openSchedule(page, MIXED_FL);
     await page.getByRole("button", { name: /1 ×\s*3,200 mm/ }).first().tap();
     await page.getByRole("button", { name: "Show on plan" }).tap();
     await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
@@ -899,14 +900,14 @@ test.describe("adversarial phone findings — measure", () => {
   });
 
   test("PH-10 changing material keeps the plan zoom and the spot you were working on; Fit still fits the page", async ({ page }) => {
-    await openMeasure(page, MIXED);
+    await openMeasure(page, MIXED_FL);
     const fit = (await vpView(page)).scale;
     const P = at(8750, 5500);
     await zoomOn(page, P, 6);
     const zoomed = (await vpView(page)).scale;
     expect(zoomed).toBeGreaterThan(fit * 5);
     await page.getByRole("radio", { name: "Select" }).click();
-    for (const name of ["Barge flashing", "Rafters 90 × 45", "Apron flashing"]) {
+    for (const name of ["Barge flashing", "Apron flashing"]) {   // HUB 002: the materials of this section
       await chooseMaterial(page, name);
       expect(Math.abs((await vpView(page)).scale - zoomed), `${name}: zoom kept`).toBeLessThan(1e-6);
       const o = await offCentre(page, P);

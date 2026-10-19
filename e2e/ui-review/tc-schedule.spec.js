@@ -11,15 +11,22 @@ import { mkdirSync } from "node:fs";
 
 const SHOTS = "docs/takeoff/evidence/ui/tc-schedule";
 mkdirSync(SHOTS, { recursive: true });
-const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed";
+const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=mixed";
+const MIXED_FL = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings&takeoffSeed=mixed";   // HUB 002: flashings are their own section
 const FIXINGS = `${MIXED}&takeoffFixings=1`;   // + an accessory material: 3 boxes of screws, membrane by others, sealant excluded
 const SCHEDULE = "Schedule";   // the focused window's title (TakeoffApp)
 
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
 }
-async function openSchedule(page) {
-  await page.goto(MIXED);
+/** HUB 002 compact rows: tap a material row so its actions show (no-op when it is already open). */
+async function openRow(row) {
+  const t = row.locator("button[aria-expanded]").first();
+  if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  return row;
+}
+async function openSchedule(page, url = MIXED) {
+  await page.goto(url);
   await ready(page);
   await page.getByRole("button", { name: "Open schedule" }).tap();
   await expect(page.getByRole("dialog", { name: SCHEDULE })).toBeVisible();
@@ -61,9 +68,10 @@ test.describe("TC-R04 schedule", () => {
     const dlg = page.getByRole("dialog", { name: SCHEDULE });
     // flashing groups are still the length schedule (Qty × finished length), with an LM total for flashing only; the
     // heading says it is more than lengths (REV-8: it read "Length schedule" under the "Schedule" window title)
-    await expect(dlg.getByRole("heading", { level: 2, name: "Flashing lengths and materials" })).toBeVisible();
-    await expect(dlg.getByText(/LM flashing$/)).toBeVisible();
-    await expect(dlg.getByRole("button", { name: /^2 ×\s*4,600 mm/ })).toBeVisible();   // two straight runs — unchanged R04 grouping
+    // HUB 002: the Timber and cladding section lists its materials only — the flashings are in their own section
+    await expect(dlg.getByRole("heading", { level: 2, name: "Materials to order" })).toBeVisible();
+    await expect(dlg.getByText(/LM flashing$/)).toHaveCount(0);
+    await expect(dlg.getByRole("button", { name: /^2 ×\s*4,600 mm/ })).toHaveCount(0);
     // rafters (J1): 18 × 5,400 — section manually specified, no structural claim
     const raf = group(page, "mat-raf");
     await expect(raf.getByRole("button", { name: /18 pieces\s*90 × 45 MGP10 H2 — 5,400 mm length/ })).toBeVisible();
@@ -163,7 +171,7 @@ test.describe("TC-R04 schedule", () => {
     await group(page, "mat-raf").getByRole("button", { name: "Show on plan" }).tap();
     await expect(page.getByRole("dialog", { name: "Rafters 90 × 45" })).toBeVisible();
     await expect(page.getByText("Material: Rafters 90 × 45")).toBeVisible();
-    await page.goto(MIXED);
+    await page.goto(MIXED_FL);
     await ready(page);
     await page.getByRole("button", { name: "Open schedule" }).tap();
     const dlg = page.getByRole("dialog", { name: SCHEDULE });
@@ -174,7 +182,7 @@ test.describe("TC-R04 schedule", () => {
   });
 
   test("continuous flashing run: one row per resulting finished length (never per plan leg), pieces listed, no lap-split form on a path", async ({ page }) => {
-    await openSchedule(page);
+    await openSchedule(page, MIXED_FL);
     const dlg = page.getByRole("dialog", { name: SCHEDULE });
     const apron = dlg.locator("section").filter({ has: page.getByRole("heading", { name: /Apron flashing/ }) });
     // 6,000 + 4,000 tight path split at 8,800 → 9,000 + 1,400; four 750 legs → ONE 3,200 (corners add nothing)
@@ -258,8 +266,8 @@ test.describe("TC-R04 supplier order", () => {
     await bat.getByLabel(/Order quantity.*\(pieces\)/).fill("0");
     await bat.getByLabel(/Order quantity.*\(pieces\)/).press("Enter");
     const totals = page.getByTestId("order-totals");
-    // flashing pieces/LM, timber pieces (18 rafters + 4 trimmers), sheets, bars and LM each on their own
-    await expect(totals).toHaveText(/^On this order: \d+ flashing pieces \(\d+\.\d{3} LM\) · 22 pieces · 4 sheets · 2 bars · 57 LM$/);
+    // timber pieces (18 rafters + 4 trimmers), sheets, bars and LM each on their own (flashings are their own order — HUB 007)
+    await expect(totals).toHaveText(/^On this order: 22 pieces · 4 sheets · 2 bars · 57 LM$/);
     await page.screenshot({ path: `${SHOTS}/order-generic-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
     const o = await overflowPx(page);
@@ -270,7 +278,7 @@ test.describe("TC-R04 supplier order", () => {
     expect(o2.right, "order wider than the 375 px screen").toBeLessThanOrEqual(1);
     expect(o2.scroll).toBeLessThanOrEqual(0);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: \d+ flashing pieces · \d+\.\d{3} LM · 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders \(review branch\)\.$/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders \(review branch\)\.$/)).toBeVisible();
     await page.getByRole("button", { name: "Export supplier PDF" }).tap();
     await expect(page.getByText(/Export 1 is frozen\. Nothing has been sent\./)).toBeVisible();
     // site appendix sits next to the supplier PDF and opens separately
@@ -286,9 +294,9 @@ test.describe("TC-R04 supplier order", () => {
     expect(raw.startsWith("%PDF-")).toBe(true);
     const text = raw.replace(/\\([()\\])/g, "$1");   // PDF string escapes → plain text
     for (const t of ["Window angle 50 x 50 x 3 - cutting sheet (6,500 mm bars)", "Bar 1: W2 bottom 1,800 | W2 left jamb 1,300", "proven minimum",
-      "Rafters 90 x 45 - timber cut list", "18 x cut 5,196 mm from 5,400 mm stock", "Axon cladding - North wall setout", "net 12.15 m2",
-      "Apron flashing run R-m-pl1: tight 10,000 mm | corners at 6,000 | splits at 8,800 | pieces 9,000 + 1,400 mm"]) expect(text, `appendix missing "${t}"`).toContain(t);
+      "Rafters 90 x 45 - timber cut list", "18 x cut 5,196 mm from 5,400 mm stock", "Axon cladding - North wall setout", "net 12.15 m2"]) expect(text, `appendix missing "${t}"`).toContain(t);
     expect(text).not.toContain("Cavity battens");   // not on this order → not in its appendix
+    expect(text).not.toContain("Apron flashing run");   // the flashing run is on the Flashings order's appendix (HUB 007)
     // order history lists the appendix next to each export's PDF
     const hist = page.locator("section").filter({ has: page.getByRole("heading", { name: "Order history" }) });
     await expect(hist.getByRole("button", { name: "Open", exact: true })).toBeVisible();
@@ -310,7 +318,7 @@ test.describe("TC-R04 supplier order", () => {
     // change what is bought (grade) on the job material
     await page.getByRole("button", { name: "Back" }).tap();
     const li = page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first();
-    await li.getByRole("button", { name: "Setup" }).tap();
+    await (await openRow(li)).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
     await setup.getByLabel("Grade (e.g. MGP10)").fill("MGP12");
     await expect(setup.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
@@ -437,7 +445,17 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(sheets).toHaveValue("4");
     await expect(page.getByText(/A quantity above isn't a valid number/)).toHaveCount(0);
     await expect(supplierPdf).toBeEnabled();
-    // same guard for the R04 flashing Qty field
+    // a focused quantity low on the screen scrolls into the upper part (an on-screen keyboard covers the lower ~40%)
+    const lm = orderGroup(page, "mat-al").getByLabel(/Order quantity.*\(bars\)/);   // mid-page (the last group can't scroll higher than the page end)
+    await lm.evaluate((el) => el.scrollIntoView({ block: "end" }));
+    await lm.focus();
+    await expect.poll(async () => { const b = await lm.boundingBox(); return b ? b.y + b.height : 9999; }, { timeout: 3000 }).toBeLessThan(844 * 0.6);
+    // same guard for the R04 flashing Qty field — on the Flashings order (HUB 007: its own order)
+    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
+    await page.getByRole("button", { name: /Review & export order/ }).tap();
+    await page.getByRole("button", { name: "New order" }).tap();
+    await expect(page.getByText(/^Ready: /)).toBeVisible();
     const qty = page.getByLabel("Qty").first();
     const was = await qty.inputValue();
     await qty.fill("1.5");
@@ -449,11 +467,6 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await qty.press("Tab");
     await expect(page.getByText(/A quantity above isn't a valid number/)).toHaveCount(0);
     await expect(supplierPdf).toBeEnabled();
-    // a focused quantity low on the screen scrolls into the upper part (an on-screen keyboard covers the lower ~40%)
-    const lm = orderGroup(page, "mat-tc").getByLabel(/Order quantity.*\(LM\)/);
-    await lm.evaluate((el) => el.scrollIntoView({ block: "end" }));
-    await lm.focus();
-    await expect.poll(async () => { const b = await lm.boundingBox(); return b ? b.y + b.height : 9999; }, { timeout: 3000 }).toBeLessThan(844 * 0.6);
     expect(errors).toEqual([]);
   });
 
@@ -484,7 +497,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
 
   test("REV-6 schedule split edits auto-apply and the curved arrows undo / redo them (each a real save)", async ({ page }) => {
     const errors = watchErrors(page);
-    await openSchedule(page);
+    await openSchedule(page, MIXED_FL);
     const dlg = page.getByRole("dialog", { name: SCHEDULE });
     await expect(dlg.getByRole("button", { name: "Undo" })).toHaveCount(0);   // nothing to undo yet
     await dlg.getByRole("button", { name: /^1 ×\s*7,200 mm/ }).tap();
@@ -525,23 +538,16 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Record order placed", exact: true }).tap();
     await expect(page.getByText("Placed externally")).toBeVisible();
     await page.getByRole("button", { name: "Back" }).tap();
-    await page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first().getByRole("button", { name: "Setup" }).tap();
+    await (await openRow(page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first())).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
     await setup.getByLabel("Grade (e.g. MGP10)").fill("MGP12");
     await expect(setup.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
     await setup.getByRole("button", { name: "Close" }).tap();
-    // and a flashing whose colour changes after its pieces were placed (R04 buckets reconcile the same way)
-    await page.locator("li").filter({ hasText: "Barge flashing" }).first().getByRole("button", { name: "Details" }).tap();
-    await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
-    await page.waitForTimeout(1200);
-    await page.getByRole("button", { name: "Close" }).tap();
     await page.getByRole("button", { name: "Open schedule" }).tap();
-    const placed = page.getByTestId("placed-surplus");
+    let placed = page.getByTestId("placed-surplus");
     await expect(placed).toContainText("Placed, but no longer in the takeoff");
-    // what was BOUGHT (the old colour / grade) and the order it is on — never the material's current name or colour
-    // (REV-16: with the orders read on open it said "7,200 mm flashing · Barge flashing", now Basalt)
-    await expect(placed.locator("li")).toHaveText(["1 piece · 7,200 mm flashing · Surfmist · 0.55 BMT · placed on FO-001001", "1 piece · 6,100 mm flashing · Surfmist · 0.55 BMT · placed on FO-001001",
-      "2 pieces · 2,400 mm flashing · Surfmist · 0.55 BMT · placed on FO-001001", "18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length · placed on FO-001001"]);
+    // what was BOUGHT (the old grade) and the order it is on — never the material's current name
+    await expect(placed.locator("li")).toHaveText(["18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length · placed on FO-001001"]);
     await expect(group(page, "mat-raf").getByRole("button", { name: /18 pieces\s*90 × 45 MGP12 H2 — 5,400 mm length\s*not ordered/ })).toBeVisible();
     await expect(group(page, "mat-axon").getByText("4 sheets ordered · 0 left")).toBeVisible();   // unchanged products stay reconciled
     await page.screenshot({ path: `${SHOTS}/schedule-placed-surplus-390x844.png`, fullPage: true });
@@ -550,6 +556,30 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByText("Placed externally")).toBeVisible();
     await expect(page.getByText(/Placed .* \(export 1\)/)).toBeVisible();
+    // and a flashing whose colour changes after its pieces were placed (R04 buckets reconcile the same way) — the
+    // flashings are their own order (HUB 007)
+    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
+    await page.getByRole("button", { name: /Review & export order/ }).tap();
+    await page.getByRole("button", { name: "New order" }).tap();
+    await expect(page.getByText(/^Ready: /)).toBeVisible();
+    await page.getByRole("button", { name: "Export supplier PDF" }).tap();
+    await expect(page.getByText(/Export 1 is frozen/)).toBeVisible();
+    await page.getByRole("button", { name: "Record order placed…" }).tap();
+    await page.getByLabel("Which PDF did you send?").selectOption({ label: "Export 1" });
+    await page.getByRole("button", { name: "Record order placed", exact: true }).tap();
+    await expect(page.getByText("Placed externally")).toBeVisible();
+    await page.getByRole("button", { name: "Back" }).tap();
+    await (await openRow(page.locator("li").filter({ hasText: "Barge flashing" }).first())).getByRole("button", { name: "Details" }).tap();
+    await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
+    await page.waitForTimeout(1200);
+    await page.getByRole("button", { name: "Close" }).tap();
+    await page.getByRole("button", { name: "Open schedule" }).tap();
+    placed = page.getByTestId("placed-surplus");
+    // (REV-16: with the orders read on open it said "7,200 mm flashing · Barge flashing", now Basalt)
+    await expect(placed.locator("li")).toHaveText(["18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length · placed on FO-001001",
+      "1 piece · 7,200 mm flashing · Surfmist · 0.55 BMT · placed on FO-001002", "1 piece · 6,100 mm flashing · Surfmist · 0.55 BMT · placed on FO-001002",
+      "2 pieces · 2,400 mm flashing · Surfmist · 0.55 BMT · placed on FO-001002"]);
     expect(errors).toEqual([]);
   });
 
@@ -642,7 +672,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
   test("REV-9 split sheet: the focused piece length stays above the keyboard; in phone landscape the whole sheet (title, close, Apply) stays on screen", async ({ page }) => {
     const errors = watchErrors(page);
     await fakeKeyboard(page);
-    await openSchedule(page);
+    await openSchedule(page, MIXED_FL);
     const dlg = page.getByRole("dialog", { name: SCHEDULE });
     await dlg.getByRole("button", { name: /^1 ×\s*7,200 mm/ }).tap();
     await dlg.getByRole("button", { name: "Split", exact: true }).tap();
@@ -696,13 +726,13 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await page.getByRole("button", { name: "New order" }).tap();
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
-    // same order as the schedule (the job's material order), not the purchase-line order
+    // the job's material order (not the purchase-line order), in the Timber part then the Cladding part (HUB 007)
     await expect(page.locator("[data-order-group]")).toHaveCount(7);
     expect(await page.locator("[data-order-group]").evaluateAll((els) => els.map((e) => e.getAttribute("data-order-group"))))
-      .toEqual(["mat-raf", "mat-axon", "mat-bat", "mat-al", "mat-tc", "mat-trim", "mat-fix"]);
+      .toEqual(["mat-raf", "mat-trim", "mat-axon", "mat-bat", "mat-al", "mat-tc", "mat-fix"]);
     const boxes = orderGroup(page, "mat-fix").getByLabel(/Order quantity.*\(boxes\)/);
     await expect(boxes).toHaveValue("3");
-    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: \d+ flashing pieces \(\d+\.\d{3} LM\) · 32 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes$/);
+    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: 32 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes$/);
     const review = page.getByTestId("accessory-scope-review");
     await expect(review).toContainText("Accessories not supplied on this order:");
     await expect(review.locator('[data-scope-material="mat-fix"] [data-scope="by-others"]')).toHaveText("By others: Membrane / wrap (Wrap by the framer), Tape");
@@ -715,9 +745,9 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
       await q.fill("0");
       await q.press("Enter");
     }
-    await expect(page.getByTestId("order-totals")).toHaveText(/· 22 pieces · 4 sheets · 2 bars · 57 LM$/);
+    await expect(page.getByTestId("order-totals")).toHaveText(/: 22 pieces · 4 sheets · 2 bars · 57 LM$/);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: \d+ flashing pieces · \d+\.\d{3} LM · 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders/)).toBeVisible();
     await expect(page.getByTestId("not-on-order")).toHaveText(/Cavity battens — 10 pieces\s*Cladding fixings — 3 boxes/);
     await page.screenshot({ path: `${SHOTS}/order-fixings-review-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
@@ -748,7 +778,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     const appendix = (id) => page.evaluate(async (x) => new TextDecoder().decode(await (await fetch(`/api/takeoff/exports/${x}/appendix`)).arrayBuffer()), id);
     const before = await appendix(exportId);
     await page.getByRole("button", { name: "Back" }).tap();
-    await page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first().getByRole("button", { name: "Setup" }).tap();
+    await (await openRow(page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first())).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
     await setup.getByLabel("Pitch").fill("45");
     await setup.getByLabel("Pitch").press("Enter");
@@ -833,8 +863,12 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.evaluate(() => window.__keyboard(360));
     await expect(page.locator("[data-keyboard-spacer]")).toHaveCount(1);
     await expect.poll(async () => { const b = await last.boundingBox(); return b ? b.y + b.height : 9999; }, { timeout: 3000 }).toBeLessThanOrEqual(844 - 360);
-    // the flashing Qty field too
+    // the flashing Qty field too — on the Flashings order (HUB 007)
     await page.evaluate(() => window.__keyboard(0));
+    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
+    await page.getByRole("button", { name: /Review & export order/ }).tap();
+    await page.getByRole("button", { name: "New order" }).tap();
     const qty = page.getByLabel("Qty").last();
     await qty.evaluate((el) => el.scrollIntoView({ block: "end" }));
     await qty.focus();

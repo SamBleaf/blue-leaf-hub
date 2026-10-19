@@ -9,7 +9,7 @@ import { readdirSync } from "node:fs";
 // TC-R04 engine suites (timber, cladding, supports, allocator, flashing paths, integration + adversarial) by name
 const TC = readdirSync("scripts/tests").filter((f) => /^takeoff-tc-.*\.test\.mjs$/.test(f)).map((f) => f.replace(/\.test\.mjs$/, "")).sort();
 const SUITES = [
-  "takeoff-calc", "takeoff-r04", "takeoff-geometry", "takeoff-gestures", "takeoff-profile-editor", "takeoff-pdf", "takeoff-db", "takeoff-api", "takeoff-premigration",
+  "takeoff-calc", "takeoff-sections", "takeoff-r04", "takeoff-geometry", "takeoff-gestures", "takeoff-profile-editor", "takeoff-pdf", "takeoff-db", "takeoff-api", "takeoff-premigration",
   ...TC,
 ];
 let failed = 0, skipped = 0;

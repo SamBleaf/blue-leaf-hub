@@ -73,6 +73,20 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
 
   // ── input helpers (mouse on desktop, touch on the phone) ─────────────────────────────────────────────────
   const press = async (loc) => { await loc.scrollIntoViewIfNeeded().catch(() => {}); return isMobile ? loc.tap() : loc.click(); };
+  // HUB 002: one takeoff, two sections; material rows show their actions once tapped
+  let curSection = "timber_cladding";
+  const SECTION_H1 = { flashings: "Flashings", timber_cladding: "Timber and cladding" };
+  const sectionHeading = () => page.getByRole("heading", { level: 1, name: /^(Flashings|Timber and cladding)$/ });
+  const toSection = async (sec) => {
+    curSection = sec;
+    await press(page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: SECTION_H1[sec], exact: true }));
+    await expect(page.getByRole("heading", { level: 1, name: SECTION_H1[sec] })).toBeVisible();
+  };
+  const openRow = async (row) => {
+    const t = row.locator("button[aria-expanded]").first();
+    if ((await t.getAttribute("aria-expanded")) !== "true") await press(t);
+    return row;
+  };
   const tapAt = async (x, y) => (isMobile ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
   const num = async (loc, v) => { await loc.fill(String(v)); await loc.press("Enter"); };
   const vp = () => page.locator("[data-takeoff-viewport]").first();
@@ -111,11 +125,11 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
   /** leave every focused window by its header close button (Back / Done / Close / ‹ Walls) */
   const toOverview = async () => {
     for (let i = 0; i < 5 && await focusWin().count(); i++) { await press(focusWin().last().locator("header button").first()); await page.waitForTimeout(300); }
-    await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible({ timeout: 20_000 });
+    await expect(sectionHeading()).toBeVisible({ timeout: 20_000 });
   };
   const recover = async () => {
-    await page.goto(url);
-    await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible({ timeout: 30_000 });
+    await page.goto(`${url}${url.includes("?") ? "&" : "?"}section=${curSection}`);
+    await expect(sectionHeading()).toBeVisible({ timeout: 30_000 });
   };
   /** the REAL server's view of this takeoff (same API + credentials as the app on this route) */
   const server = () => page.evaluate(async ({ job, base }) => {
@@ -146,13 +160,15 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
   // ═══ S0 — start a takeoff, choose the plan page, scale it ═══════════════════════════════════════════════════
   await journey("S0", "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)", async () => {
     await page.goto(url);
-    const start = page.getByRole("button", { name: "Start a flashing takeoff" });
+    const start = page.locator('[data-section="timber_cladding"]');
     await start.waitFor({ timeout: 30_000 });
-    await shot("job-takeoffs-empty", `Job takeoffs on the ${isMobile ? "Worker PWA" : "Hub"} route — no takeoff yet (fresh sandbox)`);
+    await expect(page.locator("[data-takeoff-sections] [data-section]")).toHaveCount(2);   // HUB 002: Flashings or Timber and cladding first
+    await shot("job-takeoffs-empty", `Job takeoff on the ${isMobile ? "Worker PWA" : "Hub"} route — choose Flashings or Timber and cladding (fresh sandbox)`);
     await press(start);
-    await expect(page.getByRole("heading", { name: /^(Takeoff|Flashings)$/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Timber and cladding" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add timber" })).toBeVisible();
-    await shot("takeoff-overview", "New takeoff: plan not scaled; Add flashing / timber / cladding / aluminium");
+    await expect(page.getByRole("button", { name: "Add flashing" })).toHaveCount(0);
+    await shot("takeoff-overview", "New takeoff, Timber and cladding section: plan not scaled; Add timber / cladding / aluminium (no flashing actions)");
     await press(page.getByRole("button", { name: "Set up plans" }));
     const usePage = page.getByRole("button", { name: /Use page 1 as the main plan page/ });
     await usePage.waitFor();
@@ -245,7 +261,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await shot("schedule-18x5400", "Schedule (computed by the real server): 18 pieces 90 × 45 MGP10 H3 — 5,400 mm length");
     await toOverview();
     // switch to TRUE length: the pitch is no longer applied (4,500 + 100 → 4,800 grid)
-    await press(page.getByRole("listitem").filter({ hasText: "Rafters 90 × 45" }).getByRole("button", { name: "Setup" }));
+    await press((await openRow(page.getByRole("listitem").filter({ hasText: "Rafters 90 × 45" }))).getByRole("button", { name: "Setup" }));
     await press(page.locator('[data-setup="timber"] [data-chips="length-source"]').getByRole("button", { name: "Measure true length" }));
     await expect(page.locator('[data-setup="timber"]').getByLabel("Pitch")).toHaveCount(0);
     await saved();
@@ -264,7 +280,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     observed.J1.trueLength = linesOf(w, timberId).map(lineText);
     await toOverview();
     // back to projected for the order (J5 expects 18 × 5,400); the 30° pitch must still be there
-    await press(page.getByRole("listitem").filter({ hasText: "Rafters 90 × 45" }).getByRole("button", { name: "Setup" }));
+    await press((await openRow(page.getByRole("listitem").filter({ hasText: "Rafters 90 × 45" }))).getByRole("button", { name: "Setup" }));
     await press(page.locator('[data-setup="timber"] [data-chips="length-source"]').getByRole("button", { name: "Measure projection" }));
     const pitch = page.locator('[data-setup="timber"]').getByLabel("Pitch");
     const kept = await pitch.inputValue();
@@ -398,6 +414,8 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
   // ═══ FL — continuous flashing paths (13) ═════════════════════════════════════════════════════════════════════
   let flashId = null;
   await journey("FL", "Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400", async () => {
+    await toSection("flashings");
+    await expect(page.getByRole("button", { name: "Add timber" })).toHaveCount(0);
     await press(page.getByRole("button", { name: "Add flashing" }).first());
     await press(page.getByRole("button", { name: "New flashing" }));
     const dlg = page.getByRole("dialog", { name: /^Flashing/ });
@@ -593,12 +611,12 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     }, { job: JOB, base: apiBase });
     writeFileSync(`${dir}/${tag}-orders.json`, JSON.stringify(order, null, 2));
   };
-  const commonChecks = (S, A) => [
-    ["supplier", S, /MATERIAL ORDER/],
+  // HUB 007: the timber and cladding order (Timber part, then Cladding) and the flashings order are separate supplier orders
+  const tcChecks = (S, A) => [
+    ["supplier", S, /TIMBER AND CLADDING ORDER/],
     ["supplier", S, /18 × piece 90 × 45 MGP10 H3 — 5,400 mm length/],
     ["supplier", S, /4 × sheet James Hardie Axon 133 smooth SKU \d+ — 2,750 × 1,200 mm/],
     ["supplier", S, /1 × bar equal-angle 50 × 50 × 3 — 6,500 mm length \(no joins\)/],
-    ["supplier", S, /1 × 3,200 3\.200/],
     ["supplier", S, isMobile ? /Sandbox branch \(test only\)/ : /Deliver to: 1 Sandbox Street, Testville SA \(test only\) Required: \d{4}-\d\d-\d\d/],
     ["supplier", S, /Site contact: Sandbox site lead 0400 000 000/],
     ["supplier (no DRAFT watermark)", S, /^(?![\s\S]*DRAFT)/],
@@ -612,8 +630,19 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     ["appendix", A, /North wall setout/],
     ["appendix", A, /Gross 12\.96 m² · openings 0\.81 m² · net 12\.15 m²/],
     ["appendix", A, /4 occupied cell\(s\) = 4 sheet\(s\)/],
+    ["supplier", S, /TIMBER AND CLADDING ORDER[\s\S]*\bTIMBER\b[\s\S]*\bCLADDING\b/],   // the Timber part, then the Cladding part
+    ["supplier (no flashing on it)", S, /^(?![\s\S]*(flashing piece|3,200 3\.200))/],
+  ];
+  const flChecks = (S, A) => [
+    ["supplier", S, /FLASHING ORDER/],
+    ["supplier", S, /1 × 3,200 3\.200/],
     ["appendix", A, /Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm/],
     ["appendix", A, /Piece 1: 0–3,000 mm along the run (→|->) tight 3,000 (→|->) order 3,200 mm/],
+    ["supplier", S, isMobile ? /Sandbox branch \(test only\)/ : /Deliver to: 1 Sandbox Street, Testville SA \(test only\) Required: \d{4}-\d\d-\d\d/],
+    ["supplier", S, /Site contact: Sandbox site lead 0400 000 000/],
+    ["supplier (no DRAFT watermark)", S, /^(?![\s\S]*DRAFT)/],
+    ["appendix", A, /SITE APPENDIX — CUTTING & SETOUT/],
+    ["supplier (no timber / cladding on it)", S, /^(?![\s\S]*(MGP10|Axon 133|equal-angle))/],
   ];
 
   /** honest-output issues seen in the downloaded site appendix (recorded as findings; the journey checks are above) */
@@ -631,7 +660,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     }
   };
 
-  await journey("J5", "Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back", async () => {
+  await journey("J5", "Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back", async () => {
     const w0 = await server();
     writeFileSync(`${dir}/schedule.json`, JSON.stringify({
       note: "computed.scheduleLines from the REAL sandbox server (GET workspace) just before ordering",
@@ -639,66 +668,52 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
       scheduleLines: w0.computed.scheduleLines.map((l) => ({ material: w0.snapshot.materials.find((m) => l.jobMaterialIds.includes(m.id))?.name, unit: l.unit || "piece", quantity: l.quantity,
         description: l.item?.description || null, finishedLengthMm: l.finishedLengthMm ?? null, stockLengthMm: l.item?.stockLengthMm ?? null, problems: l.problems, bucketKey: l.bucketKey })),
     }, null, 2));
+    // 1) Timber and cladding
+    await toSection("timber_cladding");
     await openOrders();
+    await expect(page.getByRole("heading", { name: "Timber and cladding orders" })).toBeVisible();
     await press(page.getByRole("button", { name: "New order" }));
     await expect(page.getByText(/Draft FO-/)).toBeVisible({ timeout: 20_000 });
     const og = (id) => page.locator(`[data-order-group="${id}"]`);
-    if (timberId) await expect(og(timberId).getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue("18");
-    if (axonId) await expect(og(axonId).getByLabel(/Order quantity.*\(sheets\)/)).toHaveValue("4");
+    if (timberId) await expect(page.locator('[data-order-part="timber"]').locator(`[data-order-group="${timberId}"]`).getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue("18");
+    if (axonId) await expect(page.locator('[data-order-part="cladding"]').locator(`[data-order-group="${axonId}"]`).getByLabel(/Order quantity.*\(sheets\)/)).toHaveValue("4");
     if (aluId) await expect(og(aluId).getByLabel(/Order quantity.*\(bars\)/)).toHaveValue("1");
+    await expect(page.getByText("Lengths on this order")).toHaveCount(0);   // no flashing line crosses onto this order
     await deliveryDetails();
-    await shot("order-review", `New order: every line defaults to what is still needed; ${isMobile ? "pick up (branch, ASAP)" : "deliver (address, required-by date)"}, site contact + phone`);
+    await shot("order-review", `Timber and cladding order: Timber and Cladding parts, every line defaults to what is still needed; ${isMobile ? "pick up (branch, ASAP)" : "deliver (address, required-by date)"}, site contact + phone`);
     const ready = await saveUntilReady("J5");
     observed.J5 = { ready };
     await expect(page.getByTestId("order-totals")).toContainText("18 pieces");
     await expect(page.getByTestId("order-totals")).toContainText("4 sheets");
     await expect(page.getByTestId("order-totals")).toContainText("1 bar");
+    await expect(page.getByTestId("order-totals")).not.toContainText("flashing");
     const { S, A } = await exportAndRead("J5");
-    const checks = runChecks("J5", [...commonChecks(S, A),
-      ["supplier", S, /1 × 9,000 9\.000/], ["supplier", S, /1 × 1,400 1\.400/],
-      ["supplier", S, /3 pieces · 13\.600 LM/], ["supplier", S, /Order total: 3 flashing pieces · 13\.600 LM (· 1 long piece flagged )?· 1 bar · 18 pieces · 4 sheets/],
-      ["appendix", A, /Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/],
-      ["appendix", A, /Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/],
-      ["appendix", A, /Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/]]);
-    observed.J5.pdfChecks = checks.filter((c) => !c.ok);
+    const checks = runChecks("J5", [...tcChecks(S, A), ["supplier", S, /Order total: 1 bar · 18 pieces · 4 sheets/]]);
     appendixFindings("J5", A);
+    // 2) Flashings — its own order
+    await toOverview();
+    await toSection("flashings");
+    await openOrders();
+    await expect(page.getByRole("heading", { name: "Flashings orders" })).toBeVisible();
+    await expect(page.getByText(/Draft FO-/)).toHaveCount(0);   // the timber and cladding order isn't listed here
+    await press(page.getByRole("button", { name: "New order" }));
+    await expect(page.getByText(/Draft FO-/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("[data-order-group]")).toHaveCount(0);
+    await deliveryDetails();
+    await shot("order-review-flashings", "Flashings order: flashing lengths only");
+    observed.J5.flashingsReady = await saveUntilReady("J5F");
+    const F = await exportAndRead("J5F");
+    const fchecks = runChecks("J5F", [...flChecks(F.S, F.A),
+      ["supplier", F.S, /1 × 9,000 9\.000/], ["supplier", F.S, /1 × 1,400 1\.400/],
+      ["supplier", F.S, /3 pieces · 13\.600 LM/], ["supplier", F.S, /Order total: 3 pieces · 13\.600 LM/],
+      ["appendix", F.A, /Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/],
+      ["appendix", F.A, /Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/],
+      ["appendix", F.A, /Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/]]);
+    observed.J5.pdfChecks = [...checks, ...fchecks].filter((c) => !c.ok);
     await saveOrders("J5");
-    const failed = checks.filter((c) => !c.ok);
+    const failed = [...checks, ...fchecks].filter((c) => !c.ok);
     expect(failed, `PDF text checks failed:\n${failed.map((c) => `${c.doc}: ${c.expect}`).join("\n")}`).toEqual([]);
   });
-
-  // ═══ J5d — DIAGNOSTIC only (not the J5 acceptance): when J5 is blocked by the split-run defect, export the same
-  //     order WITHOUT that run's flashing pieces, so the rest of J5 (export, both PDFs, quantities/units) is still
-  //     proven end to end on the real stack ═══════════════════════════════════════════════════════════════════════
-  if (results.find((r) => r.id === "J5")?.status !== "PASS") {
-    await journey("J5d", "DIAGNOSTIC (not J5): same order minus the blocked split-run flashing pieces → non-draft export + both PDFs read back", async () => {
-      await openOrders();
-      if (!(await page.getByText(/Draft FO-/).isVisible().catch(() => false))) {
-        await press(page.getByRole("button", { name: "New order" }));
-        await expect(page.getByText(/Draft FO-/)).toBeVisible({ timeout: 20_000 });
-        await deliveryDetails();
-      }
-      const rows = page.locator("li", { has: page.getByLabel(/^Qty/) });
-      const removed = [];
-      for (let i = 0; i < await rows.count(); i++) {
-        const r = rows.nth(i);
-        const t = (await r.innerText()).replace(/\s+/g, " ");
-        if (!/^3,200 mm/.test(t)) { removed.push(t.slice(0, 60)); await num(r.getByLabel(/^Qty/), 0); }
-      }
-      note(`Set to 0 on this order (the run blocked by F1): ${removed.join(" | ")}`);
-      observed.J5d = { removedFromOrder: removed };
-      const ready = await saveUntilReady("J5d");
-      observed.J5d.ready = ready;
-      const { S, A } = await exportAndRead("J5d");
-      const checks = runChecks("J5d", [...commonChecks(S, A),
-        ["supplier", S, /1 piece · 3\.200 LM/], ["supplier", S, /Order total: 1 flashing piece · 3\.200 LM · 1 bar · 18 pieces · 4 sheets/]]);
-      observed.J5d.pdfChecksFailed = checks.filter((c) => !c.ok);
-      appendixFindings("J5d", A);
-      await saveOrders("J5d");
-      const failed = checks.filter((c) => !c.ok);
-      expect(failed, `PDF text checks failed:\n${failed.map((c) => `${c.doc}: ${c.expect}`).join("\n")}`).toEqual([]);
-    });
-  }
 
   // ── write the evidence (always) ───────────────────────────────────────────────────────────────────────────
   const engine = page.context().browser();

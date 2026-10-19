@@ -30,7 +30,7 @@ async function loadOrderBundle(sb, orderRow) {
   // newest company row — the freeze compares against max(updated_at)
   const company = await q(sb.from("company_profile").select("name, abn, address, phone, email, updated_at").order("updated_at", { ascending: false }).limit(1).maybeSingle());
   return {
-    order: { id: orderRow.id, orderRef: orderRow.order_ref, delivery: orderRow.delivery || {}, notes: orderRow.notes, revision: orderRow.revision, status: orderRow.status },
+    order: { id: orderRow.id, orderRef: orderRow.order_ref, delivery: orderRow.delivery || {}, notes: orderRow.notes, revision: orderRow.revision, status: orderRow.status, category: orderRow.category || null },
     // unit + item travel with the line: generic (TC-R04) staleness and wording depend on them
     lines: lines.map((l) => ({ bucketKey: l.bucket_key, specKey: l.spec_key, jobMaterialId: l.job_material_id, finishedLengthMm: l.finished_length_mm, quantity: l.quantity,
       unit: l.unit || "piece", item: l.item || null })),

@@ -8,6 +8,7 @@ export * from "./methods.js";
 export * from "./schedule.js";
 export * from "./history.js";
 export * from "./catalogue.js";
+export * from "./sections.js";
 export * from "./engine/contract.js";
 export * from "./engine/families.js";
 

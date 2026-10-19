@@ -16,6 +16,12 @@ test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
 }
+/** HUB 002 compact rows: tap a material row so its actions show (no-op when it is already open). */
+async function openRow(row) {
+  const t = row.locator("button[aria-expanded]").first();
+  if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  return row;
+}
 
 // Job materials are seeded through the fake server's OWN commit endpoint (the same path the app saves through),
 // so these journeys don't depend on another screen's setup form. Specs come from the real catalogue/method code.
@@ -59,10 +65,10 @@ async function openWalls(page, key = "axon", { walls = [], also = [], extraMater
     return r.json();
   }, { calibrations: { insert: [] }, materials: { upsert: mats, archive: [] }, measurements: { upsert: measurements, archive: [] }, contributions: { upsert: contributions, archive: [] } });
   expect(res.ok, JSON.stringify(res)).toBe(true);
-  await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1/takeoff?reviewRole=admin"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding"); window.dispatchEvent(new PopStateEvent("popstate")); });
   await ready(page);
   const row = page.getByRole("listitem").filter({ hasText: m0.name });
-  await row.getByRole("button", { name: "Setup" }).click();
+  await (await openRow(row)).getByRole("button", { name: "Setup" }).click();
   await page.getByRole("button", { name: key === "studs" ? "Measure members" : "Walls", exact: true }).click();
   await expect(page.getByRole("dialog", { name: m0.name })).toBeVisible();
   await expect(page.getByRole("region", { name: "Walls" })).toBeVisible();
@@ -518,9 +524,9 @@ function consoleErrors(page) {
 
 /** The J5 mixed job (?takeoffSeed=mixed): Axon cladding + cavity battens on "North wall" 4,800 × 2,700 with W1 900 × 900. */
 async function openMixedWalls(page, name = "Axon cladding") {
-  await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed");
+  await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=mixed");
   await ready(page);
-  await page.getByRole("listitem").filter({ hasText: name }).first().getByRole("button", { name: "Walls", exact: true }).click();
+  await (await openRow(page.getByRole("listitem").filter({ hasText: name }).first())).getByRole("button", { name: "Walls", exact: true }).click();
   await expect(page.getByRole("region", { name: "Walls" })).toBeVisible();
 }
 
@@ -569,7 +575,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await page.reload();
     await ready(page);
     await page.getByRole("button", { name: "Restore" }).click();
-    await page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first().getByRole("button", { name: "Walls", exact: true }).click();
+    await (await openRow(page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first())).getByRole("button", { name: "Walls", exact: true }).click();
     await expect(page.locator("[data-wall-row]").filter({ hasText: "North wall" })).toContainText("5 sheets");
     await page.getByRole("button", { name: "Open North wall" }).click();
     await expect(page.getByLabel("Wall length")).toHaveValue("4801");
@@ -592,7 +598,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await page.reload();
     await ready(page);
     await page.getByRole("button", { name: "Restore" }).click();
-    await page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first().getByRole("button", { name: "Walls", exact: true }).click();
+    await (await openRow(page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first())).getByRole("button", { name: "Walls", exact: true }).click();
     const row = page.locator("[data-wall-row]").filter({ hasText: "Draft rake" });
     await expect(row).toContainText("Sloping top · 3,600 mm long");
     await expect(row).toContainText("Heights needed");
@@ -614,7 +620,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await page.reload();
     await ready(page);
     await page.getByRole("button", { name: "Restore" }).click();
-    await page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first().getByRole("button", { name: "Walls", exact: true }).click();
+    await (await openRow(page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first())).getByRole("button", { name: "Walls", exact: true }).click();
     await page.getByRole("button", { name: "Open North wall" }).click();
     await expect(page.getByLabel("Wall height")).toHaveValue("2900");
   });

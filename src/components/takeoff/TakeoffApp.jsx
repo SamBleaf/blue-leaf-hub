@@ -9,7 +9,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { FLASHING_SPEC_DEFAULTS, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
 import { newId } from "../../lib/takeoffApi.js";
@@ -34,17 +34,35 @@ import { docLabel, fmtLm, fmtMm } from "./format.js";
 
 // "return to where I was" applies to a real page RELOAD only, once per page load (not to a fresh visit or an in-app reopen)
 let placeRestoreSpent = false;
+let entryRestoreSpent = false;
 const isReload = () => { try { return performance.getEntriesByType("navigation")[0]?.type === "reload"; } catch { return false; } };
 
 // materials measured as walls (+ openings) rather than plan lines
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
 const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.family === "timber" && ["studs", "plates", "noggins"].includes(m?.spec?.purpose));
 
+const SECTION_HELP = {
+  flashings: "Flashing profiles and lengths — ordered from the flashing supplier.",
+  timber_cladding: "Timber, cladding, battens, accessories and aluminium — one order to the timber and cladding supplier.",
+};
+
 export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
   const [job, setJob] = useState(null);
   const [error, setError] = useState(null);
   const [code, setCode] = useState(null);
-  const [wsId, setWsId] = useState(null);
+  const entryKey = `takeoff-entry:${jobType}:${jobId}`;
+  // HUB 002: the first choice is Flashings or Timber and cladding. A real page reload returns to the section that was open.
+  const [entry] = useState(() => {
+    if (entryRestoreSpent || !isReload()) return null;
+    entryRestoreSpent = true;
+    try { return JSON.parse(sessionStorage.getItem(entryKey) || "null"); } catch { return null; }
+  });
+  const [wsId, setWsId] = useState(entry?.wsId || null);
+  // ?section=flashings | timber_cladding links straight into a section
+  const [section, setSection] = useState(() => {
+    if (entry?.section) return entry.section;
+    try { const q = new URLSearchParams(window.location.search).get("section"); return SECTION_VALUES_ORDER.includes(q) ? q : null; } catch { return null; }
+  });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -52,47 +70,77 @@ export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
     const r = await api.job(jobType, jobId);
     if (!r.ok) { setError(r.error); setCode(r.code || (r.status === 403 ? "FORBIDDEN" : null)); return; }
     setJob(r.data);
+    // one takeoff per job: it opens straight into the chosen section
     if (r.data.workspaces.length === 1) setWsId((cur) => cur || r.data.workspaces[0].id);
+    else setWsId((cur) => (cur && r.data.workspaces.some((w) => w.id === cur) ? cur : null));
   }, [api, jobType, jobId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    try { sessionStorage.setItem(entryKey, JSON.stringify({ wsId, section })); } catch { /* private mode: nothing kept */ }
+  }, [entryKey, wsId, section]);
 
-  async function create() {
+  async function create(sec) {
     setBusy(true);
     const r = await api.createWorkspace(jobType, jobId, { id: newId(), name: "Takeoff" });
     setBusy(false);
     if (!r.ok) { setError(r.error); return; }
     await load();
     setWsId(r.data.workspace.id);
+    setSection(sec);
+  }
+  function choose(sec) {
+    if (!job.workspaces.length) { if (job.capabilities?.edit) create(sec); return; }
+    if (job.workspaces.length === 1) setWsId(job.workspaces[0].id);
+    setSection(sec);
   }
 
-  if (wsId) return <WorkspaceView api={api} wsId={wsId} job={job} onBack={job?.workspaces?.length > 1 ? () => { setWsId(null); load(); } : null} onExternalView={onExternalView} />;
+  if (wsId && section) {
+    return <WorkspaceView key={wsId} api={api} wsId={wsId} job={job} section={section} onSection={setSection}
+      onBack={() => { setSection(null); if (job?.workspaces?.length > 1) setWsId(null); load(); }} onExternalView={onExternalView} />;
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-3 p-3">
-      <h1 className="text-lg font-semibold text-ink">Takeoffs{job?.job?.label ? <span className="block text-sm font-normal text-muted">{job.job.label}</span> : null}</h1>
+      <h1 className="text-lg font-semibold text-ink">Takeoff{job?.job?.label ? <span className="block text-sm font-normal text-muted">{job.job.label}</span> : null}</h1>
       <AsyncState loading={!job && !error} error={error} code={code} onRetry={load}>
         {job && (
           <>
             {!job.plans.length && <Banner tone="info">This job has no plans yet. Upload a plan to the job first, then come back to measure it.</Banner>}
-            {job.workspaces.length === 0 ? (
-              <div className="rounded-card border border-hairline bg-white p-4 text-center">
-                <p className="text-sm text-muted">No takeoffs on this job yet.</p>
-                {job.capabilities?.edit && <Btn kind="primary" className="mt-3" onClick={create} disabled={busy}>Start a flashing takeoff</Btn>}
-              </div>
-            ) : (
-              <ul className="divide-y divide-hairline rounded-card border border-hairline bg-white">
-                {job.workspaces.map((w) => (
-                  <li key={w.id}>
-                    <button type="button" onClick={() => setWsId(w.id)} className="flex min-h-[52px] w-full items-center gap-2 px-3 text-left">
-                      <span className="flex-1 text-sm font-medium text-ink">{w.name}</span>
-                      {w.state === "needs_review" && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Needs review</span>}
-                      <span className="text-muted">›</span>
+            {(!section || !job.workspaces.length) && (
+              <>
+                <p className="text-sm text-muted">What are you measuring?</p>
+                <div className="grid gap-2 sm:grid-cols-2" data-takeoff-sections="">
+                  {SECTION_VALUES_ORDER.map((sec) => (
+                    <button key={sec} type="button" onClick={() => choose(sec)} disabled={busy || (!job.workspaces.length && !job.capabilities?.edit)} data-section={sec}
+                      className="flex min-h-[72px] w-full items-center gap-2 rounded-card border border-hairline bg-white px-3 py-2 text-left disabled:opacity-50">
+                      <span className="flex-1"><span className="block text-base font-semibold text-ink">{SECTION_LABEL[sec]}</span>
+                        <span className="block text-xs text-muted">{SECTION_HELP[sec]}</span></span>
+                      <span className="text-muted" aria-hidden="true">›</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
+                  ))}
+                </div>
+                {!job.workspaces.length && !job.capabilities?.edit && <p className="text-sm text-muted">No takeoff on this job yet.</p>}
+              </>
             )}
-            {job.workspaces.length > 0 && job.capabilities?.edit && <Btn onClick={create} disabled={busy}>New takeoff</Btn>}
+            {section && !wsId && job.workspaces.length > 1 && (
+              <>
+                <div className="flex items-center gap-2">
+                  <Btn kind="ghost" onClick={() => setSection(null)}>‹ Back</Btn>
+                  <p className="flex-1 text-sm font-medium text-ink">{SECTION_LABEL[section]} — choose the takeoff</p>
+                </div>
+                <ul className="divide-y divide-hairline rounded-card border border-hairline bg-white">
+                  {job.workspaces.map((w) => (
+                    <li key={w.id}>
+                      <button type="button" onClick={() => setWsId(w.id)} className="flex min-h-[52px] w-full items-center gap-2 px-3 text-left">
+                        <span className="flex-1 text-sm font-medium text-ink">{w.name}</span>
+                        {w.state === "needs_review" && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Needs review</span>}
+                        <span className="text-muted">›</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </AsyncState>
@@ -100,7 +148,9 @@ export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
   );
 }
 
-function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
+const SECTION_VALUES_ORDER = [SECTIONS.FLASHINGS, SECTIONS.TIMBER_CLADDING];
+
+function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalView }) {
   const ws = useTakeoffWorkspace(api, wsId);
   const view = ws.view;
   const caps = ws.capabilities || {};
@@ -143,7 +193,13 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     setDocId(first);
     setPageIndex(view.workspace.primaryPageIndex ?? 0);
   }, [view, docId, primaryDoc, plans, scalePlan, scaleHandled]);
-  useEffect(() => { if (!activeMaterial && view?.materials?.length) setActiveMaterial(view.materials[0].id); }, [view, activeMaterial]);
+  // the material being measured always belongs to the open section (HUB 002)
+  useEffect(() => {
+    const own = (view?.materials || []).filter((m) => materialSection(m) === section);
+    if (own.length && !own.some((m) => m.id === activeMaterial)) setActiveMaterial(own[0].id);
+  }, [view, activeMaterial, section]);
+  const [openRow, setOpenRow] = useState(null); // material row whose actions are showing ("" = all closed)
+  const [moreFor, setMoreFor] = useState(null);
   // a reload (or a PWA restart) returns to the wall / cutting sheet / schedule the user had open, if it still exists
   const placeKey = wsId ? `takeoff-place:${wsId}` : null;
   const [placeRestored, setPlaceRestored] = useState(false);
@@ -183,6 +239,84 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
 
   const contribCount = (mid) => view.contributions.filter((c) => c.jobMaterialId === mid).length;
   const linesFor = (mid) => (ws.computed?.scheduleLines || []).filter((l) => l.jobMaterialIds.includes(mid));
+  const secMats = view.materials.filter((m) => materialSection(m) === section);
+  const startMeasuring = () => {
+    if (secMats.length) setWin("measure");
+    else if (section === SECTIONS.FLASHINGS) setWin("pick");
+    else setNotice({ tone: "info", text: "Add a timber or cladding item first, then measure it on the plan." });
+  };
+  const removeMaterial = (m) => {
+    if (!window.confirm(`Remove ${m.name} and its measurements from this takeoff?`)) return;
+    // measurements used ONLY by this material go with it (none are left orphaned on the plan)
+    const mine = view.contributions.filter((c) => c.jobMaterialId === m.id).map((c) => c.measurementId);
+    const shared = new Set(view.contributions.filter((c) => c.jobMaterialId !== m.id).map((c) => c.measurementId));
+    // wall-owned openings belong to their wall (and its cladding); recorded offcuts are physical stock
+    const byId = new Map(view.measurements.map((x) => [x.id, x]));
+    ws.edit(partial({ archive: { materials: [m.id], measurements: mine.filter((id) => !shared.has(id) && !byId.get(id)?.parentId && byId.get(id)?.kind !== "offcut") } }));
+  };
+  /** HUB 002: a compact row — name and one summary line; its actions show when the row is tapped, Remove sits in More. */
+  const materialRow = (m) => {
+    const std = m.fromPresetId ? presets.find((p) => p.id === m.fromPresetId) : null;
+    const ls = linesFor(m.id);
+    const fam = m.spec?.family && m.spec.family !== "flashing" ? m.spec.family : null;
+    const open = (openRow ?? (secMats.length === 1 ? m.id : null)) === m.id;
+    const summary = fam ? `${describeFamilySpec(m.spec).line} · ${contribCount(m.id)} item(s)${m.pending ? " · unsaved" : ""}`
+      : `${[m.spec?.finish, m.spec?.colour, m.spec?.bmt != null ? `${m.spec.bmt} BMT` : null].filter(Boolean).join(" · ")}${m.profile ? ` · girth ${fmtMm(indicativeGirthMm(m.profile))} mm` : ""} · ${contribCount(m.id)} item(s) · ${ls.reduce((a, l) => a + l.quantity, 0)} pcs${m.pending ? " · unsaved" : ""}`;
+    const more = [
+      ...(caps.editStandards && api.savePreset ? [["Save as standard", () => { setMoreFor(null); saveAsStandard(m); }]] : []),
+      ...(caps.edit ? [["Remove", () => { setMoreFor(null); removeMaterial(m); }]] : []),
+    ];
+    return (
+      <li key={m.id} className="py-1" data-material-row={m.id}>
+        <button type="button" onClick={() => { setMoreFor(null); setOpenRow(open ? "" : m.id); }} aria-expanded={open}
+          className="flex min-h-[48px] w-full items-center gap-2 text-left">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-ink">{m.name}</span>
+            <span className="block truncate text-[11px] text-muted">{summary}</span>
+          </span>
+          <span className="text-xs text-muted" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        </button>
+        {open && (
+          <div className="flex flex-wrap items-center gap-1 pb-1" data-material-actions="">
+            {(m.profile || m.methodKey === "flashing_runs") && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: "profile" })}>{caps.edit ? "Profile" : "View profile"}</Btn>}
+            {caps.edit && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: fam ? "family" : "details" })}>{fam ? "Setup" : "Details"}</Btn>}
+            {usesWalls(m) && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setOpenWall(null); setWin("walls"); }}>Walls</Btn>}
+            {fam === "aluminium" && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setWin("aluminium"); }}>Cutting</Btn>}
+            {caps.edit && (!fam || fam === "timber") && <Btn kind="ghost" onClick={() => setManualFor(manualFor === m.id ? null : m.id)}>Add lengths</Btn>}
+            {more.length > 0 && <Btn kind="ghost" aria-expanded={moreFor === m.id} onClick={() => setMoreFor(moreFor === m.id ? null : m.id)}>More</Btn>}
+            {moreFor === m.id && (
+              <div className="flex w-full flex-wrap gap-1 rounded-lg bg-page p-1" data-material-more="">
+                {more.map(([label, fn]) => <Btn key={label} kind={label === "Remove" ? "danger" : "secondary"} onClick={fn}>{label}</Btn>)}
+              </div>
+            )}
+          </div>
+        )}
+        {std && std.revision > (m.fromPresetRevision || 0) && caps.edit && (
+          <Banner tone="info" action={fam ? <Btn onClick={() => setReviewUpdate(m.id)}>Review update</Btn>
+            : <Btn onClick={() => ws.edit(partial({ materials: [{ ...m, fromPreset: { presetId: std.id, revision: std.revision }, name: std.name, spec: std.spec, rules: std.rules, profile: std.profile }] }))}>Update this job&apos;s copy</Btn>}>
+            The company standard was updated (rev {std.revision}). This job still uses rev {m.fromPresetRevision}.
+          </Banner>
+        )}
+        {manualFor === m.id && (() => {
+          const manual = view.contributions.filter((c) => c.jobMaterialId === m.id).map((c) => ({ c, meas: view.measurements.find((x) => x.id === c.measurementId) })).filter((x) => x.meas?.kind === "manual");
+          return manual.length > 0 && (
+            <ul className="space-y-1 rounded-lg bg-page p-2 text-sm">
+              {manual.map(({ c, meas }) => (
+                <li key={meas.id} className="flex items-center gap-2">
+                  <span className="flex-1">{meas.quantity} × {fmtMm(meas.finishedLengthMm)} mm{meas.pending ? " · unsaved" : ""}</span>
+                  <Btn kind="ghost" onClick={() => ws.edit(partial({ archive: { measurements: [meas.id], contributions: [c.id] } }))}>Remove</Btn>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+                {manualFor === m.id && <ManualLengths timber={fam === "timber"} onAdd={(len, qty) => {
+                  const mid = newId();
+                  ws.edit(partial({ measurements: [{ id: mid, kind: "manual", finishedLengthMm: len, quantity: qty }], contributions: [{ id: newId(), measurementId: mid, jobMaterialId: m.id }] }));
+                }} />}
+      </li>
+    );
+  };
   /**
    * HUB 012: what this flashing actually orders — each finished length × quantity, where it came from (plan / entered)
    * and whether it is ready. Tapping a plan-derived length opens the plan with its runs selected.
@@ -232,6 +366,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     const mm = methodFor(spec);
     const m = { id: newId(), name, methodKey: mm.key, methodVersion: mm.version, spec, rules, profile: null };
     upsertMaterial(m);
+    setOpenRow(m.id);
     setEditing({ material: m, stage: "family" });
   };
   const addTimber = () => addFamily({ family: "timber", purpose: "rafters", section: {}, stock: { kind: "grid", minMm: 1200, incrementMm: 600 } }, "Timber", { centresMm: 600, lengthSource: "projected" });
@@ -243,6 +378,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     const id = newId();
     ws.edit(partial({ materials: [{ id, fromPreset: { presetId: p.id, revision: p.revision }, name: p.name, methodKey: p.methodKey, methodVersion: p.methodVersion, spec: p.spec, rules: p.rules, profile: p.profile, fromPresetId: p.id, fromPresetRevision: p.revision }] }));
     setActiveMaterial(id);
+    setOpenRow(id);
     setWin(docId ? "measure" : "overview");
   }
 
@@ -449,24 +585,25 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     return (
       <FocusedWindow title="Measure with…" onClose={() => setWin("measure")} closeLabel="Back">
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-          {view.materials.map((m) => (
+          {secMats.map((m) => (
             <button key={m.id} type="button" onClick={() => { setActiveMaterial(m.id); setWin("measure"); }} aria-pressed={m.id === activeMaterial}
               className={`flex min-h-[52px] w-full items-center rounded-card border px-3 text-left text-sm ${m.id === activeMaterial ? "border-primary bg-primary/5" : "border-hairline bg-white"}`}>{m.name}</button>
           ))}
-          {caps.edit && (
-            <div className="grid grid-cols-2 gap-2">
-              <Btn kind="primary" onClick={() => setWin("pick")}>Add flashing</Btn>
-              <Btn onClick={addTimber}>Add timber</Btn>
-              <Btn onClick={addCladding}>Add cladding</Btn>
-              <Btn onClick={addAluminium}>Add aluminium</Btn>
-            </div>
-          )}
+          {caps.edit && (section === SECTIONS.FLASHINGS
+            ? <Btn kind="primary" className="w-full" onClick={() => setWin("pick")}>Add flashing</Btn>
+            : (
+              <div className="grid grid-cols-3 gap-2">
+                <Btn onClick={addTimber}>Add timber</Btn>
+                <Btn onClick={addCladding}>Add cladding</Btn>
+                <Btn onClick={addAluminium}>Add aluminium</Btn>
+              </div>
+            ))}
         </div>
       </FocusedWindow>
     );
   }
   if (win === "schedule") {
-    return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api}
+    return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api} section={section}
       onShowSource={({ materialId, measurementIds }) => {
         // a wall (or its openings) opens the elevation; plan-traced lines open the plan with them selected
         setActiveMaterial(materialId);
@@ -484,22 +621,30 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
     return <FocusedWindow title="Review with new scale" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><RescaleReview ws={ws} onDone={() => setWin("overview")} /></div></FocusedWindow>;
   }
   if (win === "orders") {
-    return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} jobAddress={ws.server?.jobAddress}
+    return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} section={section} jobAddress={ws.server?.jobAddress}
       deviceDrafts={editorDrafts.map((d) => ({ name: view.materials.find((x) => x.id === d.materialId)?.name || "A new flashing", invalid: Object.keys(d.draft?.drafts || {}).length }))} /></div></FocusedWindow>;
   }
 
   // ── overview ────────────────────────────────────────────────────────────────
   const offer = ws.recovery.offer;
-  const lines = ws.computed?.scheduleLines || [];
+  // HUB 002: this section's lines only — flashing lengths, or timber / cladding purchase lines
+  const lines = (ws.computed?.scheduleLines || []).filter((l) => (section === SECTIONS.FLASHINGS ? !l.generic : !!l.generic));
   return (
     <div className="mx-auto max-w-3xl space-y-3 p-3 pb-28">
       <div className="flex flex-wrap items-center gap-2">
-        {onBack && <Btn kind="ghost" onClick={onBack}>‹ Takeoffs</Btn>}
+        {onBack && <Btn kind="ghost" onClick={onBack}>‹ Back</Btn>}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold text-ink">{view.workspace.name}</h1>
-          <p className="truncate text-xs text-muted">{ws.server?.jobLabel}</p>
+          <h1 className="truncate text-lg font-semibold text-ink">{SECTION_LABEL[section]}</h1>
+          <p className="truncate text-xs text-muted">{[ws.server?.jobLabel, view.workspace.name !== "Takeoff" ? view.workspace.name : null].filter(Boolean).join(" · ")}</p>
         </div>
         <SaveChip status={ws.status} />
+      </div>
+      {/* HUB 002: one takeoff, two sections — switching keeps every saved quantity and unfinished drawing */}
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Takeoff section">
+        {SECTION_VALUES_ORDER.map((sec) => (
+          <button key={sec} type="button" aria-pressed={sec === section} onClick={() => { setOpenRow(null); setMoreFor(null); onSection(sec); }}
+            className={`min-h-[44px] rounded-md px-2 text-sm font-medium ${sec === section ? "bg-white text-primary shadow-sm" : "text-muted"}`}>{SECTION_LABEL[sec]}</button>
+        ))}
       </div>
 
       {notice && <Banner tone={notice.tone} action={<Btn kind="ghost" onClick={() => setNotice(null)}>Dismiss</Btn>}>{notice.text}</Banner>}
@@ -523,7 +668,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
         </Banner>
       )}
       {ws.status === "unsynced" && ws.saveError && <Banner tone="warn">{ws.saveError}</Banner>}
-      {caps.edit && editorDrafts.map((d) => {
+      {caps.edit && section === SECTIONS.FLASHINGS && editorDrafts.map((d) => {
         const m = view.materials.find((x) => x.id === d.materialId);
         const empty = !d.draft?.hist?.present?.profile && !d.draft?.hist?.present?.first;
         if (empty) return null;
@@ -558,81 +703,26 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
             <div className="flex flex-wrap gap-2">
               <Btn onClick={() => setWin("setup")}>Set up plans</Btn>
               {caps.edit && <Btn onClick={() => setWin("calibrate")} disabled={!docId || planDoc?.status !== "current"}>Scale this page</Btn>}
-              <Btn kind="primary" onClick={() => (view.materials.length ? setWin("measure") : setWin("pick"))} disabled={!docId}>{caps.edit ? "Measure" : "View plan"}</Btn>
+              <Btn kind="primary" onClick={startMeasuring} disabled={!docId}>{caps.edit ? "Measure" : "View plan"}</Btn>
             </div>
           </>
         )}
       </section>
 
-      <section className="space-y-2 rounded-card border border-hairline bg-white p-3">
-        <div className="flex items-center gap-2">
-          <h2 className="flex-1 text-sm font-semibold text-ink">Materials</h2>
-          {caps.edit && <Btn onClick={() => setWin("pick")}>Add flashing</Btn>}
-        </div>
-        {caps.edit && (
-          <div className="grid grid-cols-3 gap-2">
-            <Btn onClick={addTimber}>Add timber</Btn>
-            <Btn onClick={addCladding}>Add cladding</Btn>
-            <Btn onClick={addAluminium}>Add aluminium</Btn>
-          </div>
-        )}
-        {!view.materials.length && <p className="text-sm text-muted">No materials yet. Add a flashing, timber, cladding or aluminium to start measuring.</p>}
-        <ul className="divide-y divide-hairline">
-          {view.materials.map((m) => {
-            const std = m.fromPresetId ? presets.find((p) => p.id === m.fromPresetId) : null;
-            const ls = linesFor(m.id);
-            const fam = m.spec?.family && m.spec.family !== "flashing" ? m.spec.family : null;
-            return (
-              <li key={m.id} className="space-y-1 py-2">
-                <div className="flex flex-wrap items-center gap-x-1 gap-y-0">
-                  <p className="w-full min-w-0 text-sm font-medium text-ink sm:w-auto sm:flex-1">{m.name}
-                    {fam ? <span className="block text-[11px] font-normal text-muted">{describeFamilySpec(m.spec).line} · {contribCount(m.id)} item(s){m.pending ? " · unsaved" : ""}</span>
-                    : <span className="block text-[11px] font-normal text-muted">{[m.spec?.finish, m.spec?.colour, m.spec?.bmt != null ? `${m.spec.bmt} BMT` : null].filter(Boolean).join(" · ")}{m.profile ? ` · girth ${fmtMm(indicativeGirthMm(m.profile))} mm` : ""} · {contribCount(m.id)} item(s) · {ls.reduce((a, l) => a + l.quantity, 0)} pcs{m.pending ? " · unsaved" : ""}</span>}
-                  </p>
-                  {(m.profile || m.methodKey === "flashing_runs") && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: "profile" })}>{caps.edit ? "Profile" : "View profile"}</Btn>}
-                  {caps.edit && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: fam ? "family" : "details" })}>{fam ? "Setup" : "Details"}</Btn>}
-                  {usesWalls(m) && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setOpenWall(null); setWin("walls"); }}>Walls</Btn>}
-                  {fam === "aluminium" && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setWin("aluminium"); }}>Cutting</Btn>}
-                  {caps.edit && (!fam || fam === "timber") && <Btn kind="ghost" onClick={() => setManualFor(manualFor === m.id ? null : m.id)}>Add lengths</Btn>}
-                  {caps.editStandards && api.savePreset && <Btn kind="ghost" onClick={() => saveAsStandard(m)}>Save as standard</Btn>}
-                  {caps.edit && <Btn kind="ghost" onClick={() => {
-                    if (!window.confirm(`Remove ${m.name} and its measurements from this takeoff?`)) return;
-                    // measurements used ONLY by this material go with it (none are left orphaned on the plan)
-                    const mine = view.contributions.filter((c) => c.jobMaterialId === m.id).map((c) => c.measurementId);
-                    const shared = new Set(view.contributions.filter((c) => c.jobMaterialId !== m.id).map((c) => c.measurementId));
-                    // wall-owned openings belong to their wall (and its cladding); recorded offcuts are physical stock
-                    const byId = new Map(view.measurements.map((x) => [x.id, x]));
-                    ws.edit(partial({ archive: { materials: [m.id], measurements: mine.filter((id) => !shared.has(id) && !byId.get(id)?.parentId && byId.get(id)?.kind !== "offcut") } }));
-                  }}>Remove</Btn>}
-                </div>
-                {std && std.revision > (m.fromPresetRevision || 0) && caps.edit && (
-                  <Banner tone="info" action={fam ? <Btn onClick={() => setReviewUpdate(m.id)}>Review update</Btn>
-                    : <Btn onClick={() => ws.edit(partial({ materials: [{ ...m, fromPreset: { presetId: std.id, revision: std.revision }, name: std.name, spec: std.spec, rules: std.rules, profile: std.profile }] }))}>Update this job&apos;s copy</Btn>}>
-                    The company standard was updated (rev {std.revision}). This job still uses rev {m.fromPresetRevision}.
-                  </Banner>
-                )}
-                {manualFor === m.id && (() => {
-                  const manual = view.contributions.filter((c) => c.jobMaterialId === m.id).map((c) => ({ c, meas: view.measurements.find((x) => x.id === c.measurementId) })).filter((x) => x.meas?.kind === "manual");
-                  return manual.length > 0 && (
-                    <ul className="space-y-1 rounded-lg bg-page p-2 text-sm">
-                      {manual.map(({ c, meas }) => (
-                        <li key={meas.id} className="flex items-center gap-2">
-                          <span className="flex-1">{meas.quantity} × {fmtMm(meas.finishedLengthMm)} mm{meas.pending ? " · unsaved" : ""}</span>
-                          <Btn kind="ghost" onClick={() => ws.edit(partial({ archive: { measurements: [meas.id], contributions: [c.id] } }))}>Remove</Btn>
-                        </li>
-                      ))}
-                    </ul>
-                  );
-                })()}
-                {manualFor === m.id && <ManualLengths timber={fam === "timber"} onAdd={(len, qty) => {
-                  const mid = newId();
-                  ws.edit(partial({ measurements: [{ id: mid, kind: "manual", finishedLengthMm: len, quantity: qty }], contributions: [{ id: newId(), measurementId: mid, jobMaterialId: m.id }] }));
-                }} />}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
+      {(section === SECTIONS.FLASHINGS ? ["flashings"] : ["timber", "cladding"]).map((grp) => {
+        const list = secMats.filter((m) => materialGroup(m) === grp);
+        const adds = grp === "flashings" ? [["Add flashing", () => setWin("pick")]] : grp === "timber" ? [["Add timber", addTimber]] : [["Add cladding", addCladding], ["Add aluminium", addAluminium]];
+        return (
+          <section key={grp} className="space-y-1 rounded-card border border-hairline bg-white p-3" data-material-group={grp}>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="flex-1 text-sm font-semibold text-ink">{GROUP_LABEL[grp]}</h2>
+              {caps.edit && adds.map(([label, fn]) => <Btn key={label} onClick={fn}>{label}</Btn>)}
+            </div>
+            {!list.length && <p className="text-sm text-muted">{grp === "flashings" ? "No flashings yet — add one to start measuring." : grp === "timber" ? "No timber yet." : "No cladding yet. Aluminium used with the cladding goes here too."}</p>}
+            <ul className="divide-y divide-hairline">{list.map(materialRow)}</ul>
+          </section>
+        );
+      })}
 
       <section className="space-y-2 rounded-card border border-hairline bg-white p-3">
         <div className="flex items-center gap-2">

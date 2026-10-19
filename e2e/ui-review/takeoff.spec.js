@@ -19,7 +19,13 @@ const BX = 120, BY = 150;
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
 }
-async function openMeasure(page, path = "/carpentry/cjb-1/takeoff?reviewRole=admin") {
+/** HUB 002 compact rows: tap a material row so its actions show (no-op when it is already open). */
+async function openRow(row) {
+  const t = row.locator("button[aria-expanded]").first();
+  if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  return row;
+}
+async function openMeasure(page, path = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings") {
   await page.goto(path);
   await ready(page);
   await page.getByRole("button", { name: /^Measure$/ }).click();
@@ -90,7 +96,7 @@ for (const dpr of [1, 2, 3]) {
 test.describe("gestures never place stray points", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 });
   test("drag > 8px pans; two-finger pinch places nothing; tap places", async ({ page }) => {
-    await openMeasure(page, "/worker/takeoff/carpentry/cjb-1");
+    await openMeasure(page, "/worker/takeoff/carpentry/cjb-1?section=flashings");
     const vp = page.locator("[data-takeoff-viewport]");
     const box = await vp.boundingBox();
     const before = await page.locator("[data-measurement-id]").count();
@@ -118,7 +124,7 @@ test.describe("gestures never place stray points", () => {
 test.describe("journeys", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test("calibrate two axes + check → Ready", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: "Scale this page" }).click();
     await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0);
@@ -141,7 +147,7 @@ test.describe("journeys", () => {
   });
 
   test("R04 F08 press-and-hold shows the loupe; lifting places the point exactly there", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: "Scale this page" }).click();
     await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0);
@@ -158,13 +164,13 @@ test.describe("journeys", () => {
   });
 
   test("R04 A08 a saved order line whose material changes shows as stale and blocks the supplier PDF until updated", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: /Review & export order/ }).click();
     if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
     await page.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("button", { name: "Details" }).first().click();
+    await (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: "Details" }).click();
     await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
     await page.waitForTimeout(1200);
     await page.getByRole("button", { name: "Close" }).click();
@@ -181,7 +187,7 @@ test.describe("journeys", () => {
   });
 
   test("schedule → split the 7,200 run (invalid then valid)", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: "Open schedule" }).click();
     await page.getByRole("button", { name: /7,200 mm/ }).click();
@@ -201,7 +207,7 @@ test.describe("journeys", () => {
 
   test("order: draft PDF, supplier PDF, record placed (director)", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: /Review & export order/ }).click();
     await page.getByRole("button", { name: "New order" }).click();
@@ -221,9 +227,9 @@ test.describe("journeys", () => {
   });
 
   test("R04 A01/A02 existing profile: live edit (no Apply), one Undo per typing session, invalid text never changes the shape, autosaves", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
-    await page.getByRole("button", { name: "Profile" }).first().click();
+    await (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: "Profile" }).click();
     const dlg = page.getByRole("dialog", { name: /Apron flashing/ });
     await expect(dlg).toBeVisible();
     expect(await page.locator(".blueprint-fab:visible").count()).toBe(0); // global FAB hidden in focus mode
@@ -262,7 +268,7 @@ test.describe("journeys", () => {
   });
 
   test("R04 A01/A02 new flashing: empty grid, tap the shape, correct sizes, two-tap crush fold + flip, survives reload", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: "Add flashing" }).click();
     await page.getByRole("button", { name: "New flashing" }).click();
@@ -307,13 +313,13 @@ test.describe("journeys", () => {
     const name = (await dlg.getByRole("heading", { level: 1 }).textContent()).trim();
     await dlg.getByRole("button", { name: "Close" }).click();
     await expect(page.getByText(name).first()).toBeVisible();          // listed as a job material
-    await page.getByRole("button", { name: "Profile" }).last().click();  // newest material is last
+    await (await openRow(page.locator("[data-material-row]").last())).getByRole("button", { name: "Profile" }).click();  // newest material is last
     const again = page.getByRole("dialog", { name });
     for (const t of ["L1 100", "L2 150", "L3 75", "Crush 12"]) await expect(again.locator("svg text", { hasText: t })).toBeVisible();
   });
 
   test("R04 A02 unfinished drawing + invalid field draft are restored after a reload (this device, this actor)", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: "Add flashing" }).click();
     await page.getByRole("button", { name: "New flashing" }).click();
@@ -340,9 +346,9 @@ test.describe("journeys", () => {
   });
 
   test("R04b R5/R19/R20 refused save is never 'Saved' and is kept; Undo with an invalid draft only clears that field; no 'Saved' before the server has the shape", async ({ page }) => {
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
-    await page.getByRole("button", { name: "Profile" }).first().click();
+    await (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: "Profile" }).click();
     const dlg = page.getByRole("dialog", { name: /Apron flashing/ });
     const chip = dlg.getByRole("status").first();
     await dlg.locator("svg text", { hasText: "L2 150" }).click();
@@ -370,14 +376,14 @@ test.describe("journeys", () => {
   });
 
   test("PWA scroll: opening and closing the editor, details, schedule and orders never leaves the page scroll-locked", async ({ page }) => {
-    await page.goto("/worker/takeoff/carpentry/cjb-1");
+    await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings");
     await ready(page);
     const locked = () => page.evaluate(() => document.body.style.overflow === "hidden" || document.body.classList.contains("takeoff-focus-open"));
     expect(await locked()).toBe(false);
     for (const [open, close] of [
-      [() => page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click(), () => page.getByRole("dialog").getByRole("button", { name: "Close" }).first().click()],
+      [async () => (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: /^(Profile|View profile)$/ }).click(), () => page.getByRole("dialog").getByRole("button", { name: "Close" }).first().click()],
       [() => page.getByRole("button", { name: "Open schedule" }).click(), () => page.getByRole("dialog", { name: "Length schedule" }).getByRole("button", { name: "Back" }).click()],
-      [() => page.getByRole("button", { name: /^(Profile|View profile)$/ }).first().click(), async () => { await page.getByRole("button", { name: "Details" }).click(); await page.getByRole("button", { name: "Close" }).first().click(); }],
+      [async () => (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: /^(Profile|View profile)$/ }).click(), async () => { await page.getByRole("button", { name: "Details" }).click(); await page.getByRole("button", { name: "Close" }).first().click(); }],
     ]) {
       await open(); await page.waitForTimeout(250);
       expect(await locked()).toBe(true);
@@ -387,14 +393,14 @@ test.describe("journeys", () => {
   });
 
   test("ordinary worker sees no takeoff access", async ({ page }) => {
-    await page.goto("/worker/takeoff/carpentry/cjb-1?takeoffWorker=ordinary");
+    await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings&takeoffWorker=ordinary");
     await ready(page);
     await expect(page.getByText(/don't have access/)).toBeVisible();
   });
 
   test("hub desktop overview + measure with side panel", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin");
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.screenshot({ path: `${SHOTS}/hub-overview-desktop.png` });
     await page.getByRole("button", { name: /^Measure$/ }).click();
@@ -405,7 +411,7 @@ test.describe("journeys", () => {
   for (const vp of [{ w: 844, h: 390, n: "landscape-844x390" }, { w: 360, h: 780, n: "small-360x780" }]) {
     test(`overview + measure layout ${vp.n}`, async ({ page }) => {
       await page.setViewportSize({ width: vp.w, height: vp.h });
-      await page.goto("/worker/takeoff/carpentry/cjb-1");
+      await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings");
       await ready(page);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
       expect(overflow).toBe(false);
@@ -467,7 +473,7 @@ test.describe("saving + recovery (A18–A20)", () => {
 
   test("A20 storage unavailable: Recovery unavailable shown, edits stay in memory and save", async ({ page }) => {
     await page.addInitScript(() => { const orig = indexedDB.open.bind(indexedDB); indexedDB.open = (...a) => { if (a[0] === "blh-takeoff-recovery") throw new DOMException("quota", "QuotaExceededError"); return orig(...a); }; });
-    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin"); await ready(page);
+    await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings"); await ready(page);
     await expect(page.getByText(/Recovery unavailable on this device/)).toBeVisible();
     await page.getByRole("button", { name: /^Measure$/ }).click();
     await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0);

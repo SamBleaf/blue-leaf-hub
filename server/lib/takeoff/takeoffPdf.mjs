@@ -268,7 +268,8 @@ function draw(doc, snap, opts) {
   const header = (cont) => {
     y = 36;
     if (fs.existsSync(LOGO)) { try { doc.image(LOGO, M, y, { width: 120 }); } catch { /* logo optional */ } }
-    const kind = (snap.items || []).length ? "MATERIAL ORDER" : "FLASHING ORDER";
+    const kind = snap.category === "timber_cladding" ? "TIMBER AND CLADDING ORDER" : snap.category === "flashings" ? "FLASHING ORDER"
+      : (snap.items || []).length ? "MATERIAL ORDER" : "FLASHING ORDER";
     doc.font(fonts.bold).fontSize(15).fillColor(INK).text(T(opts.isDraft ? `DRAFT ${kind}` : kind), M, y, { width: CW, align: "right" });
     doc.font(fonts.regular).fontSize(9).fillColor(MUTED).text(T(`${snap.orderRef}${opts.exportNo ? ` · export ${opts.exportNo}` : ""}${snap.issuedOn ? ` · ${snap.issuedOn}` : ""}${cont ? " (continued)" : ""}`), M, y + 19, { width: CW, align: "right" });
     y += 78; // clear the wordmark on every page (it is taller than the title block)
@@ -407,9 +408,15 @@ function draw(doc, snap, opts) {
   }
 
   // generic purchase lines (TC-R04): one table per material — quantity, unit and what to supply
+  let part = null; // HUB 007: a timber-and-cladding order prints its Timber part, then its Cladding part
   for (const g of snap.items || []) {
     const rowH = 15;
-    need(Math.min(bottom() - 120, 60 + Math.min(g.lines.length, 12) * rowH));
+    need(Math.min(bottom() - 120, 60 + Math.min(g.lines.length, 12) * rowH) + (g.groupLabel && g.groupLabel !== part ? 26 : 0));
+    if (g.groupLabel && g.groupLabel !== part) {
+      part = g.groupLabel;
+      doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T(part.toUpperCase()), M, y, { width: CW });
+      y = doc.y + 6;
+    }
     doc.save().rect(M, y, CW, 20).fill("#eef5f9").restore();
     doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(`${g.groupId} — ${g.materialName}`), M + 6, y + 5, { width: CW * 0.42 - 6, lineBreak: false, ellipsis: true, height: 12 });
     doc.font(fonts.regular).fontSize(8.5).fillColor(INK).text(T(g.specText?.line || ""), M + CW * 0.42, y + 6, { width: CW * 0.58 - 6, align: "right", lineBreak: false, ellipsis: true, height: 11 });

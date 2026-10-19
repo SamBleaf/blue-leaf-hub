@@ -16,6 +16,7 @@ import {
   segmentLengthMm, getMethod, normaliseFlashingRules, normaliseProfile, computeWorkspace, orderStatus,
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
   normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm, ITEM_STALE_TEXT,
+  SECTION_VALUES, SECTION_LABEL, GROUP_LABEL, materialGroup, materialSection, accessorySupplierConflict,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
@@ -640,7 +641,7 @@ export async function savePreset(sb, ctx, body) {
 // ── Orders ────────────────────────────────────────────────────────────────────
 const mapOrder = (r) => ({
   id: r.id, workspaceId: r.workspace_id, orderRef: r.order_ref, supplierId: r.supplier_id, delivery: r.delivery || {}, notes: r.notes,
-  status: r.status, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at,
+  category: r.category || null, status: r.status, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 const mapLine = (r) => ({ id: r.id, bucketKey: r.bucket_key, specKey: r.spec_key, jobMaterialId: r.job_material_id, finishedLengthMm: r.finished_length_mm, quantity: r.quantity,
   unit: r.unit || "piece", item: r.item || null });
@@ -736,6 +737,8 @@ export async function createOrder(sb, ctx, body) {
     if (existing.workspace_id !== ctx.ws.id) throw new TakeoffHttpError(409, "That order id is already in use.", "CONFLICT");
     return mapOrder(existing);
   }
+  // HUB 007: every new order is either a Flashings order or a Timber and cladding order — never both
+  must(SECTION_VALUES.includes(body?.category), "Choose whether this is a Flashings or a Timber and cladding order (reload the app if you don't see that choice).");
   let supplierId = null;
   if (body?.supplierId) { await requireSupplier(sb, body.supplierId); supplierId = body.supplierId; }
   const { data: ref, error: refErr } = await sb.rpc("takeoff_next_order_ref");
@@ -748,7 +751,7 @@ export async function createOrder(sb, ctx, body) {
     delivery.contactPhone = delivery.contactPhone || me.phone;
   }
   const row = {
-    id, workspace_id: ctx.ws.id, order_ref: ref, supplier_id: supplierId, delivery,
+    id, workspace_id: ctx.ws.id, order_ref: ref, supplier_id: supplierId, delivery, category: body.category,
     created_by_type: ctx.actor.type, created_by_user_id: ctx.actor.userId, created_by_employee_id: ctx.actor.employeeId,
   };
   const { data, error } = await sb.from("takeoff_orders").insert(row).select("*").single();
@@ -798,6 +801,7 @@ export async function saveOrder(sb, ctx, orderRow, body) {
     const { snapshot } = await loadSnapshotFresh(sb, orderRow.workspace_id);
     const computed = computeWorkspace(snapshot);
     const byKey = new Map(computed.scheduleLines.map((l) => [l.bucketKey, l]));
+    const matsById = new Map(snapshot.materials.map((m) => [m.id, m]));
     const stored = await q(sb.from("takeoff_order_lines").select("*").eq("order_id", orderRow.id));
     const storedByKey = new Map(stored.map((r) => [`${r.bucket_key}#${r.job_material_id || ""}`, r]));
     const seen = new Set();
@@ -816,7 +820,13 @@ export async function saveOrder(sb, ctx, orderRow, body) {
       must(sl, "A selected length is no longer in the takeoff — refresh the schedule.");
       must(!l.jobMaterialId || sl.jobMaterialIds.includes(l.jobMaterialId), "That material doesn't supply this length — choose the line again.");
       // generic lines (TC-R04) carry their purchase unit and what is supplied; flashing stays length × piece
-      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: l.jobMaterialId || sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm ?? null, quantity,
+      const jobMaterialId = l.jobMaterialId || sl.jobMaterialIds[0];
+      // HUB 007: a line from the other section never lands on this order (legacy orders without a category are left as they were)
+      const mat = matsById.get(jobMaterialId);
+      if (orderRow.category && mat && materialSection(mat) !== orderRow.category) {
+        throw bad(`${mat.name} goes on a ${SECTION_LABEL[materialSection(mat)]} order, not this ${SECTION_LABEL[orderRow.category]} order.`);
+      }
+      return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId, finishedLengthMm: sl.finishedLengthMm ?? null, quantity,
         unit: sl.unit || "piece", item: sl.item || null };
     });
   }
@@ -849,6 +859,10 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   const groups = new Map();
   const items = new Map(); // generic purchase groups (TC-R04), by spec key
   for (const l of lines) {
+    const own = mats.get(l.jobMaterialId);
+    if (order.category && own && materialSection(own) !== order.category) {
+      problems.push(`${own.name} belongs on a ${SECTION_LABEL[materialSection(own)]} order — remove it from this ${SECTION_LABEL[order.category]} order.`);
+    }
     const st = orderLineState(l, computed, mats);
     const sl = st.current;
     if (st.stale) problems.push((l.item ? ITEM_STALE_TEXT : PROBLEM_TEXT)[st.problem]);
@@ -857,6 +871,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
       const mat = mats.get(l.jobMaterialId) || mats.get(sl.jobMaterialIds[0]);
       if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
       for (const p of sl.problems) problems.push(`${mat.name}: ${PROBLEM_TEXT[p] || p}`);
+      const other = accessorySupplierConflict(mat, supplier?.name);
+      if (other) problems.push(`${mat.name} comes from ${other} — put it on a separate ${other} order (or change its supplier), so it isn't mixed into this one.`);
       if (l.quantity < 1) problems.push("Quantities must be 1 or more.");
       const cv = cover?.get(sl.bucketKey);
       if (cv && cv.placed + cv.exported + l.quantity > sl.quantity && !acknowledgeSurplus) {
@@ -866,7 +882,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
       let g = items.get(mat.id);
       if (!g) {
         const mr = computed.materialResults?.[mat.id] || null;
-        g = { materialId: mat.id, family: mat.spec?.family, materialName: mat.name, specText: describeFamilySpec(mat.spec), statuses: mr?.status || null, lines: [] };
+        g = { materialId: mat.id, family: mat.spec?.family, group: materialGroup(mat), groupLabel: GROUP_LABEL[materialGroup(mat)], materialName: mat.name, specText: describeFamilySpec(mat.spec), statuses: mr?.status || null, lines: [] };
         items.set(mat.id, g);
       }
       g.lines.push({ bucketKey: sl.bucketKey, unit: sl.unit, quantity: l.quantity, required: sl.quantity, description: sl.item?.description || sl.unit,
@@ -902,7 +918,9 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     const totalMm = g.lines.reduce((a, l) => a + l.finishedLengthMm * l.quantity, 0);
     return { ...g, profileId: `P${i + 1}`, totalLm: Number((totalMm / 1000).toFixed(3)), pieces: g.lines.reduce((a, l) => a + l.quantity, 0) };
   });
-  const itemList = [...items.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.materialId < b.materialId ? -1 : 1)).map((g, i) => {
+  // HUB 007: the Timber part comes before the Cladding part on a timber-and-cladding order
+  const groupRank = (g) => (g.group === "timber" ? 0 : 1);
+  const itemList = [...items.values()].sort((a, b) => groupRank(a) - groupRank(b) || a.materialName.localeCompare(b.materialName) || (a.materialId < b.materialId ? -1 : 1)).map((g, i) => {
     const byUnit = {};
     for (const l of g.lines) byUnit[l.unit] = (byUnit[l.unit] || 0) + l.quantity;
     return { ...g, groupId: `M${i + 1}`, totals: { byUnit } };
@@ -939,6 +957,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     profileSchemaVersion: PROFILE_SCHEMA_VERSION,
     rendererVersion,
     orderRef: order.orderRef,
+    category: order.category || null,
+    categoryLabel: order.category ? SECTION_LABEL[order.category] : null,
     issuedOn: new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Adelaide" }), // YYYY-MM-DD, local (SA) date
     company: company ? { name: company.name, abn: company.abn || null, address: company.address || null, phone: company.phone || null, email: company.email || null } : { name: "Blue Leaf Building" },
     job: { label: jobLabel || null, owner: wsSnapshot.workspace.owner, takeoffName: wsSnapshot.workspace.name },

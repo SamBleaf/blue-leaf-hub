@@ -23,7 +23,7 @@ import { existsSync } from "node:fs";
 const channel = existsSync(chromium.executablePath()) ? undefined : "chrome";
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, ...(channel ? { channel } : {}) });
 
-const TAKEOFF = "/carpentry/cjb-1/takeoff?reviewRole=admin";
+const TAKEOFF = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding";
 const P = {
   matrix1190: "James Hardie|Matrix|1190|8#403811",
   matrix2990: "James Hardie|Matrix|1190|8#404169",
@@ -37,6 +37,12 @@ const P = {
 
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
+}
+/** HUB 002 compact rows: tap a material row so its actions show (no-op when it is already open). */
+async function openRow(row) {
+  const t = row.locator("button[aria-expanded]").first();
+  if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  return row;
 }
 async function openTakeoff(page) {
   await page.goto(TAKEOFF);
@@ -733,6 +739,7 @@ test("CAT01: a new company product on an existing method — Product | Ordering 
   await expect(list).toContainText("Sources: SUPA-DS-135");
   await shot(page, "cat01-family-presets");
   await unmount(page);
+  await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).click();   // HUB 002
   await page.getByRole("button", { name: "Add flashing" }).first().click();
   const flashing = page.locator("[data-flashing-picker]");
   await expect(flashing).toContainText("Apron flashing");
@@ -804,7 +811,7 @@ test("CAT02: a company template copied twice stays independent — editing one c
   await reopenTakeoff(page);
   const items = page.locator("li", { hasText: "Axon 133 smooth — company" });
   await expect(items).toHaveCount(2);
-  await items.first().getByRole("button", { name: "Setup" }).click();
+  await (await openRow(items.first())).getByRole("button", { name: "Setup" }).click();
   await expect(card(page)).toBeVisible();
   await enter(page.getByLabel("Spares"), 7);
   const read = async () => page.evaluate(async (mids) => {
@@ -1333,12 +1340,12 @@ test("R14: an unfinished sheet joint-row entry is a recoverable draft — it sur
 });
 
 // ── adversarial review (TC-R04 phone UI): setup cards ────────────────────────────────────────────────────────
-const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed";
+const MIXED = "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=mixed";
 /** The mixed-procurement seed (rafters measured on plan, Axon + battens on a wall …), with one material's setup card open. */
 async function openMixedSetup(page, name) {
   await page.goto(MIXED);
   await ready(page);
-  await page.locator("li").filter({ hasText: name }).first().getByRole("button", { name: "Setup" }).click();
+  await (await openRow(page.locator("li").filter({ hasText: name }).first())).getByRole("button", { name: "Setup" }).click();
 }
 async function materialById(page, id) {
   const s = await server(page);

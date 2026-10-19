@@ -20,10 +20,16 @@ test.afterEach(() => { expect(consoleErrors).toEqual([]); });
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
 }
+/** HUB 002 compact rows: tap a material row so its actions show (no-op when it is already open). */
+async function openRow(row) {
+  const t = row.locator("button[aria-expanded]").first();
+  if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  return row;
+}
 async function openTakeoff(page, seed) {
-  await page.goto(`/carpentry/cjb-1/takeoff?reviewRole=admin${seed ? `&takeoffSeed=${seed}` : ""}`);
+  await page.goto(`/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding${seed ? `&takeoffSeed=${seed}` : ""}`);
   await ready(page);
-  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Timber and cladding" })).toBeVisible();
 }
 const setupDialog = (page) => page.getByRole("dialog", { name: "Aluminium" });
 const aluScreen = (page, name = /Aluminium angle/) => page.getByRole("dialog", { name });
@@ -253,7 +259,7 @@ test.describe("TC-R04 aluminium cutting (phone)", () => {
   test("AL-4 openings already on walls (mixed seed): pooled across windows, each cut keeps its window label; untick / tick back; reopening keeps the plan", async ({ page }) => {
     await openTakeoff(page, "mixed");
     const row = page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" });
-    await row.getByRole("button", { name: "Setup" }).click();
+    await (await openRow(row)).getByRole("button", { name: "Setup" }).click();
     let screen = await toCutting(page, /Window angle/);
     const walls = screen.getByTestId("alu-wall-openings");
     await expect(walls.getByRole("checkbox")).toHaveCount(2);
@@ -284,7 +290,7 @@ test.describe("TC-R04 aluminium cutting (phone)", () => {
 
     // leave and come back: the plan is read from the takeoff, not held by the screen
     await screen.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }).getByRole("button", { name: "Setup" }).click();
+    await (await openRow(page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }))).getByRole("button", { name: "Setup" }).click();
     screen = await toCutting(page, /Window angle/);
     await expect(screen.getByTestId("alu-required")).toHaveText("7,300 mm");
     await expect(screen.getByTestId("alu-opening")).toHaveCount(2);
@@ -420,7 +426,7 @@ test.describe("TC-R04 aluminium layout", () => {
 
 // ── adversarial review regressions (each proves a defect found in review and fixed) ──────────────────────────
 const openMixedAluminium = async (page) => {
-  await page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }).getByRole("button", { name: "Setup" }).click();
+  await (await openRow(page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }))).getByRole("button", { name: "Setup" }).click();
   return toCutting(page, /Window angle/);
 };
 
@@ -649,7 +655,7 @@ async function placeOrderInReviewBackend(page, materialId, quantity) {
     const st = await j("/api/takeoff/workspaces/ws-1/orders");
     const line = st.scheduleLines.find((l) => l.generic && l.unit === "bar" && l.jobMaterialIds.includes(materialId));
     const id = crypto.randomUUID();
-    await j("/api/takeoff/workspaces/ws-1/orders", "POST", { id, supplierId: "sup-1", delivery: { method: "pickup" } });
+    await j("/api/takeoff/workspaces/ws-1/orders", "POST", { id, category: "timber_cladding", supplierId: "sup-1", delivery: { method: "pickup" } });
     await j(`/api/takeoff/orders/${id}`, "PATCH", { expectedRevision: 1, lines: [{ bucketKey: line.bucketKey, quantity, jobMaterialId: materialId }] });
     const ex = await j(`/api/takeoff/orders/${id}/exports`, "POST", { isDraft: false });
     if (!ex.ok) return ex;
@@ -736,7 +742,7 @@ test.describe("TC-R04 aluminium second review (phone)", () => {
       };
     });
     await openTakeoff(page, "mixed");
-    await page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }).getByRole("button", { name: "Cutting" }).click();
+    await (await openRow(page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" }))).getByRole("button", { name: "Cutting" }).click();
     const screen = aluScreen(page, /Window angle/);
     await expect(screen.getByTestId("alu-buy")).toHaveText("Buy 2 × 6,500 mm");
     await expect(screen.getByTestId("alu-statuses")).toContainText("Ordering: ready to order");
@@ -802,7 +808,7 @@ const recoveryCount = (page) => page.evaluate(() => new Promise((res) => {
   req.onerror = () => res(0);
 }));
 const openCutting = async (page, name = /Aluminium angle/) => {
-  await page.getByRole("listitem").filter({ hasText: name }).getByRole("button", { name: "Cutting" }).click();
+  await (await openRow(page.getByRole("listitem").filter({ hasText: name }))).getByRole("button", { name: "Cutting" }).click();
   const screen = aluScreen(page, name);
   await expect(screen.getByTestId("aluminium-screen")).toBeVisible();
   return screen;

@@ -261,7 +261,7 @@ function describeMeasurement(m, measById, calById) {
   return { name: m.label || (m.kind === "polyline" || m.kind === "run" ? `${kind} ${runRef(m.id)}` : kind), kind, detail: `${traced()}${extra}`, onPlan: true };
 }
 
-export default function ScheduleScreen({ ws, api, onBack, onShowSource }) {
+export default function ScheduleScreen({ ws, api, onBack, onShowSource, section = null }) {
   const view = ws.view, computed = ws.computed;
   const [open, setOpen] = useState(null);
   const [splitFor, setSplitFor] = useState(null);
@@ -291,8 +291,10 @@ export default function ScheduleScreen({ ws, api, onBack, onShowSource }) {
   }, [api, wsId]);
   const statusList = useMemo(() => (fresh && fresh.server === ws.server ? fresh.list : ws.server?.orderStatus || []), [fresh, ws.server]);
   const status = useMemo(() => new Map(statusList.map((s) => [s.bucketKey, s])), [statusList]);
+  // HUB 002: the Flashings section lists flashing lengths only; Timber and cladding lists its materials only
   const groups = useMemo(() => {
     const g = new Map();
+    if (section === "timber_cladding") return [];
     for (const l of computed?.scheduleLines || []) {
       if (l.generic) continue;
       const m = mats.get(l.jobMaterialIds[0]);
@@ -302,9 +304,10 @@ export default function ScheduleScreen({ ws, api, onBack, onShowSource }) {
       g.get(l.specKey).lines.push(l);
     }
     return [...g.values()];
-  }, [computed, mats]);
+  }, [computed, mats, section]);
   // one group per TC-R04 material, in the job's material order — shown even with no lines (its problems explain why)
   const generic = useMemo(() => {
+    if (section === "flashings") return [];
     const results = computed?.materialResults || {};
     const byMat = new Map();
     for (const l of computed?.scheduleLines || []) {
@@ -314,7 +317,7 @@ export default function ScheduleScreen({ ws, api, onBack, onShowSource }) {
       byMat.get(id).push(l);
     }
     return view.materials.filter((m) => results[m.id] || byMat.has(m.id)).map((m) => ({ mat: m, result: results[m.id] || null, lines: byMat.get(m.id) || [] }));
-  }, [computed, view.materials]);
+  }, [computed, view.materials, section]);
   const surplus = statusList.filter((s) => s.reconcile);
   // what each placed bucket was, from the placed order lines (only when the orders were read on open)
   const placed = useMemo(() => {
