@@ -13,13 +13,19 @@ const QTY = { calculated: "calculated", estimate: "estimate", incomplete: "incom
 const INST = { unspecified: "not specified", "source-pending": "source pending (not verified)", "project-detail-supplied": "project detail supplied", "supported-by-selected-rule": "supported by the selected rule" };
 const PROC = { ready: "ready to order", draft: "draft — not ready to order", "missing-product": "needs product setup", "unavailable-stock": "stock unavailable" };
 
-/** Quantity · Installation · Procurement — exactly what the engine reported, never upgraded. */
+/**
+ * Quantity · Installation · Procurement — exactly what the engine reported, never upgraded. HUB 006: kept out of the
+ * way while measuring (collapsed "Details"); real problems are shown separately in plain English.
+ */
 export function StatusRow({ status }) {
   if (!status) return null;
   return (
-    <p className="text-[11px] text-muted" data-statuses="">
-      Quantity: <b className="font-semibold text-ink">{QTY[status.quantity] || status.quantity}</b> · Installation: <b className="font-semibold text-ink">{INST[status.installation] || status.installation}</b> · Procurement: <b className="font-semibold text-ink">{PROC[status.procurement] || status.procurement}</b>
-    </p>
+    <details className="text-[11px] text-muted">
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-xs text-primary">Details</summary>
+      <p data-statuses="">
+        Quantity: <b className="font-semibold text-ink">{QTY[status.quantity] || status.quantity}</b> · Installation: <b className="font-semibold text-ink">{INST[status.installation] || status.installation}</b> · Procurement: <b className="font-semibold text-ink">{PROC[status.procurement] || status.procurement}</b>
+      </p>
+    </details>
   );
 }
 

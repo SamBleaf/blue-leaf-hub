@@ -62,6 +62,8 @@ export function createStaffTakeoffApi() {
       savePreset: (body) => post("/presets", body),
       placeOrder: (orderId, body) => post(`/orders/${orderId}/placements`, body),
       cancelPlacement: (placementId, reason) => post(`/placements/${placementId}/cancel`, { reason }),
+      // HUB 008: office staff add a supplier without leaving the order (existing procurement endpoint, admin/supervisor)
+      createSupplier: (body) => apiFetch("/api/procurement/suppliers", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body ?? {}) }),
     }),
   });
 }

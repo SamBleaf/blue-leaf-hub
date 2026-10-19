@@ -63,7 +63,7 @@ function useVisualViewport() {
 
 export default function ProfileEditor({
   value, title, readOnly = false, mode = "job", draftScope = null, syncStatus = null, painted = true,
-  onChange, onSave, onClose, onDetails, onLengths, onCancel,
+  onChange, onSave, onClose, onDetails, onLengths, onCancel, onSaveAsStandard = null,
 }) {
   const close = onClose || onCancel;
   const [init] = useState(() => initialEntry(value));
@@ -489,6 +489,8 @@ export default function ProfileEditor({
     ["Remove last leg", () => run(removeLastSegment), n <= 1],
     ["Clear drawing", () => { if (window.confirm("Clear the drawing? You can undo this.")) { commit({ profile: null, anchor: null, first: null }); setSel(null); setView(null); } }, !profile && !entry.first],
     [list ? "Hide dimension list" : "Show dimension list", () => setList((x) => !x), !profile],
+    // HUB 003: save this drawn flashing as a company standard (office staff; the job keeps its own copy)
+    ...(onSaveAsStandard ? [["Save as company standard", onSaveAsStandard, !profile]] : []),
   ];
 
   const rootStyle = vv ? { top: vv.top, height: vv.h, bottom: "auto" } : undefined;

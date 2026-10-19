@@ -860,6 +860,17 @@ await t("SEC-13: the site appendix is behind the same access as the PDF on the W
   assert.notEqual(ordinary.status, 200);
 });
 
+await t("HUB 009: a new order's site contact defaults to whoever creates it (name + phone from their records); typed values win", async () => {
+  const empId = id();
+  await q("INSERT INTO employees (id, name, phone, is_active) VALUES ($1, 'Sam Office', '0412 345 678', true)", [empId]);
+  await q("UPDATE user_profiles SET full_name='Sam Morris', employee_id=$2 WHERE id=$1", [U.admin, empId]);
+  const a = await SP(`/workspaces/${w5}/orders`, { id: id(), delivery: { method: "pickup" } });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  assert.equal(a.data.order.delivery.contactName, "Sam Morris"); assert.equal(a.data.order.delivery.contactPhone, "0412 345 678");
+  const b = await SP(`/workspaces/${w5}/orders`, { id: id(), delivery: { method: "pickup", contactName: "Site lead", contactPhone: "0499 999 999" } });
+  assert.equal(b.data.order.delivery.contactName, "Site lead"); assert.equal(b.data.order.delivery.contactPhone, "0499 999 999");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

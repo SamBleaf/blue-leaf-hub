@@ -317,6 +317,12 @@ if (SANDBOX && typeof window !== "undefined") {
 }
 
 function registerFakeTakeoffServer() {
+// HUB 008: the office adds a supplier from the order (the real endpoint is /api/procurement/suppliers)
+route("POST", "/api/procurement/suppliers", ({ bodyJson }) => {
+  const sup = { id: `sup-new-${(state.addedSuppliers || []).length + 1}`, name: bodyJson?.name, email: bodyJson?.email || null, phone: bodyJson?.phone || null };
+  state.addedSuppliers = [...(state.addedSuppliers || []), sup];
+  return { ok: true, supplier: sup };
+});
 for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     const worker = base.includes("worker");
     route("GET", `${base}/capabilities`, () => ({ ok: true, enabled: true, capabilities: caps(worker) }));
@@ -334,7 +340,7 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => applyCommit(bodyJson || {}));
     route("GET", `${base}/documents/:docId/content`, () => fetch(planUrl));
     route("GET", `${base}/presets`, () => ({ ok: true, presets: state.presets }));
-    route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }], defaultSupplierId: "sup-1" }));
+    route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }, ...(state.addedSuppliers || [])], defaultSupplierId: "sup-1" }));
     route("GET", `${base}/workspaces/:id/orders`, () => {
       // like the server (otherOrderCover): what open (draft) orders with a supplier export already cover, per bucket
       const cover = new Map();

@@ -98,6 +98,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [countLen, setCountLen] = useState(null);
   const [activeCount, setActiveCount] = useState(null); // measurement id
   const [selected, setSelected] = useState(() => (highlightIds || []).find(onThisPage) || null);
+  // HUB 011: show / hide the saved takeoff lines on this plan page (display only — nothing is deleted), remembered per page
+  const overlayKey = wsId && planDoc ? `takeoff-overlays:${wsId}|${planDoc.id}|${pageIndex}` : null;
+  const [showTakeoffs, setShowTakeoffs] = useState(() => { try { return overlayKey ? localStorage.getItem(overlayKey) !== "off" : true; } catch { return true; } });
+  const toggleTakeoffs = () => setShowTakeoffs((v) => { try { if (overlayKey) localStorage.setItem(overlayKey, v ? "off" : "on"); } catch { /* storage blocked: session only */ } return !v; });
+  const [deletedNotice, setDeletedNotice] = useState(null); // "Run deleted — Undo" right after a delete
   if (hl.key !== hlKey) { // a new "Show on plan" while this screen is open
     setHl({ key: hlKey, ids: hlKey ? highlightIds : [] });
     if (hlKey) { setModeSel("select"); setSelected(highlightIds.find(onThisPage) || null); }
@@ -547,6 +552,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       ...(d?.measurementId === m.id ? { draftBefore: d, draftAfter: null } : {}),
     });
     setSelected(null); setSelTick(null); setHandleSel(null);
+    setDeletedNotice(m.kind === "wall" ? "Wall deleted." : m.kind === "count" ? "Count deleted." : "Run deleted.");
   }
 
   function continueDrawing(m) {
@@ -827,8 +833,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             ))}
           </div>
           <button type="button" onClick={changeMaterial} className="ml-auto min-h-[44px] min-w-0 max-w-[45%] truncate rounded-lg border border-hairline px-2 text-xs text-ink">{material ? `Material: ${material.name}` : "Choose material"}</button>
+          <Btn kind="ghost" className="min-w-[44px]" onClick={toggleTakeoffs} aria-pressed={showTakeoffs} aria-label={showTakeoffs ? "Hide takeoffs on the plan" : "Show takeoffs on the plan"}>{showTakeoffs ? "Hide lines" : "Show lines"}</Btn>
           <Btn kind="ghost" className="min-w-[44px]" onClick={() => vpRef.current?.fit()} aria-label="Fit page">Fit</Btn>
         </div>
+        {!showTakeoffs && <div className="px-2 pt-2"><Banner tone="info" action={<Btn onClick={toggleTakeoffs}>Show lines</Btn>}>Takeoff lines are hidden on this page — nothing is deleted, the schedule is unchanged.</Banner></div>}
+        {deletedNotice && <div className="px-2 pt-2"><Banner tone="info" action={<div className="flex gap-1"><Btn onClick={() => { undo(); setDeletedNotice(null); }}>Undo</Btn><Btn kind="ghost" onClick={() => setDeletedNotice(null)}>OK</Btn></div>}>{deletedNotice}</Banner></div>}
         {stale && <div className="px-2 pt-2"><Banner tone="warn">This plan has been replaced. Existing measurements stay here for review — measure on the current revision.</Banner></div>}
         {!cal && !stale && drawTool && <div className="px-2 pt-2"><Banner tone="info" action={onScale && <Btn kind="primary" onClick={onScale}>Scale page</Btn>}>This page has no scale yet. {flashing ? "You can still count pieces." : "Scale it before measuring."}</Banner></div>}
         {cal && cal.status !== CALIBRATION_STATUS.READY && <div className="px-2 pt-2"><Banner tone="warn" action={onScale && <Btn onClick={onScale}>Re-scale</Btn>}>The scale on this page {cal.status === "needs_review" ? "failed its check" : "hasn't been checked"} — runs are shown but can&apos;t be ordered until it is re-scaled.</Banner></div>}
@@ -856,7 +865,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           overlay={({ toScreen: toScr }) => (
             <>
               {cal?.region && (() => { const a = toScr({ x: cal.region.x0, y: cal.region.y0 }), b = toScr({ x: cal.region.x1, y: cal.region.y1 }); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill="none" stroke="#006c9b" strokeDasharray="4 4" />; })()}
-              {pageMeasurements.map((m) => {
+              {pageMeasurements.filter((m) => showTakeoffs || m.id === selected || hlSet.has(m.id) || m.id === draft?.measurementId).map((m) => {
                 // the chosen material's layer in full colour; other materials stay visible for context, dimmed
                 const cs = contribsOf.get(m.id) || [];
                 const other = material && cs.length > 0 && !cs.some((c) => c.jobMaterialId === material.id) && m.id !== selected && !hlSet.has(m.id);
@@ -1029,7 +1038,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 <Btn onClick={() => removePoint(sel, Number(handleSel.split(":")[1]))} disabled={sel.points.length <= 2}>Remove point {Number(handleSel.split(":")[1]) + 1}</Btn>
               )}
               <p className="text-[11px] text-muted">Drag a point or split handle to adjust; tap + on a leg to add a point.</p>
-              <Btn kind="danger" onClick={removeSelected} disabled={!canEdit}>Remove run</Btn>
+              <Btn kind="danger" onClick={removeSelected} disabled={!canEdit}>Delete run</Btn>
             </div>
           )}
 

@@ -140,6 +140,34 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
   );
 }
 
+/** HUB 008: a supplier added from the order (name required; the rest optional). */
+function AddSupplier({ api, onAdded, onCancel }) {
+  const [f, setF] = useState({ name: "", contactName: "", email: "", phone: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
+  async function save() {
+    if (!f.name.trim()) { setError("Enter the supplier's name."); return; }
+    setBusy(true); setError(null);
+    const r = await api.createSupplier({ name: f.name.trim(), contactName: f.contactName.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null });
+    setBusy(false);
+    if (!r.ok) { setError(r.error || "The supplier couldn't be saved."); return; }
+    onAdded(r.data.supplier);
+  }
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-hairline bg-page p-2" data-add-supplier="">
+      <TextField label="Supplier name" value={f.name} onChange={set("name")} />
+      <div className="grid grid-cols-2 gap-2">
+        <TextField label="Contact (optional)" value={f.contactName} onChange={set("contactName")} />
+        <TextField label="Phone (optional)" value={f.phone} onChange={set("phone")} />
+      </div>
+      <TextField label="Email for orders (optional)" value={f.email} onChange={set("email")} />
+      {error && <Banner tone="error">{error}</Banner>}
+      <div className="flex gap-2"><Btn kind="primary" onClick={save} disabled={busy}>Save supplier</Btn><Btn kind="ghost" onClick={onCancel}>Cancel</Btn></div>
+    </div>
+  );
+}
+
 function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [] }) {
   const [extra, setExtra] = useState(false); // explicit "order more than is still needed" (spares)
   // unsaved changes typed on this device before a reload (same order, same saved revision only)
@@ -148,6 +176,9 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
     qty: Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.quantity])), chosen: Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.jobMaterialId])) }), [order]);
   const start = restored?.draft || saved;
   const [supplierId, setSupplierId] = useState(start.supplierId ?? saved.supplierId);
+  // HUB 008: office staff add the supplier right here (staff app only — the worker adapter has no createSupplier)
+  const canAddSupplier = !!ws.capabilities?.editStandards && typeof api.createSupplier === "function";
+  const [addingSupplier, setAddingSupplier] = useState(false);
   const [delivery, setDelivery] = useState(start.delivery || saved.delivery);
   const [notes, setNotes] = useState(start.notes ?? saved.notes);
   // a restored quantity only for a line that is still on the order or in the takeoff (never a vanished bucket)
@@ -333,11 +364,16 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
       )}
       <div>
         <label htmlFor="ord-supplier" className="mb-1 block text-xs font-medium text-muted">Supplier</label>
-        <select id="ord-supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-hairline text-base">
-          <option value="">Choose a supplier…</option>
-          {(suppliers?.suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        {!suppliers?.suppliers?.length && <p className="mt-1 text-[11px] text-muted">No suppliers on file — add one in Operations › Procurement › Suppliers.</p>}
+        <div className="flex gap-2">
+          <select id="ord-supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-hairline text-base">
+            <option value="">Choose a supplier…</option>
+            {(suppliers?.suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          {canAddSupplier && <Btn onClick={() => setAddingSupplier((v) => !v)} aria-expanded={addingSupplier}>Add supplier</Btn>}
+        </div>
+        {addingSupplier && <AddSupplier api={api} onCancel={() => setAddingSupplier(false)}
+          onAdded={async (sup) => { setAddingSupplier(false); await onChanged(); setSupplierId(sup.id); setMsg(`Added ${sup.name} — save order details to keep it on this order.`); }} />}
+        {!suppliers?.suppliers?.length && !canAddSupplier && <p className="mt-1 text-[11px] text-muted">No suppliers on file — ask the office to add one.</p>}
       </div>
       <fieldset>
         <legend className="mb-1 text-xs font-medium text-muted">Delivery or pickup</legend>
@@ -356,6 +392,7 @@ function DraftOrder({ api, order, data, status, suppliers, ws, onChanged, setMsg
           <label htmlFor={`req-${order.id}`} className="mb-1 block text-xs font-medium text-muted">Required by</label>
           <input id={`req-${order.id}`} type="date" value={delivery.requiredDate || ""} disabled={!!delivery.asap} onChange={(e) => d("requiredDate")(e.target.value || null)} className="min-h-[44px] w-full rounded-lg border border-hairline px-2 text-base disabled:opacity-50" />
           <label className="mt-1 flex min-h-[44px] items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5 rounded text-primary" checked={!!delivery.asap} onChange={(e) => setDelivery((x) => ({ ...x, asap: e.target.checked, requiredDate: e.target.checked ? null : x.requiredDate }))} />As soon as possible</label>
+          {delivery.asap && <p className="text-[11px] text-muted" data-asap-hint="">Required by is off while “As soon as possible” is ticked — untick it to pick a date.</p>}
         </div>
         <TextField label="Site contact" value={delivery.contactName} onChange={d("contactName")} />
         <TextField label="Contact phone" value={delivery.contactPhone} onChange={d("contactPhone")} />

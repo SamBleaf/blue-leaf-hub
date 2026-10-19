@@ -60,7 +60,7 @@ export default function MaterialPicker({ api, onUseStandard, onDrawNew, onPieces
         <input id="std-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search standards" className="min-h-[44px] w-full rounded-lg border border-hairline px-3 text-base focus-ring" />
       </div>
       <AsyncState loading={presets === null && !error} error={error} onRetry={retry} empty={presets && !list.length}
-        emptyText={presets?.length ? "No standards match." : "No company standards yet. Draw a flashing, then use “Save as standard”."}>
+        emptyText={presets?.length ? "No standards match." : "No company standards yet. Draw a flashing, then choose More › “Save as company standard” in the drawing."}>
         <ul className="divide-y divide-hairline rounded-lg border border-hairline bg-white">
           {list.map((p) => (
             <li key={p.id} className="flex flex-wrap items-center gap-2 px-3 py-2" data-preset={p.id}>

@@ -716,6 +716,19 @@ export async function scheduleStatus(sb, snapshot) {
   return { computed, status: [...status.values()] };
 }
 
+/** Name + phone of the person acting (staff: profile + linked employee; worker: employee). Missing stays null. */
+async function creatorContact(sb, actor) {
+  try {
+    let employeeId = actor.employeeId || null, name = null;
+    if (actor.type === "staff" && actor.userId) {
+      const p = await q(sb.from("user_profiles").select("full_name, employee_id").eq("id", actor.userId).maybeSingle());
+      name = p?.full_name || null; employeeId = employeeId || p?.employee_id || null;
+    }
+    const e = employeeId ? await q(sb.from("employees").select("name, phone").eq("id", employeeId).maybeSingle()) : null;
+    return { name: optStr(name || e?.name, 80), phone: optStr(e?.phone, 40) };
+  } catch { return { name: null, phone: null }; }
+}
+
 export async function createOrder(sb, ctx, body) {
   const id = isUuid(body?.id) ? body.id : crypto.randomUUID();
   const existing = await q(sb.from("takeoff_orders").select("*").eq("id", id).maybeSingle());
@@ -727,8 +740,15 @@ export async function createOrder(sb, ctx, body) {
   if (body?.supplierId) { await requireSupplier(sb, body.supplierId); supplierId = body.supplierId; }
   const { data: ref, error: refErr } = await sb.rpc("takeoff_next_order_ref");
   if (refErr) throw refErr;
+  // HUB 009: the site contact defaults to whoever creates the order — their name and phone from their own records
+  const delivery = cleanDelivery(body?.delivery);
+  if (!delivery.contactName || !delivery.contactPhone) {
+    const me = await creatorContact(sb, ctx.actor);
+    delivery.contactName = delivery.contactName || me.name;
+    delivery.contactPhone = delivery.contactPhone || me.phone;
+  }
   const row = {
-    id, workspace_id: ctx.ws.id, order_ref: ref, supplier_id: supplierId, delivery: cleanDelivery(body?.delivery),
+    id, workspace_id: ctx.ws.id, order_ref: ref, supplier_id: supplierId, delivery,
     created_by_type: ctx.actor.type, created_by_user_id: ctx.actor.userId, created_by_employee_id: ctx.actor.employeeId,
   };
   const { data, error } = await sb.from("takeoff_orders").insert(row).select("*").single();

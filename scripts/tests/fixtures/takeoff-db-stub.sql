@@ -55,3 +55,6 @@ CREATE POLICY "auth_users" ON public.job_documents FOR ALL TO authenticated USIN
 
 CREATE TABLE public.user_profiles (id uuid PRIMARY KEY, role text NOT NULL, is_active boolean NOT NULL DEFAULT true, full_name text);
 CREATE TABLE public.timesheets (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), employee_id uuid, project_id uuid, carpentry_job_id uuid, date date DEFAULT current_date);
+-- real-schema columns used by order contact prefill (migrations 086 + rbac employee link)
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS employee_id uuid;

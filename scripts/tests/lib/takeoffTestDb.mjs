@@ -10,7 +10,7 @@
 // =============================================================================
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
 
@@ -33,7 +33,8 @@ function assertSafeUrl(url) {
 
 async function ensureLocalServer() {
   const port = Number(process.env.TAKEOFF_TEST_DB_PORT || 55432);
-  const dataDir = join(tmpdir(), "blh-takeoff-pg");
+  // NOT in the OS temp folder: macOS purges it, which destroyed the cluster (and the local sandbox) on 2026-10-18
+  const dataDir = process.env.TAKEOFF_TEST_PGDATA || join(homedir(), ".blh-takeoff-pg");
   const initdb = findBin("initdb"), pgctl = findBin("pg_ctl");
   if (!initdb || !pgctl) return { skip: "No local Postgres binaries (initdb/pg_ctl) and TAKEOFF_TEST_DB_URL unset." };
   if (!existsSync(join(dataDir, "PG_VERSION"))) {

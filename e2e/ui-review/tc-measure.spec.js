@@ -352,7 +352,8 @@ test.describe("finished runs — select, edit, splits (exact geometry: review se
     await zoomOn(page, at(4500, 6000), 1.8);
     await tapPdf(page, at(3000, 7600));
     await expect(page.locator("[data-selected-run]")).toBeVisible();
-    await expect(page.locator("[data-selected-run] [data-statuses]")).toBeVisible();
+    await expect(page.locator("[data-selected-run] [data-statuses]")).toBeHidden(); // HUB 006: in Details, not on the panel
+    await expect(page.locator("[data-selected-run] [data-statuses]")).toHaveCount(1);
     await page.getByRole("button", { name: /^Split 1 — 8,800 mm along the run/ }).click();
     const f = page.getByLabel("Split 1 position (mm along the run)");
     await f.fill("5000"); await f.press("Enter");
@@ -461,7 +462,8 @@ test.describe("timber runs + counts (linear stock)", () => {
     await expect(runs).toHaveCount(before + 2);
     await expect(page.locator('[data-kind="polyline"][data-measurement-id][data-points="2"]:not([data-order])')).toHaveCount(2); // straight, not a flashing
     await expect(sheet(page).getByText(/2 straight pieces added — each corner is a joint/)).toBeVisible();
-    await expect(sheet(page).locator("[data-statuses]")).toBeVisible();
+    await expect(sheet(page).locator("[data-statuses]")).toBeHidden(); // HUB 006: collapsed under Details
+    await expect(sheet(page).locator("[data-statuses]")).toHaveCount(1);
     await saved(page);
     expect((await reviewState(page)).measurements).toBe(n0 + 2);
     // their labels are the two leg lengths (taps land on whole CSS px: allow the tap tolerance)

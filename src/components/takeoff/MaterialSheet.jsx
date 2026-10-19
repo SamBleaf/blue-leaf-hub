@@ -151,8 +151,16 @@ export default function MaterialSheet({ value, view, profile = null, mode = "job
           <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink">Colour: <span className="font-semibold">natural — not applicable</span> ({info.label} is unpainted).</p>
         )}
         {spec.construction === "perforated" && (
-          <fieldset className="space-y-2 rounded-lg border border-hairline p-2">
-            <legend className="px-1 text-xs font-semibold text-ink">Perforation</legend>
+          // HUB 004: the custom perforation fields stay folded until needed — a one-line summary shows what is set;
+          // nothing is cleared by folding, and an incomplete specification is still flagged at order review
+          <details className="rounded-lg border border-hairline" data-perforation-details="">
+            <summary className="flex min-h-[44px] cursor-pointer items-center gap-2 px-2 text-sm">
+              <span className="font-semibold text-ink">Perforation details</span>
+              <span className="truncate text-xs text-muted">{perf.supplierProductCode ? `code ${perf.supplierProductCode}`
+                : perf.pattern ? [PERFORATION_PATTERNS.find((x) => x.id === perf.pattern)?.label, perf.holeSizeMm ? `${perf.holeSizeMm} mm holes` : null, perf.pitchMm ? `@ ${perf.pitchMm} mm` : null].filter(Boolean).join(" ")
+                  : "not specified yet"}</span>
+            </summary>
+            <div className="space-y-2 p-2 pt-0">
             <TextField label="Supplier product code (if the supplier has one)" value={perf.supplierProductCode} onChange={(v) => setP({ supplierProductCode: v })} />
             <p className="text-[11px] text-muted">Or describe the pattern so the supplier can quote it:</p>
             <div className="grid grid-cols-2 gap-2">
@@ -193,7 +201,8 @@ export default function MaterialSheet({ value, view, profile = null, mode = "job
             )}
             <NumberField label="Solid margin at edges (optional)" unit="mm" value={perf.solidMarginMm} onCommit={(n) => setP({ solidMarginMm: n })} />
             <p className="text-[11px] text-muted">Perforated describes the sheet only — it is not a ventilation or bushfire rating.</p>
-          </fieldset>
+            </div>
+          </details>
         )}
         <details className="rounded-lg border border-hairline px-2 py-1">
           <summary className="min-h-[40px] cursor-pointer py-2 text-sm text-ink">More (codes, supplier confirmation)</summary>

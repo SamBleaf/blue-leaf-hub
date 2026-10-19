@@ -183,6 +183,40 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
 
   const contribCount = (mid) => view.contributions.filter((c) => c.jobMaterialId === mid).length;
   const linesFor = (mid) => (ws.computed?.scheduleLines || []).filter((l) => l.jobMaterialIds.includes(mid));
+  /**
+   * HUB 012: what this flashing actually orders — each finished length × quantity, where it came from (plan / entered)
+   * and whether it is ready. Tapping a plan-derived length opens the plan with its runs selected.
+   */
+  const FlashingLengths = ({ m }) => {
+    const ls = linesFor(m.id).filter((l) => !l.generic);
+    if (!ls.length) return <p className="mb-3 rounded-lg bg-page px-3 py-2 text-sm text-muted" data-flashing-lengths="">No lengths yet — measure runs on the plan or add lengths.</p>;
+    const byContribution = new Map((ws.computed?.contributions || []).map((c) => [c.contributionId, c]));
+    const measById = new Map(view.measurements.map((x) => [x.id, x]));
+    return (
+      <section className="mb-3 rounded-card border border-hairline bg-white" data-flashing-lengths="">
+        <h2 className="border-b border-hairline px-3 py-2 text-sm font-semibold text-ink">Lengths · {ls.reduce((a, l) => a + l.quantity, 0)} pieces · {fmtLm(ls.reduce((a, l) => a + l.finishedLengthMm * l.quantity, 0) / 1000)} LM</h2>
+        <ul className="divide-y divide-hairline">
+          {[...ls].sort((a, b) => b.finishedLengthMm - a.finishedLengthMm).map((l) => {
+            const srcIds = l.contributionIds.map((cid) => byContribution.get(cid)?.measurementId).filter(Boolean);
+            const kinds = new Set(srcIds.map((id) => measById.get(id)?.kind));
+            const fromPlan = kinds.has("run") || kinds.has("polyline") || kinds.has("count");
+            const source = [fromPlan ? "plan" : null, kinds.has("manual") ? "entered" : null].filter(Boolean).join(" + ");
+            const open = fromPlan ? () => { setActiveMaterial(m.id); setEditing(null); setHighlightIds(srcIds.filter((id) => measById.get(id)?.documentId)); setWin("measure"); } : null;
+            return (
+              <li key={l.bucketKey}>
+                <button type="button" disabled={!open} onClick={open || undefined} className="flex min-h-[44px] w-full items-center gap-2 px-3 text-left text-sm disabled:cursor-default">
+                  <span className="flex-1 font-medium text-ink">{fmtMm(l.finishedLengthMm)} mm</span>
+                  <span className="text-ink">× {l.quantity}</span>
+                  <span className="w-24 text-right text-[11px] text-muted">{source}</span>
+                  {l.problems.length > 0 && <span className="rounded-full bg-amber-50 px-2 text-[11px] font-semibold text-amber-900">needs attention</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  };
 
   const actorKey = ws.server?.capabilities?.actorKey || null;
   const matRec = (m) => ({ id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion || 1, spec: m.spec, rules: m.rules || {}, profile: m.profile || null, fromPresetId: m.fromPresetId || null, fromPresetRevision: m.fromPresetRevision || null });
@@ -256,6 +290,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
         onClose={leaveEditor}
         onChange={(profile) => { if (profile || view.materials.some((x) => x.id === m.id)) upsertMaterial({ ...currentMat(m), profile }); }}
         onDetails={() => { setEditing({ material: currentMat(m), stage: "details" }); setTimeout(refreshDrafts, 50); }}
+        onSaveAsStandard={!std && caps.editStandards && api.savePreset ? () => saveAsStandard(currentMat(m)) : null}
         onLengths={() => toLengths(m)}
         onSave={(profile) => {
           api.savePreset({ presetId: m.id, expectedRevision: m.revision, content: { ...m, profile } }).then(async (r) => {
@@ -331,6 +366,7 @@ function WorkspaceView({ api, wsId, job, onBack, onExternalView }) {
       <FocusedWindow title={std ? editing.material.name : "Flashing details"} subtitle={std ? "Company standard" : `${m.name} · this job only`} onClose={leaveEditor} closeLabel={std ? "Cancel" : "Close"}
         actions={!std && m.methodKey === "flashing_runs" ? <SaveChip status={ws.status} /> : null}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {!std && <FlashingLengths m={m} />}
           <MaterialSheet key={m.id} value={m} view={view} mode={std ? "standard" : "job"} canEditSourceReview={caps.editStandards}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules })}
             onCancel={leaveEditor}
