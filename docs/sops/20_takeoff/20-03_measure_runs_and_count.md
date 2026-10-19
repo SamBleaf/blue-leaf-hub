@@ -1,6 +1,6 @@
 ---
-sop_version: 2.1
-last_reviewed: 2026-10-19
+sop_version: 2.2
+last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -106,7 +106,11 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 
 ### E2. Hide the takeoff lines, delete a run, read the details (Hub review, 19 Oct 2026)
 
-1. **Hide lines** (top bar) hides every takeoff line on this plan page so the drawing is easy to read. Nothing is deleted. The banner says so. **Show lines** brings them back. The choice is remembered for this page on this device. A run you have selected, or are drawing, stays visible.
+1. **Takeoffs ▾** (top bar) opens a list of every takeoff item on this plan page (each material, with how many runs / counts it has), each with a tick box. Untick an item to hide its lines so the drawing is easier to read; tick it to bring them back. **Show all** / **Hide all** do every item at once; **Done** closes the list.
+   - Nothing is deleted and the schedule doesn't change. While anything is hidden, the button reads e.g. "Takeoffs (1 hidden)" and a banner names what is hidden, with **Show all**.
+   - A hidden line can't be selected by tapping where it is. The run you're drawing, the one you've selected and a "Show on plan" highlight always show.
+   - Measuring something new with a hidden material shows that material again, so what you just measured never disappears.
+   - The choice is remembered for this page on this device.
 2. To delete a run: tap it, then **Delete run**. A banner offers **Undo**.
 3. The technical labels (Quantity / Installation / Procurement) are under **Details** in the run panel. Real problems still show in plain English.
 
@@ -326,11 +330,13 @@ Next review date: 2027-04-14
 4. Expected record: after Remove the measurement and contribution are archived (absent from the fake snapshot); after the final undo they are back; step 2 adds one `kind` "polyline" with a contribution.
 - [ ] Pass  [ ] Fail
 
-**TC-13 — Hide lines and Delete run (HUB 011, UI Review)**
-1. Default job → **Flashings** → **Measure**.
-2. Tap **Hide lines**. Expected: no takeoff lines on the plan; banner "Takeoff lines are hidden on this page — nothing is deleted…".
-3. Tap **Show lines**. Expected: the same number of lines as before.
-4. Select a run → **Delete run**. Expected: it disappears, and a banner with **Undo** brings it back.
+**TC-13 — Show / hide takeoff items one by one, and Delete run (HUB 011, UI Review)**
+1. Default job → **Flashings** → **Measure** → **Takeoffs ▾**.
+2. Expected: a list with "Apron flashing" and "Barge flashing", both ticked.
+3. Untick **Barge flashing**. Expected: only the Barge lines disappear; the button reads "Takeoffs (1 hidden) ▾"; banner "1 of 2 takeoff items hidden on this page (Barge flashing) — nothing is deleted…". In **Select**, tapping where a Barge line was selects nothing.
+4. Reload the page. Expected: still "Takeoffs (1 hidden) ▾".
+5. **Hide all** → no lines and "All takeoffs are hidden on this page…"; **Show all** → every line back, and the Barge line can be tapped again.
+6. Select a run → **Delete run**. Expected: it disappears, and a banner with **Undo** brings it back.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

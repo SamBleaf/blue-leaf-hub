@@ -67,18 +67,60 @@ test("HUB 003: 'Save as company standard' is in the drawing's More menu", async 
   await expect(page.getByRole("menuitem", { name: "Save as company standard" })).toBeVisible();
 });
 
-test("HUB 011: Hide lines hides the takeoff overlays without deleting anything; Show lines brings them back", async ({ page }) => {
+test("HUB 011: the Takeoffs list shows or hides each item on the plan on its own; hidden items can't be tapped; nothing is deleted", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: /^Measure$/ }).click();
   await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
+  const snap = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot);
   const lines = page.locator("[data-measurement-id]");
-  const before = await lines.count();
-  expect(before).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "Hide takeoffs on the plan" }).click();
+  const shown = () => lines.evaluateAll((els) => els.map((e) => e.getAttribute("data-measurement-id")));
+  const all = await shown();
+  const bargeIds = snap.contributions.filter((c) => c.jobMaterialId === "mat-barge" && !c.archived).map((c) => c.measurementId).filter((id) => all.includes(id));
+  expect(bargeIds.length).toBeGreaterThan(0);
+  expect(all.length).toBeGreaterThan(bargeIds.length);
+  // one dropdown, every takeoff item on this page with a tick box
+  await page.getByRole("button", { name: "Show or hide takeoffs on the plan" }).click();
+  const list = page.locator("[data-layers]");
+  await expect(list.locator("[data-layer-item]")).toHaveText([/Apron flashing/, /Barge flashing/]);
+  await expect(list.getByRole("checkbox")).toHaveCount(2);
+  for (const cb of await list.getByRole("checkbox").all()) await expect(cb).toBeChecked();
+  // untick the Barge flashing: only its lines go
+  await list.locator('[data-layer-item="mat-barge"]').click();
+  await expect(list.locator('[data-layer-item="mat-barge"] input')).not.toBeChecked();
+  await expect.poll(async () => (await shown()).filter((id) => bargeIds.includes(id)).length).toBe(0);
+  expect((await shown()).length).toBe(all.length - bargeIds.length);
+  await expect(page.locator("[data-layers-button]")).toHaveText("Takeoffs (1 hidden) ▾");
+  await expect(page.getByText(/1 of 2 takeoff items hidden on this page \(Barge flashing\) — nothing is deleted/)).toBeVisible();
+  await list.getByRole("button", { name: "Done" }).click();
+  await expect(list).toHaveCount(0);
+  // a hidden line can't be picked up by tapping where it is
+  const m = snap.measurements.find((x) => bargeIds.includes(x.id) && x.kind === "run" && x.points?.length === 2 && Math.abs(Math.hypot(x.points[1].x - x.points[0].x, x.points[1].y - x.points[0].y)) > 0
+    && snap.contributions.some((c) => c.measurementId === x.id && c.jobMaterialId === "mat-barge")) ;
+  const mid = { x: (m.points[0].x + m.points[1].x) / 2, y: (m.points[0].y + m.points[1].y) / 2 };
+  const at = () => page.evaluate((pt) => { const el = document.querySelector("[data-takeoff-viewport]"); const q = el.takeoffViewport.toScreen(pt); const r = el.getBoundingClientRect(); return { x: r.left + q.x, y: r.top + q.y }; }, mid);
+  await page.getByRole("radio", { name: "Select" }).click();
+  let p0 = await at();
+  await page.touchscreen.tap(p0.x, p0.y);
+  await page.waitForTimeout(300);
+  await expect(page.getByText(/order 7,200 mm/)).toHaveCount(0);   // the Barge 7,000 run (→ 7,200) is not picked up
+  // remembered on this page after a reload
+  await page.reload();
+  await ready(page);
+  await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 }).catch(() => {});
+  if (!(await page.locator("[data-layers-button]").count())) await page.getByRole("button", { name: /^Measure$/ }).click();
+  await expect(page.locator("[data-layers-button]")).toHaveText("Takeoffs (1 hidden) ▾");
+  // Hide all → banner; Show all → everything back, and the Barge line can be tapped again
+  await page.getByRole("button", { name: "Show or hide takeoffs on the plan" }).click();
+  await list.getByRole("button", { name: "Hide all" }).click();
   await expect(lines).toHaveCount(0);
-  await expect(page.getByText(/Takeoff lines are hidden on this page — nothing is deleted/)).toBeVisible();
-  await page.getByRole("button", { name: "Show takeoffs on the plan" }).click();
-  await expect(lines).toHaveCount(before);
+  await expect(page.getByText(/All takeoffs are hidden on this page — nothing is deleted/)).toBeVisible();
+  await list.getByRole("button", { name: "Show all" }).click();
+  await expect(lines).toHaveCount(all.length);
+  await list.getByRole("button", { name: "Done" }).click();
+  await page.getByRole("radio", { name: "Select" }).click();
+  p0 = await at();   // the plan is re-fitted after the reload
+  await page.touchscreen.tap(p0.x, p0.y);
+  await expect(page.getByText(/Measured 7,000 \+ allowance 200 → order 7,200 mm/)).toBeVisible();   // the same tap picks it up once shown
 });
 
 test("HUB 002: the takeoff starts with Flashings or Timber and cladding; each section only offers its own materials", async ({ page }) => {

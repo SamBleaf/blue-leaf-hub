@@ -46,6 +46,9 @@ import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPan
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
 import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js";
 
+
+const UNASSIGNED = "__unassigned";   // show / hide list: lines with no material
+const HIDE_ALL = "__all";            // the earlier single "Hide lines" switch, still honoured when stored
 const SHEET_TITLE = { run: "Measure runs", count: "Count pieces", wall: "Trace walls", member: "Member line", distribution: "Distribution run", pan: "Move around" };
 const PATH_EXPLAINED = new Set(["ceiling_exceeded", "ceiling_unknown", "split_invalid", "path_in_progress"]);
 const flashRulesOf = (m) => (isFlashingMaterial(m) ? m.rules : {});
@@ -98,10 +101,23 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [countLen, setCountLen] = useState(null);
   const [activeCount, setActiveCount] = useState(null); // measurement id
   const [selected, setSelected] = useState(() => (highlightIds || []).find(onThisPage) || null);
-  // HUB 011: show / hide the saved takeoff lines on this plan page (display only — nothing is deleted), remembered per page
+  // HUB 011 (+ 20 Oct follow-up): show / hide the saved takeoff items on this plan page ONE BY ONE — display only,
+  // nothing is deleted. `hidden` holds material ids (UNASSIGNED = lines with no material), remembered per page.
   const overlayKey = wsId && planDoc ? `takeoff-overlays:${wsId}|${planDoc.id}|${pageIndex}` : null;
-  const [showTakeoffs, setShowTakeoffs] = useState(() => { try { return overlayKey ? localStorage.getItem(overlayKey) !== "off" : true; } catch { return true; } });
-  const toggleTakeoffs = () => setShowTakeoffs((v) => { try { if (overlayKey) localStorage.setItem(overlayKey, v ? "off" : "on"); } catch { /* storage blocked: session only */ } return !v; });
+  const [hidden, setHiddenState] = useState(() => {
+    try {
+      const raw = overlayKey ? localStorage.getItem(overlayKey) : null;
+      if (raw === "off") return new Set([HIDE_ALL]);   // the earlier single switch: "off" = everything hidden
+      const v = raw && raw !== "on" ? JSON.parse(raw) : null;
+      return new Set(Array.isArray(v?.hidden) ? v.hidden.filter((x) => typeof x === "string") : []);
+    } catch { return new Set(); }
+  });
+  const setHidden = (fn) => setHiddenState((cur) => {
+    const next = typeof fn === "function" ? fn(cur) : fn;
+    try { if (overlayKey) localStorage.setItem(overlayKey, JSON.stringify({ hidden: [...next] })); } catch { /* storage blocked: session only */ }
+    return next;
+  });
+  const [layersOpen, setLayersOpen] = useState(false);
   const [deletedNotice, setDeletedNotice] = useState(null); // "Run deleted — Undo" right after a delete
   if (hl.key !== hlKey) { // a new "Show on plan" while this screen is open
     setHl({ key: hlKey, ids: hlKey ? highlightIds : [] });
@@ -621,6 +637,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const t = tickAt(sp);
     let best = null, bestD = HIT_PX;
     for (const m of pageMeasurements) {
+      if (!isShown(m)) continue;   // a hidden item can't be picked up by tapping where it is
       const pts = (m.points || []).map(toScreen);
       if (!pts.length) continue;
       const d = m.kind === "count" ? Math.min(...pts.map((q) => Math.hypot(q.x - sp.x, q.y - sp.y))) : distToPolyline(sp, pts);
@@ -700,6 +717,46 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const draftLegs = draft && !draftIsFlash ? straightLegs(draft.points).length : 0; // walls / timber / aluminium pieces
   const drawTool = PATH_TOOLS.has(mode) || LINE_TOOLS.has(mode);
   const hlSet = useMemo(() => new Set(hl.ids), [hl.ids]);
+  // the takeoff items on this page (one per material, in the job's material order) for the show / hide list
+  const layerItems = useMemo(() => {
+    const counts = new Map();
+    let unassigned = 0;
+    for (const m of pageMeasurements) {
+      const cs = contribsOf.get(m.id) || [];
+      if (!cs.length) { if (m.id !== draft?.measurementId) unassigned += 1; continue; }
+      for (const id of new Set(cs.map((c) => c.jobMaterialId))) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    const items = view.materials.filter((x) => counts.has(x.id)).map((x) => ({ id: x.id, name: x.name, count: counts.get(x.id) }));
+    if (unassigned) items.push({ id: UNASSIGNED, name: "Lines with no material", count: unassigned });
+    return items;
+  }, [pageMeasurements, contribsOf, view.materials, draft?.measurementId]);
+  const hiddenHere = layerItems.filter((it) => hidden.has(HIDE_ALL) || hidden.has(it.id));
+  const isHiddenItem = (id) => hidden.has(HIDE_ALL) || hidden.has(id);
+  /** On the plan? The run being drawn, the selected one and "Show on plan" highlights always are. */
+  const isShown = (m) => {
+    if (m.id === selected || hlSet.has(m.id) || m.id === draft?.measurementId) return true;
+    const cs = contribsOf.get(m.id) || [];
+    if (!cs.length) return !isHiddenItem(UNASSIGNED);
+    return cs.some((c) => !isHiddenItem(c.jobMaterialId));
+  };
+  const toggleItem = (id) => setHidden((cur) => {
+    // leaving "everything hidden" for a per-item list: every item on this page starts hidden, then this one flips
+    const n = cur.has(HIDE_ALL) ? new Set(layerItems.map((it) => it.id)) : new Set(cur);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  // a NEW item measured with a hidden material shows that material again — what you just measured never disappears
+  const activeHere = pageMeasurements.filter((m) => (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === material?.id)).length;
+  const prevActive = useRef({ id: material?.id, n: activeHere });
+  useEffect(() => {
+    const was = prevActive.current;
+    prevActive.current = { id: material?.id, n: activeHere };
+    if (!material?.id || was.id !== material.id || activeHere <= was.n || !isHiddenItem(material.id)) return;
+    setHidden((cur) => { const n = cur.has(HIDE_ALL) ? new Set(layerItems.map((it) => it.id)) : new Set(cur); n.delete(material.id); n.delete(HIDE_ALL); return n; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeHere, material?.id]);
+  const showAll = () => setHidden(new Set());
+  const hideAll = () => setHidden(new Set(layerItems.map((it) => it.id)));
   const hlHere = pageMeasurements.filter((m) => hlSet.has(m.id) && m.points?.length);
   const hlElsewhere = hl.ids.map((id) => view.measurements.find((m) => m.id === id && !m.archived)).filter((m) => m && !hlHere.includes(m));
   const hlPoints = useMemo(() => pageMeasurements.filter((m) => hl.ids.includes(m.id)).flatMap((m) => m.points || []), [pageMeasurements, hl.ids]);
@@ -843,10 +900,37 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             ))}
           </div>
           <button type="button" onClick={changeMaterial} className="ml-auto min-h-[44px] min-w-0 max-w-[45%] truncate rounded-lg border border-hairline px-2 text-xs text-ink">{material ? `Material: ${material.name}` : "Choose material"}</button>
-          <Btn kind="ghost" className="min-w-[44px]" onClick={toggleTakeoffs} aria-pressed={showTakeoffs} aria-label={showTakeoffs ? "Hide takeoffs on the plan" : "Show takeoffs on the plan"}>{showTakeoffs ? "Hide lines" : "Show lines"}</Btn>
+          <Btn kind="ghost" className="min-w-[44px]" onClick={() => setLayersOpen((v) => !v)} aria-expanded={layersOpen} aria-haspopup="true"
+            aria-label="Show or hide takeoffs on the plan" data-layers-button="">Takeoffs{hiddenHere.length ? ` (${hiddenHere.length} hidden)` : ""} ▾</Btn>
           <Btn kind="ghost" className="min-w-[44px]" onClick={() => vpRef.current?.fit()} aria-label="Fit page">Fit</Btn>
         </div>
-        {!showTakeoffs && <div className="px-2 pt-2"><Banner tone="info" action={<Btn onClick={toggleTakeoffs}>Show lines</Btn>}>Takeoff lines are hidden on this page — nothing is deleted, the schedule is unchanged.</Banner></div>}
+        {layersOpen && (
+          <div className="absolute right-2 top-[52px] z-30 w-[min(20rem,calc(100%-1rem))] rounded-card border border-hairline bg-white shadow-lg" role="dialog" aria-label="Takeoffs on this plan" data-layers=""
+            onKeyDown={(e) => { if (e.key === "Escape") setLayersOpen(false); }}>
+            <div className="flex items-center gap-1 border-b border-hairline px-3 py-1">
+              <p className="flex-1 text-sm font-semibold text-ink">Show on this plan</p>
+              <Btn kind="ghost" onClick={showAll} disabled={!hiddenHere.length}>Show all</Btn>
+              <Btn kind="ghost" onClick={hideAll} disabled={!layerItems.length || hiddenHere.length === layerItems.length}>Hide all</Btn>
+            </div>
+            {!layerItems.length ? <p className="px-3 py-3 text-sm text-muted">Nothing measured on this page yet.</p> : (
+              <ul className="max-h-[50vh] overflow-y-auto py-1">
+                {layerItems.map((it) => (
+                  <li key={it.id}>
+                    <label className="flex min-h-[44px] cursor-pointer items-center gap-3 px-3 text-sm text-ink" data-layer-item={it.id}>
+                      <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={!isHiddenItem(it.id)} onChange={() => toggleItem(it.id)} />
+                      <span className="min-w-0 flex-1 truncate">{it.name}</span>
+                      <span className="text-[11px] text-muted">{it.count}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-hairline px-3 py-1 text-right"><Btn onClick={() => setLayersOpen(false)}>Done</Btn></div>
+          </div>
+        )}
+        {hiddenHere.length > 0 && <div className="px-2 pt-2"><Banner tone="info" action={<Btn onClick={showAll}>Show all</Btn>}>
+          {hiddenHere.length === layerItems.length ? "All takeoffs are hidden on this page" : `${hiddenHere.length} of ${layerItems.length} takeoff items hidden on this page (${hiddenHere.map((it) => it.name).join(", ")})`} — nothing is deleted, the schedule is unchanged.
+        </Banner></div>}
         {deletedNotice && <div className="px-2 pt-2"><Banner tone="info" action={<div className="flex gap-1"><Btn onClick={() => { undo(); setDeletedNotice(null); }}>Undo</Btn><Btn kind="ghost" onClick={() => setDeletedNotice(null)}>OK</Btn></div>}>{deletedNotice}</Banner></div>}
         {stale && <div className="px-2 pt-2"><Banner tone="warn">This plan has been replaced. Existing measurements stay here for review — measure on the current revision.</Banner></div>}
         {!cal && !stale && drawTool && <div className="px-2 pt-2"><Banner tone="info" action={onScale && <Btn kind="primary" onClick={onScale}>Scale page</Btn>}>This page has no scale yet. {flashing ? "You can still count pieces." : "Scale it before measuring."}</Banner></div>}
@@ -875,7 +959,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           overlay={({ toScreen: toScr }) => (
             <>
               {cal?.region && (() => { const a = toScr({ x: cal.region.x0, y: cal.region.y0 }), b = toScr({ x: cal.region.x1, y: cal.region.y1 }); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill="none" stroke="#006c9b" strokeDasharray="4 4" />; })()}
-              {pageMeasurements.filter((m) => showTakeoffs || m.id === selected || hlSet.has(m.id) || m.id === draft?.measurementId).map((m) => {
+              {pageMeasurements.filter(isShown).map((m) => {
                 // the chosen material's layer in full colour; other materials stay visible for context, dimmed
                 const cs = contribsOf.get(m.id) || [];
                 const other = material && cs.length > 0 && !cs.some((c) => c.jobMaterialId === material.id) && m.id !== selected && !hlSet.has(m.id);

@@ -51,18 +51,23 @@ export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
   const [error, setError] = useState(null);
   const [code, setCode] = useState(null);
   const entryKey = `takeoff-entry:${jobType}:${jobId}`;
-  // HUB 002: the first choice is Flashings or Timber and cladding. A real page reload returns to the section that was open.
-  const [entry] = useState(() => {
-    if (entryRestoreSpent || !isReload()) return null;
-    entryRestoreSpent = true;
-    try { return JSON.parse(sessionStorage.getItem(entryKey) || "null"); } catch { return null; }
-  });
-  const [wsId, setWsId] = useState(entry?.wsId || null);
+  // HUB 002: the first choice is Flashings or Timber and cladding. A real page reload returns to the section that was
+  // open (read once per page load in an effect, so React's dev double-render can't spend it before it is used).
+  const [wsId, setWsId] = useState(null);
   // ?section=flashings | timber_cladding links straight into a section
   const [section, setSection] = useState(() => {
-    if (entry?.section) return entry.section;
     try { const q = new URLSearchParams(window.location.search).get("section"); return SECTION_VALUES_ORDER.includes(q) ? q : null; } catch { return null; }
   });
+  const [entryChecked, setEntryChecked] = useState(false);
+  useEffect(() => {
+    if (entryRestoreSpent) { setEntryChecked(true); return; }
+    entryRestoreSpent = true;
+    let saved = null;
+    if (isReload()) { try { saved = JSON.parse(sessionStorage.getItem(entryKey) || "null"); } catch { saved = null; } }
+    if (saved?.wsId) setWsId((cur) => cur || saved.wsId);
+    if (saved?.section && SECTION_VALUES_ORDER.includes(saved.section)) setSection((cur) => cur || saved.section);
+    setEntryChecked(true);
+  }, [entryKey]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -76,8 +81,9 @@ export default function TakeoffApp({ api, jobType, jobId, onExternalView }) {
   }, [api, jobType, jobId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
+    if (!entryChecked) return;   // never overwrite the saved place before it has been read
     try { sessionStorage.setItem(entryKey, JSON.stringify({ wsId, section })); } catch { /* private mode: nothing kept */ }
-  }, [entryKey, wsId, section]);
+  }, [entryKey, wsId, section, entryChecked]);
 
   async function create(sec) {
     setBusy(true);
