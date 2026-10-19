@@ -312,7 +312,10 @@ await t("207 re-applies cleanly (idempotent) and leaves 206 flashing rules intac
 });
 
 await t("209 (HUB 005): open flashings on a 100 mm step move to 300 with history; placed / other steps / timber untouched; standards get a new revision; re-run changes nothing", async () => {
-  const mig = readFileSync(new URL("../../supabase/migrations/209_takeoff_flashing_order_step_300.sql", import.meta.url), "utf8").replace(/^(BEGIN|COMMIT);$/gm, "");
+  const mig = readFileSync(new URL("../../supabase/migrations/209_takeoff_flashing_order_step_300.sql", import.meta.url), "utf8");
+  const code = mig.replace(/--.*$/gm, "");
+  assert.doesNotMatch(code, /TEMP TABLE|^\s*(BEGIN|COMMIT)\s*;/im);   // one self-contained statement (Supabase SQL editor safe)
+  assert.equal(code.split(";").filter((x) => x.trim()).length, 1);
   const R = (inc) => JSON.stringify({ allowanceMm: 200, incrementMm: inc, handlingThresholdMm: 6000, orderCeilingMm: 9000 });
   const w = id(), A = id(), B = id(), C = id(), D = id(), E = id(), oid = id();
   await c.query("INSERT INTO takeoff_workspaces (id, carpentry_job_id, name, created_by_type, created_by_user_id) VALUES ($1,$2,'W209','staff',$3)", [w, carpB, user]);
@@ -330,7 +333,8 @@ await t("209 (HUB 005): open flashings on a 100 mm step move to 300 with history
   const ex = await one("SELECT public.takeoff_create_export($1, 1, 1, (SELECT updated_at FROM suppliers WHERE id=$3), false, '{\"a\":1}'::jsonb, 'h', 'v', 1, $2::jsonb, NULL) AS r", [oid, actor, sup]);
   await c.query("INSERT INTO takeoff_placements (order_id, export_id, placed_on, placed_by_user_id) VALUES ($1,$2,current_date,$3)", [oid, ex.r.exportId, user]);
   const wsRev = (await one("SELECT revision FROM takeoff_workspaces WHERE id=$1", [w])).revision;
-  await c.query(mig);
+  const first = (await c.query(mig)).rows[0];
+  assert.deepEqual([first.job_flashings_moved_to_300, first.company_standards_moved_to_300, first.history_rows_written, first.takeoffs_given_a_new_revision].map(Number), [2, 1, 2, 1]);
   const inc = async (mid) => Number((await one("SELECT rules->>'incrementMm' AS i FROM takeoff_job_materials WHERE id=$1", [mid])).i ?? NaN);
   assert.equal(await inc(A), 300); assert.equal(await inc(E), 300);
   assert.equal(await inc(B), 100);   // on a placed order
@@ -344,11 +348,11 @@ await t("209 (HUB 005): open flashings on a 100 mm step move to 300 with history
   assert.equal((await one("SELECT rules->>'incrementMm' AS i FROM takeoff_material_preset_revisions WHERE preset_id=$1 AND revision=1", [pid])).i, "100");   // old revision kept
   assert.equal((await one("SELECT from_preset_revision FROM takeoff_job_materials WHERE id=$1", [E])).from_preset_revision, 2);
   assert.equal((await one("SELECT revision FROM takeoff_workspaces WHERE id=$1", [w])).revision, wsRev + 1);
-  // re-run: nothing left to move
-  await c.query("DROP TABLE _t209, _p209");
-  const again = await c.query(mig);
-  const counts = again.find((r) => r.command === "SELECT" && r.rows[0]?.job_flashings_moved_to_300 != null).rows[0];
-  assert.equal(Number(counts.job_flashings_moved_to_300), 0); assert.equal(Number(counts.company_standards_moved_to_300), 0);
+  // re-run: nothing left to move, nothing written, no error
+  const counts = (await c.query(mig)).rows[0];
+  assert.deepEqual([counts.job_flashings_moved_to_300, counts.company_standards_moved_to_300, counts.history_rows_written, counts.takeoffs_given_a_new_revision].map(Number), [0, 0, 0, 0]);
+  assert.equal((await one("SELECT revision FROM takeoff_workspaces WHERE id=$1", [w])).revision, wsRev + 1);
+  assert.equal((await one("SELECT count(*)::int AS n FROM takeoff_material_rule_history WHERE job_material_id = ANY($1)", [[A, E]])).n, 2);
 });
 
 await db.close();
