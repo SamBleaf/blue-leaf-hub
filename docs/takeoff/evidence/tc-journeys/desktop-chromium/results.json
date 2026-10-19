@@ -10,11 +10,11 @@
       "id": "S0",
       "title": "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
       "status": "PASS",
-      "seconds": 8,
+      "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "a1da7866-f2dd-4d5c-9207-e9c8596369e8",
-          "documentId": "821d5734-0536-4ff9-8588-5c050ccf5c5e",
+          "id": "d67e4691-7d21-4a17-b99a-f6a16cd845e3",
+          "documentId": "a6af1440-6460-4f98-8e97-cd69b1b35969",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-14 23:35:55.73924+10:30"
+          "createdAt": "2026-10-19 23:25:08.080967+10:30"
         }
       }
     },
@@ -121,7 +121,7 @@
       "id": "AL",
       "title": "Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
       "status": "PASS",
-      "seconds": 3,
+      "seconds": 2,
       "observed": {
         "lines": [
           "1 bar · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)"
@@ -130,7 +130,7 @@
     },
     {
       "id": "FL",
-      "title": "Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400",
+      "title": "Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400",
       "status": "PASS",
       "seconds": 18,
       "observed": {
@@ -142,36 +142,36 @@
         },
         "storedSplit": {
           "splitsMm": [
-            8800
+            5000
           ],
           "splitAnchors": [
             {
-              "x": 431.8110236220473,
-              "y": 257.7165354330707,
-              "stationMm": 8800
+              "x": 403.4645669291339,
+              "y": 178.34645669291325,
+              "stationMm": 5000
             }
           ]
         },
         "lines": [
-          "1 × 9000",
-          "1 × 3200",
-          "1 × 1400"
+          "2 × 5400",
+          "1 × 3300"
         ],
-        "sheetAfterSave": "Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800 + 200 → 9,000 mm — long piece Piece 2: 1,200 + 200 → 1,400 mm 2 legs — corners are cut/folded on site; they add no pieces or allowances. Piece 1 orders 9,000 mm — longer than the 6,000 mm handling length. Advisory only; no split is needed. Quantity: calculated · Installation: not specified · Procurement: ready to order Tap the start of the next run. Undo reopens this one."
+        "sheetAfterSave": "Finished — one run: Order 2 pieces: 5,400 + 5,400 mm (measured 10,000) Each piece worked out 2 legs — corners are cut/folded on site; they add no pieces or allowances. Details Tap the start of the next run. Undo reopens this one."
       }
     },
     {
       "id": "J5",
-      "title": "Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back",
+      "title": "Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back",
       "status": "PASS",
-      "seconds": 4,
+      "seconds": 8,
       "observed": {
-        "ready": "Ready: 3 flashing pieces · 13.600 LM · 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "ready": "Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "flashingsReady": "Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).",
         "pdfChecks": []
       }
     }
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-14T13:06:39.505Z"
+  "at": "2026-10-19T12:55:56.416Z"
 }

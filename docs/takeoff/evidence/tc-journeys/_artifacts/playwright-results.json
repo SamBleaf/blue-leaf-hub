@@ -1,0 +1,189 @@
+{
+  "config": {
+    "argv": [
+      "/usr/local/bin/node",
+      "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/node_modules/.bin/playwright",
+      "test",
+      "--config=playwright.tc-evidence.config.js",
+      "--project=iphone13-webkit"
+    ],
+    "configFile": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/playwright.tc-evidence.config.js",
+    "rootDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/desktop-chromium",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-chromium",
+        "name": "desktop-chromium",
+        "testDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+        "testIgnore": [],
+        "testMatch": [
+          "tc-journeys-sandbox.spec.js"
+        ],
+        "timeout": 600000
+      },
+      {
+        "outputDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "iphone13-webkit",
+        "name": "iphone13-webkit",
+        "testDir": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/e2e/ui-review",
+        "testIgnore": [],
+        "testMatch": [
+          "tc-journeys-sandbox.spec.js"
+        ],
+        "timeout": 600000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "docs/takeoff/evidence/tc-journeys/_artifacts/playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tc-journeys-sandbox.spec.js",
+      "file": "tc-journeys-sandbox.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "TC-R04 real-stack journeys",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 600000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "iphone13-webkit",
+              "projectName": "iphone13-webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 56284,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "S0 — Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
+                      "duration": 9964
+                    },
+                    {
+                      "title": "J1 — Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800",
+                      "duration": 12489
+                    },
+                    {
+                      "title": "J2 — Cladding: Axon 133 smooth, wall 4,800 × 2,700 + 900 × 900 window → 4 sheets, net 12.15 m²; 4,801 → 5",
+                      "duration": 6030
+                    },
+                    {
+                      "title": "AL — Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
+                      "duration": 2526
+                    },
+                    {
+                      "title": "FL — Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400",
+                      "duration": 16933
+                    },
+                    {
+                      "title": "J5 — Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back",
+                      "duration": 7907
+                    }
+                  ],
+                  "startTime": "2026-10-19T12:56:01.182Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-3.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-1.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-2.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video-4.webm"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync/docs/takeoff/evidence/tc-journeys/_artifacts/iphone13-webkit/tc-journeys-sandbox-TC-R04-real-stack-journeys-iphone13-webkit/video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "39908a6f079d0eafc2ee-efaef938d80a5893f6e3",
+          "file": "tc-journeys-sandbox.spec.js",
+          "line": 45,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-19T12:56:00.929Z",
+    "duration": 56739.365999999995,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

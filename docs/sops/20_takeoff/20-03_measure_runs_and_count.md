@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-10-14
+sop_version: 2.1
+last_reviewed: 2026-10-19
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -103,6 +103,12 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 2. A **continuous run** shows "Run — <material>", its pieces ("Measured … → order …", or one line per piece when split), the three statuses, **How this was worked out**, its splits, and **Add a split by distance…** (SOP 20-11). Drag a point to move it, tap **+** on a leg to add a point, **Remove point N** to delete the selected point, **Remove run** to remove it.
 3. An older straight run shows **Run** with its explanation; a count shows **Count — N marks**. Drag a handle to move a point — a magnifier shows exactly where it sits. **Remove** removes the selected run, or the **whole** count group.
 4. "N unfinished run(s) is/are on this page — not in the order until finished." → **Show** → **Continue drawing**, **Finish as <material>** or **Remove**.
+
+### E2. Hide the takeoff lines, delete a run, read the details (Hub review, 19 Oct 2026)
+
+1. **Hide lines** (top bar) hides every takeoff line on this plan page so the drawing is easy to read. Nothing is deleted. The banner says so. **Show lines** brings them back. The choice is remembered for this page on this device. A run you have selected, or are drawing, stays visible.
+2. To delete a run: tap it, then **Delete run**. A banner offers **Undo**.
+3. The technical labels (Quantity / Installation / Procurement) are under **Details** in the run panel. Real problems still show in plain English.
 
 ### F. Move around, undo and finish
 
@@ -318,6 +324,13 @@ Next review date: 2027-04-14
 2. **Run**: tap two points, then tap **Done** (leave the screen without finishing); tap **Measure** again.
 3. Expected result: step 1 — the length changes on release (no "Measured 4,312" any more); undo restores "Measured 4,312"; redo re-applies; Remove hides it and the schedule drops it; undo brings it back; step 2 — leaving finished the valid run: "5 run(s) on this page." and no draft.
 4. Expected record: after Remove the measurement and contribution are archived (absent from the fake snapshot); after the final undo they are back; step 2 adds one `kind` "polyline" with a contribution.
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Hide lines and Delete run (HUB 011, UI Review)**
+1. Default job → **Flashings** → **Measure**.
+2. Tap **Hide lines**. Expected: no takeoff lines on the plan; banner "Takeoff lines are hidden on this page — nothing is deleted…".
+3. Tap **Show lines**. Expected: the same number of lines as before.
+4. Select a run → **Delete run**. Expected: it disappears, and a banner with **Undo** brings it back.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

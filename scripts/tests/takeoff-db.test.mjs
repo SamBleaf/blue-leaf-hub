@@ -311,6 +311,46 @@ await t("207 re-applies cleanly (idempotent) and leaves 206 flashing rules intac
   await rejects(`INSERT INTO takeoff_measurements (id, workspace_id, kind, geometry, created_by_type, created_by_user_id) VALUES ('${id()}','${ws}','run','{"points":[]}','staff','${user}')`, [], /takeoff_meas_run_has_cal/);
 });
 
+await t("209 (HUB 005): open flashings on a 100 mm step move to 300 with history; placed / other steps / timber untouched; standards get a new revision; re-run changes nothing", async () => {
+  const mig = readFileSync(new URL("../../supabase/migrations/209_takeoff_flashing_order_step_300.sql", import.meta.url), "utf8").replace(/^(BEGIN|COMMIT);$/gm, "");
+  const R = (inc) => JSON.stringify({ allowanceMm: 200, incrementMm: inc, handlingThresholdMm: 6000, orderCeilingMm: 9000 });
+  const w = id(), A = id(), B = id(), C = id(), D = id(), E = id(), oid = id();
+  await c.query("INSERT INTO takeoff_workspaces (id, carpentry_job_id, name, created_by_type, created_by_user_id) VALUES ($1,$2,'W209','staff',$3)", [w, carpB, user]);
+  const p = await one("SELECT public.takeoff_save_preset(NULL, 0, $1::jsonb, $2, true) AS r", [JSON.stringify({ name: "Std apron", methodKey: "flashing_runs", methodVersion: 1, spec: {}, rules: JSON.parse(R(100)) }), user]);
+  const pid = p.r.presetId;
+  const mat = (mid, name, spec, rules, preset = null) => c.query(`INSERT INTO takeoff_job_materials (id, workspace_id, name, method_key, method_version, spec, rules, from_preset_id, from_preset_revision)
+    VALUES ($1,$2,$3,$4,1,$5::jsonb,$6::jsonb,$7,$8)`, [mid, w, name, spec.family === "timber" ? "repeated_members" : "flashing_runs", JSON.stringify(spec), rules, preset, preset ? 1 : null]);
+  await mat(A, "Apron", {}, R(100));
+  await mat(B, "Barge (placed)", {}, R(100));
+  await mat(C, "Ridge 50", {}, R(50));
+  await mat(D, "Rafters", { family: "timber" }, "{}");
+  await mat(E, "From standard", {}, R(100), pid);
+  await c.query("INSERT INTO takeoff_orders (id, workspace_id, order_ref, supplier_id, created_by_type) VALUES ($1,$2,'FO-209',$3,'staff')", [oid, w, sup]);
+  await c.query("INSERT INTO takeoff_order_lines (order_id, bucket_key, spec_key, job_material_id, finished_length_mm, quantity) VALUES ($1,'k','s',$2,4600,1)", [oid, B]);
+  const ex = await one("SELECT public.takeoff_create_export($1, 1, 1, (SELECT updated_at FROM suppliers WHERE id=$3), false, '{\"a\":1}'::jsonb, 'h', 'v', 1, $2::jsonb, NULL) AS r", [oid, actor, sup]);
+  await c.query("INSERT INTO takeoff_placements (order_id, export_id, placed_on, placed_by_user_id) VALUES ($1,$2,current_date,$3)", [oid, ex.r.exportId, user]);
+  const wsRev = (await one("SELECT revision FROM takeoff_workspaces WHERE id=$1", [w])).revision;
+  await c.query(mig);
+  const inc = async (mid) => Number((await one("SELECT rules->>'incrementMm' AS i FROM takeoff_job_materials WHERE id=$1", [mid])).i ?? NaN);
+  assert.equal(await inc(A), 300); assert.equal(await inc(E), 300);
+  assert.equal(await inc(B), 100);   // on a placed order
+  assert.equal(await inc(C), 50);    // someone chose another step
+  assert.deepEqual((await one("SELECT rules FROM takeoff_job_materials WHERE id=$1", [D])).rules, {});
+  const h = await one("SELECT old_rules->>'incrementMm' AS o, new_rules->>'incrementMm' AS n, material_revision FROM takeoff_material_rule_history WHERE job_material_id=$1", [A]);
+  assert.deepEqual([h.o, h.n, h.material_revision], ["100", "300", 2]);
+  const pr = await one("SELECT current_revision FROM takeoff_material_presets WHERE id=$1", [pid]);
+  assert.equal(pr.current_revision, 2);
+  assert.equal((await one("SELECT rules->>'incrementMm' AS i FROM takeoff_material_preset_revisions WHERE preset_id=$1 AND revision=2", [pid])).i, "300");
+  assert.equal((await one("SELECT rules->>'incrementMm' AS i FROM takeoff_material_preset_revisions WHERE preset_id=$1 AND revision=1", [pid])).i, "100");   // old revision kept
+  assert.equal((await one("SELECT from_preset_revision FROM takeoff_job_materials WHERE id=$1", [E])).from_preset_revision, 2);
+  assert.equal((await one("SELECT revision FROM takeoff_workspaces WHERE id=$1", [w])).revision, wsRev + 1);
+  // re-run: nothing left to move
+  await c.query("DROP TABLE _t209, _p209");
+  const again = await c.query(mig);
+  const counts = again.find((r) => r.command === "SELECT" && r.rows[0]?.job_flashings_moved_to_300 != null).rows[0];
+  assert.equal(Number(counts.job_flashings_moved_to_300), 0); assert.equal(Number(counts.company_standards_moved_to_300), 0);
+});
+
 await db.close();
 console.log(`takeoff-db: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

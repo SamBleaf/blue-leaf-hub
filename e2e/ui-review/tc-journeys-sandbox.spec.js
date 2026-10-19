@@ -10,8 +10,8 @@
 //       net 12.15 m²; 4,801 → 5 sheets (and back to 4,800)
 //   AL  aluminium (11): Add aluminium, kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on ONE 6,500 bar,
 //       891 remainder
-//   FL  flashing paths (13): new flashing; four 750 legs as ONE path → one 3,200; a 10,000 path → red overflow →
-//       split at the limit → 9,000 + 1,400
+//   FL  flashing paths (13): new flashing (300 mm order step, HUB 005); four 750 legs as ONE path → one 3,300; a 10,000
+//       path → red overflow → split at the limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400
 //   J5  order with timber pieces + Axon sheets + aluminium bars + flashing pieces; delivery / pickup details; a
 //       NON-draft export; BOTH the supplier PDF and the site appendix downloaded, saved and read back as text
 //
@@ -22,7 +22,7 @@
 //
 // Taps: every plan point is panned into the middle of the view (as a user pans to it) and tapped on a WHOLE CSS
 // pixel — WebKit truncates touch coordinates to whole pixels, so this is what makes the tapped geometry exact and
-// the knife-edge fixtures (3,000 + 200 → 3,200; 1,200 + 200 → 1,400) reproducible instead of ±1 px.
+// the knife-edge fixtures (3,000 + 200 → 3,300; 1,200 + 200 → 1,500 at the 300 mm step) reproducible instead of ±1 px.
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -413,7 +413,9 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
 
   // ═══ FL — continuous flashing paths (13) ═════════════════════════════════════════════════════════════════════
   let flashId = null;
-  await journey("FL", "Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400", async () => {
+  // HUB 005: a NEW flashing orders in 300 mm steps (3,000 + 200 → 3,300; 1,200 + 200 → 1,500), and one "Split to handling
+  // length" re-splits the whole run into even pieces within the 6,000 handling length (10,000 → 2 × 5,000 → 5,400 each)
+  await journey("FL", "Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400", async () => {
     await toSection("flashings");
     await expect(page.getByRole("button", { name: "Add timber" })).toHaveCount(0);
     await press(page.getByRole("button", { name: "Add flashing" }).first());
@@ -442,18 +444,18 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await expect(draft).toHaveAttribute("data-points", "5");
     const tightA = Number(await draft.getAttribute("data-tight"));
     observed.FL = { pathA: { tight: tightA } };
-    await expect(draft).toHaveAttribute("data-order", "3200");
+    await expect(draft).toHaveAttribute("data-order", "3300");
     await expect(page.getByText(/4 legs — corners are cut\/folded on site/)).toBeVisible();
-    await shot("path-750x4-draft", `Four 750 legs drawn as one path: tight ${tightA} → ONE allowance → order 3,200`);
+    await shot("path-750x4-draft", `Four 750 legs drawn as one path: tight ${tightA} → ONE allowance → order 3,300 (300 mm step)`);
     await press(page.getByRole("button", { name: "Finish", exact: true }));
     await expect(page.locator("[data-path-draft]")).toHaveCount(0);
     const runs = page.locator('[data-kind="polyline"][data-measurement-id]:not([data-unfinished])');
     await expect(runs).toHaveCount(1);
     await expect(runs.first()).toHaveAttribute("data-pieces", "1");
-    await expect(runs.first()).toHaveAttribute("data-order", "3200");
+    await expect(runs.first()).toHaveAttribute("data-order", "3300");
     await expect(page.locator("[data-finished-run]")).toContainText("Finished — one run");
     await saved();
-    await shot("path-750x4-finished", "Finished — one run, one piece 3,200 (corners are site cuts/folds)");
+    await shot("path-750x4-finished", "Finished — one run, one piece 3,300 (corners are site cuts/folds)");
     // path B: 6,000 + 4,000 = 10,000 → red overflow past the 9,000 maximum → one tap on red splits at the legal marker
     await page.waitForTimeout(600);
     await zoomOn(at(8000, 3000), isMobile ? 1.6 : 1.2);
@@ -476,10 +478,18 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await exactTap(redPdf);
     await expect(d2).toHaveAttribute("data-points", "3");
     await expect(d2).toHaveAttribute("data-splits", "8800");
-    await expect(d2).toHaveAttribute("data-order", "9000+1400");
+    await expect(d2).toHaveAttribute("data-order", "9000+1500");
     await expect(d2.locator("[data-overflow-run]")).toHaveCount(0);
-    await expect(page.getByText(/Split at the limit \(8,800 mm along the run\)\. Pieces now 9,000 \+ 1,400 mm/)).toBeVisible();
-    await shot("path-10000-split", "One tap on the red part → split at the limit (8,800 along the run) → 9,000 + 1,400");
+    await expect(page.getByText(/Split at the limit \(8,800 mm along the run\)\. Pieces now 9,000 \+ 1,500 mm/)).toBeVisible();
+    await shot("path-10000-split", "One tap on the red part → split at the limit (8,800 along the run) → 9,000 + 1,500");
+    // HUB 005: the 9,000 piece is over the 6,000 handling length → ONE action splits the whole run evenly
+    const auto = page.locator("[data-split-to-handling]");
+    await expect(auto).toHaveText("Split to handling length — 2 × 5,400 mm");
+    await press(auto);
+    await expect(d2).toHaveAttribute("data-splits", "5000");
+    await expect(d2).toHaveAttribute("data-order", "5400+5400");
+    await expect(page.getByText(/Split into 2 pieces: 5,400 \+ 5,400 mm — each with its own allowance, all within the 6,000 mm handling length/)).toBeVisible();
+    await shot("path-10000-handling", "Split to handling length → 2 even pieces, 5,400 + 5,400 (each 5,000 tight + 200 allowance, rounded to 300)");
     await page.waitForTimeout(450);
     await press(page.getByRole("button", { name: "Finish", exact: true }));
     await expect(runs).toHaveCount(2);
@@ -495,7 +505,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     observed.FL.sheetAfterSave = sheetText;
     await shot("paths-finished-saved", `Both runs finished + saved; after the server round-trip the sheet reads: "${sheetText.slice(0, 220)}"`);
     const got = linesOf(wB, flashId).map((l) => `${l.quantity}x${l.finishedLengthMm}`).sort();
-    if (JSON.stringify(got) !== JSON.stringify(["1x1400", "1x3200", "1x9000"]) && runB) {
+    if (JSON.stringify(got) !== JSON.stringify(["1x3300", "2x5400"]) && runB) {
       // cross-check with the REAL engine (shared/takeoff) on the server's own snapshot: the stored (rounded) anchor vs
       // the full-precision anchor the app computed for the same split
       const cal = wB.snapshot.calibrations.find((c) => c.id === runB.calibrationId);
@@ -509,9 +519,9 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
       observed.FL.engineCrossCheck = { storedAnchor: recompute(runB.inputs.splitAnchors), fullPrecisionAnchor: recompute(exact), noAnchor: recompute(null) };
       findings.push({ journey: "FL", id: "F1", severity: "blocking", text: `Split at the limit is changed by the save. Steps: scale page 1 (S0); Add flashing → New flashing → Details → Lengths; Run tool: tap (5,000, 1,000) → (11,000, 1,000) → (11,000, 5,000) (= 10,000 mm); tap the red part → "Split at the limit (8,800 mm along the run). Pieces now 9,000 + 1,400 mm"; Finish → after "Saved" the sheet reads: "${sheetText.slice(0, 170)}…" and still says "tap it to split at the limit (8,800 mm along the run)" (src/components/takeoff/measure/PathPanel.jsx:60) although the run is already split there. The server now computes ${observed.FL.lines.join(" / ")}, and the order is blocked ("A piece is longer than the order ceiling…", "The split pieces do not cover the run."). Cause: server/lib/takeoff/takeoffService.mjs:242 cleans inputs.splitAnchors x/y — PDF-point coordinates — with MM() (:204-208, Math.round(n * 1000) / 1000): stored ${JSON.stringify(runB.inputs.splitAnchors)} vs the app's ${JSON.stringify(exact)}; shared/takeoff/engine/flashingPath.js:298 (checkSplits → locateOnPath) then rebuilds the station from the rounded anchor (8,800 → 8,800.02 → 9,000.02 → 9,100). Real-engine cross-check on the server's own snapshot: stored anchor → ${observed.FL.engineCrossCheck.storedAnchor}; full-precision anchor → ${observed.FL.engineCrossCheck.fullPrecisionAnchor}; no anchor → ${observed.FL.engineCrossCheck.noAnchor}. Rounding the other way would instead silently make piece 2 1,500 (any split at a whole-mm station is exposed).` });
     }
-    // after the save the run must still be 9,000 + 1,400 — on the plan and on the server
-    await expect(page.locator('[data-kind="polyline"][data-measurement-id][data-order="9000+1400"]')).toHaveCount(1);
-    expect(got).toEqual(["1x1400", "1x3200", "1x9000"]);
+    // after the save the run must still be 5,400 + 5,400 — on the plan and on the server
+    await expect(page.locator('[data-kind="polyline"][data-measurement-id][data-order="5400+5400"]')).toHaveCount(1);
+    expect(got).toEqual(["1x3300", "2x5400"]);
     await toOverview();
   }, ["S0"]);
 
@@ -631,13 +641,13 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     ["appendix", A, /Gross 12\.96 m² · openings 0\.81 m² · net 12\.15 m²/],
     ["appendix", A, /4 occupied cell\(s\) = 4 sheet\(s\)/],
     ["supplier", S, /TIMBER AND CLADDING ORDER[\s\S]*\bTIMBER\b[\s\S]*\bCLADDING\b/],   // the Timber part, then the Cladding part
-    ["supplier (no flashing on it)", S, /^(?![\s\S]*(flashing piece|3,200 3\.200))/],
+    ["supplier (no flashing on it)", S, /^(?![\s\S]*(flashing piece|3,300 3\.300))/],
   ];
   const flChecks = (S, A) => [
     ["supplier", S, /FLASHING ORDER/],
-    ["supplier", S, /1 × 3,200 3\.200/],
+    ["supplier", S, /1 × 3,300 3\.300/],
     ["appendix", A, /Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm/],
-    ["appendix", A, /Piece 1: 0–3,000 mm along the run (→|->) tight 3,000 (→|->) order 3,200 mm/],
+    ["appendix", A, /Piece 1: 0–3,000 mm along the run (→|->) tight 3,000 (→|->) order 3,300 mm/],
     ["supplier", S, isMobile ? /Sandbox branch \(test only\)/ : /Deliver to: 1 Sandbox Street, Testville SA \(test only\) Required: \d{4}-\d\d-\d\d/],
     ["supplier", S, /Site contact: Sandbox site lead 0400 000 000/],
     ["supplier (no DRAFT watermark)", S, /^(?![\s\S]*DRAFT)/],
@@ -704,11 +714,11 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     observed.J5.flashingsReady = await saveUntilReady("J5F");
     const F = await exportAndRead("J5F");
     const fchecks = runChecks("J5F", [...flChecks(F.S, F.A),
-      ["supplier", F.S, /1 × 9,000 9\.000/], ["supplier", F.S, /1 × 1,400 1\.400/],
-      ["supplier", F.S, /3 pieces · 13\.600 LM/], ["supplier", F.S, /Order total: 3 pieces · 13\.600 LM/],
-      ["appendix", F.A, /Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/],
-      ["appendix", F.A, /Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/],
-      ["appendix", F.A, /Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/]]);
+      ["supplier", F.S, /2 × 5,400 10\.800/],
+      ["supplier", F.S, /3 pieces · 14\.100 LM/], ["supplier", F.S, /Order total: 3 pieces · 14\.100 LM/],
+      ["appendix", F.A, /Tight 10,000 mm along the path · corners at 6,000 mm · splits at 5,000 mm/],
+      ["appendix", F.A, /Piece 1: 0–5,000 mm along the run (→|->) tight 5,000 (→|->) order 5,400 mm/],
+      ["appendix", F.A, /Piece 2: 5,000–10,000 mm along the run (→|->) tight 5,000 (→|->) order 5,400 mm/]]);
     observed.J5.pdfChecks = [...checks, ...fchecks].filter((c) => !c.ok);
     await saveOrders("J5");
     const failed = [...checks, ...fchecks].filter((c) => !c.ok);
@@ -768,7 +778,7 @@ function writeSummary() {
   const lines = [
     "# TC-R04 real-stack journeys — SUMMARY",
     "",
-    "Real app UI → isolated local sandbox (scripts/takeoff/sandbox.mjs: real takeoff server code, real Postgres with migrations 206 + 207, real pdfkit PDF renderer;",
+    "Real app UI → isolated local sandbox (scripts/takeoff/sandbox.mjs: real takeoff server code, real Postgres with migrations 206 + 207 + 208, real pdfkit PDF renderer;",
     "database `blh_takeoff_tc_evidence`, API 127.0.0.1:8798, web :5188, reset before each browser). Nothing mocked on the takeoff path.",
     "Nothing sent to suppliers, nothing ordered, no production system touched. Spec: `e2e/ui-review/tc-journeys-sandbox.spec.js`, config: `playwright.tc-evidence.config.js`.",
     "",
@@ -776,8 +786,7 @@ function writeSummary() {
     `|---|${projects.map(() => "---").join("|")}|`,
     ...ids.map((j) => `| ${j.id} — ${j.title} | ${projects.map((p) => cell(p, j.id)).join(" | ")} |`),
     "",
-    "J5d is a DIAGNOSTIC added only because J5 is blocked by F1: the same order with the split run's flashing pieces set to 0, so export + both PDFs",
-    "(quantities and units of timber, sheets, bars and the 3,200 flashing) are still proven on the real stack. It is not the J5 acceptance.",
+    "J5 (Hub review HUB 007) exports TWO supplier orders: one Timber and cladding order (Timber part, then Cladding) and a separate Flashings order.",
     "",
     "## Product defects found",
     "",

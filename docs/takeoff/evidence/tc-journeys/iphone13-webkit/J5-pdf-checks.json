@@ -1,7 +1,7 @@
 [
   {
     "doc": "supplier",
-    "expect": "/MATERIAL ORDER/",
+    "expect": "/TIMBER AND CLADDING ORDER/",
     "ok": true
   },
   {
@@ -17,11 +17,6 @@
   {
     "doc": "supplier",
     "expect": "/1 × bar equal-angle 50 × 50 × 3 — 6,500 mm length \\(no joins\\)/",
-    "ok": true
-  },
-  {
-    "doc": "supplier",
-    "expect": "/1 × 3,200 3\\.200/",
     "ok": true
   },
   {
@@ -90,48 +85,18 @@
     "ok": true
   },
   {
-    "doc": "appendix",
-    "expect": "/Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm/",
+    "doc": "supplier",
+    "expect": "/TIMBER AND CLADDING ORDER[\\s\\S]*\\bTIMBER\\b[\\s\\S]*\\bCLADDING\\b/",
     "ok": true
   },
   {
-    "doc": "appendix",
-    "expect": "/Piece 1: 0–3,000 mm along the run (→|->) tight 3,000 (→|->) order 3,200 mm/",
+    "doc": "supplier (no flashing on it)",
+    "expect": "/^(?![\\s\\S]*(flashing piece|3,300 3\\.300))/",
     "ok": true
   },
   {
     "doc": "supplier",
-    "expect": "/1 × 9,000 9\\.000/",
-    "ok": true
-  },
-  {
-    "doc": "supplier",
-    "expect": "/1 × 1,400 1\\.400/",
-    "ok": true
-  },
-  {
-    "doc": "supplier",
-    "expect": "/3 pieces · 13\\.600 LM/",
-    "ok": true
-  },
-  {
-    "doc": "supplier",
-    "expect": "/Order total: 3 flashing pieces · 13\\.600 LM (· 1 long piece flagged )?· 1 bar · 18 pieces · 4 sheets/",
-    "ok": true
-  },
-  {
-    "doc": "appendix",
-    "expect": "/Tight 10,000 mm along the path · corners at 6,000 mm · splits at 8,800 mm/",
-    "ok": true
-  },
-  {
-    "doc": "appendix",
-    "expect": "/Piece 1: 0–8,800 mm along the run (→|->) tight 8,800 (→|->) order 9,000 mm/",
-    "ok": true
-  },
-  {
-    "doc": "appendix",
-    "expect": "/Piece 2: 8,800–10,000 mm along the run (→|->) tight 1,200 (→|->) order 1,400 mm/",
+    "expect": "/Order total: 1 bar · 18 pieces · 4 sheets/",
     "ok": true
   }
 ]

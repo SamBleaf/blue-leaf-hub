@@ -8,13 +8,13 @@ Backend: scripts/takeoff/sandbox.mjs — real takeoff routes + Postgres (migrati
 
 ## S0 — Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000) — **PASS**
 
-1. `01-S0-job-takeoffs-empty.png` — Job takeoffs on the Worker PWA route — no takeoff yet (fresh sandbox)
-2. `02-S0-takeoff-overview.png` — New takeoff: plan not scaled; Add flashing / timber / cladding / aluminium
+1. `01-S0-job-takeoffs-empty.png` — Job takeoff on the Worker PWA route — choose Flashings or Timber and cladding (fresh sandbox)
+2. `02-S0-takeoff-overview.png` — New takeoff, Timber and cladding section: plan not scaled; Add timber / cladding / aluminium (no flashing actions)
 3. `03-S0-calibrate-horizontal.png` — Scale: both ends of the printed 12,000 dimension tapped, 12000 typed
 4. `04-S0-calibrate-ready.png` — Horizontal + vertical agree; independent 3,000 check → Scale is ready
 5. Server calibration record: status ready
 
-Observed (real server): `{"calibration":{"id":"cfcc206a-7d13-491f-ac59-c239d1ef1124","documentId":"f98c1a8e-8115-45a4-b072-e7fcbddfddcc","pageIndex":0,"pageMeta":{"rotate":0,"viewBox":[0,0,842,595],"userUnit":1},"region":null,"regionLabel":null,"calibrationRevision":1,"supersedesCalibrationId":null,"basisRotation":0,"mode":"uniform","sx":35.277777777777786,"sy":35.277777777777786,"measuredSx":35.277777777777786,"measuredSy":35.277777777777786,"discrepancy":0,"tolerance":0.005,"horizontal":{"p1":{"x":120.00000000000006,"y":109.99999999999999},"p2":{"x":460.1574803149606,"y":109.99999999999999},"knownMm":12000},"vertical":{"p1":{"x":79.99999999999994,"y":150.00000000000006},"p2":{"x":79.99999999999994,"y":376.7716535433071},"knownMm":8000},"verification":{"p1":{"x":119.99999999999999,"y":406.7716535433072},"p2":{"x":205.03937007874012,"y":406.7716535433071},"error":0,"passed":true,"expectedMm":3000,"observedMm":3000},"status":"ready","contentSha256":"d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de","createdAt":"2026-10-14 23:36:55.819548+10:30"}}`
+Observed (real server): `{"calibration":{"id":"3973576d-a59d-488d-864a-a2593082538e","documentId":"84d35ae1-c27b-48a5-993c-c2ee1fd9e49c","pageIndex":0,"pageMeta":{"rotate":0,"viewBox":[0,0,842,595],"userUnit":1},"region":null,"regionLabel":null,"calibrationRevision":1,"supersedesCalibrationId":null,"basisRotation":0,"mode":"uniform","sx":35.277777777777786,"sy":35.277777777777786,"measuredSx":35.277777777777786,"measuredSy":35.277777777777786,"discrepancy":0,"tolerance":0.005,"horizontal":{"p1":{"x":120.00000000000006,"y":109.99999999999999},"p2":{"x":460.1574803149606,"y":109.99999999999999},"knownMm":12000},"vertical":{"p1":{"x":79.99999999999994,"y":150.00000000000006},"p2":{"x":79.99999999999994,"y":376.7716535433071},"knownMm":8000},"verification":{"p1":{"x":119.99999999999999,"y":406.7716535433072},"p2":{"x":205.03937007874012,"y":406.7716535433071},"error":0,"passed":true,"expectedMm":3000,"observedMm":3000},"status":"ready","contentSha256":"d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de","createdAt":"2026-10-19 23:26:11.0491+10:30"}}`
 
 ## J1 — Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800 — **PASS**
 
@@ -43,25 +43,30 @@ Observed (real server): `{"materialName":"Axon 133 smooth","methodKey":"sheet_la
 
 Observed (real server): `{"lines":["1 bar · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)"]}`
 
-## FL — Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400 — **PASS**
+## FL — Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400 — **PASS**
 
 1. `17-FL-flashing-profile.png` — New flashing drawn on the empty grid (2 legs), auto-saved
-2. `18-FL-path-750x4-draft.png` — Four 750 legs drawn as one path: tight 3000.000000000009 → ONE allowance → order 3,200
-3. `19-FL-path-750x4-finished.png` — Finished — one run, one piece 3,200 (corners are site cuts/folds)
-4. `20-FL-path-10000-red.png` — 10,000 path (tight 9999.999999999998): red past the 9,000 maximum, legal split marker at 8,800
-5. `21-FL-path-10000-split.png` — One tap on the red part → split at the limit (8,800 along the run) → 9,000 + 1,400
-6. `22-FL-paths-finished-saved.png` — Both runs finished + saved; after the server round-trip the sheet reads: "Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800 + 200 → 9,000 mm — long piece Piece 2: 1,200 + 200 → 1,400 mm 2 legs — corners are cut/folded on site; they ad"
+2. `18-FL-path-750x4-draft.png` — Four 750 legs drawn as one path: tight 2999.9999999999973 → ONE allowance → order 3,300 (300 mm step)
+3. `19-FL-path-750x4-finished.png` — Finished — one run, one piece 3,300 (corners are site cuts/folds)
+4. `20-FL-path-10000-red.png` — 10,000 path (tight 10000.000000000004): red past the 9,000 maximum, legal split marker at 8,800
+5. `21-FL-path-10000-split.png` — One tap on the red part → split at the limit (8,800 along the run) → 9,000 + 1,500
+6. `22-FL-path-10000-handling.png` — Split to handling length → 2 even pieces, 5,400 + 5,400 (each 5,000 tight + 200 allowance, rounded to 300)
+7. `23-FL-paths-finished-saved.png` — Both runs finished + saved; after the server round-trip the sheet reads: "Finished — one run: Order 2 pieces: 5,400 + 5,400 mm (measured 10,000) Each piece worked out 2 legs — corners are cut/folded on site; they add no pieces or allowances. Details Tap the start of the next run. Undo reopens "
 
-Observed (real server): `{"pathA":{"tight":3000.000000000009},"pathB":{"tight":9999.999999999998},"storedSplit":{"splitsMm":[8800],"splitAnchors":[{"x":431.8110236220473,"y":257.7165354330709,"stationMm":8800}]},"lines":["1 × 9000","1 × 3200","1 × 1400"],"sheetAfterSave":"Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800 + 200 → 9,000 mm — long piece Piece 2: 1,200 + 200 → 1,400 mm 2 legs — corners are cut/folded on site; they add no pieces or allowances. Piece 1 orders 9,000 mm — longer than the 6,000 mm handling length. Advisory only; no split is needed. Quantity: calculated · Installation: not specified · Procurement: ready to order Tap the start of the next run. Undo reopens this one."}`
+Observed (real server): `{"pathA":{"tight":2999.9999999999973},"pathB":{"tight":10000.000000000004},"storedSplit":{"splitsMm":[5000],"splitAnchors":[{"x":403.46456692913387,"y":178.34645669291342,"stationMm":5000}]},"lines":["2 × 5400","1 × 3300"],"sheetAfterSave":"Finished — one run: Order 2 pieces: 5,400 + 5,400 mm (measured 10,000) Each piece worked out 2 legs — corners are cut/folded on site; they add no pieces or allowances. Details Tap the start of the next run. Undo reopens this one."}`
 
-## J5 — Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back — **PASS**
+## J5 — Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back — **PASS**
 
-1. `23-J5-order-review.png` — New order: every line defaults to what is still needed; pick up (branch, ASAP), site contact + phone
-2. `24-J5-order-ready.png` — J5: saved → Ready: 3 flashing pieces · 13.600 LM · 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).
-3. `25-J5-order-exported.png` — J5: Export 1 is frozen. Nothing has been sent. Open PDF Site appendix (cutting & setout) (not a draft) — nothing sent, nothing ordered
-4. Downloaded via the app's buttons: GET /api/worker/takeoff/exports/<export>/pdf (142792 bytes) → J5-supplier-order.pdf; GET /api/worker/takeoff/exports/<export>/appendix (3308 bytes) → J5-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
+1. `24-J5-order-review.png` — Timber and cladding order: Timber and Cladding parts, every line defaults to what is still needed; pick up (branch, ASAP), site contact + phone
+2. `25-J5-order-ready.png` — J5: saved → Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).
+3. `26-J5-order-exported.png` — J5: Export 1 is frozen. Nothing has been sent. Open PDF Site appendix (cutting & setout) (not a draft) — nothing sent, nothing ordered
+4. Downloaded via the app's buttons: GET /api/worker/takeoff/exports/<export>/pdf (141013 bytes) → J5-supplier-order.pdf; GET /api/worker/takeoff/exports/<export>/appendix (3001 bytes) → J5-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
+5. `27-J5-order-review-flashings.png` — Flashings order: flashing lengths only
+6. `28-J5-order-ready.png` — J5F: saved → Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).
+7. `29-J5-order-exported.png` — J5F: Export 1 is frozen. Nothing has been sent. Open PDF Site appendix (cutting & setout) (not a draft) — nothing sent, nothing ordered
+8. Downloaded via the app's buttons: GET /api/worker/takeoff/exports/<export>/pdf (140807 bytes) → J5F-supplier-order.pdf; GET /api/worker/takeoff/exports/<export>/appendix (2370 bytes) → J5F-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
 
-Observed (real server): `{"ready":"Ready: 3 flashing pieces · 13.600 LM · 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).","pdfChecks":[]}`
+Observed (real server): `{"ready":"Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).","flashingsReady":"Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).","pdfChecks":[]}`
 
 
 ## Console errors

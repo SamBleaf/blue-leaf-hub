@@ -144,3 +144,71 @@ test("HUB 007: an accessory from a different supplier is left off the timber and
   // the fixings say "Fielders"; the default supplier is "Fielders (review branch)" — same supplier, so they ride along
   await expect(page.locator('[data-order-part="cladding"]')).toContainText("Cladding fixings");
 });
+
+test("HUB 005: one 'Split to handling length' splits the whole run into even pieces with their own allowance; Undo puts it back", async ({ page }) => {
+  await open(page, { seed: "&takeoffSeed=mixed" });
+  await page.getByRole("button", { name: "Open schedule" }).click();
+  await page.getByRole("button", { name: /^1 ×\s*9,000 mm/ }).first().click();
+  await page.getByRole("button", { name: "Show on plan" }).click();
+  await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
+  const run = page.locator("[data-selected-run]");
+  await expect(run.locator("[data-pieces-summary]")).toContainText("Order 2 pieces: 9,000 + 1,400 mm");
+  await expect(run.locator("[data-pieces-list]")).toBeHidden();              // the working is folded away
+  await expect(run.locator("[data-statuses]")).toBeHidden();
+  await expect(run.locator("[data-edit-splits]")).not.toHaveAttribute("open", "");   // hand tools folded
+  await expect(run.getByLabel("Move to a corner")).toBeHidden();
+  // the old 8,800 split leaves a 9,000 piece over the 6,000 handling length → one action re-splits the whole run evenly
+  const btn = run.locator("[data-split-to-handling]");
+  await expect(btn).toHaveText("Split to handling length — 2 × 5,200 mm");
+  await btn.click();
+  await expect(run.locator("[data-pieces-summary]")).toContainText("Order 2 pieces: 5,200 + 5,200 mm");
+  await expect(page.getByText(/Split into 2 pieces: 5,200 \+ 5,200 mm — each with its own allowance, all within the 6,000 mm handling length/)).toBeVisible();
+  await expect(run.locator("[data-split-to-handling]")).toHaveCount(0);       // nothing left to split
+  await run.locator("[data-pieces-summary] + details summary").click();
+  await expect(run.locator("[data-pieces-list] li")).toHaveCount(2);
+  await page.getByRole("button", { name: "Undo" }).first().click();
+  await expect(run.locator("[data-pieces-summary]")).toContainText("Order 2 pieces: 9,000 + 1,400 mm");
+});
+
+test("HUB 005: a new flashing orders in 300 mm steps", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Add flashing" }).click();
+  await page.getByRole("button", { name: "Finished pieces only (no drawing)" }).click();   // shares the new-flashing rules with "New flashing"
+  await expect(page.getByLabel("Round measured runs up to")).toHaveValue("300");
+  await expect(page.getByLabel("Measured allowance", { exact: false }).first()).toHaveValue("200");
+});
+
+test("HUB 010: tapping a 'needs attention' line opens that flashing at the missing field; Close returns to the order, fixed", async ({ page }) => {
+  // the Barge flashing has lost its colour (seeded through the review API, as a real edit would)
+  await page.goto("/carpentry/cjb-1?reviewRole=admin");
+  await ready(page);
+  const res = await page.evaluate(async () => {
+    const ws = await (await fetch("/api/takeoff/workspaces/ws-1")).json();
+    const m = ws.snapshot.materials.find((x) => x.id === "mat-barge");
+    const r = await fetch("/api/takeoff/workspaces/ws-1/commit", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: ws.snapshot.workspace.revision, idempotencyKey: "hub010", changes: { materials: { upsert: [{ ...m, spec: { ...m.spec, colour: null } }], archive: [] } } }) });
+    return r.json();
+  });
+  expect(res.ok, JSON.stringify(res)).toBe(true);
+  await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await ready(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await page.getByRole("button", { name: "New order" }).click();
+  const fix = page.locator("[data-fix-line]").first();
+  await expect(fix).toHaveText("Needs attention — material details missing ›");
+  // the not-ready summary names the flashing and the length, and is tappable too
+  await expect(page.locator("[data-blockers] button").first()).toHaveText(/^Barge flashing · [\d,]+ mm — material details missing ›$/);
+  await fix.click();
+  await expect(page.getByText(/Fix this to clear the order warning — choose the colour/)).toBeVisible();
+  const colour = page.locator("[data-needs-fix]");
+  await expect(colour).toBeFocused();
+  await colour.selectOption("Surfmist");
+  await page.getByRole("button", { name: "Close" }).click();
+  // back on the same order: the line now uses the fixed flashing (save to keep it) and nothing needs attention
+  await expect(page.getByRole("heading", { name: "Flashings orders" })).toBeVisible();
+  await expect(page.locator("[data-fix-line]")).toHaveCount(0);
+  await expect(page.getByText(/Updated 3 lines to the fixed Barge flashing — save order details to keep them/)).toBeVisible();
+  await expect(page.getByTestId("stale-lines")).toHaveCount(0);
+  await page.getByRole("button", { name: "Save order details" }).click();
+  await expect(page.getByText(/^Ready: /)).toBeVisible();
+});

@@ -19,6 +19,12 @@ export const FLASHING_RULE_DEFAULTS = Object.freeze({
   orderCeilingMm: 9000,
 });
 
+/**
+ * Blue Leaf's ordering rules for a NEW flashing (Hub review HUB 005, 19 Oct 2026): a 300 mm order step, so a job orders
+ * a few standard lengths without much waste. FLASHING_RULE_DEFAULTS stays the R03 calculation default for older data.
+ */
+export const NEW_FLASHING_RULES = Object.freeze({ ...FLASHING_RULE_DEFAULTS, incrementMm: 300 });
+
 /** Validate + fill a flashing rule set. Never mutates input. */
 export function normaliseFlashingRules(rules = {}) {
   const r = { ...FLASHING_RULE_DEFAULTS, ...(rules || {}) };

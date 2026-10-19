@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-13
+sop_version: 1.1
+last_reviewed: 2026-10-19
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -113,6 +113,21 @@ Takeoffs lets the office and leading hands measure flashings straight off the jo
 5. Banners appear at the top when something needs you: recovered changes, a save conflict, "Recovery unavailable", or a replaced plan (**Mark reviewed**).
 
 [insert screenshot: takeoff overview — Plan, Materials and Length schedule sections]
+
+### D2. Choose Flashings or Timber and cladding first (Hub review, 19 Oct 2026)
+
+A job has **one takeoff** with **two sections**. They are measured and ordered separately.
+
+1. Open the job's takeoff. The first screen asks **What are you measuring?**
+   - **Flashings** — flashing profiles and lengths, ordered from the flashing supplier.
+   - **Timber and cladding** — timber, cladding, battens, accessories and aluminium, on one order to the timber and cladding supplier.
+2. Tap one. The first time, this also creates the job's takeoff.
+3. The heading shows the section you are in. To change section, use the **Flashings | Timber and cladding** switch under the heading. Nothing is lost when you switch: saved quantities and unfinished drawings stay.
+4. Each section only offers its own **Add** buttons:
+   - Flashings: **Add flashing**.
+   - Timber and cladding: **Timber** (**Add timber**) and **Cladding** (**Add cladding**, **Add aluminium**). Aluminium used with cladding sits under Cladding.
+5. Each material is one compact row: name and a one-line summary. **Tap the row** to show its buttons (Profile / Details / Setup / Walls / Cutting / Add lengths). **Remove** and **Save as standard** are under **More**.
+6. **‹ Back** returns to the section choice. A link ending in `?section=flashings` or `?section=timber_cladding` opens that section directly.
 
 ### E. Look at a leading hand's takeoffs read-only (Admin "preview as worker")
 
@@ -317,6 +332,15 @@ Next review date: 2027-04-13
 **TC-11 — Open an existing carpentry plan, original-view fallback (A01)**
 1. Upload a PDF larger than 40 MB to the test job; open Takeoffs → **Set up plans** → choose it.
 2. Expected result: "This plan is too large to measure in the app. Open it in your device viewer instead. You can still view it in your device's PDF viewer." with **Open in device viewer**, which opens the plan in a new tab. `GET /api/takeoff/documents/<docId>/content` → HTTP 413 `TOO_LARGE`. The normal-sized plan opens with its correct title and page count.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Section choice and compact rows (HUB 002, UI Review, mixed job)**
+1. Open `/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed`.
+2. Expected: "What are you measuring?" with **Flashings** and **Timber and cladding**.
+3. Tap **Flashings**. Expected: **Add flashing** only (no **Add timber**, **Add cladding**, **Add aluminium**); rows "Apron flashing" and "Barge flashing" only.
+4. Tap the "Apron flashing" row. Expected: its buttons show; **Remove** appears only after **More**.
+5. Switch to **Timber and cladding**. Expected: a **Timber** part with **Add timber** and a **Cladding** part with **Add cladding** + **Add aluminium**; "Window angle 50 × 50 × 3" is listed under Cladding; no **Add flashing**.
+6. Switch back. Expected: the flashings are unchanged.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

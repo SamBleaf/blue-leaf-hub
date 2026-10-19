@@ -10,11 +10,11 @@
       "id": "S0",
       "title": "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
       "status": "PASS",
-      "seconds": 9,
+      "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "cfcc206a-7d13-491f-ac59-c239d1ef1124",
-          "documentId": "f98c1a8e-8115-45a4-b072-e7fcbddfddcc",
+          "id": "3973576d-a59d-488d-864a-a2593082538e",
+          "documentId": "84d35ae1-c27b-48a5-993c-c2ee1fd9e49c",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-14 23:36:55.819548+10:30"
+          "createdAt": "2026-10-19 23:26:11.0491+10:30"
         }
       }
     },
@@ -84,7 +84,7 @@
       "id": "J1",
       "title": "Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800",
       "status": "PASS",
-      "seconds": 13,
+      "seconds": 12,
       "observed": {
         "projected": [
           "18 piece · 90 × 45 MGP10 H3 — 5,400 mm length"
@@ -130,48 +130,48 @@
     },
     {
       "id": "FL",
-      "title": "Flashing paths: four 750 legs → ONE 3,200; 10,000 path → red overflow → split at limit → 9,000 + 1,400",
+      "title": "Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400",
       "status": "PASS",
-      "seconds": 18,
+      "seconds": 17,
       "observed": {
         "pathA": {
-          "tight": 3000.000000000009
+          "tight": 2999.9999999999973
         },
         "pathB": {
-          "tight": 9999.999999999998
+          "tight": 10000.000000000004
         },
         "storedSplit": {
           "splitsMm": [
-            8800
+            5000
           ],
           "splitAnchors": [
             {
-              "x": 431.8110236220473,
-              "y": 257.7165354330709,
-              "stationMm": 8800
+              "x": 403.46456692913387,
+              "y": 178.34645669291342,
+              "stationMm": 5000
             }
           ]
         },
         "lines": [
-          "1 × 9000",
-          "1 × 3200",
-          "1 × 1400"
+          "2 × 5400",
+          "1 × 3300"
         ],
-        "sheetAfterSave": "Finished — one run: Measured 10,000 along the run → 2 pieces, each with its own 200 allowance: Piece 1: 8,800 + 200 → 9,000 mm — long piece Piece 2: 1,200 + 200 → 1,400 mm 2 legs — corners are cut/folded on site; they add no pieces or allowances. Piece 1 orders 9,000 mm — longer than the 6,000 mm handling length. Advisory only; no split is needed. Quantity: calculated · Installation: not specified · Procurement: ready to order Tap the start of the next run. Undo reopens this one."
+        "sheetAfterSave": "Finished — one run: Order 2 pieces: 5,400 + 5,400 mm (measured 10,000) Each piece worked out 2 legs — corners are cut/folded on site; they add no pieces or allowances. Details Tap the start of the next run. Undo reopens this one."
       }
     },
     {
       "id": "J5",
-      "title": "Order: timber + Axon sheets + aluminium bars + flashing; delivery/pickup; NON-draft export; supplier PDF + site appendix read back",
+      "title": "Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back",
       "status": "PASS",
-      "seconds": 4,
+      "seconds": 8,
       "observed": {
-        "ready": "Ready: 3 flashing pieces · 13.600 LM · 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "ready": "Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "flashingsReady": "Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).",
         "pdfChecks": []
       }
     }
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-14T13:07:39.614Z"
+  "at": "2026-10-19T12:56:57.634Z"
 }

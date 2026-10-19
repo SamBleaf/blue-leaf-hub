@@ -76,14 +76,23 @@ async function openPdf(api, exportId, setMsg, kind = "pdf") {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts = [], section = SECTIONS.FLASHINGS }) {
+/** HUB 010: a short reason for a line's first problem — shown on its Fix button and in the not-ready summary. */
+function fixReason(problems) {
+  const p = problems?.[0];
+  return { material_incomplete: "material details missing", perforation_incomplete: "perforation not specified", profile_invalid: "drawing has a problem",
+    ceiling_exceeded: "over the order maximum — split it", ceiling_unknown: "no order maximum set up", split_stale: "a split needs review", split_invalid: "a split needs review",
+    calibration_missing: "plan not scaled", calibration_not_ready: "plan scale not checked", calibration_superseded: "page re-scaled — review", plan_superseded: "plan replaced — review",
+    outside_region: "outside the scaled area", path_in_progress: "run not finished" }[p] || (p ? "needs attention" : "");
+}
+
+export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts = [], section = SECTIONS.FLASHINGS, onFix = null, focus = null, onFocusDone = null }) {
   const wsId = ws.view?.workspace?.id;
   const [data, setData] = useState(null);
   const [suppliers, setSuppliers] = useState(null);
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(focus?.orderId || null); // HUB 010: back on the same draft after a fix
 
   const load = useCallback(async () => {
     setError(null);
@@ -138,7 +147,8 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
       <AsyncState loading={!data && !error} error={error} onRetry={load}>
         {active && (
           <DraftOrder key={`${active.id}:${active.revision}`} api={api} order={active} data={sectionData} section={section} status={status} suppliers={suppliers} ws={ws}
-            onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} deviceDrafts={deviceDrafts} />
+            onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} deviceDrafts={deviceDrafts}
+            onFix={onFix} focus={focus?.orderId === active.id ? focus : null} onFocusDone={onFocusDone} />
         )}
         <OrderHistory api={api} orders={sectionOrders} caps={caps} onChanged={async () => { await load(); await ws.refreshOrderStatus?.(); }} setMsg={setMsg} />
       </AsyncState>
@@ -175,7 +185,7 @@ function AddSupplier({ api, onAdded, onCancel }) {
   );
 }
 
-function DraftOrder({ api, order, data, section, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [] }) {
+function DraftOrder({ api, order, data, section, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [], onFix = null, focus = null, onFocusDone = null }) {
   const [extra, setExtra] = useState(false); // explicit "order more than is still needed" (spares)
   // unsaved changes typed on this device before a reload (same order, same saved revision only)
   const [restored, setRestored] = useState(() => readOrderDraft(order));
@@ -352,6 +362,34 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     if (x.suggestion) setRefresh((s) => new Set(s).add(x.suggestion.bucketKey));
     setMsg(r.kept && !isGenericLine(x.line) ? `Kept ${r.kept} × ${fmtMm(x.line.finishedLengthMm)} mm for the other flashing in that colour and moved ${r.moved} to the new colour — check, then save.` : null);
   };
+  // HUB 010: a line's problem opens the fix (the flashing's details at the missing field, its drawing, or the run on the
+  // plan); Close comes back to this order at this line
+  const fixOf = (l) => (onFix && l.problems.length ? () => onFix({ orderId: order.id, bucketKey: l.bucketKey, materialId: l.jobMaterialIds[0], problems: l.problems }) : null);
+  const fixList = (lines || []).filter((l) => l.problems.length && (qty[l.bucketKey] ?? 0) > 0)
+    .map((l) => ({ l, mat: mats.get(l.jobMaterialIds[0]), text: `${mats.get(l.jobMaterialIds[0])?.name || "A material"}${isGenericLine(l) ? "" : ` · ${fmtMm(l.finishedLengthMm)} mm`} — ${fixReason(l.problems)}` }));
+  // back from a fix: the line is brought up to date with the fixed flashing (save to keep it) and shown again
+  const focusDone = useRef(false);
+  useEffect(() => {
+    if (!focus?.bucketKey || focusDone.current || !ws.computed) return;
+    focusDone.current = true;
+    // every line of the fixed material went stale together (its bucket changed) — bring them all up to date at once
+    const xs = staleLines.filter((y) => y.suggestion && (y.line.bucketKey === focus.bucketKey || (focus.materialId && y.line.jobMaterialId === focus.materialId)));
+    if (xs.length) {
+      let q = qty, c = chosen;
+      for (const y of xs) { const r = reconcileStaleLine(q, c, y); q = r.qty; c = r.chosen; }
+      setQty(q); setChosen(c);
+      setRefresh((s0) => { const n = new Set(s0); for (const y of xs) n.add(y.suggestion.bucketKey); return n; });
+      setMsg(`Updated ${xs.length === 1 ? "the line" : `${xs.length} lines`} to the fixed ${mats.get(focus.materialId)?.name || "flashing"} — save order details to keep ${xs.length === 1 ? "it" : "them"}.`);
+    }
+    const x = xs.find((y) => y.line.bucketKey === focus.bucketKey);
+    const key = x?.suggestion?.bucketKey || focus.bucketKey;
+    setTimeout(() => {
+      const el = [...(formRef.current?.querySelectorAll("[data-order-line]") || [])].find((n) => n.getAttribute("data-order-line") === key);
+      el?.scrollIntoView({ block: "center" });
+      onFocusDone?.();
+    }, 60);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus, ws.computed]);
   const removeLine = (x) => { setQty((q) => ({ ...q, [x.line.bucketKey]: 0 })); setChosen((c) => { const n = { ...c }; delete n[x.line.bucketKey]; return n; }); };
 
   return (
@@ -434,8 +472,10 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
           {flashLines.map((l) => {
             const st = status.get(l.bucketKey);
             return (
-              <li key={l.bucketKey} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm">
-                <span className="flex-1">{fmtMm(l.finishedLengthMm)} mm{l.handlingFlag ? " · long" : ""}{l.problems.length ? <span className="ml-1 text-[11px] text-red-700">needs attention</span> : null}
+              <li key={l.bucketKey} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm" data-order-line={l.bucketKey}>
+                <span className="flex-1">{fmtMm(l.finishedLengthMm)} mm{l.handlingFlag ? " · long" : ""}{l.problems.length && !fixOf(l) ? <span className="ml-1 text-[11px] text-red-700">needs attention</span> : null}
+                  {fixOf(l) && <button type="button" className="ml-1 inline-flex min-h-[44px] items-center rounded-lg px-1 text-[12px] font-semibold text-red-700 underline" data-fix-line=""
+                    onClick={fixOf(l)}>Needs attention — {fixReason(l.problems)} ›</button>}
                   <span className="block text-[11px] text-ink">{labelFor(l)}</span>
                   <span className="block text-[11px] text-muted">need {st?.required ?? l.quantity} · ordered {st?.ordered ?? 0} · left {st?.remaining ?? l.quantity}</span></span>
                 <div className="w-28"><NumberField label="Qty" unit="pcs" integer min={0} value={qty[l.bucketKey] ?? 0} onCommit={(n) => setQty((q) => ({ ...q, [l.bucketKey]: n }))} /></div>
@@ -466,7 +506,9 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
                           <li key={l.bucketKey} className="space-y-1.5 px-2 py-2 text-sm" data-order-line={l.bucketKey} data-unit={l.unit}>
                             <p className="break-words text-ink">{l.item?.description || unitWord(l.unit, 2)}
                               {l.unit === "lm" && <span className="ml-1 inline-block rounded bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800">estimate — not a piece count</span>}
-                              {l.problems.length > 0 && <span className="ml-1 inline-block rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700">needs attention</span>}
+                              {l.problems.length > 0 && (fixOf(l)
+                          ? <button type="button" className="ml-1 inline-flex min-h-[44px] items-center rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700 underline" data-fix-line="" onClick={fixOf(l)}>needs attention — fix ›</button>
+                          : <span className="ml-1 inline-block rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700">needs attention</span>)}
                               <span className="block text-[11px] text-muted">need {qtyText(need, l.unit)} · ordered {qtyText(st?.ordered ?? 0, l.unit)} · left {st?.remaining ?? l.quantity}</span>
                             </p>
                             {/* a line can't order more than the takeoff needs (the supplier export refuses it) — no hidden over-order */}
@@ -495,7 +537,8 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
       )}
       {/* 02 §6: accessory groups by others, excluded or not decided are named in the review — never silently zero */}
       <AccessoryScopeReview materials={(ws.view?.materials || []).filter((m) => materialSection(m) === section)} results={ws.computed?.materialResults} />
-      {dirtyForm && <Btn kind="primary" className="w-full" onClick={save} disabled={busy || invalidFields > 0}>Save order details</Btn>}
+      {/* never while a takeoff edit is still saving — the server would check the lines against the older takeoff */}
+      {dirtyForm && <Btn kind="primary" className="w-full" onClick={save} disabled={busy || invalidFields > 0 || ws.dirty}>Save order details</Btn>}
       {invalidDrafts.length > 0 && (
         <Banner tone="warn">{invalidDrafts.map((x) => x.name).join(", ")}: a size typed on this device isn&apos;t valid yet, so the drawing on this order may be out of date. Open the flashing and fix it before sending.</Banner>
       )}
@@ -506,7 +549,11 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
         </label>
       )}
       {preview && !dirtyForm && (preview.problems.length
-        ? <Banner tone="warn"><p className="font-medium">Not ready to order yet:</p><ul className="ml-4 list-disc text-xs">{[...new Set(previewProblems)].map((p) => <li key={p}>{p}</li>)}</ul></Banner>
+        ? <Banner tone="warn"><p className="font-medium">Not ready to order yet:</p>
+          {fixList.length > 0 && <ul className="space-y-0.5 text-xs" data-blockers="">{fixList.map((f) => (
+            <li key={f.l.bucketKey}>{onFix ? <button type="button" className="min-h-[44px] text-left font-semibold underline" onClick={fixOf(f.l)}>{f.text} ›</button> : f.text}</li>
+          ))}</ul>}
+          <ul className="ml-4 list-disc text-xs">{[...new Set(previewProblems)].filter((p) => !fixList.some((f) => f.mat && p.startsWith(`${f.mat.name} `))).map((p) => <li key={p}>{p}</li>)}</ul></Banner>
         : <Banner tone="ok">Ready: {readyText(preview.snapshot.totals)} to {preview.snapshot.supplier?.name}.</Banner>)}
       <div className="flex flex-wrap gap-2">
         <Btn onClick={() => exportPdf(true)} disabled={busy || dirtyForm || ws.dirty || invalidFields > 0}>Export draft PDF</Btn>

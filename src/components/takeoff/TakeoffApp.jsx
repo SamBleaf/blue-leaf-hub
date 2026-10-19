@@ -9,7 +9,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
 import { newId } from "../../lib/takeoffApi.js";
@@ -199,6 +199,8 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     if (own.length && !own.some((m) => m.id === activeMaterial)) setActiveMaterial(own[0].id);
   }, [view, activeMaterial, section]);
   const [openRow, setOpenRow] = useState(null); // material row whose actions are showing ("" = all closed)
+  const [orderFocus, setOrderFocus] = useState(null); // HUB 010: { orderId, bucketKey } to come back to after a fix
+  useEffect(() => { if (win === "overview") setOrderFocus(null); }, [win]);
   const [moreFor, setMoreFor] = useState(null);
   // a reload (or a PWA restart) returns to the wall / cutting sheet / schedule the user had open, if it still exists
   const placeKey = wsId ? `takeoff-place:${wsId}` : null;
@@ -360,7 +362,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     setActiveMaterial(m.id);
   }
   const currentMat = (m) => view.materials.find((x) => x.id === m.id) || m;
-  const newFlashing = () => ({ id: newId(), name: `Flashing ${view.materials.filter((x) => x.methodKey === "flashing_runs").length + 1}`, methodKey: "flashing_runs", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: {}, profile: null });
+  const newFlashing = () => ({ id: newId(), name: `Flashing ${view.materials.filter((x) => x.methodKey === "flashing_runs").length + 1}`, methodKey: "flashing_runs", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: { ...NEW_FLASHING_RULES }, profile: null });
   // TC-R04 families: create the job material at once (auto-apply), then open its setup card
   const addFamily = (spec, name, rules = {}) => {
     const mm = methodFor(spec);
@@ -398,6 +400,40 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }
 
   const leaveEditor = () => { setEditing(null); setWin(setupFrom || "overview"); setSetupFrom(null); setTimeout(refreshDrafts, 50); };
+  /**
+   * HUB 010: an order line's problem opens its fix — the flashing's details at the missing field, its drawing, the
+   * material setup, or the run itself on the plan (over the maximum → split it). Close returns to the same order line.
+   */
+  function fixFromOrder({ orderId, bucketKey, materialId, problems }) {
+    const m = view.materials.find((x) => x.id === materialId);
+    if (!m) return;
+    setOrderFocus({ orderId, bucketKey, materialId });
+    const runIssue = problems.find((p) => ["ceiling_exceeded", "split_stale", "split_invalid", "calibration_missing", "calibration_not_ready", "calibration_superseded", "plan_superseded", "outside_region", "path_in_progress"].includes(p));
+    const fam = m.spec?.family && m.spec.family !== "flashing";
+    if (runIssue && !fam) {
+      const line = (ws.computed?.scheduleLines || []).find((l) => l.bucketKey === bucketKey);
+      const byContrib = new Map((ws.computed?.contributions || []).map((c) => [c.contributionId, c.measurementId]));
+      const ids = [...new Set((line?.contributionIds || []).map((c) => byContrib.get(c)).filter(Boolean))];
+      const onPlan = view.measurements.find((x) => ids.includes(x.id) && x.documentId && x.points?.length);
+      if (onPlan) {
+        setActiveMaterial(m.id); setDocId(onPlan.documentId); setPageIndex(onPlan.pageIndex ?? 0);
+        setHighlightIds(ids); setWin("measure");
+        return;
+      }
+    }
+    setSetupFrom("orders");
+    if (fam) { setEditing({ material: m, stage: "family" }); return; }
+    if (problems.includes("profile_invalid") && !problems.includes("material_incomplete")) { setEditing({ material: m, stage: "profile" }); return; }
+    let focusField = null, reason = "check its details";
+    if (problems.includes("perforation_incomplete")) { focusField = "perforation"; reason = "the perforation isn't specified"; }
+    if (problems.includes("material_incomplete")) {
+      let n = null; try { n = normaliseSpec(m.spec); } catch { n = null; }
+      const fin = !n?.finishId || !n.finish || /^other( \/ custom)?$/i.test(n.finish.trim());
+      focusField = fin ? "finish" : n.bmt == null ? "bmt" : n.colourApplicable == null ? "painted" : n.colourApplicable && !n.colour ? "colour" : "finish";
+      reason = { finish: "choose the material / finish", bmt: "choose the thickness (BMT)", painted: "say whether it is painted", colour: "choose the colour" }[focusField];
+    }
+    setEditing({ material: m, stage: "details", focusField, fromOrder: reason });
+  }
   const toLengths = (m) => {
     setActiveMaterial(m.id); setEditing(null);
     setWin(m.spec?.family === "aluminium" ? "aluminium" : usesWalls(m) ? "walls" : docId ? "measure" : "overview");
@@ -502,8 +538,9 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       <FocusedWindow title={std ? editing.material.name : "Flashing details"} subtitle={std ? "Company standard" : `${m.name} · this job only`} onClose={leaveEditor} closeLabel={std ? "Cancel" : "Close"}
         actions={!std && m.methodKey === "flashing_runs" ? <SaveChip status={ws.status} /> : null}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {editing.fromOrder && <div className="mb-3"><Banner tone="warn">Fix this to clear the order warning — {editing.fromOrder}. Close takes you back to the order.</Banner></div>}
           {!std && <FlashingLengths m={m} />}
-          <MaterialSheet key={m.id} value={m} view={view} mode={std ? "standard" : "job"} canEditSourceReview={caps.editStandards}
+          <MaterialSheet key={m.id} value={m} view={view} mode={std ? "standard" : "job"} canEditSourceReview={caps.editStandards} focusField={editing.focusField || null}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules })}
             onCancel={leaveEditor}
             onSave={async (x) => {
@@ -529,7 +566,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
           <MaterialPicker api={api} canEditStandards={caps.editStandards}
             onUseStandard={useStandard}
             onDrawNew={() => setEditing({ material: newFlashing(), isNew: true, stage: "profile" })}
-            onPiecesOnly={() => { const m = { id: newId(), name: "Finished pieces", methodKey: "finished_piece_count", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: {}, profile: null }; upsertMaterial(m); setEditing({ material: m, stage: "details" }); }}
+            onPiecesOnly={() => { const m = { id: newId(), name: "Finished pieces", methodKey: "finished_piece_count", methodVersion: 1, spec: { ...FLASHING_SPEC_DEFAULTS }, rules: { ...NEW_FLASHING_RULES }, profile: null }; upsertMaterial(m); setEditing({ material: m, stage: "details" }); }}
             onEditStandard={(p) => setEditing({ material: p, isStandard: true })}
             onEditStandardProfile={(p) => setEditing({ material: p, isStandard: true, stage: "profile" })}
             onRetireStandard={async (p) => {
@@ -579,7 +616,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       onChangeMaterial={() => { setHighlightIds(null); setWin("materials"); }} onScale={caps.edit ? () => setWin("calibrate") : null}
       onOpenWall={(id) => { setHighlightIds(null); setOpenWall(id); setWin("walls"); }}
       highlightIds={highlightIds}
-      onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
+      onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(orderFocus ? "orders" : usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
   }
   if (win === "materials") {
     return (
@@ -622,6 +659,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }
   if (win === "orders") {
     return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} section={section} jobAddress={ws.server?.jobAddress}
+      onFix={fixFromOrder} focus={orderFocus} onFocusDone={() => setOrderFocus(null)}
       deviceDrafts={editorDrafts.map((d) => ({ name: view.materials.find((x) => x.id === d.materialId)?.name || "A new flashing", invalid: Object.keys(d.draft?.drafts || {}).length }))} /></div></FocusedWindow>;
   }
 

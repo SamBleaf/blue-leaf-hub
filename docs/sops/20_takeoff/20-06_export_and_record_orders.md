@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-10-14
+sop_version: 2.1
+last_reviewed: 2026-10-19
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -88,6 +88,18 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 7. Read the banner:
    - "Not ready to order yet:" followed by a list (e.g. "Choose a supplier.", "Enter the delivery address.", "Enter the date it's required by (or choose As soon as possible).", "Enter a site contact phone number.", "Material, finish, BMT or colour is missing.", "<material>: …") — fix each item.
    - "Ready: N pieces · X LM to <supplier>." (with other units listed too) — ready for the supplier PDF.
+
+### B2. Separate orders, adding a supplier, fixing a warning (Hub review, 19 Oct 2026)
+
+1. **One order per section.** Orders opened from **Flashings** are flashing orders and only take flashing lengths. Orders opened from **Timber and cladding** take timber and cladding, shown in a **Timber** part and a **Cladding** part. Their PDF reads "TIMBER AND CLADDING ORDER" and prints the two parts in the same order. The system refuses a line from the other section. Migration 208 must be applied.
+2. **An accessory from another supplier** (its setup names a different supplier, e.g. fixings from Fielders when the order goes to Bunnings) is left off a new timber and cladding order. It is named under "Still needed but not on this order" ("— from Fielders: start a separate order for it"). If it is added anyway, the supplier export is blocked until it is moved.
+3. **Add supplier** (office staff: Admin / Supervisor) is next to the supplier list. Enter the name (contact, phone and email are optional) → **Save supplier**. It is selected straight away; then **Save order details**.
+4. **Site contact** starts as the person who created the order (their name and phone from their staff / employee record). Type over it if someone else will receive the delivery.
+5. **Needs attention:** a flashing line with a problem shows a button, e.g. "Needs attention — material details missing ›". Tap it:
+   - a missing detail (finish, thickness, colour, perforation) opens that flashing's details, already at the missing field. **Close** brings you back to the same order and line. The order's lines for that flashing are updated to the fixed version. Then **Save order details**.
+   - an over-length or split problem opens that run on the plan; use **Split to handling length** (SOP 20-11).
+6. The "Not ready to order yet:" box lists each problem by flashing and length (e.g. "Barge flashing · 7,200 mm — material details missing ›"). Each one can be tapped. **Export supplier PDF** stays blocked only while a real problem remains. **Export draft PDF** is always marked draft.
+7. **Save order details** waits while the takeoff is still saving your last change.
 
 ### C. Update out-of-date lines
 
@@ -388,6 +400,26 @@ Next review date: 2027-04-14
 **TC-16 — Unsaved order changes survive on this device (UI Review)**
 1. Mixed job → **New order** → change the Axon quantity to 3 (Enter) without saving → **Back** → **Review & export order** again.
 2. Expected result: "Restored changes you hadn't saved on this device. Save order details to keep them." with the 3 restored and **Discard**; **Discard** returns to the saved quantity (4).
+- [ ] Pass  [ ] Fail
+
+**TC-17 — Separate orders per section (HUB 007, UI Review, mixed job)**
+1. **Flashings** → **Review & export order** → **New order**. Expected: heading "Flashings orders"; **Lengths on this order** only; no material blocks.
+2. **Back** → switch to **Timber and cladding** → **Review & export order**. Expected: "Timber and cladding orders"; the flashing draft is not listed.
+3. **New order**. Expected: a **Timber** part ("Rafters 90 × 45") and a **Cladding** part ("Axon cladding"); no **Lengths on this order**.
+4. Live stack: PATCH a flashing line onto the timber and cladding order. Expected 400 "… goes on a Flashings order, not this Timber and cladding order."
+- [ ] Pass  [ ] Fail
+
+**TC-18 — Fix a 'needs attention' line from the order (HUB 010, UI Review)**
+1. Clear the Barge flashing's colour, then **Flashings** → **Review & export order** → **New order**.
+2. Expected: "Needs attention — material details missing ›" on its lines; the not-ready box lists "Barge flashing · … mm — material details missing ›".
+3. Tap the line button. Expected: **Flashing details** with "Fix this to clear the order warning — choose the colour", the **Colour** field focused.
+4. Choose **Surfmist** → **Close**. Expected: back on "Flashings orders"; "Updated 3 lines to the fixed Barge flashing — save order details to keep them."; no warnings.
+5. **Save order details**. Expected: "Ready: …".
+- [ ] Pass  [ ] Fail
+
+**TC-19 — Add supplier and site contact (HUB 008 / HUB 009)**
+1. As Admin in a draft, tap **Add supplier** → "Stratco Wingfield", phone "08 8000 1234" → **Save supplier**. Expected: it is selected; "Added Stratco Wingfield — save order details…".
+2. Live stack: a new order created by a staff user with a linked employee phone. Expected: **Site contact** and **Contact phone** are that person's.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

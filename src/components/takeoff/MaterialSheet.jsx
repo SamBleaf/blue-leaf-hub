@@ -7,7 +7,7 @@
 // Options are published Fielders families/palettes, NOT confirmed stock: every combination says
 // "Confirm availability with supplier" until someone ticks that the supplier confirmed it.
 // =============================================================================
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FINISHES, FLASHING_RULE_DEFAULTS, FLASHING_SPEC_DEFAULTS, PERFORATION_PATTERNS, AVAILABILITY,
   colourOptions, computeWorkspace, finishInfo, normaliseFlashingRules, normaliseSpec, specProblems, thicknessOptions, PROBLEM_TEXT,
@@ -45,7 +45,21 @@ function Choice({ label, value, options, onChange, name }) {
   );
 }
 
-export default function MaterialSheet({ value, view, profile = null, mode = "job", onChange, onSave, onCancel, canEditSourceReview = false }) {
+export default function MaterialSheet({ value, view, profile = null, mode = "job", onChange, onSave, onCancel, canEditSourceReview = false, focusField = null }) {
+  // HUB 010: opened from an order warning — go straight to the field that is missing
+  useEffect(() => {
+    if (!focusField) return;
+    const id = { finish: `fin-${value?.id}`, bmt: `bmt-${value?.id}`, colour: `col-${value?.id}` }[focusField];
+    const el = id ? document.getElementById(id)
+      : focusField === "perforation" ? document.querySelector("[data-perforation-details]")
+      : focusField === "painted" ? document.querySelector(`[name="painted-${value?.id}"]`) : null;
+    if (!el) return;
+    if (el.tagName === "DETAILS") el.open = true;
+    el.scrollIntoView({ block: "center" });
+    el.focus?.({ preventScroll: true });
+    el.setAttribute("data-needs-fix", "");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const job = mode === "job";
   const [name, setName] = useState(value?.name || "Flashing");
   const [spec, setSpec] = useState(() => {

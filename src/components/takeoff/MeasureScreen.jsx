@@ -450,6 +450,16 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (which !== "draft" && which !== "sel") { setModeSel("select"); setSelected(which.measurement.id); }
     applySplits(which, t, next, `Split at the limit (${fmtRaw(at)} mm along the run).`);
   }
+  /** HUB 005: all pieces at once — the fewest even pieces within the handling length; one Undo puts the run back. */
+  function doSplitToHandling(which, res) {
+    const t = splitTarget(which);
+    if (!t) return;
+    if (!canEdit) { warn("You can't change this takeoff."); return; }
+    if (!res?.changed) { if (res?.problems?.[0]) warn(res.problems[0].message); return; }
+    t.apply(res.splitsMm);
+    setActiveSplit(null);
+    setMsg({ tone: "ok", text: `Split into ${res.pieces} pieces: ${piecesText(t, res.splitsMm)} mm — each with its own allowance, all within the ${fmtMm(res.limitMm)} mm handling length. Undo puts the run back.` });
+  }
   function splitMove(which, i, stationMm, cornerIndex = null) {
     const t = splitTarget(which);
     if (!t) return;
@@ -925,10 +935,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                   <Btn kind="ghost" onClick={discardDraft}>Discard run</Btn>
                 </div>
               )}
-              {draftPath && (draftPath.splits.length > 0 || draftPath.overflow) && (
+              {draftPath && (draftPath.splits.length > 0 || draftPath.overflow || draftPath.pieces?.some((pc) => pc.handlingFlag)) && (
                 <SplitList path={draftPath} canEdit={canEdit} activeSplit={activeSplit} onActivate={setActiveSplit}
                   onMove={(i, mm) => splitMove("draft", i, mm)} onCorner={(i, v) => splitMove("draft", i, null, v)} onRemove={(i) => splitRemove("draft", i)}
-                  onRecalc={(i) => splitRecalc("draft", i)} onAdd={(mm) => splitAdd("draft", mm)} onSplitAtLimit={() => doSplitAtLimit("draft", draftPath.overflow?.pieceIndex)} />
+                  onRecalc={(i) => splitRecalc("draft", i)} onAdd={(mm) => splitAdd("draft", mm)} onSplitAtLimit={() => doSplitAtLimit("draft", draftPath.overflow?.pieceIndex)}
+                  onSplitToHandling={(res) => doSplitToHandling("draft", res)} />
               )}
               {!draft && lastDone && (() => {
                 const p = flashPaths.get(lastDone.id);
@@ -1033,7 +1044,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               })()}
               <SplitList path={selPath} canEdit={canEdit} activeSplit={activeSplit} onActivate={setActiveSplit}
                 onMove={(i, mm) => splitMove("sel", i, mm)} onCorner={(i, v) => splitMove("sel", i, null, v)} onRemove={(i) => splitRemove("sel", i)}
-                onRecalc={(i) => splitRecalc("sel", i)} onAdd={(mm) => splitAdd("sel", mm)} onSplitAtLimit={() => doSplitAtLimit("sel", selPath.overflow?.pieceIndex)} />
+                onRecalc={(i) => splitRecalc("sel", i)} onAdd={(mm) => splitAdd("sel", mm)} onSplitAtLimit={() => doSplitAtLimit("sel", selPath.overflow?.pieceIndex)}
+                onSplitToHandling={(res) => doSplitToHandling("sel", res)} />
               {canEdit && handleSel?.startsWith(`${sel.id}:`) && (
                 <Btn onClick={() => removePoint(sel, Number(handleSel.split(":")[1]))} disabled={sel.points.length <= 2}>Remove point {Number(handleSel.split(":")[1]) + 1}</Btn>
               )}

@@ -892,7 +892,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     // Print exactly what the bucket is: a material whose CURRENT spec key equals the bucket's.
     const mat = sl.jobMaterialIds.map((id) => mats.get(id)).find((m) => m && materialSpecKey(m) === sl.specKey);
     if (!mat) { problems.push(PROBLEM_TEXT.line_stale_material); continue; }
-    for (const p of sl.problems) problems.push(PROBLEM_TEXT[p] || p);
+    // HUB 010: say WHICH flashing and length — a 77-piece order must not leave the builder searching
+    for (const p of sl.problems) problems.push(`${mat.name} ${Number(sl.finishedLengthMm).toLocaleString("en-AU")} mm — ${PROBLEM_TEXT[p] || p}`);
     if (l.quantity < 1) problems.push("Quantities must be 1 or more.");
     const cv = cover?.get(sl.bucketKey);
     if (cv && cv.placed + cv.exported + l.quantity > sl.quantity && !acknowledgeSurplus) {
@@ -913,7 +914,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   const specs = new Set([...groups.keys()]);
   for (const u of computed.unplaced || []) if (u.specKey && specs.has(u.specKey)) problems.push(`A measurement couldn't be turned into lengths (${(u.problems || []).map((p) => PROBLEM_TEXT[p] || p).join(" ")}) — fix or remove it.`);
   const groupList = [...groups.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.specKey < b.specKey ? -1 : 1)).map((g, i) => {
-    for (const p of g.materialProblems) problems.push(PROBLEM_TEXT[p] || p);
+    for (const p of g.materialProblems) problems.push(`${g.materialName} — ${PROBLEM_TEXT[p] || p}`);
     g.lines.sort((a, b) => b.finishedLengthMm - a.finishedLengthMm);
     const totalMm = g.lines.reduce((a, l) => a + l.finishedLengthMm * l.quantity, 0);
     return { ...g, profileId: `P${i + 1}`, totalLm: Number((totalMm / 1000).toFixed(3)), pieces: g.lines.reduce((a, l) => a + l.quantity, 0) };

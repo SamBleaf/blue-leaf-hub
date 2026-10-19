@@ -621,6 +621,49 @@ export function splitAtLimit(path, pieceIndex) {
   return res.problems.length ? path.splitsMm.slice() : res.splitsMm;
 }
 
+/** Most splits one run may carry (the server refuses more). */
+export const MAX_RUN_SPLITS = 20;
+
+/**
+ * Hub review HUB 005 — "Split to handling length": replace ALL of a run's splits with the FEWEST even pieces whose
+ * ordered length is within the material's handling length (and never over the hard order ceiling). Each piece keeps
+ * its own allowance and order rounding, exactly as a hand-placed split would. Corners don't matter (cut/folded on site).
+ * Nothing changes when the run already fits, or when no legal layout exists — then `problems` says exactly why.
+ * @returns {{ splitsMm: number[], splitAnchors: object[], pieces: number, orderMm: number[], limitMm: number|null, changed: boolean, problems: object[] }}
+ */
+export function splitToHandling(path) {
+  const cfg = path.config;
+  const r = cfg.rules;
+  const total = path.tightTotalMm;
+  const keep = (problems) => ({ splitsMm: path.splitsMm.slice(), splitAnchors: anchorsAfter(path), pieces: path.pieces.length,
+    orderMm: path.pieces.map((pc) => pc.orderMm), limitMm: null, changed: false, problems });
+  const limits = [r.handlingThresholdMm, r.orderCeilingMm].filter((x) => isFiniteNumber(x) && x > 0);
+  if (!limits.length) return keep([problem("handling_unknown", "This flashing has no handling length or maximum set up — set them in its details first.")]);
+  const limitMm = Math.min(...limits);
+  if (!(total > PATH_TOL_MM)) return keep([problem("path_incomplete", "Finish the run first.")]);
+  const tight = cfg.lengthKind === LENGTH_KINDS.TIGHT;
+  // greatest tight length one piece may have so that its ORDER length (allowance + rounding + extras) is ≤ the limit
+  const capOf = (isFirst, isLast) => {
+    const extra = pieceExtras(cfg, isFirst, isLast).additionalMm;
+    return tight ? Math.floor((limitMm + EPS_MM) / r.incrementMm) * r.incrementMm - r.allowanceMm - extra : limitMm - extra;
+  };
+  if (capOf(true, true) <= 0 || capOf(true, false) <= 0 || capOf(false, true) <= 0 || capOf(false, false) <= 0) {
+    return keep([problem("handling_too_short", `The ${fmt(limitMm)} mm handling length leaves no room once the ${fmt(r.allowanceMm)} mm allowance and rounding are added — check this flashing's details.`)]);
+  }
+  for (let n = 1; n <= MAX_RUN_SPLITS + 1; n++) {
+    const each = total / n;
+    const stations = Array.from({ length: n - 1 }, (_, k) => total * (k + 1) / n);
+    const fits = Array.from({ length: n }, (_, k) => each <= capOf(k === 0, k === n - 1) + EPS_MM).every(Boolean);
+    if (!fits || stations.some((st) => inZone(cfg.noJointZones, st))) continue;
+    if (n === 1 && !path.splitsMm.length) return { ...keep([]), limitMm, problems: [problem("already_within", `This run already orders within the ${fmt(limitMm)} mm handling length — no split needed.`, { blocking: false })] };
+    const orderMm = Array.from({ length: n }, (_, k) => orderLength(r, cfg.lengthKind, each, pieceExtras(cfg, k === 0, k === n - 1).additionalMm));
+    return { splitsMm: stations, splitAnchors: [], pieces: n, orderMm, limitMm, changed: !sameStations(stations, path.splitsMm), problems: [] };
+  }
+  const need = Math.ceil(total / Math.max(1, capOf(false, false)));
+  return keep([problem("handling_too_many", `Splitting this ${fmt(total)} mm run to ${fmt(limitMm)} mm needs about ${need} pieces — more than the ${MAX_RUN_SPLITS + 1} a run can have${cfg.noJointZones.length ? ", or the joints would land where the project detail allows none" : ""}. Draw it as two runs, or edit the splits by hand.`)]);
+}
+const sameStations = (a, b) => a.length === b.length && a.every((x, i) => Math.abs(x - b[i]) < PATH_TOL_MM);
+
 /**
  * Move split `index` (earlier, later or onto a corner). Blocked — splits unchanged + problem — when the piece ending
  * at it would exceed legal capacity, it would pass a neighbouring split, or the project forbids a joint there. A

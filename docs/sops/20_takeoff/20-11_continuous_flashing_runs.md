@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-14
+sop_version: 1.1
+last_reviewed: 2026-10-19
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -82,6 +82,17 @@ The **Run** tool draws one continuous path: tap the start, tap each corner, then
 3. The run stays one line on the plan with a split handle at 8,800; the panel lists "Piece 1: 8,800 + 200 → 9,000 mm — long piece" and "Piece 2: 1,200 + 200 → 1,400 mm".
 4. If another piece is still over the maximum it stays red — tap it again for the next split. **One tap = one split**; joins are never added silently.
 5. **Undo** returns to the single flagged run.
+
+### C2. Split to handling length — one tap (Hub review, 19 Oct 2026)
+
+A run stays **whole** until you split it.
+
+1. When a run (or a piece) orders longer than the flashing's **handling length** (6,000 mm by default), the run panel shows **Split to handling length — N × L mm**.
+2. Tap it. The whole run is split into the **fewest even pieces** that each order within the handling length. Each piece gets its **own 200 mm allowance** and is rounded up to the order step. Example (300 mm step): 10,000 mm → 2 × 5,000 → **5,400 + 5,400 mm**.
+3. The panel shows the short answer: "Order 2 pieces: 5,400 + 5,400 mm". **Each piece worked out** opens the calculation.
+4. **Undo** puts the run back exactly as it was.
+5. If it can't be done, the panel says exactly why. For example, the handling length is too short for the allowance, or it would need more than 21 pieces. In that case draw two runs or edit the splits by hand.
+6. The hand tools (**Split at limit**, a split's position, **Move to a corner**, **Remove split**, **Add a split by distance…**) are under **Edit splits**. It opens by itself when a split needs attention.
 
 ### D. Move, add, remove or recalculate splits (Select)
 
@@ -287,6 +298,13 @@ Next review date: 2027-04-14
 **TC-11 — Schedule shows one row per resulting length**
 1. Mixed job → **Open schedule** → **Apron flashing**.
 2. Expected result: rows "1 × 9,000 mm" (**long piece**), "1 × 1,400 mm", "1 × 3,200 mm"; no rows for 750, 6,200 or 4,200; expanding 9,000 shows "Run R-m-pl1: 10,000 mm tight along the path · 1 corner(s) at 6,000 mm — cut/folded on site, no extra pieces", "Piece 1: 0 → 8,800 mm, tight 8,800 → order 9,000 mm", "Piece 2: 8,800 → 10,000 mm, tight 1,200 → order 1,400 mm", and **no** "Split" button; expanding 3,200 shows "3,000 mm tight along the path · 3 corner(s) at 750, 1,500, 2,250 mm" with one piece; **Show on plan** on the 3,200 row opens the plan with `m-pl2` selected and framed.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Split to handling length (HUB 005, UI Review, mixed job)**
+1. **Flashings** → **Open schedule** → tap "1 × 9,000 mm" → **Show on plan**.
+2. Expected: the run panel reads "Order 2 pieces: 9,000 + 1,400 mm"; **Edit splits** is closed; the button reads "Split to handling length — 2 × 5,200 mm" (this seeded flashing uses the older 100 mm step).
+3. Tap it. Expected: "Order 2 pieces: 5,200 + 5,200 mm" and "Split into 2 pieces: 5,200 + 5,200 mm — each with its own allowance, all within the 6,000 mm handling length…".
+4. Tap **Undo**. Expected: back to 9,000 + 1,400.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

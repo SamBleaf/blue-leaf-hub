@@ -23,6 +23,11 @@ const orderOf = (tight) => Math.ceil((tight + 200) / 100) * 100;
 async function ready(page) {
   await page.waitForFunction(() => document.documentElement.getAttribute("data-ui-review-ready") === "true", null, { timeout: 30_000 }).catch(() => {});
 }
+/** HUB 005: the hand split tools sit under "Edit splits" — open it (no-op when open). */
+async function editSplits(page) {
+  const d = page.locator("[data-edit-splits]").first();
+  if ((await d.getAttribute("open")) === null) await d.locator("summary").click();
+}
 async function openMeasure(page, path = HUB) {
   await page.goto(path);
   await ready(page);
@@ -241,7 +246,7 @@ test.describe("continuous flashing runs (TC-R04 13) — phone", () => {
     await zoomOn(page, at(3500, 4000), 1.6);
     await tapPdf(page, at(500, 4000)); await tapPdf(page, at(7000, 4000));
     const draft = page.locator("[data-path-draft]");
-    await expect(sheet(page).locator("[data-handling-text]")).toContainText("longer than the 6,000 mm handling length. Advisory only");
+    await expect(sheet(page).locator("[data-handling-text]")).toContainText("longer than the 6,000 mm handling length. Split to handling length, or leave it as one long piece");
     await expect(draft.locator("[data-overflow-run]")).toHaveCount(0);
     await expect(draft).toHaveAttribute("data-pieces", "1");
     await expect(page.getByRole("button", { name: /Split at limit/ })).toHaveCount(0);
@@ -355,6 +360,7 @@ test.describe("finished runs — select, edit, splits (exact geometry: review se
     await expect(page.locator("[data-selected-run]")).toBeVisible();
     await expect(page.locator("[data-selected-run] [data-statuses]")).toBeHidden(); // HUB 006: in Details, not on the panel
     await expect(page.locator("[data-selected-run] [data-statuses]")).toHaveCount(1);
+    await editSplits(page);
     await page.getByRole("button", { name: /^Split 1 — 8,800 mm along the run/ }).click();
     const f = page.getByLabel("Split 1 position (mm along the run)");
     await f.fill("5000"); await f.press("Enter");
@@ -712,6 +718,7 @@ test.describe("phone quality (02)", () => {
     await page.getByRole("radio", { name: "Select" }).click();
     await zoomOn(page, at(4500, 6000), 1.8);
     await tapPdf(page, at(3000, 7600));
+    await editSplits(page);
     await page.getByRole("button", { name: /^Split 1 — 8,800 mm along the run/ }).click();
     await page.locator("details summary").first().click();
     expect(await small()).toEqual([]);
@@ -737,6 +744,7 @@ test.describe("phone quality (02) — keyboard deep in the sheet", () => {
     await page.getByRole("radio", { name: "Select" }).click();
     await zoomOn(page, at(4500, 6000), 1.8);
     await tapPdf(page, at(3000, 7600));
+    await editSplits(page);
     await page.getByRole("button", { name: /^Split 1 — 8,800 mm along the run/ }).click();
     const f = page.getByLabel("Split 1 position (mm along the run)");
     await f.focus();
@@ -787,6 +795,7 @@ test.describe("desktop", () => {
     const s = await screenOf(page, at(3000, 7600));
     await page.mouse.click(s.x, s.y);
     const row = page.getByRole("button", { name: /^Split 1 — 8,800 mm along the run/ });
+    await editSplits(page);
     await row.click();
     const f = page.getByLabel("Split 1 position (mm along the run)");
     await f.click();
@@ -943,6 +952,7 @@ test.describe("adversarial phone findings — measure", () => {
     await zoomOn(page, at(8750, 5750), 4);
     await tapPdf(page, at(8400, 5000));                                         // first leg of m-pl2 (four 750 legs)
     await expect(page.locator("[data-selected-run]")).toBeVisible();
+    await editSplits(page);
     await page.getByRole("button", { name: "Add a split by distance…" }).click();
     const add = page.getByLabel("Add a split at (mm along the run)");
     await add.fill("1000"); await add.press("Enter");

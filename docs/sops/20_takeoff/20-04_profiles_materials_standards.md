@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-10-13
+sop_version: 1.2
+last_reviewed: 2026-10-19
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -106,6 +106,13 @@ A **material** is what you are ordering: the flashing's cross-section **profile*
 > 💡 **Tip:** Manual and counted lengths never get the allowance or rounding — the rules only change measured runs.
 
 [insert screenshot: material form — Name, Material fields, Ordering rules and the "These draft lengths change" preview]
+
+### C2. What changed in the review (19 Oct 2026)
+
+1. **Order step 300 mm for new flashings.** A new flashing rounds each ordered length **up to the next 300 mm** (with the 200 mm allowance), so a job orders a few standard lengths. Example: 4,312 mm measured → 4,800 mm ordered. You can still change it in **Round measured runs up to**. Existing flashings move to 300 mm when the owner runs migration 209 (flashings already on a placed order keep their step).
+2. **Perforated:** the custom fields are folded under **Perforation details**. The summary line shows what is set, or "not specified yet".
+3. **Lengths:** the top of **Flashing details** lists every finished length × quantity, whether it came from the plan or was typed, and anything that needs attention. Tap a plan length to see it on the plan.
+4. **Save as company standard:** in the drawing (Profile editor) open **More › Save as company standard**. The flashing row also has **More › Save as standard**.
 
 ### D. Change an existing job material
 
@@ -315,6 +322,16 @@ Next review date: 2027-04-13
 **TC-12 — Concurrent standard edit**
 1. Two Admin sessions open the same standard in the standard form; both change it; save session 1, then session 2.
 2. Expected result: session 2 is refused (HTTP 409 "This standard was changed by someone else — reload it"); only one new revision exists. Note whether the message is visible in the Choose material window (current code shows it only after returning to the overview).
+- [ ] Pass  [ ] Fail
+
+**TC-13 — New flashing order step (HUB 005, UI Review)**
+1. **Flashings** → **Add flashing** → **Finished pieces only (no drawing)**.
+2. Expected: **Round measured runs up to** shows 300; **Measured allowance (total per run)** shows 200.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Perforation folded and Lengths list (HUB 004 / HUB 012, UI Review)**
+1. Tap the "Apron flashing" row → **Details**. Expected: a **Lengths** list at the top ("N pieces · X LM", each "… mm").
+2. Choose **Perforated**. Expected: **Perforation details** is collapsed (no **Hole size** field showing) until tapped.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
