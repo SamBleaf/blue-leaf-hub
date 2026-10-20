@@ -215,6 +215,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       setScaleHandled(true); setDocId(scalePlan); setPageIndex(0); setWin("setup"); return;
     }
     if (docId) return;
+    // HUB 021: the page this device was last on — same plan, unchanged — else the takeoff's main plan page
+    let mine = null;
+    try { mine = JSON.parse(localStorage.getItem(`takeoff-plan-page:${view.workspace.id}`) || "null"); } catch { /* none */ }
+    const same = mine && plans.find((p) => p.id === mine.docId && p.status === "current" && (p.contentSha256 || null) === (mine.contentSha256 || null));
+    if (same && Number.isInteger(mine.pageIndex) && mine.pageIndex >= 0) { setDocId(same.id); setPageIndex(mine.pageIndex); return; }
     const first = primaryDoc || plans.find((p) => p.status === "current")?.id || null;
     setDocId(first);
     setPageIndex(view.workspace.primaryPageIndex ?? 0);
@@ -256,8 +261,15 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   // re-download and re-parse the whole PDF on a phone (R04b R22)
   const [keepPlan, setKeepPlan] = useState(false);
   useEffect(() => { if (needsPdf) setKeepPlan(true); }, [needsPdf]);
-  const plan = usePlanDocument(api, needsPdf || keepPlan ? docId : null);
   const planDoc = plans.find((p) => p.id === docId) || null;
+  // HUB 021: an unchanged plan already opened on this device reopens from its device copy (no download)
+  const plan = usePlanDocument(api, needsPdf || keepPlan ? docId : null, planDoc);
+  // … and opens on the page this device was last on; a page beyond a replaced plan's end falls back to the first
+  useEffect(() => { if (plan.status === "ready" && pageIndex >= plan.numPages) setPageIndex(0); }, [plan.status, plan.numPages, pageIndex]);
+  useEffect(() => {
+    if (!docId || !view?.workspace?.id) return;
+    try { localStorage.setItem(`takeoff-plan-page:${view.workspace.id}`, JSON.stringify({ docId, contentSha256: planDoc?.contentSha256 || null, pageIndex })); } catch { /* private mode */ }
+  }, [docId, pageIndex, planDoc?.contentSha256, view?.workspace?.id]);
   const pageCals = useMemo(() => (view ? latestPageCalibrations(view.calibrations, docId, pageIndex) : []), [view, docId, pageIndex]);
   const pageScale = !pageCals.length ? "Not scaled" : pageCals.every((c) => c.status === "ready") ? "Ready" : "Needs review";
 
@@ -639,7 +651,9 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     return (
       <FocusedWindow title={planDoc?.title || "Plan"} onClose={() => setWin("overview")} closeLabel="Back">
         <div className="p-3">
-          {plan.status === "loading" && <p className="text-sm text-muted" role="status">Downloading plan{plan.progress?.total ? ` — ${Math.round((plan.progress.loaded / plan.progress.total) * 100)}%` : "…"} <Btn kind="ghost" onClick={plan.cancel}>Cancel</Btn></p>}
+          {plan.status === "loading" && (plan.progress
+            ? <p className="text-sm text-muted" role="status">Downloading plan{plan.progress.total ? ` — ${Math.round((plan.progress.loaded / plan.progress.total) * 100)}%` : "…"} <Btn kind="ghost" onClick={plan.cancel}>Cancel</Btn></p>
+            : <p className="text-sm text-muted" role="status">Opening plan…</p>)}
           {plan.status === "too_large" && <Banner tone="warn" action={onExternalView && <Btn onClick={() => onExternalView(docId)}>Open in device viewer</Btn>}>{plan.error}</Banner>}
           {(plan.status === "error" || plan.status === "cancelled") && <AsyncState error={plan.error} onRetry={plan.retry} />}
           {plan.status === "idle" && <Banner tone="info">Choose a plan first.</Banner>}

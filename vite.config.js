@@ -24,7 +24,8 @@ export default defineConfig(({ mode }) => {
         manifest: false,
         workbox: {
           mode: "production",
-          globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+          // mjs: the pdf.js worker (1.1 MB) — precached so a plan kept on the device opens with no signal (HUB 021)
+          globPatterns: ["**/*.{js,mjs,css,html,ico,png,svg,woff2}"],
           // A new deploy must take over WITHOUT a manual cache-clear. `autoUpdate` above swaps the
           // SW, but the OLD worker keeps serving its cached bundle until every tab closes — which is
           // why a deploy could stay invisible for hours (the stale main-*.js the tender board showed).

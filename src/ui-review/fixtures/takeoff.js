@@ -39,7 +39,9 @@ const k = P0.pdfUnitsPerMm;
 const now = () => new Date().toISOString();
 
 // ── seed ────────────────────────────────────────────────────────────────────
-const DOC = { id: "doc-plan-c", title: "Example-St-architectural.pdf — Rev C", documentType: "architectural", status: "current", revisionLabel: "Rev C", contentSha256: "synthetic", byteSize: 2146000, uploadedAt: "2026-10-01T02:00:00Z", version: 3, supersedesDocumentId: "doc-plan-b", archivedAt: null };
+// HUB 021: window.__takeoffReviewPlanSha (set before load) simulates the stored plan being replaced with new bytes
+const DOC = { id: "doc-plan-c", title: "Example-St-architectural.pdf — Rev C", documentType: "architectural", status: "current", revisionLabel: "Rev C", contentSha256: "synthetic", byteSize: 2146710, uploadedAt: "2026-10-01T02:00:00Z", version: 3, supersedesDocumentId: "doc-plan-b", archivedAt: null };
+if (typeof window !== "undefined" && window.__takeoffReviewPlanSha) DOC.contentSha256 = String(window.__takeoffReviewPlanSha);
 const OLD = { ...DOC, id: "doc-plan-b", title: "Example-St-architectural.pdf — Rev B", status: "superseded", revisionLabel: "Rev B", version: 2 };
 const bx = 120, by = 150;
 const H = { p1: { x: bx, y: by - 40 }, p2: { x: bx + 12000 * k, y: by - 40 }, knownMm: 12000 };
@@ -390,7 +392,12 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       return { ok: true, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status(), capabilities: caps(worker), jobLabel: "1 Example Street, Testville SA (Synthetic)", jobAddress: "1 Example Street, Testville SA" };
     });
     route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => applyCommit(bodyJson || {}));
-    route("GET", `${base}/documents/:docId/content`, () => fetch(planUrl));
+    // as the server: the stored hash in X-Content-Sha256 (the device copy is keyed by it), never HTTP-cached
+    route("GET", `${base}/documents/:docId/content`, async () => {
+      const r = await fetch(planUrl, { cache: "no-store" });
+      state.planDownloads = (state.planDownloads || 0) + 1;
+      return new Response(r.body, { status: r.status, headers: { "content-type": "application/pdf", "content-length": r.headers.get("content-length") || "", "cache-control": "private, no-store", "x-content-sha256": DOC.contentSha256 } });
+    });
     route("GET", `${base}/presets`, () => ({ ok: true, presets: state.presets }));
     route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: mockSuppliers(), defaultSupplierId: "sup-1" }));
     route("GET", `${base}/workspaces/:id/orders`, () => {
@@ -545,4 +552,5 @@ if (typeof window !== "undefined") window.__takeoffReviewDefaults = () => ({ def
   saves: state.companyDefaultSaves || [], materials: state.materials.filter((m) => m.spec?.family === "cladding").map((m) => ({ id: m.id, name: m.name, spareRate: m.spec?.spareRate, rules: m.rules })) });
 if (typeof window !== "undefined") window.__takeoffReviewState = () => ({ revision: state.revision, commits: state.commitCount || 0, measurements: state.measurements.length, appendixRequests: [...state.appendixRequests],
   // HUB 018 evidence: every material's profile as the fake server holds it (review only)
-  materials: state.materials.map(({ id, name, methodKey, profile }) => ({ id, name, methodKey, profile: profile ?? null })) });
+  materials: state.materials.map(({ id, name, methodKey, profile }) => ({ id, name, methodKey, profile: profile ?? null })),
+  planDownloads: state.planDownloads || 0 });

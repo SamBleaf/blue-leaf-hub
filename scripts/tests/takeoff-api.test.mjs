@@ -89,7 +89,7 @@ async function call(method, path, { as = "admin", body, worker, preview } = {}) 
   const r = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : Buffer.from(await r.arrayBuffer());
-  return { status: r.status, data };
+  return { status: r.status, data, headers: r.headers };
 }
 const S = (p, o) => call("GET", `/api/takeoff${p}`, o);
 const SP = (p, body, o = {}) => call("POST", `/api/takeoff${p}`, { ...o, body });
@@ -552,6 +552,16 @@ await t("review #6: a hash-anchored plan can't be repointed; served bytes must m
   const r = await S(`/documents/${D.a}/content`);
   assert.equal(r.status, 500); assert.equal(r.data.code, "INTEGRITY");
   sb._buckets.get("job-plans").set(path, orig);
+});
+await t("HUB 021: plan bytes carry their stored hash (X-Content-Sha256) for the device copy, and stay out of the HTTP cache", async () => {
+  const r = await S(`/documents/${D.a}/content`);
+  assert.equal(r.status, 200);
+  const sha = (await q("SELECT content_sha256 FROM job_documents WHERE id=$1", [D.a])).rows[0].content_sha256;
+  assert.match(sha, /^[0-9a-f]{64}$/);
+  assert.equal(r.headers.get("x-content-sha256"), sha);
+  assert.equal(r.headers.get("cache-control"), "private, no-store");
+  const w = await W(`/documents/${D.site}/content`, { worker: "wt-lh" });
+  if (w.status === 200) assert.equal(w.headers.get("x-content-sha256"), (await q("SELECT content_sha256 FROM job_documents WHERE id=$1", [D.site])).rows[0].content_sha256);
 });
 await t("review #9: replacing a plan bumps the takeoff revision (stale exports can't freeze)", async () => {
   const before = (await q("SELECT revision FROM takeoff_workspaces WHERE id=$1", [wsId])).rows[0].revision;

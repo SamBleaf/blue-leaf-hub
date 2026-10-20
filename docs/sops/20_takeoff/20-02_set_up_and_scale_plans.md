@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-13
+sop_version: 1.1
+last_reviewed: 2026-10-20
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -47,7 +47,7 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 - The plan must be uploaded as a PDF on the job's **Plans** card (Hub). Workers can't upload plans.
 - Have the plan open and find: one **long horizontal dimension**, one **long vertical dimension**, and a **third, different** dimension (ideally in another part of the drawing). Longer dimensions give a more accurate scale.
 - You need edit access (Admin, Supervisor or leading hand — see SOP 20-01).
-- You need a data connection: the plan downloads each time you open it (it is not kept offline).
+- You need a data connection the first time you open a plan on this phone. After that it is kept on the phone and reopens without downloading — also with no signal while the takeoff is open — until the plan is replaced or you sign out (HUB 021).
 
 ---
 
@@ -58,7 +58,7 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 1. Open the takeoff (SOP 20-01).
 2. In the **Plan** section tap **Set up plans**. The **Plan setup** window opens ("Choose the plan and its main floor-plan page").
 3. In the **Plan** dropdown choose the plan. Plans that have been replaced show "(replaced)".
-4. Wait while it shows "Downloading plan — N%".
+4. The first time on this phone it shows "Downloading plan — N%"; after that "Opening plan…" (no download). A replaced plan downloads once again. The page you were last on comes back on this phone.
 5. Tap the page you will measure. For plans up to 24 pages you see small page pictures; for bigger sets type the number in **Page (1–N)**. Each page shows its status: **Not scaled**, **Ready** or **Needs review**; the current main page says "· primary".
 6. Tap **Use page N as the main plan page**. You return to the overview, where the Plan line reads "<plan> · page N" with its status chip.
 
@@ -325,6 +325,11 @@ Next review date: 2027-04-13
 3. In the check step, place the check points exactly on the horizontal dimension's ends; then send (API) a calibration commit whose `verification` points equal the horizontal reference points.
 4. Expected result: step 1 — overview banner "2 run(s) were measured before the page was re-scaled. They can't be ordered until you review them."; both runs show **needs attention** with "This page has been re-scaled since this run was measured — review it with the new scale." and block **Export supplier PDF**. Step 2 — the window lists both runs as "Order <old> mm → <new> mm"; after applying, run A is clear and run B is still flagged (banner now says 1 run). Step 3 — on screen: "That's the same dimension you scaled with — pick a different printed dimension so the check is independent." with **Save scale** disabled; API → HTTP 400 `CHECK_NOT_INDEPENDENT` "Check against a DIFFERENT printed dimension — not the horizontal or vertical one you used to scale."
 5. Expected DB: two calibration rows (revision 1 and 2, both unchanged); run A's `calibration_id` = revision 2 and its `raw_length_mm` recomputed by the server; run B's `calibration_id` still revision 1; no calibration row from step 3.
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Plan kept on this phone; last page remembered (HUB 021, UI Review)**
+1. **Set up plans** → **Page 2** → **Use page 2 as the main plan page**, then reload. Expected: the overview still reads "· page 2" on this phone, with no second download.
+2. Open **Measure** twice (re-entering the takeoff in between). Expected: the second open shows "Opening plan…", never "Downloading plan". Spec: e2e/ui-review/tc-plan-reuse.spec.js.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

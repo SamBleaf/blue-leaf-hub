@@ -74,7 +74,7 @@ export async function apiStream(url, { signal, onProgress, fetcher } = {}) {
     if (!res.body || !res.body.getReader) {
       const buf = new Uint8Array(await res.arrayBuffer());
       onProgress?.(buf.length, total);
-      return { ok: true, bytes: buf, status: res.status, error: null };
+      return { ok: true, bytes: buf, status: res.status, error: null, total, contentSha256: res.headers.get("x-content-sha256") || null };
     }
     const reader = res.body.getReader();
     const chunks = [];
@@ -89,7 +89,7 @@ export async function apiStream(url, { signal, onProgress, fetcher } = {}) {
     const bytes = new Uint8Array(loaded);
     let off = 0;
     for (const c of chunks) { bytes.set(c, off); off += c.length; }
-    return { ok: true, bytes, status: res.status, error: null };
+    return { ok: true, bytes, status: res.status, error: null, total, contentSha256: res.headers.get("x-content-sha256") || null };
   } catch (e) {
     if (e?.name === "AbortError") return { ok: false, bytes: null, aborted: true, error: "Cancelled" };
     return { ok: false, bytes: null, error: e?.message || "Network error" };

@@ -24,12 +24,26 @@ export function loadPdfJs() {
   return pdfjsPromise;
 }
 
-/** Open a PDF from bytes. Caller must call doc.destroy() when done. */
+// HUB 021: one pdf.js worker for the session. pdf.js destroys a worker it created itself with each document, so
+// every reopen fetched and started the 1.1 MB worker again (and couldn't with no signal); a worker we pass in stays.
+let sharedWorker = null;
+const PDF_FILE_ERRORS = new Set(["InvalidPDFException", "PasswordException", "MissingPDFException", "UnexpectedResponseException", "ResponseException"]);
+function workerFor(lib) {
+  if (!sharedWorker || sharedWorker.destroyed) sharedWorker = new lib.PDFWorker({ name: "takeoff-plans" });
+  return sharedWorker;
+}
+
+/** Open a PDF from bytes. Caller must call doc.destroy() when done (the shared worker stays). */
 export async function openPdf(bytes) {
   const lib = await loadPdfJs();
   // pdf.js transfers the buffer to its worker — give it a copy so callers keep theirs.
-  const task = lib.getDocument({ data: bytes.slice(), isEvalSupported: false, disableAutoFetch: true, verbosity: 0 });
-  return await task.promise;
+  const open = () => lib.getDocument({ data: bytes.slice(), worker: workerFor(lib), isEvalSupported: false, disableAutoFetch: true, verbosity: 0 }).promise;
+  try { return await open(); } catch (e) {
+    if (PDF_FILE_ERRORS.has(e?.name)) throw e;   // the file itself — a fresh worker won't help
+    try { sharedWorker?.destroy(); } catch { /* already gone */ }
+    sharedWorker = null;                         // a crashed worker (e.g. out of memory): start a fresh one, once
+    return await open();
+  }
 }
 
 /** Page metadata in the shape shared/takeoff expects. */

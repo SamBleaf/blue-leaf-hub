@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-10-20
 app_version: takeoff-r03
 screenshot_status: placeholders_only
@@ -75,7 +75,7 @@ The chip appears in the takeoff header, the Measure screen header and the Length
 3. You can't open a **different** plan, export a PDF or record an order until you're back online (those need the server).
 4. When the connection returns the changes save by themselves and the chip goes to **Saved**.
 
-> 💡 **Tip:** Plans aren't stored for offline use. Open the plan you need while you still have signal.
+> 💡 **Tip:** A plan you have opened on this phone is kept on it (HUB 021) and reopens without downloading, even with no signal while the takeoff is open. Open each plan you'll need once while you still have signal. Signing out removes the copies.
 
 ### D. Restore changes kept on this device
 
@@ -150,7 +150,7 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 | Choosing **Load latest** and then measuring straight away | Expecting the old changes to be kept | New saved edits replace the kept copy — restore it first, or use **Apply my changes to latest** |
 | Two people measuring the same takeoff at once | Nobody knows the other is in | Agree who is measuring; use separate takeoffs for separate areas if needed |
 | Signing out of the Hub with unsaved changes | Sign-out clears device drafts | Check the chip says **Saved** first |
-| Expecting the takeoff to work fully offline | It's recovery only | Open plans while you have signal; export and record orders online |
+| Expecting the takeoff to work fully offline | Plans already opened reopen offline, but opening the takeoff itself, exports and orders need a connection | Open the takeoff and each plan while you have signal; export and record orders online |
 
 ---
 
@@ -210,7 +210,7 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 ## 12. Edge cases and limits
 
 - **Known limit:** an edit made within a fraction of a second of the app being killed (before the device write finishes) may not be in recovery.
-- Recovery is not offline sync: plans aren't cached on the device, there is no background sync, and exports / placements / opening a new plan need a connection.
+- Recovery is not offline sync: there is no background sync, and opening the takeoff, exports / placements and the first open of a plan need a connection. Plans already opened are kept on the device (IndexedDB `blh-takeoff-plans`, keyed by the document and its stored hash; at most 250 MB / 12 plans, least recently used first, dropped after 30 days unused, cleared on sign-out) — HUB 021.
 - One recovery copy per takeoff per login per device — a newer unsaved edit replaces the previous copy (including a copy kept by **Load latest (keep mine as a copy)**).
 - Recovery records expire after 7 days.
 - Changes kept on one device or browser are invisible to other devices until saved.
@@ -336,6 +336,13 @@ Next review date: 2027-04-13
 2. **Continue drawing** on Flashing N. Expected: the dialog is "Flashing N" with "Tap the end of the first leg."; tap two points → **Close**: its card goes, the Apron card stays, and Flashing N is in the takeoff with its legs. No Apply/Save button.
 3. **Discard** on the Apron card → Cancel: the card stays; **Discard** → OK: it goes. Apron and Barge drawings are unchanged; no flashing has a blank shape. Reload: no cards.
 4. Open a drawing and leave by **Lengths**; change another and leave by **Details**; draw a new one and **Close**. Expected: no card, and none after a reload. A new drawing cleared with **Clear drawing** and closed leaves no flashing. Node: scripts/tests/takeoff-tc-hub018.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-16 — A plan reopens from this device (HUB 021, UI Review)**
+1. Flashings → **Measure** (first open: "Downloading plan — N%"). Expected: the plan opens and one download happened.
+2. **Done** → **‹ Back** → **Flashings** → **Measure**, then reload and **Measure** again, on a slow connection. Expected: "Opening plan…" only, never "Downloading plan"; no second download.
+3. Turn the connection off and re-enter → **Measure**. Expected: the plan opens with no error.
+4. Replace the stored plan (new hash). Expected: "Downloading plan" shows once; the next open reuses the new copy. With device storage unavailable the plan still opens by downloading each time. Spec: e2e/ui-review/tc-plan-reuse.spec.js; node: takeoff-tc-hub021; API: the content route sends X-Content-Sha256 and `Cache-Control: private, no-store`.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

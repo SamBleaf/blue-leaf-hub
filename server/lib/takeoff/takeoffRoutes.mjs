@@ -151,8 +151,8 @@ function mount(app, P, adapter) {
     return ok(res, { commit: { revision: result.revision, replayed: result.replayed }, snapshot: result.snapshot, computed: result.computed, orderStatus: status });
   }));
 
-  // Plan bytes for the in-app viewer: fetched once per open, authorised every time, never a
-  // persisted signed URL. Larger than the takeoff envelope → 413 so the UI offers the device viewer.
+  // Plan bytes for the in-app viewer: authorised every time, never a persisted signed URL. The app keeps an
+  // opened plan on the device (IndexedDB, HUB 021) keyed by X-Content-Sha256; the HTTP cache never holds it. Larger than the takeoff envelope → 413 so the UI offers the device viewer.
   app.get(`${P}/documents/:docId/content`, ...mw, gate, wrap(async (req, res, sb) => {
     if (!isUuid(req.params.docId)) throw new TakeoffHttpError(400, "Invalid plan.", "INVALID");
     const { data: doc, error } = await sb.from("job_documents").select("*").eq("id", req.params.docId).maybeSingle();
@@ -193,6 +193,7 @@ function mount(app, P, adapter) {
     res.setHeader("Content-Length", String(buf.length));
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Document-Status", doc.status);
+    res.setHeader("X-Content-Sha256", servedSha);   // HUB 021: the device copy is keyed by the stored hash
     return res.end(buf);
   }));
 

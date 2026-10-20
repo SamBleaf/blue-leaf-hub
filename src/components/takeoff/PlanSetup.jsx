@@ -56,7 +56,8 @@ export default function PlanSetup({ plans, planState, selectedDocId, onSelectDoc
         </div>
         {planState.status === "loading" && (
           <p className="text-sm text-muted" role="status">
-            Downloading plan{planState.progress?.total ? ` — ${Math.round((planState.progress.loaded / planState.progress.total) * 100)}%` : planState.progress?.loaded ? ` — ${(planState.progress.loaded / 1048576).toFixed(1)} MB` : "…"}
+            {!planState.progress ? "Opening plan…" /* HUB 021: from this device — no download */
+              : `Downloading plan${planState.progress.total ? ` — ${Math.round((planState.progress.loaded / planState.progress.total) * 100)}%` : planState.progress.loaded ? ` — ${(planState.progress.loaded / 1048576).toFixed(1)} MB` : "…"}`}
           </p>
         )}
         {planState.status === "too_large" && (
