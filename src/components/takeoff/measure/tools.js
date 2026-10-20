@@ -12,6 +12,7 @@
 //   aluminium          Run · Select · Pan
 //   wall families      Line · Select · Pan                             (cladding, aac, foam, timber-cladding, batten, accessory)
 //                      HUB 022: Line traces a whole run with the Wall height in force at each tap; timber walls keep Wall
+//                      HUB 022 step 2: + Window / + Door in the Line panel put openings into the traced walls
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
 
@@ -19,6 +20,7 @@ import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
 export const COLORS = Object.freeze({
   flashing: "#006c9b", overflow: "#dc2626", handling: "#b45309", draft: "#64748b", count: "#16a34a", selected: "#f59e0b",
   halo: "#7dd3fc", wall: "#9a3412", member: "#7c3aed", distribution: "#0d9488", trim: "#006c9b", split: "#0f172a", removed: "#94a3b8",
+  window: "#0284c7", door: "#4f46e5",
 });
 
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
@@ -235,6 +237,43 @@ export function wallListItems(walls, runs) {
     out.push({ run, walls: ws });
   }
   return out;
+}
+
+// ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────
+
+/** The next free label for an opening on ONE wall: W1, W2 … for windows, D1 … for doors, O1 … for others. */
+export function nextOpeningLabel(labels, type) {
+  const p = type === "door" ? "D" : type === "other" ? "O" : "W";
+  const used = new Set(labels || []);
+  let n = 1;
+  while (used.has(`${p}${n}`)) n++;
+  return `${p}${n}`;
+}
+
+/**
+ * An opening in a wall, exactly as the wall's elevation saves one: entered numbers only (offset from the wall start,
+ * sill, width, height, label, type), no plan points and no fields of its own, so the server takes it unchanged.
+ */
+export function openingRecord(id, wallId, inputs) {
+  return { id, kind: "opening", parentId: wallId, documentId: null, pageIndex: null, calibrationId: null, points: null, label: null, inputs };
+}
+
+/**
+ * The sizes the + Window and + Door boxes start at: the last window's height and sill and the last door's height in
+ * a WALL of this takeoff (null when there is none yet). A door always sits on the floor, so it has no sill. Openings
+ * with no wall (aluminium windows by size, sill 0 as a placeholder) never set them.
+ */
+export function lastOpeningSizes(measurements) {
+  let win = { heightMm: null, sillMm: null }, door = { heightMm: null };
+  const walls = new Set((measurements || []).filter((m) => m.kind === "wall").map((m) => m.id));
+  for (const m of measurements || []) {
+    if (m.kind !== "opening" || m.archived || !walls.has(m.parentId)) continue;
+    const x = m.inputs || {};
+    if (!(finite(x.heightMm) && x.heightMm > 0)) continue;
+    if (x.type === "door") door = { heightMm: x.heightMm };
+    else if ((x.type || "window") === "window") win = { heightMm: x.heightMm, sillMm: finite(x.sillMm) && x.sillMm >= 0 ? x.sillMm : null };
+  }
+  return { window: win, door };
 }
 
 /**

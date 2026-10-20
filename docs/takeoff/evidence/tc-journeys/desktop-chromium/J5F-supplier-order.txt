@@ -1,32 +1,32 @@
-                                                                                                                                FLASHING ORDER
-                                                                                                                            FO-001002 · export 1 · 2026-10-21
+                                                                                                                               FLASHING ORDER
+                                                                                                                           FO-001002 · export 1 · 2026-10-21
 
 
 
 
-FROM                                                     SUPPLIER                                                  JOB
-Blue Leaf Building (sandbox)                             Fielders (SANDBOX — not a real                            Sandbox job — your drawings
-Sandbox address                                          contact)                                                  Deliver to:
-00 0000 0000                                             Attn: Sandbox orders                                      1 Sandbox Street, Testville SA (test only)
-office@example.invalid                                   00 0000 0000                                              Required: 2026-10-28
-                                                         orders@example.invalid                                    Site contact: Sandbox site lead 0400
-                                                                                                                   000 000
+FROM                                                     SUPPLIER                                                 JOB
+Blue Leaf Building (sandbox)                             Fielders (SANDBOX — not a real                           Sandbox job — your drawings
+Sandbox address                                          contact)                                                 Deliver to:
+00 0000 0000                                             Attn: Sandbox orders                                     1 Sandbox Street, Testville SA (test only)
+office@example.invalid                                   00 0000 0000                                             Required: 2026-10-28
+                                                         orders@example.invalid                                   Site contact: Sandbox site lead 0400
+                                                                                                                  000 000
 
 Notes: TC-R04 evidence run — sandbox only, not a real order
 All dimensions in mm. Flashing lengths are FINISHED order lengths. Girth is indicative only (no bend deduction) — supplier fabrication instructions take
 precedence.
 
 
- P1 — Flashing 1                                                                                                COLORBOND · Monument · 0.55 BMT · solid
+ P1 — Flashing 1                                                                                              COLORBOND · Monument · 0.55 BMT · solid
  Confirm availability with supplier
-                                                                                            DIMENSIONS
+                                                                                           DIMENSIONS
                90°
-                                                                                            L1 100 mm
-                                                                                            L2 120 mm
-                                       L2 120                                               B1 90° fold right
-                                                                                            Start: plain
-                                                                                            End: plain
-                                                                                            Indicative girth 220 mm
+                                                                                           L1 100 mm
+                                                                                           L2 120 mm
+                                       L2 120                                              B1 90° fold right
+                                                                                           Start: plain
+                                                                                           End: plain
+                                                                                           Indicative girth 220 mm
                       L1 100
 
 
@@ -35,9 +35,9 @@ precedence.
         Painted (colour) face — left side travelling L1 -> L2
 
 
- QTY                             FINISHED LENGTH (mm)                             LM                     HANDLING
- 2×                              5,400                                            10.800                 -
- 1×                              3,300                                            3.300                  -
+ QTY                             FINISHED LENGTH (mm)                            LM                     HANDLING
+ 2×                              5,400                                           10.800                 -
+ 1×                              3,300                                           3.300                  -
                                                                                                                                         3 pieces · 14.100 LM
 
 Order total: 3 pieces · 14.100 LM
@@ -47,5 +47,5 @@ supplier.
 
 
 
-                                             FO-001002 · takeoff-pdf@4 · takeoff-calc@3 · snapshot cb4271c8fbe3 · page 1 of 1
+                                            FO-001002 · takeoff-pdf@4 · takeoff-calc@3 · snapshot e5718a17f7e7 · page 1 of 1
 

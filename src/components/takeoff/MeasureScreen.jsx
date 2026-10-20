@@ -22,6 +22,15 @@
 //                  gets that height and the material in ONE save, with a runId + seq (tap order). Finish stays on the
 //                  plan and shows one run card ("Run 1 · 4 walls · 2,700") while that finish is the last step; its Undo
 //                  takes the whole run off in one step (↶ puts it back). While tracing, the material name is a label.
+//   + Window / + Door (HUB 022 step 2, in the Line panel and on the run card)  set the size in the panel (a window:
+//                  Height + Sill, starting at the last window; a door: Height only, it sits on the floor), then tap the
+//                  two ends of the opening on the plan. The taps snap to the nearest traced wall of THIS material and
+//                  become an opening in that wall, saved exactly as the elevation saves one (W1, D1 …; offset from the
+//                  wall start and width in real mm to the nearest 10). Taps past a wall end or round a corner are cut
+//                  back to the wall; more than a finger's slip cut off (or a window taller than its wall) is noted on
+//                  the opening's card until the next one. A tap on no traced wall saves nothing. Stays on for the
+//                  next one; ↶ and the card's Undo take the last one off (a first end tapped comes off first).
+//                  Openings are drawn on the plan; changes to one are made on the wall's elevation.
 //   Wall (timber studs / plates / noggins)  tap along the wall run on the floor plan → one wall measurement (role
 //                  "wall") per straight leg, named "Wall N", N+1 … → the first one's elevation (a corner is never
 //                  unfolded into one flat wall).
@@ -48,9 +57,9 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtMm, fmtRaw } from "./format.js";
-import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, lastWallHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextWallInputs, runIdOf, runLabel, saveDraft, stockForStation, toolsFor, upgradeDraft, wallRuns, withOverride } from "./measure/tools.js";
-import { HIT_PX, anchorsFor, distToPolyline, legMidpoints, pathLengthMm, runLegs, safePointAt, screenDirectionAt, sharedCorners, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
-import { FlashingPathShape, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
+import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, lastOpeningSizes, lastWallHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, runIdOf, runLabel, saveDraft, stockForStation, toolsFor, upgradeDraft, wallRuns, withOverride } from "./measure/tools.js";
+import { HIT_PX, anchorsFor, distToPolyline, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, pathLengthMm, planOpening, runLegs, safePointAt, screenDirectionAt, sharedCorners, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
+import { FlashingPathShape, OpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
 import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js";
@@ -58,6 +67,7 @@ import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js
 
 const UNASSIGNED = "__unassigned";   // show / hide list: lines with no material
 const HIDE_ALL = "__all";            // the earlier single "Hide lines" switch, still honoured when stored
+const finiteMm = (v) => typeof v === "number" && Number.isFinite(v) && v > 0;
 const SHEET_TITLE = { run: "Measure runs", count: "Count pieces", wall: "Trace walls", line: "Line", member: "Member line", distribution: "Distribution run", pan: "Move around" };
 const MAX_WALL_MM = 100000;
 const PATH_EXPLAINED = new Set(["ceiling_exceeded", "ceiling_unknown", "split_invalid", "path_in_progress"]);
@@ -167,6 +177,27 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const kbInset = useKeyboardInset();
   const warn = (text) => setMsg({ tone: "warn", text });
 
+  // + Window / + Door (HUB 022 step 2): which opening is being placed (on THIS material's walls, in Line only), the
+  // sizes in its boxes (they start at the last window / door in the takeoff, then keep what was typed here) and the
+  // first end tapped. Handlers read sizes + first end through refs: a tap straight after typing commits the field first.
+  const [openMode, setOpenMode] = useState(null);            // { matId, kind: "window" | "door" }
+  const openKind = mode === "line" && canEdit && openMode && openMode.matId === material?.id ? openMode.kind : null;
+  const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm } }
+  const openSizesRef = useRef(null);
+  const sizesNow = () => openSizesRef.current || lastOpeningSizes(view.measurements);
+  function setOpenSize(kind, patch) {
+    const cur = sizesNow();
+    const next = { ...cur, [kind]: { ...cur[kind], ...patch } };
+    openSizesRef.current = next;
+    setOpenSizesState(next);
+  }
+  const [openStartState, setOpenStartState] = useState(null); // { matId, kind, p, at, wallId }
+  const openStartRef = useRef(null);
+  const setOpenStart = (v) => { openStartRef.current = v; setOpenStartState(v); };
+  const pendingStart = () => { const s = openStartRef.current; return s && openKind && s.kind === openKind && s.matId === material?.id ? s : null; };
+  const openStart = openStartState && openKind && openStartState.kind === openKind && openStartState.matId === material?.id ? openStartState : null;
+  const [lastOpening, setLastOpening] = useState(null);       // { id, op, note } of the opening just placed (note: what was cut)
+
   const stale = planDoc && planDoc.status !== "current";
   const cals = useMemo(() => pageCalibrations(view.calibrations, planDoc?.id, pageIndex), [view.calibrations, planDoc?.id, pageIndex]);
   const [regionKey, setRegionKey] = useState(null);
@@ -250,6 +281,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const histRef = useRef({ past: [], future: [] });
   const sync = () => setHist({ ...histRef.current });
   const applyDraft = (d) => {
+    // a drawing coming back (Undo of a Finish, Redo of a corner) ends + Window / + Door: its Finish / Discard show again
+    if (d?.points?.length) { setOpenMode(null); setOpenStart(null); }
     draftRef.current = d;
     setDraftState((s) => ({ ...s, draft: d }));
     setDraftStored(saveDraft(dKey, d)); // at once: leaving the screen right after must not keep a stale drawing
@@ -262,6 +295,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     sync();
   }
   function undo() {
+    // the first end of a window or door comes off before any saved change (nothing was saved for it)
+    if (pendingStart()) { setOpenStart(null); setMsg(null); return; }
     const h = histRef.current;
     if (!h.past.length) return;
     const op = h.past[h.past.length - 1];
@@ -473,6 +508,103 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     setMsg({ tone: "ok", text: `Run ${run.n} taken off (${run.walls.length} wall${run.walls.length === 1 ? "" : "s"}). Undo puts it back.` });
   }
 
+  // ── + Window / + Door on the plan (HUB 022 step 2) ──────────────────────────────────────────────────────────
+  const openingsByWall = useMemo(() => {
+    const map = new Map();
+    for (const m of view.measurements) if (m.kind === "opening" && m.parentId && !m.archived) map.set(m.parentId, [...(map.get(m.parentId) || []), m]);
+    return map;
+  }, [view.measurements]);
+  const wallName = (id) => measNow(id)?.inputs?.name || "the wall";
+  /** The straight walls traced for THIS material on this page, with their own scale (`shown`: on the plan now). */
+  function materialWalls() {
+    return pageMeasurements.filter((m) => m.kind === "wall" && m.points?.length === 2 && m.inputs?.kind !== "polygon"
+      && (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === material?.id))
+      .map((m) => ({ id: m.id, points: m.points, cal: calsById.get(m.calibrationId) || null, shown: isShown(m) })).filter((w) => w.cal);
+  }
+  const tracedFirst = () => `Trace the ${material.name} walls first, then add their windows and doors.`;
+  const wallsHidden = () => `Your ${material.name} walls are hidden on this plan. Tap Show all, then add the windows and doors.`;
+  const pxPerUnit = () => { const a = toScreen({ x: 0, y: 0 }), b = toScreen({ x: 1, y: 0 }); return Math.hypot(b.x - a.x, b.y - a.y) || 1; };
+  function guardOpening() {
+    if (!canMeasure) return stale ? "This plan has been replaced. Add openings on the current revision." : !material ? "Choose a material first." : "You can't change this takeoff.";
+    // each traced wall carries its own scale, so any scaled region on the page will do (no region needs choosing)
+    if (!cals.length) return "Scale this page before adding windows and doors.";
+    return null;
+  }
+  function startOpening(kind) {
+    setMsg(null);
+    const pre = guardOpening();
+    if (pre) { warn(pre); return; }
+    const all = materialWalls();
+    if (!all.length) { warn(tracedFirst()); return; }
+    if (!all.some((w) => w.shown)) { warn(wallsHidden()); return; }
+    if (!openSizesRef.current) { openSizesRef.current = lastOpeningSizes(view.measurements); setOpenSizesState(openSizesRef.current); }
+    setOpenMode({ matId: material.id, kind });
+    setOpenStart(null);
+  }
+  function stopOpening() { setOpenMode(null); setOpenStart(null); setMsg(null); }
+  /** A tap while placing a window or door: the first end, then the other end (which saves the opening). */
+  function openingTap(p, sp) {
+    const kind = openKind;
+    const pre = guardOpening();
+    if (pre) { warn(pre); return; }
+    const size = sizesNow()[kind] || {};
+    const what = kind === "door" ? "door" : "window";
+    if (!(size.heightMm > 0)) { warn(`Type the ${what} height first.`); return; }
+    if (kind === "window" && !(size.sillMm >= 0)) { warn("Type the sill height first."); return; }
+    const all = materialWalls();
+    const walls = all.filter((w) => w.shown);
+    if (!all.length) { warn(tracedFirst()); return; }
+    if (!walls.length) { warn(wallsHidden()); return; }
+    const opts = { pxPerUnit: pxPerUnit() };
+    // a tap on one of this material's walls that is hidden on the plan: say so, rather than "no wall here"
+    const offWall = () => (nearestWall(all.filter((w) => !w.shown), p, opts) ? `That wall is hidden on this plan. Tap Show all to add windows and doors to it.`
+      : `No ${material.name} wall here. Tap on a wall you traced.`);
+    const st = pendingStart();
+    if (!st) {
+      const n = nearestWall(walls, p, opts);
+      if (!n) { warn(offWall()); return; }
+      const w = walls.find((x) => x.id === n.wall.id);
+      const at = safePointAt(w.points, w.cal, n.station.stationMm) || p;   // shown on the wall line
+      setOpenStart({ matId: material.id, kind, p, at, wallId: w.id });
+      setMsg(null);
+      return;
+    }
+    const s0 = toScreen(st.p);
+    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn("Tap the other end further away. Zoom in for a narrow opening."); return; }
+    const r = planOpening(walls, st.p, p, opts);
+    if (!r.ok) {
+      // the first end stays: tap the other end again (or Undo to start over)
+      warn(r.reason === "different_walls" ? `Both ends go on the same wall. Tap the other end on ${wallName(r.wallId)}.`
+        : r.reason === "across_join" ? `${wallName(r.wallId)} ends here and ${wallName(r.otherWallId)} carries on. Tap the part on each wall separately.`
+          : r.reason === "off_wall" ? `That's past the end of ${wallName(r.wallId)}. Tap both ends on the wall.`
+            : r.reason === "other_end_off_wall" && nearestWall(all.filter((w) => !w.shown), p, opts) ? "That wall is hidden on this plan. Tap the other end on the same wall."
+              : "Tap the other end on the wall too.");
+      return;
+    }
+    const wall = measNow(r.wallId);
+    const label = nextOpeningLabel((openingsByWall.get(wall.id) || []).map((o) => o.inputs?.label), kind);
+    const inputs = { xMm: r.xMm, sillMm: kind === "door" ? 0 : size.sillMm, widthMm: r.widthMm, heightMm: size.heightMm, label, type: kind };
+    const rec = openingRecord(newId(), wall.id, inputs);
+    const op = { redo: partial({ measurements: [rec] }), undo: partial({ archive: { measurements: [rec.id] } }) };
+    record(op);
+    setOpenStart(null);
+    // what was cut, kept on the opening's card until the next one is placed (the next tap must not wipe it)
+    const name = wallName(wall.id), tapped = fmtMm(r.tappedWidthMm);
+    const notes = [];
+    if (r.clipped === "corner") notes.push(`${label} went round the corner, so it's on ${name} only (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
+    if (r.clipped === "end") notes.push(`${label} ran past the end of ${name}, so it's cut back to the wall (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
+    if (r.clipped === "join") {
+      const next = measNow(r.nextWallId);
+      const hChange = finiteMm(wall.inputs?.heightMm) && finiteMm(next?.inputs?.heightMm) && wall.inputs.heightMm !== next.inputs.heightMm;
+      notes.push(`${label} runs on into ${wallName(r.nextWallId)}${hChange ? " (the wall height changes there)" : ""}, so it's on ${name} only (you tapped ${tapped}). Tap the rest on ${wallName(r.nextWallId)}, or Undo.`);
+    }
+    if (openingAboveWall(wall.inputs, pathLengthMm(wall.points, calsById.get(wall.calibrationId)), inputs)) {
+      const h = (wall.inputs?.kind || "rect") === "rect" && finiteMm(wall.inputs?.heightMm) ? ` (${fmtMm(wall.inputs.heightMm)} high)` : "";
+      notes.push(`${label} is taller than ${name}${h}, so only the part on the wall comes off. Check the height and sill, or Undo.`);
+    }
+    setLastOpening({ id: rec.id, op, note: notes.join(" ") || null });
+  }
+
   function discardDraft() {
     const d = draftRef.current;
     if (!d) return;
@@ -491,6 +623,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
 
   function switchMode(k) {
     setMsg(null); setActiveSplit(null); setSelTick(null); setHandleSel(null); setDragPreview(null);
+    setOpenMode(null); setOpenStart(null);   // any tool (Line too) ends placing windows and doors
     if (hl.ids.length && k !== "select") setHl((h) => ({ ...h, ids: [] }));
     const d = draftRef.current;
     if (d && d.tool !== k && (PATH_TOOLS.has(k) || LINE_TOOLS.has(k))) {
@@ -771,6 +904,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     setMsg(null);
     if (hl.ids.length) setHl((h) => ({ ...h, ids: [] }));
     if (mode === "select") { selectTap(sp); return; }
+    if (openKind) { openingTap(p, sp); return; }
     if (PATH_TOOLS.has(mode)) { pathTap(p, sp); return; }
     if (LINE_TOOLS.has(mode)) { lineTap(p, sp); return; }
     if (!canMeasure) { warn(stale ? "This plan has been replaced — measure on the current revision." : !material ? "Choose a material first." : "You can't change this takeoff."); return; }
@@ -881,7 +1015,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   };
 
   const close = () => { settleDraft({ navigate: true }); onClose?.(); };
-  const changeMaterial = () => { settleDraft({ navigate: false }); onChangeMaterial?.(); };
+  const changeMaterial = () => { settleDraft({ navigate: false }); setOpenMode(null); setOpenStart(null); onChangeMaterial?.(); };
 
   // ── render ──────────────────────────────────────────────────────────────────────────────────────────────────
   const renderMeasurement = (m, toScr) => {
@@ -913,9 +1047,26 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       return <PolylineShape key={m.id} measurementId={m.id} kind="polyline" points={pts} toScreen={toScr} color={COLORS.trim} selected={isSel} label={len ? `${fmtMm(Math.round(len))}` : ""} />;
     }
     if (m.kind === "wall" && pts.length >= 2) {
-      const len = pathLengthMm(pts, calsById.get(m.calibrationId));
-      return <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={COLORS.wall} selected={isSel}
-        label={`${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}`} />;
+      const wc = calsById.get(m.calibrationId);
+      const len = pathLengthMm(pts, wc);
+      const wallLabel = `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}`;
+      const shape = <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={COLORS.wall} selected={isSel} label={wallLabel} />;
+      // its windows and doors (HUB 022 step 2), where they are along the wall from its start, labelled clear of its name
+      const ops = pts.length === 2 && m.inputs?.kind !== "polygon" ? openingsByWall.get(m.id) || [] : [];
+      if (!ops.length || !wc) return shape;
+      const e0 = toScr(pts[0]), e1 = toScr(pts[1]);
+      const nameBox = labelBox((e0.x + e1.x) / 2, (e0.y + e1.y) / 2 - 9, wallLabel, 12);
+      return (
+        <g key={m.id}>
+          {shape}
+          {ops.map((o) => {
+            const x = o.inputs || {};
+            const on = openingOnWall(pts, wc, x.xMm, x.widthMm);
+            return on ? <OpeningMark key={o.id} id={o.id} wallId={m.id} type={x.type || "window"} label={x.label} a={toScr(on.a)} b={toScr(on.b)}
+              xMm={x.xMm} widthMm={x.widthMm} sillMm={x.sillMm} heightMm={x.heightMm} avoid={nameBox} /> : null;
+          })}
+        </g>
+      );
     }
     if ((m.kind === "member" || m.kind === "distribution") && pts.length === 2) {
       const info = ticksBy.get(m.id);
@@ -983,7 +1134,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       footer={kbSpacer}
       actions={<>
         <SaveChip status={ws.status} />
-        <Btn kind="ghost" className="min-w-[44px] px-2" onClick={undo} disabled={!hist.past.length} aria-label="Undo">↶</Btn>
+        <Btn kind="ghost" className="min-w-[44px] px-2" onClick={undo} disabled={!hist.past.length && !openStart} aria-label="Undo">↶</Btn>
         <Btn kind="ghost" className="min-w-[44px] px-2" onClick={redo} disabled={!hist.future.length} aria-label="Redo">↷</Btn>
       </>}
     >
@@ -1047,7 +1198,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         <PdfViewport
           ref={vpRef} doc={doc} pageIndex={pageIndex} displayRotation={displayRotation}
           mode={mode === "pan" ? "pan" : "tap"} onTap={mode === "pan" ? undefined : onTap}
-          onDoubleTap={PATH_TOOLS.has(mode) && canMeasure ? onDoubleTap : undefined}
+          onDoubleTap={PATH_TOOLS.has(mode) && canMeasure && !openKind ? onDoubleTap : undefined}
           focus={focus}
           viewKey={planDoc ? `${wsId}|${planDoc.id}|${pageIndex}` : null}
           className="min-h-0 flex-1"
@@ -1064,6 +1215,9 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 return el && other ? <g key={m.id} opacity={0.45} data-other-layer="">{el}</g> : el;
               })}
               {renderDraft(toScr)}
+              {openStart && (() => { const s = toScr(openStart.at); const color = openStart.kind === "door" ? COLORS.door : COLORS.window; return (
+                <circle data-opening-start={openStart.wallId} cx={s.x} cy={s.y} r={7} fill="#fff" stroke={color} strokeWidth={3} />
+              ); })()}
               {mode === "select" && canEdit && selPath && insertMarkers(sel, toScr).map((mm) => (
                 <g key={`ins${mm.k}`} data-insert-marker={mm.k}>
                   <circle cx={mm.screen.x} cy={mm.screen.y} r={11} fill="#fff" stroke={COLORS.flashing} strokeWidth={2} />
@@ -1089,7 +1243,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         />
       </div>
       {/* phone portrait: the plan keeps most of the screen; the sheet scrolls (desktop/landscape: side panel) */}
-      <Sheet title={mode === "select" ? (sel ? "Selected" : "Select") : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
+      <Sheet title={mode === "select" ? (sel ? "Selected" : "Select") : openKind ? `${openKind === "door" ? "Door" : "Window"} · ${material?.name || ""}` : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
         <div onFocusCapture={keepFieldInView} className="space-y-2">
           {msg && <Banner tone={msg.tone}>{msg.text}</Banner>}
           {hl.ids.length > 0 && (
@@ -1156,10 +1310,55 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             );
           })()}
 
-          {mode === "line" && (() => {
+          {mode === "line" && openKind && (() => {
+            // HUB 022 step 2: + Window / + Door — the size here, then the two ends on the plan
+            const win = openKind === "window";
+            const what = win ? "window" : "door";
+            const s = (openSizes || sizesNow())[openKind] || {};
+            const lo = lastOpening && hist.past[hist.past.length - 1] === lastOpening.op ? measNow(lastOpening.id) : null;
+            const lx = lo?.inputs || {};
+            const noHeight = !(s.heightMm > 0), noSill = win && !(s.sillMm >= 0);
+            const hint = openStart ? "Now tap the other end."
+              : noHeight || noSill ? (win ? `Type the ${noHeight && noSill ? "height and sill" : noHeight ? "height" : "sill height"}, then tap one end of the window.` : "Type the door height, then tap one end.")
+                : lo && (lx.type || "window") === openKind ? `Tap both ends of the next ${what}.` : `Tap one end of the ${what} on a wall, then the other end.`;
+            return (
+              <div className="space-y-2 text-sm" data-opening-panel={openKind}>
+                <div className="grid grid-cols-2 gap-2">
+                  <div data-opening-height=""><NumberField label="Height" value={s.heightMm ?? null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize(openKind, { heightMm: n })} /></div>
+                  {win && <div data-opening-sill=""><NumberField label="Sill height" value={s.sillMm ?? null} min={0} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize("window", { sillMm: n })} /></div>}
+                </div>
+                <p className={noHeight || noSill ? "text-amber-800" : "text-muted"} data-opening-hint="">{hint}</p>
+                {!win && <p className="text-[11px] text-muted">A door sits on the floor.</p>}
+                {lo && (
+                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-last-opening={lo.id}>
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate"><b className="text-ink" data-last-opening-label="">{lx.label} in {wallName(lo.parentId)}</b>
+                        <span className="text-muted"> · {fmtMm(lx.widthMm)} wide</span></p>
+                      {/* the same as ↶: a first end tapped comes off first, then this opening */}
+                      <Btn onClick={undo} aria-label={openStart ? "Undo this end" : `Undo ${lx.label}`}>Undo</Btn>
+                    </div>
+                    {lastOpening.note && <p className="text-[11px] text-amber-800" data-last-opening-note="">{lastOpening.note}</p>}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Btn onClick={stopOpening}>Trace more walls</Btn>
+                  <Btn kind="ghost" onClick={() => startOpening(win ? "door" : "window")}>{win ? "+ Door" : "+ Window"}</Btn>
+                </div>
+              </div>
+            );
+          })()}
+
+          {mode === "line" && !openKind && (() => {
             // HUB 022: the material and the Wall height together; the height in force applies to the walls traced next
             const run = !draft && lastDone?.runId && hist.past[hist.past.length - 1] === lastDone.op ? runs.get(lastDone.runId) : null;
             const drawing = draft?.points.length > 0;
+            // HUB 022 step 2: windows and doors go into the walls once they are traced (on the run card right after a run)
+            const openingButtons = canEdit && !drawing && (
+              <div className="flex flex-wrap gap-2" data-opening-buttons="">
+                <Btn onClick={() => startOpening("window")}>+ Window</Btn>
+                <Btn onClick={() => startOpening("door")}>+ Door</Btn>
+              </div>
+            );
             return (
               <div className="space-y-2 text-sm" data-line-panel="">
                 <div className="flex items-end gap-3">
@@ -1183,12 +1382,15 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 {drawing && <p className="text-[11px] text-muted">A new height only changes the walls you trace after it.{draft.points.length >= 3 ? " To go right round, double-tap the start." : ""}</p>}
                 {lineH == null && <p className="text-[11px] text-amber-800">No height yet. Type it first, or each wall will need one.</p>}
                 {drawing && <div className="flex flex-wrap gap-2"><Btn onClick={() => finishDraft()} disabled={draft.points.length < 2}>Finish</Btn><Btn kind="ghost" onClick={discardDraft}>Discard</Btn></div>}
-                {run && (
-                  <div className="flex items-center gap-2 rounded-lg border border-hairline bg-page px-3 py-1" data-run-card={run.id}>
-                    <p className="min-w-0 flex-1"><b className="text-ink" data-run-label="">{runLabel(run)}</b><span className="block text-[11px] text-muted">Tap the start of the next run.</span></p>
-                    <Btn onClick={() => undoRun(run)} aria-label="Undo this run">Undo</Btn>
+                {run ? (
+                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-run-card={run.id}>
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1"><b className="text-ink" data-run-label="">{runLabel(run)}</b><span className="block text-[11px] text-muted">Tap the start of the next run, or add the windows and doors.</span></p>
+                      <Btn onClick={() => undoRun(run)} aria-label="Undo this run">Undo</Btn>
+                    </div>
+                    {openingButtons}
                   </div>
-                )}
+                ) : openingButtons}
                 {draft && !draftStored && <p className="text-[11px] text-amber-800">This device can&apos;t keep an unfinished run if the app reloads. Finish it before leaving.</p>}
                 <p className="text-[11px] text-muted">{pageMeasurements.filter((m) => m.kind === "wall").length} wall(s) on this page.</p>
                 {statusLine}{problemLines}
@@ -1295,10 +1497,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           {mode === "select" && sel?.kind === "wall" && (() => {
             const run = runs.get(runIdOf(sel));
             const rect = (sel.inputs?.kind || "rect") === "rect";
+            const ops = openingsByWall.get(sel.id) || [];
             return (
             <div className="space-y-2 text-sm" data-selected-wall="">
               <p className="font-medium text-ink">{sel.inputs?.name || "Wall"} — {fmtRaw(pathLengthMm(sel.points, calsById.get(sel.calibrationId)))} mm along the plan</p>
               {run && run.walls.length > 1 && <p className="text-[11px] text-muted">{runLabel(run)} · wall {run.walls.findIndex((w) => w.id === sel.id) + 1} of {run.walls.length}</p>}
+              {ops.length > 0 && <p className="text-[11px] text-muted" data-wall-openings="">{ops.map((o) => o.inputs?.label || "Opening").join(", ")} in this wall. Change {ops.length === 1 ? "it" : "them"} on the elevation.</p>}
               {/* HUB 022: the height of THIS wall only — the rest of its run keeps theirs */}
               {rect && canEdit ? (
                 <div className="w-48" data-wall-height=""><NumberField key={sel.id} label="Wall height" value={sel.inputs?.heightMm ?? null} min={1} max={MAX_WALL_MM} onCommit={(n) => setWallHeight(sel, n)} help="This wall only." /></div>

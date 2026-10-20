@@ -972,6 +972,318 @@ test.describe("HUB 022 Line, height and runs — phone", () => {
   });
 });
 
+test.describe("HUB 022 step 2: + Window / + Door on the plan — phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const heightField = (page) => page.locator("[data-line-height]").getByLabel("Wall height");
+  const runCard = (page) => page.locator("[data-run-card]");
+  const panel = (page) => page.locator("[data-opening-panel]");
+  const opH = (page) => page.locator("[data-opening-height]").getByLabel("Height");
+  const opSill = (page) => page.locator("[data-opening-sill]").getByLabel("Sill height");
+  /** Every opening the (fake) server holds, with its wall's name. */
+  const openings = (page) => page.evaluate(async () => {
+    const ms = (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.measurements;
+    return ms.filter((m) => m.kind === "opening").map((m) => ({ ...m, wallName: ms.find((w) => w.id === m.parentId)?.inputs?.name || null }));
+  });
+  const fromPlan = async (page) => (await openings(page)).filter((o) => /^Wall [3-6]$/.test(o.wallName || ""));
+  // taps land on whole / fractional CSS px: the offset and width are within the tap tolerance, always to the nearest 10
+  const near = (got, want, what) => { expect(got % 10, `${what} ${got} to the nearest 10`).toBe(0); expect(Math.abs(got - want), `${what} ${got} ≈ ${want}`).toBeLessThanOrEqual(30); };
+  /** The plan's check job on the fixture: four connected walls (Wall 3–6) at 2,700, finished by double-tapping the start. */
+  async function traceFour(page) {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000), at(1500, 4000)]) await tapPdf(page, q);
+    await page.waitForTimeout(400);
+    await doubleTapPdf(page, at(1500, 1000));
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 4 walls · 2,700");
+    await saved(page);
+  }
+
+  test("acceptance 7: + Window on the run card; Height + Sill start at the last window; two taps → W1 in that wall (offset + width to the nearest 10), saved exactly like an elevation opening; more windows with just two taps; + Door asks Height only and sits on the floor; Undo removes one", async ({ page }) => {
+    await traceFour(page);
+    const s0 = await reviewState(page);
+    await expect(runCard(page).getByRole("button", { name: "+ Window" })).toBeVisible();
+    await expect(runCard(page).getByRole("button", { name: "+ Door" })).toBeVisible();
+    await runCard(page).getByRole("button", { name: "+ Window" }).click();
+    await expect(panel(page)).toHaveAttribute("data-opening-panel", "window");
+    await expect(sheet(page)).toHaveAttribute("aria-label", "Window · Axon cladding");
+    // the boxes remember the last window in the takeoff (the seeded East wall's W2: 1,200 high, sill 1,000)
+    await expect(opH(page)).toHaveValue("1200");
+    await expect(opSill(page)).toHaveValue("1000");
+    await opSill(page).fill("900");                                           // typed only: the plan tap commits it
+    await tapPdf(page, at(2500, 1000));
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await expect(panel(page).locator("[data-opening-hint]")).toHaveText("Now tap the other end.");
+    await tapPdf(page, at(3700, 1000));
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(1);
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    await expect(panel(page).locator("[data-last-opening-label]")).toHaveText("W1 in Wall 3");
+    await saved(page);
+    let ops = await fromPlan(page);
+    expect(ops).toHaveLength(1);
+    const w1 = ops[0];
+    // exactly the elevation's opening: no plan points, no fields of its own, no assignment
+    expect(Object.keys(w1.inputs).sort()).toEqual(["heightMm", "label", "sillMm", "type", "widthMm", "xMm"]);
+    expect([w1.points ?? null, w1.documentId ?? null, w1.calibrationId ?? null, w1.wallName]).toEqual([null, null, null, "Wall 3"]);
+    expect([w1.inputs.label, w1.inputs.type, w1.inputs.heightMm, w1.inputs.sillMm]).toEqual(["W1", "window", 1200, 900]);
+    near(w1.inputs.xMm, 1000, "offset"); near(w1.inputs.widthMm, 1200, "width");
+    const roles = await page.evaluate(async (oid) => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.contributions.filter((c) => c.measurementId === oid).length, w1.id);
+    expect(roles, "an opening has no material of its own: every material on the wall deducts it").toBe(0);
+    await shot(page, "hub022b-window-390x844");
+    // windows 2 and 3 are the same size: just tap both ends (wall 5 runs back along the plan; ends tapped right to left)
+    await tapPdf(page, at(6500, 1500)); await tapPdf(page, at(6500, 2700));
+    await tapPdf(page, at(3800, 4000)); await tapPdf(page, at(5000, 4000));
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(3);
+    await expect(panel(page).locator("[data-last-opening-label]")).toHaveText("W1 in Wall 5");
+    await expect(panel(page).locator("[data-opening-hint]")).toHaveText("Tap both ends of the next window.");
+    await expect(panel(page).locator("[data-last-opening-note]"), "ends tapped on the wall: nothing to say").toHaveCount(0);
+    // + Door: Height only (no door yet, so the box is empty: the panel says to type it, never "the next door")
+    await panel(page).getByRole("button", { name: "+ Door" }).click();
+    await expect(panel(page)).toHaveAttribute("data-opening-panel", "door");
+    await expect(sheet(page)).toHaveAttribute("aria-label", "Door · Axon cladding");
+    await expect(page.locator("[data-opening-sill]")).toHaveCount(0);
+    await expect(panel(page)).toContainText("A door sits on the floor.");
+    await expect(opH(page)).toHaveValue("");
+    await expect(panel(page).locator("[data-opening-hint]")).toHaveText("Type the door height, then tap one end.");
+    await tapPdf(page, at(1500, 2000));
+    await expect(sheet(page)).toContainText("Type the door height first.");
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    await opH(page).fill("2100"); await opH(page).press("Enter");
+    await expect(panel(page).locator("[data-opening-hint]")).toHaveText("Tap one end of the door on a wall, then the other end.");
+    await tapPdf(page, at(1500, 2000)); await tapPdf(page, at(1500, 2900));
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(4);
+    await expect(page.locator('[data-plan-opening][data-type="door"]')).toHaveAttribute("data-label", "D1");
+    await saved(page);
+    ops = await fromPlan(page);
+    const by = Object.fromEntries(ops.map((o) => [o.wallName, o.inputs]));
+    expect(Object.keys(by).sort()).toEqual(["Wall 3", "Wall 4", "Wall 5", "Wall 6"]);
+    near(by["Wall 4"].xMm, 500, "Wall 4 offset"); near(by["Wall 4"].widthMm, 1200, "Wall 4 width");
+    near(by["Wall 5"].xMm, 1500, "Wall 5 offset (from ITS start)"); near(by["Wall 5"].widthMm, 1200, "Wall 5 width");
+    near(by["Wall 6"].xMm, 1100, "door offset"); near(by["Wall 6"].widthMm, 900, "door width");
+    expect([by["Wall 4"].label, by["Wall 4"].heightMm, by["Wall 4"].sillMm]).toEqual(["W1", 1200, 900]);
+    expect([by["Wall 6"].label, by["Wall 6"].type, by["Wall 6"].heightMm, by["Wall 6"].sillMm]).toEqual(["D1", "door", 2100, 0]);
+    const s1 = await reviewState(page);
+    expect(s1.measurements - s0.measurements).toBe(4);
+    // each opening's label keeps clear of its wall's name (Wall 6 runs up the page: its name sits across the wall line)
+    const clash = await page.evaluate(() => {
+      const box = (el) => el.getBoundingClientRect();
+      const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      return [...document.querySelectorAll("[data-plan-opening]")].filter((g) => {
+        const name = document.querySelector(`[data-measurement-id="${g.getAttribute("data-wall-id")}"] text`);
+        const lab = g.querySelector("[data-opening-label] text");
+        return name && lab && hit(box(name), box(lab));
+      }).map((g) => g.getAttribute("data-label"));
+    });
+    expect(clash, "opening labels on top of their wall's name").toEqual([]);
+    await shot(page, "hub022b-door-390x844");
+    // the card's Undo works like ↶: a first end tapped comes off first, then the door; Redo puts it back
+    await tapPdf(page, at(1500, 1500));
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await panel(page).getByRole("button", { name: "Undo this end" }).click();
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(4);
+    await panel(page).getByRole("button", { name: "Undo D1" }).click();
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(3);
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    await saved(page);
+    expect((await fromPlan(page)).map((o) => o.wallName).sort()).toEqual(["Wall 3", "Wall 4", "Wall 5"]);
+    await page.getByRole("button", { name: "Redo" }).click();
+    await expect(page.locator("[data-plan-opening]")).toHaveCount(4);
+    await saved(page);
+    // Trace more walls: the Line panel again, with + Window / + Door (the run card has gone: an opening came after it)
+    await panel(page).getByRole("button", { name: "Trace more walls" }).click();
+    await expect(page.locator("[data-line-panel]")).toBeVisible();
+    await expect(runCard(page)).toHaveCount(0);
+    await expect(page.locator("[data-line-panel] [data-opening-buttons]").getByRole("button", { name: "+ Window" })).toBeVisible();
+    // each wall's elevation shows its opening in the right place with the right size, the sheets cut round it
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(5500, 1000));                                        // Wall 3, clear of its window
+    await expect(page.locator("[data-wall-openings]")).toHaveText("W1 in this wall. Change it on the elevation.");
+    await page.getByRole("button", { name: "Open elevation" }).click();
+    const w3 = by["Wall 3"];
+    const o3 = page.locator(`[data-opening-id="${w1.id}"]`);
+    await expect(o3).toHaveAttribute("data-x-mm", String(w3.xMm));
+    await expect(o3).toHaveAttribute("data-sill-mm", "900");
+    await expect(page.locator("[data-opening-row]")).toHaveCount(1);
+    await expect(page.locator("[data-opening-row]")).toContainText(`Window · ${w3.widthMm.toLocaleString("en-AU")} × 1,200 · sill 900 · from start ${w3.xMm.toLocaleString("en-AU")}`);
+    await expect(page.locator('[data-area="openings"]')).toHaveText(`${((w3.widthMm * 1200) / 1e6).toFixed(2)} m²`);
+    await shot(page, "hub022b-wall3-elevation-390x844");
+    // the door's wall: on the floor
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    const run = page.locator("[data-wall-run]");
+    const toggle = run.locator("button[aria-expanded]").first();
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();   // open already after visiting a wall in it
+    await run.getByRole("button", { name: "Open Wall 6" }).click();
+    const d = ops.find((o) => o.wallName === "Wall 6");
+    await expect(page.locator(`[data-opening-id="${d.id}"]`)).toHaveAttribute("data-sill-mm", "0");
+    await expect(page.locator("[data-opening-row]")).toContainText(`Door · ${d.inputs.widthMm.toLocaleString("en-AU")} × 2,100 · sill 0`);
+    await expect(page.locator('[data-area="openings"]')).toHaveText(`${((d.inputs.widthMm * 2100) / 1e6).toFixed(2)} m²`);
+  });
+
+  test("no traced wall here: says so, nothing saved; round a corner or past a wall end: cut back to the wall with a note that stays on the card (a finger's slip says nothing); a window above its wall says so; ends on two walls that don't meet: nothing; Undo takes a first end off first; hidden walls say so; Undo of the Finish brings Finish back", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    // the cladding's only wall so far is entered by numbers (North wall): nothing on the plan to put a window in
+    await page.locator("[data-line-panel] [data-opening-buttons]").getByRole("button", { name: "+ Window" }).click();
+    await expect(sheet(page)).toContainText("Trace the Axon cladding walls first, then add their windows and doors.");
+    await expect(panel(page)).toHaveCount(0);
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await expect(page.locator("[data-opening-buttons]"), "not while tracing").toHaveCount(0);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    // ↶ straight after + Window un-finishes the run: the drawing is back with its Finish (and window mode has ended)
+    await runCard(page).getByRole("button", { name: "+ Window" }).click();
+    await expect(panel(page)).toHaveCount(1);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(page.locator("[data-line-panel]").getByRole("button", { name: "Finish" })).toBeVisible();
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    // walls hidden in Takeoffs ▾: says so (not "trace them first")
+    await page.getByRole("button", { name: "Show or hide takeoffs on the plan" }).click();
+    await page.locator("[data-layers]").getByRole("button", { name: "Hide all" }).click();
+    await page.locator("[data-layers]").getByRole("button", { name: "Done" }).click();
+    await runCard(page).getByRole("button", { name: "+ Window" }).click();
+    await expect(sheet(page)).toContainText("Your Axon cladding walls are hidden on this plan. Tap Show all, then add the windows and doors.");
+    await expect(panel(page)).toHaveCount(0);
+    await page.getByRole("button", { name: "Show all" }).click();
+    const n0 = (await openings(page)).length;
+    await runCard(page).getByRole("button", { name: "+ Window" }).click();
+    await opSill(page).fill("900"); await opSill(page).press("Enter");
+    // the middle of the room: no wall there
+    await tapPdf(page, at(4000, 2500));
+    await expect(sheet(page)).toContainText("No Axon cladding wall here. Tap on a wall you traced.");
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    // a first end, then Undo: the first end comes off (nothing was saved), the run stays
+    await tapPdf(page, at(3000, 1000));
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(page.locator("[data-opening-start]")).toHaveCount(0);
+    await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(2);
+    // the other end off any wall: the first end stays, tap again
+    await tapPdf(page, at(3000, 1000)); await tapPdf(page, at(3000, 2500));
+    await expect(sheet(page)).toContainText("Tap the other end on the wall too.");
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    // round the corner: 600 before it on Wall 3, about 400 after it down Wall 4 → on Wall 3 only, cut back, with a note
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await zoomOn(page, at(6000, 2500), 2);                                     // in closer: a narrow opening needs it
+    await tapPdf(page, at(5900, 1000)); await tapPdf(page, at(6500, 1400));
+    const note = panel(page).locator("[data-last-opening-note]");
+    await expect(note).toHaveText(/^W1 went round the corner, so it's on Wall 3 only \(you tapped \d[\d,]*\)\. Undo, or change it on Wall 3's elevation\.$/);
+    await expect(panel(page).locator("[data-last-opening]")).toContainText(/W1 in Wall 3 · \d[\d,]* wide/);
+    // the note sits in the card, so Trace more walls and + Door stay on screen without scrolling the sheet
+    const fit = await sheet(page).evaluate((el) => ({ over: el.scrollHeight - el.clientHeight, bottom: el.getBoundingClientRect().bottom }));
+    expect(fit.over, "the sheet's content fits").toBeLessThanOrEqual(1);
+    const btn = await panel(page).getByRole("button", { name: "Trace more walls" }).boundingBox();
+    expect(btn.y + btn.height).toBeLessThanOrEqual(844);
+    await saved(page);
+    await shot(page, "hub022b-corner-note-390x844");
+    // ... and it stays when the next first end is tapped (only the next opening replaces it)
+    await tapPdf(page, at(3000, 1000));
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await expect(note).toHaveCount(1);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();   // that end off again
+    await expect(note).toHaveCount(1);
+    await saved(page);
+    let ops = await fromPlan(page);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].wallName).toBe("Wall 3");
+    near(ops[0].inputs.xMm, 4400, "corner offset"); near(ops[0].inputs.widthMm, 600, "corner width");
+    expect(ops[0].inputs.xMm + ops[0].inputs.widthMm, "fits the wall").toBeLessThanOrEqual(5000);
+    // past the free end of Wall 4 (it ends at 4,000 down the page): cut back to the wall
+    await tapPdf(page, at(6500, 3300)); await tapPdf(page, at(6500, 4400));
+    await expect(note).toHaveText(/^W1 ran past the end of Wall 4, so it's cut back to the wall \(you tapped \d[\d,]*\)\. Undo, or change it on Wall 4's elevation\.$/);
+    await saved(page);
+    ops = await fromPlan(page);
+    const w4 = ops.find((o) => o.wallName === "Wall 4").inputs;
+    near(w4.xMm, 2300, "past-end offset"); near(w4.widthMm, 700, "past-end width");
+    expect(w4.xMm + w4.widthMm).toBeLessThanOrEqual(3000);
+    // a finger's slip (about 2 px) past Wall 3's free start is the start: cut to the wall, nothing to say
+    await tapPdf(page, at(2500, 1000)); await tapPdf(page, at(1460, 1000));
+    await expect(panel(page).locator("[data-last-opening-label]")).toHaveText("W2 in Wall 3");
+    await expect(note).toHaveCount(0);
+    // a window above its wall (2,700): saved, and the card says only the part on the wall comes off
+    await opH(page).fill("1900"); await opH(page).press("Enter");             // sill 900 + 1,900 = 2,800
+    await tapPdf(page, at(3000, 1000)); await tapPdf(page, at(3600, 1000));
+    await expect(note).toHaveText("W3 is taller than Wall 3 (2,700 high), so only the part on the wall comes off. Check the height and sill, or Undo.");
+    await panel(page).getByRole("button", { name: "Undo W3" }).click();
+    await expect(panel(page).locator("[data-last-opening]"), "the card is for the last opening only").toHaveCount(0);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();   // W2 off too
+    await opH(page).fill("1200"); await opH(page).press("Enter");
+    await saved(page);
+    // the ends well along two walls (Wall 3's middle, Wall 4's middle): not one wall, nothing saved
+    await tapPdf(page, at(3000, 1000)); await tapPdf(page, at(6500, 3000));
+    await expect(sheet(page)).toContainText("Both ends go on the same wall. Tap the other end on Wall 3.");
+    expect((await openings(page)).length).toBe(n0 + 2);
+    // the elevation shows the clipped window fully on the wall: no "past the wall edge" note
+    await page.getByRole("button", { name: "Undo", exact: true }).click();   // the pending first end
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(3000, 1000));
+    await page.getByRole("button", { name: "Open elevation" }).click();
+    await expect(page.locator(`[data-opening-id="${ops.find((o) => o.wallName === "Wall 3").id}"]`)).toHaveAttribute("data-issue", "");
+  });
+
+  test("an unscaled page: + Window and + Door say to scale the page first, and nothing is saved", async ({ page }) => {
+    await page.addInitScript(() => { try { localStorage.setItem("takeoff-plan-page:ws-1", JSON.stringify({ docId: "doc-plan-c", contentSha256: "synthetic", pageIndex: 1 })); } catch { /* blocked */ } });
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await expect(page.getByText("This page has no scale yet.")).toBeVisible();
+    const n0 = (await reviewState(page)).measurements;
+    for (const name of ["+ Window", "+ Door"]) {
+      await page.locator("[data-line-panel] [data-opening-buttons]").getByRole("button", { name }).click();
+      await expect(sheet(page)).toContainText("Scale this page before adding windows and doors.");
+      await expect(panel(page)).toHaveCount(0);
+    }
+    expect((await reviewState(page)).measurements).toBe(n0);
+  });
+
+  test("a page with two scaled regions: + Window works on walls traced in either region, with no region to choose again", async ({ page }) => {
+    // page 2 of the plan gets two labelled scaled regions through the fake server's own commit, before the takeoff opens
+    await page.addInitScript(() => { try { localStorage.setItem("takeoff-plan-page:ws-1", JSON.stringify({ docId: "doc-plan-c", contentSha256: "synthetic", pageIndex: 1 })); } catch { /* blocked */ } });
+    await page.goto("/carpentry/cjb-1?reviewRole=admin&takeoffSeed=mixed");
+    await ready(page);
+    const H = { p1: at(0, -1400), p2: at(12000, -1400), knownMm: 12000 }, V = { p1: at(-1400, 0), p2: at(-1400, 8000), knownMm: 8000 };
+    const res = await page.evaluate(async ({ vb, H, V }) => {
+      const ws = await (await fetch("/api/takeoff/workspaces/ws-1")).json();
+      const cal = (id, regionLabel) => ({ id, documentId: "doc-plan-c", pageIndex: 1, pageMeta: { viewBox: vb, rotate: 0, userUnit: 1 }, basisRotation: 0, horizontal: H, vertical: V, regionLabel });
+      const r = await fetch("/api/takeoff/workspaces/ws-1/commit", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRevision: ws.snapshot.workspace.revision, idempotencyKey: "tc-measure-regions", changes: { calibrations: { insert: [cal("cal-g", "Ground"), cal("cal-f", "First")] } } }) });
+      return r.json();
+    }, { vb: meta.pages[1].viewBox, H, V });
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+    await page.evaluate((u) => { window.history.pushState({}, "", u); window.dispatchEvent(new PopStateEvent("popstate")); }, MIXED);
+    await ready(page);
+    await page.getByRole("button", { name: /^Measure$/ }).click();
+    await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
+    await chooseMaterial(page, "Axon cladding");
+    await page.getByRole("button", { name: "Ground", exact: true }).click();
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    // leave Measure and come back: the region choice starts afresh, but the walls carry their own scale
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await page.getByRole("button", { name: "Trace on plan" }).click();         // the Axon walls list → back on the plan
+    await page.waitForFunction((n) => (window.__takeoffViewerStats?.renders || 0) > n, renders, { timeout: 30_000 });
+    await page.waitForTimeout(250);
+    await expect(page.getByRole("button", { name: "Ground", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await page.locator("[data-line-panel] [data-opening-buttons]").getByRole("button", { name: "+ Window" }).click();
+    await expect(sheet(page)).not.toContainText("Scale this page");
+    await expect(panel(page)).toHaveAttribute("data-opening-panel", "window");
+    await zoomOn(page, at(4000, 2500), 2);
+    await tapPdf(page, at(2500, 1000)); await tapPdf(page, at(3700, 1000));
+    await expect(panel(page).locator("[data-last-opening-label]")).toHaveText("W1 in Wall 3");
+    await saved(page);
+    const w = (await openings(page)).find((o) => o.wallName === "Wall 3");
+    near(w.inputs.xMm, 1000, "offset"); near(w.inputs.widthMm, 1200, "width");
+  });
+});
+
 test.describe("schedule \"Show on plan\" (highlightIds)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const openSchedule = async (page, url = MIXED) => {

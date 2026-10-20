@@ -4,12 +4,13 @@
 //                      legal split marker, explicit split bars, one order-length label per ordered piece.
 //   PolylineShape      walls, timber/aluminium runs and unfinished drawings.
 //   TimberLineShape    member line / distribution run with member ticks + count (03 T1).
+//   OpeningMark        a window or door in a traced wall (HUB 022 step 2), with its label (W1, D1 …).
 // Nothing here is interactive except through MeasureScreen's tap hit-testing and PointHandlesLayer handles.
 // data-* attributes describe what is drawn for automated UI checks (no user data beyond what is shown).
 // =============================================================================
 import { fmtMm } from "../format.js";
 import { COLORS } from "./tools.js";
-import { safePointAt, screenDirectionAt } from "./geometry.js";
+import { labelBox, safePointAt, screenDirectionAt } from "./geometry.js";
 
 const ptsAttr = (pts) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
@@ -95,6 +96,43 @@ export function PolylineShape({ measurementId = null, kind, points, toScreen, co
       {pts.length >= 2 && <polyline points={ptsAttr(pts)} fill="none" stroke={color} strokeWidth={selected ? 4 : 3} strokeDasharray={dashed ? "9 6" : undefined} strokeLinecap="round" strokeLinejoin="round" />}
       {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={i === 0 || i === pts.length - 1 ? 4.5 : 3.5} fill="#fff" stroke={color} strokeWidth={2} />)}
       {label && mid && <Label x={mid.x} y={mid.y - 9} text={label} color={color} />}
+    </g>
+  );
+}
+
+const overlaps = (a, b, pad = 2) => !!a && !!b && a.x0 < b.x1 + pad && b.x0 < a.x1 + pad && a.y0 < b.y1 + pad && b.y0 < a.y1 + pad;
+
+/**
+ * A window or door in a traced wall (HUB 022 step 2): a thick band over the part of the wall it takes, with its label
+ * beside the wall. a / b are screen points; drawn for display only (changes are made on the wall's elevation).
+ * `avoid` is the screen box of the wall's own name: the label moves along the band (or past its far end) to keep
+ * clear of it, which matters on up-and-down walls where the name sits across the wall line.
+ */
+export function OpeningMark({ id, wallId, type, label, a, b, xMm, widthMm, sillMm, heightMm, avoid = null }) {
+  const color = type === "door" ? COLORS.door : COLORS.window;
+  const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const d = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+  const n = { x: -d.y, y: d.x };
+  // the label goes below the wall (right of it when the wall runs up the page): the wall's own name sits above it
+  const side = n.y > 0.01 || (n.y >= -0.01 && n.x > 0) ? 1 : -1;
+  let pos = null;
+  if (label) {
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const c = avoid ? { x: (avoid.x0 + avoid.x1) / 2, y: (avoid.y0 + avoid.y1) / 2 } : mid;
+    // the band's end further from the wall's name, then a little past it
+    const far = Math.hypot(a.x - c.x, a.y - c.y) > Math.hypot(b.x - c.x, b.y - c.y) ? { p: a, s: -1 } : { p: b, s: 1 };
+    const along = [mid, far.p, { x: far.p.x + d.x * far.s * 16, y: far.p.y + d.y * far.s * 16 }, { x: far.p.x + d.x * far.s * 30, y: far.p.y + d.y * far.s * 30 }];
+    const at = (q, sd) => ({ x: q.x + n.x * 16 * sd, y: q.y + n.y * 16 * sd + 4 });
+    const tries = along.flatMap((q) => [at(q, side), at(q, -side)]);
+    pos = tries.find((q) => !overlaps(labelBox(q.x, q.y, label, 11), avoid)) || tries[0];
+  }
+  return (
+    <g data-plan-opening={id} data-wall-id={wallId} data-type={type} data-label={label || ""} data-x-mm={xMm} data-width-mm={widthMm} data-sill-mm={sillMm} data-height-mm={heightMm}>
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#fff" strokeWidth={10} strokeLinecap="butt" />
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={6} strokeLinecap="butt" strokeOpacity={type === "door" ? 1 : 0.85} />
+      <CrossBar at={a} dir={d} color={color} half={8} width={2.5} />
+      <CrossBar at={b} dir={d} color={color} half={8} width={2.5} />
+      {pos && <g data-opening-label=""><Label x={pos.x} y={pos.y} text={label} color={color} size={11} /></g>}
     </g>
   );
 }

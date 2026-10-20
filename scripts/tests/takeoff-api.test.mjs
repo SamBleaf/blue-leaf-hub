@@ -1147,6 +1147,74 @@ await t("HUB 022: a Line run's walls keep runId + seq on the REAL server (reload
   assert.ok(lines.length > 0 && lines.every((l) => l.unit === "sheet"), JSON.stringify(lines.map((l) => l.unit)));
 });
 
+await t("HUB 022 step 2: + Window / + Door on the plan saves an elevation opening the REAL server keeps unchanged (no plan points, no new fields); deducted for every material on the wall", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { methodFor } = await import("../../shared/takeoff/index.js");
+  const { planOpening } = await import("../../src/components/takeoff/measure/geometry.js");
+  const { nextOpeningLabel, openingRecord } = await import("../../src/components/takeoff/measure/tools.js");
+  const fam = (s) => { const m = methodFor(s); return { spec: s, methodKey: m.key, methodVersion: m.version }; };
+  const axon = productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth");
+  const bat = productGroups({}).find((g) => /Cavity Batten/.test(g.name));
+  const w = id(), cal = id(), clad = id(), batId = id(), run = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB022b-plan.pdf");
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB022b" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  const corners = [c(0, 0), c(6000, 0), c(6000, 4000), c(0, 4000)];
+  const walls = [0, 1, 2, 3].map((i) => ({ id: id(), seq: i + 1, pts: [corners[i], corners[(i + 1) % 4]] }));
+  const r1 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: clad, name: "Axon 400 smooth", ...fam({ ...specFromGroup(axon), assemblyId: "axon-vertical" }), rules: { route: "cavity" } },
+      { id: batId, name: "Cavity battens", ...fam(specFromGroup(bat)), rules: { maxSpacingMm: 600 } }] },
+    measurements: { upsert: walls.map((x) => ({ id: x.id, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: x.pts, inputs: { kind: "rect", heightMm: 2700, name: `Wall ${x.seq}`, runId: run, seq: x.seq } })) },
+    contributions: { upsert: walls.flatMap((x) => [clad, batId].map((m) => ({ id: id(), measurementId: x.id, jobMaterialId: m, role: "wall" }))) } } });
+  assert.equal(r1.status, 200, JSON.stringify(r1.data));
+  // the client's own maths on the server's calibration record: two taps per opening → wall, offset, width (nearest 10)
+  const snap1 = (await S(`/workspaces/${w}`)).data.snapshot;
+  const sc = snap1.calibrations.find((x) => x.id === cal);
+  const onPlan = snap1.measurements.filter((m) => m.kind === "wall").map((m) => ({ id: m.id, points: m.points, cal: sc }));
+  const opts = { pxPerUnit: 0.06 / k };
+  const taps = [[c(1000, 0), c(2200, 0), "window"], [c(6000, 500), c(6000, 1700), "window"], [c(3800, 4000), c(5000, 4000), "window"], [c(0, 2000), c(0, 2900), "door"]];
+  const sent = taps.map(([a, b, type]) => {
+    const r = planOpening(onPlan, a, b, opts);
+    assert.ok(r.ok, JSON.stringify(r));
+    return openingRecord(id(), r.wallId, { xMm: r.xMm, sillMm: type === "door" ? 0 : 900, widthMm: r.widthMm, heightMm: type === "door" ? 2100 : 1200, label: nextOpeningLabel([], type), type });
+  });
+  assert.deepEqual(sent.map((o) => [walls.findIndex((x) => x.id === o.parentId) + 1, o.inputs.xMm, o.inputs.widthMm]), [[1, 1000, 1200], [2, 500, 1200], [3, 1000, 1200], [4, 1100, 900]]);
+  // each opening is its own save (one Undo each), with no assignment of its own — exactly as the elevation saves one
+  let comp = null;
+  for (const o of sent) {
+    const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [o] } } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    comp = r.data.computed;
+  }
+  const snap = (await S(`/workspaces/${w}`)).data.snapshot;
+  for (const o of sent) {
+    const got = snap.measurements.find((m) => m.id === o.id);
+    assert.deepEqual([got.kind, got.parentId, got.points ?? null, got.documentId ?? null, got.calibrationId ?? null], ["opening", o.parentId, null, null, null]);
+    assert.deepEqual(got.inputs, o.inputs, "kept exactly: offset, sill, width, height, label, type");
+  }
+  const row = (await q("SELECT geometry FROM takeoff_measurements WHERE id=$1", [sent[3].id])).rows[0].geometry;
+  assert.deepEqual(Object.keys(row).sort(), ["inputs", "parentId", "v"], "no plan points stored");
+  assert.equal(row.inputs.sillMm, 0, "the door sits on the floor");
+  // the server's own quantities: every material on each wall deducts that wall's openings (and nothing is blocked)
+  for (const m of [clad, batId]) {
+    for (const x of walls) {
+      const L = comp.materialResults[m].layouts.find((l) => l.wallMeasurementId === x.id || l.wallId === x.id);
+      const expect = sent.filter((o) => o.parentId === x.id).reduce((a, o) => a + (o.inputs.widthMm * o.inputs.heightMm) / 1e6, 0);
+      assert.ok(Math.abs(L.areas.openingM2 - expect) < 1e-9, `${m === clad ? "Axon" : "battens"} wall ${x.seq}: ${L.areas.openingM2} m² of openings (expected ${expect})`);
+    }
+    assert.equal((comp.materialResults[m].problems || []).filter((p) => /^opening_/.test(p.code)).length, 0);
+  }
+  // an opening with plan points is still refused (the plan never sends them), and Undo of one opening takes only it off
+  const bad = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap.workspace.revision, changes: { measurements: { upsert: [{ ...sent[0], id: id(), documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(1000, 0), c(2200, 0)] }] } } });
+  assert.equal(bad.status, 400); assert.match(bad.data.error, /entered by numbers/);
+  const un = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap.workspace.revision, changes: { measurements: { archive: [sent[3].id] } } });
+  assert.equal(un.status, 200, JSON.stringify(un.data));
+  const left = (await S(`/workspaces/${w}`)).data.snapshot.measurements.filter((m) => m.kind === "opening").map((m) => m.id).sort();
+  assert.deepEqual(left, sent.slice(0, 3).map((o) => o.id).sort());
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

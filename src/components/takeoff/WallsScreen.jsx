@@ -29,7 +29,7 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { runIdOf, runLabel, toolsFor, wallListItems, wallRuns } from "./measure/tools.js";
+import { nextOpeningLabel, openingRecord, runIdOf, runLabel, toolsFor, wallListItems, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
 const SNAP_MM = 10;
@@ -1270,7 +1270,7 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
     },
     createOpening(w, inputs) {
       const id = newId();
-      const meas = { id, kind: "opening", parentId: w.id, documentId: null, pageIndex: null, calibrationId: null, points: null, label: null, inputs };
+      const meas = openingRecord(id, w.id, inputs);   // the same record as an opening drawn on the plan
       record({ redo: partial({ measurements: [meas] }), undo: partial({ archive: { measurements: [id] } }) });
       return id;
     },
@@ -1574,13 +1574,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const resultLine = areas ? `Net ${fmtM2(areas.netM2)} m² of ${fmtM2(areas.grossM2)} m²${mine ? ` · ${mine.material.name}: ${blockingFor(mine.material.id) ? "needs attention (see problems)" : mineQty.length ? mineQty.join(", ") : "nothing calculated yet"}` : ""}` : null;
 
   // ── handlers ──
-  const nextLabel = (type) => {
-    const p = type === "door" ? "D" : type === "other" ? "O" : "W";
-    const used = new Set(openings.map((o) => o.label));
-    let n = 1;
-    while (used.has(`${p}${n}`)) n++;
-    return `${p}${n}`;
-  };
+  // W1, D1 … per wall — the same rule as + Window / + Door on the plan (HUB 022 step 2)
+  const nextLabel = (type) => nextOpeningLabel(openings.map((o) => o.label), type);
   // a tapped position centres the opening there, kept on the wall when it fits; typed numbers always win
   const draftValues = (d) => {
     if (!d) return null;

@@ -184,6 +184,21 @@ function serverWallInputs(i) {
   return out;
 }
 
+/**
+ * Opening inputs as the server keeps them (cleanInputs "opening"): the entered numbers, label, type and framing detail
+ * only — an opening drawn on the plan (HUB 022 step 2) carries nothing else, and a field the server drops goes here too.
+ */
+const OPENING_INPUT_KEYS = ["xMm", "sillMm", "widthMm", "heightMm", "label", "type", "detail"];
+function serverOpeningInputs(i) {
+  if (!i) return i;
+  const out = {};
+  for (const key of OPENING_INPUT_KEYS) if (i[key] !== undefined) out[key] = i[key];
+  out.label = typeof out.label === "string" && out.label.trim() ? out.label.trim().slice(0, 40) : null;
+  out.type = ["window", "door", "other"].includes(out.type) ? out.type : "window";
+  if (out.detail == null) delete out.detail;
+  return out;
+}
+
 function applyCommit(body) {
   if (window.__takeoffReviewOffline) throw new TypeError("Failed to fetch"); // simulate a dropped connection
   if (window.__takeoffReviewRefuse) { state.commitCount = (state.commitCount || 0) + 1; return fail(window.__takeoffReviewRefuse, "Your sign-in has expired.", "UNAUTHENTICATED"); } // simulate a 4xx refusal
@@ -214,9 +229,15 @@ function applyCommit(body) {
     // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft
     for (const m of ch.measurements?.upsert || []) {
       if (m.kind === "wall" && m.inputs?.kind === "gable") { const gp = gableInputProblem(m.inputs, m.inputs.widthMm); if (gp) return fail(400, gp.message, "INVALID"); }
+      // like the server: an opening is entered by numbers (never plan points) and belongs to a wall of this takeoff
+      if (m.kind === "opening" && Array.isArray(m.points) && m.points.length) return fail(400, "Openings and offcuts are entered by numbers.", "INVALID");
+      if (m.kind === "opening" && m.parentId != null && ![...state.measurements, ...ch.measurements.upsert].some((x) => x.id === m.parentId && x.kind === "wall")) {
+        return fail(400, "An opening must belong to a wall in this takeoff.", "INVALID");
+      }
     }
     up(state.measurements, ch.measurements?.upsert, (m) => {
       if (m.kind === "wall") return { ...m, inputs: serverWallInputs(m.inputs) };
+      if (m.kind === "opening") return { ...m, inputs: serverOpeningInputs(m.inputs) };
       if (m.kind !== "run") return { ...m };
       const c = state.calibrations.find((x) => x.id === m.calibrationId);
       return { ...m, rawLengthMm: c ? segmentLengthMm(c, m.points[0], m.points[1]) : null };
