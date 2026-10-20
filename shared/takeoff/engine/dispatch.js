@@ -382,7 +382,10 @@ function rowsFor(jr, b, horizontal) {
   if (!jr || !Array.isArray(jr.atMm) || !b) return jr;
   const [lo, hi] = horizontal ? [b.x0, b.x1] : [b.y0, b.y1];
   const at = jr.atMm.filter((v) => v > lo && v + (jr.gapMm || 0) < hi);
-  return at.length ? { ...jr, atMm: at } : undefined;
+  if (at.length) return { ...jr, atMm: at };
+  // HUB 015: none of the material's heights fall in this wall — keep its joint RULE (gap + detail) so a taller wall
+  // still gets automatic joints; without a complete rule there is nothing to apply
+  return Number.isFinite(jr.gapMm) && typeof jr.detailRef === "string" && jr.detailRef.trim() ? { ...jr, atMm: [] } : undefined;
 }
 
 function safeAreas(wall, openings) {

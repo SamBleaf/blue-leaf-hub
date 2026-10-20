@@ -183,7 +183,8 @@ function cleanGenericRules(r, d = 0) {
   const entries = Object.entries(r);
   must(entries.length <= 60, "A material has too many settings (60 at most).");
   for (const [k, v] of entries) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(k) || k === "__proto__" || k === "constructor" || k === "prototype") continue;
+    // setting names, or a wall's id for per-wall settings (datumByWall …) — a UUID often starts with a digit (HUB 015)
+    if (!(/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(k) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)) || k === "__proto__" || k === "constructor" || k === "prototype") continue;
     const c = cleanRuleValue(v, d);
     if (c !== undefined) out[k] = c;
   }
@@ -1128,7 +1129,7 @@ export function snapshotHash(snapshot) {
 }
 
 export { sha256 };
-export const _test = { mapDoc, mapCal, mapMeas, mapMat, mapContrib, makeBucketKey };
+export const _test = { mapDoc, mapCal, mapMeas, mapMat, mapContrib, makeBucketKey, cleanGenericRules };
 
 /** Guard used by commit/export: is a TakeoffValidationError? */
 export const isValidation = (e) => e instanceof TakeoffValidationError;

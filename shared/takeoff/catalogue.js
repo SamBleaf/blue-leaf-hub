@@ -11,6 +11,8 @@ import { TakeoffValidationError, isFiniteNumber } from "./units.js";
 
 export const SPEC_SCHEMA_VERSION = 2;
 export const DEFAULT_SUPPLIER_NAME_HINT = "Fielders";
+/** Blue Leaf's horizontal sheet joint (Sam, 20 Oct 2026, Hub review HUB 015): a 10 mm gap with an H-flashing. */
+export const BLUE_LEAF_SHEET_JOINT = Object.freeze({ gapMm: 10, detailRef: "H-flashing" });
 export const COMPANY_DEFAULT_BMT = 0.55;
 
 export const PALETTES = Object.freeze({

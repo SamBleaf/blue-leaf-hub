@@ -20,7 +20,7 @@
 //   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose()
 // =============================================================================
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
+import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
@@ -370,7 +370,7 @@ function jointLine(j, seg, k, prefix) {
   return {
     id: `${prefix}j-${j.orientation}-${j.index}-${k}`, kind: "line", state: "joint",
     a: horiz ? { x: seg.startMm, y: at } : { x: at, y: seg.startMm }, b: horiz ? { x: seg.endMm, y: at } : { x: at, y: seg.endMm },
-    info: { title: `${horiz ? "Horizontal" : "Vertical"} joint ${j.index + 1}`, rows: [["Length", `${fmtMm(seg.endMm - seg.startMm)} mm`], ["Joint gap", `${fmtMm(j.gapMm)} mm`], ...(j.detailRef ? [["Detail", j.detailRef]] : [])],
+    info: { title: `${horiz ? "Horizontal" : "Vertical"} joint ${j.index + 1}${j.source === "auto" ? " (added automatically)" : ""}`, rows: [["Length", `${fmtMm(seg.endMm - seg.startMm)} mm`], ["Joint gap", `${fmtMm(j.gapMm)} mm`], ...(j.detailRef ? [["Detail", j.detailRef]] : [])],
       note: "Joint strips / backing come from the selected joint accessory." },
   };
 }
@@ -1421,6 +1421,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const wallProblemsByMat = new Map(entries.map((e) => [e.material.id, problemsForWall(view, e.material, e.result, wall)]));
   const cladEntries = entries.filter((e) => CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey));
   const shownClad = cladEntries.find((e) => e.material.id === pick) || cladEntries[0] || null;
+  const autoJointsHere = (shownClad?.layout?.joints || []).filter((j) => j.source === "auto");
   const accessoryEntries = entries.filter((e) => e.material.spec?.family === "accessory");
   // a stud wall frames each opening from its framing detail (03 T4) — edited in the opening's sheet
   const studEntry = entries.find((e) => (e.result?.methodKey || e.material.methodKey) === "wall_frame") || null;
@@ -1671,7 +1672,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
           {(blockingHere.length > 0 || notesHere.length > 0) && (
             <section aria-label="Problems on this wall" className="space-y-2" data-wall-problems="">
               {blockingHere.map((p) => (
-                <Banner key={p.message} tone="error" action={p.code === "sheet_too_tall" && canEdit && p.materialId === material?.id ? <Btn kind="primary" onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>
+                <Banner key={p.message} tone="error" action={p.code === "sheet_too_tall" && canEdit && p.materialId === material?.id ? (
+                  <div className="flex flex-wrap gap-1">
+                    {/* HUB 015: one tap — Blue Leaf's joint; the engine then places the joints wherever a wall is taller than the sheet */}
+                    <Btn kind="primary" onClick={() => act.updateRules({ jointRows: { atMm: [], ...BLUE_LEAF_SHEET_JOINT } }, ["jointRowsDraft"], ["jointRows"])}>Use a {BLUE_LEAF_SHEET_JOINT.gapMm} mm joint with an {BLUE_LEAF_SHEET_JOINT.detailRef}</Btn>
+                    <Btn onClick={() => setSel({ kind: "jointRow" })}>Other joint…</Btn>
+                  </div>)
                   : p.code === "joint_rows_invalid" && canEdit && p.materialId === material?.id ? <Btn onClick={() => setSel({ kind: "jointRow" })}>Edit joint row</Btn> : null}>
                   {onWall.length > 1 && p.materialName ? <b>{p.materialName}: </b> : null}{p.message}
                 </Banner>
@@ -1706,7 +1712,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                 </div>
               )}
               {alignShown && <p className="text-xs text-ink" data-datum-all-change="">{setout.what} on all {materialWallsHere.length} walls using {material.name}: {alignShown.before} → <b>{materialQty}</b></p>}
-              {material.methodKey === "sheet_layout" && (material.rules?.jointRows ? (
+              {material.methodKey === "sheet_layout" && autoJointsHere.length > 0 && (
+                <p className="text-xs text-ink" data-auto-joint="">Joint added automatically at {autoJointsHere.map((j) => fmtMm(j.atMm)).join(" and ")} mm — {fmtMm(autoJointsHere[0].gapMm)} mm gap{autoJointsHere[0].detailRef ? `, ${autoJointsHere[0].detailRef}` : ""}. To put it somewhere else, set its height in Edit joint row.</p>
+              )}
+              {material.methodKey === "sheet_layout" && (material.rules?.jointRows ? (!material.rules.jointRows.atMm?.length ? (
+                <p className="text-xs text-ink" data-joint-rule="">Joints: {fmtMm(material.rules.jointRows.gapMm)} mm gap{material.rules.jointRows.detailRef ? `, ${material.rules.jointRows.detailRef}` : ""}, placed automatically wherever a wall is taller than the sheet. <Btn kind="ghost" onClick={() => setSel({ kind: "jointRow" })}>Edit joint row</Btn></p>
+              ) :
                 <p className="text-xs text-ink">Joint row at {material.rules.jointRows.atMm.map((x) => fmtMm(x)).join(", ")} mm (gap {fmtMm(material.rules.jointRows.gapMm)} mm{material.rules.jointRows.detailRef ? `, ${material.rules.jointRows.detailRef}` : ""}) <Btn kind="ghost" aria-label="Edit joint row" onClick={() => setSel({ kind: "jointRow" })}>Edit</Btn></p>
               ) : material.rules?.jointRowsDraft ? null : <Btn onClick={() => setSel({ kind: "jointRow" })}>Add a joint row</Btn>)}
               {material.methodKey === "sheet_layout" && material.rules?.jointRowsDraft && (

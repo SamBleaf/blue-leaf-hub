@@ -262,6 +262,33 @@ function gridBands(start, end, origin, pitch, gap) {
   return bands;
 }
 
+/** Shortest top course an automatic joint may leave (until a product saves its own minimum piece). */
+export const AUTO_JOINT_MIN_TOP_MM = 100;
+
+/**
+ * HUB 015: the minimum horizontal joints for a wall taller than the tallest listed sheet, from a joint RULE (gap +
+ * detail reference, no heights). Joint k sits one usable sheet length (tallest − height allowance) above the last
+ * course start; a top course thinner than AUTO_JOINT_MIN_TOP_MM moves the joint down (with a note to check). Returns
+ * null when there is no complete rule, explicit heights are given, or no joint is needed.
+ */
+export function autoJointRows(spec, lo, hi, tallestMm, allowanceMm, res, wallId = "wall") {
+  if (!spec || typeof spec !== "object" || (Array.isArray(spec.atMm) && spec.atMm.length)) return null;
+  if (!isNonNeg(spec.gapMm) || typeof spec.detailRef !== "string" || !spec.detailRef.trim() || !isFiniteNumber(tallestMm)) return null;
+  const usable = tallestMm - (allowanceMm || 0);
+  if (!(usable > spec.gapMm + AUTO_JOINT_MIN_TOP_MM)) return null;
+  const at = [];
+  let start = lo, moved = false;
+  while (hi - start > usable + EPS_MM && at.length < 50) {
+    let a = start + usable;
+    if (hi - (a + spec.gapMm) < AUTO_JOINT_MIN_TOP_MM - EPS_MM) { a = hi - spec.gapMm - AUTO_JOINT_MIN_TOP_MM; moved = true; }
+    at.push(Math.round(a * 1000) / 1000);
+    start = a + spec.gapMm;
+  }
+  if (!at.length) return null;
+  if (moved && res) res.problems.push(qty("auto_joint_lowered", `${wallId}: the automatic joint was lowered so the top course is at least ${mm(AUTO_JOINT_MIN_TOP_MM)} — check the minimum piece for this product.`, { blocking: false }));
+  return { ...spec, atMm: at };
+}
+
 /** Explicit joint rows → course bands along the sheet-length axis (null + problem when invalid). */
 function jointRowBands(spec, lo, hi, res) {
   if (spec === undefined || spec === null) return [{ index: 0, zoneStart: lo, zoneEnd: hi }];
@@ -472,7 +499,12 @@ export function sheetLayout(wall, openings, product, rawOpts) {
   const cover = base.effectiveCoverMm;
   const datum = opts.datumMm ?? bb.x0;
   if (!isFiniteNumber(datum)) res.problems.push(qty("datum_invalid", "The sheet datum must be a number (mm along the wall)."));
-  const rows = jointRowBands(opts.jointRows, bb.y0, bb.y1, res);
+  // HUB 015: a product joint rule (gap + detail, no heights) places the minimum joints itself when the wall is
+  // taller than the tallest listed sheet — explicit joint heights always win
+  const auto = autoJointRows(opts.jointRows, bb.y0, bb.y1, prod.variants[prod.variants.length - 1]?.lengthMm, allowance, res, ctx.wallId);
+  const ruleOnly = (j) => j && typeof j === "object" && !(Array.isArray(j.atMm) && j.atMm.length) && isNonNeg(j.gapMm) && typeof j.detailRef === "string" && !!j.detailRef.trim();
+  const jointSpec = auto || (ruleOnly(opts.jointRows) ? undefined : opts.jointRows);   // a rule with no joint needed = one course
+  const rows = jointRowBands(jointSpec, bb.y0, bb.y1, res);
   const cols = isFiniteNumber(datum) ? gridBands(bb.x0, bb.x1, datum, cover, 0) : [];
   if (!cols || (rows && cols.length * rows.length > MAX_ELEMENTS_PER_WALL)) {
     res.problems.push(qty("too_many_elements", `${ctx.wallId} would generate more than ${MAX_ELEMENTS_PER_WALL} sheets — split the wall.`));
@@ -521,13 +553,13 @@ export function sheetLayout(wall, openings, product, rawOpts) {
   const joints = [];
   const jointOrientation = vertical ? "horizontal" : "vertical";
   if (rows.length > 1) {
-    const spec = opts.jointRows;
+    const spec = jointSpec;
     const identity = accessoryIdentity(`${jointOrientation}-joint`, spec.product, { orientation: jointOrientation, unit: "piece" });
     if (!spec.product) res.problems.push(proc("joint_product_missing", `${ctx.wallId}: the ${jointOrientation} joint accessory product is not selected.`, { blocking: false }));
     rows.slice(0, -1).forEach((row, i) => {
       const spans = jointSpans(frame, row.zoneEnd, spec.gapMm);
       const toRect = (a, b) => toWall({ x0: a, x1: b, y0: row.zoneEnd, y1: row.zoneEnd + spec.gapMm });
-      joints.push({ index: i, orientation: jointOrientation, atMm: row.zoneEnd, gapMm: spec.gapMm, detailRef: spec.detailRef ?? null, segments: spans.map(([a, b]) => ({ startMm: a, endMm: b })) });
+      joints.push({ index: i, orientation: jointOrientation, atMm: row.zoneEnd, gapMm: spec.gapMm, detailRef: spec.detailRef ?? null, source: auto ? "auto" : "explicit", segments: spans.map(([a, b]) => ({ startMm: a, endMm: b })) });
       res.demands.push(...lineDemands(ctx, { materialId, role: `${jointOrientation}-joint`, key: `j${i}`, spans, identity, label: `${ctx.wallId} ${jointOrientation} joint ${i + 1}`, toRect }));
     });
   }

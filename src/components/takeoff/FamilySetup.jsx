@@ -1410,17 +1410,18 @@ function JointRowsField({ value, draft, onChange, onDraft, onClear }) {
   useEffect(() => { const x = JSON.parse(srcKey); setAt(x?.atMm || []); setGap(x?.gapMm ?? null); setRef(x?.detailRef || ""); }, [srcKey]);
   const tryCommit = (next) => {
     const v = { atMm: next.at ?? at, gapMm: next.gap !== undefined ? next.gap : gap, detailRef: (next.ref ?? ref).trim().slice(0, 60) };
-    if (v.atMm.length && isNum(v.gapMm) && v.detailRef) onChange(v);
+    // HUB 015: gap + detail is a complete joint RULE — heights are optional (empty = joints placed at the sheet length)
+    if (isNum(v.gapMm) && v.detailRef) onChange(v);
     else onDraft(v.atMm.length || isNum(v.gapMm) || v.detailRef ? { atMm: v.atMm, ...(isNum(v.gapMm) ? { gapMm: v.gapMm } : {}), ...(v.detailRef ? { detailRef: v.detailRef } : {}) } : null);
   };
-  const incomplete = (at.length || isNum(gap) || ref) && !(at.length && isNum(gap) && ref.trim());
+  const incomplete = (at.length || isNum(gap) || ref) && !(isNum(gap) && ref.trim());
   return (
     <fieldset className="space-y-2 rounded-lg border border-hairline p-2" data-joint-rows="">
-      <legend className="px-1 text-xs font-semibold text-ink">Horizontal joint rows (walls taller than the sheet)</legend>
-      <LengthList label="Joint height(s) above the clad base" values={at} placeholder="e.g. 2400" onCommit={(v) => { setAt(v); tryCommit({ at: v }); }} />
+      <legend className="px-1 text-xs font-semibold text-ink">Horizontal joints (walls taller than the sheet)</legend>
+      <LengthList label="Joint height(s) above the clad base (optional — empty = at the sheet length)" values={at} placeholder="e.g. 2400" onCommit={(v) => { setAt(v); tryCommit({ at: v }); }} />
       <NumberField label="Joint gap (from the detail)" value={gap} min={0} max={50} onCommit={(n) => { setGap(n); tryCommit({ gap: n }); }} />
       <CommitText label="Joint detail reference" value={ref} maxLength={60} placeholder="e.g. H02 horizontal joint detail" onCommit={(t) => { setRef(t || ""); tryCommit({ ref: t || "" }); }} />
-      {incomplete ? <p className="text-[11px] text-amber-800">Kept as a draft until positions, gap and detail are all entered — a &quot;joint allowed&quot; flag alone is never a layout.{value ? " The rows applied before stay in use until then." : ""}</p>
+      {incomplete ? <p className="text-[11px] text-amber-800">Kept as a draft until the gap and the joint detail are both entered — a &quot;joint allowed&quot; flag alone is never a layout.{value ? " The rows applied before stay in use until then." : ""}</p>
         : value ? <p className="text-[11px] text-muted">Applied: each band is its own course of sheets with its own cut.</p> : <p className="text-[11px] text-muted">Without joint rows, a wall taller than the longest sheet is blocked — never counted as one sheet.</p>}
       {(value || draft) && <Btn kind="ghost" onClick={onClear}>Remove joint rows</Btn>}
     </fieldset>

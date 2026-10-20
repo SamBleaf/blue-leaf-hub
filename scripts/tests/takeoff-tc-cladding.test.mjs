@@ -285,7 +285,7 @@ t("CL02 explicit joint row → real second course (4 × 2 sheets) + horizontal-j
   assert.deepEqual(s.map((d) => d.identity.sku), ["404419", "404419", "404419", "404419", "404417", "404417", "404417", "404417"]);
   const j = of(r, "horizontal-joint");
   assert.equal(j.length, 1); assert.equal(j[0].lengthMm, 4800); assert.equal(j[0].lengthKind, "tight");
-  assert.deepEqual(r.layout.joints[0], { index: 0, orientation: "horizontal", atMm: 3000, gapMm: 10, detailRef: "H02 joint", segments: [{ startMm: 0, endMm: 4800 }] });
+  assert.deepEqual(r.layout.joints[0], { index: 0, orientation: "horizontal", atMm: 3000, gapMm: 10, detailRef: "H02 joint", source: "explicit", segments: [{ startMm: 0, endMm: 4800 }] });   // HUB 015: joints say where they came from
   assert.ok(codes(r).includes("joint_product_missing")); assert.equal(r.status.procurement, "missing-product");
   assert.equal(r.status.quantity, "calculated");
 });

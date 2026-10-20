@@ -175,6 +175,19 @@ test.describe("TC walls — phone journeys", () => {
     await expect(row).toContainText("5 sheets");
   });
 
+  test("HUB 015: a 3,600 wall taller than the 3,000 Axon sheet — one tap uses Blue Leaf's 10 mm H-flashing joint; the joint is placed automatically and the sheets counted", async ({ page }) => {
+    await openWalls(page, "axon");
+    await addWall(page, { name: "North", length: 6573, height: 3600 });
+    const problems = page.locator("[data-wall-problems]");
+    await expect(problems).toContainText("tallest listed sheet");
+    await problems.getByRole("button", { name: "Use a 10 mm joint with an H-flashing" }).click();
+    await expect(page.locator("[data-auto-joint]")).toHaveText("Joint added automatically at 3,000 mm — 10 mm gap, H-flashing. To put it somewhere else, set its height in Edit joint row.");
+    await expect(problems.filter({ hasText: "tallest listed sheet" })).toHaveCount(0);
+    await expect(page.locator("[data-joint-rule]")).toContainText("placed automatically wherever a wall is taller than the sheet");
+    // the joint is drawn on the elevation and says it was added automatically
+    await expect(page.locator('[data-el-state="joint"]')).not.toHaveCount(0);   // a horizontal line (no height, so not "visible")
+  });
+
   test("HUB 017: gable values entered one at a time with pauses all stay (eaves 3,600 → apex 4,200 → position), through Centre and element navigation", async ({ page }) => {
     await openWalls(page, "axon");
     await addWall(page, { name: "Gable end", length: 6573, height: 3600 });
@@ -342,7 +355,7 @@ test.describe("TC walls — phone journeys", () => {
     await clickBox(page, page.locator('[data-el-id="c0r0"] rect').first());
     await expect(page.locator("[data-element-info]")).toContainText("None fits — needs 3,500 mm");
     await page.getByRole("button", { name: "Close panel" }).click();
-    await problems.getByRole("button", { name: "Add a joint row" }).click();
+    await problems.getByRole("button", { name: "Other joint…" }).click();   // HUB 015: beside the one-tap Blue Leaf joint
     const form = page.locator("[data-joint-row-form]");
     await expect(form.getByLabel("Joint height")).toHaveValue("3000"); // suggested from the tallest listed sheet
     await expect(form.getByLabel("Joint gap")).toHaveValue(""); // never defaulted
@@ -702,7 +715,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     const errs = consoleErrors(page);
     await openWalls(page, "axon", { walls: [{ name: "Low", length: 4800, height: 2700 }] });
     await addWall(page, { name: "Tall", length: 2400, height: 3500 });
-    await page.locator("[data-wall-problems]").getByRole("button", { name: "Add a joint row" }).click();
+    await page.locator("[data-wall-problems]").getByRole("button", { name: "Other joint…" }).click();
     const form = page.locator("[data-joint-row-form]");
     await expect(form.getByLabel("Joint height")).toHaveValue("3000");
     await expect(form.locator("[data-joint-row-misfit]")).toContainText("Low (2,700 mm) is not tall enough for a joint at 3,000 mm — the joint row doesn't apply there, so it keeps a single course");
@@ -1008,7 +1021,7 @@ test.describe("TC walls — phone review round 2", () => {
     await openWalls(page, "axon");
     await addWall(page, { name: "Tall", length: 6000, height: 3500 });
     await expect(cells(page, "blocked")).toHaveCount(5);
-    await page.locator("[data-wall-problems]").getByRole("button", { name: "Add a joint row" }).click();
+    await page.locator("[data-wall-problems]").getByRole("button", { name: "Other joint…" }).click();
     const form = page.locator("[data-joint-row-form]");
     await form.getByLabel("Joint gap").fill("10"); await form.getByLabel("Joint gap").press("Enter");
     // height + gap but no detail: NOT a layout — kept as a draft, still blocked

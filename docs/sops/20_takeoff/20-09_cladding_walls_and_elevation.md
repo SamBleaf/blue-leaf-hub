@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
@@ -340,6 +340,12 @@ Next review date: 2027-04-14
 2. Expected: Apex height still shows 4200, with no "Not saved" banner; the wall stays "Heights needed" until the position is in.
 3. Enter a position, then tap **Centre**. Expected: position 3287; gross area 25.63 m²; all values stay after **Next element** and closing the panel.
 4. API: three separate saves (eaves → apex height → position) each succeed. An apex below the eaves, or a position at a wall end, is refused.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — A wall taller than the sheet gets its joint automatically (HUB 015, UI Review + engine)**
+1. Axon 400 smooth wall, 6,573 long × 3,600 high (tallest listed sheet 3,000). Expected: a problem "… the tallest listed sheet is 3,000 mm …" with **Use a 10 mm joint with an H-flashing** and **Other joint…**.
+2. Tap **Use a 10 mm joint with an H-flashing**. Expected: the problem clears; "Joint added automatically at 3,000 mm — 10 mm gap, H-flashing …"; the setout card reads "Joints: 10 mm gap, H-flashing, placed automatically wherever a wall is taller than the sheet"; a joint line is drawn and the sheets are counted.
+3. Engine (scripts/tests/takeoff-tc-hub015.test.mjs): 3,600 → one joint at 3,000 (two courses). 6,500 → joints at 3,000 and 6,010. 2,950 → none. Explicit heights win, and a sliver top course lowers the joint with a note. Per-wall settings keyed by a wall's id are kept by the server.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
