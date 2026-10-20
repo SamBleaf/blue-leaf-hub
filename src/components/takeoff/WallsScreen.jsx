@@ -24,6 +24,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
+import { followerRule } from "../../../shared/takeoff/engine/followers.js";
+import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
@@ -55,6 +57,7 @@ const ROLE_LABEL = {
   support: "Supports", stud: "Studs", king: "King studs", jack: "Jack studs", trimmer: "Trimmers", lintel: "Lintels", "sill trimmer": "Sill trimmers",
   "head trimmer": "Head trimmers", cripple: "Cripple studs", sill: "Sills", "below-sill": "Below-sill pieces", "above-head": "Above-head pieces", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
   "horizontal-joint": "Horizontal joint strips", "vertical-joint": "Vertical joint strips", rail: "Rails", "control-joint": "Control joints",
+  batten: "Battens", "h-flashing": "H-flashing", "foam-tape": "Foam tape",
   coating: "Coating (net finish area)", basecoat: "Basecoat (net finish area)", "finish-coat": "Finish coat (net finish area)", "fixing-support-to-frame": "Support fixings",
 };
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? `${r.charAt(0).toUpperCase()}${r.slice(1).replace(/-/g, " ")}` : "Items");
@@ -335,33 +338,39 @@ function wallQuantities(result, wallId, tag) {
   for (const d of demandsForWall(result, wallId, tag, { ownerOnly: true })) {
     let key, text;
     const id = d.identity || {};
-    if (d.unit === "sheet" || d.kind === "sheet") {
+    if (d.follower === "tape") {
+      // foam tape is measured here in metres — the rolls are rounded once for the whole job on the schedule
+      key = "tape";
+      text = roleLabel(d.role);
+    } else if (d.unit === "sheet" || d.kind === "sheet") {
       key = `sheet|${d.role}|${id.sku}|${id.stockLengthMm}|${id.stockWidthMm}`;
       const what = [id.name, id.sku ? `SKU ${id.sku}` : null].filter(Boolean).join(" ");
       text = `${roleLabel(d.role)} — ${what ? `${what} ` : ""}${id.stockLengthMm ? `${fmtMm(id.stockLengthMm)}${id.stockWidthMm ? ` × ${fmtMm(id.stockWidthMm)}` : ""} mm` : ""}`.trim();
     } else if (d.kind === "linear" && d.unit !== "lm") {
       const a = alloc.get(d.id);
-      const stock = a?.unavailable ? null : a?.stockLengthMm ?? id.stockLengthMm ?? null;
+      const stock = a?.unavailable ? null : a?.stockLengthMm ?? id.stockLengthMm ?? (d.stockPolicy?.kind === "fixed" ? d.stockPolicy.lengthMm : null) ?? null;
       key = `piece|${d.role}|${stock}|${a?.unavailable ? "x" : ""}`;
       text = `${roleLabel(d.role)} — ${a?.unavailable ? "no stock length fits" : stock ? `cut from ${fmtMm(stock)} mm lengths` : "stock not chosen yet"}`;
     } else {
       key = `${d.unit}|${d.role}`;
       text = roleLabel(d.role);
     }
-    const g = groups.get(key) || { key, text, unit: d.unit === "sheet" || d.kind === "sheet" ? "sheet" : d.kind === "linear" && d.unit !== "lm" ? "piece" : d.unit, qty: 0, lenMm: 0 };
-    g.qty += d.quantity || 0;
-    if (d.kind === "linear" && Number.isFinite(d.lengthMm)) g.lenMm += d.lengthMm * (d.quantity || 1);
+    const g = groups.get(key) || { key, text, unit: d.follower === "tape" ? "tape" : d.unit === "sheet" || d.kind === "sheet" ? "sheet" : d.kind === "linear" && d.unit !== "lm" ? "piece" : d.unit, qty: 0, lenMm: 0, follower: d.follower || null };
+    g.qty += d.follower === "tape" ? 0 : d.quantity || 0;
+    if (d.follower === "tape") g.lenMm += d.tapeMm || 0;
+    else if (d.kind === "linear" && Number.isFinite(d.lengthMm)) g.lenMm += d.lengthMm * (d.quantity || 1);
     groups.set(key, g);
   }
   return [...groups.values()].map((g) => {
     let qtyText;
-    if (g.unit === "lm") qtyText = `${g.qty.toFixed(1)} LM (estimate)`;
+    if (g.unit === "tape") qtyText = `${(g.lenMm / 1000).toFixed(1)} m`;
+    else if (g.unit === "lm") qtyText = `${g.qty.toFixed(1)} LM (estimate)`;
     else if (g.unit === "m2") qtyText = `${fmtM2(g.qty)} m²`;
     else if (g.unit === "ml") qtyText = `${Math.round(g.qty).toLocaleString("en-AU")} ml`;
     else if (UNIT_WORD[g.unit]) qtyText = plural(Math.round(g.qty), ...UNIT_WORD[g.unit]);
     else qtyText = `${Math.round(g.qty).toLocaleString("en-AU")}`;
     if (g.unit === "piece" && g.lenMm) qtyText += ` · ${(g.lenMm / 1000).toFixed(2)} m installed`;
-    return { key: g.key, text: g.text, qtyText, unit: g.unit, qty: g.qty };
+    return { key: g.key, text: g.text, qtyText, unit: g.unit, qty: g.qty, follower: g.follower };
   }).concat((() => {
     // HUB 016b: pieces on this wall cut from a sheet or offcut counted on another wall
     const lay = (result?.layouts || []).find((l) => l?.wallMeasurementId === wallId || l?.wallId === wallId);
@@ -373,8 +382,13 @@ function wallQuantities(result, wallId, tag) {
 /** Compact per-unit totals for a wall row / result line ("4 sheets", "11 pieces", "22.0 LM (estimate)"). */
 function qtyChips(rows) {
   const by = new Map();
-  for (const r of rows) if (r.unit === "sheet" || r.unit === "piece" || r.unit === "lm" || r.unit === "borrowed") by.set(r.unit, (by.get(r.unit) || 0) + r.qty);
-  return [...by.entries()].map(([u, q]) => (u === "lm" ? `${q.toFixed(1)} LM (estimate)` : u === "borrowed" ? `${plural(q, "piece")} from other walls` : plural(Math.round(q), ...UNIT_WORD[u])));
+  for (const r of rows) {
+    if (r.follower === "battens") { by.set("battens", (by.get("battens") || 0) + r.qty); continue; }
+    if (r.follower) continue;   // foam tape and H-flashing are listed on the wall page, not in the short totals
+    if (r.unit === "sheet" || r.unit === "piece" || r.unit === "lm" || r.unit === "borrowed") by.set(r.unit, (by.get(r.unit) || 0) + r.qty);
+  }
+  return [...by.entries()].map(([u, q]) => (u === "lm" ? `${q.toFixed(1)} LM (estimate)` : u === "borrowed" ? `${plural(q, "piece")} from other walls` : u === "battens" ? `${plural(Math.round(q), "batten piece")}`
+    : plural(Math.round(q), ...UNIT_WORD[u])));
 }
 
 // ── elevation elements per view ─────────────────────────────────────────────────────────────────────────────
@@ -585,6 +599,37 @@ function supportElements(entries, bbox, polygon) {
     } else if (Array.isArray(l.bays)) {
       notes.push(`${e.material.name}: noggins — see the schedule for each bay's cut length.`);
     }
+  }
+  return { items, notes };
+}
+
+/**
+ * Wall-by-wall step 4: the battens a cladding works out by itself on this wall (engine/followers.js), for the Supports
+ * tab — one line per batten piece, plus one plain note per cladding (or why there are none here).
+ */
+function followerElements(claddingEntries) {
+  const items = [], notes = [];
+  for (const e of claddingEntries) {
+    const f = e.layout?.followers;
+    if (!f) continue;
+    const prefix = `${String(e.material.id).slice(0, 6)}-`;
+    const alloc = allocationMap(e.result);
+    const b = f.battens;
+    if (b.state === "auto") {
+      b.lines.forEach((ln, i) => {
+        const a = alloc.get(ln.demandId);
+        items.push({
+          id: `${prefix}fb${i}`, kind: "line", state: "support", auto: true, a: ln.a, b: ln.b, over: ["jamb", "head", "sill"].includes(ln.kind),
+          info: {
+            title: `Batten — ${ln.label.replace(/^.*? batten — /, "")}`,
+            rows: [["Length", `${fmtMm(Math.round(ln.lengthMm))} mm`], ["Stock", a?.stockLengthMm ? `Cut from a ${fmtMm(a.stockLengthMm)} mm Hardie Cavity Batten` : "Hardie Cavity Batten"]],
+            note: "Worked out from the cladding. Fixings to the studs are not counted.",
+          },
+        });
+      });
+      notes.push(`Battens worked out from ${e.material.name}: ${plural(b.lines.length, "piece")}, ${(b.totalMm / 1000).toFixed(2)} m on this wall. Nothing to set up. Fixings to the studs are not counted.`);
+    } else if (b.state === "hand-made") notes.push(`The battens on this wall come from ${(b.by || []).join(", ")} (set up by hand), so ${e.material.name} doesn't add its own here. To use the automatic battens instead, remove ${(b.by || []).join(", ")} from this wall in Materials on this wall.`);
+    else if (b.state === "direct") notes.push(`${e.material.name} is direct fixed, so it has no battens.`);
   }
   return { items, notes };
 }
@@ -1163,7 +1208,7 @@ function heightsText(inp = {}) {
 
 // ── the screen ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrace, onSetup, onClose }) {
+export default function WallsScreen({ ws, materialId, wallId, wallTab = null, onOpenWall, onTrace, onSetup, onClose }) {
   const view = ws.view;
   const canEdit = !!ws.capabilities?.edit;
   const material = view.materials.find((m) => m.id === materialId) || null;
@@ -1314,7 +1359,7 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
     return (
       <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => onOpenWall?.(null)} closeLabel="‹ Walls" actions={headerActions}>
         <div ref={rootRef} className="contents">
-          <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} saveBanner={saveBanner}
+          <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} saveBanner={saveBanner} initialTab={wallTab}
             draftReset={draftReset} clearDraftRef={clearDraftRef} />
         </div>
       </FocusedWindow>
@@ -1456,9 +1501,9 @@ function setoutFor(material) {
   return null;
 }
 
-function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, saveBanner, draftReset, clearDraftRef }) {
+function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, saveBanner, draftReset, clearDraftRef, initialTab = null }) {
   const fam = material?.spec?.family;
-  const [tab, setTab] = useState(fam === "batten" || fam === "timber" ? "supports" : fam === "accessory" ? "accessories" : "cladding");
+  const [tab, setTab] = useState(initialTab || (fam === "batten" || fam === "timber" ? "supports" : fam === "accessory" ? "accessories" : "cladding"));
   const [pick, setPick] = useState(null);
   const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
   const [placing, setPlacing] = useState(false);
@@ -1512,12 +1557,28 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   // elements of the ONE view shown
   let elements = { items: [], guides: [], notes: [], totals: null, sheetInfo: null };
   if (polygon && tab === "cladding" && shownClad) elements = { ...claddingElements(shownClad, bbox, wallProblemsByMat.get(shownClad.material.id) || []), totals: null };
-  if (polygon && tab === "supports") { const s = supportElements(entries.filter((e) => !CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey) && e.material.spec?.family !== "accessory"), bbox, polygon); elements = { items: s.items, guides: [], notes: s.notes, totals: null }; }
+  if (polygon && tab === "supports") {
+    const s = supportElements(entries.filter((e) => !CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey) && e.material.spec?.family !== "accessory"), bbox, polygon);
+    const f = followerElements(cladEntries);
+    elements = { items: [...f.items, ...s.items], guides: [], notes: [...f.notes, ...s.notes], totals: null };
+  }
   if (polygon && tab === "accessories") { const a = accessoryElements(polygon, openings, cladEntries); elements = { items: a.items, guides: [], notes: [], totals: a.totals }; }
   const hitItems = elements.items.filter((it) => it.hit !== false);
   const selItem = sel?.kind === "item" ? hitItems.find((it) => it.id === sel.id) || null : null;
   const selOpening = sel?.kind === "opening" ? openings.find((o) => o.id === sel.id) || null : null;
-  const legend = (LEGEND[tab] || []).filter(([state]) => elements.items.some((it) => it.state === state));
+  // the automatic battens read "Batten" in the legend (a support layer set up by hand stays "Support")
+  const legend = (LEGEND[tab] || []).filter(([state]) => elements.items.some((it) => it.state === state))
+    .map(([state, text, cls]) => [state, state === "support" && elements.items.filter((it) => it.state === "support").every((it) => it.auto) ? "Batten" : text, cls]);
+  // the Supports tab with no battens: say why, in the cladding's own terms (only Axon, Linea / Stria and timber cladding
+  // work out their own battens; direct-fixed cladding has none; anything else needs a Support battens material)
+  const supportsEmpty = (() => {
+    const rules = cladEntries.map((e) => { let n = null; try { n = normaliseFamilySpec(e.material.spec); } catch { /* a malformed spec has no rule */ } return { e, n, rule: n ? followerRule({ ...e.material, rules: { ...(e.material.rules || {}), route: undefined } }, n) : null }; });
+    const auto = rules.find((x) => x.rule && x.rule.battens && x.e.material.rules?.route !== "direct");
+    if (auto) return `No battens on this wall yet. ${auto.e.material.name} works out its own battens once its sheets or boards are laid out on this wall.`;
+    const direct = rules.find((x) => x.rule && x.e.material.rules?.route === "direct");
+    if (direct) return `${direct.e.material.name} is direct fixed, so it has no battens.`;
+    return `No support layer on this wall. Battens and rails are their own material — add one and attach it to this wall.${cladEntries.length ? " Support spacing for the cladding stays source-pending until a reviewed rule or project detail is recorded — it is not calculated here." : ""}`;
+  })();
 
   // problems shown in place: everything blocking on this wall (incl. openings off the wall); a clipped opening is a
   // note on its own row only
@@ -1546,9 +1607,9 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const datumOthers = setout && attached ? materialWallsHere.filter((w) => w.id !== wall.id && datumOf(w) !== datumHere).map((w) => ({ wall: w, datumMm: datumOf(w) })) : [];
   const setoutQty = (() => {
     if (!material || !setout) return null;
-    return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall), { ownerOnly: true }).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0);
+    return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall), { ownerOnly: true }).filter((d) => d.unit === setout.unit && !d.follower).reduce((t, d) => t + (d.quantity || 0), 0);
   })();
-  const materialQty = material && setout ? (results[material.id]?.demands || []).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0) : null;
+  const materialQty = material && setout ? (results[material.id]?.demands || []).filter((d) => d.unit === setout.unit && !d.follower).reduce((t, d) => t + (d.quantity || 0), 0) : null;
   const changeKeyFor = (rules) => {
     const r = { ...(rules || {}) };
     if (r.datumByWall) { r.datumByWall = { ...r.datumByWall }; delete r.datumByWall[wall.id]; if (!Object.keys(r.datumByWall).length) delete r.datumByWall; }
@@ -1742,9 +1803,9 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               </div>
             )}
             {polygon && tab === "supports" && !elements.items.length && !elements.notes.length && (
-              <p className="text-sm text-muted" data-supports-empty="">No support layer on this wall. Battens and rails are their own material — add one and attach it to this wall.{cladEntries.length ? " Support spacing for the cladding stays source-pending until a reviewed rule or project detail is recorded — it is not calculated here." : ""}</p>
+              <p className="text-sm text-muted" data-supports-empty="">{supportsEmpty}</p>
             )}
-            {elements.notes.map((n) => <p key={n} className="text-xs text-ink">{n}</p>)}
+            {elements.notes.map((n) => <p key={n} className="text-xs text-ink" data-elevation-note="">{n}</p>)}
             {polygon && tab === "accessories" && elements.totals && (
               <dl className="grid grid-cols-[1fr_auto] gap-x-3 text-xs" aria-label="Accessory routes">
                 {elements.totals.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="text-right font-semibold text-ink">{fmtMm(Math.round(v))} mm</dd></div>)}

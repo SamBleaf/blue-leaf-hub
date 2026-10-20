@@ -72,7 +72,8 @@ t("every piece on every wall is cut exactly once; each sheet is ordered once, on
     const owned = layouts(c).reduce((n, L) => n + L.cutPlan.sheets.length, 0);
     assert.equal(owned, sheetDemands.length, "each sheet counted on exactly one wall");
     // contributions share out the whole order, nothing lost or doubled
-    const pieces = c.contributions.filter((x) => x.jobMaterialId === "clad").flatMap((x) => x.pieces).filter((p) => /sheet/.test(p.bucketKey));
+    // (the sheet buckets only — the Axon's own battens and tape, wall-by-wall step 4, are lines of the same material)
+    const pieces = c.contributions.filter((x) => x.jobMaterialId === "clad").flatMap((x) => x.pieces).filter((p) => p.bucketKey.includes("|sheet|"));
     assert.equal(pieces.reduce((n, p) => n + p.quantity, 0), ordered(c));
   }
 });

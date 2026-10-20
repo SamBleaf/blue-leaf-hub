@@ -249,9 +249,15 @@ test("Assembly fixing route: Direct fix / Cavity is chosen, never assumed; suppo
   await pick(page, P.axon133);
   const route = page.locator('[data-chips="route"]');
   for (const b of ["Direct fix", "Cavity"]) await expect(route.getByRole("button", { name: b })).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator('[data-component="Supports"]')).toContainText("Choose direct fix or cavity");
+  // wall-by-wall step 4: the Axon works out its own battens — counted as a cavity (said so) until the route is chosen
+  const battens = page.locator('[data-component="Battens"]');
+  await expect(battens).toContainText("Counted as a cavity until you choose");
+  await expect(page.locator('[data-component="Foam tape and H-flashing"]')).toContainText("code 304560");
+  await route.getByRole("button", { name: "Direct fix" }).click();
+  await expect(battens).toContainText("Direct fix: no battens.");
+  await expect.poll(async () => (await genericMaterial(page)).rules.route ?? null).toBe("direct");
   await route.getByRole("button", { name: "Cavity" }).click();
-  await expect(page.locator('[data-component="Supports"]')).toContainText("Cavity: add a Support battens material");
+  await expect(battens).toContainText("Worked out from your walls: uprights at both ends, every sheet join and 600 centres");
   await expect.poll(async () => (await genericMaterial(page)).rules.route ?? null).toBe("cavity");
   await pick(page, P.linea150);
   await expect(page.locator('[data-carried-param="route"]')).toContainText("Fixing route cavity was set for Axon 133 smooth");
@@ -259,6 +265,26 @@ test("Assembly fixing route: Direct fix / Cavity is chosen, never assumed; suppo
   await expect.poll(async () => { const m = await genericMaterial(page); return [m.rules.route ?? null, m.rules.carried?.route?.value ?? null]; }).toEqual([null, "cavity"]);
   await page.locator('[data-carried-param="route"]').getByRole("button", { name: /^Use cavity/ }).click();
   await expect(route.getByRole("button", { name: "Cavity" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("wall-by-wall step 4: Stria and timber cladding offer Direct fix too (no battens); the route says the battens are counted as a cavity until it is chosen", async ({ page }) => {
+  await addCladding(page);
+  await pick(page, P.stria325);
+  const route = page.locator('[data-chips="route"]');
+  await expect(route).toContainText("Fixing route (battens are counted as a cavity until you choose)");
+  const battens = page.locator('[data-component="Battens"]');
+  await expect(battens).toContainText("Counted as a cavity until you choose: horizontal battens across the boards at 600 centres");
+  await route.getByRole("button", { name: "Direct fix" }).click();
+  await expect(battens).toContainText("Direct fix: no battens.");
+  await expect.poll(async () => (await genericMaterial(page)).rules.route ?? null).toBe("direct");
+  // timber cladding (no assembly at all) gets the same choice once it is named
+  await family(page, "Timber cladding");
+  await page.locator('[data-chips="cover"]').getByRole("button", { name: "120 mm", exact: true }).click();
+  await enter(page.getByLabel("Species / profile"), "Spotted gum shiplap");
+  await expect(route).toContainText("Fixing route (battens are counted as a cavity until you choose)");
+  await route.getByRole("button", { name: "Cavity" }).click();
+  await expect(battens).toContainText("Worked out from your walls: upright battens across the boards at 450 centres");
+  await expect.poll(async () => (await genericMaterial(page)).rules.route ?? null).toBe("cavity");
 });
 
 // ── CL05 ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -722,8 +748,9 @@ test("CAT01: a new company product on an existing method — Product | Ordering 
     const lines = ws.scheduleLines.filter((l) => l.jobMaterialIds.includes(m.id));
     return { lines: lines.map((l) => [l.unit, l.quantity]), explain: ws.materialResults[m.id].explain.join(" ") };
   }, saved);
-  // 12 m² ÷ 0.120 m = 100 LM, + 5 % = 105 LM (whole LM after the 0.3 m increment)
-  expect(calc.lines).toEqual([["lm", 105]]);
+  // 12 m² ÷ 0.120 m = 100 LM, + 5 % = 105 LM (whole LM after the 0.3 m increment); wall-by-wall step 4: its own battens
+  // across the flat boards at 450 (0, 450 … 4,500, 4,800 = 12 of 2,500) + ceil(12 × 5 %) = 13
+  expect(calc.lines).toEqual([["lm", 105], ["piece", 13]]);
   expect(calc.explain).toContain("100");
   // the server accepts it as an ordinary preset; it then lists under its own family, not under flashing
   const r = await postPreset(page, { content: saved });
@@ -1514,7 +1541,9 @@ test("F10: a board joint rule — over supports at given centres, or between sup
   await expect.poll(() => page.evaluate(() => [window.__tc.material.rules.joints ?? null, window.__tc.material.rules.jointsDraft ?? null]))
     .toEqual([{ orientation: "horizontal", mode: "on-support", centresMm: 600, detailRef: "H04 joint detail" }, null]);
   await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
-  await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]')).toContainText("36 pieces");
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]').filter({ hasText: "Linea" })).toContainText("36 pieces");
+  // wall-by-wall step 4: and the boards' own upright battens at 600 (0 … 6,000: 11 of 2,700)
+  await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]').filter({ hasText: "Hardie Cavity Batten" })).toContainText("11 pieces");
   await shot(page, "f10-board-joints");
   // end-matched timber boards may join between supports
   const tc = { id: "mat-tc", name: "Spotted gum", methodKey: "course_layout", methodVersion: 1, rules: {},

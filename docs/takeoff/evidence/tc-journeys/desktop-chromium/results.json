@@ -10,11 +10,11 @@
       "id": "S0",
       "title": "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
       "status": "PASS",
-      "seconds": 10,
+      "seconds": 9,
       "observed": {
         "calibration": {
-          "id": "e495be66-142b-49c5-b95d-7279a1da5801",
-          "documentId": "a0e2c428-2704-40b8-9c02-f4e605311ab5",
+          "id": "7ed8f5d8-fabe-4449-840d-45a5a1afad96",
+          "documentId": "953bc0ce-382a-4381-8db9-f7ea89ea5d62",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-21 05:43:04.83073+10:30"
+          "createdAt": "2026-10-21 07:52:14.991411+10:30"
         }
       }
     },
@@ -106,14 +106,20 @@
         "assemblyId": "axon-vertical",
         "at4800": {
           "lines": [
-            "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+            "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm",
+            "14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
+            "1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"
           ]
         },
         "at4801": [
-          "5 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+          "5 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm",
+          "14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
+          "1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"
         ],
         "final": [
-          "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"
+          "4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm",
+          "14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
+          "1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"
         ]
       }
     },
@@ -121,7 +127,7 @@
       "id": "AL",
       "title": "Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
       "status": "PASS",
-      "seconds": 2,
+      "seconds": 3,
       "observed": {
         "lines": [
           "1 bar · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)"
@@ -165,7 +171,7 @@
       "status": "PASS",
       "seconds": 8,
       "observed": {
-        "ready": "Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
+        "ready": "Ready: 32 pieces · 4 sheets · 1 bar · 1 roll to Fielders (SANDBOX — not a real contact).",
         "flashingsReady": "Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).",
         "pdfChecks": []
       }
@@ -173,5 +179,5 @@
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-20T19:13:53.008Z"
+  "at": "2026-10-20T21:23:03.222Z"
 }

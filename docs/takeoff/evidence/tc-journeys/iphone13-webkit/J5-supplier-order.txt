@@ -16,7 +16,7 @@ All dimensions in mm. Timber, aluminium and board lengths are the STOCK lengths 
 not part of this order.
 
 TIMBER
- M1 — Rafters 90 × 45                                                                                                                   90 × 45 · MGP10 · H3
+ M1 — Rafters 90 × 45                                                                                                                    90 × 45 · MGP10 · H3
  Size: manual selection (not structurally checked)
 
  QTY                     UNIT               SUPPLY                                                                  NOTE
@@ -40,14 +40,21 @@ CLADDING
  QTY                     UNIT               SUPPLY                                                                  NOTE
  4×                      sheet              James Hardie Axon 133 smooth SKU 403932 —                               -
                                             2,750 × 1,200 mm
-                                                                                                                                                        4 sheets
+ 14 ×                    piece              Hardie Cavity Batten 70 × 19, code 405307 — 3,000                       36.60 m of battens on 1 wall, cut with
+                                            mm length                                                               offcuts shared across the walls · fixings to
+                                                                                                                    the studs not counted
 
-Order total: 1 bar · 18 pieces · 4 sheets
+ 1×                      roll               Hardie™ 50mm Foam Back Sealing Tape, 25 m roll,                         8.10 m behind the vertical sheet joins -> 1
+                                            code 304560                                                             roll of 25 m
+
+                                                                                                                                  1 roll · 14 pieces · 4 sheets
+
+Order total: 1 bar · 1 roll · 32 pieces · 4 sheets
 This document lists quantities and profiles only. It is not a price or a contract. Confirm product availability, colour and fabrication allowances with the
 supplier.
 
 
 
 
-                                            FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot 736a9dbd7d96 · page 1 of 1
+                                            FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot c0682cc2a029 · page 1 of 1
 

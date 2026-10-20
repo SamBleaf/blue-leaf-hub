@@ -24,6 +24,7 @@ import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
+import { FOLLOWERS_VERSION, FOLLOWER_KINDS, FOLLOWER_TEXT, FOAM_TAPE, followerNote, followerRule, wallFollowers } from "./followers.js";
 import { CATALOGUE_SEED } from "../products/seed.js";
 
 const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pack", "cartridge"]);
@@ -379,7 +380,76 @@ function runWallMethod(mat, n, items, ctx, sink) {
   if (!results.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Add a wall for this material.", blocking: false });
   // HUB 016b: one cut plan for ALL the walls of a sheet material — offcuts from one wall serve another (off = per wall)
   if (mat.methodKey === "sheet_layout" && sharesAcrossWalls(mat)) sink.sharedAcrossWalls = !!shareSheetsAcrossWalls(results);
+  // wall-by-wall step 4: battens, foam tape and H-flashing follow the cladding's own layout on every wall
+  const rule = followerRule(mat, n);
+  if (rule) addFollowers(mat, rule, results, sink);
   return results;
+}
+
+/**
+ * The automatic followers of a cladding (engine/followers.js) on each of its walls, in the same calculation: their
+ * demands join the cladding's own (so they sit under the cladding on the schedule and the order) and the wall's layout
+ * carries them for the Supports tab. A wall whose cladding is blocked gets none until it is fixed; a wall whose sheets
+ * are all cut from another wall's sheets or offcuts (HUB 016b) still gets its own. A wall that already has battens /
+ * tape / H joints set up by hand keeps those — the automatic ones are left off there, with a note.
+ */
+function addFollowers(mat, rule, results, sink) {
+  for (const r of results) {
+    const lay = r.layout;
+    const wid = lay?.wallMeasurementId;
+    if (!wid || !Array.isArray(lay.wall?.polygon) || r.status?.quantity === "incomplete") continue;
+    // nothing of this cladding on the wall at all (no piece of its own, none borrowed): nothing to follow
+    if (!(r.demands || []).length && !(lay.cells || []).some((c) => c.occupied)) continue;
+    const tag = sink.wallTags.get(wid) || lay.wallLabel || "Wall";
+    const hand = sink.handMadeOn(wid);
+    const battens = rule.battens && !hand.battens.length;
+    const tape = rule.extras && !hand.tape.length;
+    // a joint product already chosen for the joint rows is bought as itself — never a second H-flashing as well
+    const jointBought = (r.demands || []).some((d) => d.role === "horizontal-joint" && !isUnresolved(d.identity));
+    const hFlashing = rule.extras && !hand.joints.length && !jointBought;
+    const f = wallFollowers({ polygon: lay.wall.polygon }, lay.openings, lay, { rule, materialId: mat.id, wallTag: tag, measurementId: wid, battens, tape, hFlashing });
+    // the joint the sheet layout couldn't buy (no joint product) is now the H-flashing — never both
+    if (hFlashing) {
+      r.demands = r.demands.filter((d) => !(d.role === "horizontal-joint" && isUnresolved(d.identity)));
+      r.problems = r.problems.filter((p) => p.code !== "joint_product_missing");
+    }
+    r.demands.push(...f.demands);
+    r.explain.push(...f.explain);
+    const list = (set) => [...set].join(", ");
+    f.layout.battens.state = !rule.battens ? "direct" : hand.battens.length ? "hand-made" : "auto";
+    if (hand.battens.length && rule.battens) {
+      f.layout.battens.by = hand.battens;
+      r.problems.push(followerNote("followers_hand_made", `${tag}: battens come from ${list(hand.battens)} (set up by hand), so the automatic battens from ${mat.name} aren't added on this wall — nothing is counted twice.`, [{ wallId: tag, measurementId: wid }]));
+    }
+    if (rule.extras && (hand.tape.length || hand.joints.length)) {
+      const what = [hand.tape.length ? "foam tape" : null, hand.joints.length ? "H-flashing" : null].filter(Boolean).join(" and ");
+      const by = [...new Set([...hand.tape, ...hand.joints])];
+      if (hand.tape.length) { f.layout.tape.state = "hand-made"; f.layout.tape.by = hand.tape; }
+      if (hand.joints.length) { f.layout.hFlashing.state = "hand-made"; f.layout.hFlashing.by = hand.joints; }
+      r.problems.push(followerNote("followers_hand_made", `${tag}: ${by.join(", ")} (set up by hand) already covers the ${what}, so the automatic ${what} from ${mat.name} ${what.includes(" and ") ? "aren't" : "isn't"} added on this wall — nothing is counted twice.`, [{ wallId: tag, measurementId: wid }]));
+    }
+    if (jointBought && rule.extras) f.layout.hFlashing.state = "joint-product";
+    lay.followers = f.layout;
+  }
+}
+
+/**
+ * What a hand-made accessory set on a wall already covers. H joints: a joint strip / trim in its recipe, or a decided
+ * "Joint / backing strips" choice on its card (include / by others / exclude; "Not decided" isn't one). Foam tape: only
+ * an item that IS the joint foam tape (code 304560, or named Foam Back Sealing Tape) — a set's window / wrap tape runs
+ * round openings or along membrane seams, never behind the sheet joins, so it never stands in for it.
+ */
+function accessoryDecides(m) {
+  const groups = Array.isArray(m.rules?.recipe?.groups) ? m.rules.recipe.groups : [];
+  const scope = m.rules?.scope && typeof m.rules.scope === "object" ? m.rules.scope : {};
+  const decided = (v) => ["include", "by-others", "exclude"].includes(v);
+  const isFoamTape = (...vals) => vals.some((v) => (typeof v === "string" || typeof v === "number") && (String(v).trim() === FOAM_TAPE.code || /foam\s*back\s*seal/i.test(String(v))));
+  const id = (g) => (g?.identity && typeof g.identity === "object" ? g.identity : {});
+  return {
+    tape: groups.some((g) => isFoamTape(id(g).sku, id(g).product, id(g).productCode, id(g).name, g?.productCode, g?.label))
+      || isFoamTape(m.spec?.productCode, m.spec?.product?.sku, m.spec?.product?.name),
+    joints: groups.some((g) => g?.kind === "joint-strip" || g?.kind === "joint-trim") || decided(scope.joints),
+  };
 }
 
 /** A material-wide joint row applies only to walls it actually falls inside (a short wall keeps one course). */
@@ -436,6 +506,8 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     if (!l) {
       l = { bucketKey, specKey: stableStringify({ material: matKey, identity: identityKey(identity ?? null), unit }), materialKey: matKey, generic: true, family: n.family, unit,
         finishedLengthMm: finishedLengthMm ?? null, quantity: 0, exact: 0, item, jobMaterialIds: [mat.id], contributionIds: [], demandIds: [], problems: [], notes: [], handlingFlag: false, ceilingExceeded: false };
+      // wall-by-wall step 4: an automatic batten / tape / H-flashing line of this cladding (kept apart for its own spares)
+      if (FOLLOWER_KINDS.includes(identity?.follower)) l.follower = identity.follower;
       lines.set(bucketKey, l);
     }
     l.exact += qty;
@@ -471,7 +543,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         const ids = b.cuts.map((c) => c.demandId);
         const first = demById.get(ids[0]);
         add(`${unit}|${b.stockLengthMm}|${g.identityKey}`, unit, 1, b.stockLengthMm,
-          { description: `${itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity);
+          { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity);
       }
     }
     if (n.family === "aluminium") {
@@ -482,20 +554,33 @@ function purchaseLines(mat, n, demands, matKey, sink) {
             residualMm: b.residualMm, residualUsable: !!b.residualUsable, kerfLossMm: b.kerfLossMm })) });
       }
     } else {
-      const rows = new Map();
-      for (const g of allocation.groups) for (const b of g.bars) for (const c of b.cuts) {
-        const k = `${c.lengthMm}|${b.stockLengthMm}`;
-        const r = rows.get(k) || { cutMm: c.lengthMm, stockMm: b.source === "new" ? b.stockLengthMm : null, qty: 0, labels: [] };
-        r.qty += 1; if (c.label) r.labels.push(c.label);
-        rows.set(k, r);
-      }
-      for (const g of allocation.groups) for (const u of g.unavailable || []) {
-        const d = demById.get(u.demandId);
-        rows.set(`u|${u.demandId}`, { cutMm: d?.lengthMm, stockMm: null, qty: d?.quantity || 1, labels: [d?.label].filter(Boolean) });
+      // one cut list for the material's own pieces, and (wall-by-wall step 4) one each for its automatic battens and
+      // H-flashing — a batten and an H-flashing of the same length are never one row
+      const lists = new Map();
+      const listOf = (g) => {
+        const d = demById.get(g.bars[0]?.cuts[0]?.demandId || g.unavailable?.[0]?.demandId);
+        const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : "";
+        if (!lists.has(f)) lists.set(f, { title: f === "battens" ? `battens cut list (${FOLLOWER_TEXT.battens})` : f === "hflashing" ? `H-flashing cut list (${FOLLOWER_TEXT.hflashing})` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
+        return lists.get(f).rows;
+      };
+      for (const g of allocation.groups) {
+        const rows = listOf(g);
+        for (const b of g.bars) for (const c of b.cuts) {
+          const k = `${c.lengthMm}|${b.stockLengthMm}`;
+          const r = rows.get(k) || { cutMm: c.lengthMm, stockMm: b.source === "new" ? b.stockLengthMm : null, qty: 0, labels: [] };
+          r.qty += 1; if (c.label) r.labels.push(c.label);
+          rows.set(k, r);
+        }
+        for (const u of g.unavailable || []) {
+          const d = demById.get(u.demandId);
+          rows.set(`u|${u.demandId}`, { cutMm: d?.lengthMm, stockMm: null, qty: d?.quantity || 1, labels: [d?.label].filter(Boolean) });
+        }
       }
       // labels in natural order ("Rafter @ 600" before "@ 1,200") so a site reader can follow the stations
       const natural = (a, b) => String(a).localeCompare(String(b), "en", { numeric: true });
-      appendix.timber.push({ rows: [...rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm) });
+      for (const [f, l] of [...lists.entries()].sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a < b ? -1 : 1))) {
+        appendix.timber.push({ ...(f || n.family !== "timber" ? { title: l.title } : {}), rows: [...l.rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm) });
+      }
     }
   }
   for (const d of usable) {
@@ -535,14 +620,32 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       if (Math.abs(l.quantity - l.exact) > 1e-9) l.item = { ...l.item, note: `${l.exact.toFixed(2)} LM calculated${inc ? ` → ${byInc.toFixed(2)} LM in ${inc} m steps` : ""}, ordered as ${l.quantity} LM` };
     } else l.quantity = Math.max(UNIT_INTEGER.has(l.unit) ? 1 : 0, Math.ceil(l.exact - 1e-9));
     if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null) l.problems.push("A timber line has no stock length.");
+    if (l.follower === "battens" || l.follower === "hflashing") {
+      const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);
+      const fitted = ds.reduce((t, d) => t + (d.lengthMm || 0) * (d.quantity || 1), 0) / 1000;
+      const walls = new Set(ds.map((d) => d.sourceRefs?.[0]?.measurementId || d.sourceRefs?.[0]?.wallId)).size;
+      l.item = { ...l.item, note: l.follower === "battens"
+        ? `${fitted.toFixed(2)} m of battens on ${walls} wall${walls === 1 ? "" : "s"}, cut with offcuts shared across the walls · fixings to the studs not counted`
+        : `${fitted.toFixed(2)} m of horizontal joints on ${walls} wall${walls === 1 ? "" : "s"}, cut with offcuts shared across the walls, no lap` };
+    }
   }
   // spares (02 §6): ONE spare count for the material (ceil of total × rate), spread over its lines by largest share —
-  // shown separately, never hidden in the layout count. Random-length LM already carries its spare.
+  // shown separately, never hidden in the layout count. Random-length LM already carries its spare. The automatic
+  // battens and H-flashing (step 4) each get their OWN spare count at the material's rate; foam tape takes its spare
+  // on the metres before they are rounded into rolls.
   const spareRate = n.spareRate > 0 ? n.spareRate / 100 : 0;
-  const spareable = all.filter((l) => UNIT_INTEGER.has(l.unit));
+  const spareable = all.filter((l) => UNIT_INTEGER.has(l.unit) && l.follower !== "tape");
+  for (const l of all.filter((x) => x.follower === "tape")) {
+    const exactM = (l.exact * FOAM_TAPE.rollMm) / 1000;
+    const rolls = Math.max(1, Math.ceil(l.exact * (1 + spareRate) - 1e-9));
+    const spare = rolls - Math.max(1, Math.ceil(l.exact - 1e-9));
+    l.quantity = rolls;
+    if (spare > 0) l.spareQuantity = spare;
+    l.item = { ...l.item, note: `${exactM.toFixed(2)} m behind the vertical sheet joins${spareRate ? ` + ${n.spareRate}% spare = ${(exactM * (1 + spareRate)).toFixed(2)} m` : ""} → ${rolls} roll${rolls === 1 ? "" : "s"} of ${FOAM_TAPE.rollMm / 1000} m` };
+  }
   if (spareRate && spareable.length) {
     const byUnit = new Map();
-    for (const l of spareable) byUnit.set(l.unit, [...(byUnit.get(l.unit) || []), l]);
+    for (const l of spareable) { const k = `${l.unit}|${l.follower || ""}`; byUnit.set(k, [...(byUnit.get(k) || []), l]); }
     for (const group of byUnit.values()) {
       const total = group.reduce((a, l) => a + l.quantity, 0);
       let left = Math.ceil(total * spareRate - 1e-9);
@@ -552,13 +655,14 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       for (const sh of shares) {
         if (!sh.n) continue;
         sh.l.spareQuantity = sh.n; sh.l.quantity += sh.n;
-        sh.l.item = { ...sh.l.item, note: [sh.l.item?.note, `incl. ${sh.n} spare (${n.spareRate}% of the material)`].filter(Boolean).join(" · ") };
+        const of = sh.l.follower === "battens" ? "of the battens" : sh.l.follower === "hflashing" ? "of the H-flashing" : "of the material";
+        sh.l.item = { ...sh.l.item, note: [sh.l.item?.note, `incl. ${sh.n} spare (${n.spareRate}% ${of})`].filter(Boolean).join(" · ") };
       }
     }
   }
   // full packs only when the supplier requires them (a published pack size alone never forces it — 06)
   const pack = n.product?.fullPackRequired && n.product?.packQuantity > 1 ? n.product.packQuantity : null;
-  if (pack) for (const l of spareable) {
+  if (pack) for (const l of spareable.filter((x) => !x.follower)) {   // the cladding's pack size is never the battens'
     const packed = Math.ceil(l.quantity / pack - 1e-9) * pack;
     if (packed !== l.quantity) { l.item = { ...l.item, note: [l.item?.note, `rounded up to full packs of ${pack} (+${packed - l.quantity})`].filter(Boolean).join(" · ") }; l.quantity = packed; }
   }
@@ -614,11 +718,28 @@ export function computeGenericMaterials(materials, contributions, ctx) {
   const rank = (m) => (m.spec?.family === "accessory" ? 2 : m.spec?.family === "batten" ? 1 : 0);
   const ordered = [...materials].sort((a, b) => rank(a) - rank(b));
   const sheetJointsByWall = new Map(); // wall measurement → vertical sheet-joint x positions (support stations, 05 B1)
+  // wall-by-wall step 4: battens / tape / H joints already set up BY HAND on a wall (older jobs) — the cladding's
+  // automatic ones are left off that wall so nothing is counted twice. Existing (not bought) supports don't count.
+  const matById = new Map(materials.map((m) => [m.id, m]));
+  const handMade = new Map();
+  for (const c of contributions) {
+    const m = matById.get(c.jobMaterialId), meas = ctx.measurementsById.get(c.measurementId);
+    const fam = m?.spec?.family;
+    if (meas?.kind !== "wall" || (fam !== "batten" && fam !== "accessory")) continue;
+    const h = handMade.get(c.measurementId) || { battens: new Set(), tape: new Set(), joints: new Set() };
+    if (fam === "batten" && m.rules?.existing !== true) h.battens.add(m.name || "a batten material");
+    if (fam === "accessory") { const dec = accessoryDecides(m); if (dec.tape) h.tape.add(m.name || "an accessory set"); if (dec.joints) h.joints.add(m.name || "an accessory set"); }
+    handMade.set(c.measurementId, h);
+  }
+  const handMadeOn = (wallMeasId) => { const h = handMade.get(wallMeasId); return { battens: h ? [...h.battens].sort() : [], tape: h ? [...h.tape].sort() : [], joints: h ? [...h.joints].sort() : [] }; };
   let generated = 0;
+  // wall-by-wall step 4 (Sam: "rounded up once per job"): the foam tape and the H-flashing of EVERY Axon cladding on the
+  // job are one product each — they are pooled here and bought once, after the loop (buyPooledFollowers)
+  const pool = [];
   for (const mat of ordered) {
     const mine = contributions.filter((c) => c.jobMaterialId === mat.id);
     const items = mine.map((c) => ({ c, role: c.role || "primary", m: ctx.measurementsById.get(c.measurementId) })).filter((x) => x.m);
-    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [] };
+    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
     for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
     let n = null, methodResults = [];
@@ -667,9 +788,13 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts, mat.spec?.family === "accessory" ? wallsOf.map((id) => jointsByWall.get(id) || [])
       : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || [])
       : mat.methodKey === "sheet_layout" ? { sheetPlan: sink.sharedAcrossWalls ? 2 : 1 } : null);   // HUB 016/016b: plan 2 = shared across walls; lines saved under the other plan are reviewed
+    // the automatic battens / tape / H-flashing have their OWN key: the rules version and what is set up by hand on each
+    // wall too — so they can change without making the cladding's own lines stale (and the other way round)
+    const followerKey = methodResults.some((r) => r.layout?.followers) ? fnv(`${depKey}|${stableStringify({ followers: FOLLOWERS_VERSION, hand: wallsOf.map((id) => handMadeOn(id)) })}`) : null;
     let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, omitted: [] };
+    const pooled = demands.filter((d) => POOLED_FOLLOWERS.has(d.follower));
     if (n) {
-      try { pl = purchaseLines(mat, n, demands, matKey, sink); } catch (e) {
+      try { pl = purchaseLines(mat, n, pooled.length ? demands.filter((d) => !POOLED_FOLLOWERS.has(d.follower)) : demands, matKey, sink); } catch (e) {
         if (e?.name !== "TakeoffValidationError") throw e;
         sink.problems.push({ code: "invalid_input", message: e.message, blocking: true });
       }
@@ -695,8 +820,9 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const measCodes = new Set();
     for (const v of sink.measProblems.values()) for (const p of v) measCodes.add(p);
     for (const l of pl.lines) {
-      l.dependencyKey = depKey;
-      l.item = { ...(l.item || {}), dependencyKey: depKey };
+      const key = l.follower && followerKey ? followerKey : depKey;
+      l.dependencyKey = key;
+      l.item = { ...(l.item || {}), dependencyKey: key };
       for (const p of blocking) if (!l.problems.includes(p.message)) l.problems.push(p.message);
       for (const p of measCodes) if (!l.problems.includes(p)) l.problems.push(p);
       for (const p of advisory) l.notes.push(p.message);
@@ -707,32 +833,15 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const demandMeas = new Map(demands.map((d) => { const r = d.sourceRefs?.[0] || {}; return [d.id, r.measurementId || tagToMeas.get(r.wallId) || r.wallId || null]; }));
     const contribOfMeas = new Map(mine.map((c) => [c.measurementId, c.id]));
     const perContribution = new Map(mine.map((c) => [c.id, []]));
-    for (const l of pl.lines) {
-      const owners = new Map();
-      for (const did of l.demandIds) {
-        const cid = contribOfMeas.get(demandMeas.get(did)) || mine[0]?.id;
-        if (cid) owners.set(cid, (owners.get(cid) || 0) + 1);
-      }
-      // split the WHOLE purchase quantity across the contributions that need it (largest share first, stable)
-      let left = l.quantity;
-      const total = [...owners.values()].reduce((a, b) => a + b, 0) || 1;
-      const shares = [...owners.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([cid, k], i, arr) => {
-        const q = i === arr.length - 1 ? left : Math.min(left, Math.round((l.quantity * k) / total));
-        left -= q;
-        return [cid, q];
-      });
-      for (const [cid, q] of shares) {
-        if (q <= 0) continue;
-        perContribution.get(cid)?.push({ bucketKey: l.bucketKey, quantity: q, finishedLengthMm: l.finishedLengthMm });
-        if (!l.contributionIds.includes(cid)) l.contributionIds.push(cid);
-      }
-      delete l.demandIds;
-    }
+    const contribOf = (did) => contribOfMeas.get(demandMeas.get(did)) || mine[0]?.id;
+    for (const l of pl.lines) attributeLine(l, contribOf, perContribution);
+    const resById = new Map();
     for (const { c, m } of items) {
       const pieces = perContribution.get(c.id) || [];
       const problems = [...(sink.measProblems.get(m.id) || [])];
       const res = { contributionId: c.id, measurementId: c.measurementId, jobMaterialId: mat.id, kind: m.kind, role: c.role || "primary", pieces, problems, explanation: null, generic: true };
       out.contributions.push(res);
+      resById.set(c.id, res);
       // a measurement that should feed purchases but produced none (and has problems) is a missing requirement
       if (!pieces.length && problems.length) out.unplaced.push({ contributionId: c.id, jobMaterialId: mat.id, specKey: matKey, problems, explanation: null });
     }
@@ -748,6 +857,99 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       layouts: methodResults.map((r) => r.layout).filter(Boolean), demands, allocation: pl.allocation, appendix: pl.appendix,
     };
     out.lines.push(...pl.lines);
+    if (pooled.length && n) pool.push({ mat, n, matKey, demands: pooled, key: followerKey || depKey, blocking, advisory, measCodes, contribOf, resById, ownLines: pl.lines });
   }
+  if (pool.length) buyPooledFollowers(pool, out);
   return out;
+}
+
+/** The followers bought ONCE for the whole job, whichever cladding they come from (Sam, 21 Oct 2026). */
+const POOLED_FOLLOWERS = new Set(["tape", "hflashing"]);
+
+/**
+ * Split a purchase line's WHOLE quantity across the contributions whose demands it serves (largest share first,
+ * stable) and record them on the line. `contribOf(demandId)` names the contribution.
+ */
+function attributeLine(l, contribOf, perContribution) {
+  const owners = new Map();
+  for (const did of l.demandIds) {
+    const cid = contribOf(did);
+    if (cid) owners.set(cid, (owners.get(cid) || 0) + 1);
+  }
+  let left = l.quantity;
+  const total = [...owners.values()].reduce((a, b) => a + b, 0) || 1;
+  const shares = [...owners.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([cid, k], i, arr) => {
+    const q = i === arr.length - 1 ? left : Math.min(left, Math.round((l.quantity * k) / total));
+    left -= q;
+    return [cid, q];
+  });
+  for (const [cid, q] of shares) {
+    if (q <= 0) continue;
+    perContribution.get(cid)?.push({ bucketKey: l.bucketKey, quantity: q, finishedLengthMm: l.finishedLengthMm });
+    if (!l.contributionIds.includes(cid)) l.contributionIds.push(cid);
+  }
+  delete l.demandIds;
+}
+
+/**
+ * Wall-by-wall step 4: the foam tape (metres → whole 25 m rolls) and the H-flashing (one cutting plan, offcuts shared,
+ * no lap) of every Axon cladding on the job, worked out ONCE for the job — two Axon products on one job never round up
+ * twice. Each line sits under the first cladding that has it (its section on the schedule and the order) and names the
+ * others; each wall's share is attributed to its own cladding's contribution. Spares at the highest rate among them.
+ * With one cladding this is exactly that cladding's own tape and H-flashing.
+ */
+function buyPooledFollowers(pool, out) {
+  const perContribution = new Map(pool.flatMap((e) => [...e.resById.keys()].map((cid) => [cid, []])));
+  const elsewhere = new Map();   // pool entry → [{ what, owner }] (the tape / H-flashing bought under another cladding)
+  for (const kind of ["hflashing", "tape"]) {
+    const entries = pool.filter((e) => e.demands.some((d) => d.follower === kind));
+    if (!entries.length) continue;
+    const owner = entries[0];
+    const demands = entries.flatMap((e) => e.demands.filter((d) => d.follower === kind));
+    const entryOf = new Map(entries.flatMap((e) => e.demands.map((d) => [d.id, e])));
+    const spareRate = Math.max(...entries.map((e) => (Number(e.n.spareRate) > 0 ? Number(e.n.spareRate) : 0)));
+    const sink = { problems: [], offcuts: [] };
+    let pl;
+    try { pl = purchaseLines(owner.mat, { ...owner.n, spareRate }, demands, owner.matKey, sink); } catch (e) {
+      if (e?.name !== "TakeoffValidationError") throw e;
+      // never a silent gap: every cladding whose tape / H-flashing couldn't be worked out is held up with the reason
+      for (const x of entries) {
+        out.results[x.mat.id].problems.push({ code: "invalid_input", message: e.message, blocking: true });
+        for (const l of x.ownLines) if (!l.problems.includes(e.message)) l.problems.push(e.message);
+      }
+      continue;
+    }
+    const res = out.results[owner.mat.id];
+    if (pl.allocation) res.allocation = res.allocation ? { ...res.allocation, groups: [...res.allocation.groups, ...pl.allocation.groups] } : pl.allocation;
+    res.appendix.timber.push(...pl.appendix.timber);
+    for (const l of pl.lines) {
+      const from = [owner, ...entries.slice(1).filter((e) => l.demandIds.some((did) => entryOf.get(did) === e))];
+      l.jobMaterialIds = from.map((e) => e.mat.id);
+      const key = from.length === 1 ? owner.key : fnv(from.map((e) => e.key).join("|"));
+      l.dependencyKey = key;
+      l.item = { ...(l.item || {}), dependencyKey: key };
+      if (from.length > 1) { const parts = String(l.item.note || "").split(" · ").filter(Boolean); parts.splice(1, 0, `for ${from.map((e) => e.mat.name).join(" and ")}, worked out once for the job`); l.item.note = parts.join(" · "); }
+      for (const e of from) {
+        for (const p of e.blocking) if (!l.problems.includes(p.message)) l.problems.push(p.message);
+        for (const p of e.measCodes) if (!l.problems.includes(p)) l.problems.push(p);
+        for (const p of e.advisory) if (!l.notes.includes(p.message)) l.notes.push(p.message);
+      }
+      for (const p of sink.problems) (p.blocking === false ? l.notes : l.problems).push(p.message);
+      attributeLine(l, (did) => entryOf.get(did)?.contribOf(did), perContribution);
+    }
+    for (const e of entries.slice(1)) elsewhere.set(e, [...(elsewhere.get(e) || []), { what: kind === "tape" ? "foam tape" : "H-flashing", owner: owner.mat.name }]);
+    out.lines.push(...pl.lines);
+  }
+  for (const e of pool) for (const [cid, r] of e.resById) r.pieces.push(...(perContribution.get(cid) || []));
+  // a contribution that now has pieces isn't missing any more
+  const placed = new Set([...perContribution].filter(([, v]) => v.length).map(([cid]) => cid));
+  out.unplaced = out.unplaced.filter((u) => !placed.has(u.contributionId));
+  // the other claddings say where their tape and H-flashing went
+  for (const [e, list] of elsewhere) {
+    const byOwner = new Map();
+    for (const x of list) byOwner.set(x.owner, [...(byOwner.get(x.owner) || []), x.what]);
+    const msg = `${e.mat.name}: ${[...byOwner].map(([o, w]) => `its ${w.join(" and ")} ${w.length > 1 ? "are" : "is"} ordered once for the job with ${o}`).join("; ")}.`;
+    out.results[e.mat.id].problems.push(followerNote("followers_pooled", msg));
+    for (const l of e.ownLines) if (!l.notes.includes(msg)) l.notes.push(msg);
+  }
 }

@@ -77,16 +77,17 @@ const j2 = (widthMm = 4800) => ws({
     { id: "win", kind: "opening", parentId: "wall", inputs: { xMm: 1350, sillMm: 900, widthMm: 900, heightMm: 900, label: "W01" } }],
   contributions: [con("c-wall", "wall", "clad", "wall")] });
 
-await t("J2: 4,800 × 2,700 Axon, window inside one cell → 4 sheets (2750), net 12.15 m²", () => {
+await t("J2: 4,800 × 2,700 Axon, window inside one cell → 4 sheets (2750), net 12.15 m² (+ its own 14 battens and 1 roll of foam tape, wall-by-wall step 4)", () => {
   const c = computeWorkspace(j2());
   const ls = linesOf(c, "clad");
-  assert.deepEqual(summary(ls), ["4 sheet @2750"]);
+  // step 4 (21 Oct 2026): the Axon works out its own battens and foam tape — takeoff-tc-autobattens.test.mjs has the working
+  assert.deepEqual(summary(ls), ["1 roll", "14 piece @3000", "4 sheet @2750"]);
   const lay = c.materialResults.clad.layouts[0];
   assert.ok(Math.abs(lay.areas.netM2 - 12.15) < 1e-9, String(lay.areas.netM2));
   assert.equal(ls[0].item.sku, "403932");
 });
 await t("J2: 4,801 wide → 5 sheets", () => {
-  assert.deepEqual(summary(linesOf(computeWorkspace(j2(4801)), "clad")), ["5 sheet @2750"]);
+  assert.deepEqual(summary(linesOf(computeWorkspace(j2(4801)), "clad").filter((l) => l.unit === "sheet")), ["5 sheet @2750"]);
 });
 await t("J2: wall without heights is an incomplete draft (blocks), not zero", () => {
   const w = j2(); w.measurements[0].inputs = { kind: "rect", widthMm: 4800, name: "North" };
@@ -156,7 +157,8 @@ const j5 = () => {
 };
 await t("J5: mixed job — units never merge (pieces, sheets, bars, flashing lengths)", () => {
   const c = computeWorkspace(j5());
-  assert.deepEqual(c.scheduleLines.map((l) => l.unit || "flashing").sort(), ["bar", "flashing", "piece", "sheet"]);
+  // + the Axon's own battens (pieces) and foam tape (a roll), wall-by-wall step 4 — still never merged
+  assert.deepEqual(c.scheduleLines.map((l) => l.unit || "flashing").sort(), ["bar", "flashing", "piece", "piece", "roll", "sheet"]);
   assert.equal(c.totalLm, 3.2); // LM total is flashing only
   assert.equal(c.orderReady, true, JSON.stringify(c.scheduleLines.map((l) => l.problems)));
 });
@@ -168,7 +170,7 @@ await t("J5: order snapshot → MATERIAL ORDER PDF (bars/sheets/pieces) + separa
     lines, supplier: { id: "s", name: "Supplier" }, company: { name: "Blue Leaf", phone: "08" }, jobLabel: "1 Example St", rendererVersion: "test" });
   assert.deepEqual(problems, []);
   assert.equal(snapshot.items.length, 3);
-  assert.deepEqual(snapshot.totals.byUnit, { piece: 18, sheet: 4, bar: 1 });
+  assert.deepEqual(snapshot.totals.byUnit, { piece: 18 + 14, sheet: 4, bar: 1, roll: 1 }); // 18 rafters + the Axon's 14 battens; its tape roll
   assert.equal(snapshot.appendix.aluminium[0].bars.length, 1);
   assert.equal(snapshot.appendix.flashingRuns.length, 1);
   const pdf = await renderSupplierOrderPdf(snapshot, { exportNo: 1, isDraft: false, snapshotSha256: "abc" });
@@ -185,7 +187,7 @@ await t("06 dependency staleness: a draft line goes stale when its inputs change
   assert.equal(orderLineState(order, c0, w.materials).stale, false);
   const w2 = j2(); w2.measurements[1].inputs = { ...w2.measurements[1].inputs, xMm: 1400 }; // window moved; still 4 sheets
   const c1 = computeWorkspace(w2);
-  assert.deepEqual(summary(linesOf(c1, "clad")), ["4 sheet @2750"]);
+  assert.deepEqual(summary(linesOf(c1, "clad").filter((l) => l.unit === "sheet")), ["4 sheet @2750"]);
   const st = orderLineState(order, c1, w2.materials);
   assert.equal(st.problem, "line_stale_inputs");
   assert.equal(st.suggestion.bucketKey, order.bucketKey); // explicit update to the same bucket
@@ -239,13 +241,21 @@ await t("QO-03/SEC-02: entered lengths on rafters are ordered; a kind the method
   assert.ok(c2.materialResults.tim.problems.some((p) => p.code === "measurement_unused" && p.blocking));
   assert.equal(c2.orderReady, false);
 });
-await t("QO-04/QO-05/F02/F03: an unselected joint accessory is never bought as the cladding product — named as NOT on the order", () => {
+await t("QO-04/QO-05/F02/F03: a horizontal joint is never bought as the cladding product — the Axon's own H-flashing (step 4), or named as NOT on the order where a hand-made accessory set owns the joints", () => {
   const w = j2(); w.measurements[0].inputs = { kind: "rect", widthMm: 4800, heightMm: 4000, name: "North" };
   w.materials[0].rules = { jointRows: { atMm: [2400], gapMm: 10, detailRef: "D1" } };
   const c = computeWorkspace(w);
   const ls = linesOf(c, "clad");
-  assert.ok(ls.every((l) => l.unit === "sheet"), JSON.stringify(ls.map((l) => l.item.description)));
-  assert.ok(c.materialResults.clad.problems.some((p) => p.code === "component_not_selected" && /Not on this order/.test(p.message)));
+  // wall-by-wall step 4 (21 Oct 2026): every horizontal Axon joint takes Hardie H-flashing (code 305613), bought as itself
+  assert.ok(ls.filter((l) => !l.follower).every((l) => l.unit === "sheet" && /Axon/.test(l.item.description)), JSON.stringify(ls.map((l) => l.item.description)));
+  assert.deepEqual(ls.filter((l) => l.follower === "hflashing").map((l) => [l.quantity, l.item.description]), [[2, "Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length"]]);
+  assert.ok(!c.materialResults.clad.problems.some((p) => p.code === "component_not_selected"));
+  // an older job whose accessory set (made by hand) has its own joint strip keeps it: the cladding's joint is named NOT on the order
+  const acc = { id: "acc", name: "Joints", methodKey: "accessory_routes", methodVersion: 1, spec: { family: "accessory", product: { name: "Joint set" } },
+    rules: { recipe: { groups: [{ id: "h", kind: "joint-strip", routes: ["joints"], stockPolicy: { kind: "list", lengthsMm: [3000], sharePieces: true, kerfMm: 0 } }] } } };
+  const c2 = computeWorkspace({ ...w, materials: [...w.materials, acc], contributions: [...w.contributions, con("ca", "wall", "acc", "wall")] });
+  assert.ok(linesOf(c2, "clad").every((l) => l.unit === "sheet" || ["battens", "tape"].includes(l.follower)), JSON.stringify(linesOf(c2, "clad").map((l) => l.item.description)));
+  assert.ok(c2.materialResults.clad.problems.some((p) => p.code === "component_not_selected" && /Not on this order/.test(p.message)));
 });
 await t("QO-11: battens on two walls attribute each wall's pieces to that wall's contribution", () => {
   const bat = { id: "bt", name: "Battens", methodKey: "support_grid", methodVersion: 1, spec: { family: "batten", orientation: "vertical", product: { name: "Batten 70x35", widthMm: 70, thicknessMm: 35, lengthsMm: [3000] } }, rules: { maxSpacingMm: 600, fixingScope: { status: "by-others", reason: "framer" } } };
@@ -261,15 +271,17 @@ await t("QO-08: random-length LM is rounded ONCE per material (not per wall then
     product: { name: "Shiplap", widthMm: 135, thicknessMm: 19, effectiveCoverMm: 120 } }, rules: {} };
   const walls = ["A", "B", "C"].map((id) => ({ id, kind: "wall", inputs: { kind: "rect", widthMm: 1010, heightMm: 1000, name: id } }));
   const c = computeWorkspace(ws({ materials: [tcm], measurements: walls, contributions: walls.map((w) => con(`c${w.id}`, w.id, "tc", "wall")) }));
-  // 3 × 1.01 m² ÷ 0.12 = 25.25 LM → 26 LM once (per-wall rounding would give 3 × 9 = 27)
-  assert.deepEqual(summary(linesOf(c, "tc")), ["26 lm"]);
+  // 3 × 1.01 m² ÷ 0.12 = 25.25 LM → 26 LM once (per-wall rounding would give 3 × 9 = 27); its battens (step 4) are pieces
+  assert.deepEqual(summary(linesOf(c, "tc").filter((l) => l.unit === "lm")), ["26 lm"]);
 });
 await t("QO-09/F12: full packs only when the supplier requires them; QO-14: spare % is per material, not per line", () => {
   const w = j2(); w.materials[0].spec = { ...w.materials[0].spec, product: { ...w.materials[0].spec.product, packQuantity: 3, fullPackRequired: true } };
-  assert.deepEqual(summary(linesOf(computeWorkspace(w), "clad")), ["6 sheet @2750"]);
+  // the sheet pack size never rounds the Axon's own battens (step 4): still 14
+  assert.deepEqual(summary(linesOf(computeWorkspace(w), "clad").filter((l) => l.unit !== "roll")), ["14 piece @3000", "6 sheet @2750"]);
   const w2 = j2(); w2.materials[0].spec = { ...w2.materials[0].spec, spareRate: 10 };
   const ls = linesOf(computeWorkspace(w2), "clad");
-  assert.equal(ls.reduce((a, l) => a + (l.spareQuantity || 0), 0), 1); // ceil(4 × 10 %) = 1 for the whole material
+  assert.equal(ls.filter((l) => l.unit === "sheet").reduce((a, l) => a + (l.spareQuantity || 0), 0), 1); // ceil(4 × 10 %) = 1 for the whole material
+  assert.equal(ls.find((l) => l.follower === "battens").spareQuantity, 2, "the battens' own spare: ceil(14 × 10 %)");
 });
 await t("QO-10/PH-06: connected collinear runs are one grid (18, not 20); a run traced twice is blocked; noise past a multiple adds no member", () => {
   const two = j1(); two.measurements[0] = line("d1", "distribution", 5000); two.measurements.push({ ...line("d2", "distribution", 5000), points: [{ x: 1 + 5000 / U, y: 1 }, { x: 1 + 10000 / U, y: 1 }] });

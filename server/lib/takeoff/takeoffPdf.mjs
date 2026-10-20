@@ -207,7 +207,7 @@ function drawAppendix(doc, snap, opts) {
   }
   for (const tb of a.timber || []) {
     any = true;
-    title(`${tb.materialName} — timber cut list`);
+    title(`${tb.materialName} — ${tb.title || "timber cut list"}`);   // older snapshots carry no title (timber)
     // every member is named (wrapping) — a site reader must be able to tell which ones are which
     for (const r of tb.rows || []) line(`${r.qty} × cut ${fmt(r.cutMm)} mm from ${r.stockMm ? `${fmt(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}${r.labels?.length ? ` — ${r.labels.join(", ")}` : ""}`);
     y += 6;

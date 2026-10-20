@@ -13,6 +13,9 @@
  * battens, aluminium bars, continuous flashing runs) on top of the default flashing seed; add &takeoffFixings=1 for
  * an accessory material with a manual quantity in boxes and by-others / excluded accessory scopes;
  * ?takeoffElevation=1 scales page 3 (an empty page) like page 1, for Rectangle / Area on an elevation (HUB 023);
+ * ?takeoffSeed=battens (wall-by-wall step 4) adds Axon 400 smooth set up from the Blue Leaf defaults on the check job —
+ * walls of 6, 4, 6 and 4 m at 2,700 with three windows and a door, plus a 6 m gable that needs an H joint — so its
+ * automatic battens, foam tape and H-flashing show on the walls, the schedule and the order with nothing set up;
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
  * Exports freeze a snapshot (like buildExportSnapshot: generic items by unit + the site appendix);
  * GET …/exports/:id/appendix serves a small text-only stub PDF rendered from THAT frozen snapshot.
@@ -83,6 +86,7 @@ function seed() {
     appendixRequests: [],  // exportIds whose site appendix was opened (review evidence)
   };
   if (qs().get("takeoffSeed") === "mixed") seedMixed();
+  if (qs().get("takeoffSeed") === "battens") seedBattens();
   // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
   // scale as page 1, checked), for drawing walls with Rectangle and Area
   if (qs().get("takeoffElevation") === "1") {
@@ -96,6 +100,26 @@ function seed() {
       spec: { family: "cladding", layout: "sheet", orientation: "vertical", assemblyId: "axon-vertical", product: { id: g.id, manufacturer: g.manufacturer, name: g.name, widthMm: g.widthMm, thicknessMm: g.thicknessMm }, spareRate: D.spareRate, supplierName: null },
       rules: { companyDefault: true, route: D.route, installConditions: { ...D.installConditions }, jointRows: { atMm: [], ...D.jointRule } }, profile: null, sourceReview: { status: "user_entered" } });
   }
+}
+
+/** Wall-by-wall step 4 (SYNTHETIC): Axon 400 smooth from the Blue Leaf defaults on the check job + a gable with an H joint. */
+function seedBattens() {
+  const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth"), D = BLUE_LEAF_JH_DEFAULTS;
+  const spec = { ...specFromGroup(g), assemblyId: "axon-vertical", spareRate: D.spareRate };
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-axon400", name: "Axon 400 smooth", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null,
+    rules: { route: D.route, installConditions: { ...D.installConditions, "direct-or-cavity": D.route }, jointRows: { atMm: [], ...D.jointRule } } });
+  const wall = (id, name, inputs) => ({ id, kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, revision: 1, inputs: { name, ...inputs } });
+  const opening = (id, parentId, label, type, xMm, sillMm, widthMm, heightMm) => ({ id, kind: "opening", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId, label: null, revision: 1,
+    inputs: { xMm, sillMm, widthMm, heightMm, label, type } });
+  state.measurements.push(
+    wall("bw-1", "Wall 1", { kind: "rect", widthMm: 6000, heightMm: 2700 }), wall("bw-2", "Wall 2", { kind: "rect", widthMm: 4000, heightMm: 2700 }),
+    wall("bw-3", "Wall 3", { kind: "rect", widthMm: 6000, heightMm: 2700 }), wall("bw-4", "Wall 4", { kind: "rect", widthMm: 4000, heightMm: 2700 }),
+    wall("bw-5", "Gable", { kind: "gable", widthMm: 6000, eavesHeightMm: 2400, apexXMm: 3000, apexHeightMm: 3600 }),
+    opening("bo-1", "bw-1", "W1", "window", 1000, 900, 1200, 1200), opening("bo-2", "bw-1", "W2", "window", 3800, 900, 1200, 1200),
+    opening("bo-3", "bw-2", "D1", "door", 1500, 0, 900, 2100), opening("bo-4", "bw-3", "W1", "window", 2400, 900, 1200, 1200),
+  );
+  for (const id of ["bw-1", "bw-2", "bw-3", "bw-4", "bw-5"]) state.contributions.push({ id: `bc-${id}`, measurementId: id, jobMaterialId: "mat-axon400", role: "wall" });
 }
 
 /** TC-R04 J5 mixed procurement (SYNTHETIC): every unit on one job, plus continuous flashing runs. */
@@ -358,7 +382,7 @@ function appendixLines(snap, exportNo) {
     for (const b of al.bars) out.push(`  Bar ${b.n}${b.source === "offcut" ? " (existing offcut)" : ""}: ${b.cuts.map((c) => `${c.label} ${f(c.lengthMm)}`).join(" | ")} | remainder ${f(b.residualMm)}${b.residualUsable ? " keep" : " waste"}`);
   }
   for (const tb of a.timber) {
-    out.push(`${tb.materialName} - timber cut list`);
+    out.push(`${tb.materialName} - ${tb.title || "timber cut list"}`);
     for (const r of tb.rows) out.push(`  ${r.qty} x cut ${f(r.cutMm)} mm from ${r.stockMm ? `${f(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}`);
   }
   for (const sh of a.layouts) {

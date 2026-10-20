@@ -294,7 +294,9 @@ export function computeWorkspace(ws) {
     }
   }
   const flashingLines = [...lines.values()].sort((a, b) => (a.specKey === b.specKey ? b.finishedLengthMm - a.finishedLengthMm : a.specKey < b.specKey ? -1 : 1));
-  const genericLines = gen.lines.sort((a, b) => (a.materialKey === b.materialKey ? (a.unit === b.unit ? (b.finishedLengthMm || 0) - (a.finishedLengthMm || 0) : a.unit < b.unit ? -1 : 1) : a.materialKey < b.materialKey ? -1 : 1));
+  // within a cladding its own lines come first, then its automatic battens, H-flashing and foam tape (wall-by-wall step 4)
+  const followerRank = (l) => ({ battens: 1, hflashing: 2, tape: 3 })[l.follower] || 0;
+  const genericLines = gen.lines.sort((a, b) => (a.materialKey === b.materialKey ? (followerRank(a) - followerRank(b) || (a.unit === b.unit ? (b.finishedLengthMm || 0) - (a.finishedLengthMm || 0) : a.unit < b.unit ? -1 : 1)) : a.materialKey < b.materialKey ? -1 : 1));
   const scheduleLines = [...flashingLines, ...genericLines];
   // a measurement that produced NO pieces (invalid run, no scale, …) is a missing requirement, not zero:
   // it is listed and blocks ordering of that material (R04b R1)

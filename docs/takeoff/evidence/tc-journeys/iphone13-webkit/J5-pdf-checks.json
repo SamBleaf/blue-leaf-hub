@@ -96,7 +96,17 @@
   },
   {
     "doc": "supplier",
-    "expect": "/Order total: 1 bar · 18 pieces · 4 sheets/",
+    "expect": "/Order total: 1 bar · 1 roll · 32 pieces · 4 sheets/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/Hardie Cavity Batten 70 × 19, code 405307/",
+    "ok": true
+  },
+  {
+    "doc": "supplier",
+    "expect": "/Foam Back Sealing Tape, 25 m roll/",
     "ok": true
   }
 ]

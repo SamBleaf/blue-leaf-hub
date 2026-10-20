@@ -57,8 +57,9 @@ export function planSheets({ pieces, lengthsMm, sheetWidthMm, coverMm, kerfMm = 
   if (slices.length) {
     const identity = { family: "cladding-sheet", widthMm: sheetWidthMm };
     const policy = { kind: "list", lengthsMm: [...lengthsMm].sort((a, b) => a - b), kerfMm: kerf, kerfConfirmed: true, finalEndAcceptable: true, sharePieces: true };
-    // a whole-material plan has more slices: give the search room in proportion (the per-wall budget is 50,000 nodes)
-    const nodeBudget = Math.min(1_000_000, 50_000 * Math.max(1, Math.ceil(slices.length / 12)));
+    // the allocator's usual budget, also for a whole-material plan: a bigger search made a 20-wall job ~6x slower to
+    // recalculate on every edit, and the cross-wall plan is only used when it beats the walls' own plans anyway
+    const nodeBudget = 50_000;
     const r = allocateLinear(slices.map((s) => ({ id: s.cellId, kind: "linear", unit: "piece", lengthMm: s.lengthMm, lengthKind: "cut", quantity: 1, identity, stockPolicy: policy, label: s.cellId })), { nodeBudget });
     const bars = (r.groups[0]?.bars || []).map((b) => ({ stockLengthMm: b.stockLengthMm, cellIds: b.cuts.map((c) => c.demandId).sort(), residualMm: b.residualMm }));
     // a slice within one saw cut of a stock length (e.g. 2,996 on a 3,000 sheet) takes that sheet whole: its trim cut

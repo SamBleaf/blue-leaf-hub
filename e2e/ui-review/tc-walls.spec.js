@@ -246,7 +246,11 @@ test.describe("TC walls — phone journeys", () => {
     await page.getByRole("radio", { name: "Supports" }).click();
     await expect(page.getByRole("radio", { name: "Supports" })).toHaveAttribute("aria-checked", "true");
     await expect(cells(page)).toHaveCount(0);
-    await expect(page.locator("[data-supports-empty]")).toContainText("source-pending");
+    // wall-by-wall step 4: the Axon's own battens — 11 uprights up to the rakes, the bottom (3,000 + 3,000) and a sloped
+    // batten on each rake (√(3,000² + 600²) = 3,059.4, joined over the upright at 2,400 / 3,600) = 17 pieces, 41.52 m
+    await expect(page.locator('[data-el-state="support"]')).toHaveCount(17);
+    await expect(page.locator("[data-elevation-note]").first()).toHaveText("Battens worked out from Axon 400 smooth: 17 pieces, 41.52 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+    await expect(page.locator("[data-supports-empty]")).toHaveCount(0);
     await page.getByRole("radio", { name: "Accessories" }).click();
     await expect(page.locator('[data-el-state="edge"]')).not.toHaveCount(0); // base (a horizontal line has no box height)
     await expect(page.locator('[data-el-state="end"]')).toHaveCount(2);
@@ -365,7 +369,8 @@ test.describe("TC walls — phone journeys", () => {
     await form.getByLabel("Joint gap").press("Enter");
     await expect(cells(page, "blocked")).toHaveCount(5); // PH-07: no detail yet → still a draft
     await form.getByLabel("Detail reference (drawing / guide)").fill("H02"); await form.getByLabel("Detail reference (drawing / guide)").press("Enter");
-    await expect(problems).not.toContainText("tallest listed sheet");
+    // (with the joint in, the wall has nothing left to fix: the H-flashing is the Axon's own now — wall-by-wall step 4)
+    await expect(page.getByText(/tallest listed sheet/)).toHaveCount(0);
     await expect(cells(page, "blocked")).toHaveCount(0);
     await expect(cells(page, "occupied")).toHaveCount(10); // two courses of 5
     await expect(page.locator('[data-el-state="joint"]')).toHaveCount(1);
@@ -373,7 +378,9 @@ test.describe("TC walls — phone journeys", () => {
     await expect(qty).toContainText("3,000 × 1,200 mm"); // course 1: 0–3,000
     // HUB 016: course 2's five 490 mm pieces share ONE sheet — 5 × 490 + saw cuts needs the 2,750 (not five sheets)
     await expect(qty).toContainText("2,750 × 1,200 mm1 sheet");
-    await expect(qty).toContainText("Horizontal joint strips");
+    // the joint is the Axon's own H-flashing now (wall-by-wall step 4): 6,000 of joint → 3,000 + 3,000
+    await expect(qty).toContainText("H-flashing — cut from 3,000 mm lengths2 pieces · 6.00 m installed");
+    await expect(qty).not.toContainText("Horizontal joint strips");
     // an opening covering strip 1's whole upper course: that cell is EMPTY (hatched) and consumes no sheet
     await page.getByRole("button", { name: "Close panel" }).click();
     await page.getByRole("button", { name: "Add opening" }).click();
@@ -885,7 +892,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await expect(page.getByLabel("Wall height")).toBeFocused();
     await page.getByLabel("Wall height").fill("2700"); await page.getByLabel("Wall height").press("Enter");
     await expect(page.locator("[data-provenance]")).toHaveText("Derived from plan + entered heights");
-    await expect(page.locator("[data-wall-result]")).toHaveText("Net 10.80 m² of 10.80 m² · Axon 400 smooth: 4 sheets");
+    await expect(page.locator("[data-wall-result]")).toHaveText("Net 10.80 m² of 10.80 m² · Axon 400 smooth: 4 sheets, 12 batten pieces");   // + its own battens, as pieces cut (step 4)
   });
 
   test("problems go to the right wall ('North' never takes 'North wall: …'); a material with no wall reads 'Nothing measured yet', never Calculated", async ({ page }) => {

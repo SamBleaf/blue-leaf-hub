@@ -173,6 +173,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   const [pageFrom, setPageFrom] = useState(null);       // { docId, pageIndex } Measure was on when the page picker opened
   const [activeMaterial, setActiveMaterial] = useState(null);
   const [openWall, setOpenWall] = useState(null); // wall measurement open in the elevation editor
+  const [openWallTab, setOpenWallTab] = useState(null); // the tab that wall opens on (a batten line's "Show on wall" → Supports)
   const [highlightIds, setHighlightIds] = useState(null); // schedule "show on plan" → measurements to select
   const [editing, setEditing] = useState(null); // { material, isNew, next }
   const [setupFrom, setSetupFrom] = useState(null); // window a family setup card was opened from (returns there)
@@ -683,7 +684,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       onSave={(rec, rot) => { setRotation(rot); ws.edit(partial({ calibrations: [rec] })); setWin("measure"); }} />;
   }
   if (win === "walls") {
-    return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} onOpenWall={setOpenWall}
+    return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} wallTab={openWallTab} onOpenWall={(id) => { setOpenWallTab(null); setOpenWall(id); }}
       onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }} />;
   }
   if (win === "aluminium") {
@@ -723,12 +724,12 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }
   if (win === "schedule") {
     return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api} section={section}
-      onShowSource={({ materialId, measurementIds }) => {
+      onShowSource={({ materialId, measurementIds, tab = null }) => {
         // a wall (or its openings) opens the elevation; plan-traced lines open the plan with them selected
         setActiveMaterial(materialId);
         const ms = view.measurements.filter((x) => measurementIds.includes(x.id));
         const wall = ms.find((x) => x.kind === "wall") || view.measurements.find((x) => x.id === ms.find((y) => y.kind === "opening")?.parentId);
-        if (wall && !ms.some((x) => x.documentId && x.kind !== "wall")) { setOpenWall(wall.id); setWin("walls"); }
+        if (wall && !ms.some((x) => x.documentId && x.kind !== "wall")) { setOpenWallTab(tab); setOpenWall(wall.id); setWin("walls"); }
         else {
           const onPlan = ms.find((x) => x.documentId && x.points?.length);
           if (onPlan) { setDocId(onPlan.documentId); setPageIndex(onPlan.pageIndex ?? 0); }

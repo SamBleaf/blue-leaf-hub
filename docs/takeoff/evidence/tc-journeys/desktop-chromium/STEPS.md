@@ -14,7 +14,7 @@ Backend: scripts/takeoff/sandbox.mjs — real takeoff routes + Postgres (migrati
 4. `04-S0-calibrate-ready.png` — Horizontal + vertical agree; independent 3,000 check → Scale is ready
 5. Server calibration record: status ready
 
-Observed (real server): `{"calibration":{"id":"e495be66-142b-49c5-b95d-7279a1da5801","documentId":"a0e2c428-2704-40b8-9c02-f4e605311ab5","pageIndex":0,"pageMeta":{"rotate":0,"viewBox":[0,0,842,595],"userUnit":1},"region":null,"regionLabel":null,"calibrationRevision":1,"supersedesCalibrationId":null,"basisRotation":0,"mode":"uniform","sx":35.277777777777764,"sy":35.277777777777764,"measuredSx":35.27777777777777,"measuredSy":35.27777777777776,"discrepancy":4.0282737775375773e-16,"tolerance":0.005,"horizontal":{"p1":{"x":119.99999999999999,"y":110.00000000000003},"p2":{"x":460.1574803149607,"y":110.00000000000003},"knownMm":12000},"vertical":{"p1":{"x":80,"y":149.99999999999997},"p2":{"x":80,"y":376.7716535433072},"knownMm":8000},"verification":{"p1":{"x":120.00000000000009,"y":406.77165354330725},"p2":{"x":205.03937007874015,"y":406.77165354330714},"error":1.5158245029548805e-15,"passed":true,"expectedMm":3000,"observedMm":2999.9999999999955},"status":"ready","contentSha256":"d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de","createdAt":"2026-10-21 05:43:04.83073+10:30"}}`
+Observed (real server): `{"calibration":{"id":"7ed8f5d8-fabe-4449-840d-45a5a1afad96","documentId":"953bc0ce-382a-4381-8db9-f7ea89ea5d62","pageIndex":0,"pageMeta":{"rotate":0,"viewBox":[0,0,842,595],"userUnit":1},"region":null,"regionLabel":null,"calibrationRevision":1,"supersedesCalibrationId":null,"basisRotation":0,"mode":"uniform","sx":35.277777777777764,"sy":35.277777777777764,"measuredSx":35.27777777777777,"measuredSy":35.27777777777776,"discrepancy":4.0282737775375773e-16,"tolerance":0.005,"horizontal":{"p1":{"x":119.99999999999999,"y":110.00000000000003},"p2":{"x":460.1574803149607,"y":110.00000000000003},"knownMm":12000},"vertical":{"p1":{"x":80,"y":149.99999999999997},"p2":{"x":80,"y":376.7716535433072},"knownMm":8000},"verification":{"p1":{"x":120.00000000000009,"y":406.77165354330725},"p2":{"x":205.03937007874015,"y":406.77165354330714},"error":1.5158245029548805e-15,"passed":true,"expectedMm":3000,"observedMm":2999.9999999999955},"status":"ready","contentSha256":"d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de","createdAt":"2026-10-21 07:52:14.991411+10:30"}}`
 
 ## J1 — Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800 — **PASS**
 
@@ -34,7 +34,7 @@ Observed (real server): `{"projected":["18 piece · 90 × 45 MGP10 H3 — 5,400 
 3. `13-J2-wall-elevation.png` — Generated elevation (sheet cells + window), Cladding view
 4. `14-J2-wall-4801-5-sheets.png` — Wall length 4,801 → 5 strips (1 cut: 1 mm wide) → 5 sheets
 
-Observed (real server): `{"materialName":"Axon 133 smooth","methodKey":"sheet_layout","assemblyId":"axon-vertical","at4800":{"lines":["4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"]},"at4801":["5 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"],"final":["4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm"]}`
+Observed (real server): `{"materialName":"Axon 133 smooth","methodKey":"sheet_layout","assemblyId":"axon-vertical","at4800":{"lines":["4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm","14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length","1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"]},"at4801":["5 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm","14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length","1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"],"final":["4 sheet · James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm","14 piece · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length","1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"]}`
 
 ## AL — Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder — **PASS**
 
@@ -58,15 +58,15 @@ Observed (real server): `{"pathA":{"tight":2999.9999999999945},"pathB":{"tight":
 ## J5 — Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back — **PASS**
 
 1. `24-J5-order-review.png` — Timber and cladding order: Timber and Cladding parts, every line defaults to what is still needed; deliver (address, required-by date), site contact + phone
-2. `25-J5-order-ready.png` — J5: saved → Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).
+2. `25-J5-order-ready.png` — J5: saved → Ready: 32 pieces · 4 sheets · 1 bar · 1 roll to Fielders (SANDBOX — not a real contact).
 3. `26-J5-order-exported.png` — J5: Export 1 is frozen. Nothing has been sent. Open PDF Site appendix (cutting & setout) (not a draft) — nothing sent, nothing ordered
-4. Downloaded via the app's buttons: GET /api/takeoff/exports/<export>/pdf (141048 bytes) → J5-supplier-order.pdf; GET /api/takeoff/exports/<export>/appendix (3106 bytes) → J5-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
+4. Downloaded via the app's buttons: GET /api/takeoff/exports/<export>/pdf (141394 bytes) → J5-supplier-order.pdf; GET /api/takeoff/exports/<export>/appendix (3657 bytes) → J5-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
 5. `27-J5-order-review-flashings.png` — Flashings order: flashing lengths only
 6. `28-J5-order-ready.png` — J5F: saved → Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).
 7. `29-J5-order-exported.png` — J5F: Export 1 is frozen. Nothing has been sent. Open PDF Site appendix (cutting & setout) (not a draft) — nothing sent, nothing ordered
-8. Downloaded via the app's buttons: GET /api/takeoff/exports/<export>/pdf (140842 bytes) → J5F-supplier-order.pdf; GET /api/takeoff/exports/<export>/appendix (2370 bytes) → J5F-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
+8. Downloaded via the app's buttons: GET /api/takeoff/exports/<export>/pdf (140841 bytes) → J5F-supplier-order.pdf; GET /api/takeoff/exports/<export>/appendix (2368 bytes) → J5F-site-appendix.pdf; text via pdftotext (-layout saved as .txt; -raw used for the checks)
 
-Observed (real server): `{"ready":"Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).","flashingsReady":"Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).","pdfChecks":[]}`
+Observed (real server): `{"ready":"Ready: 32 pieces · 4 sheets · 1 bar · 1 roll to Fielders (SANDBOX — not a real contact).","flashingsReady":"Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).","pdfChecks":[]}`
 
 
 ## Console errors

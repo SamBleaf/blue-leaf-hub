@@ -87,6 +87,11 @@ test.describe("TC-R04 schedule", () => {
     await expect(axon.getByRole("button", { name: /^4 sheets\s*James Hardie Axon 133 smooth SKU \d+ — 2,750 × 1,200 mm/ })).toBeVisible();
     // a wall typed in by numbers says so — "Derived from plan" only when its length was traced on the plan (REV-7)
     await expect(axon.getByText(/North wall: net 12\.15 m² \(gross 12\.96 − openings 0\.81\) · Entered length and heights/)).toBeVisible();
+    // wall-by-wall step 4: the Axon's own foam tape is on the schedule; its battens on North come from Cavity battens (set up
+    // by hand on this older job), so it adds none there — said so, never counted twice
+    await expect(axon.getByRole("button", { name: /^1 roll\s*Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560/ })).toBeVisible();
+    await expect(axon.getByText(/Note: North wall: battens come from Cavity battens \(set up by hand\), so the automatic battens from Axon cladding aren't added on this wall — nothing is counted twice\./)).toBeVisible();
+    await expect(axon.getByRole("button", { name: /Hardie Cavity Batten/ })).toHaveCount(0);
     // aluminium (11): pooled bars, honest cut-plan label
     const al = group(page, "mat-al");
     await expect(al.getByRole("button", { name: /^2 bars\s*equal-angle 50 × 50 × 3 — 6,500 mm length \(no joins\)/ })).toBeVisible();
@@ -103,9 +108,9 @@ test.describe("TC-R04 schedule", () => {
     await expect(bat.locator('[data-status="procurement"]')).toHaveText("Ordering: Draft");
     await expect(bat.locator('[data-status="quantity"]')).toHaveText("Quantity: Incomplete");
     // per-material totals are per unit — never "pieces + sheets"
-    await expect(axon.locator("p.text-right")).toHaveText("4 sheets");
+    await expect(axon.locator("p.text-right")).toHaveText("4 sheets · 1 roll");
     await expect(raf.locator("p.text-right")).toHaveText("18 pieces");
-    await expect(tc.locator("p.text-right")).toHaveText("57 LM");
+    await expect(tc.locator("p.text-right")).toHaveText("7 pieces · 57 LM");   // + its own battens across the boards at 450 (step 4)
     for (const g of [raf, axon, al, tc, bat]) await expect(g.locator("p.text-right")).not.toContainText(/pieces.*sheets|sheets.*pieces|LM.*pieces|bars.*LM/);
     await page.screenshot({ path: `${SHOTS}/schedule-mixed-390x844.png`, fullPage: true });
     const o = await overflowPx(page);
@@ -238,8 +243,11 @@ test.describe("TC-R04 supplier order", () => {
     await expect(orderGroup(page, "mat-tc").getByText("estimate — not a piece count")).toBeVisible();
     // the visible label is the unit word only (the screen-reader hint names the item)
     const labels = await page.locator("[data-order-group] label").evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !n.classList?.contains("sr-only")).map((n) => n.textContent).join("")));
-    expect(labels.length).toBe(6);   // rafters, trimmers, Axon, battens, aluminium, shiplap
-    for (const t of labels) expect(t).toMatch(/^Order quantity \((pieces|sheets|bars|LM)\)$/);
+    // rafters, trimmers, Axon + its foam tape, battens, aluminium, shiplap + its own battens (wall-by-wall step 4)
+    expect(labels.length).toBe(8);
+    for (const t of labels) expect(t).toMatch(/^Order quantity \((pieces|sheets|bars|LM|rolls)\)$/);
+    await expect(axon.getByLabel(/Order quantity.*\(rolls\)/)).toHaveValue("1");
+    await expect(axon.locator('[data-unit="roll"]')).toContainText("Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560");
     await expect(axon.locator('[data-status="procurement"]')).toHaveText("Ordering: Ready to order");
     // stepper: + / − change by one whole unit, never above what the takeoff needs (the export would refuse it);
     // an invalid typed value stays a draft and is never committed
@@ -266,8 +274,9 @@ test.describe("TC-R04 supplier order", () => {
     await bat.getByLabel(/Order quantity.*\(pieces\)/).fill("0");
     await bat.getByLabel(/Order quantity.*\(pieces\)/).press("Enter");
     const totals = page.getByTestId("order-totals");
-    // timber pieces (18 rafters + 4 trimmers), sheets, bars and LM each on their own (flashings are their own order — HUB 007)
-    await expect(totals).toHaveText(/^On this order: 22 pieces · 4 sheets · 2 bars · 57 LM$/);
+    // timber pieces (18 rafters + 4 trimmers) + the shiplap's own 7 battens, sheets, bars, LM and the Axon's roll of foam tape
+    // (wall-by-wall step 4) each on their own (flashings are their own order — HUB 007)
+    await expect(totals).toHaveText(/^On this order: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
     await page.screenshot({ path: `${SHOTS}/order-generic-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
     const o = await overflowPx(page);
@@ -278,7 +287,7 @@ test.describe("TC-R04 supplier order", () => {
     expect(o2.right, "order wider than the 375 px screen").toBeLessThanOrEqual(1);
     expect(o2.scroll).toBeLessThanOrEqual(0);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders \(review branch\)\.$/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders \(review branch\)\.$/)).toBeVisible();
     await page.getByRole("button", { name: "Export supplier PDF" }).tap();
     await expect(page.getByText(/Export 1 is frozen\. Nothing has been sent\./)).toBeVisible();
     // site appendix sits next to the supplier PDF and opens separately
@@ -316,7 +325,7 @@ test.describe("TC-R04 supplier order", () => {
     const appendix = (id) => page.evaluate(async (x) => new TextDecoder().decode(await (await fetch(`/api/takeoff/exports/${x}/appendix`)).arrayBuffer()), id);
     const before = await appendix(exportId);
     // change what is bought (grade) on the job material
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     const li = page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first();
     await (await openRow(li)).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
@@ -366,7 +375,7 @@ test.describe("TC-R04 supplier order", () => {
     // the schedule shows the placed quantities per unit (from placed records only) straight away — it reads the orders
     // when it opens (the shell passes `api`), with no takeoff save in between
     const commits = await page.evaluate(() => window.__takeoffReviewState().commits);
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: "Open schedule" }).tap();
     expect(await page.evaluate(() => window.__takeoffReviewState().commits)).toBe(commits);
     await expect(group(page, "mat-axon").getByText("4 sheets ordered · 0 left")).toBeVisible();
@@ -451,7 +460,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await lm.focus();
     await expect.poll(async () => { const b = await lm.boundingBox(); return b ? b.y + b.height : 9999; }, { timeout: 3000 }).toBeLessThan(844 * 0.6);
     // same guard for the R04 flashing Qty field — on the Flashings order (HUB 007: its own order)
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
@@ -537,7 +546,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByLabel("Which PDF did you send?").selectOption({ label: "Export 1" });
     await page.getByRole("button", { name: "Record order placed", exact: true }).tap();
     await expect(page.getByText("Placed externally")).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await (await openRow(page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first())).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
     await setup.getByLabel("Grade (e.g. MGP10)").fill("MGP12");
@@ -552,13 +561,13 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(group(page, "mat-axon").getByText("4 sheets ordered · 0 left")).toBeVisible();   // unchanged products stay reconciled
     await page.screenshot({ path: `${SHOTS}/schedule-placed-surplus-390x844.png`, fullPage: true });
     // the placed order itself is history: still the old export, still placed
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByText("Placed externally")).toBeVisible();
     await expect(page.getByText(/Placed .* \(export 1\)/)).toBeVisible();
     // and a flashing whose colour changes after its pieces were placed (R04 buckets reconcile the same way) — the
     // flashings are their own order (HUB 007)
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
@@ -569,7 +578,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByLabel("Which PDF did you send?").selectOption({ label: "Export 1" });
     await page.getByRole("button", { name: "Record order placed", exact: true }).tap();
     await expect(page.getByText("Placed externally")).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await (await openRow(page.locator("li").filter({ hasText: "Barge flashing" }).first())).getByRole("button", { name: "Details" }).tap();
     await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
     await page.waitForTimeout(1200);
@@ -595,7 +604,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(raf.getByText("This page has been re-scaled since this run was measured — review it with the new scale.")).toBeVisible();
     await expect(group(page, "mat-axon").locator('[data-status="procurement"]')).toHaveText("Ordering: Ready to order");   // numeric wall, no plan scale involved
     await page.screenshot({ path: `${SHOTS}/schedule-rescaled-not-ready-390x844.png` });
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await page.getByRole("button", { name: "New order" }).tap();
     await expect(orderGroup(page, "mat-raf").locator('[data-status="procurement"]')).toHaveText("Ordering: Not ready — a line needs attention");
@@ -722,7 +731,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(sc.locator('[data-scope="unresolved"]')).toHaveText("Not decided: Corner trims");
     await expect(sc.locator('[data-scope="include"]')).toHaveText("Included: Cladding screws 8g × 40");
     await page.screenshot({ path: `${SHOTS}/schedule-fixings-boxes-390x844.png`, fullPage: true });
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await page.getByRole("button", { name: "New order" }).tap();
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
@@ -732,7 +741,9 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
       .toEqual(["mat-raf", "mat-trim", "mat-axon", "mat-bat", "mat-al", "mat-tc", "mat-fix"]);
     const boxes = orderGroup(page, "mat-fix").getByLabel(/Order quantity.*\(boxes\)/);
     await expect(boxes).toHaveValue("3");
-    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: 32 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes$/);
+    // 32 + the shiplap's own 7 battens (step 4), and the Axon's own roll of foam tape: the fixings set's "Tape: by others" is
+    // its window / wrap tape, never the foam tape behind the sheet joins, so it doesn't switch that off
+    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: 39 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes · 1 roll$/);
     const review = page.getByTestId("accessory-scope-review");
     await expect(review).toContainText("Accessories not supplied on this order:");
     await expect(review.locator('[data-scope-material="mat-fix"] [data-scope="by-others"]')).toHaveText("By others: Membrane / wrap (Wrap by the framer), Tape");
@@ -745,9 +756,10 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
       await q.fill("0");
       await q.press("Enter");
     }
-    await expect(page.getByTestId("order-totals")).toHaveText(/: 22 pieces · 4 sheets · 2 bars · 57 LM$/);
+    // + the shiplap's own 7 battens and the Axon's roll of foam tape (step 4)
+    await expect(page.getByTestId("order-totals")).toHaveText(/: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders/)).toBeVisible();
     await expect(page.getByTestId("not-on-order")).toHaveText(/Cavity battens — 10 pieces\s*Cladding fixings — 3 boxes/);
     await page.screenshot({ path: `${SHOTS}/order-fixings-review-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
@@ -777,7 +789,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     const exportId = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.at(-1).exports.at(-1).id);
     const appendix = (id) => page.evaluate(async (x) => new TextDecoder().decode(await (await fetch(`/api/takeoff/exports/${x}/appendix`)).arrayBuffer()), id);
     const before = await appendix(exportId);
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await (await openRow(page.locator("li").filter({ hasText: "Rafters 90 × 45" }).first())).getByRole("button", { name: "Setup" }).tap();
     const setup = page.getByRole("dialog", { name: "Timber" });
     await setup.getByLabel("Pitch").fill("45");
@@ -813,7 +825,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByLabel("Notes for supplier").fill("Leave at the gate");
     await expect(page.getByRole("button", { name: "Save order details" })).toBeVisible();
     // leave without saving (before: everything typed was lost)
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByTestId("order-draft-restored")).toBeVisible();
     await expect(sheets).toHaveValue("3");
@@ -828,7 +840,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     // a draft made against revision N is not applied once the order was saved elsewhere (revision N+1)
     await orderGroup(page, "mat-axon").getByRole("button", { name: "Fewer sheets" }).tap();
     await expect(page.getByRole("button", { name: "Save order details" })).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.evaluate(async () => {
       const o = (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.at(-1);
       await fetch(`/api/takeoff/orders/${o.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: o.revision, notes: "Saved on another phone" }) });
@@ -842,7 +854,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Save order details" }).tap();
     await expect(page.getByRole("button", { name: "Save order details" })).toHaveCount(0);
     await expect(page.getByTestId("order-draft-dropped")).toHaveCount(0);
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(sheets).toHaveValue("3");
     await expect(page.getByTestId("order-draft-restored")).toHaveCount(0);
@@ -855,7 +867,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await openOrders(page);
     await page.getByRole("button", { name: "New order" }).tap();
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).tap();   // no history yet: the draft is the end of the page
+    await page.getByRole("button", { name: "Back", exact: true }).tap();   // no history yet: the draft is the end of the page
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     const last = orderGroup(page, "mat-trim").getByLabel(/Order quantity.*\(pieces\)/);
     await last.evaluate((el) => el.scrollIntoView({ block: "end" }));
@@ -865,7 +877,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect.poll(async () => { const b = await last.boundingBox(); return b ? b.y + b.height : 9999; }, { timeout: 3000 }).toBeLessThanOrEqual(844 - 360);
     // the flashing Qty field too — on the Flashings order (HUB 007)
     await page.evaluate(() => window.__keyboard(0));
-    await page.getByRole("button", { name: "Back" }).tap();
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself

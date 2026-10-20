@@ -24,6 +24,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useR
 import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, familyProblems, methodFor, normaliseFamilySpec } from "../../../shared/takeoff/index.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
+import { FOAM_TAPE, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
 import { applyCompanyDefault, defaultSummary, findCompanyDefault, isDefaulted, withoutDefaultsFrom } from "../../../shared/takeoff/companyDefaults.js";
 import { Banner, Btn, TextField } from "./ui.jsx";
 
@@ -854,11 +855,21 @@ function componentRows(s, r = {}) {
     return [["Supports", "From your walls once the maximum spacing is set: clipped at openings and rakes.", "ok"], fix];
   }
   if (s.family === "accessory") return [];
-  const supports = !needsRoute(a) || !r.route ? ["Supports", `${needsRoute(a) ? "Choose direct fix or cavity, then a" : "A"}dd a Support battens material for any cavity / support layer (or record existing framing).`, "open"]
-    : r.route === "cavity" ? ["Supports", "Cavity: add a Support battens material for the cavity battens — spacing from the reviewed rule or project detail.", "open"]
-      : ["Supports", "Direct fix: no batten layer — fixes to the existing frame. Record the frame as existing supports for a fixing layout.", "open"];
+  // wall-by-wall step 4: Axon, Linea / Stria and timber cladding work out their own battens (and Axon its tape and H-flashing)
+  // (a direct-fixed Linea / Stria / timber still reads "Direct fix: no battens" here, like a direct-fixed Axon)
+  const own = followerRule({ methodKey: methodFor(s)?.key, rules: { ...r, route: undefined } }, { family: s.family, orientation: s.orientation || "vertical" });
+  const auto = own ? { ...own, battens: r.route !== "direct" } : null;
+  const supports = auto ? (!auto.battens ? ["Battens", "Direct fix: no battens.", "na"]
+    // the route is still the user's choice (never stored for them): until it is chosen, the battens are counted as a cavity
+    : !r.route ? ["Battens", `Counted as a cavity until you choose: ${followerRuleText(auto)}. Choose Direct fix if it's fixed straight to the frame.`, needsRoute(a) ? "open" : "ok"]
+      : ["Battens", `Worked out from your walls: ${followerRuleText(auto)}. Hardie Cavity Batten, offcuts shared across the walls. Nothing to set up; fixings to the studs are not counted.`, "ok"])
+    : !needsRoute(a) || !r.route ? ["Supports", `${needsRoute(a) ? "Choose direct fix or cavity, then a" : "A"}dd a Support battens material for any cavity / support layer (or record existing framing).`, "open"]
+      : r.route === "cavity" ? ["Supports", "Cavity: add a Support battens material for the cavity battens — spacing from the reviewed rule or project detail.", "open"]
+        : ["Supports", "Direct fix: no batten layer — fixes to the existing frame. Record the frame as existing supports for a fixing layout.", "open"];
   const out = [[s.family === "timber-cladding" ? (s.supply === "random" ? "Boards (LM estimate)" : "Boards") : s.layout === "grid" ? "Panels" : s.layout === "course" ? "Boards / courses" : "Sheets", "From your walls and openings (conservative — partly used cells still buy a whole piece).", "ok"],
-    supports, fixings];
+    supports];
+  if (auto?.extras) out.push(["Foam tape and H-flashing", `Worked out from the sheets: foam tape behind every vertical sheet join (${FOAM_TAPE.rollMm / 1000} m rolls, code ${FOAM_TAPE.code}) and H-flashing on every horizontal joint (${H_FLASHING.lengthMm.toLocaleString("en-AU")} mm lengths, code ${H_FLASHING.code}).`, "ok"]);
+  out.push(fixings);
   if (s.layout === "grid") out.push(["Joint / backing strips", "From the layout's joints — strip product not selected.", "open"]);
   return out;
 }
@@ -1195,6 +1206,7 @@ function StockLengths({ spec, onChange }) {
 const needsRoute = (a) => !!a && (a.requiredSelectors || []).some((x) => x === "direct-or-cavity" || x === "cavity");
 function AssemblyPicker({ spec, onSelect, rules, onRoute, onCondition }) {
   const list = assemblyCandidates(spec);
+  const autoBattens = !!followerRule({ methodKey: methodFor(spec)?.key, rules: {} }, { family: spec.family, orientation: spec.orientation || "vertical" })?.battens;
   const company = rules?.assembly;
   const selected = assemblyById(spec.assemblyId);
   return (
@@ -1225,8 +1237,10 @@ function AssemblyPicker({ spec, onSelect, rules, onRoute, onCondition }) {
           <Btn kind="ghost" onClick={() => onSelect(null)}>Clear this assembly</Btn>
         </div>
       )}
-      {needsRoute(selected) && onRoute && (
-        <div className="mt-2"><Chips label="Fixing route (your choice — never assumed)" name="route" value={rules?.route ?? null} onChange={onRoute} options={[["direct", "Direct fix"], ["cavity", "Cavity"]]} /></div>
+      {(needsRoute(selected) || autoBattens) && onRoute && (
+        // wall-by-wall step 4: a cladding that works out its own battens (Axon, Linea / Stria, timber cladding) always offers
+        // the route — Direct fix means no battens; until it is chosen the battens are counted as a cavity
+        <div className="mt-2"><Chips label={autoBattens ? "Fixing route (battens are counted as a cavity until you choose)" : "Fixing route (your choice — never assumed)"} name="route" value={rules?.route ?? null} onChange={onRoute} options={[["direct", "Direct fix"], ["cavity", "Cavity"]]} /></div>
       )}
       {selected && onCondition && <InstallConditions assembly={selected} spec={spec} rules={rules} onSet={onCondition} />}
       <p className="mt-1 text-[11px] text-muted">Installation rules are <b>source-pending</b>: supports and fixings stay a reviewed manual layout until a guide row is checked.</p>
@@ -2141,6 +2155,11 @@ function CladdingFields({ d, result, lines, presets = null, onSaveCompanyDefault
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
+      {!full && (() => {
+        // wall-by-wall step 4: one line instead of a setup card for the cladding's own battens and extras
+        const auto = followerRule({ methodKey: mk, rules: r }, { family: fam, orientation: s.orientation || "vertical" });
+        return auto ? <p className="text-[11px] text-muted" data-followers-note="">{auto.battens ? (auto.extras ? "Battens, foam tape and H-flashing are" : "Battens are") : "Foam tape and H-flashing are"} worked out from your walls. Nothing to set up.</p> : null;
+      })()}
       {full && <ComponentRows spec={s} rules={r} />}
       {full && <ReviewSummary rules={r} />}
       <SetupStatus cur={cur} result={result} needs={needs} />

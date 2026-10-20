@@ -1,6 +1,6 @@
 ---
-sop_version: 2.4
-last_reviewed: 2026-10-20
+sop_version: 2.5
+last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -111,6 +111,18 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 3. **What isn't on the order is named with its reason:** left off (**Add** puts it back), can't be ordered yet (e.g. missing colour; **Fix ›** opens it), already ordered on a placed order, or on another order whose supplier PDF was exported. The line "Takeoff N · on this order N · already ordered · on other orders · not on this order" lets you check it at a glance.
 4. **Two or more out-of-date lines** can be cleared at once with **Remove all N out-of-date lines**.
 5. **Order history** lists every other draft. **Open draft** opens that same draft (same number, never a copy) to change quantities or add and remove flashings. **Discard draft** (with a confirm) removes a draft you don't need. A discarded draft with exported PDFs keeps them in the history, marked Discarded. **Placed orders are locked:** for more pieces, start a new order.
+
+### B4. Battens, foam tape and H-flashing on the Timber and cladding order (wall-by-wall step 4, 21 Oct 2026)
+
+1. Axon, Linea, Stria and timber cladding work out their own battens, and Axon its foam tape and H-flashing (SOP 20-09, Section F2). Nothing is set up for them.
+2. On the **Timber and cladding** order they sit in the cladding's own block, after its sheets or boards, each with its product code:
+   - "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length" (pieces),
+   - "Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces),
+   - "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" (**Order quantity (rolls)**).
+3. They work like any other line: the stepper never goes above what the takeoff needs, and **On this order** totals each unit on its own (e.g. "29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll").
+4. The supplier PDF prints them the same way, with the codes. The battens' note says how many metres are fitted ("… m of battens on N walls, cut with offcuts shared across the walls · fixings to the studs not counted"). The tape's note shows the metres and the rolls.
+5. If a wall, an opening or the batten rule changes after a draft is saved, only those lines show **needs updating**. The cladding's own sheet lines are not affected.
+6. Two Axon claddings on one job: the foam tape and the H-flashing are one line each for the whole job (rounded up once), in the block of the first cladding that has them. The line's note names both claddings ("… · for Axon 133 smooth and Axon 400 smooth, worked out once for the job").
 
 
 
@@ -348,9 +360,9 @@ Next review date: 2027-04-14
 
 **TC-06 — Purchase lines by unit, subset export, site appendix (mixed job, UI Review)**
 1. Mixed job → **Review & export order** → **New order**.
-2. Expected: **Materials on this order** with 6 steppers labelled "Order quantity (pieces)", "(sheets)", "(bars)" or "(LM)"; Axon 4 sheets, shiplap 57 LM (**estimate — not a piece count**), aluminium 2 bars; Axon **More sheets** disabled at 4; Cavity battens **needs attention**.
-3. Set Cavity battens to 0 (Enter). Expected "On this order: N flashing pieces (X LM) · 22 pieces · 4 sheets · 2 bars · 57 LM"; **Still needed but not on this order:** lists "Cavity battens — 10 pieces".
-4. **Save order details** → "Ready: N flashing pieces · X LM · 22 pieces · 4 sheets · 2 bars · 57 LM to Fielders (review branch)." → **Export supplier PDF** → "Export 1 is frozen. Nothing has been sent." → **Site appendix (cutting & setout)** (opens a new tab).
+2. Expected: **Materials on this order** with 8 steppers labelled "Order quantity (pieces)", "(sheets)", "(bars)", "(LM)" or "(rolls)"; Axon 4 sheets and 1 roll of foam tape ("Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" — its battens on North come from Cavity battens, set up by hand), shiplap 57 LM (**estimate — not a piece count**) and its own 7 battens, aluminium 2 bars; Axon **More sheets** disabled at 4; Cavity battens **needs attention**.
+3. Set Cavity battens to 0 (Enter). Expected "On this order: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll"; **Still needed but not on this order:** lists "Cavity battens — 10 pieces".
+4. **Save order details** → "Ready: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders (review branch)." → **Export supplier PDF** → "Export 1 is frozen. Nothing has been sent." → **Site appendix (cutting & setout)** (opens a new tab).
 5. Expected result: appendix text contains "Window angle 50 x 50 x 3 - cutting sheet (6,500 mm bars)", "proven minimum", "Rafters 90 x 45 - timber cut list", "18 x cut 5,196 mm from 5,400 mm stock", "Axon cladding - North wall setout", "net 12.15 m2", "Apron flashing run R-m-pl1: tight 10,000 mm | corners at 6,000 | splits at 8,800 | pieces 9,000 + 1,400 mm", and **not** "Cavity battens"; **Order history** shows **Open** and **Site appendix (cutting & setout)** next to the export.
 - [ ] Pass  [ ] Fail
 
@@ -452,6 +464,12 @@ Next review date: 2027-04-14
 2. Tap **Pick up**. Expected: **Pickup branch** shows the supplier's address.
 3. **Edit** → change the phone → **Save supplier**. Expected: "Updated Stratco Wingfield — saved on this order."; the Timber and cladding order's supplier list offers it too.
 4. API: a supplier PDF exported before the edit keeps the old phone in its snapshot, while a new preview shows the new phone. A leading hand or a preview is refused (403), and a duplicate name or bad email is refused (400). Before migration 210, adding still works (addressSaved: false).
+- [ ] Pass  [ ] Fail
+
+**TC-23 — Battens, foam tape and H-flashing on the Timber and cladding order (wall-by-wall step 4, UI Review + API)**
+1. `?reviewRole=admin&takeoffDefaults=1` → **Timber and cladding** → **Add cladding** → **Axon 400 smooth** → **Walls** → **Wall by numbers** 4,000 × 3,600 → **‹ Walls** → **Back** → **Review & export order** → **New order**.
+2. Expected: the Axon block lists the sheets, then "… · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length" (pieces), "… · Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces) and "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" with **Order quantity (rolls)** 1. Each starts at what the schedule shows.
+3. API (scripts/tests/takeoff-api.test.mjs "wall-by-wall step 4"): an order with every Axon line stores the codes 405307, 305613 and 304560 (the tape as unit "roll"); the exported snapshot has ONE material block holding them (units piece, piece, roll); the supplier PDF is served. Engine (scripts/tests/takeoff-tc-autobattens.test.mjs): the snapshot rows and the supplier PDF text read "N × piece Hardie Cavity Batten 70 × 19 …", "2 × roll Hardie™ 50mm Foam Back Sealing Tape, 25 m roll …", "2 × piece Hardie™ 9mm Alum Horizontal H Flashing …" with the codes; a hand-made batten material on a wall never adds a second batten line.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

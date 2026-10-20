@@ -291,6 +291,15 @@ export default function WallElevation({
   const F = frame;
   const clipId = `${uid}-clip`, hatchId = `${uid}-hatch`, offId = `${uid}-off`;
   const polyPts = F ? polygon.map((p) => `${F.X(p.x)},${F.Y(p.y)}`).join(" ") : "";
+  const lineEl = (it) => {
+    const st = LINE_STYLE[it.state] || LINE_STYLE.support;
+    return (
+      <g key={it.id} data-el-id={it.id} data-el-kind="line" data-el-state={it.state}>
+        <line x1={F.X(it.a.x)} y1={F.Y(it.a.y)} x2={F.X(it.b.x)} y2={F.Y(it.b.y)} stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash}
+          strokeLinecap="round" clipPath={it.clip ? `url(#${clipId})` : undefined} />
+      </g>
+    );
+  };
   const zIdx = ZOOMS.indexOf(zoom);
 
   return (
@@ -345,15 +354,7 @@ export default function WallElevation({
           })}
           {/* wall outline under the line elements, so edges / studs / joints on the boundary stay visible */}
           <polygon points={polyPts} fill="none" stroke="#0f172a" strokeWidth="2" strokeLinejoin="round" />
-          {items.filter((it) => it.kind === "line").map((it) => {
-            const st = LINE_STYLE[it.state] || LINE_STYLE.support;
-            return (
-              <g key={it.id} data-el-id={it.id} data-el-kind="line" data-el-state={it.state}>
-                <line x1={F.X(it.a.x)} y1={F.Y(it.a.y)} x2={F.X(it.b.x)} y2={F.Y(it.b.y)} stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash}
-                  strokeLinecap="round" clipPath={it.clip ? `url(#${clipId})` : undefined} />
-              </g>
-            );
-          })}
+          {items.filter((it) => it.kind === "line" && !it.over).map(lineEl)}
           {/* fills first (only the part ON the wall is deducted: on-wall part white — overlaps read as one union —
               off-wall part red-hatched), then every outline + label on top so overlapping openings stay readable */}
           <g data-opening-fills="">
@@ -383,6 +384,8 @@ export default function WallElevation({
               </g>
             );
           })}
+          {/* lines that lie ON an opening's edges (the battens round a window or door) go over its fill and outline */}
+          {items.filter((it) => it.kind === "line" && it.over).map(lineEl)}
           {draft && Number.isFinite(draft.tapX) && (() => {
             if (draft.widthMm > 0 && draft.heightMm > 0 && Number.isFinite(draft.xMm) && Number.isFinite(draft.sillMm)) {
               const r = openingRect({ xMm: draft.xMm, sillMm: draft.sillMm, widthMm: draft.widthMm, heightMm: draft.heightMm });

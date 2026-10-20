@@ -29,6 +29,13 @@ const FAMILY_LABEL = { timber: "Timber", cladding: "Cladding", aac: "AAC panels"
 const UNIT_WORDS = { piece: ["piece", "pieces"], sheet: ["sheet", "sheets"], bar: ["bar", "bars"], lm: ["LM", "LM"], m2: ["m²", "m²"], box: ["box", "boxes"], bag: ["bag", "bags"],
   roll: ["roll", "rolls"], pack: ["pack", "packs"], cartridge: ["cartridge", "cartridges"], ml: ["mL", "mL"], length: ["length", "lengths"] };
 const unitWord = (u, n) => { const w = UNIT_WORDS[u] || [u || "item", u || "items"]; return n === 1 ? w[0] : w[1]; };
+// wall-by-wall step 4: the cladding's automatic battens / H-flashing / foam tape, named wherever their lines are summed
+const FOLLOWER_NAME = { battens: "Battens", hflashing: "H-flashing", tape: "Foam tape" };
+const FOLLOWER_WORDS = { battens: ["batten", "battens"], hflashing: ["H-flashing length", "H-flashing lengths"], tape: ["roll of foam tape", "rolls of foam tape"] };
+const spareWord = (l, n) => (FOLLOWER_WORDS[l.follower] ? FOLLOWER_WORDS[l.follower][n === 1 ? 0 : 1] : unitWord(l.unit, n));
+/** "battens" | "hflashing" | "" — which automatic follower an allocator group cuts (its identity names it). */
+const groupFollower = (g) => /"follower":"(battens|hflashing)"/.exec(String(g?.identityKey || ""))?.[1] || "";
+const lowerFirst = (t) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : t);
 const qtyText = (n, u) => `${Number(n).toLocaleString("en-AU")} ${unitWord(u, n)}`;
 /** "18 pieces · 4 sheets" — one entry per unit, never summed across units. */
 function byUnitText(lines, qty = (l) => l.quantity) {
@@ -354,7 +361,7 @@ export default function ScheduleScreen({ ws, api, onBack, onShowSource, section 
     const planLine = sources.some((s) => s.onPlan && s.kind !== "Wall");
     if (!planLine && !sources.some(wallish)) return null;
     const al = mats.get(l.jobMaterialIds[0])?.spec?.family === "aluminium";
-    return <Btn kind="secondary" onClick={() => onShowSource({ materialId: l.jobMaterialIds[0], measurementIds: sources.map((s) => s.id) })}>{planLine ? "Show on plan" : al ? "Show openings" : "Show on wall"}</Btn>;
+    return <Btn kind="secondary" onClick={() => onShowSource({ materialId: l.jobMaterialIds[0], measurementIds: sources.map((s) => s.id), tab: l.follower === "battens" ? "supports" : null })}>{planLine ? "Show on plan" : al ? "Show openings" : "Show on wall"}</Btn>;
   };
 
   return (
@@ -503,13 +510,17 @@ function GenericGroup({ mat, result, lines, status, open, setOpen, sourcesOf, sh
   const advisory = problems.filter((p) => p.blocking === false);
   const st = result?.status || null;
   const verified = st && ["supported-by-selected-rule", "project-detail-supplied"].includes(st.installation);
-  const plans = [...new Set((alloc?.groups || []).map((g) => g.planLabel).filter(Boolean))];
+  const plans = [...new Set((alloc?.groups || []).filter((g) => g.planLabel).map((g) => (groupFollower(g) ? `${FOLLOWER_NAME[groupFollower(g)]}: ${lowerFirst(g.planLabel)}` : g.planLabel)))];
   const offcutBars = (alloc?.groups || []).flatMap((g) => (g.bars || []).filter((b) => b.source === "offcut"));
   const walls = (result?.layouts || []).filter((x) => x.areas);
   // shared-bar cutting (aluminium, trims with cut allocation): what the bars carry, and what is lost / left over (11)
   const shared = (alloc?.groups || []).filter((g) => g.mode !== "one-per-piece" && g.totals);
-  const sum = (f) => shared.reduce((a, g) => a + (f(g.totals) || 0), 0);
-  const keepKnown = shared.length > 0 && shared.every((g) => g.totals.reusableRemainderMm != null);
+  // one "Cuts need" line for the material's own pieces and one each for its automatic battens and H-flashing
+  const cutLines = [...new Set(shared.map(groupFollower))].sort().map((k) => {
+    const gs = shared.filter((g) => groupFollower(g) === k);
+    const sum = (f) => gs.reduce((a, g) => a + (f(g.totals) || 0), 0);
+    return { k, sum, keepKnown: gs.every((g) => g.totals.reusableRemainderMm != null) };
+  });
   const explain = [...(result?.explain || []), ...(alloc?.groups || []).flatMap((g) => g.explain || [])];
   const scopes = accessoryScopes(mat, result);
   const spareRate = Number(mat.spec?.spareRate) > 0 ? Number(mat.spec.spareRate) : 0;
@@ -553,15 +564,15 @@ function GenericGroup({ mat, result, lines, status, open, setOpen, sourcesOf, sh
         {/* added spares (02 §6): only what the engine actually added — a recorded spare % it doesn't apply is said so */}
         {spareLm > 0 ? <p className="text-[11px] text-ink" data-spares="">Spare included: {spareLm.toFixed(2)} LM ({fmtRaw(spareRate)}%) — already in the LM above.</p>
           : spareRate > 0 && lines.some((l) => l.spareQuantity > 0) ? (
-            <p className="text-[11px] text-ink" data-spares="">Spares added: {lines.filter((l) => l.spareQuantity > 0).map((l) => `${l.spareQuantity} ${unitWord(l.unit, l.spareQuantity)}`).join(", ")} ({fmtRaw(spareRate)}%) — included in the quantities above, on top of the layout.</p>
+            <p className="text-[11px] text-ink" data-spares="">Spares added: {lines.filter((l) => l.spareQuantity > 0).map((l) => `${l.spareQuantity} ${spareWord(l, l.spareQuantity)}`).join(", ")} ({fmtRaw(spareRate)}%) — included in the quantities above, on top of the layout.</p>
           ) : null}
         {plans.length > 0 && <p className="text-[11px] text-muted">{plans.join(" · ")}</p>}
-        {shared.length > 0 && (
-          <p className="text-[11px] text-muted" data-alloc-summary="">
-            Cuts need {fmtMm(Math.round(sum((t) => t.requiredLengthMm)))} mm · saw loss {fmtMm(Math.round(sum((t) => t.cutLossMm) + sum((t) => t.trimLossMm)))} mm
+        {cutLines.map(({ k, sum, keepKnown }) => (
+          <p key={k || "own"} className="text-[11px] text-muted" data-alloc-summary={k}>
+            {k ? `${FOLLOWER_NAME[k]}: cuts` : "Cuts"} need {fmtMm(Math.round(sum((t) => t.requiredLengthMm)))} mm · saw loss {fmtMm(Math.round(sum((t) => t.cutLossMm) + sum((t) => t.trimLossMm)))} mm
             {" "}· left over {fmtMm(Math.round(sum((t) => t.remainderMm)))} mm{keepKnown ? ` (keep ${fmtMm(Math.round(sum((t) => t.reusableRemainderMm)))} · scrap ${fmtMm(Math.round(sum((t) => t.scrapMm)))})` : ""} — planned, not cut yet
           </p>
-        )}
+        ))}
         {offcutBars.length > 0 && (
           <div className="text-[11px] text-ink" data-offcuts-used="">
             <p className="font-semibold">Existing offcuts used — not re-ordered:</p>
