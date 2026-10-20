@@ -1,5 +1,5 @@
 ---
-sop_version: 1.2
+sop_version: 1.3
 last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
@@ -74,7 +74,7 @@ You choose the cladding product and how it is installed, then enter each wall �
 
 ### B. Product-specific settings
 
-- **Fibre cement sheets (e.g. Axon):** each vertical strip takes the **shortest listed sheet** that covers its highest point. A 1 mm cut strip still uses a whole sheet. A wall taller than the tallest listed sheet is **blocked** until you add a joint row (Section 5G) or choose a taller listed sheet.
+- **Fibre cement sheets (e.g. Axon):** each vertical strip takes the **shortest listed sheet** that covers its highest point. A 1 mm cut strip still uses a whole sheet. **Sheets are shared across the wall:** pieces are cut across the sheet's length only, so the two long factory edges (tongue and groove) always stay and the 1,200 mm width is never cut down to fit another piece. Short pieces that sit in the same strip width (for example the course above a joint) are cut end to end from one sheet, allowing 5 mm per saw cut. A ripped strip's offcut is reused only by a piece that needs the offcut's factory edge. The wall's sheet details say how many pieces come from how many sheets, and each cell's details say which sheet it is cut from. A wall taller than the tallest listed sheet is **blocked** until you add a joint row (Section 5G) or choose a taller listed sheet.
 - **Courses / boards (e.g. Linea, Stria):** counts use the **effective cover**, not the nominal width. An opening only removes a course where it spans the full course height; otherwise the board is notched.
 - **Matrix panel grid:** **Expressed joint gap** ("10 mm — sourced assembly parameter (H10), not added to the panel size."). A 2,390 mm wide wall takes two 1,190 panels; 2,400 mm needs a third strip. Cut and narrow strips are flagged for the system's minimum-piece / edge-fixing check (**Minimum cut strip** in Advanced). Joint/backing strip product is "not selected" until you add one.
 - **AAC panels:** Walsc is listed first ("Company preference"). **One system per material** — brands and wall systems are never mixed; add another material for a second system. **Approved adhesive joint (system value)** is required ("Never defaulted, and not a 10 mm movement gap"). Rails, fixings, adhesive bags, mesh, control joints and coating show as unresolved rows until reviewed quantities are entered; coating is the **net** finish area.
@@ -222,7 +222,7 @@ You choose the cladding product and how it is installed, then enter each wall �
 - **Known issue — support battens:** a researched support batten (e.g. Hardie Cavity Batten) is blocked on the schedule with "Effective cover is needed (supplier/product value — not the nominal width)." The setup card hides this need and has no cover field for battens, so battens stay **Product details missing** in this build. Reported to the owner 2026-10-14.
 - **Known issue — joint / backing strip lines:** until a joint accessory product is selected, joint-strip lines on the schedule carry the cladding's own product name (e.g. "James Hardie Axon 400 smooth 9 thick — 6,000 mm length" for a horizontal joint strip, "James Hardie Matrix SKU 403811 8 thick — 2,390 mm length" for a Matrix joint). Don't order them as cladding; set their quantity to 0 on the order until the joint product is chosen. The wall screen labels them correctly ("Horizontal joint strips").
 - Only the selected wall renders an elevation (20+ walls stay fast).
-- Sheets: no automatic offcut reuse between cells or walls — potential offcuts are listed only. Spares (%) on sheet products are added on top of the layout in the schedule.
+- Sheets: pieces are shared within one wall (HUB 016); offcuts are not carried between walls or jobs, and are listed only. Spares (%) on sheet products are added on top of the layout in the schedule.
 - Corner trims can't be tagged on walls yet — add them as "Other item (entered quantity)".
 - Opening flashings are not generated from openings — add them as a flashing material (SOP 20-11); the opening sheet lists the edge lengths.
 - Random-length timber LM is an estimate; minimum board length, end-joint and stagger rules are not set in the app — agree them with the supplier and installer.
@@ -346,6 +346,13 @@ Next review date: 2027-04-14
 1. Axon 400 smooth wall, 6,573 long × 3,600 high (tallest listed sheet 3,000). Expected: a problem "… the tallest listed sheet is 3,000 mm …" with **Use a 10 mm joint with an H-flashing** and **Other joint…**.
 2. Tap **Use a 10 mm joint with an H-flashing**. Expected: the problem clears; "Joint added automatically at 3,000 mm — 10 mm gap, H-flashing …"; the setout card reads "Joints: 10 mm gap, H-flashing, placed automatically wherever a wall is taller than the sheet"; a joint line is drawn and the sheets are counted.
 3. Engine (scripts/tests/takeoff-tc-hub015.test.mjs): 3,600 → one joint at 3,000 (two courses). 6,500 → joints at 3,000 and 6,010. 2,950 → none. Explicit heights win, and a sliver top course lowers the joint with a note. Per-wall settings keyed by a wall's id are kept by the server.
+- [ ] Pass  [ ] Fail
+
+**TC-15 — Sheets are shared across the wall, long factory edges kept (HUB 016, UI Review + engine)**
+1. Axon 400 smooth wall, 6,573 long × 3,600 high, with the 10 mm H-flashing joint (TC-14). Open the wall's sheet details.
+2. Expected: "N pieces cut from 8 sheets: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing 5 mm per saw cut."; the quantities show **SKU 404418 2,750 × 1,200 mm 1 sheet** for the five full-width upper pieces. The narrow upper piece at the end takes its own sheet, and the offcuts list explains it is not cut from the narrow strip's offcut (its factory edge would be on the wrong side).
+3. Tap an upper cell. Expected: **From** names the shared sheet. The offcuts list reads "Sheet N (strip X): W × L mm"; a ripped strip's offcut is the sheet width less the strip and the 5 mm saw cut.
+4. Engine (scripts/tests/takeoff-tc-hub016.test.mjs): 6,573 × 3,600 → 8 sheets (was 12, one per cell); a ripped strip's offcut is reused by a narrow strip needing its other factory edge; every occupied cell is covered exactly once; the plan is the same on every run.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

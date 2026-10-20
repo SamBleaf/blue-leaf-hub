@@ -392,7 +392,8 @@ function claddingElements(entry, bbox, wallProblems) {
   if (!layout) return { items, guides, notes, sheetInfo };
   const demandOf = (() => {
     const map = new Map();
-    for (const d of demandsForWall(result, entry.wallId, entry.tag)) { const c = d.sourceRefs?.[0]?.cell; if (c && !map.has(c)) map.set(c, d); }
+    // a shared sheet (HUB 016) lists every cell cut from it
+    for (const d of demandsForWall(result, entry.wallId, entry.tag)) for (const r of d.sourceRefs || []) { const c = r?.cell; if (c && !map.has(c)) map.set(c, d); }
     return (id) => map.get(id) || null;
   })();
   const narrowRefs = wallProblems.filter((p) => p.code === "narrow_strip").flatMap((p) => p.refs || []);
@@ -400,6 +401,8 @@ function claddingElements(entry, bbox, wallProblems) {
     const cols = new Map((layout.columns || []).map((c) => [c.index, c]));
     const multi = (layout.courses || []).length > 1;
     const tallest = Math.max(0, ...(layout.stockLengthsMm || []));
+    const cellById = new Map((layout.cells || []).map((c) => [c.id, c]));
+    const cellName = (id) => { const c = cellById.get(id); return c ? `strip ${c.col + 1}${multi ? ` course ${c.row + 1}` : ""}` : "another strip"; };
     for (const c of layout.cells || []) {
       const name = `Strip ${c.col + 1}${multi ? `, course ${c.row + 1}` : ""}`;
       if (!c.occupied) { items.push({ id: c.id, kind: "rect", rect: c.rect, state: "empty", info: { title: name, rows: [["Sheet", "None — no cladding in this cell"]], note: "Empty cells use no sheet." } }); continue; }
@@ -413,6 +416,8 @@ function claddingElements(entry, bbox, wallProblems) {
           rows: [
             ["Stock", tooTall ? `None fits — needs ${fmtMm(c.requiredLengthMm)} mm; ${layout.orientation === "horizontal" ? "longest" : "tallest"} listed is ${fmtMm(tallest)} mm` : `${c.sku ? `SKU ${c.sku} · ` : ""}${fmtMm(c.stockLengthMm)}${sheetW ? ` × ${fmtMm(sheetW)}` : ""} mm sheet`],
             ["Cut size", `${fmtMm(c.cutWidthMm)} × ${fmtMm(c.cutLengthMm)} mm`],
+            ...(c.sheetId && !tooTall ? [["From", c.source === "offcut" ? `The offcut of ${cellName(c.sharedWith?.[0])}'s sheet (${c.sheetId.replace("S", "sheet ")})`
+              : c.sharedWith?.length ? `${c.sheetId.replace("S", "Sheet ")} — shared with ${c.sharedWith.map(cellName).join(", ")}` : `${c.sheetId.replace("S", "Sheet ")} (its own)`]] : []),
             ...(layout.heightAllowanceMm ? [["Needed", `${fmtMm(c.requiredLengthMm)} mm incl. ${fmtMm(layout.heightAllowanceMm)} allowance`]] : []),
           ],
           note: tooTall ? (layout.orientation === "horizontal" ? "Longer than the longest listed sheet — add a joint row with its detail, or choose a longer listed sheet." : "Taller than the tallest listed sheet — add a joint row with its detail, or choose a taller listed sheet.") : col?.kind === "cut" ? `Cut strip: ${fmtMm(col.widthMm)} mm of the ${fmtMm(layout.coverMm)} mm cover.` : null,
@@ -421,12 +426,15 @@ function claddingElements(entry, bbox, wallProblems) {
     }
     for (const j of layout.joints || []) j.segments.forEach((s, k) => items.push(jointLine(j, s, k, "")));
     guides.push({ axis: layout.orientation === "horizontal" ? "y" : "x", at: layout.datumMm, label: "datum" });
-    // C0/C1: strips, cut strips (a 1 mm strip still takes a whole sheet), layout-cut vs stock area, potential offcuts
+    // C0/C1: strips, cut strips, layout-cut vs stock area; HUB 016: pieces share stock sheets (cutPlan), offcuts left over
     const cutCols = (layout.columns || []).filter((c) => c.kind !== "full");
-    const sheets = (layout.cells || []).filter((c) => c.occupied && c.stockLengthMm != null).length;
+    const pieces = (layout.cells || []).filter((c) => c.occupied && c.stockLengthMm != null).length;
+    const sheets = layout.cutPlan ? layout.cutPlan.sheets.length : pieces;   // HUB 016: sheets are shared — the planned stock sheets
     if ((layout.cells || []).length) {
       sheetInfo = {
-        strips: (layout.columns || []).length, cutWidths: cutCols.map((c) => c.widthMm), courses: (layout.courses || []).length, sheets,
+        strips: (layout.columns || []).length, cutWidths: cutCols.map((c) => c.widthMm), courses: (layout.courses || []).length, sheets, pieces,
+        kerfMm: layout.cutPlan?.kerfMm ?? null, shared: !!layout.cutPlan,
+        refused: (layout.cutPlan?.rejected || []).map((x) => `${cellName(x.cellId)} can't use the offcut from ${cellName(x.fromCellId)} — that offcut has the other long factory edge (tongue / groove)`),
         empty: (layout.cells || []).filter((c) => !c.occupied).length, layoutCutM2: layout.areas?.layoutCutM2, stockM2: layout.areas?.stockM2,
         offcuts: (layout.potentialOffcuts || []).map((o) => ({ ...o, cell: (layout.cells || []).find((c) => c.id === o.cellId) })),
       };
@@ -1623,11 +1631,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <div className="space-y-1 text-xs text-ink" data-sheet-summary="">
                 <p>{plural(si.strips, "strip")}{si.cutWidths.length ? ` (${si.cutWidths.length} cut: ${si.cutWidths.map((w) => `${fmtMm(Math.round(w * 10) / 10)} mm`).join(", ")} wide)` : ""} × {plural(si.courses, "course")} → <b>{plural(si.sheets, "sheet")}</b>{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}. A cut strip still uses a whole sheet.</p>
                 {Number.isFinite(si.layoutCutM2) && <p className="text-muted">Layout cut {fmtM2(si.layoutCutM2)} m² · sheet stock {fmtM2(si.stockM2)} m² (spares are added in the schedule).</p>}
-                {si.offcuts.length > 0 && (
+                {si.shared && si.pieces > si.sheets && <p data-sheet-shared="">{si.pieces} pieces cut from {plural(si.sheets, "sheet")}: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.</p>}
+                {(si.offcuts.length > 0 || si.refused.length > 0) && (
                   <details className="rounded-lg border border-hairline px-3" data-offcuts="">
-                    <summary className="min-h-[44px] cursor-pointer py-3 text-xs">{plural(si.offcuts.length, "potential offcut")} — listed only, never reused automatically</summary>
+                    <summary className="min-h-[44px] cursor-pointer py-3 text-xs">{si.shared ? `${plural(si.offcuts.length, "offcut")} left over` : `${plural(si.offcuts.length, "potential offcut")} — listed only, never reused automatically`}</summary>
                     <ul className="list-disc space-y-0.5 pb-2 pl-4 text-muted">
-                      {si.offcuts.map((o, i) => <li key={`${o.cellId}-${i}`}>Strip {(o.cell?.col ?? 0) + 1}{si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""}: {fmtMm(Math.round(o.widthMm))} × {fmtMm(Math.round(o.lengthMm))} mm</li>)}
+                      {si.offcuts.map((o, i) => <li key={`${o.cellId}-${i}`}>{o.sheetId ? `${o.sheetId.replace("S", "Sheet ")} (strip ${(o.cell?.col ?? 0) + 1}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""})` : `Strip ${(o.cell?.col ?? 0) + 1}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""}`}: {fmtMm(Math.round(o.widthMm))} × {fmtMm(Math.round(o.lengthMm))} mm</li>)}
+                      {si.refused.map((r) => <li key={r} data-offcut-refused="">{r}</li>)}
                     </ul>
                   </details>
                 )}

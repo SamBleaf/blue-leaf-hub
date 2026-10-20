@@ -226,7 +226,7 @@ t("CL01 two adjacent 1,300 walls + small opening → 2 + 2 = 4 (per-wall roundin
   assert.equal(new Set(all.map((d) => d.id)).size, 4);
   assert.ok(of(a, "sheet").some((d) => d.sourceRefs.some((r) => r.openingId === "O1")));
   for (const r of [a, b]) {
-    assert.ok(r.layout.potentialOffcuts.some((o) => o.widthMm === 1100), "the 1,100 mm offcut is shown, not allocated");
+    assert.ok(r.layout.potentialOffcuts.some((o) => o.widthMm === 1095), "the 1,095 mm rip offcut (1,200 − 100 − 5 mm saw cut) is shown, not allocated");
     assert.ok(r.layout.potentialOffcuts.every((o) => o.allocated === false));
   }
 });
@@ -278,11 +278,13 @@ t("CL02 a 'joint allowed' flag is not a layout: still blocked", () => {
     assert.equal(r.status.quantity, "incomplete", JSON.stringify(opts)); assert.equal(r.demands.length, 0);
   }
 });
-t("CL02 explicit joint row → real second course (4 × 2 sheets) + horizontal-joint demands", () => {
+t("CL02 explicit joint row → real second course (4 + 1 shared sheet, HUB 016) + horizontal-joint demands", () => {
   const r = checkContract(sheetLayout(rect(4800, 3300), [], AXON400, { materialId: "axon", jointRows: { atMm: [3000], gapMm: 10, detailRef: "H02 joint" } }));
   const s = of(r, "sheet");
-  assert.equal(s.length, 8);
-  assert.deepEqual(s.map((d) => d.identity.sku), ["404419", "404419", "404419", "404419", "404417", "404417", "404417", "404417"]);
+  // HUB 016: four 3,000 sheets for the lower course; the four 290 mm upper pieces share ONE 2,450 sheet (was 4 + 4 = 8)
+  assert.equal(s.length, 5);
+  assert.deepEqual(s.map((d) => d.identity.sku).sort(), ["404417", "404419", "404419", "404419", "404419"]);
+  assert.equal(r.layout.cutPlan.sheets.find((sh) => sh.stockLengthMm === 2450).cellIds.length, 4);
   const j = of(r, "horizontal-joint");
   assert.equal(j.length, 1); assert.equal(j[0].lengthMm, 4800); assert.equal(j[0].lengthKind, "tight");
   assert.deepEqual(r.layout.joints[0], { index: 0, orientation: "horizontal", atMm: 3000, gapMm: 10, detailRef: "H02 joint", source: "explicit", segments: [{ startMm: 0, endMm: 4800 }] });   // HUB 015: joints say where they came from

@@ -447,7 +447,8 @@ t("CL02 joint rows: upper course still too tall → blocked with a fresh suggest
   assert.equal(r.problems.find((p) => p.code === "sheet_too_tall").suggestedJointAtMm, 3010 + 3000);
   assert.ok(codes(sheetLayout(rect(4800, 3300), [], AXON400, { jointRows: { atMm: [3300], gapMm: 0 } })).includes("joint_rows_invalid"));
   const two = checkContract(sheetLayout(rect(4800, 6500), [], AXON400, { jointRows: { atMm: [3000, 6010], gapMm: 10 } }));
-  assert.equal(of(two, "sheet").length, 12); assert.equal(of(two, "horizontal-joint").length, 2);
+  // HUB 016: 4 + 4 full courses + the four 490 mm top pieces cut from ONE sheet (sheets shared across the length) = 9
+  assert.equal(of(two, "sheet").length, 9); assert.equal(of(two, "horizontal-joint").length, 2);
 });
 t("CL02/J2 width change keeps existing sheet ids and only adds the new strip", () => {
   const a = sheetLayout(rect(4800, 2700), [], AXON133, { materialId: "m" }).demands.map((d) => d.id);

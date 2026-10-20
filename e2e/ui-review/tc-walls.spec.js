@@ -369,7 +369,8 @@ test.describe("TC walls — phone journeys", () => {
     await expect(page.locator('[data-el-state="joint"]')).toHaveCount(1);
     const qty = page.getByRole("region", { name: "Quantities on this wall" });
     await expect(qty).toContainText("3,000 × 1,200 mm"); // course 1: 0–3,000
-    await expect(qty).toContainText("2,450 × 1,200 mm"); // course 2: 3,010–3,500 → shortest listed
+    // HUB 016: course 2's five 490 mm pieces share ONE sheet — 5 × 490 + saw cuts needs the 2,750 (not five sheets)
+    await expect(qty).toContainText("2,750 × 1,200 mm1 sheet");
     await expect(qty).toContainText("Horizontal joint strips");
     // an opening covering strip 1's whole upper course: that cell is EMPTY (hatched) and consumes no sheet
     await page.getByRole("button", { name: "Close panel" }).click();
@@ -899,7 +900,7 @@ test.describe("TC walls — review additions at 375 px", () => {
     await page.getByRole("button", { name: "Open North wall" }).click();
     await page.getByLabel("Wall length").fill("4801"); await page.getByLabel("Wall length").press("Enter");
     await page.locator("[data-offcuts] summary").click();
-    await expect(page.locator("[data-offcuts]")).toContainText("Strip 5: 1,199 × 2,700 mm"); // the cover ripped off the 1 mm strip
+    await expect(page.locator("[data-offcuts]")).toContainText("(strip 5): 1,194 × 2,700 mm"); // the cover ripped off the 1 mm strip, less the 5 mm saw cut (HUB 016)
     await noHorizontalScroll(page);
     for (let i = 0; i < 4; i++) {
       const plus = page.getByRole("button", { name: "Zoom in drawing" });

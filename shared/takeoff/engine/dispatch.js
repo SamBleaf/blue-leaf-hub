@@ -660,7 +660,8 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     // accessories also depend on the cladding layout joints of their walls
     const wallsOf = items.filter((x) => x.m.kind === "wall").map((x) => x.m.id);
     const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts, mat.spec?.family === "accessory" ? wallsOf.map((id) => jointsByWall.get(id) || [])
-      : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || []) : null);
+      : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || [])
+      : mat.methodKey === "sheet_layout" ? { sheetPlan: 1 } : null);   // HUB 016: sheets are now shared — lines saved before are reviewed
     let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, omitted: [] };
     if (n) {
       try { pl = purchaseLines(mat, n, demands, matKey, sink); } catch (e) {
