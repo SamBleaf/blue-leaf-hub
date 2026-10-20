@@ -773,19 +773,55 @@ export async function addSupplier(sb, body) {
   must(name, "Enter the supplier's name.");
   const email = optStr(body?.email, 160);
   must(!email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "That email address doesn't look right.");
-  const shape = (r, existed) => ({ id: r.id, name: r.name, contactName: r.contact_name ?? undefined, email: r.email ?? undefined, phone: r.phone ?? undefined, existed });
   const key = (x) => String(x || "").trim().replace(/\s+/g, " ").toLowerCase();
-  const same = (await q(sb.from("suppliers").select("id, name, contact_name, email, phone").eq("is_active", true))).find((s) => key(s.name) === key(name));
-  if (same) return shape(same, true);
-  const { data, error } = await sb.from("suppliers").insert([{ name, contact_name: optStr(body?.contactName, 80), email, phone: optStr(body?.phone, 40), is_active: true }])
-    .select("id, name, contact_name, email, phone").single();
+  const same = (await q(sb.from("suppliers").select("*").eq("is_active", true))).find((s) => key(s.name) === key(name));
+  if (same) return supplierShape(same, { existed: true });
+  const row = { name, contact_name: optStr(body?.contactName, 80), email, phone: optStr(body?.phone, 40), is_active: true };
+  const address = optStr(body?.address, 200);
+  const ins = (r) => sb.from("suppliers").insert([r]).select("*").single();
+  let { data, error } = await ins(address ? { ...row, address } : row);
+  // before migration 210 the address column doesn't exist: save the rest and say the address wasn't kept
+  if (error && address && missingAddressColumn(error)) { ({ data, error } = await ins(row)); if (!error) return supplierShape(data, { existed: false, addressSaved: false }); }
   if (error) throw error;
-  return shape(data, false);
+  return supplierShape(data, { existed: false });
+}
+
+const missingAddressColumn = (e) => /address/.test(`${e?.message || ""}`) && /(42703|PGRST204|does not exist|schema cache)/.test(`${e?.code || ""} ${e?.message || ""}`);
+const supplierShape = (r, extra = {}) => ({ id: r.id, name: r.name, contactName: r.contact_name ?? undefined, email: r.email ?? undefined, phone: r.phone ?? undefined,
+  address: r.address ?? undefined, ...extra });
+
+/**
+ * HUB 019: office staff correct a supplier from the order (name, contact, phone, email, pickup / branch address).
+ * Placed orders keep the supplier details frozen in their export; future drafts and PDFs use the new details.
+ */
+export async function updateSupplier(sb, id, body) {
+  await requireSupplier(sb, id);
+  const upd = {};
+  if (body?.name !== undefined) { const n = optStr(body.name, 120); must(n, "Enter the supplier's name."); upd.name = n; }
+  if (body?.contactName !== undefined) upd.contact_name = optStr(body.contactName, 80);
+  if (body?.phone !== undefined) upd.phone = optStr(body.phone, 40);
+  if (body?.email !== undefined) { const em = optStr(body.email, 160); must(!em || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em), "That email address doesn't look right."); upd.email = em; }
+  if (body?.address !== undefined) upd.address = optStr(body.address, 200);
+  if (upd.name) {
+    const key = (x) => String(x || "").trim().replace(/\s+/g, " ").toLowerCase();
+    const clash = (await q(sb.from("suppliers").select("id, name").eq("is_active", true))).find((s) => s.id !== id && key(s.name) === key(upd.name));
+    must(!clash, `There is already a supplier called ${clash?.name} — choose it from the list instead.`);
+  }
+  upd.updated_at = new Date().toISOString();
+  const run = (u) => sb.from("suppliers").update(u).eq("id", id).select("*").single();
+  let { data, error } = await run(upd);
+  if (error && "address" in upd && missingAddressColumn(error)) {
+    const { address: _a, ...rest } = upd; void _a;
+    ({ data, error } = await run(rest));
+    if (!error) return supplierShape(data, { addressSaved: false });
+  }
+  if (error) throw error;
+  return supplierShape(data);
 }
 
 async function requireSupplier(sb, id) {
   must(isUuid(id), "Invalid supplier.");
-  const s = await q(sb.from("suppliers").select("id, name, email, phone, contact_name, abn, is_active, updated_at").eq("id", id).maybeSingle());
+  const s = await q(sb.from("suppliers").select("*").eq("id", id).maybeSingle());
   if (!s || s.is_active === false) throw bad("That supplier was not found or is inactive.");
   return s;
 }
@@ -1059,7 +1095,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     issuedOn: new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Adelaide" }), // YYYY-MM-DD, local (SA) date
     company: company ? { name: company.name, abn: company.abn || null, address: company.address || null, phone: company.phone || null, email: company.email || null } : { name: "Blue Leaf Building" },
     job: { label: jobLabel || null, owner: wsSnapshot.workspace.owner, takeoffName: wsSnapshot.workspace.name },
-    supplier: supplier ? { id: supplier.id, name: supplier.name, contactName: supplier.contact_name || null, email: supplier.email || null, phone: supplier.phone || null, abn: supplier.abn || null } : null,
+    supplier: supplier ? { id: supplier.id, name: supplier.name, contactName: supplier.contact_name || null, email: supplier.email || null, phone: supplier.phone || null, abn: supplier.abn || null,
+      ...(supplier.address ? { address: supplier.address } : {}) } : null,
     delivery: d,
     notes: order.notes || null,
     groups: groupList,

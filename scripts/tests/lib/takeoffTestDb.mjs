@@ -16,7 +16,7 @@ import pg from "pg";
 
 const ROOT = new URL("../../../", import.meta.url);
 const STUB = new URL("scripts/tests/fixtures/takeoff-db-stub.sql", ROOT);
-const MIGRATIONS = ["supabase/migrations/206_takeoff_foundation.sql", "supabase/migrations/207_takeoff_generic_methods.sql", "supabase/migrations/208_takeoff_order_category.sql"];
+const MIGRATIONS = ["supabase/migrations/206_takeoff_foundation.sql", "supabase/migrations/207_takeoff_generic_methods.sql", "supabase/migrations/208_takeoff_order_category.sql", "supabase/migrations/210_takeoff_supplier_address.sql"];
 
 function findBin(name) {
   for (const dir of ["/opt/homebrew/bin", "/opt/homebrew/opt/postgresql@17/bin", "/usr/local/bin", "/usr/lib/postgresql/17/bin", "/usr/lib/postgresql/16/bin", "/usr/bin"]) {

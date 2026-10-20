@@ -979,6 +979,47 @@ await t("HUB 013 / HUB 020: Review & export opens ONE flashing draft in step wit
   assert.equal(locked.status, 400); assert.match(locked.data.error, /Placed orders are locked/);
 });
 
+await t("HUB 019: office staff add and edit a supplier (with pickup address) from the order; a placed/exported order keeps its frozen details; works before migration 210", async () => {
+  const add = await SP("/suppliers", { name: "Stratco Gepps Cross", email: "orders@stratco.test", phone: "08 8000 1111", address: "1 Grand Junction Rd, Wingfield SA" });
+  assert.equal(add.status, 200, JSON.stringify(add.data));
+  const sid = add.data.supplier.id;
+  assert.equal(add.data.supplier.address, "1 Grand Junction Rd, Wingfield SA");
+  assert.equal((await S("/suppliers")).data.suppliers.find((x) => x.id === sid).address, "1 Grand Junction Rd, Wingfield SA");
+  // an order to that supplier, exported as the supplier PDF: its details are frozen in the export
+  const w = id(), mid = id(), msr = id(), con = id();
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB019" });
+  let r = await SP(`/workspaces/${w}/commit`, { expectedRevision: 1, changes: {
+    materials: { upsert: [{ id: mid, name: "Ridge", methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec, profile }] },
+    measurements: { upsert: [{ id: msr, kind: "manual", finishedLengthMm: 3000, quantity: 2 }] },
+    contributions: { upsert: [{ id: con, measurementId: msr, jobMaterialId: mid }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const oid = id();
+  const o = await SP(`/workspaces/${w}/orders`, { category: "flashings", id: oid, supplierId: sid, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  const line = (await S(`/workspaces/${w}/orders`)).data.scheduleLines[0];
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: [{ bucketKey: line.bucketKey, quantity: 2 }] } });
+  const wsRev = (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "hub019-exp", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: wsRev });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  // office staff correct the phone from the order; leading hands / previews can't; a duplicate name or bad email is refused
+  const ed = await call("PATCH", `/api/takeoff/suppliers/${sid}`, { body: { phone: "08 8000 2222" } });
+  assert.equal(ed.status, 200, JSON.stringify(ed.data)); assert.equal(ed.data.supplier.phone, "08 8000 2222");
+  assert.equal((await call("PATCH", `/api/worker/takeoff/suppliers/${sid}`, { body: { phone: "1" }, worker: "wt-lh" })).status, 403);
+  assert.equal((await call("PATCH", `/api/worker/takeoff/suppliers/${sid}`, { body: { phone: "1" }, as: "admin", preview: E.lh })).status, 403);
+  assert.equal((await call("PATCH", `/api/takeoff/suppliers/${sid}`, { body: { name: "fielders wingfield" } })).status, 400);
+  assert.equal((await call("PATCH", `/api/takeoff/suppliers/${sid}`, { body: { email: "nope" } })).status, 400);
+  const frozen = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
+  assert.equal(frozen.supplier.phone, "08 8000 1111"); assert.equal(frozen.supplier.address, "1 Grand Junction Rd, Wingfield SA");
+  const prev = await S(`/orders/${oid}/preview`);
+  assert.equal(prev.data.preview.snapshot.supplier.phone, "08 8000 2222");   // future PDFs use the new details
+  // before migration 210 (no address column): adding and listing still work; the address just isn't kept
+  await q("ALTER TABLE suppliers RENAME COLUMN address TO address_hidden");
+  try {
+    const pre = await SP("/suppliers", { name: "Pre 210 Supplies", address: "2 Somewhere St" });
+    assert.equal(pre.status, 200, JSON.stringify(pre.data)); assert.equal(pre.data.supplier.addressSaved, false);
+    assert.equal((await S("/suppliers")).status, 200);
+  } finally { await q("ALTER TABLE suppliers RENAME COLUMN address_hidden TO address"); }
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

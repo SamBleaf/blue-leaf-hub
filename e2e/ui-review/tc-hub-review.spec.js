@@ -50,13 +50,13 @@ test("HUB 008: office staff on the Worker app (phone) can add a supplier from th
   await form.getByLabel("Supplier name").fill("Fielders Wingfield");
   await form.getByRole("button", { name: "Save supplier" }).click();
   await expect(page.locator("#ord-supplier option:checked")).toHaveText("Fielders Wingfield");
-  await expect(page.locator("[data-supplier-note]")).toHaveText("Added Fielders Wingfield — save order details to keep it on this order.");
+  await expect(page.locator("[data-order-msg]")).toHaveText("Added Fielders Wingfield — saved on this order.");   // HUB 019: saved on the draft at once
   // the same name again is the same supplier — selected, never a second copy
   await page.getByRole("button", { name: "Add supplier" }).click();
   await form.getByLabel("Supplier name").fill("other steel supplies");
   await form.getByRole("button", { name: "Save supplier" }).click();
   await expect(page.locator("#ord-supplier option:checked")).toHaveText("Other Steel Supplies");
-  await expect(page.locator("[data-supplier-note]")).toContainText("Other Steel Supplies was already on file");
+  await expect(page.locator("[data-order-msg]")).toContainText("Other Steel Supplies was already on file");
   await expect(page.locator("#ord-supplier option").filter({ hasText: /^Other Steel Supplies$/ })).toHaveCount(1);
   // a leading hand without an office login: no Add supplier (and the server refuses it anyway)
   await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings");
@@ -346,4 +346,37 @@ test("HUB 020: a draft is reopened and revised (same draft number, no copies); h
   await expect(hist.locator("div.rounded-card").filter({ hasText: other })).toHaveCount(0);
   const after = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.map((o) => `${o.orderRef}:${o.status}`));
   expect(after).toContain(`${other}:cancelled`);
+});
+
+test("HUB 019: add the flashing supplier with its pickup address from the order — saved on the draft at once; Pick up fills the branch; Edit updates it", async ({ page }) => {
+  await open(page, { seed: "&takeoffSeed=mixed" });
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();
+  await page.getByRole("button", { name: "Add supplier" }).click();
+  const form = page.locator("[data-add-supplier]");
+  await form.getByLabel("Supplier name").fill("Stratco Wingfield");
+  await form.getByLabel("Phone (optional)").fill("08 8000 1234");
+  await form.getByLabel("Email for orders (optional)").fill("orders@stratco.test");
+  await form.getByLabel("Pickup / branch address (optional)").fill("1 Grand Junction Rd, Wingfield SA");
+  await form.getByRole("button", { name: "Save supplier" }).click();
+  await expect(page.locator("[data-order-msg]")).toHaveText("Added Stratco Wingfield — saved on this order.");
+  await expect(page.locator("#ord-supplier option:checked")).toHaveText("Stratco Wingfield");
+  await expect(page.getByRole("button", { name: "Save order details" })).toHaveCount(0);   // nothing left to save
+  // choosing Pick up fills the branch from the supplier's address (still editable)
+  await page.getByText("Pick up", { exact: true }).click();
+  await expect(page.getByLabel("Pickup branch")).toHaveValue("1 Grand Junction Rd, Wingfield SA");
+  // Edit the chosen supplier: the change is saved and the draft keeps it
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await form.getByLabel("Phone (optional)").fill("08 8000 9999");
+  await form.getByRole("button", { name: "Save supplier" }).click();
+  await expect(page.locator("[data-order-msg]")).toHaveText("Updated Stratco Wingfield — saved on this order.");
+  // leaving and coming back: the same draft still has the supplier; the Timber and cladding order can choose it too
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await expect(page.locator("#ord-supplier option:checked")).toHaveText("Stratco Wingfield");
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Timber and cladding" }).click();
+  await page.getByRole("button", { name: /Review & export order|Orders/ }).click();
+  await page.getByRole("button", { name: "New order" }).click();   // Timber and cladding: no draft yet
+  await expect(page.locator("#ord-supplier option").filter({ hasText: /^Stratco Wingfield$/ })).toHaveCount(1);
 });

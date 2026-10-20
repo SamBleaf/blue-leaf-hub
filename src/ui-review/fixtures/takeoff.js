@@ -144,6 +144,9 @@ seed();
 
 const snapshot = () => ({ workspace: { ...state.workspace, revision: state.revision }, documents: state.documents, calibrations: state.calibrations, measurements: state.measurements, materials: state.materials, contributions: state.contributions });
 const status = () => [...orderStatus(computeWorkspace(snapshot()).scheduleLines, state.commitments).values()];
+/** the suppliers on file (seeded + added from the order), with any edits made from the order (HUB 008 / HUB 019) */
+const mockSuppliers = () => [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }, ...(state.addedSuppliers || [])]
+  .map((x) => ({ ...x, ...(state.supplierEdits?.[x.id] || {}) }));
 /** an order as the API shows it — the server-kept refresh basis never leaves the server (HUB 013) */
 const publicOrder = (o) => { if (!o) return null; const { basis: _basis, ...rest } = o; void _basis; return rest; };
 const caps = (worker) => {
@@ -329,12 +332,24 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       if (!caps(worker).addSuppliers) return fail(403, "Only office staff can add suppliers.", "FORBIDDEN");
       const name = String(bodyJson?.name || "").trim();
       if (!name) return fail(400, "Enter the supplier's name.", "INVALID");
-      const known = [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }, ...(state.addedSuppliers || [])];
-      const same = known.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      const same = mockSuppliers().find((x) => x.name.toLowerCase() === name.toLowerCase());
       if (same) return { ok: true, supplier: { ...same, existed: true } };
-      const sup = { id: `sup-new-${(state.addedSuppliers || []).length + 1}`, name, email: bodyJson?.email || null, phone: bodyJson?.phone || null };
+      const sup = { id: `sup-new-${(state.addedSuppliers || []).length + 1}`, name, contactName: bodyJson?.contactName || undefined, email: bodyJson?.email || undefined, phone: bodyJson?.phone || undefined, address: bodyJson?.address || undefined };
       state.addedSuppliers = [...(state.addedSuppliers || []), sup];
       return { ok: true, supplier: { ...sup, existed: false } };
+    });
+    // HUB 019: office staff correct a supplier from the order (as the server: same capability; a duplicate name is refused)
+    route("PATCH", `${base}/suppliers/:id`, ({ params, bodyJson }) => {
+      if (!caps(worker).addSuppliers) return fail(403, "Only office staff can change suppliers.", "FORBIDDEN");
+      const cur = mockSuppliers().find((x) => x.id === params.id);
+      if (!cur) return fail(400, "That supplier was not found or is inactive.", "INVALID");
+      const name = bodyJson?.name !== undefined ? String(bodyJson.name || "").trim() : cur.name;
+      if (!name) return fail(400, "Enter the supplier's name.", "INVALID");
+      if (mockSuppliers().some((x) => x.id !== cur.id && x.name.toLowerCase() === name.toLowerCase())) return fail(400, `There is already a supplier called ${name} — choose it from the list instead.`, "INVALID");
+      const upd = { name };
+      for (const k of ["contactName", "email", "phone", "address"]) if (bodyJson?.[k] !== undefined) upd[k] = bodyJson[k] || undefined;
+      state.supplierEdits = { ...(state.supplierEdits || {}), [cur.id]: { ...(state.supplierEdits?.[cur.id] || {}), ...upd } };
+      return { ok: true, supplier: { ...cur, ...upd } };
     });
     route("GET", `${base}/capabilities`, () => ({ ok: true, enabled: true, capabilities: caps(worker) }));
     route("GET", `${base}/jobs/:jobType/:jobId`, ({ params }) => {
@@ -351,7 +366,7 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => applyCommit(bodyJson || {}));
     route("GET", `${base}/documents/:docId/content`, () => fetch(planUrl));
     route("GET", `${base}/presets`, () => ({ ok: true, presets: state.presets }));
-    route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }, ...(state.addedSuppliers || [])], defaultSupplierId: "sup-1" }));
+    route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: mockSuppliers(), defaultSupplierId: "sup-1" }));
     route("GET", `${base}/workspaces/:id/orders`, () => {
       // like the server (otherOrderCover): what open (draft) orders with a supplier export already cover, per bucket
       const cover = new Map();

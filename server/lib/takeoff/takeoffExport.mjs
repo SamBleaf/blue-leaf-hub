@@ -25,7 +25,7 @@ const todayYmd = () => new Date().toISOString().slice(0, 10);
 async function loadOrderBundle(sb, orderRow) {
   const lines = await q(sb.from("takeoff_order_lines").select("*").eq("order_id", orderRow.id));
   const supplier = orderRow.supplier_id
-    ? await q(sb.from("suppliers").select("id, name, email, phone, contact_name, abn, is_active, updated_at").eq("id", orderRow.supplier_id).maybeSingle())
+    ? await q(sb.from("suppliers").select("*").eq("id", orderRow.supplier_id).maybeSingle())   // * : the address exists only after migration 210
     : null;
   // newest company row — the freeze compares against max(updated_at)
   const company = await q(sb.from("company_profile").select("name, abn, address, phone, email, updated_at").order("updated_at", { ascending: false }).limit(1).maybeSingle());

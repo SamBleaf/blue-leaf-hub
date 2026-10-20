@@ -20,7 +20,7 @@ import {
 } from "./takeoffAccess.mjs";
 import {
   PLAN_DOC_TYPES, RENDER_LIMIT_BYTES, listWorkspaces, createWorkspace, getWorkspaceRow, loadSnapshotFresh, commitWorkspace,
-  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier, openWorkingOrder, discardDraft,
+  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier, updateSupplier, openWorkingOrder, discardDraft,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
 import { renderSiteAppendixPdf } from "./takeoffPdf.mjs";
@@ -206,11 +206,12 @@ function mount(app, P, adapter) {
   app.get(`${P}/suppliers`, ...mw, gate, wrap(async (req, res, sb) => {
     const ctx = await adapter.context(req, sb, null);
     requireView(ctx);
-    const cols = ctx.caps.viewSupplierContacts ? "id, name, contact_name, email, phone, is_active, is_preferred" : "id, name, is_active";
-    let { data, error } = await sb.from("suppliers").select(cols).eq("is_active", true).order("name", { ascending: true });
-    if (error && /is_preferred/.test(error.message || "")) ({ data, error } = await sb.from("suppliers").select(cols.replace(", is_preferred", "")).eq("is_active", true).order("name", { ascending: true }));
+    // contacts (+ pickup / branch address, migration 210) only for those who send the PDF; "*" so a missing column never breaks the list
+    const { data, error } = await sb.from("suppliers").select("*").eq("is_active", true).order("name", { ascending: true });
     if (error) throw error;
-    const suppliers = (data || []).map((s) => ({ id: s.id, name: s.name, contactName: s.contact_name ?? undefined, email: s.email ?? undefined, phone: s.phone ?? undefined }));
+    const full = ctx.caps.viewSupplierContacts;
+    const suppliers = (data || []).map((s) => (full ? { id: s.id, name: s.name, contactName: s.contact_name ?? undefined, email: s.email ?? undefined, phone: s.phone ?? undefined, address: s.address ?? undefined }
+      : { id: s.id, name: s.name }));
     const hint = suppliers.find((s) => s.name?.toLowerCase().startsWith(DEFAULT_SUPPLIER_NAME_HINT.toLowerCase()));
     return ok(res, { suppliers, defaultSupplierId: hint?.id || null });
   }));
@@ -222,6 +223,13 @@ function mount(app, P, adapter) {
     requireView(ctx);
     if (ctx.caps.isPreview || req.workerPreview || !ctx.caps.addSuppliers) throw new TakeoffHttpError(403, "Only office staff can add suppliers.", "FORBIDDEN");
     return ok(res, { supplier: await addSupplier(sb, req.body || {}) });
+  }));
+  app.patch(`${P}/suppliers/:id`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await adapter.context(req, sb, null);
+    requireView(ctx);
+    if (ctx.caps.isPreview || req.workerPreview || !ctx.caps.addSuppliers) throw new TakeoffHttpError(403, "Only office staff can change suppliers.", "FORBIDDEN");
+    if (!isUuid(req.params.id)) throw new TakeoffHttpError(400, "Invalid supplier.", "INVALID");
+    return ok(res, { supplier: await updateSupplier(sb, req.params.id, req.body || {}) });
   }));
 
   app.get(`${P}/workspaces/:id/orders`, ...mw, gate, wrap(async (req, res, sb) => {

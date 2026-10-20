@@ -1,5 +1,5 @@
 ---
-sop_version: 2.3
+sop_version: 2.4
 last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
@@ -93,7 +93,7 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 
 1. **One order per section.** Orders opened from **Flashings** are flashing orders and only take flashing lengths. Orders opened from **Timber and cladding** take timber and cladding, shown in a **Timber** part and a **Cladding** part. Their PDF reads "TIMBER AND CLADDING ORDER" and prints the two parts in the same order. The system refuses a line from the other section. Migration 208 must be applied.
 2. **An accessory from another supplier** (its setup names a different supplier, e.g. fixings from Fielders when the order goes to Bunnings) is left off a new timber and cladding order. It is named under "Still needed but not on this order" ("— from Fielders: start a separate order for it"). If it is added anyway, the supplier export is blocked until it is moved.
-3. **Add supplier** sits next to the supplier list for office staff: an Admin or Supervisor on the Hub, or in the Worker app a login linked to an Admin / Supervisor account (e.g. the director on his phone). Leading hands don't see it, and the server refuses it for them. Enter the name (contact, phone and email are optional) → **Save supplier**. It is selected straight away; then **Save order details**. Typing a name that is already on file selects that supplier instead of adding a copy ("… was already on file — it's now selected."). Suppliers can also be managed without a job at Operations › Procurement › **Suppliers** (`/operations/procurement`).
+3. **Add supplier** sits next to the supplier list for office staff: an Admin or Supervisor on the Hub, or in the Worker app a login linked to an Admin / Supervisor account (e.g. the director on his phone). Leading hands don't see it, and the server refuses it for them. Enter the name (contact, phone, order email and **Pickup / branch address** are optional) → **Save supplier**. It is selected and saved on the draft straight away ("Added … — saved on this order."). With a supplier chosen, **Edit** corrects its details the same way. Future drafts and PDFs use the new details, while exported and placed orders keep the details printed on their PDF. Choosing **Pick up** fills **Pickup branch** from the supplier's address (you can change it). The address is only kept once migration 210 is applied; until then the note says so. Typing a name that is already on file selects that supplier instead of adding a copy ("… was already on file — it's now selected."). Suppliers can also be managed without a job at Operations › Procurement › **Suppliers** (`/operations/procurement`).
 4. **Site contact** starts as the person who created the order (their name and phone from their staff / employee record). Type over it if someone else will receive the delivery.
 5. **Needs attention:** a flashing line with a problem shows a button, e.g. "Needs attention — material details missing ›". Tap it:
    - a missing detail (finish, thickness, colour, perforation) opens that flashing's details, already at the missing field. **Close** brings you back to the same order and line. The order's lines for that flashing are updated to the fixed version. Then **Save order details**.
@@ -445,6 +445,13 @@ Next review date: 2027-04-14
 1. Remove the Barge group → **Save order details** → **Back** → **Review & export order**. Expected: the same draft number, Barge still off and listed as left off; no **New order** button.
 2. With an older draft in Order history: **Open draft** opens it (same number); **Discard draft** → confirm. Expected: it leaves the history (no PDFs) and the API shows it cancelled.
 3. API: a placed order can't be reopened ("Placed orders are locked — start a new order for more pieces.").
+- [ ] Pass  [ ] Fail
+
+**TC-22 — Supplier address and edit (HUB 019, UI Review + API)**
+1. Mixed job → **Flashings** → **Review & export order** → **Add supplier** → "Stratco Wingfield", phone, email, pickup address → **Save supplier**. Expected: "Added Stratco Wingfield — saved on this order."; it is selected; no **Save order details** needed.
+2. Tap **Pick up**. Expected: **Pickup branch** shows the supplier's address.
+3. **Edit** → change the phone → **Save supplier**. Expected: "Updated Stratco Wingfield — saved on this order."; the Timber and cladding order's supplier list offers it too.
+4. API: a supplier PDF exported before the edit keeps the old phone in its snapshot, while a new preview shows the new phone. A leading hand or a preview is refused (403), and a duplicate name or bad email is refused (400). Before migration 210, adding still works (addressSaved: false).
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -176,7 +176,7 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
       </div>
       <Banner tone="info">Exporting makes a PDF for you to send — it doesn&apos;t send or place anything. Send it to the supplier yourself, then record it as placed.</Banner>
       {ws.dirty && <Banner tone="warn">Saving your latest takeoff changes… orders use the saved version.</Banner>}
-      {msg && <Banner tone="error">{msg}</Banner>}
+      {msg && <Banner tone={msg.tone || "error"}><span data-order-msg="">{msg.text || msg}</span></Banner>}
       {syncNote && <Banner tone="info" action={<Btn kind="ghost" onClick={() => setSyncNote(null)}>OK</Btn>}><span data-order-sync="">{syncNote}</span></Banner>}
       <AsyncState loading={(!data && !error) || !opened} error={error} onRetry={load}>
         {active && (
@@ -192,19 +192,23 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
   );
 }
 
-/** HUB 008: a supplier added from the order (name required; the rest optional). */
-function AddSupplier({ api, onAdded, onCancel }) {
-  const [f, setF] = useState({ name: "", contactName: "", email: "", phone: "" });
+/**
+ * HUB 008 / HUB 019: office staff add a supplier — or correct the chosen one — from the order: name required; contact,
+ * phone, order email and pickup / branch address optional. Placed orders keep the details frozen in their PDF.
+ */
+function SupplierForm({ api, supplier = null, onSaved, onCancel }) {
+  const [f, setF] = useState({ name: supplier?.name || "", contactName: supplier?.contactName || "", email: supplier?.email || "", phone: supplier?.phone || "", address: supplier?.address || "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
   async function save() {
     if (!f.name.trim()) { setError("Enter the supplier's name."); return; }
     setBusy(true); setError(null);
-    const r = await api.createSupplier({ name: f.name.trim(), contactName: f.contactName.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null });
+    const body = { name: f.name.trim(), contactName: f.contactName.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null, address: f.address.trim() || null };
+    const r = supplier ? await api.updateSupplier(supplier.id, body) : await api.createSupplier(body);
     setBusy(false);
     if (!r.ok) { setError(r.error || "The supplier couldn't be saved."); return; }
-    onAdded(r.data.supplier);
+    onSaved(r.data.supplier);
   }
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-hairline bg-page p-2" data-add-supplier="">
@@ -214,6 +218,7 @@ function AddSupplier({ api, onAdded, onCancel }) {
         <TextField label="Phone (optional)" value={f.phone} onChange={set("phone")} />
       </div>
       <TextField label="Email for orders (optional)" value={f.email} onChange={set("email")} />
+      <TextField label="Pickup / branch address (optional)" value={f.address} onChange={set("address")} />
       {error && <Banner tone="error">{error}</Banner>}
       <div className="flex gap-2"><Btn kind="primary" onClick={save} disabled={busy}>Save supplier</Btn><Btn kind="ghost" onClick={onCancel}>Cancel</Btn></div>
     </div>
@@ -228,11 +233,12 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     qty: Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.quantity])), chosen: Object.fromEntries(order.lines.map((l) => [l.bucketKey, l.jobMaterialId])) }), [order]);
   const start = restored?.draft || saved;
   const [supplierId, setSupplierId] = useState(start.supplierId ?? saved.supplierId);
-  // HUB 008: office staff add the supplier right here (staff app only — the worker adapter has no createSupplier)
+  // HUB 008 / HUB 019: office staff add (or correct) the supplier right here — Hub and Worker app (server-checked)
   const canAddSupplier = !!ws.capabilities?.addSuppliers && typeof api.createSupplier === "function";
-  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [addingSupplier, setAddingSupplier] = useState(false); // false | "add" | "edit"
   const [supplierNote, setSupplierNote] = useState(null);
-  const supplierName = (suppliers?.suppliers || []).find((x) => x.id === supplierId)?.name || null;
+  const chosenSupplier = (suppliers?.suppliers || []).find((x) => x.id === supplierId) || null;
+  const supplierName = chosenSupplier?.name || null;
   const [delivery, setDelivery] = useState(start.delivery || saved.delivery);
   const [notes, setNotes] = useState(start.notes ?? saved.notes);
   // a restored quantity only for a line that is still on the order or in the takeoff (never a vanished bucket)
@@ -397,13 +403,13 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
   const wsRevision = ws.server?.snapshot?.workspace?.revision;
   useEffect(() => { loadPreview(); }, [loadPreview, wsRevision]);
 
-  async function save() {
+  async function save(over = {}) {
     setBusy(true); setMsg(null);
-    const body = { expectedRevision: order.revision, supplierId: supplierId || null, delivery, notes,
+    const body = { expectedRevision: order.revision, supplierId: (over.supplierId ?? supplierId) || null, delivery: over.delivery || delivery, notes,
       lines: Object.entries(qty).filter(([, n]) => n > 0).map(([bucketKey, quantity]) => ({ bucketKey, quantity, jobMaterialId: chosen[bucketKey] || undefined, ...(refresh.has(bucketKey) ? { refresh: true } : {}) })) };
     const r = await api.saveOrder(order.id, body);
     if (!r.ok) setMsg(r.status === 409 ? "Someone else changed this order — it has been reloaded." : r.error);
-    else { writeOrderDraft(order.id, null); setRefresh(new Set()); } // saved: nothing left to recover on this device
+    else { writeOrderDraft(order.id, null); setRefresh(new Set()); if (over.note) setMsg({ tone: "ok", text: over.note }); } // saved: nothing left to recover on this device
     await onChanged();
     setBusy(false);
   }
@@ -490,12 +496,18 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
             <option value="">Choose a supplier…</option>
             {(suppliers?.suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          {canAddSupplier && <Btn onClick={() => setAddingSupplier((v) => !v)} aria-expanded={addingSupplier}>Add supplier</Btn>}
+          {canAddSupplier && <Btn onClick={() => setAddingSupplier((v) => (v === "add" ? false : "add"))} aria-expanded={addingSupplier === "add"}>Add supplier</Btn>}
+          {canAddSupplier && chosenSupplier && <Btn kind="ghost" onClick={() => setAddingSupplier((v) => (v === "edit" ? false : "edit"))} aria-expanded={addingSupplier === "edit"}>Edit</Btn>}
         </div>
-        {addingSupplier && <AddSupplier api={api} onCancel={() => setAddingSupplier(false)}
-          onAdded={async (sup) => {
+        {addingSupplier && <SupplierForm key={addingSupplier} api={api} supplier={addingSupplier === "edit" ? chosenSupplier : null} onCancel={() => setAddingSupplier(false)}
+          onSaved={async (sup) => {
+            const editing = addingSupplier === "edit";
             setAddingSupplier(false); await onChanged(); setSupplierId(sup.id);
-            setSupplierNote(sup.existed ? `${sup.name} was already on file — it's now selected. Save order details to keep it on this order.` : `Added ${sup.name} — save order details to keep it on this order.`);
+            const what = editing ? `Updated ${sup.name}` : sup.existed ? `${sup.name} was already on file — it's now selected` : `Added ${sup.name}`;
+            const lost = sup.addressSaved === false ? " (the pickup address can be saved once migration 210 is applied)" : "";
+            // HUB 019: saved on this draft straight away when nothing else blocks saving — otherwise the note asks for Save
+            if (!invalidFields && !ws.dirty) await save({ supplierId: sup.id, note: `${what} — saved on this order.${lost}` });
+            else setSupplierNote(`${what} — save order details to keep it on this order.${lost}`);
           }} />}
         {supplierNote && <p className="mt-1 text-xs text-emerald-700" role="status" data-supplier-note="">{supplierNote}</p>}
         {!suppliers?.suppliers?.length && !canAddSupplier && <p className="mt-1 text-[11px] text-muted">No suppliers on file — ask the office to add one.</p>}
@@ -505,7 +517,8 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
         <div className="flex gap-2">
           {["delivery", "pickup"].map((m) => (
             <label key={m} className={`flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border text-sm ${delivery.method === m ? "border-primary bg-primary/5 text-primary" : "border-hairline"}`}>
-              <input type="radio" name={`method-${order.id}`} className="sr-only" checked={delivery.method === m} onChange={() => d("method")(m)} />{m === "delivery" ? "Deliver" : "Pick up"}
+              <input type="radio" name={`method-${order.id}`} className="sr-only" checked={delivery.method === m}
+                onChange={() => setDelivery((x) => ({ ...x, method: m, ...(m === "pickup" && !x.pickupBranch && chosenSupplier?.address ? { pickupBranch: chosenSupplier.address } : {}) }))} />{m === "delivery" ? "Deliver" : "Pick up"}
             </label>
           ))}
         </div>

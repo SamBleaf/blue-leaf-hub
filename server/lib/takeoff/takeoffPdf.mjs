@@ -16,7 +16,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
-export const RENDERER_VERSION = "takeoff-pdf@3"; // @3: generic purchase lines (timber/cladding/aluminium) + separate site appendix
+export const RENDERER_VERSION = "takeoff-pdf@4"; // @3: generic purchase lines + site appendix; @4: supplier address, Timber / Cladding parts
 const BRAND = "#006c9b";
 const INK = "#1A1A2E";
 const MUTED = "#64748b";
@@ -297,7 +297,7 @@ function draw(doc, snap, opts) {
   const d = snap.delivery || {};
   const third = (CW - 20) / 3;
   const y1 = col(M, third, "From", [c.name, c.abn ? `ABN ${c.abn}` : null, c.address, c.phone, c.email]);
-  const y2 = col(M + third + 10, third, "Supplier", [s.name || "Not chosen", s.contactName ? `Attn: ${s.contactName}` : null, s.phone, s.email]);
+  const y2 = col(M + third + 10, third, "Supplier", [s.name || "Not chosen", s.contactName ? `Attn: ${s.contactName}` : null, s.phone, s.email, s.address]);
   const deliveryLines = d.method === "pickup"
     ? ["Pickup", d.pickupBranch ? `Branch: ${d.pickupBranch}` : null]
     : d.method === "delivery" ? ["Deliver to:", d.address] : ["Delivery / pickup not set"];
