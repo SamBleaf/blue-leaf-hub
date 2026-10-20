@@ -24,6 +24,7 @@ import {
   SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
+import { BLUE_LEAF_JH_DEFAULTS } from "../../../shared/takeoff/companyDefaults.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
 
 // Binary fixtures are fetched from the Vite DEV server path (ui-review always runs on `vite`),
@@ -79,6 +80,13 @@ function seed() {
     appendixRequests: [],  // exportIds whose site appendix was opened (review evidence)
   };
   if (qs().get("takeoffSeed") === "mixed") seedMixed();
+  // ?takeoffDefaults=1 — the Axon 400 smooth company default exactly as migration 211 seeds it (HUB 014)
+  if (qs().get("takeoffDefaults") === "1") {
+    const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth"), D = BLUE_LEAF_JH_DEFAULTS;
+    state.presets.push({ id: "pre-axon400-default", name: "Axon 400 smooth — company default", revision: 1, isActive: true, updatedAt: "2026-10-20T00:00:00Z", methodKey: "sheet_layout", methodVersion: 2,
+      spec: { family: "cladding", layout: "sheet", orientation: "vertical", assemblyId: "axon-vertical", product: { id: g.id, manufacturer: g.manufacturer, name: g.name, widthMm: g.widthMm, thicknessMm: g.thicknessMm }, spareRate: D.spareRate, supplierName: null },
+      rules: { companyDefault: true, route: D.route, installConditions: { ...D.installConditions }, jointRows: { atMm: [], ...D.jointRule } }, profile: null, sourceReview: { status: "user_entered" } });
+  }
 }
 
 /** TC-R04 J5 mixed procurement (SYNTHETIC): every unit on one job, plus continuous flashing runs. */
@@ -154,10 +162,10 @@ const caps = (worker) => {
     const ordinary = qs().get("takeoffWorker") === "ordinary";
     // ?takeoffWorker=office — a Worker-app login linked to an Admin / Supervisor account (office staff on a phone)
     const office = qs().get("takeoffWorker") === "office";
-    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, addSuppliers: office, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
+    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, addSuppliers: office, saveCompanyDefaults: office, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
   }
   const role = reviewRole();
-  return { view: true, edit: true, export: true, editStandards: true, addSuppliers: role === "admin" || role === "supervisor", placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
+  return { view: true, edit: true, export: true, editStandards: true, addSuppliers: role === "admin" || role === "supervisor", saveCompanyDefaults: role === "admin" || role === "supervisor", placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
 };
 const fail = (status, error, code) => ({ __status: status, body: { ok: false, error, code } });
 
@@ -331,6 +339,20 @@ if (SANDBOX && typeof window !== "undefined") {
 function registerFakeTakeoffServer() {
 for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     const worker = base.includes("worker");
+    // HUB 014: a product's company cladding default (as the server: office logins only; only a company default is revised)
+    route("POST", `${base}/company-defaults`, ({ bodyJson }) => {
+      if (!caps(worker).saveCompanyDefaults) return fail(403, "Only office staff can change company defaults.", "FORBIDDEN");
+      const content = { ...(bodyJson?.content || {}), rules: { ...(bodyJson?.content?.rules || {}), companyDefault: true } };
+      if (!content.spec?.product?.id || content.methodKey === "flashing_runs") return fail(400, "Choose a catalogue product first.", "INVALID");
+      const ex = bodyJson.presetId ? state.presets.find((x) => x.id === bodyJson.presetId) : null;
+      if (bodyJson.presetId && (!ex || !ex.rules?.companyDefault || ex.spec?.product?.id !== content.spec.product.id)) return fail(400, "That isn't this product's company default.", "INVALID");
+      if (ex && Number(bodyJson.expectedRevision) !== ex.revision) return fail(409, "Changed by someone else.", "CONFLICT");
+      state.companyDefaultSaves = [...(state.companyDefaultSaves || []), { presetId: ex?.id || null, content }];
+      if (ex) { Object.assign(ex, content, { revision: ex.revision + 1, updatedAt: new Date().toISOString() }); return { ok: true, preset: { presetId: ex.id, revision: ex.revision } }; }
+      const id = `pre-default-${state.presets.length + 1}`;
+      state.presets.push({ id, revision: 1, isActive: true, updatedAt: new Date().toISOString(), ...content });
+      return { ok: true, preset: { presetId: id, revision: 1 } };
+    });
     // HUB 008: office staff add a supplier from the order (as the server: refused for everyone else; same name = reuse)
     route("POST", `${base}/suppliers`, ({ bodyJson }) => {
       if (!caps(worker).addSuppliers) return fail(403, "Only office staff can add suppliers.", "FORBIDDEN");
@@ -518,4 +540,7 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
 }
 
 export function _resetTakeoffFixture() { seed(); }
+// HUB 014 evidence: the company defaults, what was saved through "Save as company default", and the cladding materials
+if (typeof window !== "undefined") window.__takeoffReviewDefaults = () => ({ defaults: state.presets.filter((p) => p.rules?.companyDefault).map((p) => ({ id: p.id, revision: p.revision, rules: p.rules, spareRate: p.spec?.spareRate })),
+  saves: state.companyDefaultSaves || [], materials: state.materials.filter((m) => m.spec?.family === "cladding").map((m) => ({ id: m.id, name: m.name, spareRate: m.spec?.spareRate, rules: m.rules })) });
 if (typeof window !== "undefined") window.__takeoffReviewState = () => ({ revision: state.revision, commits: state.commitCount || 0, measurements: state.measurements.length, appendixRequests: [...state.appendixRequests] });

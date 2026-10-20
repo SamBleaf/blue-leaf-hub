@@ -1,5 +1,5 @@
 ---
-sop_version: 1.3
+sop_version: 1.4
 last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
@@ -63,7 +63,7 @@ You choose the cladding product and how it is installed, then enter each wall �
 1. Overview → **Materials** → **Add cladding**. The **Cladding** setup card opens ("… · this job only"). Changes save automatically — there is no Save button; **Undo** / **Redo** at the top.
 2. **Company products** (top of the card): if the company has saved one, tap **Use on this job** (SOP 20-12). Otherwise set it up here.
 3. **Material** — **Fibre cement**, **AAC (Walsc first)**, **Rendex foam**, **Timber cladding**, **Support battens** or **Accessories**.
-4. **Product** — search (name, SKU, size) and tap the product. A chosen product shows its facts: width, thickness, effective cover, SKUs and **Product sources** (e.g. H01, H02). "Product dimensions are published facts for quantity only."
+4. **Product** — search (name, SKU, size) and tap the product. **James Hardie products (Axon, Linea, Stria, Matrix) open with the Blue Leaf defaults** (HUB 014): one summary line, e.g. "Cavity · Wind N2 · Timber frame · On studs · ND nails · 10% spares · 2,450 / 2,750 / 3,000 mm · 10 mm H-flashing joints", and you can go straight to **Walls**. Anything the product's assembly asks that the default doesn't answer is listed as "Still needed: …" (e.g. Linea's edge zone). Wind class is a company default — check it against this site. Tap **Edit** for an exception on this job (e.g. a different wind class); the changed value is marked "(this job)" and the company default doesn't change. **Save as company default** (Admin / Supervisor, also in the Worker app when your login is linked to one of those accounts) asks first, then every new takeoff of that product uses your values; jobs already set up keep their own. A product with no default yet shows the full form and "No company default for this product yet."; an older material of a product that now has one offers **Use Blue Leaf defaults**. Steps 5–8 below are under **Edit** when the defaults are in use. Without a default, a chosen product shows its facts: width, thickness, effective cover, SKUs and **Product sources** (e.g. H01, H02). "Product dimensions are published facts for quantity only."
 5. **Lengths your supplier stocks** — untick any length the supplier doesn't have; the layout picks the shortest listed length that fits.
 6. **Orientation** (boards / courses) — **Horizontal courses** or **Vertical boards** (only those the product is listed for).
 7. **Installation assembly** — pick the researched assembly (badge **Candidate — not reviewed**, "0 reviewed rule rows · automatic fixings off"). If it needs one, choose **Fixing route (your choice — never assumed)**: **Direct fix** or **Cavity**. "Installation rules are **source-pending** …"
@@ -353,6 +353,14 @@ Next review date: 2027-04-14
 2. Expected: "N pieces cut from 8 sheets: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing 5 mm per saw cut."; the quantities show **SKU 404418 2,750 × 1,200 mm 1 sheet** for the five full-width upper pieces. The narrow upper piece at the end takes its own sheet, and the offcuts list explains it is not cut from the narrow strip's offcut (its factory edge would be on the wrong side).
 3. Tap an upper cell. Expected: **From** names the shared sheet. The offcuts list reads "Sheet N (strip X): W × L mm"; a ripped strip's offcut is the sheet width less the strip and the 5 mm saw cut.
 4. Engine (scripts/tests/takeoff-tc-hub016.test.mjs): 6,573 × 3,600 → 8 sheets (was 12, one per cell); a ripped strip's offcut is reused by a narrow strip needing its other factory edge; every occupied cell is covered exactly once; the plan is the same on every run.
+- [ ] Pass  [ ] Fail
+
+**TC-16 — Company cladding defaults (HUB 014, UI Review + API + engine)**
+1. UI Review `?reviewRole=admin&section=timber_cladding&takeoffDefaults=1`: **Add cladding** → **Axon 400 smooth** (two taps). Expected: "Cavity · Wind N2 · Timber frame · On studs · ND nails · 10% spares · 2,450 / 2,750 / 3,000 mm · 10 mm H-flashing joints"; no stock lengths, spares, Advanced or product facts on screen; no Needs row; **Walls** available. The saved material has spares 10, those installation conditions and the joint rule.
+2. **Edit** → Installation conditions → Wind class **N3** → **Hide details**. Expected: "Wind N3 (this job)", "changed for this job"; the company default is still N2 at revision 1 (nothing saved).
+3. **Save as company default** → OK. Expected: "Saved as the company default for Axon 400 smooth …"; the default is now revision 2 with N3; the joint rule is saved without any wall heights.
+4. Worker app as a leading hand: the defaults apply and **Edit** works, but there is no **Save as company default**. With `&takeoffWorker=office` (a login linked to an Admin account) the button shows. API: a leading hand is refused (403); the linked login saves; the route never overwrites a flashing standard or saves flashing content (400); a stale revision is refused; a job's own N3 and its link survive a reload while the default stays N2.
+5. Engine/migration (scripts/tests/takeoff-tc-hub014.test.mjs, takeoff-db 211): each product gets only the answers its own assembly asks (Stria: wind; Matrix: no route, no substrate, no sheet joint); product sizes, cover and SKUs are never overwritten; migration 211 seeds the 10 James Hardie cladding products once and skips a product that already has a default.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

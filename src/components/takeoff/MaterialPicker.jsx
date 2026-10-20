@@ -12,6 +12,7 @@
 // =============================================================================
 import { useEffect, useMemo, useState } from "react";
 import { computeWorkspace, describeFamilySpec, indicativeGirthMm, sourceReviewComplete } from "../../../shared/takeoff/index.js";
+import { isCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { ReviewBadge } from "./FamilySetup.jsx";
 import { AsyncState, Banner, Btn } from "./ui.jsx";
@@ -91,6 +92,7 @@ export default function MaterialPicker({ api, onUseStandard, onDrawNew, onPieces
 function jobCopy(p) {
   const rules = clone(p.rules) || {};
   delete rules.carried; // another job's "check these" flags never travel
+  delete rules.defaultsFrom; delete rules.companyDefault; // HUB 014: a job's company-default link never travels either
   return {
     id: newId(), fromPreset: { presetId: p.id, revision: p.revision },
     name: p.name, methodKey: p.methodKey, methodVersion: p.methodVersion,
@@ -134,14 +136,14 @@ export function FamilyPresetPicker({ api, families, onUse, onEdit, onNew, onReti
     const out = new Map(fams.map((f) => [f, []]));
     for (const p of presets || []) {
       const f = p?.spec?.family;
-      if (!out.has(f)) continue;
+      if (!out.has(f) || isCompanyDefault(p)) continue; // HUB 014: company defaults apply when the product is picked
       const line = describeFamilySpec(p.spec).line;
       if (t && !`${p.name} ${line} ${p.spec?.supplierName || ""}`.toLowerCase().includes(t)) continue;
       out.get(f).push({ p, line });
     }
     return [...out.entries()].filter(([, l]) => l.length);
   }, [presets, q, fams]);
-  const total = (presets || []).filter((p) => fams.includes(p?.spec?.family)).length;
+  const total = (presets || []).filter((p) => fams.includes(p?.spec?.family) && !isCompanyDefault(p)).length;
 
   return (
     <div className="space-y-3" data-family-presets={fams.join(",")}>

@@ -43,6 +43,8 @@ function makeApi(base, send, fetcher, extras = {}) {
     // HUB 008: office staff add a supplier from the order — Hub and Worker app (the server checks who may)
     createSupplier: (body) => post("/suppliers", body),
     updateSupplier: (id, body) => patch(`/suppliers/${id}`, body),   // HUB 019
+    // HUB 014: save a product's company cladding default (office logins on the Hub and in the Worker app)
+    saveCompanyDefault: (body) => post("/company-defaults", body),
     // HUB 013 / HUB 020: open (and for Flashings, bring up to date) the section's working draft; discard a draft
     openOrder: (wsId, body) => post(`/workspaces/${wsId}/orders/open`, body),
     discardOrder: (orderId, body) => post(`/orders/${orderId}/discard`, body),

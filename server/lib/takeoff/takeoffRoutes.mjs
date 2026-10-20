@@ -20,7 +20,7 @@ import {
 } from "./takeoffAccess.mjs";
 import {
   PLAN_DOC_TYPES, RENDER_LIMIT_BYTES, listWorkspaces, createWorkspace, getWorkspaceRow, loadSnapshotFresh, commitWorkspace,
-  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier, updateSupplier, openWorkingOrder, discardDraft,
+  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier, updateSupplier, openWorkingOrder, discardDraft, saveCompanyDefault,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
 import { renderSiteAppendixPdf } from "./takeoffPdf.mjs";
@@ -214,6 +214,14 @@ function mount(app, P, adapter) {
       : { id: s.id, name: s.name }));
     const hint = suppliers.find((s) => s.name?.toLowerCase().startsWith(DEFAULT_SUPPLIER_NAME_HINT.toLowerCase()));
     return ok(res, { suppliers, defaultSupplierId: hint?.id || null });
+  }));
+
+  // HUB 014: a product's company cladding default — office staff on the Hub and in the Worker app (checked in the service)
+  app.post(`${P}/company-defaults`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await adapter.context(req, sb, null);
+    requireView(ctx);
+    if (ctx.caps.isPreview || req.workerPreview) throw new TakeoffHttpError(403, "Read-only preview — you can't change company defaults.", "PREVIEW");
+    return ok(res, { preset: await saveCompanyDefault(sb, ctx, req.body || {}) });
   }));
 
   // HUB 008: office staff add a supplier without leaving the order — on the Hub AND in the Worker app (a login linked

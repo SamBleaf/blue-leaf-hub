@@ -503,6 +503,7 @@ function content(d) {
   delete rules.jointRowsDraft; // an unfinished entry is never company data
   delete rules.jointsDraft;
   delete rules.fixingDraft;
+  delete rules.defaultsFrom; delete rules.companyDefault; // HUB 014: a company default is saved only from the cladding card
   dropJobOnly(rules);
   if (rules.review) for (const g of Object.keys(rules.review)) if (!rules.review[g]) delete rules.review[g];
   const pr = rules.review?.product;

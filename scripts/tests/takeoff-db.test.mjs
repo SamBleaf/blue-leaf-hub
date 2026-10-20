@@ -355,6 +355,26 @@ await t("209 (HUB 005): open flashings on a 100 mm step move to 300 with history
   assert.equal((await one("SELECT count(*)::int AS n FROM takeoff_material_rule_history WHERE job_material_id = ANY($1)", [[A, E]])).n, 2);
 });
 
+await t("211 (HUB 014): seeds one company default per James Hardie cladding product; a product with a default is skipped; re-run adds nothing", async () => {
+  const mig = readFileSync(new URL("../../supabase/migrations/211_takeoff_company_cladding_defaults.sql", import.meta.url), "utf8");
+  const defaults = "SELECT r.spec->'product'->>'id' AS pid, r.rules FROM takeoff_material_presets p JOIN takeoff_material_preset_revisions r ON r.preset_id=p.id AND r.revision=p.current_revision WHERE p.is_active AND r.rules->>'companyDefault'='true'";
+  // the office already saved its own Axon 400 default in the app → 211 leaves it alone
+  const own = (await one("SELECT public.takeoff_save_preset(NULL, 0, $1::jsonb, $2, NULL) AS r", [JSON.stringify({ name: "Axon 400 smooth — company default", methodKey: "sheet_layout", methodVersion: 2,
+    spec: { family: "cladding", layout: "sheet", product: { id: "James Hardie|Axon 400 smooth|1200|9" }, spareRate: 15 }, rules: { companyDefault: true, route: "direct" } }), user])).r;
+  const before = (await c.query(defaults)).rows.length;
+  await c.query(mig);
+  const rows = (await c.query(defaults)).rows;
+  assert.equal(rows.length - before, 9, "10 James Hardie products, one already has a default");
+  const axon = rows.filter((x) => x.pid === "James Hardie|Axon 400 smooth|1200|9");
+  assert.equal(axon.length, 1); assert.equal(axon[0].rules.route, "direct");
+  const linea = rows.find((x) => x.pid === "James Hardie|Linea|180|16");
+  assert.deepEqual(linea.rules.installConditions, { wind: "N2", substrate: "Timber frame", "on-or-off-stud": "on-stud", "fixing-family": "ND nails" });
+  assert.equal(rows.find((x) => x.pid === "James Hardie|Axon 133 smooth|1200|9").rules.jointRows.detailRef, "H-flashing");
+  await c.query(mig);
+  assert.equal((await c.query(defaults)).rows.length, rows.length, "re-run is a no-op");
+  assert.equal((await one("SELECT count(*)::int AS n FROM takeoff_material_preset_revisions WHERE preset_id=$1", [own.presetId])).n, 1);
+});
+
 await db.close();
 console.log(`takeoff-db: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

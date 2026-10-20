@@ -641,6 +641,35 @@ export async function savePreset(sb, ctx, body) {
   return data;
 }
 
+/**
+ * HUB 014: save a product's company cladding default — a company preset marked rules.companyDefault, keyed by the
+ * catalogue product. Office staff on the Hub, and Worker-app logins linked to an Admin / Supervisor account. This
+ * route can only create or revise a company default of the same product; flashing standards stay staff-only.
+ */
+export async function saveCompanyDefault(sb, ctx, body) {
+  if (!ctx.caps.saveCompanyDefaults) throw new TakeoffHttpError(403, "Only office staff can change company defaults.", "FORBIDDEN");
+  must(body?.content && typeof body.content === "object", "Nothing to save.");
+  const content = { ...cleanMaterialContent(body.content), sourceReview: { status: "user_entered" } };
+  const productId = content.spec?.product?.id;
+  must(content.methodKey !== "flashing_runs" && content.methodKey !== "finished_piece_count" && productId, "Choose a catalogue product first.");
+  content.rules = { ...content.rules, companyDefault: true };
+  delete content.rules.defaultsFrom;
+  const presetId = body.presetId || null;
+  if (presetId) {
+    must(isUuid(presetId), "Invalid company default.");
+    const { data: p, error } = await sb.from("takeoff_material_presets").select("*").eq("id", presetId).maybeSingle();
+    if (error) throw error;
+    const rev = p ? (await q(sb.from("takeoff_material_preset_revisions").select("*").eq("preset_id", presetId).eq("revision", p.current_revision)))[0] : null;
+    must(rev && rev.rules?.companyDefault === true && rev.spec?.product?.id === productId, "That isn't this product's company default.");
+  }
+  const { data, error } = await sb.rpc("takeoff_save_preset", {
+    p_preset_id: presetId, p_expected_revision: presetId ? Number(body.expectedRevision) : 0, p_content: content,
+    p_user_id: ctx.actor.userId || ctx.emp?.user_id || null, p_active: null,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // ── Orders ────────────────────────────────────────────────────────────────────
 const mapOrder = (r) => ({
   id: r.id, workspaceId: r.workspace_id, orderRef: r.order_ref, supplierId: r.supplier_id, delivery: withoutBasis(r.delivery), notes: r.notes,

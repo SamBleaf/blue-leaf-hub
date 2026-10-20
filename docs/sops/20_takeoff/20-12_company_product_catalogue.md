@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-14
+sop_version: 1.1
+last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -47,6 +47,8 @@ Without edit-standards permission the editor is read-only: "Only office staff ca
 Company products live in one catalogue, grouped by kind (Timber, Fibre cement cladding, AAC panels, Rendex foam, Timber cladding, Support battens, Aluminium profiles, Accessories). Each product uses one of the app's **existing calculation methods** — there are **no formula fields**; a new kind of calculation is a development change. The editor has three tabs — **Product**, **Ordering**, **Installation** — and each has its own **source and review** state (Candidate → Transcription checked → Reviewed, with the source, who checked it and the date). When a job uses a product it gets an **independent copy** of that exact version: editing the job copy never changes the company product or another job, and a new company version never changes a job until someone reviews the differences on that job and taps **Update**.
 
 ---
+
+**Company defaults are separate (HUB 014).** A *company default* is not a company product: it holds only Blue Leaf's routine choices for one catalogue product (fixing route, wind class, substrate, on/off studs, fastener, spares, stocked lengths, supplier, the sheet joint rule). It is applied automatically when that product is picked on the cladding card and is never listed under **Company products** here. It is saved only from the cladding card with **Save as company default** (Admin / Supervisor, and Worker-app logins linked to those accounts) — see SOP 20-09 §5A. Migration 211 seeds the James Hardie defaults (Axon, Linea, Stria, Matrix) with Sam's reviewed values.
 
 ## 4. Before you start
 

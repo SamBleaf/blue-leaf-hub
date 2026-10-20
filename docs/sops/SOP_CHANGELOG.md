@@ -4,6 +4,7 @@ Track every SOP change here. One row per change.
 
 ---
 
+| 2026-10-20 | Takeoffs — 20-09 v1.4 + 20-12: company cladding defaults per product — James Hardie products open with the Blue Leaf defaults as one summary with Edit (this job only); Save as company default is explicit and office-only (Hub + linked Worker-app logins); migration 211 seeds the defaults; TC-16 (HUB 014) | docs/sops/20_takeoff/20-09_cladding_walls_and_elevation.md, docs/sops/20_takeoff/20-12_company_product_catalogue.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-09 v1.3: sheets shared across a wall — pieces cut across the length only so the long tongue-and-groove edges stay, short pieces cut end to end from one sheet with a 5 mm saw cut, ripped-strip offcuts reused only on the matching factory edge (HUB 016) | docs/sops/20_takeoff/20-09_cladding_walls_and_elevation.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-09: automatic horizontal joints from a joint rule (Blue Leaf: 10 mm gap + H-flashing), one-tap from the wall problem; per-wall settings now kept by the server (HUB 015) | docs/sops/20_takeoff/20-09_cladding_walls_and_elevation.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-09: gable values save one at a time (a missing apex position is a draft, not a refused save) (HUB 017) | docs/sops/20_takeoff/20-09_cladding_walls_and_elevation.md | Done (untested) | Claude |

@@ -380,3 +380,88 @@ test("HUB 019: add the flashing supplier with its pickup address from the order 
   await page.getByRole("button", { name: "New order" }).click();   // Timber and cladding: no draft yet
   await expect(page.locator("#ord-supplier option").filter({ hasText: /^Stratco Wingfield$/ })).toHaveCount(1);
 });
+
+// ── HUB 014: company cladding defaults ────────────────────────────────────────────────────────────────────────
+const AXON400 = "James Hardie|Axon 400 smooth|1200|9";
+const defaultsState = (page) => page.evaluate(() => window.__takeoffReviewDefaults());
+async function addAxon400(page) {
+  await page.locator('[data-material-group="cladding"]').getByRole("button", { name: "Add cladding" }).click();
+  await expect(page.locator('[data-setup="cladding"]')).toBeVisible();
+  const change = page.getByRole("button", { name: "Change product" });
+  if (await change.isVisible().catch(() => false)) await change.click();
+  await page.locator(`[data-product-option="${AXON400}"]`).click();
+  await expect(page.locator(`[data-chosen-product="${AXON400}"]`)).toBeVisible();
+}
+const SUMMARY = "Cavity · Wind N2 · Timber frame · On studs · ND nails · 10% spares · 2,450 / 2,750 / 3,000 mm · 10 mm H-flashing joints";
+
+test("HUB 014: adding Axon 400 smooth opens ready to measure with the Blue Leaf defaults; Edit changes this job only; Save as company default is explicit", async ({ page }) => {
+  await open(page, { section: "timber_cladding", seed: "&takeoffDefaults=1" });
+  await addAxon400(page);
+  const sum = page.locator('[data-company-defaults=""]');
+  await expect(sum.locator("[data-default-values]")).toHaveText(SUMMARY);
+  await expect(sum).toContainText("check this site's wind classification");
+  // routine setup is folded away; the quantity preview and the Walls step stay
+  for (const sel of ["[data-stock-lengths]", "[data-advanced]", "[data-product-facts]"]) await expect(page.locator(sel)).toHaveCount(0);
+  await expect(page.getByLabel("Spares")).toHaveCount(0);
+  await expect(page.locator("[data-needs]")).toHaveCount(0);   // nothing left to answer before measuring
+  await expect(page.getByRole("button", { name: "Walls" })).toBeVisible();
+  await expect.poll(async () => (await defaultsState(page)).materials.find((m) => m.name === "Axon 400 smooth")?.rules?.defaultsFrom?.presetId).toBe("pre-axon400-default");
+  let st = await defaultsState(page);
+  const mine = st.materials.find((m) => m.name === "Axon 400 smooth");
+  expect(mine.spareRate).toBe(10);
+  expect(mine.rules.installConditions).toMatchObject({ wind: "N2", substrate: "Timber frame", "on-or-off-stud": "on-stud", "fixing-family": "ND nails", "direct-or-cavity": "cavity" });
+  expect(mine.rules.jointRows).toEqual({ atMm: [], gapMm: 10, detailRef: "H-flashing" });
+  // Edit: the full form for this job's exception — wind N3 on this site
+  await sum.getByRole("button", { name: "Edit" }).click();
+  await expect(page.locator("[data-stock-lengths]")).toBeVisible();
+  await page.locator("[data-install-conditions] summary").click();
+  await expect(page.locator("[data-install-conditions]")).toContainText("Filled from the Blue Leaf company default");
+  await page.getByLabel("Wind class").selectOption("N3");
+  await sum.getByRole("button", { name: "Hide details" }).click();
+  await expect(sum.locator('[data-default="wind"]')).toHaveText(" · Wind N3 (this job)");
+  await expect(sum).toContainText("changed for this job");
+  st = await defaultsState(page);
+  expect(st.saves).toHaveLength(0);
+  expect(st.defaults[0]).toMatchObject({ revision: 1, rules: { installConditions: { wind: "N2" } } });
+  // only an explicit Save (with a confirm) changes the company default
+  page.once("dialog", (d) => d.accept());
+  await sum.getByRole("button", { name: "Save as company default" }).click();
+  await expect(page.getByText(/Saved as the company default for Axon 400 smooth/)).toBeVisible();
+  st = await defaultsState(page);
+  expect(st.defaults[0]).toMatchObject({ revision: 2, rules: { companyDefault: true, installConditions: { wind: "N3" } } });
+  expect(st.defaults[0].rules.jointRows).toEqual({ atMm: [], gapMm: 10, detailRef: "H-flashing" });
+  await expect(sum).not.toContainText("this job");
+});
+
+test("HUB 014: a leading hand gets the defaults and can Edit for the job, but has no Save as company default; the Worker-app office login has it", async ({ page }) => {
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=timber_cladding&takeoffDefaults=1");
+  await ready(page);
+  await addAxon400(page);
+  const sum = page.locator('[data-company-defaults=""]');
+  await expect(sum.locator("[data-default-values]")).toHaveText(SUMMARY);
+  await sum.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("button", { name: "Save as company default" })).toHaveCount(0);
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=timber_cladding&takeoffDefaults=1&takeoffWorker=office");
+  await ready(page);
+  await addAxon400(page);
+  await page.locator('[data-company-defaults=""]').getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("button", { name: "Save as company default" })).toBeVisible();
+});
+
+test("HUB 014: with no default yet the office saves the first one from the card; the next Axon 400 opens with it", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  await addAxon400(page);
+  const off = page.locator('[data-company-defaults="off"]');
+  await expect(off).toContainText("No company default for this product yet.");
+  await expect(page.locator("[data-stock-lengths]")).toBeVisible();   // no default → the full form, as before
+  await page.getByLabel("Spares").fill("10");
+  await page.getByLabel("Spares").press("Enter");
+  page.once("dialog", (d) => d.accept());
+  await off.getByRole("button", { name: "Save as company default" }).click();
+  await expect(page.getByText(/Saved as the company default for Axon 400 smooth/)).toBeVisible();
+  await expect(page.locator('[data-company-defaults=""]')).toContainText("10% spares");
+  const st = await defaultsState(page);
+  expect(st.saves).toHaveLength(1);
+  expect(st.defaults).toHaveLength(1);
+  expect(st.saves[0].content.rules).not.toHaveProperty("defaultsFrom");
+});

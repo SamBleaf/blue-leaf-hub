@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
+import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { describeChanges, partial } from "./changeset.js";
@@ -405,6 +406,20 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     else setNotice({ tone: "error", text: r.error });
   }
 
+  /** HUB 014: save this material's routine choices as its product's company default — only when asked, after a confirm. */
+  async function saveCompanyDefault(m) {
+    const label = m.spec?.product?.name || m.name;
+    if (!window.confirm(`Save these as the Blue Leaf default for ${label}? New takeoffs will use them; jobs already set up keep their own.`)) return null;
+    const existing = findCompanyDefault(presets, m.spec);
+    const content = companyDefaultContent(m);
+    const r = await api.saveCompanyDefault(existing ? { presetId: existing.id, expectedRevision: existing.revision, content } : { content });
+    if (!r.ok) return { tone: "error", text: r.status === 409 ? "The company default was changed by someone else — close and reopen, then save again." : r.error };
+    const x = await api.presets(); if (x.ok) setPresets(x.data.presets || []);
+    const cur = currentMat(m);
+    upsertMaterial({ ...cur, rules: { ...(cur.rules || {}), defaultsFrom: { presetId: r.data.preset?.presetId || existing?.id || null, revision: r.data.preset?.revision ?? null, productId: m.spec.product.id } } });
+    return { tone: "ok", text: `Saved as the company default for ${label}. New takeoffs will use it; jobs already set up keep their own.` };
+  }
+
   const leaveEditor = () => { setEditing(null); setWin(setupFrom || "overview"); setSetupFrom(null); setTimeout(refreshDrafts, 50); };
   /**
    * HUB 010: an order line's problem opens its fix — the flashing's details at the missing field, its drawing, the
@@ -532,6 +547,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
             </div>
           )}
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
+            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : {})}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
         </div>
       </FocusedWindow>

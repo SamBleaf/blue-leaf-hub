@@ -913,6 +913,49 @@ await t("HUB 008: office staff add a supplier from the order on the Hub AND in t
   } finally { await q("UPDATE employees SET user_id=NULL WHERE id=$1", [E.lh]); }
 });
 
+await t("HUB 014: Save as company default — office staff on the Hub and linked Worker-app logins; never a flashing standard; a job's own choice survives reload", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { applyCompanyDefault, companyDefaultContent } = await import("../../shared/takeoff/companyDefaults.js");
+  const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth");
+  const mat = { id: id(), name: "Axon 400 smooth", methodKey: "sheet_layout", methodVersion: 2, spec: { ...specFromGroup(g), assemblyId: "axon-vertical", spareRate: 10 },
+    rules: { route: "cavity", installConditions: { wind: "N2", substrate: "Timber frame", "on-or-off-stud": "on-stud", "fixing-family": "ND nails", "direct-or-cavity": "cavity" } } };
+  const first = await SP("/company-defaults", { content: companyDefaultContent(mat) });
+  assert.equal(first.status, 200, JSON.stringify(first.data)); assert.equal(first.data.preset.revision, 1);
+  const pid = first.data.preset.presetId;
+  const listed = (await S("/presets")).data.presets.find((p) => p.id === pid);
+  assert.equal(listed.rules.companyDefault, true); assert.equal(listed.rules.installConditions.wind, "N2"); assert.equal(listed.spec.spareRate, 10);
+  // revise (CAS on the revision); a stale revision is refused
+  assert.equal((await SP("/company-defaults", { presetId: pid, expectedRevision: 1, content: companyDefaultContent({ ...mat, spec: { ...mat.spec, spareRate: 12 } }) }, { as: "sup" })).data.preset.revision, 2);
+  assert.notEqual((await SP("/company-defaults", { presetId: pid, expectedRevision: 1, content: companyDefaultContent(mat) })).status, 200);
+  // never a way to overwrite a flashing standard or save flashing content
+  const std = (await S("/presets")).data.presets.find((p) => !p.rules?.companyDefault);
+  if (std) assert.equal((await SP("/company-defaults", { presetId: std.id, expectedRevision: std.revision, content: companyDefaultContent(mat) })).status, 400);
+  assert.equal((await SP("/company-defaults", { content: { name: "F", methodKey: "flashing_runs", methodVersion: 1, spec, rules: {}, profile } })).status, 400);
+  assert.equal((await SP("/company-defaults", { content: companyDefaultContent(mat) }, { as: "emp" })).status, 403);
+  // Worker app: a leading hand is refused; the same login linked to an Admin account saves (Sam on his phone)
+  assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.saveCompanyDefaults, false);
+  assert.equal((await WP("/company-defaults", { presetId: pid, expectedRevision: 2, content: companyDefaultContent(mat) }, { worker: "wt-lh" })).status, 403);
+  await q("UPDATE employees SET user_id=$1 WHERE id=$2", [U.admin, E.lh]);
+  try {
+    assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.saveCompanyDefaults, true);
+    const w = await WP("/company-defaults", { presetId: pid, expectedRevision: 2, content: companyDefaultContent(mat) }, { worker: "wt-lh" });
+    assert.equal(w.status, 200, JSON.stringify(w.data)); assert.equal(w.data.preset.revision, 3);
+    assert.equal((await WP("/company-defaults", { content: companyDefaultContent(mat) }, { as: "admin", preview: E.lh })).status, 403);
+  } finally { await q("UPDATE employees SET user_id=NULL WHERE id=$1", [E.lh]); }
+  // a job changes wind to N3 for this site: reload keeps N3 and the link; the company default stays N2
+  const preset = (await S("/presets")).data.presets.find((p) => p.id === pid);
+  const w1 = id();
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w1, name: "HUB014" });
+  const job = applyCompanyDefault(mat, preset);
+  job.rules.installConditions.wind = "N3";
+  const r = await SP(`/workspaces/${w1}/commit`, { expectedRevision: 1, changes: { materials: { upsert: [job] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const back = (await S(`/workspaces/${w1}`)).data.snapshot.materials.find((m) => m.id === job.id);
+  assert.equal(back.rules.installConditions.wind, "N3");
+  assert.deepEqual(back.rules.defaultsFrom, { presetId: pid, revision: 3, productId: g.id });
+  assert.equal((await S("/presets")).data.presets.find((p) => p.id === pid).rules.installConditions.wind, "N2");
+});
+
 await t("HUB 013 / HUB 020: Review & export opens ONE flashing draft in step with the takeoff; an old 34-piece draft comes up to 79; reopening writes nothing; discard; placed is locked", async () => {
   const w = id(); const M = { pb: id(), ax: id(), co: id(), he: id() };
   await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB013" });

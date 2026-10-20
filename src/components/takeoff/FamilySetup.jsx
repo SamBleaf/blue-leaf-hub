@@ -24,6 +24,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useR
 import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, familyProblems, methodFor, normaliseFamilySpec } from "../../../shared/takeoff/index.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
+import { applyCompanyDefault, defaultSummary, findCompanyDefault, isDefaulted, withoutDefaultsFrom } from "../../../shared/takeoff/companyDefaults.js";
 import { Banner, Btn, TextField } from "./ui.jsx";
 
 const PURPOSE_LABEL = { rafters: "Rafters", joists: "Joists", studs: "Studs", plates: "Plates", noggins: "Noggins", battens: "Battens", trim: "Trim", other: "Other member" };
@@ -1254,7 +1255,9 @@ function InstallConditions({ assembly, spec, rules, onSet }) {
         Installation conditions —&nbsp;<b className={missing.length ? "text-amber-800" : "text-emerald-700"}>{missing.length ? `${missing.length} still needed` : "All entered"}</b>
       </summary>
       <div className="space-y-2 pb-2">
-        <p className="text-[11px] text-muted">This job&apos;s own site and drawing facts — never inferred. They pick the guide&apos;s rule row; no row is reviewed yet, so installation stays source-pending.</p>
+        <p className="text-[11px] text-muted">{rules?.defaultsFrom
+          ? <>Filled from the Blue Leaf company default (HUB 014) — change any that differ on this site. No guide row is reviewed yet, so installation stays source-pending.</>
+          : <>This job&apos;s own site and drawing facts — never inferred. They pick the guide&apos;s rule row; no row is reviewed yet, so installation stays source-pending.</>}</p>
         {elsewhere.length > 0 && <p className="text-[12px] text-amber-900">Also needed above: {elsewhere.map((k) => conditionLabel(k).toLowerCase()).join(", ")}.</p>}
         {own.map((k) => {
           const f = CONDITION_FIELDS[k] || {};
@@ -1951,7 +1954,7 @@ function BattenFields({ d, result, lines }) {
   );
 }
 
-export function CladdingSetup({ value, onChange, result, lines }) {
+export function CladdingSetup({ value, onChange, result, lines, presets = null, onSaveCompanyDefault = null }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
   const pf = usePendingFields();
@@ -1961,7 +1964,7 @@ export function CladdingSetup({ value, onChange, result, lines }) {
     if (f === fam) return;
     d.update((c) => {
       const autoName = DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec);
-      return carry(c, { ...c, name: autoName ? FAMILY_LABEL[f] : c.name, spec: freshSpec(f, c.spec) }, "family");
+      return withoutDefaultsFrom(carry(c, { ...c, name: autoName ? FAMILY_LABEL[f] : c.name, spec: freshSpec(f, c.spec) }, "family"));
     });
   };
   return (
@@ -1970,27 +1973,35 @@ export function CladdingSetup({ value, onChange, result, lines }) {
       <UndoBar d={d} pending={pf.pending} />
       <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => d.patch({ name: t })} />
       <Chips label="Material" name="family" value={fam} options={CLADDING_FAMILIES} onChange={chooseFamily} />
-      {fam === "batten" ? <BattenFields d={d} result={result} lines={lines} /> : fam === "accessory" ? <AccessoryFields d={d} result={result} lines={lines} /> : <CladdingFields d={d} result={result} lines={lines} />}
+      {fam === "batten" ? <BattenFields d={d} result={result} lines={lines} /> : fam === "accessory" ? <AccessoryFields d={d} result={result} lines={lines} /> : <CladdingFields d={d} result={result} lines={lines} presets={presets} onSaveCompanyDefault={onSaveCompanyDefault} />}
     </div>
     </PendingContext.Provider>
   );
 }
 
-function CladdingFields({ d, result, lines }) {
+function CladdingFields({ d, result, lines, presets = null, onSaveCompanyDefault = null }) {
   const cur = d.cur, s = cur.spec || {}, r = cur.rules || {};
   const fam = s.family;
   const mk = methodFor(s)?.key;
   const g = groupOf(s);
+  // HUB 014: a product picked with a company default opens as one summary; Edit shows the full form for exceptions (this job only)
+  const companyDefault = g ? findCompanyDefault(presets, s) : null;
+  const defaulted = !!g && isDefaulted(cur);
+  const [editOpen, setEditOpen] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const full = !defaulted || editOpen;
   const setRule = (k, v) => d.update((c) => ({ ...c, rules: { ...withoutCarried(c.rules, k), [k]: v } }));
   const setP = (p) => d.update((c) => ({ ...c, spec: { ...c.spec, product: { ...(c.spec.product || {}), ...p } } }));
-  const pick = (o) => d.update((c) => {
+  const pick = (o) => { setEditOpen(false); d.update((c) => {
     const base = specFromGroup(o.group, { sku: o.sku || undefined });
     const keep = { supplierName: c.spec.supplierName ?? null, spareRate: c.spec.spareRate ?? 0, notes: c.spec.notes ?? null };
     const spec = { ...keep, ...base };
     spec.assemblyId = reselectAssembly(spec);
     const autoName = DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec);
-    return carry(c, { ...c, name: autoName ? o.title : c.name, spec }, "product");
-  });
+    const moved = carry(c, { ...c, name: autoName ? o.title : c.name, spec }, "product");
+    const def = findCompanyDefault(presets, moved.spec);
+    return def ? applyCompanyDefault(moved, def) : withoutDefaultsFrom(moved);
+  }); };
   const setOrientation = (o) => d.update((c) => {
     const spec = { ...c.spec, orientation: o };
     spec.assemblyId = reselectAssembly(spec);
@@ -2026,8 +2037,16 @@ function CladdingFields({ d, result, lines }) {
     <div className="space-y-3">
       {["cladding", "aac"].includes(fam) && <ProductPicker key={fam} family={fam} spec={s} onPick={pick} />}
       <CarriedFlags cur={cur} update={d.update} />
+      {g && (defaulted || companyDefault || onSaveCompanyDefault) && (
+        <CompanyDefaultSummary cur={cur} preset={companyDefault} defaulted={defaulted} editOpen={editOpen} onEdit={() => setEditOpen((v) => !v)}
+          onUse={companyDefault && !defaulted ? () => { setEditOpen(false); d.update((c) => applyCompanyDefault(c, companyDefault)); } : null}
+          onSave={onSaveCompanyDefault ? async () => { setSaveMsg(null); const m = await onSaveCompanyDefault(cur); if (m) { setSaveMsg(m); if (m.tone === "ok") setEditOpen(false); } } : null} />
+      )}
+      {saveMsg && (
+        <div data-default-msg={saveMsg.tone}><Banner tone={saveMsg.tone === "ok" ? "ok" : "error"} action={<Btn kind="ghost" onClick={() => setSaveMsg(null)}>Dismiss</Btn>}>{saveMsg.text}</Banner></div>
+      )}
       {fam === "aac" && g && <p className="text-[11px] text-muted" data-aac-system="">One system per material: <b>{productLabel(s)}</b> ({fmt(g.thicknessMm)} mm) only — brands and wall systems are never mixed. Add another material for a second system.</p>}
-      {g && (
+      {g && full && (
         <div className="rounded-lg border border-hairline bg-white px-3 py-2 text-[12px] text-ink" data-product-facts="">
           <p>{fmt(s.product?.widthMm)} wide · {fmt(s.product?.thicknessMm)} thick{isNum(s.product?.effectiveCoverMm) ? <> · effective cover <b>{fmt(s.product.effectiveCoverMm)} mm</b></> : null}
             {(() => { const skus = (s.product?.skus || []).map((k) => k.sku).filter(Boolean); return skus.length ? ` · SKU ${skus.join(", ")}` : " · no published SKU — use the supplier's code"; })()}</p>
@@ -2043,8 +2062,8 @@ function CladdingFields({ d, result, lines }) {
           <div className="mt-1"><SourceRefs refs={s.product?.sourceRefs} label="Product sources" /></div>
         </div>
       )}
-      {g && <StockLengths spec={s} onChange={setP} />}
-      {mk === "panel_grid" && (
+      {g && full && <StockLengths spec={s} onChange={setP} />}
+      {mk === "panel_grid" && (full || !isNum(s.product?.gapMm)) && (
         <NumberField label="Expressed joint gap" value={isNum(s.product?.gapMm) ? s.product.gapMm : null} min={0} max={50}
           onCommit={(n) => d.update((c) => ({ ...c, rules: withoutCarried(c.rules, "productGapMm"), spec: { ...c.spec, product: { ...c.spec.product, gapMm: n } } }))}
           help={s.product?.gapMm === 10 && (s.product?.sourceRefs || []).includes("H09") ? "10 mm — sourced assembly parameter (H10), not added to the panel size." : "Entered — from the selected assembly detail."} />
@@ -2097,13 +2116,15 @@ function CladdingFields({ d, result, lines }) {
       {mk === "panel_grid" && <PanelOrientation spec={s} value={r.panelOrientation} onChange={(v) => setRule("panelOrientation", v)} />}
       {mk === "course_layout" && <BoardJointsField spec={s} value={r.joints || null} draft={r.jointsDraft || null} needed={(result?.problems || []).some((p) => p.code === "needs_layout")}
         onApply={(v) => setJoints(v, null)} onDraft={(v) => setJoints(undefined, v)} onClear={() => setJoints(null, null)} />}
-      {(fam !== "timber-cladding" || s.product?.name) && <AssemblyPicker spec={s} rules={r} onSelect={(id) => d.update((c) => carry(c, { ...c, spec: { ...c.spec, assemblyId: id } }, "assembly"))} onRoute={(v) => setRule("route", v)} onCondition={setCondition} />}
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => d.patch({ spec: { spareRate: n } })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : SPARES_HELP} />
-        {fam !== "timber-cladding" && <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => d.patch({ spec: { supplierName: t } })} />}
-      </div>
-      <AvailabilityChips value={s.availability} onChange={(v) => d.patch({ spec: { availability: v } })} />
-      {["sheet_layout", "panel_grid", "aac_panel_layout"].includes(mk) && (
+      {full && (fam !== "timber-cladding" || s.product?.name) && <AssemblyPicker spec={s} rules={r} onSelect={(id) => d.update((c) => carry(c, { ...c, spec: { ...c.spec, assemblyId: id } }, "assembly"))} onRoute={(v) => setRule("route", v)} onCondition={setCondition} />}
+      {full && (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Spares" unit="%" value={s.spareRate ?? 0} min={0} max={100} onCommit={(n) => d.patch({ spec: { spareRate: n } })} help={mk === "area_to_linear" ? "Added on top of the LM estimate. 0 doesn't mean no real waste." : SPARES_HELP} />
+          {fam !== "timber-cladding" && <CommitText label="Supplier" value={s.supplierName} onCommit={(t) => d.patch({ spec: { supplierName: t } })} />}
+        </div>
+      )}
+      {full && <AvailabilityChips value={s.availability} onChange={(v) => d.patch({ spec: { availability: v } })} />}
+      {full && ["sheet_layout", "panel_grid", "aac_panel_layout"].includes(mk) && (
         <details className="rounded-lg border border-hairline px-2 py-1" data-advanced="">
           <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Advanced (joint rows, allowances, minimum strip)</summary>
           <div className="space-y-2 pb-2">
@@ -2120,9 +2141,42 @@ function CladdingFields({ d, result, lines }) {
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
-      <ComponentRows spec={s} rules={r} />
-      <ReviewSummary rules={r} />
+      {full && <ComponentRows spec={s} rules={r} />}
+      {full && <ReviewSummary rules={r} />}
       <SetupStatus cur={cur} result={result} needs={needs} />
+    </div>
+  );
+}
+
+/**
+ * HUB 014: the company default as one line — Cavity · Wind N2 · Timber frame · On studs · ND nails · 10% spares … —
+ * with Edit for this job's exceptions. "Save as company default" is explicit and office-only (the server checks too).
+ */
+function CompanyDefaultSummary({ cur, preset, defaulted, editOpen, onEdit, onUse, onSave }) {
+  const { rows, missing } = defaultSummary(cur, preset);
+  const changed = rows.some((x) => x.differs);
+  if (!defaulted) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline bg-white px-3 py-2 text-[12px] text-ink" data-company-defaults="off">
+        <p className="min-w-0 flex-1">{onUse ? "This product has a Blue Leaf company default." : "No company default for this product yet."}</p>
+        {onUse && <Btn kind="primary" onClick={onUse}>Use Blue Leaf defaults</Btn>}
+        {onSave && <Btn kind="ghost" onClick={onSave}>Save as company default</Btn>}
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px] text-ink" data-company-defaults="">
+      <p className="font-semibold">Blue Leaf defaults{changed ? " (changed for this job)" : ""}</p>
+      <p data-default-values="">{rows.map((x, i) => (
+        <span key={x.key} data-default={x.key} data-differs={x.differs ? "true" : undefined}>{i ? " · " : ""}{x.value}{x.differs ? <b className="text-amber-800"> (this job)</b> : null}</span>
+      ))}</p>
+      {missing.length > 0 && <p className="mt-1 font-medium text-amber-800" data-default-missing="">Still needed: {missing.map((k) => conditionLabel(k).toLowerCase()).join(", ")}.</p>}
+      {rows.some((x) => x.key === "wind") && <p className="mt-1 text-[11px] text-muted">Wind class is the company default — check this site&apos;s wind classification.</p>}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Btn kind="ghost" aria-expanded={editOpen} onClick={onEdit}>{editOpen ? "Hide details" : "Edit"}</Btn>
+        {onSave && (changed || editOpen) && <Btn kind="ghost" onClick={onSave}>Save as company default</Btn>}
+      </div>
+      {editOpen && <p className="mt-1 text-[11px] text-muted">Changes here are for this job only{onSave ? " unless you tap Save as company default" : ""}.</p>}
     </div>
   );
 }
