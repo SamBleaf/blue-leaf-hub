@@ -130,10 +130,12 @@ export async function clearRememberedActorRecovery() {
 // same actor scoping as the change-set recovery, so logout clears these too. Local only: "On this device".
 const editorKey = (actorKey, workspaceId, materialId) => `editor|${actorKey}|${workspaceId}|${materialId}`;
 
-export async function saveEditorDraft({ actorKey, workspaceId, materialId, draft }) {
+export async function saveEditorDraft({ actorKey, workspaceId, materialId, draft, meta = null }) {
   if (!actorKey || !workspaceId || !materialId) return { ok: false, reason: "no-identity" };
   try {
     const record = { key: editorKey(actorKey, workspaceId, materialId), kind: "editor", actorKey, workspaceId, materialId, draft: JSON.parse(JSON.stringify(draft)), savedAt: Date.now() };
+    // HUB 018: the flashing's name, so a card for a flashing not yet in the takeoff reopens under its own name
+    if (meta) record.meta = { name: String(meta.name || "").slice(0, 120) || null, isNew: !!meta.isNew };
     await tx("readwrite", (s) => s.put(record));
     return { ok: true };
   } catch (e) {

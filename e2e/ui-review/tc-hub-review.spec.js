@@ -465,3 +465,114 @@ test("HUB 014: with no default yet the office saves the first one from the card;
   expect(st.defaults).toHaveLength(1);
   expect(st.saves[0].content.rules).not.toHaveProperty("defaultsFrom");
 });
+
+// ── HUB 018: trustworthy autosave recovery ────────────────────────────────────────────────────────────────────
+const reviewMaterials = async (page) => (await page.evaluate(() => window.__takeoffReviewState())).materials;
+const cards = (page) => page.locator("[data-draft-card]");
+/** The unfinished drawings stored on this device (IndexedDB), so a reload never races the store's own write. */
+const deviceDrafts = (page) => page.evaluate(() => new Promise((res) => {
+  const r = indexedDB.open("blh-takeoff-recovery");
+  r.onsuccess = () => { const db = r.result; const q = db.transaction("drafts", "readonly").objectStore("drafts").getAllKeys(); q.onsuccess = () => res(q.result.filter((k) => String(k).startsWith("editor|"))); };
+  r.onerror = () => res([]);
+}));
+async function openDrawing(page, name) {
+  await rowAction(page, name, "Profile");
+  const dlg = page.getByRole("dialog", { name });
+  await expect(dlg.locator("[data-takeoff-viewport]")).toBeVisible();
+  return dlg;
+}
+async function newDrawing(page) {
+  await page.getByRole("button", { name: "Add flashing" }).click();
+  await page.getByRole("button", { name: "New flashing" }).click();
+  const dlg = page.getByRole("dialog", { name: /^Flashing \d+/ });
+  const box = await dlg.locator("[data-takeoff-viewport]").boundingBox();
+  return { dlg, at: (fx, fy) => page.mouse.click(box.x + box.width * fx, box.y + box.height * fy) };
+}
+
+test("HUB 018: two unfinished drawings → reload → Continue and finish one, Discard the other (asks first); no blank flashing; the other drawings unchanged", async ({ page }) => {
+  await open(page);
+  const before = await reviewMaterials(page);
+  // A: a size that isn't valid yet on Apron flashing, then the app is reloaded mid-edit
+  let dlg = await openDrawing(page, "Apron flashing");
+  await dlg.locator("svg text", { hasText: /^L1 / }).click();
+  await dlg.getByLabel("L1 length").fill(".");
+  await page.waitForTimeout(300);
+  await page.reload(); await ready(page);
+  // B: a new flashing with only its start point, then reloaded
+  const b = await newDrawing(page);
+  const bName = (await b.dlg.getByRole("heading", { level: 1 }).textContent()).trim();
+  await b.at(0.3, 0.7);
+  await page.waitForTimeout(300);
+  await page.reload(); await ready(page);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(cards(page).filter({ hasText: "Apron flashing (has a size that isn't valid yet)." })).toHaveCount(1);
+  await expect(cards(page).filter({ hasText: `${bName} — not in the takeoff yet.` })).toHaveCount(1);
+  await expect(page.getByText("New flashing", { exact: true })).toHaveCount(0);
+  // Continue B: the exact unfinished drawing, under its own name; two more points, Close = finished
+  await cards(page).filter({ hasText: bName }).getByRole("button", { name: "Continue drawing" }).click();
+  dlg = page.getByRole("dialog", { name: bName });
+  await expect(dlg.getByText("Tap the end of the first leg.")).toBeVisible();
+  const box = await dlg.locator("[data-takeoff-viewport]").boundingBox();
+  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.3);
+  await expect(dlg.locator("svg text", { hasText: /^L2 / })).toBeVisible();
+  await expect(dlg.getByRole("button", { name: /Apply|^Save/ })).toHaveCount(0);   // still automatic saving, no Apply step
+  await dlg.getByRole("button", { name: "Close" }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toContainText("Apron flashing");
+  await expect.poll(async () => (await reviewMaterials(page)).find((m) => m.name === bName)?.profile?.segments?.length || 0).toBeGreaterThanOrEqual(2);
+  // Discard A: asks first — Cancel keeps it, OK removes only that one
+  let asked = "";
+  page.once("dialog", (d) => { asked = d.message(); d.dismiss(); });
+  await cards(page).getByRole("button", { name: "Discard" }).click();
+  expect(asked).toBe("Discard this unfinished drawing from this device?");
+  await expect(cards(page)).toHaveCount(1);
+  page.once("dialog", (d) => d.accept());
+  await cards(page).getByRole("button", { name: "Discard" }).click();
+  await expect(cards(page)).toHaveCount(0);
+  await expect.poll(() => deviceDrafts(page)).toEqual([]);   // both device copies are gone: B finished, A discarded
+  const after = await reviewMaterials(page);
+  for (const id of ["mat-apron", "mat-barge"]) expect(after.find((m) => m.id === id).profile).toEqual(before.find((m) => m.id === id).profile);
+  expect(after.filter((m) => m.methodKey === "flashing_runs" && !m.profile)).toEqual([]);
+  expect(after.some((m) => m.name === "New flashing")).toBe(false);
+  await page.reload(); await ready(page);
+  await expect(page.getByText(/Unfinished drawing on this device/)).toHaveCount(0);
+});
+
+test("HUB 018: Close, Details and Lengths finish the drawing — no card now or after a reload (the four-cards case)", async ({ page }) => {
+  await open(page);
+  let dlg = await openDrawing(page, "Apron flashing");                 // opened and left by Lengths
+  await dlg.getByRole("button", { name: "Lengths" }).click();
+  await page.getByRole("button", { name: "Back" }).or(page.getByRole("button", { name: "Close" })).first().click().catch(() => {});
+  await open(page);
+  dlg = await openDrawing(page, "Barge flashing");                     // changed and left by Details
+  await dlg.locator("svg text", { hasText: /^L1 / }).click();
+  await dlg.getByLabel("L1 length").fill("120");
+  await dlg.getByRole("button", { name: "Done" }).click();
+  await dlg.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "Close" }).first().click();
+  const b = await newDrawing(page);                                    // drawn and closed
+  await b.at(0.25, 0.8); await b.at(0.25, 0.3); await b.at(0.7, 0.3);
+  await expect(b.dlg.locator("svg text", { hasText: /^L2 / })).toBeVisible();
+  await b.dlg.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByText(/Unfinished drawing on this device/)).toHaveCount(0);
+  await expect.poll(() => deviceDrafts(page)).toEqual([]);   // nothing left on the device either
+  await page.reload(); await ready(page);
+  await expect(page.getByText(/Unfinished drawing on this device/)).toHaveCount(0);
+});
+
+test("HUB 018: a new drawing cleared to nothing and closed leaves no blank flashing", async ({ page }) => {
+  await open(page);
+  const seeded = (await reviewMaterials(page)).map((m) => m.id);
+  const b = await newDrawing(page);
+  const name = (await b.dlg.getByRole("heading", { level: 1 }).textContent()).trim();
+  await b.at(0.25, 0.8); await b.at(0.25, 0.3);
+  await expect(b.dlg.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await b.dlg.getByRole("button", { name: "More" }).click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("menuitem", { name: "Clear drawing" }).or(page.getByRole("button", { name: "Clear drawing" })).first().click();
+  await b.dlg.getByRole("button", { name: "Close" }).click();
+  await expect(page.locator("[data-material-row]").filter({ hasText: name })).toHaveCount(0);
+  await expect.poll(async () => (await reviewMaterials(page)).filter((m) => !seeded.includes(m.id)).length).toBe(0);
+  await expect(page.getByText(/Unfinished drawing on this device/)).toHaveCount(0);
+});

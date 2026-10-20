@@ -543,4 +543,6 @@ export function _resetTakeoffFixture() { seed(); }
 // HUB 014 evidence: the company defaults, what was saved through "Save as company default", and the cladding materials
 if (typeof window !== "undefined") window.__takeoffReviewDefaults = () => ({ defaults: state.presets.filter((p) => p.rules?.companyDefault).map((p) => ({ id: p.id, revision: p.revision, rules: p.rules, spareRate: p.spec?.spareRate })),
   saves: state.companyDefaultSaves || [], materials: state.materials.filter((m) => m.spec?.family === "cladding").map((m) => ({ id: m.id, name: m.name, spareRate: m.spec?.spareRate, rules: m.rules })) });
-if (typeof window !== "undefined") window.__takeoffReviewState = () => ({ revision: state.revision, commits: state.commitCount || 0, measurements: state.measurements.length, appendixRequests: [...state.appendixRequests] });
+if (typeof window !== "undefined") window.__takeoffReviewState = () => ({ revision: state.revision, commits: state.commitCount || 0, measurements: state.measurements.length, appendixRequests: [...state.appendixRequests],
+  // HUB 018 evidence: every material's profile as the fake server holds it (review only)
+  materials: state.materials.map(({ id, name, methodKey, profile }) => ({ id, name, methodKey, profile: profile ?? null })) });

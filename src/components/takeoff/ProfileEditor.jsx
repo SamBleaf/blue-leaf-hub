@@ -62,7 +62,7 @@ function useVisualViewport() {
 }
 
 export default function ProfileEditor({
-  value, title, readOnly = false, mode = "job", draftScope = null, syncStatus = null, painted = true,
+  value, title, readOnly = false, mode = "job", draftScope = null, syncStatus = null, painted = true, isNew = false,
   onChange, onSave, onClose, onDetails, onLengths, onCancel, onSaveAsStandard = null,
 }) {
   const close = onClose || onCancel;
@@ -80,6 +80,8 @@ export default function ProfileEditor({
   const [view, setView] = useState(null);
   const [hover, setHover] = useState(null);         // snapped mm point under the pointer (drawing preview)
   const [loaded, setLoaded] = useState(!draftScope); // don't overwrite a stored draft before reading it
+  // HUB 018: "changed elsewhere" — the device copy is kept untouched until the user chooses
+  const choicePending = useRef(false);
   const [prefs, setPrefs] = useState(readPrefs);
   const [fieldReset, setFieldReset] = useState(0);
   const [selVia, setSelVia] = useState(null); // "label" when a size label was tapped (focus its field) // remounts the open field so it shows the restored value
@@ -142,9 +144,13 @@ export default function ProfileEditor({
         if (sameJson(d.hist.present.profile, serverNow)) restore(); // same shape — just bring back the history/drafts
         else if (sameJson(d.base ?? null, serverNow ?? null) || !serverNow) {
           restore();
-          setNotice({ text: "Restored your unfinished drawing from this device.", action: { label: "Discard it", fn: discardDraft } });
+          // a brand-new flashing has no saved state to go back to — its card's Discard is the only discard (HUB 018)
+          setNotice({ text: "Restored your unfinished drawing from this device.", action: isNew ? null : { label: "Discard it", fn: discardDraft } });
         } else {
-          setNotice({ text: "This flashing was changed elsewhere after your unsaved drawing on this device.", action: { label: "Use my drawing", fn: () => { restore(); setNotice(null); } }, dismissLabel: "Keep the saved one" });
+          choicePending.current = true;
+          setNotice({ text: "This flashing was changed elsewhere after your unsaved drawing on this device.",
+            action: { label: "Use my drawing", fn: () => { choicePending.current = false; restore(); setNotice(null); } }, dismissLabel: "Keep the saved one",
+            onDismiss: () => { choicePending.current = false; clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); } });
         }
       }
       setLoaded(true);
@@ -154,14 +160,16 @@ export default function ProfileEditor({
   }, []);
 
   function discardDraft() {
+    if (!window.confirm("Discard this unfinished drawing from this device?")) return;
     if (draftScope) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
     setHist(createHistory(init.entry, 60)); setDrafts({}); setNotice(null); session.current = null;
   }
 
   // every change is written to the device draft at once (not debounced) — includes unfinished points
   useEffect(() => {
-    if (!draftScope || !loaded || readOnly) return;
-    const empty = !entry.profile && !entry.first && !hist.past.length && !invalidCount;
+    if (!draftScope || !loaded || readOnly || choicePending.current) return;
+    // HUB 018: nothing drawn or typed yet = nothing to recover (just opening a saved drawing writes no draft)
+    const empty = !entry.first && !hist.past.length && !invalidCount;
     if (empty) { clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); return; }
     saveEditorDraft({ ...draftScope, draft: { v: 1, base: lastSent.current ?? null, hist: { present: hist.present, past: hist.past.slice(-30), future: hist.future.slice(0, 30) }, drafts, view } });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- view is saved opportunistically with the next edit
@@ -380,16 +388,37 @@ export default function ProfileEditor({
   }, []);
 
   // ── leave / publish ────────────────────────────────────────────────────────
-  function leave() {
+  /**
+   * HUB 018: Close, Details and Lengths FINISH the drawing — the last valid shape is already in the flashing (autosave),
+   * so this drawing's device copy (and its card) goes; an invalid size or a lone start point is dropped. Only an
+   * interrupted drawing (reload, app closed, back button) keeps a card. Never touches another flashing's draft.
+   */
+  function finishDrawing() {
     endSession();
-    if (!job && editable && hist.past.length && !window.confirm("Leave without publishing these changes to the company standard? (Your drawing stays on this device.)")) return;
     flush();
-    // a job copy that reached the takeoff and has no unfinished field drafts doesn't need the device draft
-    if (draftScope && job && profile && !invalidCount) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
-    if (draftScope && !profile && !entry.first) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
-    close?.();
+    if (draftScope && job && !readOnly && !choicePending.current) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId);
   }
-  function goto(fn) { endSession(); flush(); fn?.(); }
+  function leave() {
+    if (!job) {
+      endSession();
+      if (editable && hist.past.length && !window.confirm("Leave without publishing these changes to the company standard? (Your drawing stays on this device.)")) return;
+      flush();
+      close?.();
+      return;
+    }
+    finishDrawing();
+    close?.({ empty: !profile });
+  }
+  function goto(fn) { finishDrawing(); fn?.(); }
+  /** HUB 018: Done on a size sheet never leaves an invalid size behind — the last valid value stays. */
+  function doneSheet(key) {
+    if (key && latest.current.drafts[key] != null) {
+      setDrafts((ds) => { const nx = { ...ds }; delete nx[key]; return nx; });
+      setFieldReset((x) => x + 1);
+    }
+    endSession();
+    select(null);
+  }
   function publish() {
     try { onSave?.(normaliseProfile(profile)); if (draftScope) clearEditorDraft(draftScope.actorKey, draftScope.workspaceId, draftScope.materialId); }
     catch (e) { setError(e instanceof TakeoffValidationError ? e.message : "This profile couldn’t be saved."); }
@@ -411,7 +440,7 @@ export default function ProfileEditor({
     if (seg) {
       const key = `leg:${seg.id}`;
       sheet = (
-        <Sheet title={`Leg L${i + 1}`} onDone={() => select(null)} onPrev={i > 0 ? () => select({ kind: "leg", id: profile.segments[i - 1].id }) : null}
+        <Sheet title={`Leg L${i + 1}`} onDone={() => doneSheet(key)} onPrev={i > 0 ? () => select({ kind: "leg", id: profile.segments[i - 1].id }) : null}
           onNext={i < n - 1 ? () => select({ kind: "leg", id: profile.segments[i + 1].id }) : null}>
           <LiveNumber key={`${key}:${fieldReset}`} label={`L${i + 1} length`} unit="mm" value={seg.lengthMm} draft={drafts[key]} autoFocus
             onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
@@ -428,7 +457,7 @@ export default function ProfileEditor({
     const key = `corner:${sel.index}`;
     const dir = bendDirection(b.turnDeg);
     sheet = (
-      <Sheet title={`Corner B${sel.index + 1}`} onDone={() => select(null)} onPrev={sel.index > 0 ? () => select({ kind: "corner", index: sel.index - 1 }) : null}
+      <Sheet title={`Corner B${sel.index + 1}`} onDone={() => doneSheet(key)} onPrev={sel.index > 0 ? () => select({ kind: "corner", index: sel.index - 1 }) : null}
         onNext={sel.index < profile.bends.length - 1 ? () => select({ kind: "corner", index: sel.index + 1 }) : null}>
         <LiveNumber key={`${key}:${fieldReset}`} label="Included angle" unit="°" value={includedAngle(b.turnDeg)} draft={drafts[key]} autoFocus
           onDraft={(raw) => setDraft(key, raw)} onBlur={endSession}
@@ -453,7 +482,7 @@ export default function ProfileEditor({
       savePrefs({ crushSide: side });
     };
     sheet = (
-      <Sheet title={sel.which === "start" ? "Start of L1" : `End of L${n}`} onDone={() => select(null)}
+      <Sheet title={sel.which === "start" ? "Start of L1" : `End of L${n}`} onDone={() => doneSheet(key)}
         onPrev={sel.which === "end" ? () => select({ kind: "end", which: "start" }) : null} onNext={sel.which === "start" ? () => select({ kind: "end", which: "end" }) : null}>
         <div className="grid grid-cols-3 gap-2" role="group" aria-label="End">
           <EndChoice on={t.type === "none"} onClick={() => set("none")} label="Plain end" icon="plain" />
@@ -519,7 +548,7 @@ export default function ProfileEditor({
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm text-sky-900">
               <span className="flex-1">{notice.text}</span>
               {notice.action && <button type="button" className="min-h-[44px] rounded-md px-2 font-semibold underline" onClick={() => { notice.action.fn(); }}>{notice.action.label}</button>}
-              <button type="button" className="min-h-[44px] rounded-md px-2" onClick={() => setNotice(null)}>{notice.dismissLabel || "OK"}</button>
+              <button type="button" className="min-h-[44px] rounded-md px-2" onClick={() => { notice.onDismiss?.(); setNotice(null); }}>{notice.dismissLabel || "OK"}</button>
             </div>
           )}
           {syncStatus === "rejected" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-700">A change couldn&apos;t be saved — it&apos;s kept on this device. Close to see why and try again.</div>}

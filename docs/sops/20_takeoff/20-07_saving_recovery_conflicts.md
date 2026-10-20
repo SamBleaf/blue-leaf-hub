@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-13
+sop_version: 1.1
+last_reviewed: 2026-10-20
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -121,6 +121,17 @@ The chip appears in the takeoff header, the Measure screen header and the Length
 
 ---
 
+### I. Unfinished drawings on this device (flashing drawings, HUB 018)
+
+A flashing drawing saves itself as you draw — there is no Apply or Save step. The device also keeps a copy of a drawing **while it is open**, so a reload, a closed app or a dropped phone doesn't lose it.
+
+1. **Close**, **Details** or **Lengths** in the drawing **finishes** it: the shape is already in the flashing, and the device copy goes. A size you typed that isn't valid yet, or a lone start point, is dropped; the last valid shape stays. **Done** on a size sheet puts the last valid size back.
+2. An **"Unfinished drawing on this device: <name> …"** card appears in Flashings only when a drawing was interrupted (reload, app closed, back button) and still holds something the flashing doesn't: "(has a size that isn't valid yet).", "— newer than the saved drawing." or "— not in the takeoff yet." A drawing already saved exactly as it is never shows a card; old cards like that clear themselves.
+3. **Continue drawing** reopens that exact drawing under its own name (e.g. "Flashing 3") — never a blank "New flashing".
+4. **Discard** asks "Discard this unfinished drawing from this device?" and removes only that drawing's copy. Removing a flashing also removes its card.
+5. A brand-new flashing that is cleared or undone back to nothing and closed is not kept in the takeoff. An existing flashing you clear saves as cleared (Undo brings it back).
+6. "This flashing was changed elsewhere …" keeps your device copy until you choose **Use my drawing** or **Keep the saved one**.
+
 ## 6. What happens next
 
 - Saved changes are visible to everyone who opens the takeoff (they see them when they next open or reload it — screens don't live-update).
@@ -148,6 +159,7 @@ The chip appears in the takeoff header, the Measure screen header and the Length
 | Problem the user sees | Most likely cause | Fix |
 |----------------------|-------------------|-----|
 | "No connection — your changes are kept on this device and will save when you're back online." | No signal | Keep working; it saves when back online |
+| Several "Unfinished drawing on this device" cards at once | Drawings interrupted by a reload or the app closing (before HUB 018, leaving by Details or Lengths also left one) | Tap **Continue drawing** to finish one (Close finishes it) or **Discard** to drop that copy; finished ones clear themselves |
 | "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare." | Another person saved first | Section E |
 | "These recovered changes were made on an older version. Review, then choose how to apply them." | Restored changes from an older version | Section E |
 | "Recovery unavailable on this device (storage blocked or full). Your edits are kept while this screen stays open." | Browser storage blocked or full | Section G |
@@ -317,6 +329,13 @@ Next review date: 2027-04-13
 2. Tap **Try again** on the overview.
 3. Leave the takeoff, reopen it, tap **Discard** on the recovery banner.
 4. Expected result: steps 1–2 — chip **Not saved**, the same message every time, and the manual length is **not** saved either; step 3 — after Discard the chip is **Saved**, the screen matches the server and neither change exists. Record the result; the lack of a "drop just this change" option is a known gap reported to the owner.
+- [ ] Pass  [ ] Fail
+
+**TC-15 — Unfinished drawings: Continue, finish, Discard (HUB 018, UI Review)**
+1. Flashings → Apron flashing → **Profile**: tap L1, type "." and reload. Then **Add flashing** → **New flashing**, tap one point and reload. Expected: exactly two cards — "Apron flashing (has a size that isn't valid yet)." and "Flashing N — not in the takeoff yet." — and no "New flashing".
+2. **Continue drawing** on Flashing N. Expected: the dialog is "Flashing N" with "Tap the end of the first leg."; tap two points → **Close**: its card goes, the Apron card stays, and Flashing N is in the takeoff with its legs. No Apply/Save button.
+3. **Discard** on the Apron card → Cancel: the card stays; **Discard** → OK: it goes. Apron and Barge drawings are unchanged; no flashing has a blank shape. Reload: no cards.
+4. Open a drawing and leave by **Lengths**; change another and leave by **Details**; draw a new one and **Close**. Expected: no card, and none after a reload. A new drawing cleared with **Clear drawing** and closed leaves no flashing. Node: scripts/tests/takeoff-tc-hub018.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

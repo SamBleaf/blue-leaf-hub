@@ -13,6 +13,7 @@ import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECT
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
+import { draftCardText, editorDraftCard, materialForDraft } from "./editorDrafts.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { describeChanges, partial } from "./changeset.js";
 import { useTakeoffWorkspace } from "./useTakeoffWorkspace.js";
@@ -184,6 +185,24 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     listEditorDrafts(draftActor, draftWs).then(setEditorDrafts);
   }, [draftActor, draftWs]);
   useEffect(() => { refreshDrafts(); }, [refreshDrafts]);
+  /** HUB 018: forget one drawing's device copy now (its card goes at once) — the list is re-read after the delete. */
+  const dropDraft = useCallback((materialId) => {
+    setEditorDrafts((ds) => ds.filter((d) => d.materialId !== materialId));
+    if (draftActor && draftWs) clearEditorDraft(draftActor, draftWs, materialId).then(refreshDrafts);
+  }, [draftActor, draftWs, refreshDrafts]);
+  // HUB 018: only drafts with something to recover get a card — a drawing already saved as it is in its flashing doesn't
+  const draftCards = useMemo(() => (view ? editorDrafts.map((d) => {
+    const card = editorDraftCard(d, view.materials.find((x) => x.id === d.materialId));
+    return card ? { ...card, key: d.key, record: d } : null;
+  }).filter(Boolean) : []), [editorDrafts, view]);
+  // … and the ones with nothing left to recover (finished drawings from older builds) are cleared quietly
+  useEffect(() => {
+    if (!view || !draftActor || !draftWs) return;
+    const keep = new Set(draftCards.map((c) => c.key));
+    const open = editing?.stage === "profile" ? editing.material?.id : null; // never under the drawing that is open now
+    const stale = editorDrafts.filter((d) => !keep.has(d.key) && d.materialId !== open);
+    if (stale.length) Promise.all(stale.map((d) => clearEditorDraft(draftActor, draftWs, d.materialId))).then(refreshDrafts);
+  }, [draftCards, editorDrafts, view, draftActor, draftWs, refreshDrafts, editing]);
 
   const plans = useMemo(() => view?.documents || job?.plans || [], [view?.documents, job?.plans]);
   const primaryDoc = view?.workspace?.primaryDocumentId;
@@ -262,6 +281,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     // wall-owned openings belong to their wall (and its cladding); recorded offcuts are physical stock
     const byId = new Map(view.measurements.map((x) => [x.id, x]));
     ws.edit(partial({ archive: { materials: [m.id], measurements: mine.filter((id) => !shared.has(id) && !byId.get(id)?.parentId && byId.get(id)?.kind !== "offcut") } }));
+    dropDraft(m.id); // HUB 018: a removed flashing's unfinished drawing goes with it
   };
   /** HUB 002: a compact row — name and one summary line; its actions show when the row is tapped, Remove sits in More. */
   const materialRow = (m) => {
@@ -420,7 +440,13 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     return { tone: "ok", text: `Saved as the company default for ${label}. New takeoffs will use it; jobs already set up keep their own.` };
   }
 
-  const leaveEditor = () => { setEditing(null); setWin(setupFrom || "overview"); setSetupFrom(null); setTimeout(refreshDrafts, 50); };
+  const leaveEditor = (how) => {
+    const m = editing?.material;
+    // HUB 018: a brand-new flashing closed with no shape is not kept — never a blank flashing in the takeoff
+    if (editing?.isNew && how?.empty && m && view.materials.some((x) => x.id === m.id)) ws.edit(partial({ archive: { materials: [m.id] } }));
+    if (m?.id && editing?.stage === "profile") setEditorDrafts((ds) => ds.filter((d) => d.materialId !== m.id));
+    setEditing(null); setWin(setupFrom || "overview"); setSetupFrom(null); refreshDrafts();
+  };
   /**
    * HUB 010: an order line's problem opens its fix — the flashing's details at the missing field, its drawing, the
    * material setup, or the run itself on the plan (over the maximum → split it). Close returns to the same order line.
@@ -458,7 +484,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   const toLengths = (m) => {
     setActiveMaterial(m.id); setEditing(null);
     setWin(m.spec?.family === "aluminium" ? "aluminium" : usesWalls(m) ? "walls" : docId ? "measure" : "overview");
-    setTimeout(refreshDrafts, 50);
+    setEditorDrafts((ds) => ds.filter((d) => d.materialId !== m.id)); refreshDrafts();
   };
   /** The editor's status for THIS flashing: Saved only when the server holds exactly this shape (R04b R20). */
   const materialSync = (m, shownProfile) => {
@@ -479,10 +505,12 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     return createPortal(
       <><FocusMode /><ProfileEditor key={`${std ? "std" : "job"}:${m?.id}`} value={cur?.profile || null} title={cur?.name || "Flashing"} readOnly={std ? !caps.editStandards : !caps.edit}
         mode={std ? "standard" : "job"} painted={isPainted(cur)} syncStatus={std ? null : materialSync(m, currentMat(m).profile)}
-        draftScope={actorKey && m?.id ? { actorKey, workspaceId: std ? "standards" : wsId, materialId: m.id } : null}
+        draftScope={actorKey && m?.id ? { actorKey, workspaceId: std ? "standards" : wsId, materialId: m.id, meta: { name: cur?.name || null, isNew: !!editing?.isNew } } : null}
+        isNew={!!editing?.isNew}
         onClose={leaveEditor}
-        onChange={(profile) => { if (profile || view.materials.some((x) => x.id === m.id)) upsertMaterial({ ...currentMat(m), profile }); }}
-        onDetails={() => { setEditing({ material: currentMat(m), stage: "details" }); setTimeout(refreshDrafts, 50); }}
+        // HUB 018: a brand-new flashing undone / cleared to nothing writes nothing (no blank flashing); an existing one saves as cleared
+        onChange={(profile) => { if (profile) upsertMaterial({ ...currentMat(m), profile }); else if (!editing?.isNew && view.materials.some((x) => x.id === m.id)) upsertMaterial({ ...currentMat(m), profile: null }); }}
+        onDetails={() => { setEditing({ material: currentMat(m), stage: "details" }); setEditorDrafts((ds) => ds.filter((d) => d.materialId !== m.id)); refreshDrafts(); }}
         onSaveAsStandard={!std && caps.editStandards && api.savePreset ? () => saveAsStandard(currentMat(m)) : null}
         onLengths={() => toLengths(m)}
         onSave={(profile) => {
@@ -682,7 +710,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   if (win === "orders") {
     return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} section={section} jobAddress={ws.server?.jobAddress}
       onFix={fixFromOrder} focus={orderFocus} onFocusDone={() => setOrderFocus(null)}
-      deviceDrafts={editorDrafts.map((d) => ({ name: view.materials.find((x) => x.id === d.materialId)?.name || "A new flashing", invalid: Object.keys(d.draft?.drafts || {}).length }))} /></div></FocusedWindow>;
+      deviceDrafts={draftCards.map((c) => ({ name: c.name || "A new flashing", invalid: c.reason === "invalid" ? 1 : 0 }))} /></div></FocusedWindow>;
   }
 
   // ── overview ────────────────────────────────────────────────────────────────
@@ -728,17 +756,15 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
         </Banner>
       )}
       {ws.status === "unsynced" && ws.saveError && <Banner tone="warn">{ws.saveError}</Banner>}
-      {caps.edit && section === SECTIONS.FLASHINGS && editorDrafts.map((d) => {
-        const m = view.materials.find((x) => x.id === d.materialId);
-        const empty = !d.draft?.hist?.present?.profile && !d.draft?.hist?.present?.first;
-        if (empty) return null;
+      {caps.edit && section === SECTIONS.FLASHINGS && draftCards.map((c) => {
+        const m = view.materials.find((x) => x.id === c.materialId);
         return (
-          <Banner key={d.key} tone="info" action={<div className="flex gap-1">
-            <Btn onClick={() => setEditing({ material: m || { ...newFlashing(), id: d.materialId, name: "New flashing" }, isNew: !m, stage: "profile" })}>Continue drawing</Btn>
-            <Btn kind="ghost" onClick={() => { if (window.confirm("Discard this unfinished drawing from this device?")) clearEditorDraft(draftActor, draftWs, d.materialId).then(refreshDrafts); }}>Discard</Btn>
+          <div key={c.key} data-draft-card={c.reason}><Banner tone="info" action={<div className="flex gap-1">
+            <Btn onClick={() => setEditing({ material: m || materialForDraft(c.record, newFlashing()), isNew: !m, stage: "profile" })}>Continue drawing</Btn>
+            <Btn kind="ghost" onClick={() => { if (window.confirm("Discard this unfinished drawing from this device?")) dropDraft(c.materialId); }}>Discard</Btn>
           </div>}>
-            Unfinished drawing on this device: <span className="font-semibold">{m ? m.name : "a new flashing"}</span>{Object.keys(d.draft?.drafts || {}).length ? " (has a size that isn't valid yet)" : ""}.
-          </Banner>
+            Unfinished drawing on this device: <span className="font-semibold">{c.name || "a new flashing"}</span>{draftCardText(c)}
+          </Banner></div>
         );
       })}
       {(() => { const n = rescaleCandidates(view).length; return n > 0 && (
