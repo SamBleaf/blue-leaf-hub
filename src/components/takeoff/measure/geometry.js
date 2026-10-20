@@ -108,8 +108,26 @@ export function screenDirectionAt(points, cal, stationMm, toScreen) {
  * @returns {Array<[{x:number,y:number},{x:number,y:number}]>}
  */
 export function straightLegs(points, { maxTurnDeg = 3 } = {}) {
-  const pts = [];
-  for (const p of points || []) if (!pts.length || Math.hypot(p.x - pts[pts.length - 1].x, p.y - pts[pts.length - 1].y) > 1e-9) pts.push(p);
+  return runLegs(points, null, { maxTurnDeg }).map((l) => [l.a, l.b]);
+}
+
+/**
+ * The walls of a Line run (HUB 022): straight legs as straightLegs, each with the wall height in force when its END
+ * point was tapped (heights[i] belongs to points[i]; the start point's own height is never used). Taps along a
+ * straight wall merge only while the height stays the same, so a straight wall splits where the height changes.
+ * Changing the height mid-run never changes a leg that was already drawn.
+ * @param {Array<{x:number,y:number}>} points
+ * @param {Array<number|null>|null} heights
+ * @returns {Array<{ a:{x:number,y:number}, b:{x:number,y:number}, heightMm:number|null }>}
+ */
+export function runLegs(points, heights, { maxTurnDeg = 3 } = {}) {
+  const pts = [], hs = [];
+  (points || []).forEach((p, i) => {
+    if (pts.length && Math.hypot(p.x - pts[pts.length - 1].x, p.y - pts[pts.length - 1].y) <= 1e-9) return;
+    pts.push(p);
+    const h = heights?.[i];
+    hs.push(typeof h === "number" && Number.isFinite(h) && h > 0 ? h : null);
+  });
   if (pts.length < 2) return [];
   const sinMax = Math.sin((maxTurnDeg * Math.PI) / 180);
   const legs = [];
@@ -118,10 +136,25 @@ export function straightLegs(points, { maxTurnDeg = 3 } = {}) {
     const u = { x: pts[i].x - start.x, y: pts[i].y - start.y }, v = { x: pts[i + 1].x - pts[i].x, y: pts[i + 1].y - pts[i].y };
     const lu = Math.hypot(u.x, u.y), lv = Math.hypot(v.x, v.y);
     const straight = u.x * v.x + u.y * v.y > 0 && Math.abs(u.x * v.y - u.y * v.x) / (lu * lv) < sinMax;
-    if (!straight) { legs.push([start, pts[i]]); start = pts[i]; }
+    if (!straight || hs[i] !== hs[i + 1]) { legs.push({ a: start, b: pts[i], heightMm: hs[i] }); start = pts[i]; }
   }
-  legs.push([start, pts[pts.length - 1]]);
+  legs.push({ a: start, b: pts[pts.length - 1], heightMm: hs[pts.length - 1] });
   return legs;
+}
+
+/**
+ * The other straight walls with a corner exactly where point `index` of `wall` is (walls traced in one run share
+ * their corner points). Traced elevation outlines (polygon walls) are never linked. @returns {Array<{id, index}>}
+ */
+export function sharedCorners(measurements, wall, index) {
+  const q = wall?.points?.[index];
+  if (!q || wall.kind !== "wall" || wall.inputs?.kind === "polygon") return [];
+  const out = [];
+  for (const m of measurements || []) {
+    if (m.id === wall.id || m.kind !== "wall" || m.archived || m.inputs?.kind === "polygon" || m.documentId !== wall.documentId || m.pageIndex !== wall.pageIndex) continue;
+    (m.points || []).forEach((p, i) => { if (Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6) out.push({ id: m.id, index: i }); });
+  }
+  return out;
 }
 
 /** Screen-space midpoints of each leg (for "insert a point" markers), skipping legs too short to tap safely. */

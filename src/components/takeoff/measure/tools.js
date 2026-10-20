@@ -10,7 +10,8 @@
 //   timber noggins     Wall · Count · Select · Pan
 //   timber trim/other  Run · Count · Select · Pan
 //   aluminium          Run · Select · Pan
-//   wall families      Wall · Select · Pan                             (cladding, aac, foam, timber-cladding, batten, accessory)
+//   wall families      Line · Select · Pan                             (cladding, aac, foam, timber-cladding, batten, accessory)
+//                      HUB 022: Line traces a whole run with the Wall height in force at each tap; timber walls keep Wall
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
 
@@ -31,6 +32,7 @@ export const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.
 const T = {
   run: { k: "run", label: "Run" }, count: { k: "count", label: "Count" }, select: { k: "select", label: "Select" }, pan: { k: "pan", label: "Pan" },
   wall: { k: "wall", label: "Wall" }, member: { k: "member", label: "Member" }, distribution: { k: "distribution", label: "Distribution" },
+  line: { k: "line", label: "Line" },
 };
 
 /** The tool row for a material (first = default). */
@@ -48,12 +50,12 @@ export function toolsFor(material) {
     return [T.run, T.count, T.select, T.pan];
   }
   if (fam === "aluminium") return [T.run, T.select, T.pan];
-  if (usesWalls(material)) return [T.wall, T.select, T.pan];
+  if (usesWalls(material)) return [T.line, T.select, T.pan];
   return [T.select, T.pan];
 }
 
 /** Multi-point tools: tap each corner, double-tap (or Finish) to finish. */
-export const PATH_TOOLS = new Set(["run", "wall"]);
+export const PATH_TOOLS = new Set(["run", "wall", "line"]);
 /** Two-point line tools: the second tap finishes the line. */
 export const LINE_TOOLS = new Set(["member", "distribution"]);
 
@@ -68,6 +70,7 @@ export function memberNoun(material, n = 2) {
 
 const DRAFT_PREFIX = "blh-takeoff-measure-draft";
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
+const heightOrNull = (v) => (finite(v) && v > 0 ? v : null);
 
 export const draftKey = ({ workspaceId, materialId, documentId, pageIndex }) =>
   (workspaceId && materialId && documentId != null ? `${DRAFT_PREFIX}:${workspaceId}:${materialId}:${documentId}:${pageIndex}` : null);
@@ -84,6 +87,9 @@ export function loadDraft(key) {
       tool: d.tool, points: d.points.map((p) => ({ x: p.x, y: p.y })),
       splitsMm: Array.isArray(d.splitsMm) ? d.splitsMm.filter(finite) : [],
       measurementId: typeof d.measurementId === "string" ? d.measurementId : null,
+      // Line (HUB 022): the wall height in force at each tap, one per point, and the height in the box now
+      ...(Array.isArray(d.heights) ? { heights: d.points.map((_, i) => heightOrNull(d.heights[i])) } : {}),
+      ...(d.heightMm !== undefined ? { heightMm: heightOrNull(d.heightMm) } : {}),
     };
   } catch {
     return null;
@@ -95,7 +101,10 @@ export function saveDraft(key, d) {
   if (!key) return false;
   try {
     if (!d || !d.points?.length) window.localStorage.removeItem(key);
-    else window.localStorage.setItem(key, JSON.stringify({ tool: d.tool, points: d.points, splitsMm: d.splitsMm || [], measurementId: d.measurementId || null, savedAt: Date.now() }));
+    else {
+      window.localStorage.setItem(key, JSON.stringify({ tool: d.tool, points: d.points, splitsMm: d.splitsMm || [], measurementId: d.measurementId || null,
+        ...(Array.isArray(d.heights) ? { heights: d.heights } : {}), ...(d.heightMm !== undefined ? { heightMm: d.heightMm } : {}), savedAt: Date.now() }));
+    }
     return true;
   } catch {
     return false;
@@ -125,12 +134,107 @@ export function explainableMm(tightMm, { allowanceMm = 0, extraMm = 0, increment
  */
 export function nextWallInputs(measurements) {
   const walls = (measurements || []).filter((m) => m.kind === "wall" && !m.archived);
-  let height = null;
-  for (const w of walls) if (finite(w.inputs?.heightMm) && w.inputs.heightMm > 0) height = w.inputs.heightMm;
+  const height = lastWallHeight(walls);
   const names = new Set(walls.map((w) => String(w.inputs?.name || "").trim().toLowerCase()));
   let n = walls.length + 1;
   while (names.has(`wall ${n}`)) n++;
   return { kind: "rect", ...(height ? { heightMm: height } : {}), name: `Wall ${n}` };
+}
+
+/**
+ * The height of the last wall in this takeoff (rectangular walls), or null. Walls of one traced run are saved together
+ * and come back in no set order, so inside a run the last wall is the one tapped last (highest seq).
+ */
+export function lastWallHeight(measurements) {
+  let last = null;
+  for (const w of measurements || []) {
+    if (w.kind !== "wall" || w.archived || !(finite(w.inputs?.heightMm) && w.inputs.heightMm > 0)) continue;
+    if (last && runIdOf(w) && runIdOf(w) === runIdOf(last) && (w.inputs.seq ?? 0) < (last.inputs.seq ?? 0)) continue;
+    last = w;
+  }
+  return last ? last.inputs.heightMm : null;
+}
+
+// ── traced runs (HUB 022) ─────────────────────────────────────────────────────────────────────────────────────
+
+/** The run a traced wall belongs to (inputs.runId), or null for a wall that stands on its own (older walls too). */
+export const runIdOf = (m) => (typeof m?.inputs?.runId === "string" && m.inputs.runId ? m.inputs.runId : null);
+
+/** Inputs for one wall of a Line run: rectangular, "Wall N", the height in force when it was traced, its run and place. */
+export function lineWallInputs(measurements, { heightMm, runId, seq }) {
+  const { name } = nextWallInputs(measurements);
+  return { kind: "rect", ...(heightOrNull(heightMm) ? { heightMm } : {}), name, runId, seq };
+}
+
+/**
+ * Every traced run in the takeoff: runId → { id, n, walls } with its walls in tap order (seq). Runs are numbered
+ * "Run 1, Run 2 …" in takeoff order (a run's walls share one save time, so they arrive together).
+ */
+export function wallRuns(measurements) {
+  const runs = new Map();
+  for (const m of measurements || []) {
+    if (m.kind !== "wall" || m.archived) continue;
+    const id = runIdOf(m);
+    if (!id) continue;
+    if (!runs.has(id)) runs.set(id, { id, n: runs.size + 1, walls: [] });
+    runs.get(id).walls.push(m);
+  }
+  for (const r of runs.values()) r.walls.sort((a, b) => (a.inputs.seq ?? 0) - (b.inputs.seq ?? 0));
+  return runs;
+}
+
+/** The highest point of a wall's cladding (rectangle height, sloping-top high end, gable apex), or null. */
+export function wallTopMm(inp = {}) {
+  const k = inp?.kind || "rect";
+  const v = k === "rect" ? inp.heightMm : k === "rake" ? Math.max(inp.startHeightMm || 0, inp.endHeightMm || 0) : k === "gable" ? inp.apexHeightMm : null;
+  return heightOrNull(v);
+}
+
+/**
+ * "Run 1 · 4 walls · 2,700" (heights in tap order, "2,700 / 3,600" when they change; "no height yet" when none;
+ * "· 1 needs a height" when only some walls have one, so a missing height is never hidden behind the others).
+ */
+export function runLabel(run, walls = run.walls) {
+  const hs = [];
+  let missing = 0;
+  for (const w of walls) {
+    const h = wallTopMm(w.inputs);
+    if (!h) { if ((w.inputs?.kind || "rect") !== "polygon") missing += 1; continue; }
+    if (!hs.includes(h)) hs.push(h);
+  }
+  const fmt = (v) => v.toLocaleString("en-AU", { maximumFractionDigits: 2 });
+  const need = hs.length && missing ? ` · ${missing} need${missing === 1 ? "s" : ""} a height` : "";
+  return `Run ${run.n} · ${walls.length} wall${walls.length === 1 ? "" : "s"} · ${hs.length ? hs.map(fmt).join(" / ") : "no height yet"}${need}`;
+}
+
+/**
+ * A drawing kept on this device by an older build: one started with the Wall tool on a material that now traces with
+ * Line (HUB 022) carries on as a Line run instead of being dropped by the next tap. Every tap so far gets the height
+ * the Wall tool would have given it (the last wall height), so finishing makes a run that stays on the plan.
+ * @param {string[]} toolKeys the material's tools now (toolsFor(material).map(t => t.k))
+ */
+export function upgradeDraft(d, toolKeys, heightMm) {
+  if (!d || d.tool !== "wall" || toolKeys.includes("wall") || !toolKeys.includes("line")) return d;
+  const h = heightOrNull(heightMm);
+  return { ...d, tool: "line", heights: d.points.map(() => h), heightMm: h };
+}
+
+/**
+ * The wall list's items, in takeoff order: a traced run of two or more of these walls is ONE item (its walls in tap
+ * order); every other wall is its own item. @returns {Array<{ run, walls } | { wall }>}
+ */
+export function wallListItems(walls, runs) {
+  const here = new Set((walls || []).map((w) => w.id));
+  const out = [], done = new Set();
+  for (const w of walls || []) {
+    const run = runs?.get(runIdOf(w));
+    const ws = run ? run.walls.filter((x) => here.has(x.id)) : [];
+    if (ws.length < 2) { out.push({ wall: w }); continue; }
+    if (done.has(run.id)) continue;
+    done.add(run.id);
+    out.push({ run, walls: ws });
+  }
+  return out;
 }
 
 /**

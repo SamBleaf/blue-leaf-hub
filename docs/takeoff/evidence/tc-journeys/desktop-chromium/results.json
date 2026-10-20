@@ -13,8 +13,8 @@
       "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "b89b5b23-ebb3-4e6c-934e-65a1b1ab88e9",
-          "documentId": "0021cd0d-4198-4e8a-88e4-512329b7eefa",
+          "id": "5f46c26e-c664-48d1-8b5f-0adb3264c0fe",
+          "documentId": "d6e03926-e41e-4578-bc62-f3260edac4a0",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-20 23:50:51.964311+10:30"
+          "createdAt": "2026-10-21 03:20:27.987198+10:30"
         }
       }
     },
@@ -163,7 +163,7 @@
       "id": "J5",
       "title": "Orders (HUB 007): ONE timber-and-cladding order (timber + Axon sheets + aluminium bars, Timber / Cladding parts) and a SEPARATE flashings order; delivery/pickup; NON-draft exports; supplier PDFs + site appendices read back",
       "status": "PASS",
-      "seconds": 7,
+      "seconds": 8,
       "observed": {
         "ready": "Ready: 18 pieces · 4 sheets · 1 bar to Fielders (SANDBOX — not a real contact).",
         "flashingsReady": "Ready: 3 pieces · 14.100 LM to Fielders (SANDBOX — not a real contact).",
@@ -173,5 +173,5 @@
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-20T13:21:39.286Z"
+  "at": "2026-10-20T16:51:16.061Z"
 }

@@ -222,7 +222,10 @@ function cleanInputs(kind, inp, tracedLengthMm) {
     const out = { kind: wk, widthMm: tracedLengthMm != null ? Math.round(tracedLengthMm * 1000) / 1000 : MM(i.widthMm, "Wall length", { min: 1, allowNull: false }),
       heightMm: MM(i.heightMm, "Wall height", { min: 1 }), startHeightMm: MM(i.startHeightMm, "Start height", { min: 1 }), endHeightMm: MM(i.endHeightMm, "End height", { min: 1 }),
       eavesHeightMm: MM(i.eavesHeightMm, "Eaves height", { min: 1 }), apexXMm: MM(i.apexXMm, "Apex position"), apexHeightMm: MM(i.apexHeightMm, "Apex height", { min: 1 }),
-      heightSource: tracedLengthMm != null ? "plan+entered" : "entered", name: optStr(i.name, 60), floor: optStr(i.floor, 40) };
+      heightSource: tracedLengthMm != null ? "plan+entered" : "entered", name: optStr(i.name, 60), floor: optStr(i.floor, 40),
+      // HUB 022: a wall traced with Line keeps its run and its place in it (tap order). Walls saved together share one
+      // save time, so seq is what brings a run back in order. Kept only as a valid pair; otherwise the wall stands alone.
+      ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}) };
     // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
     // incomplete; values that ARE present must be coherent
     if (wk === "gable") { const gp = gableInputProblem(out, out.widthMm); must(!gp, gp?.message); }   // HUB 017: present values only

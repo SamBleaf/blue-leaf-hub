@@ -1,8 +1,10 @@
 // =============================================================================
 // WallsScreen — walls + openings + generated elevation for wall-based materials (TC-R04 02 §3–4, 04 C0–C6,
 // 05 B1/B5, 03 T4).
-//   List    the takeoff's walls, which materials use each, the material's three statuses and problems,
-//           "Wall by numbers" / "Trace on plan", attach/detach the current material, remove (undoable).
+//   List    the walls this material uses, which materials use each, the material's three statuses and problems,
+//           "Wall by numbers" / "Trace on plan". A run traced with Line (HUB 022) is ONE compact item that opens into
+//           its walls in tap order; walls on other materials fold under "Other walls". Use / Remove are inside each
+//           wall (Materials on this wall), not on the rows.
 //   Editor  numeric wall fields (authoritative, auto-applied), openings (tap the elevation then type sizes;
 //           drag the selected opening — snaps to 10 mm, the numbers follow), the generated elevation of THIS
 //           wall only with ONE view at a time: Cladding | Supports | Accessories. Tap a cell / board / line
@@ -27,6 +29,7 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
+import { runIdOf, runLabel, toolsFor, wallListItems, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
 const SNAP_MM = 10;
@@ -68,6 +71,10 @@ const MEAS_PROBLEM = {
 };
 
 // ── small helpers ──────────────────────────────────────────────────────────────────────────────────────────
+/** Materials that go on the cladding's walls (no walls of their own): their list points to Other walls first. */
+const FOLLOWERS = new Set(["batten", "accessory"]);
+/** Cladding-type walls are traced with Line (height first, HUB 022); timber walls keep the Wall tool. */
+const usesLine = (material) => !!material && toolsFor(material).some((t) => t.k === "line");
 const snap = (v) => Math.round(v / SNAP_MM) * SNAP_MM;
 const fmtM2 = (n) => (Number.isFinite(n) ? n.toFixed(2) : "—");
 const plural = (n, one, many = `${one}s`) => `${n.toLocaleString("en-AU")} ${n === 1 ? one : many}`;
@@ -1173,6 +1180,12 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
   const walls = view.measurements.filter((m) => m.kind === "wall" && !m.archived);
   const wall = wallId ? walls.find((w) => w.id === wallId) || null : null;
   useEffect(() => { if (wallId && !wall) onOpenWall?.(null); }, [wallId, wall, onOpenWall]);
+  // HUB 022: which runs are opened out in the list (the run of a wall you come back from stays open)
+  const [openRuns, setOpenRuns] = useState(() => new Set([runIdOf(wall)].filter(Boolean)));
+  const toggleRun = (id) => setOpenRuns((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // "Other walls": open by itself while this material has no walls of its own (battens, accessories … are put on the
+  // cladding's walls from there); once opened, or a wall in it is opened, it stays open for this visit
+  const [othersOpen, setOthersOpen] = useState(null);
 
   // A typed number counts once the page is hidden (app switch, reload, the phone locking): blur the field so it
   // commits — and is written to device recovery — instead of being lost. Invalid text stays as it is.
@@ -1310,6 +1323,73 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
 
   const nextName = (() => { let n = walls.length + 1; const names = new Set(walls.map(wallName)); while (names.has(`Wall ${n}`)) n++; return `Wall ${n}`; })();
   const attribution = material ? attributeProblems(view, material, result) : null;
+  // HUB 022: this material's walls first (runs as one item each); walls on other materials fold away
+  const usedBy = (w) => [...new Set(view.contributions.filter((c) => c.measurementId === w.id && !c.archived).map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
+  const mine = material ? walls.filter((w) => usedBy(w).some((m) => m.id === material.id)) : walls;
+  const others = material ? walls.filter((w) => !usedBy(w).some((m) => m.id === material.id)) : [];
+  const runs = wallRuns(view.measurements);
+  const othersShown = othersOpen ?? !mine.length;
+  const rowInfo = (w) => {
+    const inp = w.inputs || {};
+    const users = usedBy(w);
+    const attached = !!material && users.some((m) => m.id === material.id);
+    const needsHeights = missingHeights(inp).length > 0;
+    return { inp, users, attached, needsHeights, blocked: attached && !needsHeights && (attribution?.byWall.get(w.id) || []).some((p) => p.blocking !== false) };
+  };
+  const wallRow = (w) => {
+    const { inp, users, attached, needsHeights, blocked } = rowInfo(w);
+    const k = inp.kind || "rect";
+    const len = isTraced(w) ? tracedLengthMm(w, view.calibrations) : inp.widthMm;
+    const hText = heightsText(inp);
+    const nOpen = openingsOf(w.id).length;
+    const tag = attached ? wallTag(view, material.id, w) : null;
+    const q = attached ? qtyChips(wallQuantities(result, w.id, tag)) : [];
+    return (
+      <li key={w.id} className="py-2" data-wall-row={w.id}>
+        <button type="button" onClick={() => { if (material && !attached) setOthersOpen(true); onOpenWall?.(w.id); }}
+          className="flex min-h-[48px] w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-page" aria-label={`Open ${wallName(w)}`}>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-ink">{wallName(w)}</span>
+            <span className="block text-[11px] text-muted">{SHAPE_LABEL[k]} · {fmtMm(Math.round((len || 0) * 10) / 10)} mm long{hText ? ` · ${hText}` : ""}{nOpen ? ` · ${plural(nOpen, "opening")}` : ""}</span>
+            <span className="mt-1 flex flex-wrap gap-1">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTracedOutline(w) ? "Traced elevation" : isTraced(w) ? "From plan" : "Entered"}</span>
+              {needsHeights && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
+              {blocked && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-wall-blocked="">Needs attention</span>}
+              {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
+              {q.map((t) => <span key={t} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">{t}</span>)}
+            </span>
+          </span>
+          <span aria-hidden="true" className="text-muted">›</span>
+        </button>
+      </li>
+    );
+  };
+  const listItems = (list) => wallListItems(list, runs).map((it) => {
+    if (it.wall) return wallRow(it.wall);
+    const open = openRuns.has(it.run.id);
+    const info = it.walls.map(rowInfo);
+    const total = it.walls.reduce((a, w) => a + (tracedLengthMm(w, view.calibrations) || 0), 0);
+    const label = runLabel(it.run, it.walls);
+    return (
+      <li key={it.run.id} className="py-2" data-wall-run={it.run.id}>
+        <button type="button" onClick={() => toggleRun(it.run.id)} aria-expanded={open}
+          className="flex min-h-[48px] w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-page">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-ink" data-run-label="">{label}</span>
+            <span className="block text-[11px] text-muted">{fmtMm(Math.round(total * 10) / 10)} mm long · From plan</span>
+            {(info.some((x) => x.needsHeights) || info.some((x) => x.blocked)) && (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {info.some((x) => x.needsHeights) && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
+                {info.some((x) => x.blocked) && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-run-blocked="">Needs attention</span>}
+              </span>
+            )}
+          </span>
+          <span aria-hidden="true" className="text-muted">{open ? "▾" : "▸"}</span>
+        </button>
+        {open && <ul className="ml-2 divide-y divide-hairline border-l border-hairline pl-2" data-run-walls="">{it.walls.map(wallRow)}</ul>}
+      </li>
+    );
+  });
   return (
     <FocusedWindow title={material?.name || "Walls"} subtitle="Walls" onClose={onClose} closeLabel="Back" actions={headerActions}>
       <div ref={rootRef} className="contents">
@@ -1320,7 +1400,7 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
           {notice && <Banner tone="info" action={hist.past ? <Btn onClick={undo}>Undo</Btn> : null}>{notice}</Banner>}
           <section aria-label="Walls" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="flex-1 text-sm font-semibold text-ink">Walls <span className="font-normal text-muted">({walls.length})</span></h2>
+              <h2 className="flex-1 text-sm font-semibold text-ink">Walls <span className="font-normal text-muted">({mine.length})</span></h2>
             </div>
             {canEdit && material && (
               <div className="grid grid-cols-2 gap-2">
@@ -1328,47 +1408,22 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
                 {onTrace ? <Btn onClick={onTrace}>Trace on plan</Btn> : <span />}
               </div>
             )}
-            {!walls.length && <p className="text-sm text-muted">No walls yet. Add one by numbers (length and heights), or trace its run on the plan and enter the heights.</p>}
-            <ul className="divide-y divide-hairline">
-              {walls.map((w) => {
-                const inp = w.inputs || {};
-                const k = inp.kind || "rect";
-                const len = isTraced(w) ? tracedLengthMm(w, view.calibrations) : inp.widthMm;
-                const hText = heightsText(inp);
-                const users = [...new Set(view.contributions.filter((c) => c.measurementId === w.id && !c.archived).map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
-                const attached = !!material && users.some((m) => m.id === material.id);
-                const nOpen = openingsOf(w.id).length;
-                const tag = attached ? wallTag(view, material.id, w) : null;
-                const q = attached ? qtyChips(wallQuantities(result, w.id, tag)) : [];
-                const needsHeights = missingHeights(inp).length > 0;
-                const blocked = attached && !needsHeights && (attribution?.byWall.get(w.id) || []).some((p) => p.blocking !== false);
-                return (
-                  <li key={w.id} className="py-2" data-wall-row={w.id}>
-                    <button type="button" onClick={() => onOpenWall?.(w.id)} className="flex min-h-[48px] w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-page" aria-label={`Open ${wallName(w)}`}>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-ink">{wallName(w)}</span>
-                        <span className="block text-[11px] text-muted">{SHAPE_LABEL[k]} · {fmtMm(Math.round((len || 0) * 10) / 10)} mm long{hText ? ` · ${hText}` : ""}{nOpen ? ` · ${plural(nOpen, "opening")}` : ""}</span>
-                        <span className="mt-1 flex flex-wrap gap-1">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTracedOutline(w) ? "Traced elevation" : isTraced(w) ? "From plan" : "Entered"}</span>
-                          {needsHeights && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
-                          {blocked && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-wall-blocked="">Needs attention</span>}
-                          {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
-                          {q.map((t) => <span key={t} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">{t}</span>)}
-                        </span>
-                      </span>
-                      <span aria-hidden="true" className="text-muted">›</span>
-                    </button>
-                    {canEdit && material && (
-                      <div className="mt-1 flex flex-wrap gap-2 pl-1">
-                        <Btn aria-pressed={attached} onClick={() => act.setAttached(w, !attached)} aria-label={attached ? `Stop using ${material.name} on ${wallName(w)}` : `Use ${material.name} on ${wallName(w)}`}
-                          className={attached ? "border-primary text-primary" : ""}>{attached ? "✓ Uses this material" : "Use this material"}</Btn>
-                        <Btn kind="danger" onClick={() => act.removeWall(w)} aria-label={`Remove ${wallName(w)}`}>Remove</Btn>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            {!mine.length && <p className="text-sm text-muted">{walls.length && material
+              ? FOLLOWERS.has(material.spec?.family)
+                ? `No walls use ${material.name} yet. Open a wall under Other walls and tap Use here.`
+                : `No walls use ${material.name} yet. Trace or add one, or open a wall under Other walls.`
+              : usesLine(material)
+                ? "No walls yet. Trace on plan: type the wall height, then tap each corner. Or add one by numbers (length and heights)."
+                : "No walls yet. Add one by numbers (length and heights), or trace its run on the plan and enter the heights."}</p>}
+            <ul className="divide-y divide-hairline">{listItems(mine)}</ul>
+            {others.length > 0 && (
+              <details className="rounded-lg border border-hairline" data-other-walls="" open={othersShown} onToggle={(e) => setOthersOpen(e.currentTarget.open)}>
+                <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-2 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+                  <span className="flex-1">Other walls ({others.length})</span><span aria-hidden="true" className="text-muted">{othersShown ? "▾" : "▸"}</span></summary>
+                <p className="px-2 text-[11px] text-muted">Walls on other materials. Open one to use {material?.name || "this material"} on it.</p>
+                <ul className="divide-y divide-hairline px-1">{listItems(others)}</ul>
+              </details>
+            )}
           </section>
           {saveBanner}
         </div>
@@ -1608,6 +1663,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     <>
       <KeyboardSafe className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-3">
+          {/* a wall opened from "Other walls": putting this material on it is the next step, so it is at the top
+              (Materials on this wall, below, keeps the full Use / ✓ Uses / Remove wall) */}
+          {canEdit && material && !attached && (
+            <div data-use-here=""><Banner tone="info" action={<Btn kind="primary" onClick={() => act.setAttached(wall, true)} aria-label={`Use ${material.name} on this wall`}>Use here</Btn>}>
+              {material.name} isn&apos;t on this wall yet.</Banner></div>
+          )}
           {measProblems.map((t) => <Banner key={t} tone="warn">{t}</Banner>)}
           <section ref={elevRef} aria-label="Elevation" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div role="radiogroup" aria-label="Elevation view" className="flex rounded-lg border border-hairline p-0.5">

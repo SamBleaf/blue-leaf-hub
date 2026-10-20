@@ -15,12 +15,21 @@
 //                   spaced along; ticks at every member station with the count; the sheet reads count → stock
 //                   lengths → what each needs (engine allocation); tap a tick (Select) to remove, duplicate or
 //                   override its length; the run panel shows the last gap and flags one thinner than the member.
-//   Wall           tap along the wall run on the floor plan → one wall measurement (role "wall") per straight leg,
-//                  named "Wall N", N+1 … → the first one's elevation (a corner is never unfolded into one flat wall).
+//   Line (cladding-type walls, HUB 022)  the panel shows the material and an editable Wall height together (it starts
+//                  at the last height used). Tap the start and each corner, then Finish or double-tap the last point.
+//                  The height in force at each tap belongs to the walls drawn after it: changing it mid-run never
+//                  changes earlier points or walls, and a straight wall splits where the height changes. Every new wall
+//                  gets that height and the material in ONE save, with a runId + seq (tap order). Finish stays on the
+//                  plan and shows one run card ("Run 1 · 4 walls · 2,700") while that finish is the last step; its Undo
+//                  takes the whole run off in one step (↶ puts it back). While tracing, the material name is a label.
+//   Wall (timber studs / plates / noggins)  tap along the wall run on the floor plan → one wall measurement (role
+//                  "wall") per straight leg, named "Wall N", N+1 … → the first one's elevation (a corner is never
+//                  unfolded into one flat wall).
 //   Count          enter the FINISHED length first, then tap each occurrence (unchanged; no double-tap here).
 //   Select         tap anything to adjust it (drag handles + magnifier). A finished run: drag/insert/remove
 //                  points, move splits along the run / to a corner / by station; splits a geometry edit made
-//                  invalid are flagged with Recalculate — never moved silently.
+//                  invalid are flagged with Recalculate — never moved silently. A wall: a Height box that changes
+//                  that wall only; dragging a corner shared with another wall moves both (one Undo).
 //   Pan            every drag navigates; nothing is placed.
 // highlightIds (schedule "Show on plan"): those measurements open selected + highlighted and the plan frames them;
 // any that live on another page / plan (or have no plan position) are named in the sheet instead.
@@ -39,8 +48,8 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtMm, fmtRaw } from "./format.js";
-import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextWallInputs, saveDraft, stockForStation, toolsFor, withOverride } from "./measure/tools.js";
-import { HIT_PX, anchorsFor, distToPolyline, legMidpoints, pathLengthMm, safePointAt, screenDirectionAt, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
+import { COLORS, LINE_TOOLS, PATH_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, lastWallHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextWallInputs, runIdOf, runLabel, saveDraft, stockForStation, toolsFor, upgradeDraft, wallRuns, withOverride } from "./measure/tools.js";
+import { HIT_PX, anchorsFor, distToPolyline, legMidpoints, pathLengthMm, runLegs, safePointAt, screenDirectionAt, sharedCorners, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
@@ -49,7 +58,8 @@ import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js
 
 const UNASSIGNED = "__unassigned";   // show / hide list: lines with no material
 const HIDE_ALL = "__all";            // the earlier single "Hide lines" switch, still honoured when stored
-const SHEET_TITLE = { run: "Measure runs", count: "Count pieces", wall: "Trace walls", member: "Member line", distribution: "Distribution run", pan: "Move around" };
+const SHEET_TITLE = { run: "Measure runs", count: "Count pieces", wall: "Trace walls", line: "Line", member: "Member line", distribution: "Distribution run", pan: "Move around" };
+const MAX_WALL_MM = 100000;
 const PATH_EXPLAINED = new Set(["ceiling_exceeded", "ceiling_unknown", "split_invalid", "path_in_progress"]);
 const flashRulesOf = (m) => (isFlashingMaterial(m) ? m.rules : {});
 /** Where highlighted measurements that aren't on this page are ("Ground floor page 2", "entered lengths" …). */
@@ -76,7 +86,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // ── unfinished drawing (kept on this device; restored after a reload) ───────────────────────────────────────
   const dKey = draftKey({ workspaceId: wsId, materialId: material?.id, documentId: planDoc?.id, pageIndex });
   const restore = (key) => {
-    const d = loadDraft(key);
+    // a cladding drawing kept by an older build (Wall tool) carries on as a Line run (HUB 022)
+    const d = upgradeDraft(loadDraft(key), tools.map((t) => t.k), lastWallHeight(view.measurements));
     if (!d) return null;
     if (!d.measurementId) return d;
     if (view.contributions.some((c) => c.measurementId === d.measurementId && !c.archived)) return null; // finished meanwhile
@@ -92,14 +103,37 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [draftStored, setDraftStored] = useState(true);
   useEffect(() => { if (dKey) setDraftStored(saveDraft(dKey, draftRef.current)); }, [dKey]);
 
+  // Line (HUB 022): the Wall height in force — starts at the unfinished run's height, else the last wall's. Handlers
+  // read it through a ref so a tap straight after typing (the field commits on blur) uses the new height.
+  // (undefined = the drawing says nothing; null = the box was cleared on purpose, and stays empty after a reload)
+  const draftHeight = (d) => (d?.tool !== "line" ? undefined : d.heightMm !== undefined ? d.heightMm : d.heights?.length ? d.heights[d.heights.length - 1] : undefined);
+  const [lineH, setLineHState] = useState(() => { const h = draftHeight(draft); return h !== undefined ? h : lastWallHeight(view.measurements); });
+  const lineHRef = useRef(lineH);
+  function setLineH(n) {
+    lineHRef.current = n;
+    setLineHState(n);
+    const d = draftRef.current;
+    if (d?.tool === "line") { // kept with the unfinished run on this device (not an edit: nothing to undo)
+      const nd = { ...d, heightMm: n };
+      draftRef.current = nd;
+      setDraftState((st) => ({ ...st, draft: nd }));
+      setDraftStored(saveDraft(dKey, nd));
+    }
+  }
+
   // schedule "Show on plan": the measurements to highlight (cleared by the next tap on the plan / tool change)
   const hlKey = (highlightIds || []).join(",");
   const onThisPage = (id) => view.measurements.some((m) => m.id === id && !m.archived && m.documentId === planDoc?.id && m.pageIndex === pageIndex && m.points?.length);
   const [hl, setHl] = useState(() => ({ key: hlKey, ids: hlKey ? highlightIds : [] }));
   const [modeSel, setModeSel] = useState(() => (hlKey ? "select" : draftState.draft?.tool || null));
   const mode = tools.some((t) => t.k === modeSel) ? modeSel : tools[0].k;
-  const [countLen, setCountLen] = useState(null);
-  const [activeCount, setActiveCount] = useState(null); // measurement id
+  const [countLen, setCountLenState] = useState(null);
+  const [activeCount, setActiveCountState] = useState(null); // measurement id
+  // Count reads these through a ref: a length typed and not yet confirmed is committed by the next plan tap (onTap
+  // blurs the field first), and that same tap must count at the new length
+  const countRef = useRef({ len: null, active: null });
+  const setCountLen = (n) => { countRef.current = { ...countRef.current, len: n }; setCountLenState(n); };
+  const setActiveCount = (id) => { countRef.current = { ...countRef.current, active: id }; setActiveCountState(id); };
   const [selected, setSelected] = useState(() => (highlightIds || []).find(onThisPage) || null);
   // HUB 011 (+ 20 Oct follow-up): show / hide the saved takeoff items on this plan page ONE BY ONE — display only,
   // nothing is deleted. `hidden` holds material ids (UNASSIGNED = lines with no material), remembered per page.
@@ -150,7 +184,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const calsById = useMemo(() => new Map(view.calibrations.map((c) => [c.id, c])), [view.calibrations]);
   const computedBy = useMemo(() => new Map((ws.computed?.contributions || []).map((c) => [c.measurementId, c])), [ws.computed]);
   const matOf = useCallback((m) => materialsById.get(contribsOf.get(m.id)?.[0]?.jobMaterialId) || null, [materialsById, contribsOf]);
-  const pointsOf = useCallback((m) => (dragPreview?.measurementId === m.id ? m.points.map((q, i) => (i === dragPreview.index ? dragPreview.p : q)) : m.points), [dragPreview]);
+  const pointsOf = useCallback((m) => {
+    if (!dragPreview?.measurementId) return m.points;
+    // a dragged corner moves every wall that shares it (HUB 022)
+    const at = dragPreview.measurementId === m.id ? dragPreview.index : dragPreview.linked?.find((l) => l.id === m.id)?.index;
+    return at == null ? m.points : m.points.map((q, i) => (i === at ? dragPreview.p : q));
+  }, [dragPreview]);
 
   // ── continuous flashing paths on this page (engine, same inputs as the schedule) ────────────────────────────
   const flashRules = useMemo(() => (flashing ? material.rules : {}), [flashing, material?.rules]);
@@ -264,15 +303,24 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     ? partial({ measurements: [polylineRecord(d.measurementId, d.points, d.splitsMm)] }) : null);
   const draftIsFlashTool = () => flashing && mode === "run";
   function addVertexOp(d, points) {
+    // Undo restores the drawing exactly as it was, even one of another tool that this tap replaces
+    const before = draftRef.current ?? null;
     const base = d || { tool: mode, points: [], splitsMm: [], measurementId: null };
     const next = { ...base, tool: mode, points };
+    if (mode === "line") {
+      // the height in force at THIS tap belongs to the new point — earlier points keep theirs (HUB 022)
+      const hs = (base.heights || []).slice(0, base.points.length);
+      while (hs.length < base.points.length) hs.push(null);
+      next.heights = [...hs, ...points.slice(base.points.length).map(() => lineHRef.current ?? null)];
+      next.heightMm = lineHRef.current ?? null;
+    }
     if (draftIsFlashTool() && points.length >= 2) {
       // from two points the run is a measurement with no material assignment: it survives reloads/devices but is
       // in no order until it is finished
       const mid = base.measurementId || newId();
       record({ redo: partial({ measurements: [polylineRecord(mid, points, base.splitsMm)] }), undo: draftRecordUndo(base) || partial({ archive: { measurements: [mid] } }),
-        draftBefore: d ?? null, draftAfter: { ...next, measurementId: mid } });
-    } else record({ draftBefore: d ?? null, draftAfter: next });
+        draftBefore: before, draftAfter: { ...next, measurementId: mid } });
+    } else record({ draftBefore: before, draftAfter: next });
     setLastDone(null);
   }
 
@@ -358,6 +406,28 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     let r;
     try { r = finishPath(d.points, cal); } catch (e) { warn(e.message); return false; }
     if (!r.finished) { warn("Tap at least two points, then double-tap the last one (or press Finish)."); return false; }
+    if (d.tool === "line") {
+      // HUB 022: one wall per straight leg, each with the height in force when it was traced, the material, its run
+      // and its place in the run — all in ONE save (one Undo). Stays on the plan: the run card says what was made.
+      const legs = runLegs(r.points, (d.heights || []).slice(0, r.points.length));
+      const runId = newId();
+      const meas = [], cons = [];
+      let known = view.measurements;
+      legs.forEach((leg, i) => {
+        const mid = newId();
+        const inputs = lineWallInputs(known, { heightMm: leg.heightMm, runId, seq: i + 1 });
+        known = [...known, { kind: "wall", inputs }];
+        meas.push({ id: mid, kind: "wall", documentId: planDoc.id, pageIndex, calibrationId: cal.id, points: [leg.a, leg.b], inputs });
+        cons.push({ id: newId(), measurementId: mid, jobMaterialId: material.id, role: "wall" });
+      });
+      const op = { redo: partial({ measurements: meas, contributions: cons }),
+        undo: partial({ archive: { measurements: meas.map((m) => m.id), contributions: cons.map((c) => c.id) } }), draftBefore: d, draftAfter: null };
+      record(op);
+      // the run card (and its Undo) belongs to THIS step: it shows only while finishing the run is the last change
+      setLastDone({ id: meas[0].id, runId, op });
+      setMsg(null);
+      return true;
+    }
     if (!(flashing && d.tool === "run")) {
       // walls / timber / aluminium: a plan corner is a JOINT, not a fold — every straight leg is its own wall or
       // piece (a 4 × 3 m trim path is four 3 m pieces, never one 12 m member; an L-shaped wall run is two
@@ -391,6 +461,16 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     });
     setMsg(null); setLastDone({ id: mid }); setActiveSplit(null);
     return true;
+  }
+
+  /** The run card's Undo: takes the whole run off in one step (no drawing left behind); Undo (↶) puts it back. */
+  function undoRun(run) {
+    const op = lastDone?.op;
+    const h = histRef.current;
+    if (!op || h.past[h.past.length - 1] !== op) return;
+    record({ redo: op.undo, undo: op.redo });
+    setLastDone(null);
+    setMsg({ tone: "ok", text: `Run ${run.n} taken off (${run.walls.length} wall${run.walls.length === 1 ? "" : "s"}). Undo puts it back.` });
   }
 
   function discardDraft() {
@@ -539,16 +619,26 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const [mid, idx] = handleId.split(":");
     const m = measNow(mid);
     if (!m) return;
-    if (m.calibrationId && m.kind !== "count") {
-      const c = calsById.get(m.calibrationId);
+    // HUB 022: a corner shared by walls traced together moves on every one of them
+    const linked = sharedCorners(pageMeasurements, m, Number(idx)).filter((l) => measNow(l.id));
+    for (const x of [m, ...linked.map((l) => measNow(l.id))]) {
+      if (!x.calibrationId || x.kind === "count") continue;
+      const c = calsById.get(x.calibrationId);
       if (c && !pointsWithinCalibration(c, [p])) { warn("That point is outside the scaled region."); return; }
     }
-    if (!commit) { setDragPreview({ measurementId: mid, index: Number(idx), p }); return; }
+    if (!commit) { setDragPreview({ measurementId: mid, index: Number(idx), p, linked }); return; }
     setDragPreview(null);
     const pts = m.points.map((q, i) => (i === Number(idx) ? p : q));
     const r = m.kind === "polyline" ? geometryEdit(m, pts) : { next: { ...m, points: pts } };
     if (r.error) { warn(r.error); return; }
-    record({ redo: partial({ measurements: [r.next] }), undo: partial({ measurements: [m] }) });
+    const others = linked.map((l) => { const o = measNow(l.id); return { before: o, next: { ...o, points: o.points.map((q, i) => (i === l.index ? p : q)) } }; });
+    // one edit for every wall at that corner, so one Undo puts the corner back
+    record({ redo: partial({ measurements: [r.next, ...others.map((o) => o.next)] }), undo: partial({ measurements: [m, ...others.map((o) => o.before)] }) });
+    if (others.length) setMsg({ tone: "ok", text: `Corner moved on ${others.length + 1} walls. Undo puts it back.` });
+  }
+  /** Select → Height on a wall: that wall only (HUB 022). */
+  function setWallHeight(m, n) {
+    record({ redo: partial({ measurements: [{ ...m, inputs: { ...(m.inputs || {}), heightMm: n } }] }), undo: partial({ measurements: [m] }) });
   }
   function insertPoint(m, k, p) {
     const r = geometryEdit(m, [...m.points.slice(0, k), p, ...m.points.slice(k)]);
@@ -654,6 +744,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }
 
   function countTap(p) {
+    const { len: countLen, active: activeCount } = countRef.current;
     if (!countLen) { warn("Enter the finished length first."); return; }
     const existing = activeCount && measNow(activeCount);
     if (existing && existing.finishedLengthMm === countLen) {
@@ -668,6 +759,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }
 
   function onTap(p, sp) {
+    // a number still being typed (Line's Wall height, Select's Wall height, a count length …) counts from this tap:
+    // the plan's pointerdown never takes focus, so leave the field here and it commits to what it belongs to before
+    // the tap changes the selection or the drawing (and the keyboard drops)
+    if (document.activeElement?.tagName === "INPUT") document.activeElement.blur();
     // the tap that trails a double-tap finish (tap the end, then double-tap it = three taps) is part of the same
     // gesture burst — it must not start a phantom new run at the finished end (13: no phantom points)
     const lf = lastFinishTap.current;
@@ -714,7 +809,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const results = material && familyOf(material) ? ws.computed?.materialResults?.[material.id] || null : null;
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false);
   const draftLen = draft && cal && draft.points.length >= 2 ? pathLengthMm(draft.points, cal) : null;
-  const draftLegs = draft && !draftIsFlash ? straightLegs(draft.points).length : 0; // walls / timber / aluminium pieces
+  const draftLegs = draft && !draftIsFlash ? (draft.tool === "line" ? runLegs(draft.points, draft.heights) : straightLegs(draft.points)).length : 0; // walls / timber / aluminium pieces
+  const runs = useMemo(() => wallRuns(view.measurements), [view.measurements]);
   const drawTool = PATH_TOOLS.has(mode) || LINE_TOOLS.has(mode);
   const hlSet = useMemo(() => new Set(hl.ids), [hl.ids]);
   // the takeoff items on this page (one per material, in the job's material order) for the show / hide list
@@ -851,7 +947,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
 
   const renderDraft = (toScr) => {
     if (!draft || !draft.points.length) return null;
-    const color = draft.tool === "wall" ? COLORS.wall : draft.tool === "member" ? COLORS.member : draft.tool === "distribution" ? COLORS.distribution : COLORS.flashing;
+    const color = draft.tool === "wall" || draft.tool === "line" ? COLORS.wall : draft.tool === "member" ? COLORS.member : draft.tool === "distribution" ? COLORS.distribution : COLORS.flashing;
     if (draft.points.length === 1) {
       const s = toScr(draft.points[0]);
       return <circle data-path-draft="" data-points={1} cx={s.x} cy={s.y} r={7} fill="#fff" stroke={color} strokeWidth={3} />;
@@ -860,7 +956,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       return <FlashingPathShape measurementId={draft.measurementId} points={draft.points} path={draftPath} cal={cal} toScreen={toScr} unfinished draft activeSplit={activeSplit} />;
     }
     const len = cal ? pathLengthMm(draft.points, cal) : null;
-    return <PolylineShape kind={draft.tool === "wall" ? "wall" : "polyline"} points={draft.points} toScreen={toScr} color={color} dashed draft label={len ? fmtMm(Math.round(len)) : ""} />;
+    return <PolylineShape kind={draft.tool === "wall" || draft.tool === "line" ? "wall" : "polyline"} points={draft.points} toScreen={toScr} color={color} dashed draft label={len ? fmtMm(Math.round(len)) : ""} />;
   };
 
   const statusLine = results && <StatusRow status={results.status} />;
@@ -1060,6 +1156,46 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             );
           })()}
 
+          {mode === "line" && (() => {
+            // HUB 022: the material and the Wall height together; the height in force applies to the walls traced next
+            const run = !draft && lastDone?.runId && hist.past[hist.past.length - 1] === lastDone.op ? runs.get(lastDone.runId) : null;
+            const drawing = draft?.points.length > 0;
+            return (
+              <div className="space-y-2 text-sm" data-line-panel="">
+                <div className="flex items-end gap-3">
+                  {/* the material is one per run: while tracing it is plain text, so a thumb reaching for the height
+                      never finishes the run by mistake (change it with "Material: …" above) */}
+                  {drawing ? (
+                    <p className="flex min-h-[44px] min-w-0 flex-1 items-center text-sm font-semibold text-ink" data-line-material-text="">
+                      <span className="truncate" data-line-material="">{material?.name}</span></p>
+                  ) : (
+                    <button type="button" onClick={changeMaterial} aria-label={`${material?.name || ""}: change material`} data-line-material-button=""
+                      className="flex min-h-[44px] min-w-0 flex-1 items-center gap-1 rounded-full bg-page px-3 text-left text-sm font-semibold text-primary">
+                      <span className="truncate" data-line-material="">{material?.name}</span><span aria-hidden="true">›</span></button>
+                  )}
+                  <div className="w-40 shrink-0" data-line-height="">
+                    <NumberField label="Wall height" value={lineH} min={1} max={MAX_WALL_MM} optional onCommit={setLineH} />
+                  </div>
+                </div>
+                {!drawing && !run && <p className="text-muted">Tap the start of the wall, then each corner. Double-tap the last point, or press Finish. To go right round, double-tap the start.</p>}
+                {draft?.points.length === 1 && <p className="text-muted">Tap the next corner.</p>}
+                {draft?.points.length >= 2 && <p className="text-muted" data-line-progress="">{draftLegs} wall{draftLegs === 1 ? "" : "s"} · {draftLen != null ? `${fmtRaw(draftLen)} mm` : "—"}. Tap the next corner, or double-tap the last point to finish.</p>}
+                {drawing && <p className="text-[11px] text-muted">A new height only changes the walls you trace after it.{draft.points.length >= 3 ? " To go right round, double-tap the start." : ""}</p>}
+                {lineH == null && <p className="text-[11px] text-amber-800">No height yet. Type it first, or each wall will need one.</p>}
+                {drawing && <div className="flex flex-wrap gap-2"><Btn onClick={() => finishDraft()} disabled={draft.points.length < 2}>Finish</Btn><Btn kind="ghost" onClick={discardDraft}>Discard</Btn></div>}
+                {run && (
+                  <div className="flex items-center gap-2 rounded-lg border border-hairline bg-page px-3 py-1" data-run-card={run.id}>
+                    <p className="min-w-0 flex-1"><b className="text-ink" data-run-label="">{runLabel(run)}</b><span className="block text-[11px] text-muted">Tap the start of the next run.</span></p>
+                    <Btn onClick={() => undoRun(run)} aria-label="Undo this run">Undo</Btn>
+                  </div>
+                )}
+                {draft && !draftStored && <p className="text-[11px] text-amber-800">This device can&apos;t keep an unfinished run if the app reloads. Finish it before leaving.</p>}
+                <p className="text-[11px] text-muted">{pageMeasurements.filter((m) => m.kind === "wall").length} wall(s) on this page.</p>
+                {statusLine}{problemLines}
+              </div>
+            );
+          })()}
+
           {mode === "member" && (() => {
             const own = view.contributions.find((c) => !c.archived && c.jobMaterialId === material?.id && c.role === "member");
             const mm = own ? measNow(own.measurementId) : null;
@@ -1156,16 +1292,26 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             </div>
           )}
 
-          {mode === "select" && sel?.kind === "wall" && (
-            <div className="space-y-2 text-sm">
+          {mode === "select" && sel?.kind === "wall" && (() => {
+            const run = runs.get(runIdOf(sel));
+            const rect = (sel.inputs?.kind || "rect") === "rect";
+            return (
+            <div className="space-y-2 text-sm" data-selected-wall="">
               <p className="font-medium text-ink">{sel.inputs?.name || "Wall"} — {fmtRaw(pathLengthMm(sel.points, calsById.get(sel.calibrationId)))} mm along the plan</p>
-              <p className="text-[11px] text-muted">{sel.inputs?.heightMm ? `Height ${fmtMm(sel.inputs.heightMm)} mm.` : "No height yet."} The elevation is derived from plan + entered heights.</p>
+              {run && run.walls.length > 1 && <p className="text-[11px] text-muted">{runLabel(run)} · wall {run.walls.findIndex((w) => w.id === sel.id) + 1} of {run.walls.length}</p>}
+              {/* HUB 022: the height of THIS wall only — the rest of its run keeps theirs */}
+              {rect && canEdit ? (
+                <div className="w-48" data-wall-height=""><NumberField key={sel.id} label="Wall height" value={sel.inputs?.heightMm ?? null} min={1} max={MAX_WALL_MM} onCommit={(n) => setWallHeight(sel, n)} help="This wall only." /></div>
+              ) : (
+                <p className="text-[11px] text-muted">{rect ? (sel.inputs?.heightMm ? `Height ${fmtMm(sel.inputs.heightMm)} mm.` : "No height yet.") : "Change this wall's heights on its elevation."} The elevation is derived from plan + entered heights.</p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {onOpenWall && <Btn kind="primary" onClick={() => onOpenWall(sel.id)}>Open elevation</Btn>}
                 <Btn kind="danger" onClick={removeSelected} disabled={!canEdit}>Remove wall</Btn>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {mode === "select" && sel?.kind === "member" && (
             <div className="space-y-2 text-sm">

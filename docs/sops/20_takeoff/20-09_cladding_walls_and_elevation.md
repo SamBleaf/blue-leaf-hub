@@ -1,6 +1,6 @@
 ---
-sop_version: 1.5
-last_reviewed: 2026-10-20
+sop_version: 1.6
+last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -87,9 +87,14 @@ You choose the cladding product and how it is installed, then enter each wall �
 
 1. The **Walls** screen shows the material's statuses (**Quantity / Installation / Ordering**), "The app has not verified installation (supports, fixings, wind zones). Quantities are for ordering only.", any **Needs attention before ordering** list, and the walls.
 2. **Wall by numbers** → **Wall name**, **Shape** (**Rectangle**, **Sloping top**, **Gable**), **Wall length** (Enter). The wall's editor opens with the missing height ready to type.
-3. **Trace on plan** → the plan opens with the **Wall** tool: tap the start of the wall run and each corner, then double-tap the last point (or **Finish**). Each straight leg becomes its own wall ("Wall 3", "Wall 4" …); the first one's elevation opens next. The height last used on this takeoff is offered ("Height 2,700 mm (last used here)").
-4. In the list each wall shows its shape, length, heights, openings, **Entered** or **From plan**, the materials using it and its quantities. **Heights needed** and **Needs attention** chips show what is missing.
-5. **✓ Uses this material** / **Use this material** attaches or detaches the current material. **Remove** deletes the wall and its openings **for every material using it** ("Removed North and its 1 opening. Also gone from …") — **Undo** brings it back.
+3. **Trace on plan** → the plan opens with the **Line** tool. The panel shows the cladding (for example "Axon 400 smooth") and **Wall height** side by side. The height starts at the last one used on this takeoff. (Timber studs, plates and noggins keep the **Wall** tool: SOP 20-08.)
+4. Type the **Wall height** (for example 2,700) and tap **Done**. Then tap the start of the wall and each corner. Double-tap the last point, or tap **Finish**. To close a run round a building, double-tap the start point (the panel says so). If you clear the box, the walls you trace next have no height and show **Heights needed**.
+5. You can change **Wall height** partway through a run. Only the walls you trace after that get the new height. Walls already drawn keep theirs. If you change it partway along a straight wall, that wall is split into two walls where you changed it.
+6. **Finish** keeps you on the plan. One card shows the run, for example "Run 1 · 4 walls · 2,700". Each straight leg is its own wall ("Wall 3", "Wall 4" …) with its own elevation and sheets. All the walls are saved together, with the cladding already on them. If some walls have no height, the card says so ("… · 2,700 · 1 needs a height"). **Undo** on the card takes the whole run off in one go, and the toolbar **↶** puts it back. The card only shows while finishing the run is the last thing you did. After any other change (a height, a corner), use the toolbar **↶** instead.
+7. The cladding stays the same for the whole run. While you are tracing, its name is only a label, so a stray tap beside the height box can't finish the run. Before you start, tapping the name (or **Material: …** at the top) opens the material list. **Material: …** during a run finishes the run first.
+8. To change one wall's height later, tap **Select**, tap the wall and change **Wall height**. Only that wall changes. You don't have to tap **Done**: tapping the next wall (or anywhere on the plan) keeps the height you typed. The same goes for the Line height and a Count length. To move a corner, drag its point. A corner shared by two walls moves both walls, and one **Undo** puts it back.
+9. In the list, a traced run is one line ("Run 1 · 4 walls · 2,700"). Tap it to see its walls in the order you traced them. Each wall shows its shape, length, heights, openings, **Entered** or **From plan**, the materials using it and its quantities. **Heights needed** and **Needs attention** chips show what is missing (on the run's line too). Walls on other materials are folded under **Other walls** (tap it to open: ▸ / ▾). If this material has no walls yet (battens, for example), **Other walls** is already open.
+10. To put this material on a wall, open the wall and tap **Use here** at the top ("Cavity batten 70 × 19 isn't on this wall yet."). Back in the list, **Other walls** and the run stay open, so the next wall is one tap away. **Materials on this wall** (further down) also has **Use … here** / **✓ Uses …** to take it off again. **Remove wall** is there too. It deletes the wall and its openings **for every material using it** ("Removed North and its 1 opening. Also gone from …"). **Undo** brings it back.
 
 ### D. Enter the wall's size and read the elevation
 
@@ -150,6 +155,7 @@ You choose the cladding product and how it is installed, then enter each wall �
 | Assuming "Not decided" accessory groups are excluded | They look empty | Decide each one: By others / Exclude (with reason) / entered item |
 | Treating the elevation as surveyed | It looks exact | It is derived from the plan + typed heights — check site measurements |
 | Removing a wall shared by several materials | Remove looks local | Read "Also gone from …"; Undo if wrong |
+| Changing **Wall height** to fix a wall already traced | The box looks like it sets every wall | The box only changes the walls you trace next. Use **Select** → the wall → **Wall height** |
 | Ordering joint-strip lines as cladding boards | The line uses the cladding's product name (Section 12) | Leave them off the order until a joint product is chosen |
 
 ---
@@ -159,6 +165,10 @@ You choose the cladding product and how it is installed, then enter each wall �
 | Problem the user sees | Most likely cause | Fix |
 |----------------------|-------------------|-----|
 | "Enter the wall heights to generate the elevation." / **Heights needed** | Wall has a length but no height | Type the height(s) |
+| "No height yet. Type it first, or each wall will need one." on the Line panel | No wall on this takeoff has a height yet | Type **Wall height** before tracing, or set each wall afterwards with **Select** |
+| A wall I expected isn't in the list | It is on another material | Open **Other walls**, open the wall, tap **Use here** at the top |
+| An unfinished drawing from before the update comes back as a **Line** run | Cladding no longer has the **Wall** tool; the drawing carries on as a Line run with the last wall height | Carry on tapping corners, or **Finish** / **Discard**. It finishes as a run and you stay on the plan |
+| **Undo this run** isn't on the plan any more | You changed something after finishing the run (a height, a corner) | Use the toolbar **↶**. It undoes the last change first |
 | "The apex must be higher than the eaves." / "The apex must sit between the two wall ends …" | Gable values don't fit | Correct the value — the old shape stays until valid |
 | "… the tallest listed sheet is 3,000 mm …" / **No stock fits** cells | Wall taller than any listed sheet | **Add a joint row** with its detail, or choose a taller listed sheet |
 | "… is entirely outside the wall" / "<material>: no layout on this wall — fix the problems below first." | An opening is off the wall | Move or remove the opening |
@@ -193,7 +203,8 @@ You choose the cladding product and how it is installed, then enter each wall �
 ## 10. Screenshot placeholders
 
 [insert screenshot: Cladding setup card — Material chips, product picker, chosen product facts, Installation assembly (Candidate), Needs…]
-[insert screenshot: Walls list — material status, Wall by numbers / Trace on plan, wall rows with chips]
+[insert screenshot: Line panel — cladding name and Wall height side by side; the run card "Run 1 · 4 walls · 2,700" with Undo]
+[insert screenshot: Walls list — material status, Wall by numbers / Trace on plan, a run opened into its walls, Other walls folded]
 [insert screenshot: wall editor — Cladding view with 4 sheets, W1 opening, Gross/Openings/Net]
 [insert screenshot: New opening sheet — Width, Height, Sill height, Offset from wall start, Label, Type]
 [insert screenshot: tapped cell — Stock / Cut size with Previous / Next]
@@ -207,7 +218,7 @@ You choose the cladding product and how it is installed, then enter each wall �
 ## 11. Automation notes
 
 - **Add cladding** upserts a `takeoff_job_materials` row (`spec.family` 'cladding', layout 'sheet'); the method follows the product: `sheet_layout@2` (sheets, Rendex), `course_layout@1` (boards / fixed timber), `panel_grid@1` (Matrix), `aac_panel_layout@1` (AAC), `area_to_linear@2` (random-length timber), `support_grid@1` (battens), `accessory_routes@1` (accessories).
-- **Wall:** `takeoff_measurements` `kind` 'wall', `geometry.inputs` { kind rect|rake|gable|polygon, widthMm, heightMm | start/end | eaves/apex, name }, traced walls also store plan points + `calibration_id` / `document_id`; contribution `role` 'wall' per material using it.
+- **Wall:** `takeoff_measurements` `kind` 'wall', `geometry.inputs` { kind rect|rake|gable|polygon, widthMm, heightMm | start/end | eaves/apex, name }, traced walls also store plan points + `calibration_id` / `document_id`; contribution `role` 'wall' per material using it. A wall traced with **Line** (HUB 022) also stores `runId` (uuid, shared by the run) and `seq` (1, 2, 3 … in tap order) in `geometry.inputs`. No migration: the server keeps them only as a valid pair and drops anything else. A run's walls and their contributions are one commit, so they share one `created_at`; `seq` is what brings them back in order.
 - **Opening:** `kind` 'opening', `geometry.parentId` = the wall, inputs { xMm, sillMm, widthMm, heightMm, label, type }. Removing a wall archives its openings and every contribution to them.
 - **Joint rows, datum, route, spacing, adhesive joint** are material `rules` (one change → every wall using that material).
 - **Calculation** (`shared/takeoff/engine/wall.js`, `cladding.js`, `supports.js`, `accessories.js`, `dispatch.js`): wall polygon, opening **union** clipped to the wall, gross / opening / net; occupied-cell sheet layout; course bands; panel grid n = ceil((W + g) ÷ (p + g)); AAC columns; area ÷ cover LM. Recomputed on every save on the server; the client never sends quantities.
@@ -226,7 +237,9 @@ You choose the cladding product and how it is installed, then enter each wall �
 - Corner trims can't be tagged on walls yet — add them as "Other item (entered quantity)".
 - Opening flashings are not generated from openings — add them as a flashing material (SOP 20-11); the opening sheet lists the edge lengths.
 - Random-length timber LM is an estimate; minimum board length, end-joint and stagger rules are not set in the app — agree them with the supplier and installer.
-- Traced walls keep their plan length; to change it, retrace. A re-scale or replaced plan flags traced walls (SOP 20-02).
+- Traced walls keep their plan length; to change it, retrace or drag a corner. A re-scale or replaced plan flags traced walls (SOP 20-02).
+- Runs are numbered in takeoff order across the job (Run 1, Run 2 …). Removing every wall of a run renumbers the runs after it. A run with only one wall is listed as a plain wall. Walls traced before HUB 022 (and walls by numbers) have no run and are listed on their own.
+- A corner moves both walls only where the two walls share the exact same point (walls traced in one run). Walls from separate runs that only look joined move on their own.
 - Wind classification, edge zones and fixing patterns are never inferred.
 
 ---
@@ -368,6 +381,24 @@ Next review date: 2027-04-14
 2. Expected: "Sheets and offcuts are shared across all 2 walls of Axon 400 smooth: 6 pieces from 5 sheets in all …" and "1 piece on this wall comes from another wall's sheet or offcut". Tap strip 3: **From** reads "The offcut of North strip 1 (Sheet 1, counted on North)".
 3. Tap **Plan each wall on its own**. Expected: "Each wall is planned on its own: offcuts are not used on other walls."; South → 3 sheets; strip 3 is "(its own)". Tap **Share offcuts across walls**: shared again.
 4. Engine (scripts/tests/takeoff-tc-hub016b.test.mjs): two 6,573 × 3,600 walls → 15 sheets shared, 16 wall by wall; the matching-edge case 6 → 5; the same edge on both walls is refused, naming the other wall; every piece is cut once and every sheet is ordered once; the cut list names the wall; the same walls in any order give the same plan; a blocked wall shares nothing.
+- [ ] Pass  [ ] Fail
+
+**TC-18 — Line, height and runs (HUB 022, UI Review + API)**
+1. `?takeoffSeed=mixed` → Timber and cladding → **Measure** → material **Axon cladding**. Expected: **Line** is chosen (there is no **Wall** tool for cladding); the panel shows "Axon cladding" and **Wall height** 3000 (the East wall's height, the last one used).
+2. Leave 3000 → tap four corners of a rectangle → double-tap the start. Expected: you stay on the plan with no elevation form and no material question; the card reads "Run 1 · 4 walls · 3,000" with **Undo**; four walls are drawn; the fake server got ONE commit (`__takeoffReviewState().commits` + 1); each wall has role "wall" on Axon, the same `runId` and `seq` 1–4. **Undo** on the card takes all four walls off in one step with no drawing left ("Run 1 taken off (4 walls). Undo puts it back."); the toolbar **↶** brings them back.
+3. New run: **Wall height** 2700, tap the start and two corners, change to 3600, tap two more corners → **Finish**. Expected: "Run … · 4 walls · 2,700 / 3,600"; walls 1–2 at 2,700, walls 3–4 at 3,600. Along a straight wall: 2700, tap the start and the middle, type 3000 (no Enter), tap the end → **Finish**. Expected: two walls, 2,700 then 3,000, joined exactly at the middle.
+4. **Select** → tap one wall → **Wall height** 3600. Expected: only that wall changes (the other wall's record is untouched). Drag the corner it shares with the next wall. Expected: "Corner moved on 2 walls. Undo puts it back."; both walls follow and their free ends stay. One **Undo** puts the corner back on both; the height stays 3,600.
+5. Leave the plan → **Walls**. Expected: the run is one line ("Run 1 · …"); tap it → its walls in tap order; walls on other materials sit under **Other walls**; the rows have no Use / Remove buttons (they are inside each wall under **Materials on this wall**); every target is at least 44 px; no sideways scroll at 390 px.
+6. Offline: trace a run, change one wall's height with Select, reload → **Restore** → **Walls**. Expected: the run, its tap order and its heights are back; **North wall** still opens; **Wall by numbers** still works. An unfinished run also comes back after a reload with each tap's height and the height in the box.
+7. Timber: a studs material shows **Wall** (not Line) and finishing opens the first wall's elevation, as before (SOP 20-08 TC-12).
+8. API (scripts/tests/takeoff-api.test.mjs "HUB 022"): the real server keeps `runId` + `seq` in `geometry.inputs`; the run's walls share one save time and come back in tap order by `seq`; a bad `runId` or a non-whole `seq` is dropped (never guessed); saving one wall's new height leaves the other walls exactly as they were. Pure rules: scripts/tests/takeoff-tc-hub022.test.mjs. Screens: e2e/ui-review/tc-measure.spec.js and tc-walls.spec.js ("HUB 022").
+9. Review fixes (screens "review fix"):
+   - **Select** → wall 1 → type 3600 in **Wall height** without Enter or Done → tap wall 2. Expected: wall 1 is saved at 3,600 and the panel shows wall 2. Type 3300 → tap empty plan. Expected: wall 2 is saved at 3,300. In **Count**, a length typed without Enter counts from the next tap.
+   - Finish a run → **Select** → change a wall's height → **Line**. Expected: no run card. Toolbar **↶** (the height goes back): the card is back. A corner drag also takes the card away.
+   - Tap 3 corners. Expected: the cladding name is plain text (tapping it does nothing) and the panel says "To go right round, double-tap the start."
+   - Clear **Wall height** → Enter. Expected: the box stays empty with "No height yet …". Tap two points, type 2700, tap a third → **Finish**. Expected: "Run 1 · 2 walls · 2,700 · 1 needs a height"; wall 1 has no height.
+   - A drawing stored by the older **Wall** tool for Axon (device storage) comes back as a **Line** drawing at 3000; the next tap adds a corner; **Finish** makes a run and stays on the plan.
+   - **Cavity batten** with no walls, Axon run of 4: **Walls (0)**, **Other walls (4)** already open (▾). Open Wall 2 → **Use here** is visible without scrolling → tap it → **‹ Walls**: **Walls (1)**, Other walls and the run still open.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

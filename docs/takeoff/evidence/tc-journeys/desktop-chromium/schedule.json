@@ -2,25 +2,25 @@
   "note": "computed.scheduleLines from the REAL sandbox server (GET workspace) just before ordering",
   "materials": [
     {
-      "id": "1c71afb7-5795-465c-ac16-d0ba9f5c3688",
+      "id": "ee0f8dab-dd45-4ed8-a806-316ffa9fc5de",
       "name": "Rafters 90 × 45",
       "methodKey": "repeated_members",
       "family": "timber"
     },
     {
-      "id": "352ca934-f187-477a-9d9d-d453b6474a7c",
+      "id": "a4c70807-3773-4b7a-a9e2-cf8821d1f4bc",
       "name": "Axon 133 smooth",
       "methodKey": "sheet_layout",
       "family": "cladding"
     },
     {
-      "id": "4688916e-e371-4035-a98f-79063aed8a8c",
+      "id": "48bf8962-8531-4668-adc5-9e6fd6c12dda",
       "name": "Aluminium angle 50 × 50 × 3",
       "methodKey": "linear_stock",
       "family": "aluminium"
     },
     {
-      "id": "577001ae-4b2c-4695-b8bc-2f6f4629ad8e",
+      "id": "0b96e87e-5e12-4c7f-b0f1-3438b029b2d7",
       "name": "Flashing 1",
       "methodKey": "flashing_runs",
       "family": "flashing"
@@ -55,7 +55,7 @@
       "finishedLengthMm": 6500,
       "stockLengthMm": 6500,
       "problems": [],
-      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|4688916e-e371-4035-a98f-79063aed8a8c|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}"
+      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|48bf8962-8531-4668-adc5-9e6fd6c12dda|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}"
     },
     {
       "material": "Axon 133 smooth",
@@ -65,7 +65,7 @@
       "finishedLengthMm": 2750,
       "stockLengthMm": 2750,
       "problems": [],
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|352ca934-f187-477a-9d9d-d453b6474a7c|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}"
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4c70807-3773-4b7a-a9e2-cf8821d1f4bc|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}"
     },
     {
       "material": "Rafters 90 × 45",
@@ -75,7 +75,7 @@
       "finishedLengthMm": 5400,
       "stockLengthMm": 5400,
       "problems": [],
-      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|1c71afb7-5795-465c-ac16-d0ba9f5c3688|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}"
+      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|ee0f8dab-dd45-4ed8-a806-316ffa9fc5de|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}"
     }
   ]
 }

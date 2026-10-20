@@ -96,6 +96,31 @@ function fakeKeyboard() {
 const shot = (page, name) => page.screenshot({ path: `docs/takeoff/evidence/ui/tc-measure/${name}.png` });
 const reviewState = (page) => page.evaluate(() => window.__takeoffReviewState());
 const saved = (page) => expect(page.getByRole("status").filter({ hasText: /^Saved$/ }).first()).toBeVisible({ timeout: 15_000 });
+/** HUB 022: the walls of traced runs as the (fake) server holds them, in run order then tap order. */
+const runWalls = (page) => page.evaluate(async () => {
+  const ms = (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.measurements.filter((m) => m.kind === "wall" && m.inputs?.runId);
+  const order = [...new Set(ms.map((m) => m.inputs.runId))];
+  return ms.sort((a, b) => order.indexOf(a.inputs.runId) - order.indexOf(b.inputs.runId) || a.inputs.seq - b.inputs.seq)
+    .map(({ id, points, inputs }) => ({ id, points, inputs }));
+});
+/** A timber studs material (keeps the Wall tool), seeded through the fake server's own commit before the takeoff opens. */
+const STUDS = { id: "mat-studs", name: "Studs 90 × 45", methodKey: "wall_frame", methodVersion: 1,
+  spec: { family: "timber", purpose: "studs", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock: { kind: "grid", minMm: 1200, incrementMm: 600 } }, rules: { centresMm: 600 }, profile: null };
+async function openMeasureWith(page, materials) {
+  await page.goto("/carpentry/cjb-1?reviewRole=admin&takeoffSeed=mixed");
+  await ready(page);
+  const res = await page.evaluate(async (mats) => {
+    const ws = await (await fetch("/api/takeoff/workspaces/ws-1")).json();
+    const r = await fetch("/api/takeoff/workspaces/ws-1/commit", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: ws.snapshot.workspace.revision, idempotencyKey: "tc-measure-seed", changes: { materials: { upsert: mats, archive: [] } } }) });
+    return r.json();
+  }, materials);
+  expect(res.ok, JSON.stringify(res)).toBe(true);
+  await page.evaluate((u) => { window.history.pushState({}, "", u); window.dispatchEvent(new PopStateEvent("popstate")); }, MIXED);
+  await ready(page);
+  await page.getByRole("button", { name: /^Measure$/ }).click();
+  await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
+}
 
 test.describe("continuous flashing runs (TC-R04 13) — phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
@@ -293,6 +318,22 @@ test.describe("continuous flashing runs (TC-R04 13) — phone", () => {
     await page.touchscreen.tap(x, y);
     await page.touchscreen.tap(x + 12, y);                                     // < 300 ms, < 24 px
     await expect(page.getByText(/Counted 2 × 2,400 mm/)).toBeVisible();
+  });
+
+  test("review fix: a count length typed without Enter counts from the next tap (the tap confirms it first)", async ({ page }) => {
+    await openMeasure(page);
+    await page.getByRole("radio", { name: "Count" }).click();
+    const f = page.getByLabel("Finished length (no allowance added)");
+    await f.fill("2400"); await f.press("Enter");
+    const box = await page.locator("[data-takeoff-viewport]").boundingBox();
+    const x = box.x + box.width / 2, y = box.y + box.height / 3;
+    await page.touchscreen.tap(x, y);
+    await expect(page.getByText(/Counted 1 × 2,400 mm/)).toBeVisible();
+    await f.fill("1800");                                                      // keyboard still up
+    await page.waitForTimeout(400);
+    await page.touchscreen.tap(x + 60, y);
+    await expect(page.getByText(/Counted 1 × 1,800 mm/)).toBeVisible();
+    await expect(f).toHaveValue("1800");
   });
 
   test("13 recovery: an unfinished run survives a reload and is in no order until finished", async ({ page }) => {
@@ -579,13 +620,14 @@ test.describe("repeated timber members — the run's own settings", () => {
   });
 });
 
-test.describe("wall run on the floor plan (02 §3)", () => {
+test.describe("wall run on the floor plan (02 §3) — timber keeps the Wall tool", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test("Wall tool: an L-shaped wall run → one wall per straight leg (role wall, 'Wall N', 'Wall N+1', last height); the first elevation opens", async ({ page }) => {
-    await openMeasure(page, MIXED);
-    await chooseMaterial(page, "Axon cladding");
+  test("Wall tool (timber studs): an L-shaped wall run → one wall per straight leg (role wall, 'Wall N', 'Wall N+1', last height); the first elevation opens", async ({ page }) => {
+    await openMeasureWith(page, [STUDS]);
+    await chooseMaterial(page, STUDS.name);
     await expect(page.getByRole("radio", { name: "Wall", exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveCount(0);
     await expect(page.getByText(/Height 3,000 mm \(last used here\)/)).toBeVisible();
     const before = (await reviewState(page)).measurements;
     await zoomOn(page, at(4000, 2500), 2);
@@ -609,8 +651,324 @@ test.describe("wall run on the floor plan (02 §3)", () => {
     await expect(page.locator('[data-kind="wall"] text').filter({ hasText: /^Wall 3 · 5,0\d\d$|^Wall 3 · 4,9\d\d$/ })).toBeVisible();
     await expect(page.locator('[data-kind="wall"] text').filter({ hasText: /^Wall 4 · (3,0|2,9)\d\d$/ })).toBeVisible();
     await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(2);
+    await expect(page.getByRole("radio", { name: "Wall", exact: true })).toHaveAttribute("aria-checked", "true");
     await tapPdf(page, at(1500, 5000));
     await expect(page.getByText(/^Wall 5: /)).toBeVisible();
+  });
+});
+
+test.describe("HUB 022 Line, height and runs — phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const heightField = (page) => page.locator("[data-line-height]").getByLabel("Wall height");
+  const runCard = (page) => page.locator("[data-run-card]");
+
+  test("acceptance 1–2: Line shows the cladding and Wall height together (last height 3,000); four connected walls → ONE run at 3,000 in ONE save, still on the plan", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "Wall", exact: true })).toHaveCount(0);
+    const panel = page.locator("[data-line-panel]");
+    await expect(panel.locator("[data-line-material]")).toHaveText("Axon cladding");
+    await expect(heightField(page)).toHaveValue("3000");                       // East wall (3,000) is the last height used
+    await shot(page, "hub022-line-panel-390x844");
+    const s0 = await reviewState(page);
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000), at(1500, 4000)]) await tapPdf(page, q);
+    await expect(panel.locator("[data-line-progress]")).toContainText("3 walls");
+    await page.waitForTimeout(400);
+    await doubleTapPdf(page, at(1500, 1000));                                  // double-tap the start: closes the run and finishes
+    await expect(runCard(page)).toBeVisible();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 4 walls · 3,000");
+    // still on the plan: no elevation form, no material question
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /^Wall \d/ })).toHaveCount(0);
+    await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(4);
+    await saved(page);
+    const s1 = await reviewState(page);
+    expect(s1.measurements).toBe(s0.measurements + 4);
+    expect(s1.commits - s0.commits, "every wall of the run in ONE save").toBe(1);
+    const walls = await runWalls(page);
+    expect(walls).toHaveLength(4);
+    expect(new Set(walls.map((w) => w.inputs.runId)).size).toBe(1);
+    expect(walls.map((w) => w.inputs.seq)).toEqual([1, 2, 3, 4]);
+    expect(walls.map((w) => w.inputs.heightMm)).toEqual([3000, 3000, 3000, 3000]);
+    expect(walls.map((w) => w.inputs.name)).toEqual(["Wall 3", "Wall 4", "Wall 5", "Wall 6"]);
+    for (let i = 0; i < 4; i++) expect(walls[i].points[1], "corners shared exactly").toEqual(walls[(i + 1) % 4].points[0]);
+    const roles = await page.evaluate(async (ids) => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.contributions
+      .filter((c) => ids.includes(c.measurementId)).map((c) => `${c.jobMaterialId}:${c.role}`), walls.map((w) => w.id));
+    expect(roles).toEqual(Array(4).fill("mat-axon:wall"));
+    await shot(page, "hub022-run-card-390x844");
+    // the run card's Undo takes the whole run off in ONE step, with no drawing left behind; Undo (↶) puts it back
+    await runCard(page).getByRole("button", { name: "Undo this run" }).click();
+    await expect(runCard(page)).toHaveCount(0);
+    await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(0);
+    await expect(page.locator("[data-path-draft]")).toHaveCount(0);
+    await expect(sheet(page)).toContainText("Run 1 taken off (4 walls). Undo puts it back.");
+    await saved(page);
+    expect(await runWalls(page)).toEqual([]);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(4);
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.seq)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("review fix: the run card belongs to the finish: after any other edit it goes (its Undo would undo that edit instead); back when the finish is the last step again", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 2 walls · 2,700");
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(6500, 2500));                                        // wall 2
+    const h = page.locator("[data-selected-wall]").getByLabel("Wall height");
+    await h.fill("3900"); await h.press("Enter");
+    await page.getByRole("radio", { name: "Line", exact: true }).click();
+    await expect(runCard(page)).toHaveCount(0);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();     // the height edit comes off: the finish is last again
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 2 walls · 2,700");
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.heightMm)).toEqual([2700, 2700]);
+    // a corner drag after the finish takes the card away too
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(4000, 1000));
+    const [w1] = await runWalls(page);
+    const hb = await page.locator(`[data-handle-id="${w1.id}:1"]`).boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down();
+    await page.mouse.move(hb.x + hb.width / 2 + 30, hb.y + hb.height / 2 + 24, { steps: 6 }); await page.mouse.up();
+    await expect(sheet(page)).toContainText("Corner moved on 2 walls.");
+    await page.getByRole("radio", { name: "Line", exact: true }).click();
+    await expect(runCard(page)).toHaveCount(0);
+    await expect(page.locator('[data-kind="wall"][data-points="2"]')).toHaveCount(2);
+  });
+
+  test("review fix: a Wall height typed in Select (no Enter, no Done) is kept when the next tap is on the plan: another wall, or empty plan", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(4000, 1000));                                        // wall 1
+    const selPanel = page.locator("[data-selected-wall]");
+    await expect(selPanel).toContainText("wall 1 of 2");
+    await selPanel.getByLabel("Wall height").fill("3600");                     // typed, keyboard still up
+    await tapPdf(page, at(6500, 2500));                                        // straight on to wall 2
+    await expect(selPanel).toContainText("wall 2 of 2");
+    await expect(selPanel.getByLabel("Wall height")).toHaveValue("2700");
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.heightMm)).toEqual([3600, 2700]);
+    await selPanel.getByLabel("Wall height").fill("3300");
+    await tapPdf(page, at(4000, 2500));                                        // empty plan: nothing selected
+    await expect(page.locator("[data-selected-wall]")).toHaveCount(0);
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.heightMm)).toEqual([3600, 3300]);
+  });
+
+  test("review fix: while tracing, the cladding name is plain text (reaching for the height can't finish the run); the screen says how to go right round", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    const panel = page.locator("[data-line-panel]");
+    await expect(panel.getByRole("button", { name: "Axon cladding: change material" })).toBeVisible();
+    await expect(panel).toContainText("To go right round, double-tap the start.");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await expect(panel.getByRole("button", { name: /change material/ })).toHaveCount(0);
+    await expect(panel.locator("[data-line-material]")).toHaveText("Axon cladding");
+    await expect(panel).toContainText("To go right round, double-tap the start.");
+    await panel.locator("[data-line-material]").click();                       // a tap on the name does nothing
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(runCard(page)).toHaveCount(0);
+    // the Wall height box still takes a new height mid-run
+    await heightField(page).fill("3300"); await heightField(page).press("Enter");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+  });
+
+  test("review fix: clearing Wall height means no height: the hint shows, the next walls need one, and the run card says so", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    const panel = page.locator("[data-line-panel]");
+    await heightField(page).fill(""); await heightField(page).press("Enter");
+    await expect(heightField(page)).toHaveValue("");
+    await expect(panel).toContainText("No height yet. Type it first, or each wall will need one.");
+    await expect(panel).not.toContainText("Enter a value.");
+    await zoomOn(page, at(4000, 2500), 2);
+    await tapPdf(page, at(1500, 1000)); await tapPdf(page, at(6500, 1000));
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await tapPdf(page, at(6500, 4000));
+    await panel.getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 2 walls · 2,700 · 1 needs a height");
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.heightMm ?? null)).toEqual([null, 2700]);
+  });
+
+  test("review fix: an unfinished cladding drawing kept by the older Wall tool carries on as a Line run (the next tap adds to it; Finish stays on the plan)", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    const pts = [at(1500, 1000), at(6500, 1000), at(6500, 4000)];
+    await page.evaluate((p) => localStorage.setItem("blh-takeoff-measure-draft:ws-1:mat-axon:doc-plan-c:0",
+      JSON.stringify({ tool: "wall", points: p, splitsMm: [], measurementId: null, savedAt: Date.now() })), pts);
+    await chooseMaterial(page, "Axon cladding");                               // opened again: the device's drawing is read
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    await expect(page.locator("[data-line-progress]")).toContainText("2 walls");
+    await expect(heightField(page)).toHaveValue("3000");                       // what the Wall tool would have used
+    await zoomOn(page, at(4000, 2500), 2);
+    await tapPdf(page, at(1500, 4000));
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "4");
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 3 walls · 3,000");
+    await expect(page.getByRole("dialog", { name: /^Wall \d/ })).toHaveCount(0);
+    await saved(page);
+    const walls = await runWalls(page);
+    expect(walls.map((w) => w.inputs.seq)).toEqual([1, 2, 3]);
+    expect(walls.map((w) => w.inputs.heightMm)).toEqual([3000, 3000, 3000]);
+    expect(walls[0].points[0]).toEqual(pts[0]);
+  });
+
+  test("acceptance 3: 2,700 for the start and two corners, then 3,600 for two more → walls 1–2 at 2,700, 3–4 at 3,600; a straight wall splits where the height changes (a typed height counts from the next tap)", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(5000, 3000), 2);
+    for (const q of [at(1000, 1000), at(5000, 1000), at(5000, 4000)]) await tapPdf(page, q);
+    await heightField(page).fill("3600"); await heightField(page).press("Enter");
+    for (const q of [at(1000, 4000), at(1000, 2000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 4 walls · 2,700 / 3,600");
+    // partway along a straight wall: 2,700 to the middle, then 3,000 (typed only — the next tap commits it)
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await tapPdf(page, at(7000, 4500)); await tapPdf(page, at(9000, 4500));
+    await heightField(page).fill("3000");
+    await tapPdf(page, at(11000, 4500));
+    await expect(heightField(page)).toHaveValue("3000");
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 2 · 2 walls · 2,700 / 3,000");
+    await saved(page);
+    const all = await runWalls(page);
+    const run1 = all.filter((w) => w.inputs.runId === all[0].inputs.runId), run2 = all.filter((w) => w.inputs.runId !== all[0].inputs.runId);
+    expect(run1.map((w) => w.inputs.heightMm)).toEqual([2700, 2700, 3600, 3600]);
+    expect(run2.map((w) => w.inputs.heightMm)).toEqual([2700, 3000]);
+    expect(run2.map((w) => w.inputs.seq)).toEqual([1, 2]);
+    expect(run2[0].points[1], "split exactly at the tap where the height changed").toEqual(run2[1].points[0]);
+    // the next run starts at the height now in the box
+    await expect(heightField(page)).toHaveValue("3000");
+  });
+
+  test("an unfinished Line run survives a reload with the height of every tap (earlier walls keep theirs); not a wall until finished", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    const n0 = (await reviewState(page)).measurements;
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    await tapPdf(page, at(1500, 1000)); await tapPdf(page, at(6500, 1000));
+    await heightField(page).fill("3300"); await heightField(page).press("Enter");
+    await tapPdf(page, at(6500, 4000));
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    expect((await reviewState(page)).measurements, "drawing: no wall saved yet").toBe(n0);
+    await page.waitForTimeout(400);
+    await page.reload();
+    await ready(page);
+    if (await page.getByRole("button", { name: "Restore" }).isVisible().catch(() => false)) await page.getByRole("button", { name: "Restore" }).click();
+    await page.getByRole("button", { name: /^Measure$/ }).click();
+    await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0);
+    await chooseMaterial(page, "Axon cladding");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    await expect(heightField(page)).toHaveValue("3300");                       // the height in force comes back too
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await expect(runCard(page).locator("[data-run-label]")).toHaveText("Run 1 · 2 walls · 2,700 / 3,300");
+    await saved(page);
+    expect((await runWalls(page)).map((w) => w.inputs.heightMm)).toEqual([2700, 3300]);
+  });
+
+  test("acceptance 4 + 6: Select → Height changes ONE wall only; a corner shared by two walls drags both and one Undo puts it back", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    const [w1, w2] = await runWalls(page);
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(4000, 1000));                                        // the middle of wall 1
+    const selPanel = page.locator("[data-selected-wall]");
+    await expect(selPanel).toContainText("Run 1 · 2 walls · 2,700 · wall 1 of 2");
+    const h = selPanel.getByLabel("Wall height");
+    await expect(h).toHaveValue("2700");
+    await h.fill("3600"); await h.press("Enter");
+    await expect(selPanel).toContainText("Run 1 · 2 walls · 3,600 / 2,700");
+    await saved(page);
+    let now = await runWalls(page);
+    expect(now.map((w) => w.inputs.heightMm)).toEqual([3600, 2700]);
+    expect(now[1]).toEqual(w2);                                                // the other wall: not touched at all
+    // the shared corner (wall 1's end = wall 2's start) drags both walls
+    const hb = await page.locator(`[data-handle-id="${w1.id}:1"]`).boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down();
+    await page.mouse.move(hb.x + hb.width / 2 + 30, hb.y + hb.height / 2 + 24, { steps: 6 }); await page.mouse.up();
+    await expect(sheet(page)).toContainText("Corner moved on 2 walls. Undo puts it back.");
+    await saved(page);
+    now = await runWalls(page);
+    expect(now[0].points[1]).toEqual(now[1].points[0]);
+    expect(now[0].points[1]).not.toEqual(w1.points[1]);
+    expect(now[0].points[0]).toEqual(w1.points[0]);                            // the free ends stay
+    expect(now[1].points[1]).toEqual(w2.points[1]);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();     // ONE Undo: the corner is back on both
+    await saved(page);
+    now = await runWalls(page);
+    expect(now[0].points).toEqual(w1.points);
+    expect(now[1].points).toEqual(w2.points);
+    expect(now[0].inputs.heightMm, "the height edit is its own step").toBe(3600);
+  });
+
+  test("acceptance 5: an offline reload keeps the run, its tap order and its edits; older walls still open and Wall by numbers still works", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await page.evaluate(() => { window.__takeoffReviewOffline = true; });
+    await heightField(page).fill("2700"); await heightField(page).press("Enter");
+    await zoomOn(page, at(4000, 2500), 2);
+    for (const q of [at(1500, 1000), at(6500, 1000), at(6500, 4000), at(1500, 4000)]) await tapPdf(page, q);
+    await page.locator("[data-line-panel]").getByRole("button", { name: "Finish" }).click();
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(6500, 2500));                                        // wall 2
+    await page.locator("[data-selected-wall]").getByLabel("Wall height").fill("3600");
+    await page.locator("[data-selected-wall]").getByLabel("Wall height").press("Enter");
+    await expect(page.locator("[data-selected-wall]")).toContainText("Run 1 · 3 walls · 2,700 / 3,600");
+    await page.waitForTimeout(300);
+    await expect.poll(() => page.evaluate(() => new Promise((res) => {
+      const req = indexedDB.open("blh-takeoff-recovery");
+      req.onsuccess = () => { try { const c = req.result.transaction("drafts", "readonly").objectStore("drafts").count(); c.onsuccess = () => res(c.result); c.onerror = () => res(0); } catch { res(0); } };
+      req.onerror = () => res(0);
+    }))).toBeGreaterThan(0);
+    await page.reload();
+    await ready(page);
+    await page.getByRole("button", { name: "Restore" }).click();
+    const row = page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first();
+    const t = row.locator("button[aria-expanded]").first();
+    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+    await row.getByRole("button", { name: "Walls", exact: true }).click();
+    const run = page.locator("[data-wall-run]");
+    await expect(run).toHaveCount(1);
+    await expect(run.locator("[data-run-label]")).toHaveText("Run 1 · 3 walls · 2,700 / 3,600");
+    await run.getByRole("button", { expanded: false }).click();
+    await expect(run.locator("[data-wall-row]")).toHaveCount(3);
+    await expect(run.locator("[data-wall-row]").nth(0)).toContainText("Wall 3");
+    await expect(run.locator("[data-wall-row]").nth(1)).toContainText("Wall 4");
+    await expect(run.locator("[data-wall-row]").nth(1)).toContainText("3,600 high");
+    await expect(run.locator("[data-wall-row]").nth(2)).toContainText("Wall 5");
+    await expect(run.locator("[data-wall-row]").nth(2)).toContainText("2,700 high");
+    // older walls stand on their own and still open; Wall by numbers still works
+    await page.getByRole("button", { name: "Open North wall" }).click();
+    await expect(page.getByLabel("Wall length")).toHaveValue("4800");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await page.getByRole("button", { name: "Wall by numbers" }).click();
+    const add = page.getByRole("region", { name: "Wall by numbers" });
+    await add.getByLabel("Wall length").fill("2400"); await add.getByLabel("Wall length").press("Enter");
+    await expect(page.getByLabel("Wall height")).toBeFocused();
   });
 });
 
@@ -993,7 +1351,7 @@ test("pure helpers: wall naming + last height, member overrides, tools per mater
   expect(keys({ family: "timber", purpose: "studs" }, "wall_frame")).toEqual(["wall", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "plates" }, "linear_stock")).toEqual(["wall", "run", "count", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "trim" }, "linear_stock")).toEqual(["run", "count", "select", "pan"]);
-  expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["wall", "select", "pan"]);
+  expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["line", "select", "pan"]);   // HUB 022: cladding traces with Line
   // PH-06 / PH-19: the timber review reads the engine result as-is (never recalculated)
   expect(memberThicknessMm({ spec: { section: { depthMm: 90, widthMm: 45 } } })).toBe(45);
   expect(memberThicknessMm({ spec: { section: { depthMm: 45, widthMm: 90 } } })).toBe(45);

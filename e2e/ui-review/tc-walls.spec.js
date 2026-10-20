@@ -404,7 +404,7 @@ test.describe("TC walls — phone journeys", () => {
     await expect(cells(page, "cut")).toHaveCount(2); // a 600 start strip and a 600 end strip
   });
 
-  test("list: attach / detach the material, remove a wall with its openings (undoable)", async ({ page }) => {
+  test("HUB 022: Use / Remove are inside the wall, not on the rows; a detached wall folds under Other walls; remove a wall with its openings (undoable)", async ({ page }) => {
     await openWalls(page, "axon");
     await addWall(page, { name: "North", length: 6000, height: 2700 });
     await addOpeningByTap(page, { fx: 0.5, fy: 0.5, width: 900, height: 900 });
@@ -413,15 +413,30 @@ test.describe("TC walls — phone journeys", () => {
     await addWall(page, { name: "South", length: 4800, height: 2700 });
     await page.getByRole("button", { name: "‹ Walls" }).click();
     await expect(page.locator("[data-wall-row]")).toHaveCount(2);
+    // the rows only open the wall: no attach / remove buttons on any row
+    await expect(page.locator("[data-wall-row] button")).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /Use this material|Uses this material|^Remove North$|^Remove South$/ })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Stop using Axon 400 smooth on South" }).click();
-    const south = page.locator("[data-wall-row]").nth(1);
-    await expect(south.getByRole("button", { name: "Use Axon 400 smooth on South" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "Open South" }).click();
+    await page.getByRole("button", { name: "✓ Uses Axon 400 smooth" }).click();      // inside the wall: Materials on this wall
+    await expect(page.getByRole("button", { name: "Use Axon 400 smooth here" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    // South now uses no material of this list: it folds under "Other walls", without sheets
+    await expect(page.getByRole("heading", { name: /Walls \(1\)/ })).toBeVisible();
+    const other = page.locator("[data-other-walls]");
+    await expect(other.locator("summary")).toHaveText("Other walls (1)▸");      // folded, with its marker
+    await expect(other.locator("[data-wall-row]")).not.toBeVisible();
+    await other.locator("summary").click();
+    const south = other.locator("[data-wall-row]").filter({ hasText: "South" });
     await expect(south).not.toContainText("sheets");
-    await south.getByRole("button", { name: "Use Axon 400 smooth on South" }).click();
-    await expect(south).toContainText("4 sheets");
+    await south.getByRole("button", { name: "Open South" }).click();
+    await page.getByRole("button", { name: "Use Axon 400 smooth here" }).click();
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await expect(page.locator("[data-other-walls]")).toHaveCount(0);
+    await expect(page.locator("[data-wall-row]").filter({ hasText: "South" })).toContainText("4 sheets");
 
-    await page.getByRole("button", { name: "Remove North" }).click();
+    await page.getByRole("button", { name: "Open North" }).click();
+    await page.getByRole("button", { name: "Remove wall" }).click();
     await expect(page.locator("[data-wall-row]")).toHaveCount(1);
     await expect(page.getByText("Removed North and its 1 opening.")).toBeVisible();
     await page.getByRole("button", { name: "Undo", exact: true }).first().click();
@@ -429,6 +444,88 @@ test.describe("TC walls — phone journeys", () => {
     await page.getByRole("button", { name: "Open North" }).click();
     await expect(page.locator("[data-opening-id]")).toHaveCount(1);
     await expect(page.locator('[data-area="openings"]')).toHaveText("0.81 m²");
+  });
+
+  test("HUB 022: a traced run is ONE compact item that opens into its walls in tap order (whatever order they arrive in); older walls stand alone; other materials' walls fold away", async ({ page }) => {
+    const RUN = "aaaaaaaa-1111-4222-8333-444444444444";
+    const corners = [planPt(1000, 1000), planPt(7000, 1000), planPt(7000, 5000), planPt(1000, 5000), planPt(1000, 1000)];
+    const runWall = (seq, h) => ({ id: `run-wall-${seq}`, kind: "wall", documentId: "doc-plan-c", pageIndex: 0, calibrationId: "cal-1", points: [corners[seq - 1], corners[seq]], parentId: null, label: null,
+      inputs: { kind: "rect", heightMm: h, name: `Wall ${seq + 1}`, runId: RUN, seq } });
+    // the server keeps no order inside one save: arriving 3, 1, 4, 2 must still list 1, 2, 3, 4
+    const run = [runWall(3, 2700), runWall(1, 2700), runWall(4, 2700), runWall(2, 2700)];
+    const battenOnly = { id: "batten-wall", kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, inputs: { kind: "rect", widthMm: 3000, heightMm: 2400, name: "Shed" } };
+    await openWalls(page, "axon", { walls: [{ name: "Older", length: 4800, height: 2700 }], also: ["batten"], extraMaterials: [], extraMeasurements: [...run, battenOnly],
+      extraContributions: [...run.map((w) => ({ id: `con-${w.id}`, measurementId: w.id, jobMaterialId: "mat-axon", role: "wall" })), { id: "con-shed", measurementId: battenOnly.id, jobMaterialId: "mat-batten", role: "wall" }] });
+    await expect(page.getByRole("heading", { name: /Walls \(5\)/ })).toBeVisible();
+    const item = page.locator("[data-wall-run]");
+    await expect(item).toHaveCount(1);
+    await expect(item.locator("[data-run-label]")).toHaveText("Run 1 · 4 walls · 2,700");
+    await expect(item).toContainText("20,000 mm long · From plan");
+    await expect(item.getByRole("button", { expanded: false })).toBeVisible();     // compact until opened
+    await expect(item.locator("[data-wall-row]")).toHaveCount(0);
+    await expect(page.locator("[data-wall-row]").filter({ hasText: "Older" })).toBeVisible();  // an older wall stands on its own
+    await item.getByRole("button", { expanded: false }).click();
+    await expect(item.locator("[data-wall-row]")).toHaveCount(4);
+    for (let i = 0; i < 4; i++) await expect(item.locator("[data-wall-row]").nth(i)).toContainText(`Wall ${i + 2}`);
+    await expect(item.locator("[data-wall-row]").nth(0)).toContainText("6,000 mm long · 2,700 high");
+    await expect(item.locator("[data-wall-row]").nth(1)).toContainText("4,000 mm long · 2,700 high");
+    await noHorizontalScroll(page);
+    await page.screenshot({ path: `${SHOTS}/tc-walls-hub022-run-390x844.png` });
+    // each wall keeps its own elevation and sheets; back from it, its run is still open
+    await item.getByRole("button", { name: "Open Wall 3" }).click();
+    await expect(page.getByRole("dialog", { name: "Wall 3" })).toBeVisible();
+    await expect(page.locator("[data-traced-length]")).toHaveText("4,000 mm");
+    await expect(page.getByLabel("Wall height")).toHaveValue("2700");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await expect(item.locator("[data-wall-row]")).toHaveCount(4);
+    // the batten-only wall is folded under Other walls (it shows the material it is on)
+    const other = page.locator("[data-other-walls]");
+    await expect(other.locator("summary")).toHaveText("Other walls (1)▸");      // folded, with its marker
+    await other.locator("summary").click();
+    await expect(other.locator("[data-wall-row]").filter({ hasText: "Shed" })).toContainText("Cavity batten 70 × 19");
+    // a 375 px phone: every target in the list is at least 44 px
+    const small = await page.evaluate(() => [...document.querySelectorAll("[data-takeoff-focus] section[aria-label='Walls'] button, [data-takeoff-focus] section[aria-label='Walls'] summary")]
+      .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.height < 43.5; }).map((el) => el.textContent?.trim().slice(0, 30)));
+    expect(small).toEqual([]);
+  });
+
+  test("review fix: battens with no walls of their own: Other walls is open, Use here is at the top of each wall, and the list stays where you were", async ({ page }) => {
+    const RUN = "bbbbbbbb-1111-4222-8333-444444444444";
+    const corners = [planPt(1000, 1000), planPt(7000, 1000), planPt(7000, 5000), planPt(1000, 5000), planPt(1000, 1000)];
+    const run = [1, 2, 3, 4].map((seq) => ({ id: `run-wall-${seq}`, kind: "wall", documentId: "doc-plan-c", pageIndex: 0, calibrationId: "cal-1", points: [corners[seq - 1], corners[seq]], parentId: null, label: null,
+      inputs: { kind: "rect", heightMm: 2700, name: `Wall ${seq + 1}`, runId: RUN, seq } }));
+    await openWalls(page, "batten", { also: ["axon"], extraMeasurements: run, extraContributions: run.map((w) => ({ id: `con-${w.id}`, measurementId: w.id, jobMaterialId: "mat-axon", role: "wall" })) });
+    await expect(page.getByRole("heading", { name: /Walls \(0\)/ })).toBeVisible();
+    await expect(page.getByText("No walls use Cavity batten 70 × 19 yet. Open a wall under Other walls and tap Use here.")).toBeVisible();
+    const other = page.locator("[data-other-walls]");
+    await expect(other).toHaveAttribute("open", "");
+    await expect(other.locator("summary")).toHaveText("Other walls (4)▾");
+    const item = other.locator("[data-wall-run]");
+    await expect(item.locator("[data-run-label]")).toHaveText("Run 1 · 4 walls · 2,700");
+    await item.getByRole("button", { expanded: false }).click();
+    await item.getByRole("button", { name: "Open Wall 2" }).click();
+    const use = page.getByRole("button", { name: "Use Cavity batten 70 × 19 on this wall" });
+    await expect(use).toBeInViewport();                                        // at the top: no scrolling to find it
+    await expect(page.locator("[data-use-here]")).toContainText("Cavity batten 70 × 19 isn't on this wall yet.");
+    await use.click();
+    await expect(use).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "✓ Uses Cavity batten 70 × 19" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    // back in the list: Other walls and the run are still open, so the next wall is one tap away
+    await expect(page.getByRole("heading", { name: /Walls \(1\)/ })).toBeVisible();
+    await expect(other).toHaveAttribute("open", "");
+    await expect(other.locator("[data-wall-row]")).toHaveCount(3);
+    await other.getByRole("button", { name: "Open Wall 3" }).click();
+    await page.getByRole("button", { name: "Use Cavity batten 70 × 19 on this wall" }).click();
+    await page.getByRole("button", { name: "‹ Walls" }).click();
+    await expect(page.getByRole("heading", { name: /Walls \(2\)/ })).toBeVisible();
+    // it folds when you fold it
+    await other.locator("summary").click();
+    await expect(other).not.toHaveAttribute("open", "");
+    await expect(other.locator("summary")).toHaveText("Other walls (2)▸");
+    // a wall that already uses this material has no prompt
+    await page.getByRole("button", { name: "Open Wall 2" }).click();
+    await expect(page.locator("[data-use-here]")).toHaveCount(0);
   });
 
   test("20 walls stay usable: only the selected wall renders an elevation", async ({ page }) => {

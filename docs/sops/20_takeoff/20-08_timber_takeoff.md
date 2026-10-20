@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-14
+sop_version: 1.1
+last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -102,7 +102,8 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 ### D. Studs, plates and noggins (walls)
 
 1. **Measure members** on a studs / plates / noggins material opens the **Walls** screen (same screen as cladding — SOP 20-09). Add a wall with **Wall by numbers** (name, shape, length, then height) or **Trace on plan** (Wall tool: tap each corner, double-tap the last point or **Finish**; each straight leg becomes its own wall).
-2. Make sure the wall shows **✓ Uses this material**.
+2. Make sure the wall uses this timber: open it and check **Materials on this wall** shows **✓ Uses …** (tap **Use … here** if not). The wall rows no longer carry these buttons (HUB 022), and walls on other materials are folded under **Other walls**.
+   - Timber keeps the **Wall** tool. Cladding traces with **Line** instead, which sets the height before you trace and keeps you on the plan (SOP 20-09 Section 5C).
 3. **Studs** — in the setup card: **Stud cut length (or frame height)** and **That is: Stud cut / Frame height**. Frame height needs **Bottom plate(s) thickness** and **Top plate(s) thickness** (never assumed). Blank uses the wall height as the stud cut length. On the wall, the **Supports** view shows a line per stud (e.g. a 3,600 mm wall at 600 centres → 7 studs).
 4. Openings (add them on the wall — SOP 20-09 Section 5C): studs strictly inside an opening are **removed** (greyed "Removed stud"). The wall then says "W1: base studs only; opening framing incomplete — needs its framing detail." **Kings, jacks, trimmers, sills and lintels are never guessed** — add them as their own timber material or entered lengths (Section 5E) from the framing detail.
 5. **Plates** — **Plates per wall: Bottom + top** or **Bottom + double top**; each wall gives one piece per layer at the wall length (e.g. 3,600 wall → 2 × 3,600). Plates can also be measured with **Run** or counted with **Count** on the plan.
@@ -319,6 +320,14 @@ Next review date: 2027-04-14
 **TC-11 — Known issue check: blank Roof pitch on the plan**
 1. **Measure** → material **Rafters 90 × 45** → **Member** tool → clear **Roof pitch** and press Enter.
 2. Expected result (current build): the panel reads "… → 4,500 mm true at 0°" and the stored `mat-raf.rules.pitchDeg` is **0**. Record this as the known issue in Section 12 (the desired behaviour is "not entered", as in the setup card). Re-type 30 and confirm "→ 5,196.2 mm true at 30°".
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Timber walls keep the Wall tool (HUB 022)**
+1. Add a **Studs** material (as TC-09) → **Measure members** → **Trace on plan**.
+2. Expected: the tools are **Wall | Select | Pan** (no **Line**); the panel says the height last used here (e.g. "Height 3,000 mm (last used here)").
+3. Tap three points of an L-shaped wall run, then double-tap the last point. Expected: two walls ("Wall N", "Wall N+1"), each one straight leg; the first wall's elevation opens, as before.
+4. **‹ Walls**: the two walls are listed on their own (timber walls have no run); open one → **Materials on this wall** shows **✓ Uses Studs …**.
+5. Screen test: e2e/ui-review/tc-measure.spec.js "Wall tool (timber studs)".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

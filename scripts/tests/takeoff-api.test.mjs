@@ -1093,6 +1093,60 @@ await t("HUB 017: a gable saves its values one at a time (eaves → apex height 
   assert.equal(end.status, 400); assert.match(end.data.error, /between the two wall ends/);
 });
 
+await t("HUB 022: a Line run's walls keep runId + seq on the REAL server (reload in tap order, one save); one wall's height changes alone; bad run fields are dropped", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const axon = productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth");
+  const w = id(), cal = id(), clad = id(), run = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB022-plan.pdf");
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB022" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  // four connected walls 6 / 4 / 6 / 4 m traced in one run: corners shared exactly, saved in ONE commit
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  const corners = [c(0, 0), c(6000, 0), c(6000, 4000), c(0, 4000), c(0, 0)];
+  const walls = [0, 1, 2, 3].map((i) => ({ id: id(), seq: i + 1, pts: [corners[i], corners[i + 1]], h: i < 2 ? 2700 : 3600 }));
+  const loose = { id: id(), seq: 1 }, noSeq = id();
+  const send = [walls[2], walls[0], walls[3], walls[1]].map((x) => ({ id: x.id, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: x.pts,
+    inputs: { kind: "rect", heightMm: x.h, name: `Wall ${x.seq}`, runId: run, seq: x.seq } }));
+  send.push({ id: loose.id, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(0, 5000), c(3000, 5000)], inputs: { kind: "rect", heightMm: 2700, name: "Bad run", runId: "not-a-uuid", seq: 1 } });
+  send.push({ id: noSeq, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(0, 6000), c(3000, 6000)], inputs: { kind: "rect", heightMm: 2700, name: "No seq", runId: run, seq: 2.5, extra: "dropped" } });
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: clad, name: "Axon 400 smooth", methodKey: "sheet_layout", methodVersion: 2, spec: specFromGroup(axon), rules: {} }] },
+    measurements: { upsert: send },
+    contributions: { upsert: walls.map((x) => ({ id: id(), measurementId: x.id, jobMaterialId: clad, role: "wall" })) } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // stored in the row itself (geometry jsonb — no migration), and every wall of the run shares ONE save time
+  const rows = (await q("SELECT id, geometry, created_at FROM takeoff_measurements WHERE workspace_id=$1 AND kind='wall'", [w])).rows;
+  for (const x of walls) {
+    const g = rows.find((row) => row.id === x.id).geometry;
+    assert.deepEqual([g.inputs.runId, g.inputs.seq, g.inputs.heightMm], [run, x.seq, x.h]);
+  }
+  assert.equal(new Set(rows.filter((row) => walls.some((x) => x.id === row.id)).map((row) => String(row.created_at))).size, 1, "one save time — seq is what orders them");
+  // a fresh load: the run comes back in tap order by seq, whatever order the rows arrive in
+  const snap = (await S(`/workspaces/${w}`)).data.snapshot;
+  const inRun = snap.measurements.filter((m) => m.inputs?.runId === run).sort((a, b) => a.inputs.seq - b.inputs.seq);
+  assert.deepEqual(inRun.map((m) => m.id), walls.map((x) => x.id));
+  assert.deepEqual(inRun.map((m) => m.inputs.heightMm), [2700, 2700, 3600, 3600]);
+  assert.deepEqual(inRun.map((m) => m.inputs.name), ["Wall 1", "Wall 2", "Wall 3", "Wall 4"]);
+  // the corners stay shared exactly (a shared corner drags both walls on the plan)
+  for (let i = 0; i < 3; i++) assert.deepEqual(inRun[i].points[1], inRun[i + 1].points[0]);
+  // invalid run fields are dropped, never guessed: the wall stands on its own (and unknown keys go as before)
+  const bad = snap.measurements.find((m) => m.id === loose.id), half = snap.measurements.find((m) => m.id === noSeq);
+  assert.equal(bad.inputs.runId, undefined); assert.equal(bad.inputs.seq, undefined);
+  assert.equal(half.inputs.runId, undefined); assert.equal(half.inputs.seq, undefined); assert.equal(half.inputs.extra, undefined);
+  // acceptance 4 at the server: Select → Height 3,600 on wall 1 sends that wall only; the rest of the run is untouched
+  const before = Object.fromEntries(inRun.map((m) => [m.id, JSON.stringify(m)]));
+  const w1 = inRun[0];
+  const r2 = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap.workspace.revision, changes: { measurements: { upsert: [{ ...w1, inputs: { ...w1.inputs, heightMm: 3600 } }] } } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  const after = (await S(`/workspaces/${w}`)).data.snapshot.measurements.filter((m) => m.inputs?.runId === run).sort((a, b) => a.inputs.seq - b.inputs.seq);
+  assert.deepEqual([after[0].inputs.heightMm, after[0].inputs.runId, after[0].inputs.seq], [3600, run, 1], "the edited wall keeps its run and place");
+  for (const m of after.slice(1)) assert.equal(JSON.stringify({ ...m, revision: undefined }), JSON.stringify({ ...JSON.parse(before[m.id]), revision: undefined }), `${m.inputs.name} unchanged`);
+  // the server's own quantities: four Axon walls, each with its sheets
+  const lines = r2.data.computed.scheduleLines.filter((l) => l.jobMaterialIds.includes(clad));
+  assert.ok(lines.length > 0 && lines.every((l) => l.unit === "sheet"), JSON.stringify(lines.map((l) => l.unit)));
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

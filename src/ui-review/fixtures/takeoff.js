@@ -170,6 +170,19 @@ const caps = (worker) => {
   return { view: true, edit: true, export: true, editStandards: true, addSuppliers: role === "admin" || role === "supervisor", saveCompanyDefaults: role === "admin" || role === "supervisor", placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
 };
 const fail = (status, error, code) => ({ __status: status, body: { ok: false, error, code } });
+/**
+ * Wall inputs exactly as the server keeps them (takeoffService.mjs cleanInputs): known keys only, so a field the
+ * server would drop is dropped here too. HUB 022: runId + seq are kept only as a valid pair (a uuid and 1–1,000).
+ */
+const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon"];
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function serverWallInputs(i) {
+  if (!i) return i;
+  const out = {};
+  for (const key of WALL_INPUT_KEYS) if (i[key] !== undefined) out[key] = i[key];
+  if (typeof i.runId === "string" && UUID_RX.test(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000) { out.runId = i.runId; out.seq = i.seq; }
+  return out;
+}
 
 function applyCommit(body) {
   if (window.__takeoffReviewOffline) throw new TypeError("Failed to fetch"); // simulate a dropped connection
@@ -203,6 +216,7 @@ function applyCommit(body) {
       if (m.kind === "wall" && m.inputs?.kind === "gable") { const gp = gableInputProblem(m.inputs, m.inputs.widthMm); if (gp) return fail(400, gp.message, "INVALID"); }
     }
     up(state.measurements, ch.measurements?.upsert, (m) => {
+      if (m.kind === "wall") return { ...m, inputs: serverWallInputs(m.inputs) };
       if (m.kind !== "run") return { ...m };
       const c = state.calibrations.find((x) => x.id === m.calibrationId);
       return { ...m, rawLengthMm: c ? segmentLengthMm(c, m.points[0], m.points[1]) : null };
