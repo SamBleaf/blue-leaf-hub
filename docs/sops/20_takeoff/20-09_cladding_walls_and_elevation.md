@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-10-14
+sop_version: 1.1
+last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -333,6 +333,13 @@ Next review date: 2027-04-14
 **TC-12 — Phone layout**
 1. 375 × 667: open the Walls list, the North wall editor and the New opening sheet.
 2. Expected result: no sideways scrolling; every button / field at least 44 px tall; the elevation fits the screen width (zoom − / + buttons appear only when cells are smaller than a finger).
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Gable values entered one at a time (HUB 017, UI Review + API)**
+1. Axon wall 6,573 long, 3,600 high → **Gable** → Apex height 4200 → move to the next field and wait a second.
+2. Expected: Apex height still shows 4200, with no "Not saved" banner; the wall stays "Heights needed" until the position is in.
+3. Enter a position, then tap **Centre**. Expected: position 3287; gross area 25.63 m²; all values stay after **Next element** and closing the panel.
+4. API: three separate saves (eaves → apex height → position) each succeed. An apex below the eaves, or a position at a wall end, is refused.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

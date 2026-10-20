@@ -4,6 +4,7 @@ Track every SOP change here. One row per change.
 
 ---
 
+| 2026-10-20 | Takeoffs — 20-09: gable values save one at a time (a missing apex position is a draft, not a refused save) (HUB 017) | docs/sops/20_takeoff/20-09_cladding_walls_and_elevation.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-06 v2.4: supplier pickup / branch address (migration 210), Edit supplier from the order, supplier saved on the draft at once, Pick up prefilled (HUB 019) | docs/sops/20_takeoff/20-06_export_and_record_orders.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-06 v2.3: Review & export opens one Flashings draft that follows the takeoff, grouped P1/P2 like the PDF, with named reasons for anything left off (HUB 013); reopen, revise or discard drafts from Order history (HUB 020) | docs/sops/20_takeoff/20-06_export_and_record_orders.md | Done (untested) | Claude |
 | 2026-10-20 | Takeoffs — 20-06 v2.2: **Add supplier** now also in the Worker app for office logins (linked Admin / Supervisor); same name reuses the existing supplier; where to manage suppliers without a job | docs/sops/20_takeoff/20-06_export_and_record_orders.md | Done (untested) | Claude |

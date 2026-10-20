@@ -175,6 +175,32 @@ test.describe("TC walls — phone journeys", () => {
     await expect(row).toContainText("5 sheets");
   });
 
+  test("HUB 017: gable values entered one at a time with pauses all stay (eaves 3,600 → apex 4,200 → position), through Centre and element navigation", async ({ page }) => {
+    await openWalls(page, "axon");
+    await addWall(page, { name: "Gable end", length: 6573, height: 3600 });
+    await page.getByRole("button", { name: "Gable", exact: true }).click();
+    const apex = page.getByLabel("Apex height");
+    await apex.fill("4200"); await apex.press("Tab");
+    await page.waitForTimeout(900);   // longer than the save delay: the apex height is saved on its own, before any position
+    await expect(apex).toHaveValue("4200");
+    await expect(page.getByText(/Not saved/)).toHaveCount(0);
+    const pos = page.getByLabel(/Apex position/);
+    await pos.fill("3000"); await pos.press("Tab");
+    await page.waitForTimeout(900);
+    await expect(apex).toHaveValue("4200");
+    await page.getByRole("button", { name: /^Centre/ }).click();
+    await page.waitForTimeout(900);
+    await expect(apex).toHaveValue("4200");
+    await expect(pos).toHaveValue("3287");
+    await expect(page.locator('[data-area="gross"]')).toHaveText("25.63 m²");   // 6.573 × 3.6 + ½ × 6.573 × 0.6
+    await clickBox(page, page.locator('[data-el-id="c2r0"] rect').first());
+    await page.getByRole("button", { name: "Next element" }).click();
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await expect(apex).toHaveValue("4200");
+    await expect(pos).toHaveValue("3287");
+    await expect(page.getByText(/Not saved/)).toHaveCount(0);
+  });
+
   test("gable: tap a cell → stock selection + cut size; invalid apex stays a draft; views switch one at a time", async ({ page }) => {
     await openWalls(page, "axon");
     await addWall(page, { name: "Gable end", length: 6000, height: 2400 });

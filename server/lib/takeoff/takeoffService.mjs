@@ -22,6 +22,7 @@ import {
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { methodReads } from "../../../shared/takeoff/engine/dispatch.js";
+import { gableInputProblem } from "../../../shared/takeoff/engine/wall.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
 import { docInOwner, isUuid, ownerColumns, ownerFromRow, scopeQuery } from "./takeoffAccess.mjs";
 
@@ -223,7 +224,7 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       heightSource: tracedLengthMm != null ? "plan+entered" : "entered", name: optStr(i.name, 60), floor: optStr(i.floor, 40) };
     // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
     // incomplete; values that ARE present must be coherent
-    if (wk === "gable" && out.eavesHeightMm && out.apexHeightMm) must(out.apexXMm != null && out.apexXMm <= out.widthMm && out.apexHeightMm > out.eavesHeightMm, "The apex must sit within the wall and above the eaves.");
+    if (wk === "gable") { const gp = gableInputProblem(out, out.widthMm); must(!gp, gp?.message); }   // HUB 017: present values only
     if (wk === "polygon" && i.polygon != null) {
       must(Array.isArray(i.polygon) && i.polygon.length >= 3 && i.polygon.length <= 200, "A wall outline needs 3–200 points.");
       out.polygon = i.polygon.map((p) => { must(p && typeof p === "object", "A wall outline point is invalid."); return { x: MM(p.x, "Outline x", { min: -100000, allowNull: false }), y: MM(p.y, "Outline y", { min: -100000, allowNull: false }) }; });

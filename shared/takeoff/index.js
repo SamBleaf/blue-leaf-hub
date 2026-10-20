@@ -12,6 +12,7 @@ export * from "./sections.js";
 export * from "./orderDraft.js";
 export * from "./engine/contract.js";
 export * from "./engine/families.js";
+export { gableInputProblem } from "./engine/wall.js";
 
 /** Bumped when any calculation in this package changes behaviour; frozen into exports. */
 export const CALCULATION_VERSION = "takeoff-calc@3"; // @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits

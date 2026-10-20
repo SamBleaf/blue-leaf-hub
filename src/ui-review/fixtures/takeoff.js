@@ -21,7 +21,7 @@ import { reviewRole } from "../config.js";
 import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
-  SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines,
+  SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
@@ -188,6 +188,10 @@ function applyCommit(body) {
       // TC-R04 families keep their own rules (centres, pitch, heights …); flashing rules are normalised as before
       return m.spec?.family && m.spec.family !== "flashing" ? { ...m, rules: { ...(m.rules || {}) } } : { ...m, rules: normaliseFlashingRules(m.rules) };
     });
+    // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft
+    for (const m of ch.measurements?.upsert || []) {
+      if (m.kind === "wall" && m.inputs?.kind === "gable") { const gp = gableInputProblem(m.inputs, m.inputs.widthMm); if (gp) return fail(400, gp.message, "INVALID"); }
+    }
     up(state.measurements, ch.measurements?.upsert, (m) => {
       if (m.kind !== "run") return { ...m };
       const c = state.calibrations.find((x) => x.id === m.calibrationId);

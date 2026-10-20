@@ -26,6 +26,20 @@ export const MAX_OPENINGS_PER_WALL = 500;
 
 export const WALL_KINDS = Object.freeze(["rect", "rake", "gable", "polygon"]);
 
+/**
+ * Hub review HUB 017: the ONE rule for gable values while a wall is being entered (server, test backend). Only values
+ * that are present are checked — a gable whose apex position isn't entered yet is a draft the engine reports as
+ * incomplete, never a refused save (refusing it cleared the apex height while Sam moved to the position field).
+ * @returns {{ field: string, message: string } | null}
+ */
+export function gableInputProblem(inputs, widthMm) {
+  const i = inputs || {};
+  const w = widthMm ?? i.widthMm;
+  if (i.apexXMm != null && w && !(i.apexXMm > 0 && i.apexXMm < w)) return { field: "apexXMm", message: "The apex must sit between the two wall ends." };
+  if (i.apexHeightMm != null && i.eavesHeightMm != null && !(i.apexHeightMm > i.eavesHeightMm)) return { field: "apexHeightMm", message: "The apex must be higher than the eaves." };
+  return null;
+}
+
 const qty = (code, message, extra = {}) => problem(code, message, { axis: "quantity", ...extra });
 const isPos = (v) => isFiniteNumber(v) && v > 0;
 const isNonNeg = (v) => isFiniteNumber(v) && v >= 0;

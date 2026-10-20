@@ -1020,6 +1020,26 @@ await t("HUB 019: office staff add and edit a supplier (with pickup address) fro
   } finally { await q("ALTER TABLE suppliers RENAME COLUMN address_hidden TO address"); }
 });
 
+await t("HUB 017: a gable saves its values one at a time (eaves → apex height → apex position): a missing position is a draft, never refused", async () => {
+  const w = id(), wall = id();
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB017" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const put = async (inputs) => SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [{ id: wall, kind: "wall", inputs: { kind: "gable", widthMm: 6573, name: "Gable end", ...inputs } }] } } });
+  let r = await put({ eavesHeightMm: 3600 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await put({ eavesHeightMm: 3600, apexHeightMm: 4200 });   // refused before the fix — that cleared the apex height on site
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await put({ eavesHeightMm: 3600, apexHeightMm: 4200, apexXMm: 3287 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const m = (await S(`/workspaces/${w}`)).data.snapshot.measurements.find((x) => x.id === wall);
+  assert.deepEqual([m.inputs.eavesHeightMm, m.inputs.apexHeightMm, m.inputs.apexXMm], [3600, 4200, 3287]);
+  // values that ARE present must still make sense
+  const low = await put({ eavesHeightMm: 3600, apexHeightMm: 3500, apexXMm: 3287 });
+  assert.equal(low.status, 400); assert.match(low.data.error, /apex must be higher than the eaves/);
+  const end = await put({ eavesHeightMm: 3600, apexHeightMm: 4200, apexXMm: 6573 });
+  assert.equal(end.status, 400); assert.match(end.data.error, /between the two wall ends/);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

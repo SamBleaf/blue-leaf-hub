@@ -1188,6 +1188,10 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
   }
 
   const openingsOf = (wid) => view.measurements.filter((m) => m.kind === "opening" && m.parentId === wid && !m.archived);
+  // HUB 017: a field's save builds on the wall's LATEST inputs, so two quick entries (e.g. Centre tapped while the apex
+  // field is still focused) never overwrite each other
+  const latestView = useRef(view);
+  latestView.current = view;
   const act = {
     createWall({ name, kind, widthMm }) {
       const id = newId(), cid = newId();
@@ -1199,8 +1203,9 @@ export default function WallsScreen({ ws, materialId, wallId, onOpenWall, onTrac
       onOpenWall?.(id);
     },
     updateWall(w, patch) {
-      const before = mRec(w);
-      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(w.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+      const latest = latestView.current.measurements.find((m) => m.id === w.id) || w;
+      const before = mRec(latest);
+      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(latest.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
     },
     removeWall(w) {
       const ops = openingsOf(w.id);
