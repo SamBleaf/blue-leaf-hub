@@ -59,10 +59,10 @@ a { color: var(--primary); }
 <div class="wrap">
   <header>
     <h1>Hub Review Plan</h1>
-    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 20 October 2026, evening. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
     <div class="counts" aria-label="Totals">
       <div class="count"><b>11</b> live</div>
-      <div class="count"><b>9</b> built, awaiting deploy</div>
+      <div class="count"><b>10</b> built, awaiting deploy</div>
       <div class="count"><b>1</b> not started</div>
       <div class="count"><b>0</b> verified by you</div>
     </div>
@@ -73,21 +73,48 @@ a { color: var(--primary); }
     <ol>
       <li>Paste <span class="mono">210_takeoff_supplier_address.sql</span> in the Supabase SQL editor. <span class="sub">Adds the supplier pickup address (HUB 019). One statement, safe to re-run.</span></li>
       <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Seeds your James Hardie defaults (HUB 014).</span></li>
-      <li>Say <b>deploy</b>. <span class="sub">Puts HUB 013–021 live (main 44af8a9 → 8ef8ac6).</span></li>
-      <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
+      <li>Say <b>deploy</b>. <span class="sub">Puts HUB 013–022 live.</span></li>
+      <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
+      <li>Read the wall-by-wall plan below and answer its six questions. <span class="sub">Nothing is built until you say go.</span></li>
     </ol>
   </section>
 
   <section aria-labelledby="board-h">
     <h2 id="board-h">Faults</h2>
     <div class="filters" role="group" aria-label="Show">
-      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 21</button>
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 22</button>
       <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
       <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
       <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
     </div>
     <div class="board" id="board"></div>
+  </section>
+
+  <section class="card" aria-labelledby="walk">
+    <h2 id="walk">Next: wall-by-wall takeoff (planned, awaiting your OK)</h2>
+    <p>You asked for a takeoff you can move through wall by wall, quickly, always knowing what to do next. This is the plan; nothing is built yet.</p>
+    <ul>
+      <li>A big button at the bottom of every wall shows the next step: "Next: Wall 3 ›", "+ Next wall" or "Walls done ✓". No trips back to the wall list.</li>
+      <li>"+ Window" and "+ Door" sit in the same bar. A door never asks for a sill.</li>
+      <li>A new wall starts with the last wall's height and shape, so you type the length only.</li>
+      <li>Or trace the house once on the plan, type the height once, and walk round in the order you tapped.</li>
+      <li>The top card on the takeoff says what's next: "Add cladding", "Carry on: Wall 3" or "Review order".</li>
+      <li>After the last wall, one screen shows every wall, anything missing and the sheet total, which matches the order.</li>
+      <li>Status chips and explanations fold away under "More". The calculation doesn't change.</li>
+    </ul>
+    <p><b>A 4-wall Axon extension with 3 windows and a door:</b> about 60 taps today → about 36 by numbers (about 58 → 38 traced), with no scrolling.</p>
+    <p><b>Built in 5 steps:</b> 1 walk the walls (bottom bar, compact wall page) · 2 quick walls and openings (height carried over, keypad opens straight away, "Same as W1") · 3 tracing hand-off · 4 start card and finish summary · 5 battens and accessories follow the walls. You check each step on your iPhone before the next.</p>
+    <p><b>Your six questions:</b></p>
+    <ol>
+      <li>Your keep list says "Previous/Next wall", but today's ‹ › steps through the sheets on one wall; there is no wall-to-wall button. Is that the one you meant? <span class="sub">Suggested: keep it and add the wall buttons separately.</span></li>
+      <li>New walls start with the last wall's height and shape, and walls traced together share one height? <span class="sub">Suggested: yes, shown and easy to change.</span></li>
+      <li>Fold the status chips and notes away on the wall screens? <span class="sub">Suggested: yes; they stay on the schedule and the order.</span></li>
+      <li>Show a walls summary before the order? <span class="sub">Suggested: yes; it catches a missed window.</span></li>
+      <li>Add a "Same as W1" button for repeat windows? <span class="sub">Suggested: yes; it saves three numbers each time.</span></li>
+      <li>New walls also go on battens and accessories automatically (never on a second cladding)? <span class="sub">Suggested: yes, in step 5, once the walk works on your phone.</span></li>
+    </ol>
+    <p class="sub">Full plan in the repo: <span class="mono">docs/hub_review/WALL_BY_WALL_PLAN.md</span></p>
   </section>
 
   <section class="card" aria-labelledby="daily">
@@ -104,6 +131,11 @@ a { color: var(--primary); }
   <section aria-labelledby="log-h">
     <h2 id="log-h">Log</h2>
     <div class="log">
+      <div class="entry"><time datetime="2026-10-21">21 Oct</time><ul>
+        <li>Built HUB 022 at your request: sheets and offcuts are shared across all the walls of a cladding (two recorded walls: 16 → 15 sheets), with "Plan each wall on its own" to turn it off. Not deployed.</li>
+        <li>Two independent reviews of it found and fixed a fault from HUB 016: a piece within one saw cut of a sheet length was left off the order. It now takes the sheet whole.</li>
+        <li>Wrote the wall-by-wall plan (above). Nothing built from it yet.</li>
+      </ul></div>
       <div class="entry"><time datetime="2026-10-20">20 Oct, evening</time><ul>
         <li>Deployed the Worker-app Add supplier (HUB 008 follow-up).</li>
         <li>Built and tested HUB 013–021, one commit each, not deployed. Verdicts written in the doc.</li>
@@ -145,6 +177,7 @@ const FAULTS = [
   ["HUB 019", "Supplier with pickup address, editable", "P0", "wait", "Awaiting deploy", "Migration 210, deploy, add Fielders"],
   ["HUB 020", "Reopen and revise an unplaced draft", "P0", "wait", "Awaiting deploy", "Reopen FO-001003 and revise it"],
   ["HUB 021", "Plan reopens without downloading", "P2", "wait", "Awaiting deploy", "Reopen a plan in Aeroplane Mode"],
+  ["HUB 022", "Offcuts shared across walls", "P1", "wait", "Awaiting deploy", "Two Axon walls: check the cut list names each wall"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");
