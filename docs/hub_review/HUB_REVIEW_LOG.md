@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 20 October 2026, evening)
+## Current state (updated 21 October 2026)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -32,15 +32,33 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 019 Supplier address + edit | Implemented, awaiting deploy | 1934643 | Migration 210 + deploy |
 | HUB 020 Reopen / revise a draft | Implemented, awaiting deploy | 463aab0 | Deploy |
 | HUB 021 Plan kept on the phone | Implemented, awaiting deploy | b361b95 | Deploy |
+| HUB 022 Offcuts shared across walls (follow-up to 016) | Implemented, awaiting deploy | c220c90 | Deploy + two-wall iPhone check |
 
 **Migrations for Sam to paste (Supabase SQL editor, in order):**
 `supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
 Both are one statement and safe to re-run. Applied already: 206, 207, 208, 209.
 
 **Decisions waiting on Sam:** HUB 016 (the recorded wall comes to 8 sheets under the factory-edge rule; confirm, or say
-which cut gets to 7). HUB 001 (the ongoing forecast rule).
+which cut gets to 7). HUB 001 (the ongoing forecast rule). The wall-by-wall plan (`docs/hub_review/WALL_BY_WALL_PLAN.md`):
+his OK and six questions before anything is built.
 
 ## Log
+
+### 2026-10-21 — HUB 022 (offcuts across walls) + wall-by-wall plan
+- Sam asked for offcuts to be shared through the whole takeoff, not just within a wall. Built as HUB 022 (c220c90, local):
+  one cut plan for every wall of a fibre-cement material under the HUB 016 rules; a shared sheet is counted on the wall of
+  its first piece and the cut list names every wall; "Plan each wall on its own" switches it off; the shared plan is used
+  only when it is no worse than the walls' own plans. Two recorded 6,573 × 3,600 walls: 16 → 15 sheets.
+- Two adversarial review passes (6 + 2 agents). Fixed: a piece within one saw cut of a sheet length was left off the order
+  (from HUB 016, ordering short) — now takes the sheet whole, and an unplaceable piece blocks the order; one single-piece
+  rule for every listed length; either-edge offcut for a piece needing no edge; wall counts add up to the order; the
+  switch only for editors and on the screen's own material; a shared plan never costs more than per-wall plans.
+- Tests: 14 HUB 022 engine tests; all node suites; 220 screen tests; real-server journeys pass in Chromium and WebKit
+  iPhone 13 (desktop needed one re-run after a Playwright response-body error, not an app fault). SOP 20-09 v1.5 TC-17.
+- Google Doc: follow-up verdict under HUB 016.
+- Sam asked for a plan for a seamless wall-by-wall takeoff. Planned only (3 readers, 3 designs, 1 judge):
+  `docs/hub_review/WALL_BY_WALL_PLAN.md`. About 60 → 36 taps by numbers for a 4-wall Axon job. Waiting on his OK and six
+  decisions; nothing built.
 
 ### 2026-10-20 (evening) — review round 2, HUB 013–021
 - Deployed first: 44af8a9 (HUB 008 follow-up, Add supplier in the Worker app for office logins). main = 44af8a9.
