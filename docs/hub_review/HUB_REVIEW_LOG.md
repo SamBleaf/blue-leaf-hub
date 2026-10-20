@@ -33,8 +33,8 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 020 Reopen / revise a draft | Implemented, live | 463aab0 | iPhone check |
 | HUB 021 Plan kept on the phone | Implemented, live | b361b95 | iPhone check |
 | HUB 016 follow-up: offcuts shared across walls | Implemented, live | c220c90 | Two-wall iPhone check |
-| HUB 022 Height first, trace the whole run | Planned with Sam (not built) | — | Sam's OK + 4 questions |
-| HUB 023 Rectangle and Area on elevations | Planned with Sam (not built) | — | Sam's OK + 4 questions |
+| HUB 022 Height first, trace the whole run | Planned with Sam (not built) | — | Sam's go (answers in) |
+| HUB 023 Rectangle and Area on elevations | Planned with Sam (not built) | — | Sam's go (answers in) |
 
 **Migrations for Sam to paste (Supabase SQL editor, in order):**
 `supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
@@ -56,7 +56,8 @@ his OK and six questions before anything is built.
   mid-run); windows and doors drawn on the plan into the traced wall; no "Same as W1"; battens worked out from each
   product's fixing rules (Axon: perimeter, top, bottom, behind H joints, uprights at 600; Linea/Stria/timber one way at
   450 or 600), Axon H-flashing and black foam tape behind sheet joins counted. Revised plan (3 readers, 1 planner, 1 skeptic):
-  docs/hub_review/WALL_BY_WALL_PLAN.md. About 70 → 35 taps for the 4-wall Axon job. Waiting on Sam's OK and 4 questions.
+  docs/hub_review/WALL_BY_WALL_PLAN.md. About 70 → 35 taps for the 4-wall Axon job. Sam answered the 4 questions (Height + Sill boxes; Linea/Stria battens 600 either way, timber 450;
+  batten openings, no nail count; foam tape behind vertical joins, H-flashing by the metre). Waiting on his go.
 
 ### 2026-10-21 — HUB 016 follow-up (offcuts across walls) + wall-by-wall plan
 - Sam asked for offcuts to be shared through the whole takeoff, not just within a wall. Built as HUB 016 follow-up (c220c90, local):

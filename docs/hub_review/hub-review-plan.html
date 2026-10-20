@@ -75,7 +75,7 @@ a { color: var(--primary); }
       <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Turns on your James Hardie defaults (HUB 014).</span></li>
       <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
-      <li>Answer the four questions on the wall-by-wall plan below and say go. <span class="sub">Nothing is built until you do.</span></li>
+      <li>Say go to start the wall-by-wall build (step 1: line, height and runs). <span class="sub">Your four answers are in.</span></li>
     </ol>
   </section>
 
@@ -103,13 +103,14 @@ a { color: var(--primary); }
     </ul>
     <p><b>A 4-wall Axon extension with 3 windows and a door, traced:</b> about 70 taps and 21 numbers today (including adding battens) → about 35 taps and 4 numbers.</p>
     <p><b>Built in 5 steps:</b> 1 line, height and runs (HUB 022) · 2 windows and doors on the plan · 3 Rectangle, Area and page switching (HUB 023) · 4 automatic battens and extras · 5 the end review. You check each on your iPhone before the next.</p>
-    <p><b>Your four questions:</b></p>
+    <p><b>Your answers (21 Oct):</b></p>
     <ol>
-      <li>How is a window's height and sill set when drawn on the plan? <span class="sub">Suggested: Height and Sill boxes that remember the last window; doors ask Height only; on an elevation, tap two opposite corners instead.</span></li>
-      <li>Linea, Stria and timber: which board direction gets 450 and which 600, and which timber batten do you buy? <span class="sub">Suggested: flat boards on upright battens at 600; standing boards on horizontal battens at 450; timber 70×35 H3 pine.</span></li>
-      <li>Count the Axon 150 mm fixings as nails, and batten round windows and doors? <span class="sub">Suggested: yes to both.</span></li>
-      <li>Foam tape and H-flashing: where, which products, how bought? <span class="sub">Suggested: tape behind the vertical sheet joins only, full height; H-flashing by the metre. Which products?</span></li>
+      <li>Windows: Height and Sill boxes, remembered; doors ask Height only.</li>
+      <li>Linea and Stria battens at 600 either way; timber cladding at 450.</li>
+      <li>Battens round windows and doors; nails not counted.</li>
+      <li>Foam tape behind vertical sheet joins, full height; H-flashing by the metre. Products to name later.</li>
     </ol>
+    <p><b>Waiting on:</b> your go to start step 1 (line, height and runs).</p>
     <p class="sub">Full plan in the repo: <span class="mono">docs/hub_review/WALL_BY_WALL_PLAN.md</span></p>
   </section>
 
@@ -179,8 +180,8 @@ const FAULTS = [
   ["HUB 020", "Reopen and revise an unplaced draft", "P0", "live", "Live", "Reopen FO-001003 and revise it"],
   ["HUB 021", "Plan reopens without downloading", "P2", "live", "Live", "Reopen a plan in Aeroplane Mode"],
   ["HUB 016 follow-up", "Offcuts shared across walls", "P1", "live", "Live", "Two Axon walls: check the cut list names each wall"],
-  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Being planned", "Answer the 4 questions below"],
-  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Being planned", "Answer the 4 questions below"],
+  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Being planned", "Say go to start step 1"],
+  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Being planned", "Say go to start step 1"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");

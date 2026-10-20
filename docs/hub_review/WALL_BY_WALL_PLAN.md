@@ -232,6 +232,14 @@ iPhone: checks 11–12.
 - **Double counting:** a wall drawn on both the plan and an elevation counts twice. Its row already says "From plan" or "Traced elevation" (WallsScreen.jsx:1352).
 - **Two branches:** the 5am run keeps committing other fixes to takeoff-r03, so each phase is rebased onto it before you merge.
 
+## Sam's answers (21 October 2026)
+1. **Window size:** Height and Sill boxes, set before tapping the two ends; they remember the last window. Doors ask Height only and sit on the floor.
+2. **Batten centres:** Linea and Stria at 600 centres, whichever way the boards run (battens across the boards). Timber cladding at 450 centres, either way.
+3. **Axon fixings and openings:** batten round windows and doors (sides and head, plus the sill on windows). Do **not** count nails.
+4. **Foam tape and H-flashing:** black foam tape behind every vertical sheet join, full height, stopping at openings and the H-flashing. H-flashing by the metre on every horizontal join, rounded up once per job. Products still to name (tape roll, H-flashing).
+
+These replace the matching guesses in "Battens, fixings, H-flashing and foam tape": no nail count (phase 4c is dropped); Linea/Stria battens at 600 in both directions; timber at 450.
+
 ## Questions for you
 1. **How do you want to set the height and sill of a window drawn on the plan?** Recommend: Height and Sill boxes that remember the last window, with doors asking for Height only. On a scaled elevation, tap two opposite corners instead.
 2. **For Linea, Stria and timber, which direction gets 450 and which gets 600, and which timber batten do you buy?** Recommend: boards laid flat go on upright battens at 600, and boards standing up go on horizontal battens at 450. For timber, 70×35 H3 pine in your usual length (for example 5.4 m).
