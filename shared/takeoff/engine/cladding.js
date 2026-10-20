@@ -449,6 +449,150 @@ function coatingDemand(res, ctx, { materialId, role, system, panelM2 }) {
 
 // ── C1 / Rendex: sheet layout ────────────────────────────────────────────────
 
+// ── HUB 016 / HUB 022: plan the sheets — one wall, or every wall of a material together ──────────────────────
+// What a wall's layout keeps aside for the material-level re-plan; never part of the layout payload sent anywhere.
+const SHEET_SHARE = new WeakMap();
+
+/**
+ * Turn one sheet plan into each wall's demands, cell links, leftover offcuts and cut plan. `entries` are the walls of
+ * ONE material ({ res, s: share record, prefix }); a sheet is counted (ordered) on the wall of its first piece and
+ * names every piece it serves, so the site cut list says which wall's offcut a piece comes from.
+ */
+function planEntries(entries) {
+  const s0 = entries[0].s;
+  const pieces = entries.flatMap((e) => e.s.pieces.map((p) => ({ ...p, cellId: e.prefix + p.cellId })));
+  return { pieces, plan: planSheets({ pieces, lengthsMm: s0.variants.map((x) => x.lengthMm), sheetWidthMm: s0.sheetW, coverMm: s0.cover, kerfMm: s0.kerfMm }) };
+}
+function applySheetPlan(entries, { crossWall, planned = null }) {
+  const s0 = entries[0].s;
+  const { pieces, plan } = planned || planEntries(entries);
+  const entryOf = (pid) => entries.find((e) => pid.startsWith(e.prefix)) || entries[0];
+  const localId = (pid) => pid.slice(entryOf(pid).prefix.length);
+  const nameOf = (pid, viewer = null) => {
+    const e = entryOf(pid), c = e.s.byCell.get(localId(pid));
+    const n = `strip ${e.s.stripNo.get(c.col) ?? c.col + 1}${e.s.multiCourse ? ` course ${c.row + 1}` : ""}`;
+    return crossWall && e !== viewer ? `${e.s.wallId} ${n}` : n;
+  };
+  for (const e of entries) {
+    e.res.demands = e.res.demands.filter((d) => d.role !== "sheet"); e.s.offcuts.length = 0; e.stockMm2 = 0; e.owned = [];
+    // a re-plan starts clean: nothing from the wall's own plan stays on its cells
+    for (const c of e.s.byCell.values()) { delete c.sheetId; delete c.source; delete c.sharedWith; delete c.fromPiece; delete c.sharedWithOther; delete c.sheetWall; }
+  }
+  const fromOffcutOf = new Map(plan.fromOffcut.map((f) => [f.cellId, f.fromCellId]));
+  const ownerOf = new Map();
+  for (const sh of plan.sheets) {
+    const owner = entryOf(sh.cellIds[0]);
+    const v = s0.variants.find((x) => Math.abs(x.lengthMm - sh.stockLengthMm) < EPS_MM) || s0.variants[s0.variants.length - 1];
+    const riders = plan.lanes.filter((l) => sh.cellIds.includes(l.fromCellId)).flatMap((l) => l.cellIds);
+    const all = [...sh.cellIds, ...riders];
+    for (const pid of all) ownerOf.set(pid, owner);
+    owner.stockMm2 += s0.sheetW * v.lengthMm;
+    owner.owned.push(sh);
+    const perWall = new Map();
+    for (const pid of all) perWall.set(entryOf(pid).s.wallId, (perWall.get(entryOf(pid).s.wallId) || 0) + 1);
+    const names = !crossWall ? (all.length > 3 ? `${all.length} pieces` : all.map((pid) => nameOf(pid)).join(", "))
+      : all.length > 6 ? `${all.length} pieces (${[...perWall].map(([w, k]) => `${w} ${k}`).join(", ")})` : all.map((pid) => nameOf(pid)).join(", ");
+    owner.res.demands.push({
+      id: demandId(owner.s.materialId, owner.s.wallId, "sheet", localId(sh.cellIds[0])), materialId: owner.s.materialId, role: "sheet", kind: "sheet", unit: "sheet",
+      widthMm: s0.sheetW, heightMm: v.lengthMm, quantity: 1,
+      identity: stockIdentity(v.rec, { orientation: s0.orientation, unit: "sheet", stockLengthMm: v.lengthMm, stockWidthMm: s0.sheetW }),
+      label: `${crossWall ? "Sheet" : `${owner.s.wallId} sheet`} ${sh.id.slice(1)} — ${v.rec.sku ?? v.rec.name} ${mm(v.lengthMm)}: ${names}`,
+      sourceRefs: all.flatMap((pid) => entryOf(pid).s.refsOf(localId(pid))), provenance: "calculated",
+    });
+    for (const pid of all) {
+      const e = entryOf(pid), c = e.s.byCell.get(localId(pid));
+      c.sheetId = sh.id; c.source = fromOffcutOf.has(pid) ? "offcut" : "sheet";
+      c.sharedWith = all.filter((x) => x !== pid && entryOf(x) === e).map(localId);
+      c.fromPiece = fromOffcutOf.has(pid) ? nameOf(fromOffcutOf.get(pid), e) : null;   // the piece whose rip left this offcut
+      if (crossWall) { c.sharedWithOther = all.filter((x) => entryOf(x) !== e).map((x) => nameOf(x, e)); c.sheetWall = owner === e ? null : owner.s.wallId; }
+      else { delete c.sharedWithOther; delete c.sheetWall; }
+      c.stockLengthMm = v.lengthMm; c.sku = v.rec.sku ?? null; c.productId = v.rec.id ?? null;
+    }
+  }
+  // never order short: a piece the plan couldn't put on a listed sheet blocks the order, with its name and size
+  for (const e of entries) {
+    const missing = e.s.pieces.filter((p) => !e.s.byCell.get(p.cellId)?.sheetId);
+    if (!missing.length) continue;
+    e.res.problems.push(qty("sheet_unplaced", `${e.s.wallId}: ${missing.map((p) => `${nameOf(e.prefix + p.cellId, e)} (${mm(p.lengthMm)})`).join(", ")} couldn't be planned on a listed sheet, so ${missing.length === 1 ? "it isn't" : "they aren't"} on the order. Choose a taller listed sheet or add a joint row.`,
+      { refs: missing.map((p) => ({ wallId: e.s.wallId, cell: p.cellId, requiredMm: p.lengthMm })) }));
+    e.res.status = { ...(e.res.status || {}), quantity: "incomplete" };
+  }
+  // what is left: each sheet's end beyond its cuts (full width, on the wall it is counted on) and each rip's unused part
+  // (on the wall it was ripped for) — listed, never counted as reused
+  for (const sh of plan.sheets) {
+    if (sh.residualMm <= EPS_MM) continue;
+    const owner = entryOf(sh.cellIds[0]);
+    const last = [...sh.cellIds].reverse().find((pid) => entryOf(pid) === owner);
+    owner.s.offcuts.push({ cellId: localId(last), sheetId: sh.id, widthMm: s0.sheetW, lengthMm: sh.residualMm, allocated: false });
+  }
+  for (const l of plan.lanes) {
+    const e = entryOf(l.fromCellId), id = localId(l.fromCellId);
+    const left = l.lengthMm - l.usedMm - (l.cellIds.length ? plan.kerfMm : 0);
+    if (l.cellIds.length === 0) e.s.offcuts.push({ cellId: id, sheetId: e.s.byCell.get(id)?.sheetId || null, widthMm: l.widthMm, lengthMm: l.lengthMm, allocated: false, edge: l.edge });
+    else if (left > EPS_MM) e.s.offcuts.push({ cellId: id, sheetId: e.s.byCell.get(id)?.sheetId || null, widthMm: l.widthMm, lengthMm: left, allocated: false, edge: l.edge });
+  }
+  for (const e of entries) {
+    const mine = (pid) => entryOf(pid) === e;
+    const link = (x) => (crossWall ? { cellId: localId(x.cellId), fromCellId: mine(x.fromCellId) ? localId(x.fromCellId) : null, fromName: nameOf(x.fromCellId, e) }
+      : { cellId: x.cellId, fromCellId: x.fromCellId });
+    const myPieces = e.s.pieces.map((p) => e.prefix + p.cellId);
+    e.res.layout.cutPlan = {
+      kerfMm: plan.kerfMm,
+      sheets: e.owned.map((sh) => ({ id: sh.id, stockLengthMm: sh.stockLengthMm, cellIds: crossWall ? sh.cellIds.filter(mine).map(localId) : sh.cellIds, residualMm: sh.residualMm })),
+      fromOffcut: plan.fromOffcut.filter((f) => mine(f.cellId)).map(link),
+      rejected: plan.rejected.filter((x) => mine(x.cellId)).map((x) => ({ ...link(x), reason: x.reason })),
+      ...(crossWall ? { scope: "walls", walls: entries.map((x) => x.s.wallId), totalSheets: plan.sheets.length, totalPieces: pieces.length,
+        fromOtherWalls: myPieces.filter((pid) => ownerOf.get(pid) && ownerOf.get(pid) !== e).length,
+        usedSheets: new Set(myPieces.map((pid) => e.s.byCell.get(localId(pid))?.sheetId).filter(Boolean)).size } : {}),
+    };
+    e.res.layout.potentialOffcuts = e.s.offcuts;
+    e.res.layout.areas = { ...e.res.layout.areas, stockM2: e.stockMm2 / 1e6 };
+    const sheets = e.res.demands.filter((d) => d.role === "sheet");
+    const bySku = {};
+    for (const d of sheets) bySku[d.identity.sku ?? d.identity.name] = (bySku[d.identity.sku ?? d.identity.name] || 0) + 1;
+    e.res.layout.summary = { ...e.res.layout.summary, sheets: sheets.length, bySku };
+  }
+  return plan;
+}
+
+/**
+ * HUB 022 (Sam, 20 Oct 2026): share sheets AND offcuts across every wall of one fibre-cement material, not just within a
+ * wall — e.g. one wall's spare upper slices or a ripped strip's offcut serve a piece on another wall. Same rules as
+ * HUB 016: one product, long factory edges kept, nothing turned over, an offcut only for a piece needing its edge.
+ * `results` are that material's per-wall sheetLayout results; walls whose quantity is blocked keep nothing to share.
+ * Mutates the results in place; returns the material-level plan, or null when there is nothing to share across.
+ */
+export function shareSheetsAcrossWalls(results) {
+  const entries = (results || []).map((res) => ({ res, s: SHEET_SHARE.get(res) }))
+    .filter((e) => e.s && e.res.status?.quantity !== "incomplete" && e.s.pieces.length);
+  if (entries.length < 2) return null;
+  // the same walls always give the same plan, whatever order their measurements were added in
+  entries.sort((a, b) => String(a.res.layout?.wallMeasurementId ?? a.s.wallId).localeCompare(String(b.res.layout?.wallMeasurementId ?? b.s.wallId)));
+  entries.forEach((e, i) => { e.prefix = `${String(i).padStart(4, "0")}|`; });   // padded: string order = wall order
+  // the shared plan is used only when it is no worse than the walls' own plans together (fewest sheets, then the least
+  // stock length) — a bigger search can come back worse than the walls planned one by one, and must never cost more
+  const planned = planEntries(entries);
+  const cost = (sheets) => ({ n: sheets.length, mm: sheets.reduce((t, x) => t + x.stockLengthMm, 0) });
+  const own = cost(entries.flatMap((e) => e.res.layout.cutPlan?.sheets || []));
+  const together = cost(planned.plan.sheets);
+  if (planned.plan.unplaced?.length || together.n > own.n || (together.n === own.n && together.mm >= own.mm - EPS_MM)) return null;
+  const plan = applySheetPlan(entries, { crossWall: true, planned });
+  for (const e of entries) {
+    const cp = e.res.layout.cutPlan, at = e.s.explainAt;
+    if (!Number.isInteger(at) || e.res.explain.length < at + 3) continue;
+    const occupied = e.s.pieces.length;
+    e.res.explain[at] = `${e.s.wallId}: ${e.s.colsCount} strip(s) at ${mm(e.s.cover)} effective cover × ${e.s.rowsCount} course(s) → ${occupied} piece(s); sheets and offcuts are shared with the other walls of this material (all walls: ${cp.totalPieces} pieces from ${cp.totalSheets} sheets), ${cp.sheets.length} counted on this wall, cut across their length only (the long factory edges stay), ${mm(cp.kerfMm)} per saw cut; empty cells use none.`;
+    if (e.res.explain[at + 2] !== undefined) e.res.explain[at + 2] = "A piece can come from another wall's sheet or offcut — the cut list names the wall. A ripped strip's offcut keeps its other factory edge, so it is only reused where that edge fits. Spares and pack rounding are applied at purchase level.";
+    // the cut list for THIS wall says which of its pieces come from another wall's sheet or offcut
+    const borrowed = e.s.pieces.map((p) => e.s.byCell.get(p.cellId)).filter((c) => c?.sheetWall);
+    if (borrowed.length) {
+      const name = (c) => `strip ${e.s.stripNo.get(c.col) ?? c.col + 1}${e.s.multiCourse ? ` course ${c.row + 1}` : ""}`;
+      e.res.explain.splice(at + 1, 0, `${e.s.wallId}: from other walls — ${borrowed.map((c) => `${name(c)} from Sheet ${c.sheetId.slice(1)} (counted on ${c.sheetWall}${c.fromPiece ? `; the offcut of ${c.fromPiece}` : ""})`).join("; ")}.`);
+    }
+  }
+  return plan;
+}
+
 /**
  * sheet_layout@2 — vertical sheets (Axon) or Rendex EPS sheets on one wall.
  * Columns are effective-cover strips from the datum (default: wall start); each joint-row band is a course.
@@ -585,8 +729,9 @@ export function sheetLayout(wall, openings, product, rawOpts) {
   }
 
   // HUB 016: fibre-cement sheets are SHARED across the wall — cut across their length only, long factory edges kept —
-  // so the order is the planned stock sheets, never one sheet per cell (a foam system keeps one per cell)
-  let cutPlan = null;
+  // so the order is the planned stock sheets, never one sheet per cell (a foam system keeps one per cell). What the
+  // plan needs is kept aside so the material can re-plan ALL its walls together (HUB 022, shareSheetsAcrossWalls).
+  let share = null;
   const cellSheets = res.demands.filter((d) => d.role === "sheet");
   if (base.family === "cladding" && cellSheets.length) {
     const byCell = new Map(cells.filter((c) => c.occupied && c.stockLengthMm).map((c) => [c.id, c]));
@@ -595,38 +740,12 @@ export function sheetLayout(wall, openings, product, rawOpts) {
       const left = occ.has(`${c.col - 1}:${c.row}`), right = occ.has(`${c.col + 1}:${c.row}`);
       return { cellId: c.id, widthMm: c.cutWidthMm, lengthMm: c.requiredLengthMm, keep: left && right ? "full" : left ? "left" : right ? "right" : "none" };
     });
-    const sheetW = prod.variants[0].rec.dimensionsMm.width;
-    const plan = planSheets({ pieces, lengthsMm: prod.variants.map((x) => x.lengthMm), sheetWidthMm: sheetW, coverMm: cover, kerfMm: opts.sheetCut?.kerfMm });
     const demandOfCell = new Map(cellSheets.map((d) => [d.id, d]));
-    res.demands = res.demands.filter((d) => d.role !== "sheet");
-    stockMm2 = 0;
-    const name = (id) => { const c = byCell.get(id); return `strip ${c.col + 1}${rows.length > 1 ? ` course ${c.row + 1}` : ""}`; };
-    const fromOffcutOf = new Map(plan.fromOffcut.map((f) => [f.cellId, f.fromCellId]));
-    for (const sh of plan.sheets) {
-      const v = prod.variants.find((x) => Math.abs(x.lengthMm - sh.stockLengthMm) < EPS_MM) || prod.variants[prod.variants.length - 1];
-      const riders = plan.lanes.filter((l) => sh.cellIds.includes(l.fromCellId)).flatMap((l) => l.cellIds);
-      const all = [...sh.cellIds, ...riders];
-      const refs = all.flatMap((id) => demandOfCell.get(demandId(materialId, ctx.wallId, "sheet", id))?.sourceRefs || []);
-      stockMm2 += sheetW * v.lengthMm;
-      res.demands.push({
-        id: demandId(materialId, ctx.wallId, "sheet", sh.cellIds[0]), materialId, role: "sheet", kind: "sheet", unit: "sheet",
-        widthMm: sheetW, heightMm: v.lengthMm, quantity: 1,
-        identity: stockIdentity(v.rec, { orientation, unit: "sheet", stockLengthMm: v.lengthMm, stockWidthMm: sheetW }),
-        label: `${ctx.wallId} sheet ${sh.id.slice(1)} — ${v.rec.sku ?? v.rec.name} ${mm(v.lengthMm)}: ${all.length > 3 ? `${all.length} pieces` : all.map(name).join(", ")}`,
-        sourceRefs: refs, provenance: "calculated",
-      });
-      for (const id of all) { const c = byCell.get(id); c.sheetId = sh.id; c.source = fromOffcutOf.has(id) ? "offcut" : "sheet"; c.sharedWith = all.filter((x) => x !== id); c.stockLengthMm = v.lengthMm; c.sku = v.rec.sku ?? null; c.productId = v.rec.id ?? null; }
-    }
-    // what is left: each sheet's end beyond its cuts (full width) and each rip's unused part — listed, never counted as reused
-    offcuts.length = 0;
-    for (const sh of plan.sheets) if (sh.residualMm > EPS_MM) offcuts.push({ cellId: sh.cellIds[sh.cellIds.length - 1], sheetId: sh.id, widthMm: sheetW, lengthMm: sh.residualMm, allocated: false });
-    for (const l of plan.lanes) {
-      const left = l.lengthMm - l.usedMm - (l.cellIds.length ? plan.kerfMm : 0);
-      if (l.cellIds.length === 0) offcuts.push({ cellId: l.fromCellId, sheetId: byCell.get(l.fromCellId)?.sheetId || null, widthMm: l.widthMm, lengthMm: l.lengthMm, allocated: false, edge: l.edge });
-      else if (left > EPS_MM) offcuts.push({ cellId: l.fromCellId, sheetId: byCell.get(l.fromCellId)?.sheetId || null, widthMm: l.widthMm, lengthMm: left, allocated: false, edge: l.edge });
-    }
-    cutPlan = { kerfMm: plan.kerfMm, sheets: plan.sheets.map((sh) => ({ id: sh.id, stockLengthMm: sh.stockLengthMm, cellIds: sh.cellIds, residualMm: sh.residualMm })),
-      fromOffcut: plan.fromOffcut, rejected: plan.rejected };
+    // strips are numbered by position (1 = first from the wall start), so a part strip before the datum is strip 1, not 0
+    const stripNo = new Map(cols.map((c, i) => [c.index, i + 1]));
+    share = { materialId, wallId: ctx.wallId, byCell, pieces, offcuts, orientation, cover, multiCourse: rows.length > 1, colsCount: cols.length, rowsCount: rows.length, stripNo,
+      sheetW: prod.variants[0].rec.dimensionsMm.width, variants: prod.variants, kerfMm: opts.sheetCut?.kerfMm,
+      refsOf: (id) => demandOfCell.get(demandId(materialId, ctx.wallId, "sheet", id))?.sourceRefs || [] };
   }
 
   const sheets = res.demands.filter((d) => d.role === "sheet");
@@ -635,13 +754,15 @@ export function sheetLayout(wall, openings, product, rawOpts) {
   res.layout = {
     method, wallId: ctx.wallId, family: base.family, orientation, datumMm: datum, coverMm: cover, heightAllowanceMm: allowance,
     openingPolicy: ctx.policy, lapDirection: opts.lapDirection ?? null, stockLengthsMm: prod.variants.map((x) => x.lengthMm),
-    openings: ctx.openings, columns: cols, courses: rows, cells, joints, potentialOffcuts: offcuts, cutPlan, components,
+    openings: ctx.openings, columns: cols, courses: rows, cells, joints, potentialOffcuts: offcuts, cutPlan: null, components,
     areas: { grossM2: ctx.areas.grossM2, openingM2: ctx.areas.openingM2, netM2: ctx.areas.netM2, layoutCutM2: layoutCutMm2 / 1e6, stockM2: stockMm2 / 1e6 },
     summary: { sheets: sheets.length, bySku },
   };
+  if (share) { applySheetPlan([{ res, s: share, prefix: "" }], { crossWall: false }); share.explainAt = res.explain.length; SHEET_SHARE.set(res, share); }
+  const cutPlan = res.layout.cutPlan;
   const occupiedCells = cells.filter((c) => c.occupied && c.stockLengthMm).length;
   res.explain.push(cutPlan
-    ? `${ctx.wallId}: ${cols.length} strip(s) at ${mm(cover)} effective cover × ${rows.length} course(s) → ${occupiedCells} piece(s) cut from ${sheets.length} sheet(s): sheets are only cut across their length (the long factory edges stay), ${mm(cutPlan.kerfMm)} per saw cut; empty cells use none.`
+    ? `${ctx.wallId}: ${cols.length} strip(s) at ${mm(cover)} effective cover × ${rows.length} course(s) → ${occupiedCells} piece(s) cut from ${res.layout.summary.sheets} sheet(s): sheets are only cut across their length (the long factory edges stay), ${mm(cutPlan.kerfMm)} per saw cut; empty cells use none.`
     : `${ctx.wallId}: ${cols.length} strip(s) at ${mm(cover)} effective cover × ${rows.length} course(s) → ${sheets.length} occupied cell(s) = ${sheets.length} sheet(s); empty cells use none.`,
     `Each piece is its cut + ${mm(allowance)} allowance; a raked strip is sized by its highest point.`,
     cutPlan ? "A ripped strip's offcut keeps its other factory edge, so it is only reused where that edge fits. Spares and pack rounding are applied at purchase level."

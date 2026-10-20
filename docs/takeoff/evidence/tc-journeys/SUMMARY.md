@@ -21,7 +21,7 @@ None.
 
 ## desktop-chromium
 
-director (Hub route, admin) · chromium 149.0.7827.55 · viewport {"width":1440,"height":900} · run 2026-10-20T11:21:24.065Z
+director (Hub route, admin) · chromium 149.0.7827.55 · viewport {"width":1440,"height":900} · run 2026-10-20T13:21:39.286Z
 User agent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36`
 
 Console errors: none
@@ -30,7 +30,7 @@ Evidence: `desktop-chromium/STEPS.md`, screenshots `desktop-chromium/NN-<journey
 
 ## iphone13-webkit
 
-leading hand (Worker PWA route, worker token) · webkit 26.5 · viewport {"width":390,"height":664} · run 2026-10-20T11:22:24.508Z
+leading hand (Worker PWA route, worker token) · webkit 26.5 · viewport {"width":390,"height":664} · run 2026-10-20T13:20:18.151Z
 User agent: `Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Mobile/15E148 Safari/604.1`
 
 Console errors: none

@@ -230,8 +230,11 @@ function wallTag(view, materialId, wall) {
   return names.filter((x) => x === n).length > 1 ? `${n} (${String(wall.id).slice(0, 4)})` : n;
 }
 
-function demandsForWall(result, wallId, tag) {
-  return (result?.demands || []).filter((d) => (d.sourceRefs || []).some((r) => r && (r.measurementId === wallId || r.wallId === wallId || (tag && r.wallId === tag))));
+function demandsForWall(result, wallId, tag, { ownerOnly = false } = {}) {
+  const onWall = (r) => r && (r.measurementId === wallId || r.wallId === wallId || (tag && r.wallId === tag));
+  // HUB 022: a sheet shared across walls names every wall it serves; for counting, it belongs to the wall it is
+  // ordered on (its first piece), so the walls add up to the order
+  return (result?.demands || []).filter((d) => (ownerOnly && (d.unit === "sheet" || d.kind === "sheet") ? onWall(d.sourceRefs?.[0]) : (d.sourceRefs || []).some(onWall)));
 }
 
 /** A wall's bounding box in local mm (null until its size is complete). */
@@ -322,7 +325,7 @@ function allocationMap(result) {
 function wallQuantities(result, wallId, tag) {
   const alloc = allocationMap(result);
   const groups = new Map();
-  for (const d of demandsForWall(result, wallId, tag)) {
+  for (const d of demandsForWall(result, wallId, tag, { ownerOnly: true })) {
     let key, text;
     const id = d.identity || {};
     if (d.unit === "sheet" || d.kind === "sheet") {
@@ -352,14 +355,19 @@ function wallQuantities(result, wallId, tag) {
     else qtyText = `${Math.round(g.qty).toLocaleString("en-AU")}`;
     if (g.unit === "piece" && g.lenMm) qtyText += ` · ${(g.lenMm / 1000).toFixed(2)} m installed`;
     return { key: g.key, text: g.text, qtyText, unit: g.unit, qty: g.qty };
-  });
+  }).concat((() => {
+    // HUB 022: pieces on this wall cut from a sheet or offcut counted on another wall
+    const lay = (result?.layouts || []).find((l) => l?.wallMeasurementId === wallId || l?.wallId === wallId);
+    const n = lay?.cutPlan?.fromOtherWalls || 0;
+    return n ? [{ key: "borrowed", text: "Cut from other walls' sheets or offcuts", qtyText: `${plural(n, "piece")} from other walls`, unit: "borrowed", qty: n }] : [];
+  })());
 }
 
 /** Compact per-unit totals for a wall row / result line ("4 sheets", "11 pieces", "22.0 LM (estimate)"). */
 function qtyChips(rows) {
   const by = new Map();
-  for (const r of rows) if (r.unit === "sheet" || r.unit === "piece" || r.unit === "lm") by.set(r.unit, (by.get(r.unit) || 0) + r.qty);
-  return [...by.entries()].map(([u, q]) => (u === "lm" ? `${q.toFixed(1)} LM (estimate)` : plural(Math.round(q), ...UNIT_WORD[u])));
+  for (const r of rows) if (r.unit === "sheet" || r.unit === "piece" || r.unit === "lm" || r.unit === "borrowed") by.set(r.unit, (by.get(r.unit) || 0) + r.qty);
+  return [...by.entries()].map(([u, q]) => (u === "lm" ? `${q.toFixed(1)} LM (estimate)` : u === "borrowed" ? `${plural(q, "piece")} from other walls` : plural(Math.round(q), ...UNIT_WORD[u])));
 }
 
 // ── elevation elements per view ─────────────────────────────────────────────────────────────────────────────
@@ -393,18 +401,22 @@ function claddingElements(entry, bbox, wallProblems) {
   const demandOf = (() => {
     const map = new Map();
     // a shared sheet (HUB 016) lists every cell cut from it
-    for (const d of demandsForWall(result, entry.wallId, entry.tag)) for (const r of d.sourceRefs || []) { const c = r?.cell; if (c && !map.has(c)) map.set(c, d); }
+    // (HUB 022: a sheet shared across walls also names other walls' cells — only this wall's own count here)
+    for (const d of demandsForWall(result, entry.wallId, entry.tag)) for (const r of d.sourceRefs || []) { const c = r?.cell; if (c && !map.has(c) && (r.wallId === entry.tag || r.wallId === entry.wallId || r.measurementId === entry.wallId)) map.set(c, d); }
     return (id) => map.get(id) || null;
   })();
   const narrowRefs = wallProblems.filter((p) => p.code === "narrow_strip").flatMap((p) => p.refs || []);
   if (method === "sheet_layout") {
     const cols = new Map((layout.columns || []).map((c) => [c.index, c]));
+    // strips are numbered by position from the wall start (a part strip before the datum is strip 1)
+    const stripNo = new Map((layout.columns || []).map((c, i) => [c.index, i + 1]));
+    const strip = (c) => stripNo.get(c?.col) ?? (c?.col ?? 0) + 1;
     const multi = (layout.courses || []).length > 1;
     const tallest = Math.max(0, ...(layout.stockLengthsMm || []));
     const cellById = new Map((layout.cells || []).map((c) => [c.id, c]));
-    const cellName = (id) => { const c = cellById.get(id); return c ? `strip ${c.col + 1}${multi ? ` course ${c.row + 1}` : ""}` : "another strip"; };
+    const cellName = (id) => { const c = cellById.get(id); return c ? `strip ${strip(c)}${multi ? ` course ${c.row + 1}` : ""}` : "another strip"; };
     for (const c of layout.cells || []) {
-      const name = `Strip ${c.col + 1}${multi ? `, course ${c.row + 1}` : ""}`;
+      const name = `Strip ${strip(c)}${multi ? `, course ${c.row + 1}` : ""}`;
       if (!c.occupied) { items.push({ id: c.id, kind: "rect", rect: c.rect, state: "empty", info: { title: name, rows: [["Sheet", "None — no cladding in this cell"]], note: "Empty cells use no sheet." } }); continue; }
       const col = cols.get(c.col);
       const sheetW = demandOf(c.id)?.identity?.stockWidthMm ?? null;
@@ -416,8 +428,13 @@ function claddingElements(entry, bbox, wallProblems) {
           rows: [
             ["Stock", tooTall ? `None fits — needs ${fmtMm(c.requiredLengthMm)} mm; ${layout.orientation === "horizontal" ? "longest" : "tallest"} listed is ${fmtMm(tallest)} mm` : `${c.sku ? `SKU ${c.sku} · ` : ""}${fmtMm(c.stockLengthMm)}${sheetW ? ` × ${fmtMm(sheetW)}` : ""} mm sheet`],
             ["Cut size", `${fmtMm(c.cutWidthMm)} × ${fmtMm(c.cutLengthMm)} mm`],
-            ...(c.sheetId && !tooTall ? [["From", c.source === "offcut" ? `The offcut of ${cellName(c.sharedWith?.[0])}'s sheet (${c.sheetId.replace("S", "sheet ")})`
-              : c.sharedWith?.length ? `${c.sheetId.replace("S", "Sheet ")} — shared with ${c.sharedWith.map(cellName).join(", ")}` : `${c.sheetId.replace("S", "Sheet ")} (its own)`]] : []),
+            ...(c.sheetId && !tooTall ? [["From", (() => {
+              // HUB 016 / 022: which stock sheet (and, across walls, which wall it is counted on) this piece is cut from
+              const sheet = `${c.sheetId.replace("S", "Sheet ")}${c.sheetWall ? `, counted on ${c.sheetWall}` : ""}`;
+              const others = [...(c.sharedWith || []).map(cellName), ...(c.sharedWithOther || [])];
+              if (c.source === "offcut") return `The offcut of ${c.fromPiece || cellName(c.sharedWith?.[0])} (${sheet})`;
+              return others.length ? `${sheet} — shared with ${others.join(", ")}` : `${sheet} (its own)`;
+            })()]] : []),
             ...(layout.heightAllowanceMm ? [["Needed", `${fmtMm(c.requiredLengthMm)} mm incl. ${fmtMm(layout.heightAllowanceMm)} allowance`]] : []),
           ],
           note: tooTall ? (layout.orientation === "horizontal" ? "Longer than the longest listed sheet — add a joint row with its detail, or choose a longer listed sheet." : "Taller than the tallest listed sheet — add a joint row with its detail, or choose a taller listed sheet.") : col?.kind === "cut" ? `Cut strip: ${fmtMm(col.widthMm)} mm of the ${fmtMm(layout.coverMm)} mm cover.` : null,
@@ -434,7 +451,10 @@ function claddingElements(entry, bbox, wallProblems) {
       sheetInfo = {
         strips: (layout.columns || []).length, cutWidths: cutCols.map((c) => c.widthMm), courses: (layout.courses || []).length, sheets, pieces,
         kerfMm: layout.cutPlan?.kerfMm ?? null, shared: !!layout.cutPlan,
-        refused: (layout.cutPlan?.rejected || []).map((x) => `${cellName(x.cellId)} can't use the offcut from ${cellName(x.fromCellId)} — that offcut has the other long factory edge (tongue / groove)`),
+        refused: (layout.cutPlan?.rejected || []).map((x) => `${cellName(x.cellId)} can't use the offcut from ${x.fromCellId ? cellName(x.fromCellId) : x.fromName} — that offcut has the other long factory edge (tongue / groove)`),
+        acrossWalls: layout.cutPlan?.scope === "walls" ? { walls: layout.cutPlan.walls || [], totalSheets: layout.cutPlan.totalSheets, totalPieces: layout.cutPlan.totalPieces,
+          fromOtherWalls: layout.cutPlan.fromOtherWalls || 0, usedSheets: layout.cutPlan.usedSheets } : null,
+        stripOf: (c) => strip(c),
         empty: (layout.cells || []).filter((c) => !c.occupied).length, layoutCutM2: layout.areas?.layoutCutM2, stockM2: layout.areas?.stockM2,
         offcuts: (layout.potentialOffcuts || []).map((o) => ({ ...o, cell: (layout.cells || []).find((c) => c.id === o.cellId) })),
       };
@@ -1467,10 +1487,11 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const datumOf = (w) => material?.rules?.datumByWall?.[w.id] ?? defaultDatum;
   const datumHere = datumOf(wall);
   const materialWallsHere = material ? materialWalls(view, material.id) : [];
+  const sharedWallsOf = (m) => materialWalls(view, m.id).length;   // HUB 022: the share-across-walls switch shows for 2+ walls
   const datumOthers = setout && attached ? materialWallsHere.filter((w) => w.id !== wall.id && datumOf(w) !== datumHere).map((w) => ({ wall: w, datumMm: datumOf(w) })) : [];
   const setoutQty = (() => {
     if (!material || !setout) return null;
-    return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall)).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0);
+    return demandsForWall(results[material.id], wall.id, wallTag(view, material.id, wall), { ownerOnly: true }).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0);
   })();
   const materialQty = material && setout ? (results[material.id]?.demands || []).filter((d) => d.unit === setout.unit).reduce((t, d) => t + (d.quantity || 0), 0) : null;
   const changeKeyFor = (rules) => {
@@ -1629,14 +1650,35 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             )}
             {si && (
               <div className="space-y-1 text-xs text-ink" data-sheet-summary="">
-                <p>{plural(si.strips, "strip")}{si.cutWidths.length ? ` (${si.cutWidths.length} cut: ${si.cutWidths.map((w) => `${fmtMm(Math.round(w * 10) / 10)} mm`).join(", ")} wide)` : ""} × {plural(si.courses, "course")} → <b>{plural(si.sheets, "sheet")}</b>{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}. A cut strip still uses a whole sheet.</p>
+                <p>{plural(si.strips, "strip")}{si.cutWidths.length ? ` (${si.cutWidths.length} cut: ${si.cutWidths.map((w) => `${fmtMm(Math.round(w * 10) / 10)} mm`).join(", ")} wide)` : ""} × {plural(si.courses, "course")} → {si.acrossWalls
+                  ? <><b>{plural(si.pieces, "piece")}</b> from {plural(si.acrossWalls.usedSheets ?? si.sheets, "sheet")}, {plural(si.sheets, "sheet")} counted on this wall</>
+                  : <b>{plural(si.sheets, "sheet")}</b>}{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}. A cut strip still uses a whole sheet.</p>
                 {Number.isFinite(si.layoutCutM2) && <p className="text-muted">Layout cut {fmtM2(si.layoutCutM2)} m² · sheet stock {fmtM2(si.stockM2)} m² (spares are added in the schedule).</p>}
-                {si.shared && si.pieces > si.sheets && <p data-sheet-shared="">{si.pieces} pieces cut from {plural(si.sheets, "sheet")}: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.</p>}
+                {si.acrossWalls ? (
+                  <p data-sheet-shared="walls">Sheets and offcuts are shared across {(() => {
+                    // a wall of this cladding whose quantity is blocked isn't in the shared plan until it is fixed
+                    const all = shownClad?.material ? sharedWallsOf(shownClad.material) : si.acrossWalls.walls.length;
+                    return all > si.acrossWalls.walls.length ? `${si.acrossWalls.walls.length} of the ${all} walls` : `all ${si.acrossWalls.walls.length} walls`;
+                  })()} of {shownClad?.material?.name || "this cladding"}: {plural(si.acrossWalls.totalPieces, "piece")} from {plural(si.acrossWalls.totalSheets, "sheet")} in all, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.{si.acrossWalls.fromOtherWalls ? ` ${plural(si.acrossWalls.fromOtherWalls, "piece")} on this wall come${si.acrossWalls.fromOtherWalls === 1 ? "s" : ""} from another wall's sheet or offcut — tap a piece to see which.` : ""}</p>
+                ) : si.shared && si.pieces > si.sheets && <p data-sheet-shared="">{si.pieces} pieces cut from {plural(si.sheets, "sheet")}: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.</p>}
+                {si.shared && canEdit && shownClad?.material && shownClad.material.id === material?.id && material.methodKey === "sheet_layout" && sharedWallsOf(material) > 1 && (() => {
+                  // HUB 022: one switch per cladding — keep offcuts for the other walls, or plan each wall on its own (walls clad separately)
+                  const on = material.rules?.shareSheetsAcrossWalls !== false;
+                  return (
+                    <div className="flex flex-wrap items-center gap-2" data-share-walls={on ? "on" : "off"}>
+                      <p className="min-w-0 flex-1 text-muted">{!on ? "Each wall is planned on its own: offcuts are not used on other walls."
+                        : si.acrossWalls ? "Offcuts are kept for the other walls. Plan each wall on its own if they are clad on different days."
+                        : (results[material.id]?.layouts || []).some((l) => l?.cutPlan?.scope === "walls") ? "This wall isn't in the shared plan until its problems are fixed."
+                        : "Offcuts are shared across walls when that saves sheets; here each wall's own plan is already the best."}</p>
+                      <Btn kind="ghost" onClick={() => act.updateRules(on ? { shareSheetsAcrossWalls: false } : {}, on ? [] : ["shareSheetsAcrossWalls"])}>{on ? "Plan each wall on its own" : "Share offcuts across walls"}</Btn>
+                    </div>
+                  );
+                })()}
                 {(si.offcuts.length > 0 || si.refused.length > 0) && (
                   <details className="rounded-lg border border-hairline px-3" data-offcuts="">
                     <summary className="min-h-[44px] cursor-pointer py-3 text-xs">{si.shared ? `${plural(si.offcuts.length, "offcut")} left over` : `${plural(si.offcuts.length, "potential offcut")} — listed only, never reused automatically`}</summary>
                     <ul className="list-disc space-y-0.5 pb-2 pl-4 text-muted">
-                      {si.offcuts.map((o, i) => <li key={`${o.cellId}-${i}`}>{o.sheetId ? `${o.sheetId.replace("S", "Sheet ")} (strip ${(o.cell?.col ?? 0) + 1}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""})` : `Strip ${(o.cell?.col ?? 0) + 1}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""}`}: {fmtMm(Math.round(o.widthMm))} × {fmtMm(Math.round(o.lengthMm))} mm</li>)}
+                      {si.offcuts.map((o, i) => <li key={`${o.cellId}-${i}`}>{o.sheetId ? `${o.sheetId.replace("S", "Sheet ")} (strip ${si.stripOf(o.cell)}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""})` : `Strip ${si.stripOf(o.cell)}${si.courses > 1 ? `, course ${(o.cell?.row ?? 0) + 1}` : ""}`}: {fmtMm(Math.round(o.widthMm))} × {fmtMm(Math.round(o.lengthMm))} mm</li>)}
                       {si.refused.map((r) => <li key={r} data-offcut-refused="">{r}</li>)}
                     </ul>
                   </details>
@@ -1706,7 +1748,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <h3 className="text-sm font-semibold text-ink">{material.methodKey === "sheet_layout" ? "Sheet setout" : "Course setout"}</h3>
               <NumberField key={draftReset} label={setout.label} value={datumHere} min={setout.min} max={setout.max ?? MAX_MM}
                 onCommit={(n) => {
-                  setDatumChange({ before: setoutQty, datumMm: n, key: changeKeyFor(material.rules) });
+                  setDatumChange({ before: setoutQty, beforeAll: materialQty, datumMm: n, key: changeKeyFor(material.rules) });
                   setAlignChange(null);
                   // THIS wall only (rules.datumByWall); the same value as the material default needs no own entry
                   const byWall = { ...(material.rules?.datumByWall || {}) };
@@ -1714,7 +1756,10 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                   if (Object.keys(byWall).length) act.updateRules({ datumByWall: byWall }); else act.updateRules({}, ["datumByWall"]);
                 }}
                 help={setout.help} />
-              {datumShown && <p className="text-xs text-ink" data-datum-change="">{setout.what} on this wall: {datumShown.before} → <b>{setoutQty}</b></p>}
+              {datumShown && <p className="text-xs text-ink" data-datum-change="">{setout.what} on this wall: {datumShown.before} → <b>{setoutQty}</b>
+                {/* HUB 022: with sheets shared across walls, a setout change can save or add a sheet on another wall */}
+                {material.methodKey === "sheet_layout" && material.rules?.shareSheetsAcrossWalls !== false && materialWallsHere.length > 1 && Number.isFinite(datumShown.beforeAll)
+                  ? <> · all walls of {material.name}: {datumShown.beforeAll} → <b>{materialQty}</b></> : null}</p>}
               {datumOthers.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-[11px] text-muted" data-datum-others="">Other walls using {material.name}: {datumOthers.map((o) => `${wallName(o.wall)} starts at ${fmtMm(o.datumMm)} mm`).join(" · ")}.</p>

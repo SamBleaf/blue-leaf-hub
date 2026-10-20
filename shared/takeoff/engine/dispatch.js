@@ -21,7 +21,7 @@ import { computeManualTimber, computeNoggins, computePlates, computeRepeatedMemb
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
-import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, sheetLayout } from "./cladding.js";
+import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
 import { CATALOGUE_SEED } from "../products/seed.js";
@@ -323,6 +323,9 @@ function productVariants(n) {
   }));
 }
 
+/** HUB 022: fibre-cement sheets are shared across every wall of the material unless it is switched off. */
+export const sharesAcrossWalls = (mat) => mat?.rules?.shareSheetsAcrossWalls !== false;
+
 function runWallMethod(mat, n, items, ctx, sink) {
   const rules = mat.rules || {};
   const results = [];
@@ -374,6 +377,8 @@ function runWallMethod(mat, n, items, ctx, sink) {
     results.push(r);
   }
   if (!results.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Add a wall for this material.", blocking: false });
+  // HUB 022: one cut plan for ALL the walls of a sheet material — offcuts from one wall serve another (off = per wall)
+  if (mat.methodKey === "sheet_layout" && sharesAcrossWalls(mat)) sink.sharedAcrossWalls = !!shareSheetsAcrossWalls(results);
   return results;
 }
 
@@ -661,7 +666,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const wallsOf = items.filter((x) => x.m.kind === "wall").map((x) => x.m.id);
     const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts, mat.spec?.family === "accessory" ? wallsOf.map((id) => jointsByWall.get(id) || [])
       : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || [])
-      : mat.methodKey === "sheet_layout" ? { sheetPlan: 1 } : null);   // HUB 016: sheets are now shared — lines saved before are reviewed
+      : mat.methodKey === "sheet_layout" ? { sheetPlan: sink.sharedAcrossWalls ? 2 : 1 } : null);   // HUB 016/022: plan 2 = shared across walls; lines saved under the other plan are reviewed
     let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, omitted: [] };
     if (n) {
       try { pl = purchaseLines(mat, n, demands, matKey, sink); } catch (e) {

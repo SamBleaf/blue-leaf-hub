@@ -22,23 +22,26 @@ export const SHEET_KERF_DEFAULT_MM = 5;
  *   lengthsMm: number[], sheetWidthMm: number, coverMm: number, kerfMm?: number }} p
  * @returns {{ sheets: Array<{id:string, stockLengthMm:number, cellIds:string[], residualMm:number}>,
  *   fromOffcut: Array<{cellId:string, fromCellId:string}>, lanes: Array<{fromCellId:string, edge:string, widthMm:number, lengthMm:number, usedMm:number, cellIds:string[]}>,
- *   rejected: Array<{cellId:string, fromCellId:string, reason:string}>, kerfMm:number }}
+ *   rejected: Array<{cellId:string, fromCellId:string, reason:string}>, unplaced: string[], kerfMm:number }}
  */
 export function planSheets({ pieces, lengthsMm, sheetWidthMm, coverMm, kerfMm = SHEET_KERF_DEFAULT_MM }) {
   const kerf = Number.isFinite(kerfMm) && kerfMm >= 0 ? kerfMm : SHEET_KERF_DEFAULT_MM;
   const order = (a, b) => b.lengthMm - a.lengthMm || b.widthMm - a.widthMm || (a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0);
   const narrow = pieces.filter((p) => p.widthMm < coverMm - EPS_MM && p.keep !== "full").sort(order);
   const slices = pieces.filter((p) => !(p.widthMm < coverMm - EPS_MM && p.keep !== "full")).map((p) => ({ cellId: p.cellId, lengthMm: p.lengthMm }));
-  const lanes = [], fromOffcut = [], rejected = [];
+  const lanes = [], fromOffcut = [], rejected = [], unplaced = [];
   for (const p of narrow) {
     const room = (l) => l.lengthMm - l.usedMm - (l.cellIds.length ? kerf : 0);
     const fitsSize = (l) => l.widthMm >= p.widthMm - EPS_MM && room(l) >= p.lengthMm - EPS_MM;
-    const edgeOk = (l) => p.keep === "none" || l.edge === p.keep;
+    // a lane ripped for a piece that needed NO factory edge can keep either edge (the piece came off whichever side) —
+    // it takes the edge of the first edged piece cut from it (HUB 022 review)
+    const edgeOk = (l) => p.keep === "none" || l.edge === p.keep || l.edge === "both";
     const ok = lanes.filter((l) => fitsSize(l) && edgeOk(l)).sort((a, b) => a.widthMm - b.widthMm || room(a) - room(b) || (a.fromCellId < b.fromCellId ? -1 : 1));
     if (ok.length) {
       const l = ok[0];
       l.usedMm += (l.cellIds.length ? kerf : 0) + p.lengthMm;
       l.cellIds.push(p.cellId);
+      if (l.edge === "both" && p.keep !== "none") l.edge = p.keep;
       fromOffcut.push({ cellId: p.cellId, fromCellId: l.fromCellId });
       continue;
     }
@@ -54,10 +57,29 @@ export function planSheets({ pieces, lengthsMm, sheetWidthMm, coverMm, kerfMm = 
   if (slices.length) {
     const identity = { family: "cladding-sheet", widthMm: sheetWidthMm };
     const policy = { kind: "list", lengthsMm: [...lengthsMm].sort((a, b) => a - b), kerfMm: kerf, kerfConfirmed: true, finalEndAcceptable: true, sharePieces: true };
-    const r = allocateLinear(slices.map((s) => ({ id: s.cellId, kind: "linear", unit: "piece", lengthMm: s.lengthMm, lengthKind: "cut", quantity: 1, identity, stockPolicy: policy, label: s.cellId })), {});
+    // a whole-material plan has more slices: give the search room in proportion (the per-wall budget is 50,000 nodes)
+    const nodeBudget = Math.min(1_000_000, 50_000 * Math.max(1, Math.ceil(slices.length / 12)));
+    const r = allocateLinear(slices.map((s) => ({ id: s.cellId, kind: "linear", unit: "piece", lengthMm: s.lengthMm, lengthKind: "cut", quantity: 1, identity, stockPolicy: policy, label: s.cellId })), { nodeBudget });
     const bars = (r.groups[0]?.bars || []).map((b) => ({ stockLengthMm: b.stockLengthMm, cellIds: b.cuts.map((c) => c.demandId).sort(), residualMm: b.residualMm }));
+    // a slice within one saw cut of a stock length (e.g. 2,996 on a 3,000 sheet) takes that sheet whole: its trim cut
+    // falls in the waste at the end. Never dropped from the order (HUB 022 review: it used to be left off, ordering short).
+    const stock = [...lengthsMm].sort((a, b) => a - b);
+    for (const u of r.groups[0]?.unavailable || []) {
+      const L = stock.find((x) => x >= u.lengthMm - EPS_MM);
+      if (L == null) { unplaced.push(u.demandId); continue; }
+      bars.push({ stockLengthMm: L, cellIds: [u.demandId], residualMm: Math.max(0, L - u.lengthMm - kerf) });
+    }
+    // one rule for every listed length: a sheet holding ONE slice is the shortest listed length that holds it (its
+    // trim cut, if any, falls in the waste) — so 2,447 takes a 2,450 sheet just as 2,996 takes a 3,000 sheet
+    const lenOf = new Map(slices.map((x) => [x.cellId, x.lengthMm]));
+    for (const b of bars) {
+      if (b.cellIds.length !== 1) continue;
+      const len = lenOf.get(b.cellIds[0]);
+      const L = stock.find((x) => x >= len - EPS_MM);
+      if (L != null && L < b.stockLengthMm - EPS_MM) { b.stockLengthMm = L; b.residualMm = Math.max(0, L - len - kerf); }
+    }
     bars.sort((a, b) => (a.cellIds[0] < b.cellIds[0] ? -1 : a.cellIds[0] > b.cellIds[0] ? 1 : 0));
     bars.forEach((b, i) => sheets.push({ id: `S${i + 1}`, ...b }));
   }
-  return { sheets, fromOffcut, lanes, rejected, kerfMm: kerf };
+  return { sheets, fromOffcut, lanes, rejected, unplaced: unplaced.sort(), kerfMm: kerf };
 }
