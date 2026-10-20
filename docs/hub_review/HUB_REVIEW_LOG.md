@@ -33,8 +33,8 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 020 Reopen / revise a draft | Implemented, live | 463aab0 | iPhone check |
 | HUB 021 Plan kept on the phone | Implemented, live | b361b95 | iPhone check |
 | HUB 016 follow-up: offcuts shared across walls | Implemented, live | c220c90 | Two-wall iPhone check |
-| HUB 022 Height first, trace the whole run | Planned with Sam (not built) | — | Sam's go (answers in) |
-| HUB 023 Rectangle and Area on elevations | Planned with Sam (not built) | — | Sam's go (answers in) |
+| HUB 022 Height first, trace the whole run (+ windows/doors on the plan, auto battens, end review) | Implemented, awaiting deploy | 9f4818d, 57314d5, 2e37dae, ee7418d | Deploy + iPhone check |
+| HUB 023 Rectangle and Area on elevations | Implemented, awaiting deploy | d9acb34 | Deploy + iPhone check |
 
 **Migrations for Sam to paste (Supabase SQL editor, in order):**
 `supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
@@ -45,6 +45,20 @@ which cut gets to 7). HUB 001 (the ongoing forecast rule). The wall-by-wall plan
 his OK and six questions before anything is built.
 
 ## Log
+
+### 2026-10-21 (evening) — wall-by-wall takeoff built (steps 1–5), not deployed
+- Migrations 210 and 211 confirmed live (read-only): suppliers.address exists; 10 James Hardie company defaults.
+- Products from Sam: foam tape 304560 (25 m rolls), H-flashing 305613 (3,000 lengths).
+- Each step: one build agent, three reviewers (Sam's words / regressions / phone), one fixer, full retest; then the
+  orchestrator ran the real-server journeys (Chromium + WebKit iPhone 13) and committed.
+  1. 9f4818d Line tool + Wall height + runs (HUB 022) — 11 findings fixed.
+  2. 57314d5 + Window / + Door drawn on the plan — 18 findings fixed.
+  3. d9acb34 Rectangle / Area / Page chip (HUB 023) — 13 findings fixed.
+  4. 2e37dae Automatic battens, foam tape, H-flashing — 15 issues fixed (incl. walls cut from another wall's sheets got
+     no battens); also capped the cross-wall sheet search (20 walls 632 → 158 ms); journeys J2/J5 updated for the new lines.
+  5. ee7418d End review: wall-to-wall Previous/Next, Review order, detail under More — 10 findings fixed.
+- Final: 34 node suites (1,005 tests), 260 screen tests, lint, build, real-server journeys all pass.
+- Review doc: HUB 022 and HUB 023 verdicts written, status "Implemented, awaiting deploy".
 
 ### 2026-10-21 (later) — deployed; new review items HUB 022–023; revised wall plan
 - Deployed main a8e5b22 (HUB 013–021 + HUB 016 follow-up). Live bundle checked; /api/takeoff/company-defaults answers 401.

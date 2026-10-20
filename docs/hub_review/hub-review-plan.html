@@ -59,10 +59,10 @@ a { color: var(--primary); }
 <div class="wrap">
   <header>
     <h1>Hub Review Plan</h1>
-    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026, after the deploy. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026, evening. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
     <div class="counts" aria-label="Totals">
       <div class="count"><b>21</b> live</div>
-      <div class="count"><b>2</b> being planned with you</div>
+      <div class="count"><b>2</b> built, awaiting deploy</div>
       <div class="count"><b>1</b> not started</div>
       <div class="count"><b>0</b> verified by you</div>
     </div>
@@ -71,11 +71,9 @@ a { color: var(--primary); }
   <section class="steps" aria-labelledby="next">
     <h2 id="next">Your next steps</h2>
     <ol>
-      <li>Paste <span class="mono">210_takeoff_supplier_address.sql</span> in the Supabase SQL editor. <span class="sub">Saves the supplier pickup address (HUB 019). One statement, safe to re-run.</span></li>
-      <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Turns on your James Hardie defaults (HUB 014).</span></li>
-      <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
+            <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
-      <li>Say go to start the wall-by-wall build (step 1: line, height and runs). <span class="sub">Your four answers are in.</span></li>
+      <li>Say <b>deploy</b> to put the wall-by-wall takeoff live. <span class="sub">All five steps are built and tested.</span></li>
     </ol>
   </section>
 
@@ -83,7 +81,7 @@ a { color: var(--primary); }
     <h2 id="board-h">Faults</h2>
     <div class="filters" role="group" aria-label="Show">
       <button type="button" id="f-all" data-f="all" aria-pressed="true">All 24</button>
-      <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Being planned</button>
+      <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
       <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
       <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
     </div>
@@ -91,8 +89,8 @@ a { color: var(--primary); }
   </section>
 
   <section class="card" aria-labelledby="walk">
-    <h2 id="walk">Next: wall-by-wall takeoff with HUB 022 and 023 (revised plan, awaiting your OK)</h2>
-    <p>Revised with your answers and the doc's HUB 022 and 023. Nothing is built yet.</p>
+    <h2 id="walk">Wall-by-wall takeoff with HUB 022 and 023: built, awaiting deploy</h2>
+    <p>All five steps were built on 21 October and are waiting for you to say deploy.</p>
     <ul>
       <li>The Line tool shows the cladding and its Wall height together. Trace the whole run point to point; change the height partway and only the walls after that change.</li>
       <li>Finish keeps you on the plan with one card, e.g. "Run 1 · 4 walls · 2,700". Each wall keeps its own elevation and sheets.</li>
@@ -110,7 +108,7 @@ a { color: var(--primary); }
       <li>Battens round windows and doors; nails not counted.</li>
       <li>Foam tape behind vertical sheet joins, full height; H-flashing by the metre. Products to name later.</li>
     </ol>
-    <p><b>Waiting on:</b> your go to start step 1 (line, height and runs).</p>
+    <p><b>Waiting on:</b> your deploy, then a run of walls on your iPhone.</p>
     <p class="sub">Full plan in the repo: <span class="mono">docs/hub_review/WALL_BY_WALL_PLAN.md</span></p>
   </section>
 
@@ -128,6 +126,11 @@ a { color: var(--primary); }
   <section aria-labelledby="log-h">
     <h2 id="log-h">Log</h2>
     <div class="log">
+      <div class="entry"><time datetime="2026-10-21">21 Oct, evening</time><ul>
+        <li>Built all five wall-by-wall steps: the Line tool with a height, windows and doors on the plan, Rectangle and Area, automatic battens, tape and H-flashing, and the end review. Not deployed.</li>
+        <li>Each step was checked from three angles before it was committed; 67 problems were found and fixed along the way.</li>
+        <li>Migrations 210 and 211 are live.</li>
+      </ul></div>
       <div class="entry"><time datetime="2026-10-21">21 Oct, later</time><ul>
         <li>Deployed HUB 013–021 and the offcut sharing across walls. Migrations 210 and 211 are still to paste.</li>
         <li>The doc's new HUB 022 and 023 are part of the revised wall-by-wall plan. The offcut work is now called "follow-up to HUB 016".</li>
@@ -180,8 +183,8 @@ const FAULTS = [
   ["HUB 020", "Reopen and revise an unplaced draft", "P0", "live", "Live", "Reopen FO-001003 and revise it"],
   ["HUB 021", "Plan reopens without downloading", "P2", "live", "Live", "Reopen a plan in Aeroplane Mode"],
   ["HUB 016 follow-up", "Offcuts shared across walls", "P1", "live", "Live", "Two Axon walls: check the cut list names each wall"],
-  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Being planned", "Say go to start step 1"],
-  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Being planned", "Say go to start step 1"],
+  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Awaiting deploy", "Deploy, then trace a run on your iPhone"],
+  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Awaiting deploy", "Deploy, then measure an elevation"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");
