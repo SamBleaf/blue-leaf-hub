@@ -4,11 +4,11 @@ FO-001002 · export 1 · Sandbox job — your drawings
 For site use. Not part of the supplier order. Quantities are calculated from the plan and entered values; installation details marked source-pending are not
 verified.
 
- Flashing 1 — continuous run R-7a4b06a5
+ Flashing 1 — continuous run R-36bed51a
  Tight 3,000 mm along the path · corners at 750, 1,500, 2,250 mm · splits at none mm. Corners are site cuts/folds, not supplier bends.
     Piece 1: 0–3,000 mm along the run -> tight 3,000 -> order 3,300 mm
 
- Flashing 1 — continuous run R-4b4c9634
+ Flashing 1 — continuous run R-01718397
  Tight 10,000 mm along the path · corners at 6,000 mm · splits at 5,000 mm. Corners are site cuts/folds, not supplier bends.
     Piece 1: 0–5,000 mm along the run -> tight 5,000 -> order 5,400 mm
     Piece 2: 5,000–10,000 mm along the run -> tight 5,000 -> order 5,400 mm
@@ -16,5 +16,5 @@ verified.
 
 
 
-                                           FO-001002 · site appendix · takeoff-pdf@3 · snapshot d1cfe3699f1a · page 1 of 1
+                                          FO-001002 · site appendix · takeoff-pdf@4 · snapshot e050444dd5b4 · page 1 of 1
 

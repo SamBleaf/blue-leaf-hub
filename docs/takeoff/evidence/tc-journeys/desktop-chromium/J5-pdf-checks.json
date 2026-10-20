@@ -81,7 +81,7 @@
   },
   {
     "doc": "appendix",
-    "expect": "/4 occupied cell\\(s\\) = 4 sheet\\(s\\)/",
+    "expect": "/4 piece\\(s\\) cut from 4 sheet\\(s\\)/",
     "ok": true
   },
   {

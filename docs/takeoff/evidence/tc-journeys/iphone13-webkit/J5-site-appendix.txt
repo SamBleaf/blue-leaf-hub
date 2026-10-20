@@ -16,16 +16,18 @@ verified.
 
  Axon 133 smooth — North wall setout
  Gross 12.96 m² · openings 0.81 m² · net 12.15 m² · Entered length and heights
- 1 × North wall strip 1 — 403932 2,750 mm
- 1 × North wall strip 2 — 403932 2,750 mm
- 1 × North wall strip 3 — 403932 2,750 mm
- 1 × North wall strip 4 — 403932 2,750 mm
-    North wall: 4 strip(s) at 1,200 mm effective cover × 1 course(s) -> 4 occupied cell(s) = 4 sheet(s); empty cells use none.
-    Each strip takes the shortest listed length >= its cut + 0 mm allowance; a raked strip is sized by its highest point.
-    No offcut reuse: potential offcuts are listed separately. Spares and pack rounding are applied at purchase level.
+ 1 × North wall sheet 1 — 403932 2,750 mm: strip 1
+ 1 × North wall sheet 2 — 403932 2,750 mm: strip 2
+ 1 × North wall sheet 3 — 403932 2,750 mm: strip 3
+ 1 × North wall sheet 4 — 403932 2,750 mm: strip 4
+    North wall: 4 strip(s) at 1,200 mm effective cover × 1 course(s) -> 4 piece(s) cut from 4 sheet(s): sheets are only cut across their
+    length (the long factory edges stay), 5 mm per saw cut; empty cells use none.
+    Each piece is its cut + 0 mm allowance; a raked strip is sized by its highest point.
+    A ripped strip's offcut keeps its other factory edge, so it is only reused where that edge fits. Spares and pack rounding are applied
+    at purchase level.
 
 
 
 
-                                           FO-001001 · site appendix · takeoff-pdf@3 · snapshot f0ea33124c27 · page 1 of 1
+                                          FO-001001 · site appendix · takeoff-pdf@4 · snapshot 31325595c6b1 · page 1 of 1
 

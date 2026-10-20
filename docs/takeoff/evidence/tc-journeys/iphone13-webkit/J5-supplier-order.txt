@@ -1,5 +1,5 @@
                                                                                            TIMBER AND CLADDING ORDER
-                                                                                                                           FO-001001 · export 1 · 2026-10-19
+                                                                                                                           FO-001001 · export 1 · 2026-10-20
 
 
 
@@ -49,5 +49,5 @@ supplier.
 
 
 
-                                            FO-001001 · takeoff-pdf@3 · takeoff-calc@3 · snapshot f0ea33124c27 · page 1 of 1
+                                            FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot 31325595c6b1 · page 1 of 1
 

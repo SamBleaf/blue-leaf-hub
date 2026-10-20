@@ -13,8 +13,8 @@
       "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "3973576d-a59d-488d-864a-a2593082538e",
-          "documentId": "84d35ae1-c27b-48a5-993c-c2ee1fd9e49c",
+          "id": "08b04f14-ac72-4c3b-9cd2-bc04e11c51b3",
+          "documentId": "29307746-86ca-4113-8a7f-90aa47bde347",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-19 23:26:11.0491+10:30"
+          "createdAt": "2026-10-20 21:51:38.537494+10:30"
         }
       }
     },
@@ -121,7 +121,7 @@
       "id": "AL",
       "title": "Aluminium: kerf 3 confirmed; opening 600 × 2,400 → 2,500 / 2,500 / 600 on one 6,500 bar, 891 remainder",
       "status": "PASS",
-      "seconds": 3,
+      "seconds": 2,
       "observed": {
         "lines": [
           "1 bar · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)"
@@ -173,5 +173,5 @@
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-19T12:56:57.634Z"
+  "at": "2026-10-20T11:22:24.508Z"
 }

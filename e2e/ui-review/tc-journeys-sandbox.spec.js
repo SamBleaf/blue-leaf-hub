@@ -639,7 +639,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     ["appendix", A, /18 × cut 5,296(\.\d+)? mm from 5,400 mm stock/],
     ["appendix", A, /North wall setout/],
     ["appendix", A, /Gross 12\.96 m² · openings 0\.81 m² · net 12\.15 m²/],
-    ["appendix", A, /4 occupied cell\(s\) = 4 sheet\(s\)/],
+    ["appendix", A, /4 piece\(s\) cut from 4 sheet\(s\)/],   // HUB 016: sheets are shared across the wall
     ["supplier", S, /TIMBER AND CLADDING ORDER[\s\S]*\bTIMBER\b[\s\S]*\bCLADDING\b/],   // the Timber part, then the Cladding part
     ["supplier (no flashing on it)", S, /^(?![\s\S]*(flashing piece|3,300 3\.300))/],
   ];
@@ -705,9 +705,9 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await toSection("flashings");
     await openOrders();
     await expect(page.getByRole("heading", { name: "Flashings orders" })).toBeVisible();
-    await expect(page.getByText(/Draft FO-/)).toHaveCount(0);   // the timber and cladding order isn't listed here
-    await press(page.getByRole("button", { name: "New order" }));
-    await expect(page.getByText(/Draft FO-/)).toBeVisible({ timeout: 20_000 });
+    // HUB 013: Flashings opens its own working draft from the takeoff by itself (the timber and cladding order isn't listed here)
+    await expect(page.getByText(/^Draft FO-/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "New order" })).toHaveCount(0);
     await expect(page.locator("[data-order-group]")).toHaveCount(0);
     await deliveryDetails();
     await shot("order-review-flashings", "Flashings order: flashing lengths only");

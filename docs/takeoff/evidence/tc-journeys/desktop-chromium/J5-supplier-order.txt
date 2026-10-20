@@ -1,5 +1,5 @@
                                                                                            TIMBER AND CLADDING ORDER
-                                                                                                                           FO-001001 · export 1 · 2026-10-19
+                                                                                                                           FO-001001 · export 1 · 2026-10-20
 
 
 
@@ -8,7 +8,7 @@ FROM                                                    SUPPLIER                
 Blue Leaf Building (sandbox)                            Fielders (SANDBOX — not a real                            Sandbox job — your drawings
 Sandbox address                                         contact)                                                  Deliver to:
 00 0000 0000                                            Attn: Sandbox orders                                      1 Sandbox Street, Testville SA (test only)
-office@example.invalid                                  00 0000 0000                                              Required: 2026-10-26
+office@example.invalid                                  00 0000 0000                                              Required: 2026-10-27
                                                         orders@example.invalid                                    Site contact: Sandbox site lead 0400
                                                                                                                   000 000
 
@@ -50,5 +50,5 @@ supplier.
 
 
 
-                                            FO-001001 · takeoff-pdf@3 · takeoff-calc@3 · snapshot 82af4351e1d5 · page 1 of 1
+                                            FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot 67011611cbf2 · page 1 of 1
 

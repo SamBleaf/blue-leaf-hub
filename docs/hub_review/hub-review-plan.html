@@ -1,0 +1,170 @@
+<title>Hub Review Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one reading column; next steps first, then the fault board, the daily run and the log. Hub tokens (Lato, primary blue, accent green, warning gold). */
+:root {
+  --bg: #f4f6f7; --surface: #ffffff; --ink: #18252c; --muted: #5b6b73; --line: #dbe3e7;
+  --primary: #006c9b; --accent: #2e6b4f; --warn: #a8771f; --warn-bg: #fbf3e2; --live-bg: #e6f2ec; --wait-bg: #e3f0f7; --none-bg: #eef1f3;
+  --f-body: "Lato", "Helvetica Neue", Arial, sans-serif; --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f171b; --surface: #16222a; --ink: #e5edf1; --muted: #9aabb3; --line: #263741;
+  --primary: #4fb3e0; --accent: #6cc39a; --warn: #e2b45a; --warn-bg: #2f2716; --live-bg: #14301f; --wait-bg: #102a38; --none-bg: #1d2a31; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f171b; --surface: #16222a; --ink: #e5edf1; --muted: #9aabb3; --line: #263741;
+  --primary: #4fb3e0; --accent: #6cc39a; --warn: #e2b45a; --warn-bg: #2f2716; --live-bg: #14301f; --wait-bg: #102a38; --none-bg: #1d2a31; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body); }
+.wrap { max-width: 860px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px; display: grid; gap: 28px; }
+h1 { font-size: 30px; font-weight: 900; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 62ch; }
+.mono { font-family: var(--f-mono); font-size: 12.5px; }
+.counts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.count { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; display: flex; gap: 8px; align-items: baseline; }
+.count b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.steps { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: 10px; padding: 16px 18px; }
+.steps ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
+.steps li::marker { font-weight: 900; color: var(--primary); }
+.steps .sub { color: var(--muted); font-size: 13.5px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.filters button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 6px 12px; min-height: 36px; cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.filters button:focus-visible, a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.board { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.row { background: var(--surface); display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 14px; align-items: start; }
+.row .id { font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); padding-top: 2px; }
+.row .t { font-weight: 700; min-width: 0; }
+.row .w { grid-column: 2 / 4; color: var(--muted); font-size: 13.5px; min-width: 0; }
+.pill { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.s-live { background: var(--live-bg); color: var(--accent); }
+.s-wait { background: var(--wait-bg); color: var(--primary); }
+.s-none { background: var(--none-bg); color: var(--muted); }
+.s-dec { background: var(--warn-bg); color: var(--warn); }
+.pri { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); margin-left: 6px; font-weight: 500; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.log { display: grid; gap: 14px; }
+.entry { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; }
+.entry time { font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); padding-top: 2px; }
+.entry ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+a { color: var(--primary); }
+@media (max-width: 520px) {
+  .row { grid-template-columns: minmax(0, 1fr) auto; } .row .id { grid-column: 1 / 3; } .row .w { grid-column: 1 / 3; }
+  .entry { grid-template-columns: 1fr; gap: 4px; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Hub Review Plan</h1>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 20 October 2026, evening. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <div class="counts" aria-label="Totals">
+      <div class="count"><b>11</b> live</div>
+      <div class="count"><b>9</b> built, awaiting deploy</div>
+      <div class="count"><b>1</b> not started</div>
+      <div class="count"><b>0</b> verified by you</div>
+    </div>
+  </header>
+
+  <section class="steps" aria-labelledby="next">
+    <h2 id="next">Your next steps</h2>
+    <ol>
+      <li>Paste <span class="mono">210_takeoff_supplier_address.sql</span> in the Supabase SQL editor. <span class="sub">Adds the supplier pickup address (HUB 019). One statement, safe to re-run.</span></li>
+      <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Seeds your James Hardie defaults (HUB 014).</span></li>
+      <li>Say <b>deploy</b>. <span class="sub">Puts HUB 013–021 live (8 commits, main 44af8a9 → b361b95).</span></li>
+      <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
+      <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="board-h">
+    <h2 id="board-h">Faults</h2>
+    <div class="filters" role="group" aria-label="Show">
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 21</button>
+      <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
+      <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
+      <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
+    </div>
+    <div class="board" id="board"></div>
+  </section>
+
+  <section class="card" aria-labelledby="daily">
+    <h2 id="daily">Daily 5am run</h2>
+    <p>Every morning at 5am the run reads the review doc, takes the Open faults without a verdict (P0 first, up to four), finds the cause in the code, builds and tests the fix, commits it locally and writes a Verdict under the fault. It then adds an entry to the log below.</p>
+    <ul>
+      <li>It never deploys, pastes migrations, sends supplier emails or places orders. You say <b>deploy</b>.</li>
+      <li>A fault that needs a rule you haven't given gets "Needs Sam's decision" with a suggested answer, not a guess.</li>
+      <li>It skips HUB 001 and stops if the code has unfinished changes.</li>
+      <li>Log file in the repo: <span class="mono">docs/hub_review/HUB_REVIEW_LOG.md</span></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="log-h">
+    <h2 id="log-h">Log</h2>
+    <div class="log">
+      <div class="entry"><time datetime="2026-10-20">20 Oct, evening</time><ul>
+        <li>Deployed the Worker-app Add supplier (HUB 008 follow-up).</li>
+        <li>Built and tested HUB 013–021, one commit each, not deployed. Verdicts written in the doc.</li>
+        <li>Your rules used: 10 mm gap with H-flashing (HUB 015); long tongue and groove edges stay factory (HUB 016).</li>
+        <li>New migrations 210 and 211, not applied.</li>
+        <li>26 node suites, 219 screen tests, lint and build all pass. Two real-server journey checks still expected the old behaviour and were updated; all journeys now pass in desktop Chrome and the iPhone 13 emulator.</li>
+      </ul></div>
+      <div class="entry"><time datetime="2026-10-20">20 Oct, day</time><ul>
+        <li>You applied migrations 208 and 209; both checked read-only.</li>
+        <li>Deployed HUB 002, 005, 007, 010 and the Takeoffs ▾ show / hide list.</li>
+      </ul></div>
+      <div class="entry"><time datetime="2026-10-19">19 Oct</time><ul>
+        <li>Deployed HUB 003, 004, 006, 008, 009, 011, 012. HUB 001 left for later at your request.</li>
+      </ul></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const FAULTS = [
+  ["HUB 001", "Margin and forecast for a section not started", "P1", "none", "Not started", "Your forecast rule"],
+  ["HUB 002", "Choose Flashings or Timber and cladding first", "P1", "live", "Live", "iPhone check"],
+  ["HUB 003", "Save as company standard is easy to find", "P1", "live", "Live", "Save one, reuse on a second job"],
+  ["HUB 004", "Perforation details folded away", "P1", "live", "Live", "Values survive reload and export"],
+  ["HUB 005", "Split a run to the handling length in one tap", "P1", "live", "Live", "iPhone check"],
+  ["HUB 006", "Status labels moved into Details", "P2", "live", "Live", ""],
+  ["HUB 007", "Separate flashing and timber-and-cladding orders", "P1", "live", "Live", "Export both to the real suppliers"],
+  ["HUB 008", "Add supplier from the order", "P1", "live", "Live", "Add the real flashing supplier"],
+  ["HUB 009", "Order contact filled in for you", "P1", "live", "Live", "New order, change contact, check PDF"],
+  ["HUB 010", "Tap an order warning to fix it", "P1", "live", "Live", "The 3,000 mm bottom flashing line"],
+  ["HUB 011", "Show or hide each takeoff on the plan", "P1", "live", "Live", "iPhone check"],
+  ["HUB 012", "Lengths list inside a flashing", "P1", "live", "Live", "Flashing 5 totals"],
+  ["HUB 013", "Flashing order matches the takeoff", "P0", "wait", "Awaiting deploy", "Deploy, then 16 / 23 / 29 / 11 on the recorded job"],
+  ["HUB 014", "Company cladding defaults, one summary with Edit", "P1", "wait", "Awaiting deploy", "Migration 211, deploy, add Axon 400 Smooth"],
+  ["HUB 015", "Sheet joint added automatically", "P0", "wait", "Awaiting deploy", "Deploy, then the 3,600 mm wall"],
+  ["HUB 016", "Sheets shared across the wall", "P0", "dec", "Awaiting deploy", "8 sheets, not 7: your call"],
+  ["HUB 017", "Gable values kept while editing", "P1", "wait", "Awaiting deploy", "Enter the recorded gable and reload"],
+  ["HUB 018", "Drawing recovery cards you can trust", "P1", "wait", "Awaiting deploy", "Old cards gone after deploy"],
+  ["HUB 019", "Supplier with pickup address, editable", "P0", "wait", "Awaiting deploy", "Migration 210, deploy, add Fielders"],
+  ["HUB 020", "Reopen and revise an unplaced draft", "P0", "wait", "Awaiting deploy", "Reopen FO-001003 and revise it"],
+  ["HUB 021", "Plan reopens without downloading", "P2", "wait", "Awaiting deploy", "Reopen a plan in Aeroplane Mode"],
+];
+const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
+const board = document.getElementById("board");
+function render(f) {
+  board.replaceChildren(...FAULTS.filter((x) => f === "all" || x[3] === f || (f === "wait" && x[3] === "dec")).map(([id, t, p, s, label, w]) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="id"></span><span class="t"></span><span class="pill ${PILL[s]}"></span><span class="w"></span>`;
+    row.children[0].textContent = id;
+    row.children[1].textContent = t;
+    const pri = document.createElement("span"); pri.className = "pri"; pri.textContent = p; row.children[1].append(pri);
+    row.children[2].textContent = label;
+    row.children[3].textContent = w ? `Next: ${w}` : "Nothing left to check";
+    return row;
+  }));
+  for (const b of document.querySelectorAll(".filters button")) b.setAttribute("aria-pressed", String(b.dataset.f === f));
+  try { localStorage.setItem("hub-plan-filter", f); } catch { /* not kept */ }
+}
+for (const b of document.querySelectorAll(".filters button")) b.addEventListener("click", () => render(b.dataset.f));
+let start = "all";
+try { start = localStorage.getItem("hub-plan-filter") || "all"; } catch { /* default */ }
+render(["all", "wait", "live", "none"].includes(start) ? start : "all");
+</script>
