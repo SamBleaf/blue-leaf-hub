@@ -8,8 +8,9 @@
 // their checks allow the tap tolerance but always prove one allowance per piece (never one per corner).
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { explainableMm, memberThicknessMm, nextWallInputs, stockForStation, timberOrderSummary, withOverride, toolsFor } from "../../src/components/takeoff/measure/tools.js";
-import { straightLegs } from "../../src/components/takeoff/measure/geometry.js";
+import { explainableMm, memberThicknessMm, nextWallInputs, sheetSummaryText, stockForStation, timberOrderSummary, wallSheetSummary, withOverride, toolsFor } from "../../src/components/takeoff/measure/tools.js";
+import { isRectOutline, outlineFrame, straightLegs } from "../../src/components/takeoff/measure/geometry.js";
+import { computeWorkspace } from "../../shared/takeoff/index.js";
 
 const meta = JSON.parse(readFileSync(new URL("../../src/ui-review/fixtures/takeoff/synthetic-plan-set.json", import.meta.url), "utf8"));
 const k = meta.pages[0].pdfUnitsPerMm;
@@ -1284,6 +1285,510 @@ test.describe("HUB 022 step 2: + Window / + Door on the plan — phone", () => {
   });
 });
 
+test.describe("HUB 023 Rectangle, Area and pages — phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const ELEV = `${MIXED}&takeoffElevation=1`;   // page 3 is a scaled, empty elevation
+  const shapePanel = (page) => page.locator("[data-shape-panel]");
+  const card = (page) => page.locator("[data-shape-card]");
+  const hint = (page) => page.locator("[data-shape-hint]");
+  const snap = (page) => page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot);
+  /** The outline walls (Rectangle / Area) the (fake) server holds, with their materials and openings. */
+  const outlines = async (page) => {
+    const s = await snap(page);
+    return s.measurements.filter((m) => m.kind === "wall" && m.inputs?.kind === "polygon").map((m) => ({ ...m,
+      materials: s.contributions.filter((c) => c.measurementId === m.id).map((c) => `${c.jobMaterialId}:${c.role}`),
+      openings: s.measurements.filter((o) => o.kind === "opening" && o.parentId === m.id) }));
+  };
+  const subtitle = (page) => page.locator("[data-takeoff-focus]").first();
+  /** The Page chip: the page picker, then one tap on a page — straight back to measuring on it. */
+  async function toPage(page, n) {
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.locator("[data-page-chip]").click();
+    await expect(page.getByText("Measure on another page. The main plan page stays the same.")).toBeVisible();
+    await page.getByRole("button", { name: `Measure on page ${n}`, exact: true }).click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await page.waitForTimeout(250);
+    await expect(page.locator("[data-page-chip]")).toHaveText(`Page ${n} ▾`);
+  }
+  /** A plain plan set of n A1 pages (served in place of the review plan to try other page counts). */
+  async function pdfOfPages(n) {
+    const { default: PDFDocument } = await import("pdfkit");
+    return new Promise((res) => {
+      const d = new PDFDocument({ size: [2384, 1684], autoFirstPage: false });
+      const parts = []; d.on("data", (b) => parts.push(b)); d.on("end", () => res(Buffer.concat(parts)));
+      for (let i = 0; i < n; i++) { d.addPage(); d.fontSize(60).text(`Sheet ${i + 1}`, 200, 200); }
+      d.end();
+    });
+  }
+  /** Drag a corner handle of the selected outline to a plan point; `during` runs while the finger is still down. */
+  async function dragCorner(page, id, i, to, during) {
+    const hb = await page.locator(`[data-handle-id="${id}:${i}"]`).boundingBox();
+    const s = await screenOf(page, to);
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down();
+    await page.mouse.move(s.x, s.y, { steps: 8 });
+    if (during) await during();
+    await page.mouse.up();
+  }
+  const R = [at(1000, 1000), at(5000, 4000)];   // a 4 m × 3 m wall, its bottom left then its top right
+  // a corner lands on the nearest 10 mm of the page's real-mm grid: within 5 mm of the plan point tapped
+  const closeTo = (p, q) => Math.abs(p.x - q.x) <= 5.01 * k && Math.abs(p.y - q.y) <= 5.01 * k;
+
+  test("acceptance 8: Rectangle and Area sit beside Line; the Page chip goes to page 3 and straight back to measuring (the main plan page stays); a 4 × 3 m Rectangle reads 12.00 m² — ONE outline wall on the cladding, four square corners, real sheet sizes; its card's Undo takes it off and ↶ puts it back", async ({ page }) => {
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    expect(await page.getByRole("radiogroup", { name: "Tool" }).getByRole("radio").allInnerTexts()).toEqual(["Line", "Rectangle", "Area", "Select", "Pan"]);
+    const s0 = await reviewState(page);
+    // Back from the page picker: the same page, nothing changed
+    await page.locator("[data-page-chip]").click();
+    await expect(page.getByRole("button", { name: "Measure on page 1", exact: true })).toContainText("main plan page");
+    await expect(page.getByRole("button", { name: "Measure on page 1", exact: true })).toContainText("measuring now");
+    await shot(page, "hub023-page-picker-390x844");
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.locator("[data-page-chip]")).toHaveText("Page 1 ▾");
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    await toPage(page, 3);                                                     // two taps to change page
+    await expect(subtitle(page)).toContainText("page 3 · scaled");
+    await expect(page.getByRole("radio", { name: "Rectangle" }), "the tool carries on").toHaveAttribute("aria-checked", "true");
+    const w0 = (await snap(page)).workspace;
+    expect([w0.primaryDocumentId, w0.primaryPageIndex], "the takeoff's main plan page is left alone").toEqual(["doc-plan-c", 0]);
+    expect((await reviewState(page)).commits, "changing page saves nothing").toBe(s0.commits);
+    await expect(hint(page)).toHaveText("Tap one corner of the wall, then the opposite corner.");
+    await zoomOn(page, at(3000, 2500), 8);
+    await tapPdf(page, R[0]);
+    await expect(hint(page)).toHaveText("Now tap the opposite corner.");
+    await expect(page.locator("[data-path-draft]")).toHaveCount(1);
+    await tapPdf(page, R[1]);                                                  // a Rectangle wall: 3 taps
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 12.00 m²");
+    await expect(card(page).locator("[data-shape-size]")).toHaveText("4,000 wide × 3,000 high");
+    await saved(page);
+    const s1 = await reviewState(page);
+    expect(s1.commits - s0.commits, "one save").toBe(1);
+    const [o] = await outlines(page);
+    expect(o.points).toHaveLength(4);
+    expect(isRectOutline(o.points), "four square corners").toBe(true);
+    expect(closeTo(o.points[0], R[0]) && closeTo(o.points[2], R[1]), JSON.stringify(o.points)).toBe(true);
+    expect([o.documentId, o.pageIndex, o.calibrationId]).toEqual(["doc-plan-c", 2, "cal-elev"]);
+    // on the 10 mm grid: exactly 4,000 × 3,000, whatever the finger's hair of error
+    const f0 = outlineFrame(o.points, (await snap(page)).calibrations.find((c) => c.id === "cal-elev"));
+    expect([Math.abs(f0.widthMm - 4000) < 1e-6, Math.abs(f0.heightMm - 3000) < 1e-6], `${f0.widthMm} × ${f0.heightMm}`).toEqual([true, true]);
+    expect(o.inputs).toEqual({ kind: "polygon", name: "Wall 3" });
+    expect(o.materials, "on the cladding in use").toEqual(["mat-axon:wall"]);
+    // drawn closed with its area
+    const shape = page.locator(`[data-measurement-id="${o.id}"]`);
+    await expect(shape).toHaveAttribute("data-closed", "");
+    await expect(shape).toHaveAttribute("data-area-m2", "12");
+    // the same engine as the server: 12 m² laid out with the product's REAL sheet sizes (never an area shortcut)
+    const s = await snap(page);
+    const res = computeWorkspace(s).materialResults["mat-axon"];
+    const L = res.layouts.find((l) => l.wallMeasurementId === o.id);
+    expect(Math.abs(L.areas.grossM2 - 12), "12 m²").toBeLessThan(1e-6);
+    const product = s.materials.find((m) => m.id === "mat-axon").spec.product;
+    const sheets = res.demands.filter((d) => d.unit === "sheet" && d.sourceRefs?.[0]?.measurementId === o.id);
+    expect(sheets.length).toBeGreaterThanOrEqual(4);
+    for (const d of sheets) { expect(product.lengthsMm).toContain(d.identity.stockLengthMm); expect(d.identity.stockWidthMm).toBe(product.widthMm); }
+    await expect(card(page).locator("[data-shape-sheets]")).toHaveText(sheetSummaryText(wallSheetSummary(res, o.id)));
+    await shot(page, "hub023-rectangle-390x844");
+    // the card's Undo takes the wall off in one step (no corner left behind); ↶ puts it back
+    await card(page).getByRole("button", { name: "Undo this wall" }).click();
+    await expect(card(page)).toHaveCount(0);
+    await expect(shape).toHaveCount(0);
+    await expect(page.locator("[data-path-draft]")).toHaveCount(0);
+    await expect(sheet(page)).toContainText("Wall 3 taken off. Undo puts it back.");
+    await saved(page);
+    expect(await outlines(page)).toEqual([]);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(shape).toHaveCount(1);
+    await saved(page);
+    expect((await outlines(page)).map((x) => x.points)).toEqual([o.points]);
+  });
+
+  test("acceptance 8: an unscaled page — Rectangle asks for a scale first, once, with Scale page by the thumb (no + Window / + Door yet); Scale page → scaled → straight back to Rectangle on that page; then 4 × 3 m reads 12.00 m²", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    await toPage(page, 4);
+    await expect(subtitle(page)).toContainText("page 4 · not scaled");
+    // said once, in the panel by the thumb, with its Scale page button there (no banner at the top as well)
+    await expect(hint(page)).toHaveText("This page has no scale yet. Scale it, then you come straight back here to draw.");
+    await expect(page.getByText("This page has no scale yet. Scale it before measuring.")).toHaveCount(0);
+    await expect(page.getByText(/This page has no scale yet/)).toHaveCount(1);
+    await expect(page.locator("[data-shape-needs-scale]").getByRole("button", { name: "Scale page", exact: true })).toBeVisible();
+    await expect(page.locator("[data-opening-buttons]"), "no windows or doors before there is a wall").toHaveCount(0);
+    const n0 = (await reviewState(page)).measurements;
+    await tapPdf(page, R[0]);
+    await page.waitForTimeout(300);
+    await expect(page.locator("[data-path-draft]")).toHaveCount(0);
+    await expect(page.getByText(/This page has no scale yet|Scale this page/), "a tap adds no second copy").toHaveCount(1);
+    expect((await reviewState(page)).measurements).toBe(n0);
+    await shot(page, "hub023-needs-scale-390x844");
+    // scale it (whole page, both directions + a check), exactly as from the overview
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.locator("[data-shape-needs-scale]").getByRole("button", { name: "Scale page", exact: true }).click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await page.getByRole("button", { name: "Scale the whole page" }).click();
+    await zoomOn(page, at(6000, 4000), 3);                                     // the A1 sheet is small at Fit
+    const two = async (a, b) => { await tapPdf(page, a); await page.waitForTimeout(400); await tapPdf(page, b); await page.waitForTimeout(200); };
+    await two({ x: BX, y: BY - 40 }, { x: BX + 12000 * k, y: BY - 40 });
+    await page.getByRole("textbox", { name: "Horizontal dimension" }).fill("12000"); await page.getByRole("textbox", { name: "Horizontal dimension" }).press("Enter");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await two({ x: BX - 40, y: BY }, { x: BX - 40, y: BY + 8000 * k });
+    await page.getByRole("textbox", { name: "Vertical dimension" }).fill("8000"); await page.getByRole("textbox", { name: "Vertical dimension" }).press("Enter");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await page.getByRole("button", { name: /Next: check/ }).click();
+    await two({ x: BX, y: BY + 8000 * k + 30 }, { x: BX + 3000 * k, y: BY + 8000 * k + 30 });
+    await page.getByRole("textbox", { name: "Printed check dimension" }).fill("3000"); await page.getByRole("textbox", { name: "Printed check dimension" }).press("Enter");
+    await expect(page.getByText(/Scale is ready/)).toBeVisible();
+    const back = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.getByRole("button", { name: "Save scale" }).click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, back, { timeout: 30_000 });
+    await page.waitForTimeout(250);
+    // straight back to measuring, on the same page, with Rectangle still chosen
+    await expect(page.getByRole("radio", { name: "Rectangle" })).toHaveAttribute("aria-checked", "true");
+    await expect(subtitle(page)).toContainText("page 4 · scaled");
+    await expect(hint(page)).toHaveText("Tap one corner of the wall, then the opposite corner.");
+    await zoomOn(page, at(3000, 2500), 8);
+    await tapPdf(page, R[0]); await tapPdf(page, R[1]);
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 12.00 m²");
+    await saved(page);
+    const [o] = await outlines(page);
+    expect([o.pageIndex, o.points.length, o.materials]).toEqual([3, 4, ["mat-axon:wall"]]);
+  });
+
+  test("acceptance 9: a five-corner Area keeps all five corners with the right area as you tap (the closing side shows; tap the first corner to finish); dragging one corner changes only it; an offline reload keeps the shape and the material", async ({ page }) => {
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    await toPage(page, 3);
+    await page.getByRole("radio", { name: "Area" }).click();
+    await expect(hint(page)).toHaveText("Tap each corner of the wall in turn. Double-tap the last one, or press Finish.");
+    await page.evaluate(() => { window.__takeoffReviewOffline = true; });
+    await zoomOn(page, at(3000, 2500), 8);
+    const G = [at(1000, 1000), at(5000, 1000), at(5000, 3000), at(3000, 4500), at(1000, 3000)];   // a gable end
+    for (const q of G.slice(0, 2)) await tapPdf(page, q);
+    await page.waitForTimeout(400);
+    await tapPdf(page, G[0]);                                                  // back to the first corner too soon: nothing added
+    await expect(sheet(page)).toContainText("An area needs at least three corners. Tap the next corner.");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "2");
+    await tapPdf(page, G[2]);
+    await expect(page.locator("[data-area-progress]")).toHaveText("3 corners · 4.00 m²");
+    await expect(page.locator("[data-closing-side]")).toHaveCount(1);
+    await tapPdf(page, G[3]);
+    await expect(page.locator("[data-area-progress]")).toHaveText("4 corners · 9.00 m²");
+    await tapPdf(page, G[4]);
+    await expect(page.locator("[data-area-progress]")).toHaveText("5 corners · 11.00 m²");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-area-m2", "11");
+    await shot(page, "hub023-area-drawing-390x844");
+    await page.waitForTimeout(400);
+    await tapPdf(page, G[0]);                                                  // the first corner: closes it and saves
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 11.00 m²");
+    await expect(card(page).locator("[data-shape-size]")).toHaveText("4,000 wide × 3,500 high");
+    await expect(page.locator("[data-path-draft]")).toHaveCount(0);
+    const shape = page.locator('[data-kind="wall"][data-closed]');
+    await expect(shape).toHaveAttribute("data-points", "5");
+    // Select by the closing side (the last corner back to the first) and drag the apex: only it moves
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(1000, 2000));
+    const selPanel = page.locator("[data-selected-outline]");
+    await expect(selPanel.locator("[data-outline-area]")).toHaveText("11.00 m²");
+    await expect(selPanel.locator("[data-outline-size]")).toHaveText("4,000 wide × 3,500 high · 5 corners");
+    const id = await shape.getAttribute("data-measurement-id");
+    await dragCorner(page, id, 3, at(3000, 5000), async () => {
+      await expect(selPanel.locator("[data-outline-area]"), "the m² follows the finger").toHaveText("12.00 m²");
+    });
+    await expect(selPanel.locator("[data-outline-area]")).toHaveText("12.00 m²");
+    await page.waitForTimeout(300);
+    await expect.poll(() => page.evaluate(() => new Promise((res) => {
+      const req = indexedDB.open("blh-takeoff-recovery");
+      req.onsuccess = () => { try { const c = req.result.transaction("drafts", "readonly").objectStore("drafts").count(); c.onsuccess = () => res(c.result); c.onerror = () => res(0); } catch { res(0); } };
+      req.onerror = () => res(0);
+    }))).toBeGreaterThan(0);
+    // reload (the device kept the unsaved changes): the shape, its corners and its material come back
+    await page.reload();
+    await ready(page);
+    await page.getByRole("button", { name: "Restore" }).click();
+    await saved(page);
+    const [o] = await outlines(page);
+    expect(o.points).toHaveLength(5);
+    const want = [G[0], G[1], G[2], at(3000, 5000), G[4]];
+    expect(o.points.every((p, i) => closeTo(p, want[i])), JSON.stringify(o.points)).toBe(true);
+    expect([o.inputs.kind, o.inputs.name, o.materials]).toEqual(["polygon", "Wall 3", ["mat-axon:wall"]]);
+    await page.getByRole("button", { name: /^Measure$/ }).click();
+    await page.waitForFunction(() => (window.__takeoffViewerStats?.renders || 0) > 0, null, { timeout: 30_000 });
+    await chooseMaterial(page, "Axon cladding");
+    await expect(page.locator("[data-page-chip]")).toHaveText("Page 3 ▾");      // this device carries on where it was
+    await expect(shape).toHaveAttribute("data-points", "5");
+    await expect(shape).toHaveAttribute("data-area-m2", "12");
+  });
+
+  test("acceptance 9: + Window / + Door on an outline take two opposite corners (nothing typed); Select picks it by its closing side; a corner drag moves that corner only, updates m² and sheets at once and saves; its window and door stay put; a door that grows to the floor says so; one Undo puts it all back", async ({ page }) => {
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    await toPage(page, 3);
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    await zoomOn(page, at(3000, 2500), 8);
+    await tapPdf(page, R[0]); await tapPdf(page, R[1]);
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 12.00 m²");
+    await saved(page);
+    // + Window: two opposite corners of the window — its height and sill come from the taps (a window: 3 taps)
+    await card(page).getByRole("button", { name: "+ Window" }).click();
+    const panel = page.locator("[data-opening-panel]");
+    await expect(panel).toHaveAttribute("data-opening-panel", "window");
+    await expect(panel.locator("[data-opening-height]"), "no boxes to fill in").toHaveCount(0);
+    await expect(panel.locator("[data-opening-hint]")).toHaveText("Tap one corner of the window on the wall, then the opposite corner.");
+    await tapPdf(page, at(2000, 2000));
+    await expect(panel.locator("[data-opening-hint]")).toHaveText("Now tap the opposite corner.");
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await tapPdf(page, at(3200, 3200));
+    await expect(panel.locator("[data-last-opening-label]")).toHaveText("W1 in Wall 3");
+    await expect(panel.locator("[data-last-opening-size]")).toHaveText(" · 1,200 × 1,200, sill 1,000");
+    // + Door: on the floor, up to the higher corner
+    await panel.getByRole("button", { name: "+ Door" }).click();
+    await tapPdf(page, at(3800, 1100)); await tapPdf(page, at(4600, 3100));
+    await expect(panel.locator("[data-last-opening-label]")).toHaveText("D1 in Wall 3");
+    await expect(panel.locator("[data-last-opening-size]")).toHaveText(" · 800 × 2,100");
+    await saved(page);
+    let [o] = await outlines(page);
+    const opsOf = (x) => Object.fromEntries(x.openings.map((m) => [m.inputs.label, m.inputs]));
+    expect(opsOf(o)).toEqual({ W1: { xMm: 1000, sillMm: 1000, widthMm: 1200, heightMm: 1200, label: "W1", type: "window" },
+      D1: { xMm: 2800, sillMm: 0, widthMm: 800, heightMm: 2100, label: "D1", type: "door" } });
+    for (const m of o.openings) expect([m.points ?? null, m.documentId ?? null], "entered by numbers, like the elevation's own").toEqual([null, null]);
+    await expect(page.locator(`[data-plan-opening][data-outline-opening][data-wall-id="${o.id}"]`)).toHaveCount(2);
+    await shot(page, "hub023-outline-openings-390x844");
+    await panel.getByRole("button", { name: "Draw more walls" }).click();
+    await expect(shapePanel(page)).toHaveAttribute("data-shape-panel", "rect");
+    // Select by the closing side (the left side: the last corner back to the first)
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(1000, 2500));
+    const selPanel = page.locator("[data-selected-outline]");
+    await expect(selPanel).toContainText("Wall 3 · 12.00 m² · Axon cladding");
+    await expect(selPanel).toContainText("Drag a corner to change the wall. The sheets update straight away.");
+    const sheets0 = await selPanel.locator("[data-outline-sheets]").innerText();
+    const markW1 = page.locator(`[data-plan-opening][data-label="W1"] polygon`);
+    const w1Before = await markW1.getAttribute("points");
+    const before = o;
+    // drag the bottom-left corner (the leftmost) out to the left: only that corner moves, the area follows the finger
+    await dragCorner(page, o.id, 0, at(-400, 1000), async () => {
+      await expect(selPanel.locator("[data-outline-area]")).toHaveText("14.10 m²");
+      expect(await markW1.getAttribute("points"), "the window doesn't move while the corner does").toBe(w1Before);
+    });
+    await expect(selPanel.locator("[data-outline-area]")).toHaveText("14.10 m²");
+    await expect(selPanel.locator("[data-outline-size]")).toHaveText("5,400 wide × 3,000 high · 4 corners");
+    await expect(selPanel.locator("[data-outline-sheets]"), "the sheets change straight away").not.toHaveText(sheets0);
+    expect(await markW1.getAttribute("points"), "the window stays where it is on the page").toBe(w1Before);
+    await expect(sheet(page), "nothing cut or grown: no note").not.toContainText("Undo puts the corner");
+    await saved(page);
+    [o] = await outlines(page);
+    expect(isRectOutline(o.points), "only that corner moved: the left side leans out").toBe(false);
+    expect(o.points.slice(1), "the other three corners stay").toEqual(before.points.slice(1));
+    expect(closeTo(o.points[0], at(-400, 1000)), JSON.stringify(o.points[0])).toBe(true);
+    // measured again from the new leftmost corner, so on the page they are exactly where they were
+    expect(opsOf(o)).toEqual({ W1: { xMm: 2400, sillMm: 1000, widthMm: 1200, heightMm: 1200, label: "W1", type: "window" },
+      D1: { xMm: 4200, sillMm: 0, widthMm: 800, heightMm: 2100, label: "D1", type: "door" } });
+    const cal = (await snap(page)).calibrations.find((c) => c.id === "cal-elev");
+    const A = outlineFrame(before.points, cal), B = outlineFrame(o.points, cal);
+    for (const [a, b] of [[{ x: 1000, y: 1000 }, { x: 2400, y: 1000 }], [{ x: 2200, y: 2200 }, { x: 3600, y: 2200 }]]) {
+      const p = A.toPdf(a), q = B.toPdf(b);
+      expect(Math.abs(p.x - q.x) + Math.abs(p.y - q.y), "W1 on the page (within 1 mm)").toBeLessThan(k);
+    }
+    await shot(page, "hub023-corner-drag-390x844");
+    // one Undo: the wall and both openings as they were
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(selPanel.locator("[data-outline-area]")).toHaveText("12.00 m²");
+    await saved(page);
+    [o] = await outlines(page);
+    expect(o.points).toEqual(before.points);
+    expect(opsOf(o)).toEqual(opsOf(before));
+    // the floor comes down under the door (the bottom-right corner 500 down): D1 keeps its head and reaches the new
+    // floor, and the panel says so (it changes what comes off the wall); one Undo puts both back
+    await dragCorner(page, o.id, 1, at(5000, 500));
+    await expect(sheet(page)).toContainText("D1 is now 2,600 high, so it still reaches the floor.");
+    await expect(sheet(page)).toContainText("Undo puts the corner and D1 back.");
+    await saved(page);
+    [o] = await outlines(page);
+    expect([opsOf(o).D1.sillMm, opsOf(o).D1.heightMm, opsOf(o).W1.sillMm]).toEqual([0, 2600, 1500]);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(selPanel.locator("[data-outline-area]")).toHaveText("12.00 m²");
+    await saved(page);
+    [o] = await outlines(page);
+    expect(o.points).toEqual(before.points);
+    expect(opsOf(o)).toEqual(opsOf(before));
+    // the wall's elevation: the outline with W1 and D1 where they were tapped, the sheets cut round them
+    await page.getByRole("button", { name: "Open elevation" }).click();
+    await expect(page.getByText("Traced elevation outline").first()).toBeVisible();
+    const w1 = o.openings.find((m) => m.inputs.label === "W1"), d1 = o.openings.find((m) => m.inputs.label === "D1");
+    await expect(page.locator(`[data-opening-id="${w1.id}"]`)).toHaveAttribute("data-sill-mm", "1000");
+    await expect(page.locator(`[data-opening-id="${d1.id}"]`)).toHaveAttribute("data-sill-mm", "0");
+    await expect(page.locator("[data-opening-row]")).toHaveCount(2);
+    await expect(page.locator("[data-opening-row]").first()).toContainText("Window · 1,200 × 1,200 · sill 1,000 · from start 1,000");
+    await expect(page.locator('[data-area="openings"]')).toHaveText(`${(1.44 + 0.8 * 2.1).toFixed(2)} m²`);
+    await shot(page, "hub023-outline-elevation-390x844");
+  });
+
+  test("phone: a double-tap on a Rectangle's opposite corner (the Line / Area habit) saves ONE wall and starts nothing new; the same for a window's second corner on an outline", async ({ page }) => {
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    await toPage(page, 3);
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    await zoomOn(page, at(3000, 2500), 8);
+    await tapPdf(page, R[0]);
+    await doubleTapPdf(page, R[1]);
+    await page.waitForTimeout(500);
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 12.00 m²");
+    await expect(page.locator("[data-path-draft]"), "no phantom first corner").toHaveCount(0);
+    await expect(hint(page)).toHaveText("Tap one corner of the wall, then the opposite corner.");
+    await saved(page);
+    expect((await outlines(page)).length).toBe(1);
+    await card(page).getByRole("button", { name: "+ Window" }).click();
+    const panel = page.locator("[data-opening-panel]");
+    await tapPdf(page, at(2000, 2000));
+    await doubleTapPdf(page, at(3200, 3200));
+    await page.waitForTimeout(500);
+    await expect(panel.locator("[data-last-opening-label]")).toHaveText("W1 in Wall 3");
+    await expect(page.locator("[data-opening-start]"), "no phantom first corner of a next window").toHaveCount(0);
+    await expect(panel.locator("[data-opening-hint]")).not.toHaveText("Now tap the opposite corner.");
+    await tapPdf(page, at(4000, 3500));                                        // the first corner of the NEXT window
+    await expect(page.locator("[data-opening-start]")).toHaveCount(1);
+    await saved(page);
+    const [o] = await outlines(page);
+    expect(o.openings.map((m) => m.inputs.label), "only the window that was drawn").toEqual(["W1"]);
+    expect((await outlines(page)).length).toBe(1);
+  });
+
+  test("phone: a Rectangle taller than the longest sheet says so on its card (no sheets is never silent), with Open elevation to add the joint row", async ({ page }) => {
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    await toPage(page, 3);
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    await zoomOn(page, at(3000, 3000), 6);
+    await tapPdf(page, at(1000, 1000)); await tapPdf(page, at(5000, 5200));   // 4,000 × 4,200: Axon 133 comes up to 3,600
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 3 · 16.80 m²");
+    await expect(card(page).locator("[data-shape-size]")).toHaveText("4,000 wide × 4,200 high");
+    await expect(card(page).locator("[data-shape-sheets]")).toHaveCount(0);
+    await expect(card(page).locator("[data-shape-issue]")).toHaveText("Taller than the longest sheet (3,600). Add a joint row on the elevation.");
+    await saved(page);
+    // the same short line in Select
+    await page.getByRole("radio", { name: "Select" }).click();
+    await tapPdf(page, at(1000, 3000));
+    await expect(page.locator("[data-selected-outline] [data-outline-issue]")).toHaveText("Taller than the longest sheet (3,600). Add a joint row on the elevation.");
+    await page.getByRole("radio", { name: "Rectangle" }).click();
+    // a fresh one: the card's own Open elevation goes straight to the wall
+    await tapPdf(page, at(6000, 1000)); await tapPdf(page, at(9000, 5000));
+    await expect(card(page).locator("[data-shape-label]")).toHaveText("Wall 4 · 12.00 m²");
+    await expect(card(page).locator("[data-shape-issue]")).toBeVisible();
+    await card(page).getByRole("button", { name: "Open elevation" }).click();
+    await expect(page.getByText("Traced elevation outline").first()).toBeVisible();
+  });
+
+  test("phone: the Page chip leaves a half-drawn Area waiting on its page (nothing saved) and it comes back there; Back after looking at another plan returns to the page you were on; the page tiles keep their size as they draw", async ({ page }) => {
+    // Rev B is served as a 2-page set while it is looked at, so Back must not clamp page 3 to Rev B's page count
+    const twoPages = await pdfOfPages(2);
+    let serveRevB = false;
+    await page.route("**/synthetic-plan-set.pdf", (route) => (serveRevB ? route.fulfill({ status: 200, contentType: "application/pdf", body: twoPages }) : route.continue()));
+    await openMeasure(page, ELEV);
+    await chooseMaterial(page, "Axon cladding");
+    await toPage(page, 3);
+    await page.getByRole("radio", { name: "Area" }).click();
+    await zoomOn(page, at(3000, 2500), 8);
+    const G = [at(1000, 1000), at(5000, 1000), at(5000, 3000)];
+    for (const q of G) await tapPdf(page, q);
+    await expect(page.locator("[data-area-progress]")).toHaveText("3 corners · 4.00 m²");
+    const s0 = await reviewState(page);
+    // the picker: every tile is the same fixed size before and after its page draws
+    await page.locator("[data-page-chip]").click();
+    await expect(page.getByText("Measure on another page. The main plan page stays the same.")).toBeVisible();
+    const tile = page.locator("[data-page-thumb]").last();
+    const y0 = (await tile.boundingBox()).y;
+    for (const h of await page.locator("[data-thumb-box]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) expect(h).toBe(150);
+    await page.waitForTimeout(1200);
+    expect((await tile.boundingBox()).y, "the last tile hasn't moved while the pages drew").toBe(y0);
+    await page.getByRole("button", { name: "Measure on page 1", exact: true }).click();
+    await page.waitForTimeout(400);
+    await expect(page.locator("[data-page-chip]")).toHaveText("Page 1 ▾");
+    expect((await reviewState(page)).commits, "the half-drawn Area isn't saved as a wall").toBe(s0.commits);
+    expect(await outlines(page)).toEqual([]);
+    await expect(page.locator("[data-path-draft]"), "it waits on its own page").toHaveCount(0);
+    // back to page 3: the drawing is there, with Area chosen
+    await toPage(page, 3);
+    await expect(page.getByRole("radio", { name: "Area" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    await expect(page.locator("[data-area-progress]")).toHaveText("3 corners · 4.00 m²");
+    // the picker, another plan in its Plan list, then Back: the page you were on (not page 1), the drawing still there
+    await page.locator("[data-page-chip]").click();
+    serveRevB = true;
+    await page.locator("#plan-doc").selectOption("doc-plan-b");
+    await expect(page.getByText("This plan has been replaced.").first()).toBeVisible();
+    await expect(page.locator("[data-page-thumb]"), "Rev B (2 pages here) is open in the picker").toHaveCount(2);
+    serveRevB = false;
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await page.waitForTimeout(300);
+    await expect(page.locator("[data-page-chip]")).toHaveText("Page 3 ▾");
+    await expect(subtitle(page)).toContainText("Rev C · page 3 · scaled");
+    await expect(page.locator("[data-path-draft]")).toHaveAttribute("data-points", "3");
+    expect((await reviewState(page)).commits, "still nothing saved").toBe(s0.commits);
+    // and it finishes as ONE outline wall when Sam is ready
+    await page.locator("[data-shape-panel]").getByRole("button", { name: "Finish" }).click();
+    await saved(page);
+    expect((await outlines(page)).map((x) => x.points.length)).toEqual([3]);
+  });
+
+  test("phone: a plan set over 24 pages — the Page chip's page-number box selects on tap, can be cleared and retyped, Go chooses the page, and its button rises above the keyboard", async ({ page }) => {
+    // the review plan served as a 30-page set (the picker shows the page-number box instead of thumbnails)
+    const big = await pdfOfPages(30);
+    await page.route("**/synthetic-plan-set.pdf", (route) => route.fulfill({ status: 200, contentType: "application/pdf", body: big }));
+    await page.addInitScript(fakeKeyboard);
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Axon cladding");
+    await page.locator("[data-page-chip]").click();
+    const box = page.getByRole("textbox", { name: "Page (1–30)" });
+    await expect(box).toHaveValue("1");
+    await box.click();
+    expect(await box.evaluate((el) => [el.selectionStart, el.selectionEnd]), "the number is selected, ready to type over").toEqual([0, 1]);
+    await page.keyboard.press("Backspace");
+    await expect(box, "it can be cleared").toHaveValue("");
+    await page.keyboard.type("5");
+    await expect(page.getByRole("button", { name: "Measure on page 5", exact: true })).toBeVisible();
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("17");
+    await expect(box).toHaveValue("17");
+    // an on-screen keyboard: the button rises above it
+    await page.evaluate(() => window.__keyboard(320));
+    const btn = page.getByRole("button", { name: "Measure on page 17", exact: true });
+    await expect(page.locator("[data-keyboard-spacer]")).toHaveCount(1);
+    const bb = await btn.boundingBox();
+    expect(bb.y + bb.height, "above the keyboard").toBeLessThanOrEqual(844 - 320 + 1);
+    // Go on the keyboard chooses it: straight back to measuring on page 17
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await box.press("Enter");
+    await page.evaluate(() => window.__keyboard(0));
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await expect(page.locator("[data-page-chip]")).toHaveText("Page 17 ▾");
+    expect((await snap(page)).workspace.primaryPageIndex, "the main plan page stays").toBe(0);
+  });
+
+  test("phone: at 390 px the toolbar stays on two rows with a long material name and a takeoff hidden (Page, Takeoffs and Fit beside the material)", async ({ page }) => {
+    await openMeasure(page, MIXED);
+    await chooseMaterial(page, "Shiplap (random lengths)");
+    await expect(page.getByRole("radiogroup", { name: "Tool" }).getByRole("radio")).toHaveCount(5);
+    await page.getByRole("button", { name: "Show or hide takeoffs on the plan" }).click();
+    const list = page.locator("[data-layers]");
+    await list.locator("[data-layer-item]").first().click();
+    await list.getByRole("button", { name: "Done" }).click();
+    await expect(page.locator("[data-layers-button]")).toHaveText("Takeoffs (1 hidden) ▾");
+    const box = async (l) => l.boundingBox();
+    const tools = await box(page.getByRole("radiogroup", { name: "Tool" }));
+    const mat = await box(page.getByRole("button", { name: /^Material:/ }));
+    const chip = await box(page.locator("[data-page-chip]"));
+    const fit = await box(page.getByRole("button", { name: "Fit page" }));
+    expect(Math.abs(fit.y - mat.y), "Fit on the material's row").toBeLessThan(2);
+    expect(Math.abs(chip.y - mat.y), "Page on the material's row").toBeLessThan(2);
+    expect(mat.y, "the material's row is the second row").toBeGreaterThan(tools.y + 20);
+    expect(fit.y - tools.y, "two rows, not three").toBeLessThan(tools.height + 20);
+    expect(fit.x + fit.width, "nothing off the right edge").toBeLessThanOrEqual(390);
+    await shot(page, "hub023-toolbar-hidden-390x844");
+  });
+});
+
 test.describe("schedule \"Show on plan\" (highlightIds)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const openSchedule = async (page, url = MIXED) => {
@@ -1663,7 +2168,7 @@ test("pure helpers: wall naming + last height, member overrides, tools per mater
   expect(keys({ family: "timber", purpose: "studs" }, "wall_frame")).toEqual(["wall", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "plates" }, "linear_stock")).toEqual(["wall", "run", "count", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "trim" }, "linear_stock")).toEqual(["run", "count", "select", "pan"]);
-  expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["line", "select", "pan"]);   // HUB 022: cladding traces with Line
+  expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["line", "rect", "area", "select", "pan"]);   // HUB 022: cladding traces with Line; HUB 023: Rectangle + Area
   // PH-06 / PH-19: the timber review reads the engine result as-is (never recalculated)
   expect(memberThicknessMm({ spec: { section: { depthMm: 90, widthMm: 45 } } })).toBe(45);
   expect(memberThicknessMm({ spec: { section: { depthMm: 45, widthMm: 90 } } })).toBe(45);

@@ -1215,6 +1215,73 @@ await t("HUB 022 step 2: + Window / + Door on the plan saves an elevation openin
   assert.deepEqual(left, sent.slice(0, 3).map((o) => o.id).sort());
 });
 
+await t("HUB 023: Rectangle and Area outline walls on the REAL server keep every corner and the cladding through a reload; 12 m² / 9.6 m² laid out with real sheets; a corner drag with its openings kept in place saves in one commit", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { methodFor } = await import("../../shared/takeoff/index.js");
+  const { isRectOutline, keepOpeningsInPlace, outlineFrame, outlineOpening, rectCorners } = await import("../../src/components/takeoff/measure/geometry.js");
+  const { nextOpeningLabel, openingRecord, outlineWallInputs } = await import("../../src/components/takeoff/measure/tools.js");
+  const fam = (s) => { const m = methodFor(s); return { spec: s, methodKey: m.key, methodVersion: m.version }; };
+  const axon = productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth");
+  const w = id(), cal = id(), clad = id(), rectId = id(), gableId = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB023-elevation.pdf");
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB023" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  // PDF y runs up the page: c(x, y) is x mm across and y mm up the elevation
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  const rect = rectCorners(c(0, 0), c(4000, 3000));
+  const gable = [c(5000, 0), c(9000, 0), c(9000, 1800), c(7000, 3000), c(5000, 1800)];   // Axon 400 comes up to 3,000 long
+  const r1 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: clad, name: "Axon 400 smooth", ...fam({ ...specFromGroup(axon), assemblyId: "axon-vertical", spareRate: 0 }), rules: { route: "cavity" } }] },
+    measurements: { upsert: [
+      { id: rectId, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: rect, inputs: outlineWallInputs([]) },
+      { id: gableId, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: gable, inputs: outlineWallInputs([{ kind: "wall", inputs: { name: "Wall 1" } }]) }] },
+    contributions: { upsert: [rectId, gableId].map((m) => ({ id: id(), measurementId: m, jobMaterialId: clad, role: "wall" })) } } });
+  assert.equal(r1.status, 200, JSON.stringify(r1.data));
+  // reload: every corner, the outline kind, the name and the cladding are kept
+  const snap1 = (await S(`/workspaces/${w}`)).data.snapshot;
+  const got = (mid) => snap1.measurements.find((m) => m.id === mid);
+  assert.deepEqual(got(rectId).points, rect); assert.deepEqual(got(gableId).points, gable, "all five corners");
+  assert.deepEqual([got(rectId).inputs.kind, got(rectId).inputs.name, got(gableId).inputs.kind, got(gableId).inputs.name], ["polygon", "Wall 1", "polygon", "Wall 2"]);
+  assert.equal(isRectOutline(got(rectId).points), true);
+  assert.deepEqual(snap1.contributions.filter((x) => x.jobMaterialId === clad).map((x) => [x.measurementId, x.role]).sort(), [[rectId, "wall"], [gableId, "wall"]].sort());
+  // the server's own quantities: 12 m² and 11 m², real Axon 400 sheet sizes
+  const res = r1.data.computed.materialResults[clad];
+  const L = (mid) => res.layouts.find((l) => l.wallMeasurementId === mid);
+  assert.ok(Math.abs(L(rectId).areas.grossM2 - 12) < 1e-6, String(L(rectId).areas.grossM2));
+  assert.ok(Math.abs(L(gableId).areas.grossM2 - 9.6) < 1e-6, String(L(gableId).areas.grossM2));
+  assert.equal(L(gableId).wall.polygon.length, 5);
+  const sheets = res.demands.filter((d) => d.unit === "sheet");
+  assert.ok(sheets.length >= 8 && sheets.every((d) => axon.lengthsMm.includes(d.identity.stockLengthMm) && d.identity.stockWidthMm === 1200), JSON.stringify(sheets.map((d) => d.identity.stockLengthMm)));
+  // + Window from two corners on the Rectangle (the client's maths on the server's calibration)
+  const sc = snap1.calibrations.find((x) => x.id === cal);
+  const ow = outlineOpening(outlineFrame(rect, sc), c(1000, 1000), c(2200, 2200), "window");
+  const op = openingRecord(id(), rectId, { xMm: ow.xMm, sillMm: ow.sillMm, widthMm: ow.widthMm, heightMm: ow.heightMm, label: nextOpeningLabel([], "window"), type: "window" });
+  assert.deepEqual([op.inputs.xMm, op.inputs.sillMm, op.inputs.widthMm, op.inputs.heightMm], [1000, 1000, 1200, 1200]);
+  const r2 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [op] } } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  // drag the bottom-left corner (only it moves) left and down: the wall and its window in ONE commit (one Undo), the
+  // window re-measured from the new leftmost / lowest corner
+  const moved = rect.map((q, i) => (i === 0 ? c(-500, -200) : q));
+  const kept = keepOpeningsInPlace(rect, moved, sc, [op]).openings[0];
+  assert.deepEqual([kept.inputs.xMm, kept.inputs.sillMm, kept.inputs.widthMm, kept.inputs.heightMm], [1500, 1200, 1200, 1200]);
+  const r3 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [{ ...got(rectId), points: moved }, kept] } } });
+  assert.equal(r3.status, 200, JSON.stringify(r3.data));
+  const snap3 = (await S(`/workspaces/${w}`)).data.snapshot;
+  assert.deepEqual(snap3.measurements.find((m) => m.id === rectId).points, moved);
+  assert.deepEqual(snap3.measurements.find((m) => m.id === op.id).inputs, kept.inputs);
+  const L3 = r3.data.computed.materialResults[clad].layouts.find((l) => l.wallMeasurementId === rectId);
+  assert.ok(Math.abs(L3.areas.grossM2 - 13.15) < 1e-6, String(L3.areas.grossM2));
+  assert.equal(L3.wall.polygon.length, 4);
+  assert.deepEqual([L3.openings[0].x0, L3.openings[0].y0, L3.openings[0].x1, L3.openings[0].y1], [1500, 1200, 2700, 2400], "the window where it was tapped");
+  // a corner wall that isn't an outline is still refused (a floor-plan wall is straight); an outline has 200 corners at most
+  const bent = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap3.workspace.revision, changes: { measurements: { upsert: [{ id: id(), kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: gable.slice(0, 3), inputs: { kind: "rect", heightMm: 2700 } }] } } });
+  assert.equal(bent.status, 400); assert.match(bent.data.error, /one straight wall at a time/);
+  const many = Array.from({ length: 201 }, (_, i) => c(10000 + 2000 * Math.cos(i / 32), 2000 + 2000 * Math.sin(i / 32)));
+  const big = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap3.workspace.revision, changes: { measurements: { upsert: [{ id: id(), kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: many, inputs: { kind: "polygon" } }] } } });
+  assert.equal(big.status, 400, JSON.stringify(big.data));
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

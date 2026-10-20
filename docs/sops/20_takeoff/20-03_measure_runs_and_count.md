@@ -1,6 +1,6 @@
 ---
-sop_version: 2.2
-last_reviewed: 2026-10-20
+sop_version: 2.3
+last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -60,7 +60,7 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 
 1. On the takeoff overview tap **Measure** (view-only users see **View plan**).
 2. The plan fills the screen. The top bar shows the material name, "<plan> · page N · scaled / scale needs review / not scaled", the save chip, **↶** (Undo) and **↷** (Redo). **Done** (top-left) returns to the overview.
-3. Under the top bar: the tool switch **Run | Count | Select | Pan**, a **Material: <name>** button and **Fit** (show the whole page).
+3. Under the top bar: the tool switch **Run | Count | Select | Pan**, a **Material: <name>** button, **Page N ▾** (measure on another page of the plan: tap it, then tap the page; the main plan page stays the same, SOP 20-02 Section F) and **Fit** (show the whole page).
 4. Check the material is right. To change it tap **Material: <name>** → **Measure with…** → tap the material (or **Add flashing**). The list includes timber, cladding and aluminium materials — choosing one changes the tools (SOPs 20-08 to 20-10).
 5. If the page has more than one scaled region, tap the one you are measuring under **Scaled region:**.
 

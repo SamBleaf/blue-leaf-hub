@@ -5,6 +5,8 @@
 //   PolylineShape      walls, timber/aluminium runs and unfinished drawings.
 //   TimberLineShape    member line / distribution run with member ticks + count (03 T1).
 //   OpeningMark        a window or door in a traced wall (HUB 022 step 2), with its label (W1, D1 …).
+//   PolylineShape `closed`  an outline wall drawn with Rectangle / Area (HUB 023): the closing side is drawn too.
+//   OutlineOpeningMark a window or door on an outline, drawn where it is on the elevation (HUB 023).
 // Nothing here is interactive except through MeasureScreen's tap hit-testing and PointHandlesLayer handles.
 // data-* attributes describe what is drawn for automated UI checks (no user data beyond what is shown).
 // =============================================================================
@@ -81,21 +83,45 @@ export function FlashingPathShape({ measurementId = null, points, path, cal, toS
   );
 }
 
-/** Wall run / timber or aluminium run / unfinished drawing. */
-export function PolylineShape({ measurementId = null, kind, points, toScreen, color, label, selected = false, dashed = false, draft = false }) {
+/**
+ * Wall run / timber or aluminium run / unfinished drawing. `closed`: an outline wall (Rectangle / Area, HUB 023) — the
+ * side back to the first corner is drawn as part of it (and is tappable with Select); `closing`: an Area being drawn,
+ * whose closing side shows faintly until it is finished.
+ */
+export function PolylineShape({ measurementId = null, kind, points, toScreen, color, label, selected = false, dashed = false, draft = false, closed = false, closing = false, areaM2 = null }) {
   const pts = points.map(toScreen);
-  const mid = pts.length >= 2 ? (() => {
+  const ring = closed && pts.length >= 3 ? [...pts, pts[0]] : pts;
+  const mid = ring.length >= 2 ? (() => {
     // label at the middle of the longest leg (readable at any zoom)
     let best = 0, k = 0;
-    for (let i = 1; i < pts.length; i++) { const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); if (L > best) { best = L; k = i; } }
-    return { x: (pts[k].x + pts[k - 1].x) / 2, y: (pts[k].y + pts[k - 1].y) / 2 };
+    for (let i = 1; i < ring.length; i++) { const L = Math.hypot(ring[i].x - ring[i - 1].x, ring[i].y - ring[i - 1].y); if (L > best) { best = L; k = i; } }
+    return { x: (ring[k].x + ring[k - 1].x) / 2, y: (ring[k].y + ring[k - 1].y) / 2 };
   })() : pts[0];
   return (
-    <g data-measurement-id={measurementId || undefined} data-path-draft={draft ? "" : undefined} data-kind={kind} data-points={points.length}>
-      {selected && pts.length >= 2 && <polyline points={ptsAttr(pts)} fill="none" stroke={COLORS.halo} strokeWidth={11} strokeOpacity={0.7} strokeLinecap="round" strokeLinejoin="round" />}
-      {pts.length >= 2 && <polyline points={ptsAttr(pts)} fill="none" stroke={color} strokeWidth={selected ? 4 : 3} strokeDasharray={dashed ? "9 6" : undefined} strokeLinecap="round" strokeLinejoin="round" />}
-      {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={i === 0 || i === pts.length - 1 ? 4.5 : 3.5} fill="#fff" stroke={color} strokeWidth={2} />)}
+    <g data-measurement-id={measurementId || undefined} data-path-draft={draft ? "" : undefined} data-kind={kind} data-points={points.length}
+      data-closed={closed ? "" : undefined} data-area-m2={areaM2 != null ? String(Math.round(areaM2 * 1e4) / 1e4) : undefined}>
+      {closed && ring.length >= 4 && <polygon points={ptsAttr(pts)} fill={color} fillOpacity={selected ? 0.12 : 0.06} stroke="none" />}
+      {selected && ring.length >= 2 && <polyline points={ptsAttr(ring)} fill="none" stroke={COLORS.halo} strokeWidth={11} strokeOpacity={0.7} strokeLinecap="round" strokeLinejoin="round" />}
+      {ring.length >= 2 && <polyline points={ptsAttr(ring)} fill="none" stroke={color} strokeWidth={selected ? 4 : 3} strokeDasharray={dashed ? "9 6" : undefined} strokeLinecap="round" strokeLinejoin="round" />}
+      {closing && pts.length >= 3 && <line data-closing-side="" x1={pts[pts.length - 1].x} y1={pts[pts.length - 1].y} x2={pts[0].x} y2={pts[0].y} stroke={color} strokeWidth={1.5} strokeOpacity={0.6} strokeDasharray="3 5" />}
+      {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={i === 0 || (!closed && i === pts.length - 1) ? 4.5 : 3.5} fill="#fff" stroke={color} strokeWidth={2} />)}
       {label && mid && <Label x={mid.x} y={mid.y - 9} text={label} color={color} />}
+    </g>
+  );
+}
+
+/**
+ * A window or door on an outline wall (HUB 023), drawn as its rectangle on the elevation. `corners` are its four screen
+ * corners; drawn for display only (changes are made on the wall's elevation).
+ */
+export function OutlineOpeningMark({ id, wallId, type, label, corners, xMm, widthMm, sillMm, heightMm }) {
+  const color = type === "door" ? COLORS.door : COLORS.window;
+  const cx = corners.reduce((a, q) => a + q.x, 0) / corners.length, cy = corners.reduce((a, q) => a + q.y, 0) / corners.length;
+  return (
+    <g data-plan-opening={id} data-wall-id={wallId} data-type={type} data-label={label || ""} data-x-mm={xMm} data-width-mm={widthMm} data-sill-mm={sillMm} data-height-mm={heightMm}
+      data-outline-opening="">
+      <polygon points={ptsAttr(corners)} fill={color} fillOpacity={0.18} stroke={color} strokeWidth={2.5} strokeLinejoin="round" />
+      {label && <g data-opening-label=""><Label x={cx} y={cy + 4} text={label} color={color} size={11} /></g>}
     </g>
   );
 }

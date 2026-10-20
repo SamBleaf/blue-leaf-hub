@@ -12,6 +12,7 @@
  * ?takeoffSeed=mixed adds the TC-R04 J5 mixed-procurement job (timber pieces, random-length LM, Axon sheets,
  * battens, aluminium bars, continuous flashing runs) on top of the default flashing seed; add &takeoffFixings=1 for
  * an accessory material with a manual quantity in boxes and by-others / excluded accessory scopes;
+ * ?takeoffElevation=1 scales page 3 (an empty page) like page 1, for Rectangle / Area on an elevation (HUB 023);
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
  * Exports freeze a snapshot (like buildExportSnapshot: generic items by unit + the site appendix);
  * GET …/exports/:id/appendix serves a small text-only stub PDF rendered from THAT frozen snapshot.
@@ -82,6 +83,12 @@ function seed() {
     appendixRequests: [],  // exportIds whose site appendix was opened (review evidence)
   };
   if (qs().get("takeoffSeed") === "mixed") seedMixed();
+  // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
+  // scale as page 1, checked), for drawing walls with Rectangle and Area
+  if (qs().get("takeoffElevation") === "1") {
+    const P2 = planMeta.pages[2];
+    state.calibrations.push({ id: "cal-elev", documentId: DOC.id, pageIndex: 2, pageMeta: { viewBox: P2.viewBox, rotate: 0, userUnit: 1 }, region: null, regionLabel: null, calibrationRevision: 1, ...cal0, createdAt: "2026-10-02T00:00:00Z" });
+  }
   // ?takeoffDefaults=1 — the Axon 400 smooth company default exactly as migration 211 seeds it (HUB 014)
   if (qs().get("takeoffDefaults") === "1") {
     const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth"), D = BLUE_LEAF_JH_DEFAULTS;
@@ -229,6 +236,11 @@ function applyCommit(body) {
     // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft
     for (const m of ch.measurements?.upsert || []) {
       if (m.kind === "wall" && m.inputs?.kind === "gable") { const gp = gableInputProblem(m.inputs, m.inputs.widthMm); if (gp) return fail(400, gp.message, "INVALID"); }
+      // like the server: a wall traced on a plan is one straight wall; only an elevation OUTLINE (Rectangle / Area, HUB 023)
+      // has more corners — at most 200
+      if (m.kind === "wall" && Array.isArray(m.points) && m.points.length && !(m.points.length === 2 || (m.inputs?.kind === "polygon" && m.points.length <= 200))) {
+        return fail(400, "Trace one straight wall at a time — a corner starts the next wall.", "INVALID");
+      }
       // like the server: an opening is entered by numbers (never plan points) and belongs to a wall of this takeoff
       if (m.kind === "opening" && Array.isArray(m.points) && m.points.length) return fail(400, "Openings and offcuts are entered by numbers.", "INVALID");
       if (m.kind === "opening" && m.parentId != null && ![...state.measurements, ...ch.measurements.upsert].some((x) => x.id === m.parentId && x.kind === "wall")) {

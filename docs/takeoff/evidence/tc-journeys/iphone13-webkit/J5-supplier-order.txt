@@ -1,44 +1,44 @@
-                                                                                               TIMBER AND CLADDING ORDER
-                                                                                                                               FO-001001 · export 1 · 2026-10-21
+                                                                                           TIMBER AND CLADDING ORDER
+                                                                                                                           FO-001001 · export 1 · 2026-10-21
 
 
 
 
-FROM                                                        SUPPLIER                                                   JOB
-Blue Leaf Building (sandbox)                                Fielders (SANDBOX — not a real                             Sandbox job — your drawings
-Sandbox address                                             contact)                                                   Pickup
-00 0000 0000                                                Attn: Sandbox orders                                       Branch: Sandbox branch (test only)
-office@example.invalid                                      00 0000 0000                                               Site contact: Sandbox site lead 0400
-                                                            orders@example.invalid                                     000 000
+FROM                                                    SUPPLIER                                                  JOB
+Blue Leaf Building (sandbox)                            Fielders (SANDBOX — not a real                            Sandbox job — your drawings
+Sandbox address                                         contact)                                                  Pickup
+00 0000 0000                                            Attn: Sandbox orders                                      Branch: Sandbox branch (test only)
+office@example.invalid                                  00 0000 0000                                              Site contact: Sandbox site lead 0400
+                                                        orders@example.invalid                                    000 000
 
 Notes: TC-R04 evidence run — sandbox only, not a real order
 All dimensions in mm. Timber, aluminium and board lengths are the STOCK lengths to supply; site cut lists and setout are in the separate site appendix,
 not part of this order.
 
 TIMBER
- M1 — Rafters 90 × 45                                                                                                                      90 × 45 · MGP10 · H3
+ M1 — Rafters 90 × 45                                                                                                                   90 × 45 · MGP10 · H3
  Size: manual selection (not structurally checked)
 
- QTY                     UNIT               SUPPLY                                                                      NOTE
- 18 ×                    piece              90 × 45 MGP10 H3 — 5,400 mm length                                          -
+ QTY                     UNIT               SUPPLY                                                                  NOTE
+ 18 ×                    piece              90 × 45 MGP10 H3 — 5,400 mm length                                      -
 
                                                                                                                                                        18 pieces
 
 CLADDING
- M2 — Aluminium angle 50 × 50 × 3                                                                                     equal-angle 50 × 50 × 3 · 6500 mm lengths
+ M2 — Aluminium angle 50 × 50 × 3                                                                                equal-angle 50 × 50 × 3 · 6500 mm lengths
  Cutting: 3 mm kerf, 0 mm end trim
 
- QTY                     UNIT               SUPPLY                                                                      NOTE
- 1×                      bar                equal-angle 50 × 50 × 3 — 6,500 mm length (no                               -
+ QTY                     UNIT               SUPPLY                                                                  NOTE
+ 1×                      bar                equal-angle 50 × 50 × 3 — 6,500 mm length (no                           -
                                             joins)
                                                                                                                                                               1 bar
 
 
- M3 — Axon 133 smooth                                                       James Hardie · Axon 133 smooth · 9 thick · 1200 wide · cover 1200 · vertical
+ M3 — Axon 133 smooth                                                   James Hardie · Axon 133 smooth · 9 thick · 1200 wide · cover 1200 · vertical
  Installation: source-pending (axon-vertical)
 
- QTY                     UNIT               SUPPLY                                                                      NOTE
- 4×                      sheet              James Hardie Axon 133 smooth SKU 403932 —                                   -
+ QTY                     UNIT               SUPPLY                                                                  NOTE
+ 4×                      sheet              James Hardie Axon 133 smooth SKU 403932 —                               -
                                             2,750 × 1,200 mm
                                                                                                                                                         4 sheets
 
@@ -49,5 +49,5 @@ supplier.
 
 
 
-                                                FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot 1c2984fbd72f · page 1 of 1
+                                            FO-001001 · takeoff-pdf@4 · takeoff-calc@3 · snapshot 736a9dbd7d96 · page 1 of 1
 

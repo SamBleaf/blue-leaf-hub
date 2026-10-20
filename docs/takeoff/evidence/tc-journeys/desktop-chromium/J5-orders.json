@@ -2,8 +2,8 @@
   "ok": true,
   "orders": [
     {
-      "id": "fe1d3f8e-799b-414f-8d9f-14e19f055c3a",
-      "workspaceId": "cd95f9a6-1be6-4056-adca-2baa369cdf74",
+      "id": "7f733eea-2358-400f-b3a4-d9f405e9c781",
+      "workspaceId": "d00695ad-1b01-40d5-9ee3-756e31a0688e",
       "orderRef": "FO-001001",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
@@ -21,28 +21,28 @@
       "category": "timber_cladding",
       "status": "draft",
       "revision": 3,
-      "createdAt": "2026-10-21 04:22:11.330428+10:30",
-      "updatedAt": "2026-10-21 04:22:11.544164+10:30",
+      "createdAt": "2026-10-21 05:43:46.359998+10:30",
+      "updatedAt": "2026-10-21 05:43:46.57451+10:30",
       "lines": [
         {
-          "id": "42325b70-c651-492b-a477-bb8ba9a349e0",
-          "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|a871333e-dd44-44cd-8196-714d89d050b2|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+          "id": "2ee36c88-55a2-464a-96ce-fdf605cb0963",
+          "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|445a2b85-54cb-48e7-bb40-871827f1eef5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
           "specKey": "{\"identity\":\"{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}}\",\"material\":\"{\\\"identity\\\":{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}},\\\"method\\\":\\\"linear_stock@1\\\"}\",\"unit\":\"bar\"}",
-          "jobMaterialId": "a871333e-dd44-44cd-8196-714d89d050b2",
+          "jobMaterialId": "445a2b85-54cb-48e7-bb40-871827f1eef5",
           "finishedLengthMm": 6500,
           "quantity": 1,
           "unit": "bar",
           "item": {
             "description": "equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)",
-            "dependencyKey": "29dddfdc",
+            "dependencyKey": "db9b2298",
             "stockLengthMm": 6500
           }
         },
         {
-          "id": "fa52c27c-879f-431e-bf6c-28d13581236a",
-          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|d3b03d26-d2ec-4a44-b2d6-8a0d5e41e109|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+          "id": "28ff0faa-8751-4cfa-a665-f77a6e008f99",
+          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|2269b4de-922c-4e07-a844-422cf7d877f4|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
           "specKey": "{\"identity\":\"{\\\"coating\\\":null,\\\"endCondition\\\":null,\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"grade\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"profile\\\":\\\"Axon 133 smooth\\\",\\\"sku\\\":\\\"403932\\\",\\\"species\\\":null,\\\"stockLengthMm\\\":2750,\\\"stockWidthMm\\\":1200,\\\"supplier\\\":null,\\\"thicknessMm\\\":9,\\\"treatment\\\":null,\\\"unit\\\":\\\"sheet\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"sheet\"}",
-          "jobMaterialId": "d3b03d26-d2ec-4a44-b2d6-8a0d5e41e109",
+          "jobMaterialId": "2269b4de-922c-4e07-a844-422cf7d877f4",
           "finishedLengthMm": 2750,
           "quantity": 4,
           "unit": "sheet",
@@ -50,47 +50,47 @@
             "sku": "403932",
             "widthMm": 1200,
             "description": "James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm",
-            "dependencyKey": "cd356cdb",
+            "dependencyKey": "f58cb400",
             "stockLengthMm": 2750
           }
         },
         {
-          "id": "4486ae26-4e03-4dc2-8e49-fb755aeb7fe8",
-          "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|2d9b15e3-bab1-4330-8e48-5427cca2572f|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+          "id": "db4bb0c5-7133-412c-8587-434bc86663ae",
+          "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|515f0b50-6e01-4b51-b00c-4f18db4c7e02|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
           "specKey": "{\"identity\":\"{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"MGP10\\\",\\\"section\\\":\\\"90x45\\\",\\\"species\\\":null,\\\"treatment\\\":\\\"H3\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"mgp10\\\",\\\"productCode\\\":null,\\\"section\\\":{\\\"depthMm\\\":90,\\\"widthMm\\\":45},\\\"species\\\":null,\\\"treatment\\\":\\\"h3\\\"},\\\"method\\\":\\\"repeated_members@2\\\"}\",\"unit\":\"piece\"}",
-          "jobMaterialId": "2d9b15e3-bab1-4330-8e48-5427cca2572f",
+          "jobMaterialId": "515f0b50-6e01-4b51-b00c-4f18db4c7e02",
           "finishedLengthMm": 5400,
           "quantity": 18,
           "unit": "piece",
           "item": {
             "description": "90 × 45 MGP10 H3 — 5,400 mm length",
-            "dependencyKey": "6381117c",
+            "dependencyKey": "91eea444",
             "stockLengthMm": 5400
           }
         }
       ],
       "exports": [
         {
-          "id": "b66e6923-92a1-49e0-9f82-c2eb3591522f",
-          "orderId": "fe1d3f8e-799b-414f-8d9f-14e19f055c3a",
+          "id": "2b444df3-cadc-4616-b07a-6d653173e3c5",
+          "orderId": "7f733eea-2358-400f-b3a4-d9f405e9c781",
           "exportNo": 1,
           "isDraft": false,
-          "snapshotSha256": "dc6ac9a518daf540d89e8dcfd8f844516451a1316622221362f9fcc6fbadb83c",
+          "snapshotSha256": "7dc6a131ff9892c72ed49463ecc50fdc8087c64ed5865f38aa5c0a5b22ba6822",
           "calculationVersion": "takeoff-calc@3",
           "workspaceRevision": 26,
           "orderRevision": 3,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "38703d026a88c6cb98e3a675127b38fe72ef6e2ddbf336b8186e9256d0275ef7",
+          "pdfSha256": "aa1f0f1877494f4d536621d484433ba136af8c9d80ca6eaed50edbf20d49b3e3",
           "rendererVersion": "takeoff-pdf@4",
-          "createdAt": "2026-10-21 04:22:11.744817+10:30"
+          "createdAt": "2026-10-21 05:43:46.775608+10:30"
         }
       ],
       "placements": []
     },
     {
-      "id": "949863f5-11a1-4623-84c1-b02dfbbae9e8",
-      "workspaceId": "cd95f9a6-1be6-4056-adca-2baa369cdf74",
+      "id": "9ba3e137-e820-4e0a-b42b-d64f493f846e",
+      "workspaceId": "d00695ad-1b01-40d5-9ee3-756e31a0688e",
       "orderRef": "FO-001002",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
@@ -108,24 +108,24 @@
       "category": "flashings",
       "status": "draft",
       "revision": 3,
-      "createdAt": "2026-10-21 04:22:14.521418+10:30",
-      "updatedAt": "2026-10-21 04:22:15.460283+10:30",
+      "createdAt": "2026-10-21 05:43:49.583817+10:30",
+      "updatedAt": "2026-10-21 05:43:50.541158+10:30",
       "lines": [
         {
-          "id": "1e807334-4e9f-498f-a001-9de158411548",
+          "id": "e2d227d8-c107-4c71-b833-406e9df1d12d",
           "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|5400",
           "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
-          "jobMaterialId": "a4aef3e7-bfee-4749-af65-846a456fdf1c",
+          "jobMaterialId": "1b7c9a21-8b9a-4bf8-819a-64fd6e830467",
           "finishedLengthMm": 5400,
           "quantity": 2,
           "unit": "piece",
           "item": null
         },
         {
-          "id": "129f0f66-fb02-486f-89c9-e867898af701",
+          "id": "6c5a9149-a65e-4c27-90d5-20dd9608c3d3",
           "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3300",
           "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
-          "jobMaterialId": "a4aef3e7-bfee-4749-af65-846a456fdf1c",
+          "jobMaterialId": "1b7c9a21-8b9a-4bf8-819a-64fd6e830467",
           "finishedLengthMm": 3300,
           "quantity": 1,
           "unit": "piece",
@@ -134,19 +134,19 @@
       ],
       "exports": [
         {
-          "id": "e578484f-d0c6-4c59-a3bd-1b2e6f950eea",
-          "orderId": "949863f5-11a1-4623-84c1-b02dfbbae9e8",
+          "id": "8f3d5e18-f806-464f-8cc6-04b6261e04e7",
+          "orderId": "9ba3e137-e820-4e0a-b42b-d64f493f846e",
           "exportNo": 1,
           "isDraft": false,
-          "snapshotSha256": "e5718a17f7e74faffa46bd59d761fc21c05be682cf96ddacb5693151cf91ce66",
+          "snapshotSha256": "155988989a4de036f738b0c60a33d7c43b124ef946137303c74fe7a46527a739",
           "calculationVersion": "takeoff-calc@3",
           "workspaceRevision": 26,
           "orderRevision": 3,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "d1a7b832fed2ebd644d4e2c6319512b494b94644bff504bd4d515fd106cc969c",
+          "pdfSha256": "f04a822beb4465ddf6ea734e3f272adac7eeb6fded498d9788072772255490cc",
           "rendererVersion": "takeoff-pdf@4",
-          "createdAt": "2026-10-21 04:22:15.661855+10:30"
+          "createdAt": "2026-10-21 05:43:50.744482+10:30"
         }
       ],
       "placements": []
@@ -176,7 +176,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|a871333e-dd44-44cd-8196-714d89d050b2|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|445a2b85-54cb-48e7-bb40-871827f1eef5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
       "required": 1,
       "ordered": 0,
       "remaining": 1,
@@ -187,7 +187,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|d3b03d26-d2ec-4a44-b2d6-8a0d5e41e109|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|2269b4de-922c-4e07-a844-422cf7d877f4|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
       "required": 4,
       "ordered": 0,
       "remaining": 4,
@@ -198,7 +198,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|2d9b15e3-bab1-4330-8e48-5427cca2572f|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|515f0b50-6e01-4b51-b00c-4f18db4c7e02|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
       "required": 18,
       "ordered": 0,
       "remaining": 18,
@@ -214,12 +214,12 @@
       "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|5400",
       "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "a4aef3e7-bfee-4749-af65-846a456fdf1c"
+        "1b7c9a21-8b9a-4bf8-819a-64fd6e830467"
       ],
       "finishedLengthMm": 5400,
       "quantity": 2,
       "contributionIds": [
-        "07939dd7-6315-4de8-9ebe-2be66da264c9"
+        "caa2ae74-2abe-4be1-a794-211582c9e947"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
@@ -229,19 +229,19 @@
       "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3300",
       "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[100,120],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "a4aef3e7-bfee-4749-af65-846a456fdf1c"
+        "1b7c9a21-8b9a-4bf8-819a-64fd6e830467"
       ],
       "finishedLengthMm": 3300,
       "quantity": 1,
       "contributionIds": [
-        "450919b0-807b-47ad-a604-92b007fa26fc"
+        "54bac698-95ec-4b5a-b4af-d023b59c8ff2"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|a871333e-dd44-44cd-8196-714d89d050b2|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|445a2b85-54cb-48e7-bb40-871827f1eef5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
       "specKey": "{\"identity\":\"{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}}\",\"material\":\"{\\\"identity\\\":{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}},\\\"method\\\":\\\"linear_stock@1\\\"}\",\"unit\":\"bar\"}",
       "materialKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}",
       "generic": true,
@@ -253,22 +253,22 @@
       "item": {
         "description": "equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)",
         "stockLengthMm": 6500,
-        "dependencyKey": "29dddfdc"
+        "dependencyKey": "db9b2298"
       },
       "jobMaterialIds": [
-        "a871333e-dd44-44cd-8196-714d89d050b2"
+        "445a2b85-54cb-48e7-bb40-871827f1eef5"
       ],
       "contributionIds": [
-        "b75c869d-2eb0-4f44-9978-a1eaf90724b8"
+        "fed08a32-0793-4a96-b247-560b121f1dfb"
       ],
       "problems": [],
       "notes": [],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "29dddfdc"
+      "dependencyKey": "db9b2298"
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|d3b03d26-d2ec-4a44-b2d6-8a0d5e41e109|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|2269b4de-922c-4e07-a844-422cf7d877f4|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
       "specKey": "{\"identity\":\"{\\\"coating\\\":null,\\\"endCondition\\\":null,\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"grade\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"profile\\\":\\\"Axon 133 smooth\\\",\\\"sku\\\":\\\"403932\\\",\\\"species\\\":null,\\\"stockLengthMm\\\":2750,\\\"stockWidthMm\\\":1200,\\\"supplier\\\":null,\\\"thicknessMm\\\":9,\\\"treatment\\\":null,\\\"unit\\\":\\\"sheet\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"sheet\"}",
       "materialKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}",
       "generic": true,
@@ -282,13 +282,13 @@
         "stockLengthMm": 2750,
         "widthMm": 1200,
         "sku": "403932",
-        "dependencyKey": "cd356cdb"
+        "dependencyKey": "f58cb400"
       },
       "jobMaterialIds": [
-        "d3b03d26-d2ec-4a44-b2d6-8a0d5e41e109"
+        "2269b4de-922c-4e07-a844-422cf7d877f4"
       ],
       "contributionIds": [
-        "890607e1-b6f9-4fa5-afa2-43c3bf4c8ed3"
+        "3f45b95e-97d7-4823-8f28-0168e8643eb9"
       ],
       "problems": [],
       "notes": [
@@ -298,10 +298,10 @@
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "cd356cdb"
+      "dependencyKey": "f58cb400"
     },
     {
-      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|2d9b15e3-bab1-4330-8e48-5427cca2572f|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|515f0b50-6e01-4b51-b00c-4f18db4c7e02|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
       "specKey": "{\"identity\":\"{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"MGP10\\\",\\\"section\\\":\\\"90x45\\\",\\\"species\\\":null,\\\"treatment\\\":\\\"H3\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"mgp10\\\",\\\"productCode\\\":null,\\\"section\\\":{\\\"depthMm\\\":90,\\\"widthMm\\\":45},\\\"species\\\":null,\\\"treatment\\\":\\\"h3\\\"},\\\"method\\\":\\\"repeated_members@2\\\"}\",\"unit\":\"piece\"}",
       "materialKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}",
       "generic": true,
@@ -313,13 +313,13 @@
       "item": {
         "description": "90 × 45 MGP10 H3 — 5,400 mm length",
         "stockLengthMm": 5400,
-        "dependencyKey": "6381117c"
+        "dependencyKey": "91eea444"
       },
       "jobMaterialIds": [
-        "2d9b15e3-bab1-4330-8e48-5427cca2572f"
+        "515f0b50-6e01-4b51-b00c-4f18db4c7e02"
       ],
       "contributionIds": [
-        "e2fd31d6-6225-4e71-a048-b03466814889"
+        "996c9114-3123-4827-8fb7-ce2eb3a35789"
       ],
       "problems": [],
       "notes": [
@@ -327,7 +327,7 @@
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "6381117c"
+      "dependencyKey": "91eea444"
     }
   ],
   "unplaced": [],

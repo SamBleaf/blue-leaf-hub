@@ -4,7 +4,7 @@
 // take PDF user-space points + the page calibration and return calibrated mm stations (never screen pixels).
 // =============================================================================
 import { pathStations, pointAtStation } from "../../../../shared/takeoff/engine/flashingPath.js";
-import { pointToMm } from "../../../../shared/takeoff/calibration.js";
+import { pointToMm, polygonAreaMm2 } from "../../../../shared/takeoff/calibration.js";
 import { buildWall, normaliseOpenings } from "../../../../shared/takeoff/engine/wall.js";
 
 /** Minimum touch target (CSS px) — every tappable thing on the plan uses this radius ×2. */
@@ -313,6 +313,191 @@ export function openingOnWall(points, cal, xMm, widthMm) {
   if (!(s1 - s0 > 1e-6)) return null;
   const a = safePointAt(points, cal, s0), b = safePointAt(points, cal, s1);
   return a && b ? { a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } } : null;
+}
+
+// ── Rectangle and Area on an elevation (HUB 023) ─────────────────────────────────────────────────────────────
+
+const EPS = 1e-9;
+
+/**
+ * The four square corners of a Rectangle from two opposite corners (PDF space, tap order kept: a, then b). A scale's
+ * horizontal and vertical are always along the page's own axes (rotations are multiples of 90°), so square on the page
+ * is square in real mm too — on a stretched (separate X / Y) scale as well.
+ */
+export function rectCorners(a, b) {
+  return [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }];
+}
+
+/** Four corners square to the page, each side along x or y in turn (a Rectangle, and nothing drawn by hand). */
+export function isRectOutline(points) {
+  if (points?.length !== 4) return false;
+  let prev = null;
+  for (let i = 0; i < 4; i++) {
+    const a = points[i], b = points[(i + 1) % 4];
+    const sx = Math.abs(a.x - b.x) <= EPS, sy = Math.abs(a.y - b.y) <= EPS;
+    if (sx === sy) return false;                       // a diagonal side, or two corners on top of each other
+    if (prev !== null && prev === sx) return false;    // sides must turn the corner
+    prev = sx;
+  }
+  return true;
+}
+
+/**
+ * A traced elevation outline in the engine's own frame (dispatch.js resolveWall): real mm with x along the wall from
+ * its leftmost corner and y up from its lowest corner. toLocal / toPdf convert a plan point either way, so openings
+ * tapped on the elevation land exactly where the elevation lays them out.
+ * @returns {{ widthMm:number, heightMm:number, polygon:Array<{x:number,y:number}>, toLocal:(p)=>{x,y}, toPdf:(l)=>{x,y} } | null}
+ */
+export function outlineFrame(points, cal) {
+  if (!cal || !(points?.length >= 3)) return null;
+  const o = points[0];
+  const q = points.map((p) => pointToMm(cal, o, p));
+  const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  // pointToMm is linear: its unit vectors give the way back from real mm to the page
+  const ux = pointToMm(cal, { x: 0, y: 0 }, { x: 1, y: 0 }), uy = pointToMm(cal, { x: 0, y: 0 }, { x: 0, y: 1 });
+  const det = ux.x * uy.y - uy.x * ux.y;
+  if (!(Math.abs(det) > 0)) return null;
+  return {
+    widthMm: maxX - minX, heightMm: maxY - minY,
+    polygon: q.map((p) => ({ x: p.x - minX, y: maxY - p.y })),
+    toLocal: (p) => { const m = pointToMm(cal, o, p); return { x: m.x - minX, y: maxY - m.y }; },
+    toPdf: (l) => { const qx = l.x + minX, qy = maxY - l.y; return { x: o.x + (uy.y * qx - uy.x * qy) / det, y: o.y + (ux.x * qy - ux.y * qx) / det }; },
+  };
+}
+
+/** Why an outline can't be a wall ("wall_self_intersecting", "wall_polygon_invalid" …), or null when it can. */
+export function outlineProblem(points, cal) {
+  const f = outlineFrame(points, cal);
+  if (!f) return "wall_polygon_invalid";
+  const w = buildWall({ kind: "polygon", points: f.polygon });
+  return w.polygon ? null : w.problems?.[0]?.code || "wall_polygon_invalid";
+}
+
+/**
+ * A Rectangle / Area corner on the nearest `stepMm` (10 mm) of the page's real-mm grid (from the page origin, along the
+ * scale's own axes), so every side of an outline is a whole 10 mm, like the openings tapped on it: a wall tapped at
+ * 3,000.3 high is 3,000 high and takes a 3,000 sheet, never the next length up. A tap is never that precise anyway.
+ */
+export function snapToMmGrid(cal, p, stepMm = 10) {
+  if (!cal || !p) return p;
+  const o = { x: 0, y: 0 };
+  const m = pointToMm(cal, o, p);
+  const ux = pointToMm(cal, o, { x: 1, y: 0 }), uy = pointToMm(cal, o, { x: 0, y: 1 });
+  const det = ux.x * uy.y - uy.x * ux.y;
+  if (!(Math.abs(det) > 0) || !(stepMm > 0)) return p;
+  const qx = Math.round(m.x / stepMm) * stepMm, qy = Math.round(m.y / stepMm) * stepMm;
+  return { x: (uy.y * qx - uy.x * qy) / det, y: (ux.x * qy - ux.y * qx) / det };
+}
+
+/** Real area of an outline in m² (shoelace on the scaled corners), or null when it can't be measured. */
+export function outlineAreaM2(points, cal) {
+  if (!cal || !(points?.length >= 3)) return null;
+  try { return polygonAreaMm2(cal, points) / 1e6; } catch { return null; }
+}
+
+/** The closed ring of an outline (its first corner again at the end), for drawing and for tapping its closing side. */
+export const closedRing = (pts) => (pts?.length >= 3 ? [...pts, pts[0]] : pts || []);
+
+/** Is p inside the polygon (even-odd rule; any coordinate space)? */
+export function pointInPolygon(p, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * The outline a tap is on: inside it, or within a finger's reach (screen px) of its edge — the smallest one when
+ * outlines overlap. @param {Array<{ id, points }>} outlines  @param sp the tap on screen  @param toScreen PDF → screen
+ */
+export function outlineAt(outlines, p, sp, toScreen, reachPx = HIT_PX) {
+  let best = null;
+  for (const o of outlines || []) {
+    const inside = pointInPolygon(p, o.points);
+    if (!inside && distToPolyline(sp, closedRing(o.points).map(toScreen)) > reachPx) continue;
+    const a = Math.abs(o.points.reduce((s, q, i) => { const r = o.points[(i + 1) % o.points.length]; return s + q.x * r.y - r.x * q.y; }, 0));
+    if (!best || (inside && !best.inside) || (inside === best.inside && a < best.a)) best = { outline: o, inside, a };
+  }
+  return best?.outline || null;
+}
+
+/**
+ * A window or door from two opposite corners tapped on an outline (HUB 023): its offset from the left of the outline,
+ * sill above its lowest point, width and height, in real mm to the nearest 10 — the elevation's own numbers. A door
+ * sits on the floor (sill 0, up to the higher tap). Anything past the outline's sides, bottom or top is cut back to
+ * it; `clipped` says so when more than `slopMm` (a finger's slip) was cut off.
+ * @returns {{ ok:true, xMm, sillMm, widthMm, heightMm, clipped:boolean, tappedWidthMm, tappedHeightMm } | { ok:false, reason:"too_small"|"no_outline" }}
+ */
+export function outlineOpening(frame, p1, p2, kind, { slopMm = 0 } = {}) {
+  if (!frame) return { ok: false, reason: "no_outline" };
+  const a = frame.toLocal(p1), b = frame.toLocal(p2);
+  const W = frame.widthMm, H = frame.heightMm;
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+  const y0 = kind === "door" ? 0 : Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+  const cx0 = Math.max(0, x0), cx1 = Math.min(W, x1), cy0 = Math.max(0, y0), cy1 = Math.min(H, y1);
+  const xMm = round10(cx0), sillMm = kind === "door" ? 0 : round10(cy0);
+  let widthMm = round10(cx1 - cx0), heightMm = round10(cy1 - cy0);
+  if (xMm + widthMm > W) widthMm = Math.floor((W - xMm) / 10) * 10;      // never past the outline after rounding
+  if (sillMm + heightMm > H) heightMm = Math.floor((H - sillMm) / 10) * 10;
+  if (!(widthMm >= 10 && heightMm >= 10)) return { ok: false, reason: "too_small" };
+  const cut = Math.max(cx0 - x0, x1 - cx1, cy0 - y0, y1 - cy1);
+  return { ok: true, xMm, sillMm, widthMm, heightMm, clipped: cut > slopMm, tappedWidthMm: round10(x1 - x0), tappedHeightMm: round10(y1 - y0) };
+}
+
+/**
+ * Does an opening reach outside an outline anywhere (under a gable's slope, past a notch)? The engine then deducts
+ * only the part on the wall (wall.js "opening_clipped"), so the plan says so as it is placed.
+ */
+export function openingOutsideOutline(polygon, o) {
+  const w = buildWall({ kind: "polygon", points: polygon });
+  if (!w.polygon) return false;
+  const r = normaliseOpenings(w, [{ id: "o", xMm: o.xMm, sillMm: o.sillMm, widthMm: o.widthMm, heightMm: o.heightMm }]);
+  return r.openings[0]?.clipped === true;
+}
+
+/**
+ * Keep an outline's openings where they are on the page when its corners change (HUB 023). The elevation measures
+ * openings from the outline's leftmost and lowest corner, so moving that corner would otherwise move every opening:
+ * each one is re-measured from the new corners instead. A door stays on the floor with its head where it was, so its
+ * height changes when the floor moves (`resized`). A part now past ANY side of the outline's box is cut back to it
+ * (`cut`). One that is still on the wall but newly reaches outside the outline itself (under a lowered gable slope,
+ * past a moved side) is kept, and only the part on the wall comes off, as the engine does (`outside`). An opening left
+ * wholly off the wall, by the box or by the engine's own test on the new outline, is `lost` (refuse the move).
+ * @param {Array<{ id, inputs }>} openings
+ * @returns {{ openings: Array<{ id, inputs }>, cut: string[], lost: string[], outside: string[], resized: Array<{ name, heightMm }> }}
+ */
+export function keepOpeningsInPlace(oldPoints, newPoints, cal, openings) {
+  const a = outlineFrame(oldPoints, cal), b = outlineFrame(newPoints, cal);
+  const out = [], cut = [], lost = [], outside = [], resized = [];
+  if (!a || !b) return { openings: (openings || []).map((o) => ({ ...o })), cut, lost, outside, resized };
+  const W = Math.round(b.widthMm), H = Math.round(b.heightMm);
+  const wall = buildWall({ kind: "polygon", points: b.polygon });
+  for (const o of openings || []) {
+    const x = o.inputs || {};
+    const name = x.label || "An opening";
+    if (![x.xMm, x.sillMm, x.widthMm, x.heightMm].every(Number.isFinite)) { out.push(o); continue; }
+    const door = x.type === "door";
+    const lo = b.toLocal(a.toPdf({ x: x.xMm, y: x.sillMm })), hi = b.toLocal(a.toPdf({ x: x.xMm + x.widthMm, y: x.sillMm + x.heightMm }));
+    let xMm = Math.round(Math.min(lo.x, hi.x)), widthMm = x.widthMm;
+    let sillMm = door ? 0 : Math.round(Math.min(lo.y, hi.y)), heightMm = door ? Math.round(Math.max(lo.y, hi.y)) : x.heightMm;
+    let wasCut = false;
+    if (xMm < 0) { widthMm += xMm; xMm = 0; wasCut = true; }
+    if (sillMm < 0) { heightMm += sillMm; sillMm = 0; wasCut = true; }
+    if (xMm + widthMm > W) { widthMm = W - xMm; wasCut = true; }
+    if (sillMm + heightMm > H) { heightMm = H - sillMm; wasCut = true; }
+    if (!(widthMm >= 1 && heightMm >= 1)) { lost.push(name); continue; }
+    // the engine's own test on the NEW outline: wholly outside it (above a lowered apex …) is off the wall too
+    const onWall = wall.polygon ? normaliseOpenings(wall, [{ id: "o", xMm, sillMm, widthMm, heightMm }]) : null;
+    if (onWall?.problems.some((p) => p.code === "opening_outside_wall")) { lost.push(name); continue; }
+    if (wasCut) cut.push(name);
+    else if (onWall?.openings[0]?.clipped && !openingOutsideOutline(a.polygon, x)) outside.push(name);
+    if (door && !wasCut && heightMm !== x.heightMm) resized.push({ name, heightMm });
+    out.push({ ...o, inputs: { ...x, xMm, sillMm, widthMm, heightMm } });
+  }
+  return { openings: out, cut, lost, outside, resized };
 }
 
 /** Rough screen box of a bold plan label (centred on x, baseline at y): about 0.6 em a character. */

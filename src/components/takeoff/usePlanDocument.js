@@ -13,7 +13,10 @@ export const MAX_PAGES = 100;
 
 /** @param {{contentSha256?: string|null, byteSize?: number|null}|null} docInfo the snapshot's record of this plan */
 export function usePlanDocument(api, docId, docInfo = null) {
-  const [state, setState] = useState({ status: docId ? "loading" : "idle", progress: null, error: null, code: null, doc: null, numPages: 0, source: null });
+  // forId: the plan this state belongs to. For the one render after docId changes (before the effect below runs) the
+  // state still holds the OLD plan — reported as loading, so nothing measures on the old PDF or clamps the new page
+  // to the old page count (HUB 023: Back from the page picker after choosing another plan)
+  const [state, setState] = useState({ status: docId ? "loading" : "idle", progress: null, error: null, code: null, doc: null, numPages: 0, source: null, forId: docId || null });
   const abortRef = useRef(null);
   const docRef = useRef(null);
   // read through a ref: a snapshot that anchors a legacy plan's hash after its first open must not re-open it
@@ -22,12 +25,12 @@ export function usePlanDocument(api, docId, docInfo = null) {
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!docId) { setState({ status: "idle", progress: null, error: null, code: null, doc: null, numPages: 0, source: null }); return undefined; }
+    if (!docId) { setState({ status: "idle", progress: null, error: null, code: null, doc: null, numPages: 0, source: null, forId: null }); return undefined; }
     let stop = false;
     const ctl = new AbortController();
     abortRef.current = ctl;
     const info = { id: docId, contentSha256: infoRef.current?.contentSha256 ?? null, byteSize: infoRef.current?.byteSize ?? null };
-    setState({ status: "loading", progress: null, error: null, code: null, doc: null, numPages: 0, source: "device" });
+    setState({ status: "loading", progress: null, error: null, code: null, doc: null, numPages: 0, source: "device", forId: docId });
     const ready = (doc) => {
       if (doc.numPages > MAX_PAGES) {
         doc.destroy();
@@ -35,7 +38,7 @@ export function usePlanDocument(api, docId, docInfo = null) {
         return false;
       }
       docRef.current = doc;
-      setState((s) => ({ status: "ready", progress: null, error: null, code: null, doc, numPages: doc.numPages, source: s.source }));
+      setState((s) => ({ status: "ready", progress: null, error: null, code: null, doc, numPages: doc.numPages, source: s.source, forId: docId }));
       return true;
     };
     (async () => {
@@ -82,5 +85,8 @@ export function usePlanDocument(api, docId, docInfo = null) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const cancel = useCallback(() => abortRef.current?.abort(), []);
+  if ((state.forId || null) !== (docId || null)) {
+    return { status: docId ? "loading" : "idle", progress: null, error: null, code: null, doc: null, numPages: 0, source: null, forId: docId || null, retry, cancel };
+  }
   return { ...state, retry, cancel };
 }

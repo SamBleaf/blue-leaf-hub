@@ -18,7 +18,8 @@ const wall = (id, inputs, extra = {}) => ({ id, kind: "wall", documentId: "d", p
 
 t("Line on every cladding-type wall material; timber studs, plates and noggins keep Wall", () => {
   const keys = (spec, methodKey = "sheet_layout") => toolsFor({ spec, methodKey }).map((x) => x.k);
-  for (const family of ["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]) assert.deepEqual(keys({ family }), ["line", "select", "pan"], family);
+  // HUB 023 put Rectangle and Area beside Line (takeoff-tc-hub023.test.mjs)
+  for (const family of ["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]) assert.deepEqual(keys({ family }), ["line", "rect", "area", "select", "pan"], family);
   assert.equal(toolsFor({ spec: { family: "cladding" }, methodKey: "sheet_layout" })[0].label, "Line");
   assert.deepEqual(keys({ family: "timber", purpose: "studs" }, "wall_frame"), ["wall", "select", "pan"]);
   assert.deepEqual(keys({ family: "timber", purpose: "plates" }, "linear_stock"), ["wall", "run", "count", "select", "pan"]);
@@ -146,7 +147,7 @@ t("the unfinished run keeps the height of every tap and the height in the box on
 
 t("review fix: a cladding drawing kept by the older Wall tool carries on as a Line run (heights the Wall tool would have used)", () => {
   const old = { tool: "wall", points: [P(1, 2), P(3, 4), P(5, 6)], splitsMm: [], measurementId: null };
-  const line = ["line", "select", "pan"], timber = ["wall", "select", "pan"];
+  const line = ["line", "rect", "area", "select", "pan"], timber = ["wall", "select", "pan"];
   assert.deepEqual(upgradeDraft(old, line, 3000), { ...old, tool: "line", heights: [3000, 3000, 3000], heightMm: 3000 });
   assert.deepEqual(upgradeDraft(old, line, null), { ...old, tool: "line", heights: [null, null, null], heightMm: null }, "no height on the takeoff yet: Heights needed");
   assert.equal(upgradeDraft(old, timber, 3000), old, "timber still has Wall: unchanged");

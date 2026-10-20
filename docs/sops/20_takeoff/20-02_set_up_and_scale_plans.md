@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-10-20
+sop_version: 1.2
+last_reviewed: 2026-10-21
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -81,7 +81,7 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
    - Within 0.5%: "Scale is ready." Tap **Save scale**.
    - Over 0.5%: the warning says the page will be marked **Needs review** and measured runs can't be ordered until it is re-scaled. Tap **Re-tap** to try again (recommended), or **Save scale** to keep it as Needs review for viewing only.
 9. **Save without a check (Not checked — can't order measured runs)** is only for a quick look. Runs measured on an unchecked scale cannot go on a supplier order.
-10. After **Save scale** the app goes straight to the Measure screen (SOP 20-03).
+10. After **Save scale** the app goes straight to the Measure screen (SOP 20-03). If you came from **Scale page** in the Measure screen, you are back on the same page with the same tool (for example **Rectangle**). **Cancel** there also takes you back to measuring.
 
 > 💡 **Tip:** To fine-tune a point, drag it — a magnifier shows exactly where it sits. On a keyboard: select the point, then use Alt + arrow keys.
 
@@ -116,6 +116,15 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 7. Exports already made and orders already placed are not changed.
 
 > 💡 **Tip:** Removing a plan from the Plans card that a takeoff has used does not delete it — you'll see "This plan is used by a takeoff, so it was archived (hidden from the field) instead of deleted." and the takeoff goes to **Needs review**.
+
+### F. Measure on another page (Page chip)
+
+1. In the Measure screen, tap **Page 1 ▾** (it shows the page you are on). It shows only when the plan has more than one page, or there is more than one plan.
+2. The page picker opens: "Choose a page — Measure on another page. The main plan page stays the same." The main page says "· main plan page" and the page you are on says "· measuring now". Each page shows **Not scaled**, **Ready** or **Needs review**.
+3. Tap the page. You go straight back to measuring on it, with the same tool. That's two taps. Each page tile keeps its size while the pages draw, so a tap lands on the page you aimed at. For plans over 24 pages, tap the number box (it selects the number), type the page and tap **Go** on the keyboard, or **Measure on page N**.
+4. The takeoff's main plan page doesn't change, and nothing is saved. A wall you were halfway through drawing waits on its own page and comes back when you return to it. To change the main page, use **Set up plans** (Section A).
+5. **Back** returns to measuring on the page you were on, even if you looked at another plan in the **Plan** list.
+6. A page with no scale says so. Tap **Scale page** and you come back to it when the scale is saved (Section B, step 10).
 
 ---
 
@@ -204,6 +213,7 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 - **Plan revision upload** (Plans card) runs `takeoff_plan_insert` in one transaction: inserts the new `job_documents` row (`status` 'current', `version` = old + 1, `supersedes_document_id`, `revision_label`, `content_sha256`, `byte_size`) and sets the old row `status` 'superseded'; every active takeoff whose main plan or live measurements use the old plan becomes `state` 'needs_review', `review_reason` 'plan_superseded'. On failure only the newly uploaded file is removed; the old plan stays current.
 - **Removing a plan** used by any takeoff calls `takeoff_archive_if_referenced`: `status` 'superseded', `archived_at` / `archived_by` set, bytes kept; takeoffs go to `needs_review` with `review_reason` 'plan_removed'. Unused plans: the database row is deleted first, then the stored file.
 - **Mark reviewed** sets `state` back to 'active' and clears `review_reason`.
+- **Page chip** (HUB 023): the same `PlanSetup` picker with `purpose="measure"`. Choosing a page only changes the page on this device (the last page is remembered per phone, HUB 021); `primary_document_id` / `primary_page_index` are untouched and no commit is made. **Scale page** from Measure returns to Measure (`TakeoffApp` `scaleFrom`, `measureTool`).
 - No email, notification or Dropbox file is created.
 
 ---
@@ -330,6 +340,13 @@ Next review date: 2027-04-13
 **TC-13 — Plan kept on this phone; last page remembered (HUB 021, UI Review)**
 1. **Set up plans** → **Page 2** → **Use page 2 as the main plan page**, then reload. Expected: the overview still reads "· page 2" on this phone, with no second download.
 2. Open **Measure** twice (re-entering the takeoff in between). Expected: the second open shows "Opening plan…", never "Downloading plan". Spec: e2e/ui-review/tc-plan-reuse.spec.js.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Page chip and Scale page from Measure (HUB 023, UI Review)**
+1. `?takeoffSeed=mixed&takeoffElevation=1` → Timber and cladding → **Measure** → **Axon cladding** → **Page 1 ▾**. Expected: "Choose a page", page 1 "· main plan page · measuring now", page 3 **Ready**, the others **Not scaled**. **Back**: still page 1.
+2. **Rectangle** → **Page 1 ▾** → **Page 3**. Expected: straight back to measuring on "page 3 · scaled" with Rectangle still chosen; `snapshot.workspace.primaryPageIndex` is still 0 and `__takeoffReviewState().commits` hasn't changed.
+3. **Page 3 ▾** → **Page 4** (not scaled) → **Scale page** (in the Rectangle panel) → scale the whole page with a check → **Save scale**. Expected: back on "page 4 · scaled" with Rectangle chosen.
+4. **Area** on page 3: tap three corners → **Page 3 ▾**. Expected: every page tile is 150 high and doesn't move as the pages draw. Tap **Page 1**: no commit, no wall. **Page 1 ▾** → **Page 3**: the three corners are back with Area chosen. **Page 3 ▾** → **Plan** → Rev B → **Back**. Expected: "Rev C · page 3 · scaled", the three corners still there. Spec: e2e/ui-review/tc-measure.spec.js "HUB 023".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

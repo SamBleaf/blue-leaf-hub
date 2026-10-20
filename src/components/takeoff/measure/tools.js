@@ -10,9 +10,11 @@
 //   timber noggins     Wall · Count · Select · Pan
 //   timber trim/other  Run · Count · Select · Pan
 //   aluminium          Run · Select · Pan
-//   wall families      Line · Select · Pan                             (cladding, aac, foam, timber-cladding, batten, accessory)
+//   wall families      Line · Rectangle · Area · Select · Pan          (cladding, aac, foam, timber-cladding, batten, accessory)
 //                      HUB 022: Line traces a whole run with the Wall height in force at each tap; timber walls keep Wall
 //                      HUB 022 step 2: + Window / + Door in the Line panel put openings into the traced walls
+//                      HUB 023: Rectangle (two opposite corners) and Area (each corner, then Finish) draw a wall straight
+//                      onto a scaled elevation, saved as a traced outline wall (inputs.kind "polygon")
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
 
@@ -34,7 +36,7 @@ export const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.
 const T = {
   run: { k: "run", label: "Run" }, count: { k: "count", label: "Count" }, select: { k: "select", label: "Select" }, pan: { k: "pan", label: "Pan" },
   wall: { k: "wall", label: "Wall" }, member: { k: "member", label: "Member" }, distribution: { k: "distribution", label: "Distribution" },
-  line: { k: "line", label: "Line" },
+  line: { k: "line", label: "Line" }, rect: { k: "rect", label: "Rectangle" }, area: { k: "area", label: "Area" },
 };
 
 /** The tool row for a material (first = default). */
@@ -52,7 +54,7 @@ export function toolsFor(material) {
     return [T.run, T.count, T.select, T.pan];
   }
   if (fam === "aluminium") return [T.run, T.select, T.pan];
-  if (usesWalls(material)) return [T.line, T.select, T.pan];
+  if (usesWalls(material)) return [T.line, T.rect, T.area, T.select, T.pan];
   return [T.select, T.pan];
 }
 
@@ -60,6 +62,10 @@ export function toolsFor(material) {
 export const PATH_TOOLS = new Set(["run", "wall", "line"]);
 /** Two-point line tools: the second tap finishes the line. */
 export const LINE_TOOLS = new Set(["member", "distribution"]);
+/** HUB 023 shapes on an elevation: Rectangle (the second corner finishes it) and Area (each corner, then Finish). */
+export const SHAPE_TOOLS = new Set(["rect", "area"]);
+/** The tools whose panel has + Window / + Door (the walls they make take openings). */
+export const OPENING_TOOLS = new Set(["line", "rect", "area"]);
 
 /** Plain-English name of a timber purpose's members, for counts ("11 rafters"). */
 export function memberNoun(material, n = 2) {
@@ -166,6 +172,79 @@ export const runIdOf = (m) => (typeof m?.inputs?.runId === "string" && m.inputs.
 export function lineWallInputs(measurements, { heightMm, runId, seq }) {
   const { name } = nextWallInputs(measurements);
   return { kind: "rect", ...(heightOrNull(heightMm) ? { heightMm } : {}), name, runId, seq };
+}
+
+// ── Rectangle and Area on an elevation (HUB 023) ─────────────────────────────────────────────────────────────
+
+/** A traced elevation outline (Rectangle / Area, or an older traced outline): a wall whose corners are its outline. */
+export const isOutline = (m) => m?.kind === "wall" && m.inputs?.kind === "polygon" && Array.isArray(m.points) && m.points.length >= 3;
+
+/**
+ * Inputs for a NEW outline wall drawn with Rectangle or Area: a traced outline ("Wall N", unique), nothing else. Its
+ * sizes come from its corners on the scaled page (the engine lays the cladding out over that outline), never a height.
+ */
+export function outlineWallInputs(measurements) {
+  return { kind: "polygon", name: nextWallInputs(measurements).name };
+}
+
+/**
+ * The sheets the engine laid out for ONE wall of a sheet material: grouped by size, in the order they first appear
+ * ([{ qty, lengthMm, widthMm }]), counting each sheet on the wall it is ordered on (HUB 016b), plus the pieces cut
+ * from other walls' sheets or offcuts. Null when the material has no sheets on that wall.
+ */
+export function wallSheetSummary(result, wallId) {
+  const groups = new Map();
+  for (const d of result?.demands || []) {
+    if (!(d.unit === "sheet" || d.kind === "sheet") || d.sourceRefs?.[0]?.measurementId !== wallId) continue;
+    const L = d.identity?.stockLengthMm ?? null, W = d.identity?.stockWidthMm ?? null;
+    const key = `${L}|${W}`;
+    const g = groups.get(key) || { qty: 0, lengthMm: L, widthMm: W };
+    g.qty += d.quantity || 0;
+    groups.set(key, g);
+  }
+  const lay = (result?.layouts || []).find((l) => l?.wallMeasurementId === wallId);
+  const borrowed = lay?.cutPlan?.fromOtherWalls || 0;
+  return groups.size || borrowed ? { sheets: [...groups.values()], borrowed } : null;
+}
+
+/** "4 sheets 3,000 × 1,200" (+ "1 sheet 2,750 × 1,200" …, "+ 2 pieces from other walls"). */
+export function sheetSummaryText(s) {
+  if (!s) return "";
+  const n = (v) => v.toLocaleString("en-AU", { maximumFractionDigits: 0 });
+  const parts = s.sheets.map((g) => `${n(g.qty)} sheet${g.qty === 1 ? "" : "s"}${g.lengthMm ? ` ${n(g.lengthMm)}${g.widthMm ? ` × ${n(g.widthMm)}` : ""}` : ""}`);
+  if (s.borrowed) parts.push(`${n(s.borrowed)} piece${s.borrowed === 1 ? "" : "s"} from other walls`);
+  return parts.join(" + ");
+}
+
+/**
+ * The engine's readable name for a wall on one material (dispatch.js wallTags): its name, plus a short id when two of
+ * that material's walls share the name. Problems and demands name the wall by it.
+ */
+export function wallTagOn(measurements, contributions, materialId, wallId) {
+  const live = (measurements || []).filter((m) => !m.archived);
+  const walls = (contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId)
+    .map((c) => live.find((m) => m.id === c.measurementId)).filter((m) => m?.kind === "wall");
+  const nameOf = (m) => m.inputs?.name || m.label || "Wall";
+  const w = walls.find((m) => m.id === wallId);
+  if (!w) return null;
+  return walls.filter((m) => nameOf(m) === nameOf(w)).length > 1 ? `${nameOf(w)} (${String(w.id).slice(0, 4)})` : nameOf(w);
+}
+
+/**
+ * Why a wall has NO sheets, in a few plain words, from the engine's blocking problems on it — null when it has
+ * sheets or nothing blocks it (HUB 023: a Rectangle taller than the longest sheet must not look finished).
+ */
+export function wallSheetIssue(result, wallId, tag) {
+  if (wallSheetSummary(result, wallId)) return null;
+  const onWall = (r) => r && (r.measurementId === wallId || r.wallId === wallId || (tag && r.wallId === tag));
+  const mine = (result?.problems || []).filter((p) => p.blocking !== false && (p.refs || []).some(onWall));
+  if (!mine.length) return null;
+  const tall = mine.find((p) => p.code === "sheet_too_tall");
+  if (tall) {
+    const L = Math.max(...(tall.listedLengthsMm || []).filter((v) => Number.isFinite(v)));
+    return `Taller than the longest sheet${Number.isFinite(L) ? ` (${L.toLocaleString("en-AU")})` : ""}. Add a joint row on the elevation.`;
+  }
+  return "No sheets on this wall yet. Open the elevation to see why.";
 }
 
 /**

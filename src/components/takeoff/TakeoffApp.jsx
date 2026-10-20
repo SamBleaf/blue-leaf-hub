@@ -166,6 +166,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   const [docId, setDocId] = useState(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [rotation, setRotation] = useState(0);
+  // HUB 023: scaling a page or choosing another page from Measure comes straight back to Measure, with the tool in use;
+  // the page picker opened from Measure never changes the takeoff's main plan page
+  const [measureTool, setMeasureTool] = useState(null);
+  const [scaleFrom, setScaleFrom] = useState(null);     // "measure" when the scale was asked for from Measure
+  const [pageFrom, setPageFrom] = useState(null);       // { docId, pageIndex } Measure was on when the page picker opened
   const [activeMaterial, setActiveMaterial] = useState(null);
   const [openWall, setOpenWall] = useState(null); // wall measurement open in the elevation editor
   const [highlightIds, setHighlightIds] = useState(null); // schedule "show on plan" → measurements to select
@@ -256,7 +261,9 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }, [placeKey, placeRestored, win, activeMaterial, openWall]);
   useEffect(() => { let stop = false; api.presets().then((r) => { if (!stop && r.ok) setPresets(r.data.presets || []); }); return () => { stop = true; }; }, [api]);
 
-  const needsPdf = ["setup", "calibrate", "measure"].includes(win);
+  const needsPdf = ["setup", "pages", "calibrate", "measure"].includes(win);
+  // the tool to come back to belongs to one trip out of Measure (scale / page) and back
+  useEffect(() => { if (!["measure", "calibrate", "pages"].includes(win)) setMeasureTool(null); }, [win]);
   // once opened, keep the plan loaded while in this takeoff — switching material / editing a flashing must not
   // re-download and re-parse the whole PDF on a phone (R04b R22)
   const [keepPlan, setKeepPlan] = useState(false);
@@ -647,6 +654,14 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       primary={{ documentId: primaryDoc, pageIndex: view.workspace.primaryPageIndex }} onClose={() => setWin("overview")} onExternalView={onExternalView}
       onChoosePage={(id, pi) => { setPageIndex(pi); if (caps.edit && planDoc?.status === "current") ws.edit(partial({ workspace: { primaryDocumentId: id, primaryPageIndex: pi } })); setWin("overview"); }} />;
   }
+  if (win === "pages") {
+    // HUB 023: the same page picker, for measuring on another page — tap a page to go straight back to Measure
+    return <PlanSetup purpose="measure" plans={plans} planState={plan} selectedDocId={docId} onSelectDoc={(id) => { setDocId(id); setPageIndex(0); }} calibrations={view.calibrations}
+      primary={{ documentId: primaryDoc, pageIndex: view.workspace.primaryPageIndex }} current={pageFrom ? { documentId: pageFrom.docId, pageIndex: pageFrom.pageIndex } : null}
+      onExternalView={onExternalView}
+      onClose={() => { if (pageFrom) { setDocId(pageFrom.docId); setPageIndex(pageFrom.pageIndex); } setWin("measure"); }}
+      onChoosePage={(id, pi) => { setDocId(id); setPageIndex(pi); setWin("measure"); }} />;
+  }
   if ((win === "calibrate" || win === "measure") && plan.status !== "ready") {
     return (
       <FocusedWindow title={planDoc?.title || "Plan"} onClose={() => setWin("overview")} closeLabel="Back">
@@ -664,7 +679,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   if (win === "calibrate") {
     return <CalibrationScreen doc={plan.doc} documentId={docId} pageIndex={pageIndex} displayRotation={rotation} docTitle={planDoc?.title}
       existing={pageCals}
-      onClose={() => setWin("overview")}
+      onClose={() => setWin(scaleFrom === "measure" ? "measure" : "overview")}
       onSave={(rec, rot) => { setRotation(rot); ws.edit(partial({ calibrations: [rec] })); setWin("measure"); }} />;
   }
   if (win === "walls") {
@@ -677,7 +692,10 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }
   if (win === "measure") {
     return <MeasureScreen ws={ws} doc={plan.doc} document={planDoc} pageIndex={pageIndex} displayRotation={rotation} materialId={activeMaterial}
-      onChangeMaterial={() => { setHighlightIds(null); setWin("materials"); }} onScale={caps.edit ? () => setWin("calibrate") : null}
+      onChangeMaterial={() => { setHighlightIds(null); setWin("materials"); }}
+      onScale={caps.edit ? (tool) => { setMeasureTool(tool || null); setScaleFrom("measure"); setWin("calibrate"); } : null}
+      onPage={plans.length > 1 || plan.numPages > 1 ? (tool) => { setMeasureTool(tool || null); setHighlightIds(null); setPageFrom({ docId, pageIndex }); setWin("pages"); } : null}
+      initialTool={measureTool}
       onOpenWall={(id) => { setHighlightIds(null); setOpenWall(id); setWin("walls"); }}
       highlightIds={highlightIds}
       onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(orderFocus ? "orders" : usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
@@ -802,7 +820,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
             </p>
             <div className="flex flex-wrap gap-2">
               <Btn onClick={() => setWin("setup")}>Set up plans</Btn>
-              {caps.edit && <Btn onClick={() => setWin("calibrate")} disabled={!docId || planDoc?.status !== "current"}>Scale this page</Btn>}
+              {caps.edit && <Btn onClick={() => { setScaleFrom(null); setWin("calibrate"); }} disabled={!docId || planDoc?.status !== "current"}>Scale this page</Btn>}
               <Btn kind="primary" onClick={startMeasuring} disabled={!docId}>{caps.edit ? "Measure" : "View plan"}</Btn>
             </div>
           </>
