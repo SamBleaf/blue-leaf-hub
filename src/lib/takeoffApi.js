@@ -40,6 +40,8 @@ function makeApi(base, send, fetcher, extras = {}) {
     commit: (id, body) => post(`/workspaces/${id}/commit`, body),
     presets: () => get("/presets"),
     suppliers: () => get("/suppliers"),
+    // HUB 008: office staff add a supplier from the order — Hub and Worker app (the server checks who may)
+    createSupplier: (body) => post("/suppliers", body),
     orders: (wsId) => get(`/workspaces/${wsId}/orders`),
     createOrder: (wsId, body) => post(`/workspaces/${wsId}/orders`, body),
     saveOrder: (orderId, body) => patch(`/orders/${orderId}`, body),
@@ -62,8 +64,6 @@ export function createStaffTakeoffApi() {
       savePreset: (body) => post("/presets", body),
       placeOrder: (orderId, body) => post(`/orders/${orderId}/placements`, body),
       cancelPlacement: (placementId, reason) => post(`/placements/${placementId}/cancel`, { reason }),
-      // HUB 008: office staff add a supplier without leaving the order (existing procurement endpoint, admin/supervisor)
-      createSupplier: (body) => apiFetch("/api/procurement/suppliers", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body ?? {}) }),
     }),
   });
 }

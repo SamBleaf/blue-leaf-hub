@@ -889,6 +889,30 @@ await t("HUB 009: a new order's site contact defaults to whoever creates it (nam
   assert.equal(b.data.order.delivery.contactName, "Site lead"); assert.equal(b.data.order.delivery.contactPhone, "0499 999 999");
 });
 
+await t("HUB 008: office staff add a supplier from the order on the Hub AND in the Worker app; others are refused; the same name is reused", async () => {
+  const a = await SP("/suppliers", { name: "Fielders Wingfield", phone: "08 8000 1234" });
+  assert.equal(a.status, 200, JSON.stringify(a.data)); assert.equal(a.data.supplier.existed, false);
+  const again = await SP("/suppliers", { name: "  fielders WINGFIELD " }, { as: "sup" });
+  assert.equal(again.status, 200); assert.equal(again.data.supplier.id, a.data.supplier.id); assert.equal(again.data.supplier.existed, true);
+  assert.equal((await q("SELECT count(*)::int AS n FROM suppliers WHERE lower(name)='fielders wingfield'")).rows[0].n, 1);
+  assert.equal((await SP("/suppliers", { name: "X" }, { as: "emp" })).status, 403);
+  // a leading hand in the Worker app is refused …
+  assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.addSuppliers, false);
+  assert.equal((await WP("/suppliers", { name: "Bunnings" }, { worker: "wt-lh" })).status, 403);
+  // … until their employee record is linked to an Admin login (office staff on a phone, e.g. the director)
+  await q("UPDATE employees SET user_id=$1 WHERE id=$2", [U.admin, E.lh]);
+  try {
+    assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.addSuppliers, true);
+    const w = await WP("/suppliers", { name: "Stratco Wingfield", email: "orders@stratco.test" }, { worker: "wt-lh" });
+    assert.equal(w.status, 200, JSON.stringify(w.data)); assert.equal(w.data.supplier.existed, false);
+    const names = (await W("/suppliers", { worker: "wt-lh" })).data.suppliers.map((x) => x.name);
+    assert.ok(names.includes("Stratco Wingfield") && names.includes("Fielders Wingfield"), names.join(", "));
+    assert.equal((await WP("/suppliers", { name: "Bad email", email: "nope" }, { worker: "wt-lh" })).status, 400);
+    assert.equal((await WP("/suppliers", { name: "  " }, { worker: "wt-lh" })).status, 400);
+    assert.equal((await WP("/suppliers", { name: "Preview" }, { as: "admin", preview: E.lh })).status, 403);   // an admin's read-only "preview as worker" never adds
+  } finally { await q("UPDATE employees SET user_id=NULL WHERE id=$1", [E.lh]); }
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

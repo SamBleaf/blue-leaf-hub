@@ -39,6 +39,36 @@ test("HUB 008: office staff add a supplier from the order and it is selected str
   await expect(page.getByText(/Added Stratco Wingfield/)).toBeVisible();
 });
 
+test("HUB 008: office staff on the Worker app (phone) can add a supplier from the order; a leading hand can't", async ({ page }) => {
+  // a Worker-app login linked to an Admin account (e.g. the director on his iPhone)
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings&takeoffWorker=office");
+  await ready(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await page.getByRole("button", { name: "New order" }).click();
+  await page.getByRole("button", { name: "Add supplier" }).click();
+  const form = page.locator("[data-add-supplier]");
+  await form.getByLabel("Supplier name").fill("Fielders Wingfield");
+  await form.getByRole("button", { name: "Save supplier" }).click();
+  await expect(page.locator("#ord-supplier option:checked")).toHaveText("Fielders Wingfield");
+  await expect(page.locator("[data-supplier-note]")).toHaveText("Added Fielders Wingfield — save order details to keep it on this order.");
+  // the same name again is the same supplier — selected, never a second copy
+  await page.getByRole("button", { name: "Add supplier" }).click();
+  await form.getByLabel("Supplier name").fill("other steel supplies");
+  await form.getByRole("button", { name: "Save supplier" }).click();
+  await expect(page.locator("#ord-supplier option:checked")).toHaveText("Other Steel Supplies");
+  await expect(page.locator("[data-supplier-note]")).toContainText("Other Steel Supplies was already on file");
+  await expect(page.locator("#ord-supplier option").filter({ hasText: /^Other Steel Supplies$/ })).toHaveCount(1);
+  // a leading hand without an office login: no Add supplier (and the server refuses it anyway)
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings");
+  await ready(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
+  await expect(page.locator("#ord-supplier")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add supplier" })).toHaveCount(0);
+  const refused = await page.evaluate(async () => (await fetch("/api/worker/takeoff/suppliers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Sneaky" }) })).status);
+  expect(refused).toBe(403);
+});
+
 test("HUB 012: a flashing's details list every finished length with its quantity and source", async ({ page }) => {
   await open(page);
   await rowAction(page, "Apron flashing", "Details");

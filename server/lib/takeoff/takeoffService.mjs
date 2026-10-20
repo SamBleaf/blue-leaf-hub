@@ -762,6 +762,26 @@ export async function createOrder(sb, ctx, body) {
   return mapOrder(data);
 }
 
+/**
+ * HUB 008: add a supplier from the order (office staff — the route checks the capability). Name required; contact,
+ * phone and email optional. The same name twice is one supplier: an active one with that name is reused, not copied.
+ * @returns {{ id, name, contactName, email, phone, existed: boolean }}
+ */
+export async function addSupplier(sb, body) {
+  const name = optStr(body?.name, 120);
+  must(name, "Enter the supplier's name.");
+  const email = optStr(body?.email, 160);
+  must(!email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "That email address doesn't look right.");
+  const shape = (r, existed) => ({ id: r.id, name: r.name, contactName: r.contact_name ?? undefined, email: r.email ?? undefined, phone: r.phone ?? undefined, existed });
+  const key = (x) => String(x || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const same = (await q(sb.from("suppliers").select("id, name, contact_name, email, phone").eq("is_active", true))).find((s) => key(s.name) === key(name));
+  if (same) return shape(same, true);
+  const { data, error } = await sb.from("suppliers").insert([{ name, contact_name: optStr(body?.contactName, 80), email, phone: optStr(body?.phone, 40), is_active: true }])
+    .select("id, name, contact_name, email, phone").single();
+  if (error) throw error;
+  return shape(data, false);
+}
+
 async function requireSupplier(sb, id) {
   must(isUuid(id), "Invalid supplier.");
   const s = await q(sb.from("suppliers").select("id, name, email, phone, contact_name, abn, is_active, updated_at").eq("id", id).maybeSingle());

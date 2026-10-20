@@ -194,8 +194,9 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
   const start = restored?.draft || saved;
   const [supplierId, setSupplierId] = useState(start.supplierId ?? saved.supplierId);
   // HUB 008: office staff add the supplier right here (staff app only — the worker adapter has no createSupplier)
-  const canAddSupplier = !!ws.capabilities?.editStandards && typeof api.createSupplier === "function";
+  const canAddSupplier = !!ws.capabilities?.addSuppliers && typeof api.createSupplier === "function";
   const [addingSupplier, setAddingSupplier] = useState(false);
+  const [supplierNote, setSupplierNote] = useState(null);
   const supplierName = (suppliers?.suppliers || []).find((x) => x.id === supplierId)?.name || null;
   const [delivery, setDelivery] = useState(start.delivery || saved.delivery);
   const [notes, setNotes] = useState(start.notes ?? saved.notes);
@@ -420,7 +421,11 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
           {canAddSupplier && <Btn onClick={() => setAddingSupplier((v) => !v)} aria-expanded={addingSupplier}>Add supplier</Btn>}
         </div>
         {addingSupplier && <AddSupplier api={api} onCancel={() => setAddingSupplier(false)}
-          onAdded={async (sup) => { setAddingSupplier(false); await onChanged(); setSupplierId(sup.id); setMsg(`Added ${sup.name} — save order details to keep it on this order.`); }} />}
+          onAdded={async (sup) => {
+            setAddingSupplier(false); await onChanged(); setSupplierId(sup.id);
+            setSupplierNote(sup.existed ? `${sup.name} was already on file — it's now selected. Save order details to keep it on this order.` : `Added ${sup.name} — save order details to keep it on this order.`);
+          }} />}
+        {supplierNote && <p className="mt-1 text-xs text-emerald-700" role="status" data-supplier-note="">{supplierNote}</p>}
         {!suppliers?.suppliers?.length && !canAddSupplier && <p className="mt-1 text-[11px] text-muted">No suppliers on file — ask the office to add one.</p>}
       </div>
       <fieldset>

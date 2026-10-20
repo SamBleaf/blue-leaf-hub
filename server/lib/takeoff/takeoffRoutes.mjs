@@ -20,7 +20,7 @@ import {
 } from "./takeoffAccess.mjs";
 import {
   PLAN_DOC_TYPES, RENDER_LIMIT_BYTES, listWorkspaces, createWorkspace, getWorkspaceRow, loadSnapshotFresh, commitWorkspace,
-  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256,
+  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
 import { renderSiteAppendixPdf } from "./takeoffPdf.mjs";
@@ -213,6 +213,15 @@ function mount(app, P, adapter) {
     const suppliers = (data || []).map((s) => ({ id: s.id, name: s.name, contactName: s.contact_name ?? undefined, email: s.email ?? undefined, phone: s.phone ?? undefined }));
     const hint = suppliers.find((s) => s.name?.toLowerCase().startsWith(DEFAULT_SUPPLIER_NAME_HINT.toLowerCase()));
     return ok(res, { suppliers, defaultSupplierId: hint?.id || null });
+  }));
+
+  // HUB 008: office staff add a supplier without leaving the order — on the Hub AND in the Worker app (a login linked
+  // to an Admin / Supervisor account). Everyone else is refused here, not just hidden in the UI.
+  app.post(`${P}/suppliers`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await adapter.context(req, sb, null);
+    requireView(ctx);
+    if (ctx.caps.isPreview || req.workerPreview || !ctx.caps.addSuppliers) throw new TakeoffHttpError(403, "Only office staff can add suppliers.", "FORBIDDEN");
+    return ok(res, { supplier: await addSupplier(sb, req.body || {}) });
   }));
 
   app.get(`${P}/workspaces/:id/orders`, ...mw, gate, wrap(async (req, res, sb) => {

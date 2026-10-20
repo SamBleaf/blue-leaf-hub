@@ -1,6 +1,6 @@
 ---
-sop_version: 2.1
-last_reviewed: 2026-10-19
+sop_version: 2.2
+last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
 owner: Admin / Director
@@ -93,7 +93,7 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 
 1. **One order per section.** Orders opened from **Flashings** are flashing orders and only take flashing lengths. Orders opened from **Timber and cladding** take timber and cladding, shown in a **Timber** part and a **Cladding** part. Their PDF reads "TIMBER AND CLADDING ORDER" and prints the two parts in the same order. The system refuses a line from the other section. Migration 208 must be applied.
 2. **An accessory from another supplier** (its setup names a different supplier, e.g. fixings from Fielders when the order goes to Bunnings) is left off a new timber and cladding order. It is named under "Still needed but not on this order" ("— from Fielders: start a separate order for it"). If it is added anyway, the supplier export is blocked until it is moved.
-3. **Add supplier** (office staff: Admin / Supervisor) is next to the supplier list. Enter the name (contact, phone and email are optional) → **Save supplier**. It is selected straight away; then **Save order details**.
+3. **Add supplier** sits next to the supplier list for office staff: an Admin or Supervisor on the Hub, or in the Worker app a login linked to an Admin / Supervisor account (e.g. the director on his phone). Leading hands don't see it, and the server refuses it for them. Enter the name (contact, phone and email are optional) → **Save supplier**. It is selected straight away; then **Save order details**. Typing a name that is already on file selects that supplier instead of adding a copy ("… was already on file — it's now selected."). Suppliers can also be managed without a job at Operations › Procurement › **Suppliers** (`/operations/procurement`).
 4. **Site contact** starts as the person who created the order (their name and phone from their staff / employee record). Type over it if someone else will receive the delivery.
 5. **Needs attention:** a flashing line with a problem shows a button, e.g. "Needs attention — material details missing ›". Tap it:
    - a missing detail (finish, thickness, colour, perforation) opens that flashing's details, already at the missing field. **Close** brings you back to the same order and line. The order's lines for that flashing are updated to the fixed version. Then **Save order details**.
@@ -419,7 +419,9 @@ Next review date: 2027-04-14
 
 **TC-19 — Add supplier and site contact (HUB 008 / HUB 009)**
 1. As Admin in a draft, tap **Add supplier** → "Stratco Wingfield", phone "08 8000 1234" → **Save supplier**. Expected: it is selected; "Added Stratco Wingfield — save order details…".
-2. Live stack: a new order created by a staff user with a linked employee phone. Expected: **Site contact** and **Contact phone** are that person's.
+2. Worker app as an office login (UI Review: `/worker/takeoff/carpentry/cjb-1?section=flashings&takeoffWorker=office`) → **New order** → **Add supplier** → "Fielders Wingfield". Expected: selected; adding "other steel supplies" selects the existing "Other Steel Supplies" (no copy).
+3. Worker app as a plain leading hand (`/worker/takeoff/carpentry/cjb-1?section=flashings`). Expected: no **Add supplier**; a direct `POST /api/worker/takeoff/suppliers` returns 403.
+4. Live stack: a new order created by a staff user with a linked employee phone. Expected: **Site contact** and **Contact phone** are that person's.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

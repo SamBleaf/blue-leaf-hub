@@ -147,10 +147,12 @@ const status = () => [...orderStatus(computeWorkspace(snapshot()).scheduleLines,
 const caps = (worker) => {
   if (worker) {
     const ordinary = qs().get("takeoffWorker") === "ordinary";
-    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
+    // ?takeoffWorker=office — a Worker-app login linked to an Admin / Supervisor account (office staff on a phone)
+    const office = qs().get("takeoffWorker") === "office";
+    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, addSuppliers: office, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
   }
   const role = reviewRole();
-  return { view: true, edit: true, export: true, editStandards: true, placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
+  return { view: true, edit: true, export: true, editStandards: true, addSuppliers: role === "admin" || role === "supervisor", placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
 };
 const fail = (status, error, code) => ({ __status: status, body: { ok: false, error, code } });
 
@@ -318,14 +320,20 @@ if (SANDBOX && typeof window !== "undefined") {
 }
 
 function registerFakeTakeoffServer() {
-// HUB 008: the office adds a supplier from the order (the real endpoint is /api/procurement/suppliers)
-route("POST", "/api/procurement/suppliers", ({ bodyJson }) => {
-  const sup = { id: `sup-new-${(state.addedSuppliers || []).length + 1}`, name: bodyJson?.name, email: bodyJson?.email || null, phone: bodyJson?.phone || null };
-  state.addedSuppliers = [...(state.addedSuppliers || []), sup];
-  return { ok: true, supplier: sup };
-});
 for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     const worker = base.includes("worker");
+    // HUB 008: office staff add a supplier from the order (as the server: refused for everyone else; same name = reuse)
+    route("POST", `${base}/suppliers`, ({ bodyJson }) => {
+      if (!caps(worker).addSuppliers) return fail(403, "Only office staff can add suppliers.", "FORBIDDEN");
+      const name = String(bodyJson?.name || "").trim();
+      if (!name) return fail(400, "Enter the supplier's name.", "INVALID");
+      const known = [{ id: "sup-1", name: "Fielders (review branch)" }, { id: "sup-2", name: "Other Steel Supplies" }, ...(state.addedSuppliers || [])];
+      const same = known.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (same) return { ok: true, supplier: { ...same, existed: true } };
+      const sup = { id: `sup-new-${(state.addedSuppliers || []).length + 1}`, name, email: bodyJson?.email || null, phone: bodyJson?.phone || null };
+      state.addedSuppliers = [...(state.addedSuppliers || []), sup];
+      return { ok: true, supplier: { ...sup, existed: false } };
+    });
     route("GET", `${base}/capabilities`, () => ({ ok: true, enabled: true, capabilities: caps(worker) }));
     route("GET", `${base}/jobs/:jobType/:jobId`, ({ params }) => {
       if (worker && !caps(true).view) return fail(403, "Takeoffs are for leading hands and office staff.", "FORBIDDEN");
