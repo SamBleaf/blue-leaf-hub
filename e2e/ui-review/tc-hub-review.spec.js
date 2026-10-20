@@ -27,7 +27,7 @@ async function rowAction(page, name, action) {
 test("HUB 008: office staff add a supplier from the order and it is selected straight away", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: /Review & export order/ }).click();
-  if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
   await page.getByRole("button", { name: "Add supplier" }).click();
   const form = page.locator("[data-add-supplier]");
   await form.getByLabel("Supplier name").fill("Stratco Wingfield");
@@ -44,7 +44,7 @@ test("HUB 008: office staff on the Worker app (phone) can add a supplier from th
   await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings&takeoffWorker=office");
   await ready(page);
   await page.getByRole("button", { name: /Review & export order/ }).click();
-  await page.getByRole("button", { name: "New order" }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();
   await page.getByRole("button", { name: "Add supplier" }).click();
   const form = page.locator("[data-add-supplier]");
   await form.getByLabel("Supplier name").fill("Fielders Wingfield");
@@ -62,7 +62,7 @@ test("HUB 008: office staff on the Worker app (phone) can add a supplier from th
   await page.goto("/worker/takeoff/carpentry/cjb-1?section=flashings");
   await ready(page);
   await page.getByRole("button", { name: /Review & export order/ }).click();
-  if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
   await expect(page.locator("#ord-supplier")).toBeVisible();
   await expect(page.getByRole("button", { name: "Add supplier" })).toHaveCount(0);
   const refused = await page.evaluate(async () => (await fetch("/api/worker/takeoff/suppliers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Sneaky" }) })).status);
@@ -190,7 +190,8 @@ test("HUB 007: Flashings and Timber and cladding are separate orders — no line
   await open(page, { seed: "&takeoffSeed=mixed" });
   await page.getByRole("button", { name: /Review & export order/ }).click();
   await expect(page.getByRole("heading", { name: "Flashings orders" })).toBeVisible();
-  await page.getByRole("button", { name: "New order" }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // opened by itself (HUB 013)
+  await expect(page.getByRole("button", { name: "New order" })).toHaveCount(0);   // one open Flashings draft, never a duplicate
   await expect(page.getByText("Lengths on this order")).toBeVisible();
   await expect(page.locator("[data-order-part]")).toHaveCount(0);
   await expect(page.locator("[data-order-group]")).toHaveCount(0);
@@ -250,7 +251,7 @@ test("HUB 005: a new flashing orders in 300 mm steps", async ({ page }) => {
   await expect(page.getByLabel("Measured allowance", { exact: false }).first()).toHaveValue("200");
 });
 
-test("HUB 010: tapping a 'needs attention' line opens that flashing at the missing field; Close returns to the order, fixed", async ({ page }) => {
+test("HUB 010 / 013: a flashing that can't be ordered yet is named with a Fix button; Fix opens it at the missing field; Close returns to the order, brought up to date", async ({ page }) => {
   // the Barge flashing has lost its colour (seeded through the review API, as a real edit would)
   await page.goto("/carpentry/cjb-1?reviewRole=admin");
   await ready(page);
@@ -265,22 +266,84 @@ test("HUB 010: tapping a 'needs attention' line opens that flashing at the missi
   await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings"); window.dispatchEvent(new PopStateEvent("popstate")); });
   await ready(page);
   await page.getByRole("button", { name: /Review & export order/ }).click();
-  await page.getByRole("button", { name: "New order" }).click();
-  const fix = page.locator("[data-fix-line]").first();
-  await expect(fix).toHaveText("Needs attention — material details missing ›");
-  // the not-ready summary names the flashing and the length, and is tappable too
-  await expect(page.locator("[data-blockers] button").first()).toHaveText(/^Barge flashing · [\d,]+ mm — material details missing ›$/);
-  await fix.click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();
+  // HUB 013: a flashing that can't be ordered yet is left off the draft and named, with the reason and a Fix button
+  const off = page.locator("[data-off-flashing]").filter({ hasText: "Barge flashing" });
+  await expect(off).toContainText(/Barge flashing — \d+ pieces can't be ordered yet: material details missing/);
+  await expect(page.locator("[data-order-flashing]").filter({ hasText: "Barge flashing" })).toHaveCount(0);
+  await expect(page.getByTestId("order-reconcile")).toContainText(/not on this order [1-9]/);
+  await off.getByRole("button", { name: "Fix ›" }).click();
   await expect(page.getByText(/Fix this to clear the order warning — choose the colour/)).toBeVisible();
   const colour = page.locator("[data-needs-fix]");
   await expect(colour).toBeFocused();
   await colour.selectOption("Surfmist");
   await page.getByRole("button", { name: "Close" }).click();
-  // back on the same order: the line now uses the fixed flashing (save to keep it) and nothing needs attention
+  // back on the same order: brought up to date with the fixed flashing (saved), nothing left off, ready
   await expect(page.getByRole("heading", { name: "Flashings orders" })).toBeVisible();
-  await expect(page.locator("[data-fix-line]")).toHaveCount(0);
-  await expect(page.getByText(/Updated 3 lines to the fixed Barge flashing — save order details to keep them/)).toBeVisible();
-  await expect(page.getByTestId("stale-lines")).toHaveCount(0);
-  await page.getByRole("button", { name: "Save order details" }).click();
+  await expect(page.locator("[data-order-sync]")).toContainText(/Brought up to date with the takeoff: Barge flashing \+\d+/);
+  await expect(page.locator("[data-order-flashing]").filter({ hasText: "Barge flashing" })).toHaveCount(1);
+  await expect(page.locator("[data-off-flashing]")).toHaveCount(0);
   await expect(page.getByText(/^Ready: /)).toBeVisible();
+});
+
+test("HUB 013: Review & export opens the Flashings draft in step with the takeoff — grouped P1, P2 … like the PDF, no zero rows, reconciled", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await expect(page.getByText(/^Draft FO-/)).toBeVisible();
+  const groups = page.locator("[data-order-flashing]");
+  await expect(groups).toHaveCount(2);
+  await expect(groups.nth(0)).toContainText(/^P1 — Apron flashing/);
+  await expect(groups.nth(1)).toContainText(/^P2 — Barge flashing/);
+  // every length shown has a quantity — never a zero row
+  for (const v of await page.getByLabel("Qty").evaluateAll((els) => els.map((e) => Number(e.value)))) expect(v).toBeGreaterThan(0);
+  const rec = page.getByTestId("order-reconcile");
+  const takeoff = Number((await rec.textContent()).match(/Takeoff (\d+)/)[1]);
+  await expect(rec).toHaveText(`Takeoff ${takeoff} · on this order ${takeoff} · already ordered 0 · on other orders 0 · not on this order 0`);
+  await expect(page.locator("[data-off-flashing]")).toHaveCount(0);
+  // take the Barge flashing off: it is named as left off with an Add button; Add puts it back
+  await groups.nth(1).getByRole("button", { name: "Remove" }).click();
+  const off = page.locator("[data-off-flashing]").filter({ hasText: "Barge flashing" });
+  await expect(off).toContainText(/Barge flashing — \d+ pieces left off this order/);
+  await expect(rec).toContainText(/not on this order [1-9]/);
+  await off.getByRole("button", { name: "Add" }).click();
+  await expect(page.locator("[data-off-flashing]")).toHaveCount(0);
+  await expect(rec).toContainText(`on this order ${takeoff}`);
+});
+
+test("HUB 020: a draft is reopened and revised (same draft number, no copies); history opens or discards a draft", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  const title = page.getByRole("heading", { name: /^Draft FO-/ });
+  await expect(title).toBeVisible();
+  const ref = (await title.textContent()).replace("Draft ", "");
+  // remove the Barge flashing, save, leave and come back: the same draft, still without it (the user's choice is kept)
+  await page.locator("[data-order-flashing]").filter({ hasText: "Barge flashing" }).getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("button", { name: "Save order details" }).click();
+  await expect(page.getByRole("button", { name: "Save order details" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await expect(title).toHaveText(`Draft ${ref}`);
+  await expect(page.locator("[data-order-flashing]").filter({ hasText: "Barge flashing" })).toHaveCount(0);
+  await expect(page.locator("[data-off-flashing]").filter({ hasText: "Barge flashing" })).toContainText("left off this order");
+  await expect(page.getByRole("button", { name: "New order" })).toHaveCount(0);   // one open Flashings draft
+  // an older draft (e.g. from before the fix) shows in Order history: Open draft opens that same draft; Discard removes it
+  const other = await page.evaluate(async () => {
+    const r = await fetch("/api/takeoff/workspaces/ws-1/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "ord-old", category: "flashings", delivery: { method: "pickup" } }) });
+    return (await r.json()).order.orderRef;
+  });
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await expect(title).toHaveText(`Draft ${other}`);   // the newest unsent draft opens, brought up to date
+  const hist = page.locator("section").filter({ has: page.getByRole("heading", { name: "Order history" }) });
+  const card = hist.locator("div.rounded-card").filter({ hasText: ref });
+  await expect(card).toContainText("Draft");
+  await card.getByRole("button", { name: "Open draft" }).click();
+  await expect(title).toHaveText(`Draft ${ref}`);
+  await expect(page.locator("[data-order-flashing]").filter({ hasText: "Barge flashing" })).toHaveCount(0);   // still as Sam left it
+  page.once("dialog", (d) => d.accept());
+  await hist.locator("div.rounded-card").filter({ hasText: other }).getByRole("button", { name: "Discard draft" }).click();
+  // a discarded draft with no PDFs leaves nothing to keep, so it drops out of the history (one with PDFs stays, as "Discarded")
+  await expect(hist.locator("div.rounded-card").filter({ hasText: other })).toHaveCount(0);
+  const after = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.map((o) => `${o.orderRef}:${o.status}`));
+  expect(after).toContain(`${other}:cancelled`);
 });

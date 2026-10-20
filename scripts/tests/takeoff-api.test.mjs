@@ -913,6 +913,72 @@ await t("HUB 008: office staff add a supplier from the order on the Hub AND in t
   } finally { await q("UPDATE employees SET user_id=NULL WHERE id=$1", [E.lh]); }
 });
 
+await t("HUB 013 / HUB 020: Review & export opens ONE flashing draft in step with the takeoff; an old 34-piece draft comes up to 79; reopening writes nothing; discard; placed is locked", async () => {
+  const w = id(); const M = { pb: id(), ax: id(), co: id(), he: id() };
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB013" });
+  const names = { pb: "Cladding perforated bottom flashing", ax: "Axon starter flashing", co: "Corner flashing", he: "Head flashing" };
+  const colours = { pb: "Monument", ax: "Surfmist", co: "Basalt", he: "Woodland Grey" };
+  const runs = [["pb", 3000, 16], ["ax", 2400, 20], ["ax", 1200, 3], ["co", 2700, 29], ["he", 1800, 11]];
+  const ms = runs.map(() => id()), cs = runs.map(() => id());
+  let r = await SP(`/workspaces/${w}/commit`, { expectedRevision: 1, changes: {
+    materials: { upsert: Object.keys(M).map((k) => ({ id: M[k], name: names[k], methodKey: "flashing_runs", methodVersion: 1, rules: {}, spec: { ...spec, colour: colours[k] }, profile })) },
+    measurements: { upsert: runs.map(([, len, n], i) => ({ id: ms[i], kind: "manual", finishedLengthMm: len, quantity: n })) },
+    contributions: { upsert: runs.map(([k], i) => ({ id: cs[i], measurementId: ms[i], jobMaterialId: M[k] })) } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines;
+  const key = (k, len) => sched.find((l) => l.jobMaterialIds[0] === M[k] && l.finishedLengthMm === len).bucketKey;
+  const total = (o) => o.lines.reduce((a, l) => a + l.quantity, 0);
+  // the old draft, made when the takeoff had fewer flashings: Axon 5 + Corner 29 = 34
+  const old = id();
+  const o1 = await SP(`/workspaces/${w}/orders`, { category: "flashings", id: old, delivery: { method: "pickup" } });
+  r = await call("PATCH", `/api/takeoff/orders/${old}`, { body: { expectedRevision: o1.data.order.revision, lines: [{ bucketKey: key("ax", 2400), quantity: 5 }, { bucketKey: key("co", 2700), quantity: 29 }] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // Review & export: the same draft, brought up to 79 (16 / 23 / 29 / 11), naming what changed
+  const open1 = await SP(`/workspaces/${w}/orders/open`, { section: "flashings", newId: id() });
+  assert.equal(open1.status, 200, JSON.stringify(open1.data));
+  assert.equal(open1.data.order.id, old); assert.equal(open1.data.created, false);
+  assert.equal(total(open1.data.order), 79);
+  assert.deepEqual(open1.data.changes.map((c) => c.materialName).sort(), ["Axon starter flashing", "Cladding perforated bottom flashing", "Head flashing"]);
+  assert.equal(open1.data.order.delivery.basis, undefined);   // the refresh record never reaches the app
+  // opening again: the same draft and revision, nothing written; the Worker app opens the same one
+  const open2 = await SP(`/workspaces/${w}/orders/open`, { section: "flashings", newId: id() });
+  assert.equal(open2.data.order.id, old); assert.equal(open2.data.order.revision, open1.data.order.revision); assert.deepEqual(open2.data.changes, []);
+  const wOpen = await WP(`/workspaces/${w}/orders/open`, { section: "flashings", newId: id() }, { worker: "wt-lh" });
+  assert.equal(wOpen.status, 200, JSON.stringify(wOpen.data)); assert.equal(wOpen.data.order.id, old);
+  // the supplier PDF numbers the flashings exactly as the screen does, and adds to 79; the refresh record is not frozen
+  const prev = await S(`/orders/${old}/preview`);
+  assert.deepEqual(prev.data.preview.snapshot.groups.map((g) => `${g.profileId} ${g.materialName} ${g.pieces}`),
+    ["P1 Axon starter flashing 23", "P2 Cladding perforated bottom flashing 16", "P3 Corner flashing 29", "P4 Head flashing 11"]);
+  assert.equal(prev.data.preview.snapshot.totals.pieces, 79);
+  assert.equal(JSON.stringify(prev.data.preview.snapshot).includes("basis"), false);
+  // HUB 020: take Head off and save; reopen by id: same draft number, Head stays off (the user's choice), takeoff untouched
+  const wsRev = (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const withoutHead = open2.data.order.lines.filter((l) => l.jobMaterialId !== M.he).map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity, jobMaterialId: l.jobMaterialId }));
+  r = await call("PATCH", `/api/takeoff/orders/${old}`, { body: { expectedRevision: open2.data.order.revision, lines: withoutHead, delivery: { method: "pickup", pickupBranch: "Wingfield" } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const open3 = await SP(`/workspaces/${w}/orders/open`, { section: "flashings", orderId: old, newId: id() });
+  assert.equal(open3.data.order.orderRef, open1.data.order.orderRef); assert.equal(total(open3.data.order), 68); assert.deepEqual(open3.data.changes, []);
+  assert.equal(open3.data.order.delivery.pickupBranch, "Wingfield");
+  assert.equal((await S(`/workspaces/${w}`)).data.snapshot.workspace.revision, wsRev);
+  assert.equal((await S(`/workspaces/${w}/orders`)).data.orders.filter((o) => o.status === "draft").length, 1);
+  // put Head back by hand (the screen's Add): it is followed again from then on
+  r = await call("PATCH", `/api/takeoff/orders/${old}`, { body: { expectedRevision: open3.data.order.revision, lines: [...withoutHead, { bucketKey: key("he", 1800), quantity: 11 }] } });
+  assert.equal((await SP(`/workspaces/${w}/orders/open`, { section: "flashings", orderId: old })).data.order.lines.reduce((a, l) => a + l.quantity, 0), 79);
+  // another draft can be discarded (a stale revision is refused); a discarded draft can't be edited or reopened
+  const second = id();
+  const o2 = await SP(`/workspaces/${w}/orders`, { category: "flashings", id: second, delivery: { method: "pickup" } });
+  assert.equal((await SP(`/orders/${second}/discard`, { expectedRevision: o2.data.order.revision + 5 })).status, 409);
+  const disc = await SP(`/orders/${second}/discard`, { expectedRevision: o2.data.order.revision });
+  assert.equal(disc.status, 200, JSON.stringify(disc.data));
+  assert.equal((await S(`/workspaces/${w}/orders`)).data.orders.find((o) => o.id === second).status, "cancelled");
+  assert.equal((await call("PATCH", `/api/takeoff/orders/${second}`, { body: { expectedRevision: o2.data.order.revision + 1, lines: [] } })).status, 400);
+  assert.equal((await SP(`/workspaces/${w}/orders/open`, { section: "flashings", orderId: second })).status, 400);
+  // a placed order is locked: it can't be reopened for editing
+  await q("UPDATE takeoff_orders SET status='placed' WHERE id=$1", [old]);
+  const locked = await SP(`/workspaces/${w}/orders/open`, { section: "flashings", orderId: old });
+  assert.equal(locked.status, 400); assert.match(locked.data.error, /Placed orders are locked/);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

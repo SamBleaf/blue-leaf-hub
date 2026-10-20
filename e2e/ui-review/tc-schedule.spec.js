@@ -454,7 +454,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Back" }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
-    await page.getByRole("button", { name: "New order" }).tap();
+    await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
     await expect(page.getByText(/^Ready: /)).toBeVisible();
     const qty = page.getByLabel("Qty").first();
     const was = await qty.inputValue();
@@ -561,7 +561,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Back" }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
-    await page.getByRole("button", { name: "New order" }).tap();
+    await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
     await expect(page.getByText(/^Ready: /)).toBeVisible();
     await page.getByRole("button", { name: "Export supplier PDF" }).tap();
     await expect(page.getByText(/Export 1 is frozen/)).toBeVisible();
@@ -820,7 +820,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(page.getByLabel("Notes for supplier")).toHaveValue("Leave at the gate");
     await expect(page.getByRole("button", { name: "Export supplier PDF" })).toBeDisabled();   // still unsaved
     await page.screenshot({ path: `${SHOTS}/order-draft-restored-390x844.png` });
-    await page.getByRole("button", { name: "Discard" }).tap();
+    await page.getByRole("button", { name: "Discard", exact: true }).tap();
     await expect(sheets).toHaveValue("4");
     await expect(page.getByLabel("Notes for supplier")).toHaveValue("");
     await expect(page.getByTestId("order-draft-restored")).toHaveCount(0);
@@ -868,7 +868,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Back" }).tap();
     await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
-    await page.getByRole("button", { name: "New order" }).tap();
+    await expect(page.getByText(/^Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
     const qty = page.getByLabel("Qty").last();
     await qty.evaluate((el) => el.scrollIntoView({ block: "end" }));
     await qty.focus();

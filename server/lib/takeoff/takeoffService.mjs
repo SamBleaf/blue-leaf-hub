@@ -17,6 +17,7 @@ import {
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
   normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm, ITEM_STALE_TEXT,
   SECTION_VALUES, SECTION_LABEL, GROUP_LABEL, materialGroup, materialSection, accessorySupplierConflict,
+  SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, DEFAULT_SUPPLIER_NAME_HINT,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
@@ -640,7 +641,7 @@ export async function savePreset(sb, ctx, body) {
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 const mapOrder = (r) => ({
-  id: r.id, workspaceId: r.workspace_id, orderRef: r.order_ref, supplierId: r.supplier_id, delivery: r.delivery || {}, notes: r.notes,
+  id: r.id, workspaceId: r.workspace_id, orderRef: r.order_ref, supplierId: r.supplier_id, delivery: withoutBasis(r.delivery), notes: r.notes,
   category: r.category || null, status: r.status, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 const mapLine = (r) => ({ id: r.id, bucketKey: r.bucket_key, specKey: r.spec_key, jobMaterialId: r.job_material_id, finishedLengthMm: r.finished_length_mm, quantity: r.quantity,
@@ -805,7 +806,7 @@ export function cleanDelivery(d) {
   };
 }
 
-export async function saveOrder(sb, ctx, orderRow, body) {
+export async function saveOrder(sb, ctx, orderRow, body, opts = {}) {
   const expected = Number(body?.expectedRevision);
   must(Number.isInteger(expected), "Missing order revision.");
   const fields = {};
@@ -813,7 +814,10 @@ export async function saveOrder(sb, ctx, orderRow, body) {
     if (body.supplierId) await requireSupplier(sb, body.supplierId);
     fields.supplierId = body.supplierId || null;
   }
-  if (body.delivery !== undefined) fields.delivery = cleanDelivery(body.delivery);
+  // HUB 013: the refresh basis is server-kept inside delivery — a client save keeps it, opening the draft rewrites it
+  const keptBasis = opts.basis !== undefined ? opts.basis : orderRow.delivery?.basis;
+  if (body.delivery !== undefined) fields.delivery = { ...cleanDelivery(body.delivery), ...(keptBasis ? { basis: keptBasis } : {}) };
+  else if (opts.basis !== undefined) fields.delivery = { ...cleanDelivery(orderRow.delivery), basis: opts.basis };
   if (body.notes !== undefined) fields.notes = optStr(body.notes, 1000);
   let lines = null;
   if (Array.isArray(body.lines)) {
@@ -853,6 +857,78 @@ export async function saveOrder(sb, ctx, orderRow, body) {
   const { data, error } = await sb.rpc("takeoff_save_order", { p_order_id: orderRow.id, p_expected_revision: expected, p_fields: fields, p_lines: lines });
   if (error) throw error;
   return data;
+}
+
+/**
+ * HUB 013 / HUB 020: the order a section's "Review & export" opens. Picks `orderId` (a draft of this section), else the
+ * newest draft whose supplier PDF hasn't gone out, else the newest draft. For Flashings it brings an unsent draft in
+ * step with the takeoff (refreshDraftLines), or creates one when there is no draft at all and something is needed.
+ * A draft whose supplier PDF was exported is opened untouched (changes show as "needs updating") and no second order
+ * is started behind the user — they choose New order. Placed / cancelled orders can't be reopened.
+ * @returns {{ order: object|null, created: boolean, changes: Array<{materialName:string, from:number, to:number}> }}
+ */
+export async function openWorkingOrder(sb, ctx, body, { jobAddress = null } = {}) {
+  const section = body?.section;
+  must(SECTION_VALUES.includes(section), "Choose Flashings or Timber and cladding.");
+  const wsId = ctx.ws.id;
+  const { snapshot } = await loadSnapshotFresh(sb, wsId);
+  const mats = new Map(snapshot.materials.map((m) => [m.id, m]));
+  const all = await listOrders(sb, wsId);
+  const sectionOf = (o) => o.category || (o.lines.length ? lineSection(o.lines[0], mats) : SECTIONS.FLASHINGS);
+  const mine = all.filter((o) => sectionOf(o) === section);
+  const drafts = mine.filter((o) => o.status === "draft");
+  const sent = (o) => o.exports.some((e) => !e.isDraft);
+  const newest = (list) => list.reduce((a, o) => (!a || o.createdAt > a.createdAt ? o : a), null);
+  let order = null;
+  if (body.orderId) {
+    order = mine.find((o) => o.id === body.orderId) || null;
+    if (!order) throw new TakeoffHttpError(404, "Order not found.", "NOT_FOUND");
+    if (order.status !== "draft") throw bad(order.status === "placed" ? "Placed orders are locked — start a new order for more pieces." : "That draft was discarded — start a new order.");
+  } else order = newest(drafts.filter((o) => !sent(o))) || newest(drafts);   // a sent draft is opened as it is — never a quiet second order
+  if (section !== SECTIONS.FLASHINGS) return { order: order || newest(drafts), created: false, changes: [] };
+  const { computed, status } = await scheduleStatus(sb, snapshot);
+  const statusMap = new Map(status.map((x) => [x.bucketKey, x]));
+  const needsFor = async (excludeId) => flashingNeeds({ scheduleLines: computed.scheduleLines, status: statusMap, cover: await otherOrderCover(sb, wsId, excludeId),
+    unplacedSpecKeys: new Set((computed.unplaced || []).map((u) => u.specKey).filter(Boolean)) });
+  let created = false;
+  if (!order) {
+    const needs = await needsFor(null);
+    if (!needs.some((n) => n.reason === null && n.need > 0)) return { order: newest(drafts), created: false, changes: [] };
+    const sups = await q(sb.from("suppliers").select("id, name").eq("is_active", true).order("name", { ascending: true }));
+    const hint = sups.find((x) => x.name?.toLowerCase().startsWith(DEFAULT_SUPPLIER_NAME_HINT.toLowerCase()));
+    const fresh = await createOrder(sb, ctx, { id: body.newId, category: section, supplierId: hint?.id || null,
+      delivery: { method: "delivery", address: jobAddress || "", addressSource: jobAddress ? "job" : null } });
+    order = { ...fresh, lines: [], exports: [], placements: [] };
+    created = true;
+  }
+  if (sent(order)) return { order, created, changes: [] };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const row = await getOrderRow(sb, order.id);
+    const r = refreshDraftLines({ lines: order.lines, basis: row.delivery?.basis ?? null, needs: await needsFor(order.id) });
+    if (!r.changed) break;
+    try {
+      await saveOrder(sb, ctx, row, { expectedRevision: row.revision, lines: r.lines }, { basis: r.basis });
+      const named = new Map();
+      for (const c of r.changes) { const n = mats.get(c.materialId)?.name || "A flashing"; const e = named.get(n) || { materialName: n, from: 0, to: 0 }; e.from += c.from; e.to += c.to; named.set(n, e); }
+      return { order: (await listOrders(sb, wsId)).find((o) => o.id === order.id), created, changes: [...named.values()] };
+    } catch (e) {
+      if (attempt || !/changed|revision|CONFLICT/i.test(`${e?.code || ""} ${e?.message || ""}`)) throw e;
+      order = (await listOrders(sb, wsId)).find((o) => o.id === order.id);   // someone saved it meanwhile: refresh against theirs once
+    }
+  }
+  return { order: (await listOrders(sb, wsId)).find((o) => o.id === order.id), created, changes: [] };
+}
+
+/** HUB 020: discard a draft (status cancelled, nothing placed). Its frozen exports stay as history. */
+export async function discardDraft(sb, ctx, orderRow, body) {
+  const expected = Number(body?.expectedRevision);
+  must(Number.isInteger(expected), "Missing order revision.");
+  if (orderRow.status !== "draft") throw bad("Only a draft can be discarded — placed orders are locked.");
+  const { data, error } = await sb.from("takeoff_orders").update({ status: "cancelled", revision: orderRow.revision + 1, updated_at: new Date().toISOString() })
+    .eq("id", orderRow.id).eq("status", "draft").eq("revision", expected).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new TakeoffHttpError(409, "This draft changed on another device — reload and try again.", "CONFLICT");
+  return { orderId: orderRow.id, status: "cancelled" };
 }
 
 // ── Export snapshot + readiness ───────────────────────────────────────────────
@@ -933,7 +1009,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   // measurements of these materials that produced no pieces = unknown quantity → not ready (R04b R1)
   const specs = new Set([...groups.keys()]);
   for (const u of computed.unplaced || []) if (u.specKey && specs.has(u.specKey)) problems.push(`A measurement couldn't be turned into lengths (${(u.problems || []).map((p) => PROBLEM_TEXT[p] || p).join(" ")}) — fix or remove it.`);
-  const groupList = [...groups.values()].sort((a, b) => a.materialName.localeCompare(b.materialName) || (a.specKey < b.specKey ? -1 : 1)).map((g, i) => {
+  const groupList = [...groups.values()].sort(compareFlashingGroups).map((g, i) => {   // same P-numbering as the order screen (HUB 013)
     for (const p of g.materialProblems) problems.push(`${g.materialName} — ${PROBLEM_TEXT[p] || p}`);
     g.lines.sort((a, b) => b.finishedLengthMm - a.finishedLengthMm);
     const totalMm = g.lines.reduce((a, l) => a + l.finishedLengthMm * l.quantity, 0);

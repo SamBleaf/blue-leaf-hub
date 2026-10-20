@@ -20,7 +20,7 @@ import {
 } from "./takeoffAccess.mjs";
 import {
   PLAN_DOC_TYPES, RENDER_LIMIT_BYTES, listWorkspaces, createWorkspace, getWorkspaceRow, loadSnapshotFresh, commitWorkspace,
-  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier,
+  listOwnerPlans, listPresets, savePreset, listOrders, createOrder, saveOrder, getOrderRow, scheduleStatus, otherOrderCover, sha256, addSupplier, openWorkingOrder, discardDraft,
 } from "./takeoffService.mjs";
 import { cancelPlacement, createExport, exportPdfBytes, finishArtifact, placeOrder, previewExport } from "./takeoffExport.mjs";
 import { renderSiteAppendixPdf } from "./takeoffPdf.mjs";
@@ -240,6 +240,22 @@ function mount(app, P, adapter) {
     requireEdit(req, ctx);
     if (!ctx.caps.export) throw new TakeoffHttpError(403, "You can't prepare orders.", "FORBIDDEN");
     return ok(res, { order: await createOrder(sb, ctx, req.body || {}) });
+  }));
+
+  // HUB 013 / HUB 020: the draft "Review & export" opens — in step with the takeoff (Flashings), never a duplicate
+  app.post(`${P}/workspaces/:id/orders/open`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await wsCtx(req, sb, req.params.id);
+    requireEdit(req, ctx);
+    if (!ctx.caps.export) throw new TakeoffHttpError(403, "You can't prepare orders.", "FORBIDDEN");
+    const r = await openWorkingOrder(sb, ctx, req.body || {}, { jobAddress: await ownerAddress(sb, ctx.owner) });
+    return ok(res, { order: r.order, created: r.created, changes: r.changes });
+  }));
+
+  app.post(`${P}/orders/:orderId/discard`, ...mw, gate, wrap(async (req, res, sb) => {
+    const ctx = await orderCtx(req, sb, req.params.orderId);
+    requireEdit(req, ctx);
+    if (!ctx.caps.export) throw new TakeoffHttpError(403, "You can't prepare orders.", "FORBIDDEN");
+    return ok(res, { result: await discardDraft(sb, ctx, ctx.orderRow, req.body || {}) });
   }));
 
   app.patch(`${P}/orders/:orderId`, ...mw, gate, wrap(async (req, res, sb) => {

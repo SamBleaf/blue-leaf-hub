@@ -21,7 +21,7 @@ import { reviewRole } from "../config.js";
 import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
-  SECTION_VALUES, SECTION_LABEL, materialSection,
+  SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
@@ -144,6 +144,8 @@ seed();
 
 const snapshot = () => ({ workspace: { ...state.workspace, revision: state.revision }, documents: state.documents, calibrations: state.calibrations, measurements: state.measurements, materials: state.materials, contributions: state.contributions });
 const status = () => [...orderStatus(computeWorkspace(snapshot()).scheduleLines, state.commitments).values()];
+/** an order as the API shows it — the server-kept refresh basis never leaves the server (HUB 013) */
+const publicOrder = (o) => { if (!o) return null; const { basis: _basis, ...rest } = o; void _basis; return rest; };
 const caps = (worker) => {
   if (worker) {
     const ordinary = qs().get("takeoffWorker") === "ordinary";
@@ -358,7 +360,65 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
         for (const l of o.lines) { const c = cover.get(l.bucketKey) || { n: 0, refs: [] }; c.n += l.quantity; if (!c.refs.includes(o.orderRef)) c.refs.push(o.orderRef); cover.set(l.bucketKey, c); }
       }
       const orderStatusWithCover = status().map((x) => ({ ...x, onExportedOrders: cover.get(x.bucketKey)?.n || 0, exportedRefs: cover.get(x.bucketKey)?.refs || [] }));
-      return { ok: true, orders: state.orders, orderStatus: orderStatusWithCover, scheduleLines: computeWorkspace(snapshot()).scheduleLines, workspaceRevision: state.revision };
+      return { ok: true, orders: state.orders.map(publicOrder), orderStatus: orderStatusWithCover, scheduleLines: computeWorkspace(snapshot()).scheduleLines, workspaceRevision: state.revision };
+    });
+    // HUB 013 / HUB 020 (as the server's openWorkingOrder): the section's working draft — Flashings created or brought up
+    // to date with the takeoff (shared refreshDraftLines rules); a draft whose supplier PDF went out is never changed
+    route("POST", `${base}/workspaces/:id/orders/open`, ({ bodyJson }) => {
+      const section = bodyJson?.section;
+      if (!SECTION_VALUES.includes(section)) return fail(400, "Choose Flashings or Timber and cladding.", "INVALID");
+      const mats = new Map(state.materials.map((m) => [m.id, m]));
+      const mine = state.orders.filter((o) => (o.category || (o.lines.length ? lineSection(o.lines[0], mats) : "flashings")) === section);
+      const sent = (o) => o.exports.some((e) => !e.isDraft);
+      const newest = (list) => list[list.length - 1] || null;
+      let order = null;
+      if (bodyJson.orderId) {
+        order = mine.find((o) => o.id === bodyJson.orderId) || null;
+        if (!order) return fail(404, "Order not found.", "NOT_FOUND");
+        if (order.status !== "draft") return fail(400, order.status === "placed" ? "Placed orders are locked — start a new order for more pieces." : "That draft was discarded — start a new order.", "INVALID");
+      } else order = newest(mine.filter((o) => o.status === "draft" && !sent(o))) || newest(mine.filter((o) => o.status === "draft"));
+      if (section !== "flashings") return { ok: true, order: publicOrder(order || newest(mine.filter((o) => o.status === "draft"))), created: false, changes: [] };
+      const comp = computeWorkspace(snapshot());
+      const st = new Map(status().map((x) => [x.bucketKey, x]));
+      const needsFor = (exclude) => {
+        const cover = new Map();
+        for (const o of state.orders) {
+          if (o.id === exclude || o.status !== "draft" || !sent(o)) continue;
+          for (const l of o.lines) { const c = cover.get(l.bucketKey) || { exported: 0, placed: 0, refs: [] }; c.exported += l.quantity; if (!c.refs.includes(o.orderRef)) c.refs.push(o.orderRef); cover.set(l.bucketKey, c); }
+        }
+        return flashingNeeds({ scheduleLines: comp.scheduleLines, status: st, cover });
+      };
+      let created = false;
+      if (!order) {
+        if (!needsFor(null).some((n) => n.reason === null && n.need > 0)) return { ok: true, order: publicOrder(newest(mine.filter((o) => o.status === "draft"))), created: false, changes: [] };
+        order = { id: bodyJson.newId || `ord-${state.orders.length + 1}`, workspaceId: "ws-1", orderRef: `FO-00${1000 + state.orders.length + 1}`, supplierId: "sup-1",
+          delivery: { method: "delivery", address: "1 Example Street, Testville SA", addressSource: "job" }, notes: null, category: section, status: "draft", revision: 1, lines: [], exports: [], placements: [], createdAt: now() };
+        state.orders.push(order);
+        created = true;
+      }
+      if (sent(order)) return { ok: true, order: publicOrder(order), created, changes: [] };
+      const r = refreshDraftLines({ lines: order.lines, basis: order.basis ?? null, needs: needsFor(order.id) });
+      if (!r.changed) return { ok: true, order: publicOrder(order), created, changes: [] };
+      const byKey = new Map(comp.scheduleLines.map((l) => [l.bucketKey, l]));
+      order.lines = r.lines.map((l) => {
+        const keep = order.lines.find((x) => x.bucketKey === l.bucketKey);
+        if (keep) return { ...keep, quantity: l.quantity };
+        const sl = byKey.get(l.bucketKey);
+        return { bucketKey: sl.bucketKey, specKey: sl.specKey, jobMaterialId: l.jobMaterialId || sl.jobMaterialIds[0], finishedLengthMm: sl.finishedLengthMm ?? null, quantity: l.quantity, unit: sl.unit || "piece", item: sl.item || null };
+      });
+      order.basis = r.basis;
+      order.revision += 1;
+      const named = new Map();
+      for (const c of r.changes) { const n = mats.get(c.materialId)?.name || "A flashing"; const e = named.get(n) || { materialName: n, from: 0, to: 0 }; e.from += c.from; e.to += c.to; named.set(n, e); }
+      return { ok: true, order: publicOrder(order), created, changes: [...named.values()] };
+    });
+    route("POST", `${base}/orders/:orderId/discard`, ({ params, bodyJson }) => {
+      const o = state.orders.find((x) => x.id === params.orderId);
+      if (!o) return fail(404, "Order not found.", "NOT_FOUND");
+      if (o.status !== "draft") return fail(400, "Only a draft can be discarded — placed orders are locked.", "INVALID");
+      if (bodyJson?.expectedRevision !== o.revision) return fail(409, "This draft changed on another device — reload and try again.", "CONFLICT");
+      o.status = "cancelled"; o.revision += 1;
+      return { ok: true, result: { orderId: o.id, status: "cancelled" } };
     });
     route("POST", `${base}/workspaces/:id/orders`, ({ bodyJson }) => {
       const o = { id: bodyJson.id, workspaceId: "ws-1", orderRef: `FO-00${1000 + state.orders.length + 1}`, supplierId: bodyJson.supplierId, delivery: bodyJson.delivery || {}, notes: null, category: bodyJson.category || null, status: "draft", revision: 1, lines: [], exports: [], placements: [], createdAt: now() };

@@ -163,18 +163,28 @@ test.describe("journeys", () => {
     await expect(page.getByText(/Tap the other end/)).toBeVisible();  // the hold placed the first point
   });
 
-  test("R04 A08 a saved order line whose material changes shows as stale and blocks the supplier PDF until updated", async ({ page }) => {
+  test("R04 A08 / HUB 013: an unsent draft follows a material change; once its supplier PDF is exported, a changed line is stale and blocks the next supplier PDF until updated", async ({ page }) => {
     await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
+    const recolour = async (colour) => {
+      await page.getByRole("button", { name: "Back" }).click();
+      await (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: "Details" }).click();
+      await page.getByLabel("Colour", { exact: true }).selectOption(colour);
+      await page.waitForTimeout(1200);
+      await page.getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: /Review & export order/ }).click();
+    };
     await page.getByRole("button", { name: /Review & export order/ }).click();
-    if (await page.getByRole("button", { name: "New order" }).isVisible()) await page.getByRole("button", { name: "New order" }).click();
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).click();
-    await (await openRow(page.locator("[data-material-row]").first())).getByRole("button", { name: "Details" }).click();
-    await page.getByLabel("Colour", { exact: true }).selectOption("Basalt");
-    await page.waitForTimeout(1200);
-    await page.getByRole("button", { name: "Close" }).click();
-    await page.getByRole("button", { name: /Review & export order/ }).click();
+    // not sent yet: the draft simply follows the takeoff (HUB 013) — no stale lines to sort out
+    await recolour("Basalt");
+    await expect(page.locator("[data-order-sync]")).toContainText("Brought up to date with the takeoff");
+    await expect(page.getByTestId("stale-lines")).toHaveCount(0);
+    // once the supplier PDF has gone out, the order is never changed behind the user: a change shows as stale
+    await expect(page.getByText(/^Ready: /)).toBeVisible();
+    await page.getByRole("button", { name: "Export supplier PDF" }).click();
+    await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible();
+    await recolour("Monument");
     await expect(page.getByTestId("stale-lines")).toBeVisible();
     await expect(page.getByRole("button", { name: "Export supplier PDF" })).toBeDisabled();
     await page.screenshot({ path: `${SHOTS}/stale-order-line-390x844.png`, fullPage: true });
@@ -210,8 +220,7 @@ test.describe("journeys", () => {
     await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=flashings");
     await ready(page);
     await page.getByRole("button", { name: /Review & export order/ }).click();
-    await page.getByRole("button", { name: "New order" }).click();
-    await expect(page.getByText(/Draft FO-/)).toBeVisible();
+    await expect(page.getByText(/Draft FO-/)).toBeVisible();   // HUB 013: the Flashings draft opens by itself
     await expect(page.getByText(/^Ready: \d+ pieces/)).toBeVisible();
     await page.getByRole("button", { name: "Export draft PDF" }).click();
     await expect(page.getByText(/Export 1 \(draft\) is frozen\. Nothing has been sent\./)).toBeVisible();

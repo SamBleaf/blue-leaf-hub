@@ -15,7 +15,7 @@
 // =============================================================================
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { GROUP_LABEL, ITEM_STALE_TEXT, accessorySupplierConflict, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
+import { GROUP_LABEL, ITEM_STALE_TEXT, accessorySupplierConflict, flashingOrderGroups, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { AccessoryScopeReview, StatusChips } from "./ScheduleScreen.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -115,9 +115,41 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
   // older orders have no category: they show in the section of their lines
   const sectionOrders = (data?.orders || []).filter((o) => (o.category || (o.lines?.length ? lineSection(o.lines[0], mats) : SECTIONS.FLASHINGS)) === section);
   const drafts = sectionOrders.filter((o) => o.status === "draft");
-  const active = drafts.find((o) => o.id === activeId) || drafts[0] || null;
+  // the newest draft when none is picked (listOrders is oldest-first) — never a stale old one (HUB 013)
+  const active = drafts.find((o) => o.id === activeId) || drafts[drafts.length - 1] || null;
+  const sent = (o) => (o.exports || []).some((e) => !e.isDraft);
+  // HUB 013 / HUB 020: Review & export opens the section's working draft — for Flashings created or brought up to date
+  // with the takeoff on the server (lines nobody changed follow the takeoff; changed ones keep their number)
+  const canOpen = !!caps.export && typeof api.openOrder === "function";
+  const [opened, setOpened] = useState(!canOpen);
+  const [syncNote, setSyncNote] = useState(null);
+  const openWorking = useCallback(async (orderId) => {
+    const r = await api.openOrder(wsId, { section, orderId: orderId || undefined, newId: newId() });
+    if (!r.ok) { setMsg(friendly(r)); return false; }
+    if (r.data.order) setActiveId(r.data.order.id);
+    const ch = r.data.changes || [];
+    setSyncNote(r.data.created ? "Started a new order with everything the takeoff still needs."
+      : ch.length ? `Brought up to date with the takeoff: ${ch.map((c) => `${c.materialName} ${c.to - c.from > 0 ? "+" : ""}${c.to - c.from}`).join(", ")}.` : null);
+    return true;
+  }, [api, wsId, section]);
+  const openStarted = useRef(false);
+  useEffect(() => {
+    if (opened || openStarted.current || ws.dirty || !wsId) return;
+    openStarted.current = true;   // once per visit; the screen shows "loading" until the working draft is in place
+    openWorking(focus?.orderId).then(load).then(() => setOpened(true));
+  }, [opened, ws.dirty, wsId, openWorking, focus?.orderId, load]);
+  async function reopen(orderId) { setMsg(null); setBusy(true); await openWorking(orderId); await load(); setBusy(false); }
+  async function discard(order) {
+    const sentNote = sent(order) ? " Its supplier PDF stays in the history but won't count as ordered any more." : "";
+    if (!window.confirm(`Discard draft ${order.orderRef}? It can't be reopened.${sentNote}`)) return;
+    const r = await api.discardOrder(order.id, { expectedRevision: order.revision });
+    if (!r.ok) { setMsg(friendly(r)); return; }
+    if (order.id === active?.id) setActiveId(null);
+    await load();
+  }
 
   async function newOrder() {
+    if (section === SECTIONS.FLASHINGS && canOpen) { setMsg(null); setBusy(true); await openWorking(null); await load(); setBusy(false); return; }
     setBusy(true); setMsg(null);
     const r = await api.createOrder(wsId, { id: newId(), category: section, supplierId: suppliers?.defaultSupplierId || null, delivery: { method: "delivery", address: jobAddress || "", addressSource: jobAddress ? "job" : null } });
     if (!r.ok) { setMsg(friendly(r)); setBusy(false); return; }
@@ -139,18 +171,21 @@ export default function OrdersScreen({ api, ws, jobAddress, onBack, deviceDrafts
       <div className="flex items-center gap-2">
         {onBack && <Btn kind="ghost" onClick={onBack}>‹ Back</Btn>}
         <h2 className="flex-1 text-base font-semibold text-ink">{SECTION_LABEL[section]} orders</h2>
-        {caps.export && <Btn kind="primary" onClick={newOrder} disabled={busy || !data || ws.dirty}>New order</Btn>}
+        {/* Flashings keeps ONE open draft: New order only when every draft's supplier PDF has gone out (HUB 013) */}
+        {caps.export && opened && !(section === SECTIONS.FLASHINGS && canOpen && drafts.some((o) => !sent(o))) && <Btn kind="primary" onClick={newOrder} disabled={busy || !data || ws.dirty}>New order</Btn>}
       </div>
       <Banner tone="info">Exporting makes a PDF for you to send — it doesn&apos;t send or place anything. Send it to the supplier yourself, then record it as placed.</Banner>
       {ws.dirty && <Banner tone="warn">Saving your latest takeoff changes… orders use the saved version.</Banner>}
       {msg && <Banner tone="error">{msg}</Banner>}
-      <AsyncState loading={!data && !error} error={error} onRetry={load}>
+      {syncNote && <Banner tone="info" action={<Btn kind="ghost" onClick={() => setSyncNote(null)}>OK</Btn>}><span data-order-sync="">{syncNote}</span></Banner>}
+      <AsyncState loading={(!data && !error) || !opened} error={error} onRetry={load}>
         {active && (
           <DraftOrder key={`${active.id}:${active.revision}`} api={api} order={active} data={sectionData} section={section} status={status} suppliers={suppliers} ws={ws}
-            onChanged={load} setMsg={setMsg} drafts={drafts} onPick={setActiveId} deviceDrafts={deviceDrafts}
+            onChanged={load} setMsg={setMsg} drafts={drafts} orders={sectionOrders} onPick={setActiveId} deviceDrafts={deviceDrafts} onDiscard={() => discard(active)}
             onFix={onFix} focus={focus?.orderId === active.id ? focus : null} onFocusDone={onFocusDone} />
         )}
-        <OrderHistory api={api} orders={sectionOrders} caps={caps} onChanged={async () => { await load(); await ws.refreshOrderStatus?.(); }} setMsg={setMsg} />
+        <OrderHistory api={api} orders={sectionOrders} activeId={active?.id} caps={caps} onChanged={async () => { await load(); await ws.refreshOrderStatus?.(); }} setMsg={setMsg}
+          onOpen={reopen} onDiscard={discard} busy={busy} />
       </AsyncState>
       {kbInset > 0 && <div aria-hidden="true" data-keyboard-spacer="" style={{ height: kbInset }} />}
     </div>
@@ -185,7 +220,7 @@ function AddSupplier({ api, onAdded, onCancel }) {
   );
 }
 
-function DraftOrder({ api, order, data, section, status, suppliers, ws, onChanged, setMsg, drafts, onPick, deviceDrafts = [], onFix = null, focus = null, onFocusDone = null }) {
+function DraftOrder({ api, order, data, section, status, suppliers, ws, onChanged, setMsg, drafts, orders = [], onPick, deviceDrafts = [], onFix = null, focus = null, onFocusDone = null, onDiscard = null }) {
   const [extra, setExtra] = useState(false); // explicit "order more than is still needed" (spares)
   // unsaved changes typed on this device before a reload (same order, same saved revision only)
   const [restored, setRestored] = useState(() => readOrderDraft(order));
@@ -239,6 +274,42 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
   }, []);
   const lines = useMemo(() => data.scheduleLines || [], [data.scheduleLines]);
   const flashLines = lines.filter((l) => !isGenericLine(l));
+  // HUB 013: the flashing order grouped like the PDF (P1, P2 …), only lengths with a quantity — a length taken to 0
+  // here stays listed until the order is saved, so it can be put back
+  const [touched, setTouched] = useState(() => new Set());
+  const setLineQty = (k, n) => { setQty((q) => ({ ...q, [k]: n })); setTouched((t) => new Set(t).add(k)); };
+  const flashGroups = useMemo(() => flashingOrderGroups(qty, flashLines, mats, touched), [qty, flashLines, mats, touched]);
+  // what of the takeoff is NOT on this order, per flashing, with the reason and what to do about it
+  const placedRefs = useMemo(() => {
+    const m = new Map();
+    for (const o of orders) if ((o.placements || []).some((p) => p.status === "placed")) for (const l of o.lines || []) m.set(l.bucketKey, [...(m.get(l.bucketKey) || []), o.orderRef]);
+    return m;
+  }, [orders]);
+  const flashOff = useMemo(() => {
+    const exportedHere = (order.exports || []).some((e) => !e.isDraft);
+    const byMat = new Map();
+    let need = 0, here = 0, placed = 0, elsewhere = 0;
+    for (const l of flashLines) {
+      const st = status.get(l.bucketKey);
+      const own = exportedHere ? order.lines.find((x) => x.bucketKey === l.bucketKey)?.quantity || 0 : 0;
+      const other = Math.max(0, (st?.onExportedOrders || 0) - own);
+      const left = Math.max(0, (st?.remaining ?? l.quantity) - other);
+      const n = qty[l.bucketKey] ?? 0;
+      need += l.quantity; here += Math.min(n, left); placed += st?.ordered || 0; elsewhere += Math.min(other, Math.max(0, l.quantity - (st?.ordered || 0)));
+      const missing = left - n;
+      const id = l.jobMaterialIds[0];
+      const e = byMat.get(id) || { id, name: mats.get(id)?.name || "A flashing", blocked: 0, leftOff: 0, ordered: 0, onOther: 0, refs: new Set(), placedRefs: new Set(), fixLine: null, addKeys: [] };
+      if ((st?.ordered || 0) > 0) { e.ordered += st.ordered; for (const r of placedRefs.get(l.bucketKey) || []) e.placedRefs.add(r); }
+      if (other > 0) { e.onOther += other; for (const r of st?.exportedRefs || []) e.refs.add(r); }
+      if (missing > 0) {
+        if (l.problems.length) { e.blocked += missing; e.fixLine = e.fixLine || l; } else { e.leftOff += missing; e.addKeys.push([l.bucketKey, left]); }
+      }
+      byMat.set(id, e);
+    }
+    const rank = (id) => { const i = (ws.view?.materials || []).findIndex((m) => m.id === id); return i < 0 ? 1e9 : i; };
+    const rows = [...byMat.values()].filter((e) => e.blocked || e.leftOff || e.ordered || e.onOther).sort((a, b) => rank(a.id) - rank(b.id));
+    return { rows, need, here, placed, elsewhere, leftOff: rows.reduce((a, e) => a + e.leftOff + e.blocked, 0) };
+  }, [flashLines, status, qty, order.exports, order.lines, mats, placedRefs, ws.view]);
   // TC-R04 lines grouped per material (the material's statuses travel with them)
   const genericGroups = useMemo(() => {
     const g = new Map();
@@ -282,7 +353,7 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
       const own = exportedHere ? order.lines.find((x) => x.bucketKey === l.bucketKey)?.quantity || 0 : 0;
       const left = Math.max(0, (st?.remaining ?? l.quantity) - Math.max(0, (st?.onExportedOrders || 0) - own));
       const off = left - (qty[l.bucketKey] ?? 0);
-      if (off <= 0) continue;
+      if (off <= 0 || !isGenericLine(l)) continue;   // flashings: listed with their reason below (HUB 013)
       const id = l.jobMaterialIds[0];
       const e = byMat.get(id) || { flashing: !isGenericLine(l), units: new Map(), pieces: 0 };
       if (isGenericLine(l)) e.units.set(l.unit || "piece", (e.units.get(l.unit || "piece") || 0) + off);
@@ -397,6 +468,7 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     <section ref={formRef} className="space-y-3 rounded-card border border-hairline bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="flex-1 text-sm font-semibold text-ink">Draft {order.orderRef}</h3>
+        {onDiscard && <Btn kind="ghost" onClick={onDiscard}>Discard draft</Btn>}
         {drafts.length > 1 && (
           <select aria-label="Choose draft order" value={order.id} onChange={(e) => onPick(e.target.value)} className="min-h-[44px] rounded-lg border border-hairline text-sm">
             {drafts.map((o) => <option key={o.id} value={o.id}>{o.orderRef}</option>)}
@@ -452,6 +524,9 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
         <TextField label="Notes for supplier" value={notes} onChange={setNotes} />
       </div>
       <div>
+        {staleLines.length > 1 && (
+          <Btn kind="secondary" className="mb-2 w-full" onClick={() => staleLines.forEach(removeLine)}>Remove all {staleLines.length} out-of-date lines</Btn>
+        )}
         {staleLines.length > 0 && (
           <div className="mb-2 space-y-2" data-testid="stale-lines">
             {staleLines.map((x) => (
@@ -472,22 +547,42 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
             ))}
           </div>
         )}
-        {flashLines.length > 0 && <p className="mb-1 text-xs font-medium text-muted">Lengths on this order</p>}
-        {flashLines.length > 0 && <ul className="divide-y divide-hairline rounded-lg border border-hairline">
-          {flashLines.map((l) => {
-            const st = status.get(l.bucketKey);
-            return (
-              <li key={l.bucketKey} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm" data-order-line={l.bucketKey}>
-                <span className="flex-1">{fmtMm(l.finishedLengthMm)} mm{l.handlingFlag ? " · long" : ""}{l.problems.length && !fixOf(l) ? <span className="ml-1 text-[11px] text-red-700">needs attention</span> : null}
-                  {fixOf(l) && <button type="button" className="ml-1 inline-flex min-h-[44px] items-center rounded-lg px-1 text-[12px] font-semibold text-red-700 underline" data-fix-line=""
-                    onClick={fixOf(l)}>Needs attention — {fixReason(l.problems)} ›</button>}
-                  <span className="block text-[11px] text-ink">{labelFor(l)}</span>
-                  <span className="block text-[11px] text-muted">need {st?.required ?? l.quantity} · ordered {st?.ordered ?? 0} · left {st?.remaining ?? l.quantity}</span></span>
-                <div className="w-28"><NumberField label="Qty" unit="pcs" integer min={0} value={qty[l.bucketKey] ?? 0} onCommit={(n) => setQty((q) => ({ ...q, [l.bucketKey]: n }))} /></div>
-              </li>
-            );
-          })}
-        </ul>}
+        {flashGroups.length > 0 && <p className="mb-1 text-xs font-medium text-muted">Lengths on this order</p>}
+        <div className="space-y-2">
+          {flashGroups.map((g) => (
+            <div key={g.specKey} className="rounded-lg border border-hairline" data-order-flashing={g.profileId}>
+              <div className="flex items-center gap-2 border-b border-hairline px-2 py-1">
+                <p className="min-w-0 flex-1 text-sm font-medium text-ink">{g.profileId} — {g.materialName}<span className="block text-[11px] font-normal text-muted">{g.pieces} {g.pieces === 1 ? "piece" : "pieces"} · {fmtLm(g.totalLm)} LM</span></p>
+                {g.pieces > 0 && <Btn kind="ghost" onClick={() => g.lines.forEach((x) => setLineQty(x.line.bucketKey, 0))}>Remove</Btn>}
+              </div>
+              <ul className="divide-y divide-hairline">
+                {g.lines.map(({ line: l }) => (
+                  <li key={l.bucketKey} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm" data-order-line={l.bucketKey}>
+                    <span className="flex-1">{fmtMm(l.finishedLengthMm)} mm{l.handlingFlag ? " · long" : ""}{l.problems.length && !fixOf(l) ? <span className="ml-1 text-[11px] text-red-700">needs attention</span> : null}
+                      {fixOf(l) && <button type="button" className="ml-1 inline-flex min-h-[44px] items-center rounded-lg px-1 text-[12px] font-semibold text-red-700 underline" data-fix-line=""
+                        onClick={fixOf(l)}>Needs attention — {fixReason(l.problems)} ›</button>}</span>
+                    <div className="w-28"><NumberField label="Qty" unit="pcs" integer min={0} value={qty[l.bucketKey] ?? 0} onCommit={(n) => setLineQty(l.bucketKey, n)} /></div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        {flashLines.length > 0 && (
+          <div className="mt-2 space-y-1" data-testid="flash-off">
+            <p className="text-xs text-ink" data-testid="order-reconcile">Takeoff {flashOff.need} · on this order {flashOff.here} · already ordered {flashOff.placed} · on other orders {flashOff.elsewhere} · not on this order {flashOff.leftOff}</p>
+            {flashOff.rows.map((e) => (
+              <div key={e.id} className="space-y-1 rounded-lg border border-hairline bg-page px-2 py-1.5 text-xs text-ink" data-off-flashing={e.id}>
+                {e.leftOff > 0 && <p className="flex flex-wrap items-center gap-2"><span className="flex-1">{e.name} — {e.leftOff} {e.leftOff === 1 ? "piece" : "pieces"} left off this order</span>
+                  <Btn kind="secondary" onClick={() => e.addKeys.forEach(([k, n]) => setLineQty(k, n))}>Add</Btn></p>}
+                {e.blocked > 0 && <p className="flex flex-wrap items-center gap-2"><span className="flex-1">{e.name} — {e.blocked} {e.blocked === 1 ? "piece" : "pieces"} can&apos;t be ordered yet: {fixReason(e.fixLine?.problems)}</span>
+                  {fixOf(e.fixLine) && <Btn kind="secondary" onClick={fixOf(e.fixLine)}>Fix ›</Btn>}</p>}
+                {e.ordered > 0 && <p>{e.name} — {e.ordered} already ordered{e.placedRefs.size ? ` on ${[...e.placedRefs].join(", ")}` : ""} (placed)</p>}
+                {e.onOther > 0 && <p>{e.name} — {e.onOther} on {e.refs.size ? [...e.refs].join(", ") : "another order"} (supplier PDF exported, not recorded placed yet)</p>}
+              </div>
+            ))}
+          </div>
+        )}
         {genericGroups.length > 0 && <p className="mb-1 mt-3 text-xs font-medium text-muted">Materials on this order</p>}
         {/* HUB 007: one timber-and-cladding order, in two parts */}
         {["timber", "cladding"].map((part) => {
@@ -572,13 +667,14 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
   );
 }
 
-function OrderHistory({ api, orders, caps, onChanged, setMsg }) {
+function OrderHistory({ api, orders, activeId = null, caps, onChanged, setMsg, onOpen = null, onDiscard = null, busy = false }) {
   const [placing, setPlacing] = useState(null); // order id
   const [form, setForm] = useState({ exportId: "", placedOn: todayYmd(), supplierReference: "", acknowledgeSurplus: false, needsAck: null });
   const [cancelFor, setCancelFor] = useState(null);
   const [reason, setReason] = useState("");
   const placeKey = useRef(null); // one idempotency key per "record placed" attempt, reused on retry
-  const history = orders.filter((o) => o.exports.length || o.placements.length);
+  // HUB 020: every other order of this section — an unplaced draft can be reopened (the same draft, never a copy) or discarded
+  const history = orders.filter((o) => (o.status === "draft" && o.id !== activeId) || o.exports.length || o.placements.length);
   if (!history.length) return null;
 
   async function place(order) {
@@ -608,9 +704,16 @@ function OrderHistory({ api, orders, caps, onChanged, setMsg }) {
             <div className="flex flex-wrap items-center gap-2">
               <p className="flex-1 font-medium text-ink">{o.orderRef}</p>
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${o.status === "placed" ? "bg-emerald-50 text-emerald-700" : o.status === "cancelled" ? "bg-slate-100 text-muted" : "bg-sky-50 text-sky-700"}`}>
-                {o.status === "placed" ? "Placed externally" : o.status === "cancelled" ? "Cancelled" : "Draft"}
+                {o.status === "placed" ? "Placed externally" : o.status === "cancelled" ? (o.placements.length ? "Cancelled" : "Discarded") : "Draft"}
               </span>
             </div>
+            {o.status === "draft" && o.id !== activeId && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex-1 text-xs text-muted">{o.lines.reduce((a, l) => a + l.quantity, 0)} pieces on this draft{o.exports.some((e) => !e.isDraft) ? " · supplier PDF exported" : ""}</span>
+                {onOpen && caps.export && <Btn onClick={() => onOpen(o.id)} disabled={busy}>Open draft</Btn>}
+                {onDiscard && caps.export && <Btn kind="ghost" onClick={() => onDiscard(o)} disabled={busy}>Discard draft</Btn>}
+              </div>
+            )}
             <ul className="space-y-1">
               {o.exports.map((e) => (
                 <li key={e.id} className="flex flex-wrap items-center gap-2 text-xs">

@@ -1,5 +1,5 @@
 ---
-sop_version: 2.2
+sop_version: 2.3
 last_reviewed: 2026-10-20
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
@@ -101,7 +101,18 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 6. The "Not ready to order yet:" box lists each problem by flashing and length (e.g. "Barge flashing · 7,200 mm — material details missing ›"). Each one can be tapped. **Export supplier PDF** stays blocked only while a real problem remains. **Export draft PDF** is always marked draft.
 7. **Save order details** waits while the takeoff is still saving your last change.
 
-### C. Update out-of-date lines
+### B3. The Flashings order follows the takeoff; reopen, revise or discard a draft (Hub review HUB 013 / HUB 020, 20 Oct 2026)
+
+1. **Review & export opens the one open Flashings draft for you.** There is no need to tap New order. If there is no draft, one is started with everything the takeoff still needs. An existing draft is brought up to date first, and a banner says what changed, e.g. "Brought up to date with the takeoff: Head flashing +11".
+   - A length nobody has changed on the order follows the takeoff, up or down, including a colour or size change.
+   - A quantity you typed, or a flashing you removed, keeps your choice.
+   - Once a draft's **supplier PDF** has been exported, it is never changed behind you. Changes show as "needs updating" (section C), and a second order is only started when you tap **New order**.
+2. **The order is grouped like the PDF:** P1, P2 … one group per flashing, with its pieces and LM, and only lengths with a quantity. Tap **Remove** to take a whole flashing off.
+3. **What isn't on the order is named with its reason:** left off (**Add** puts it back), can't be ordered yet (e.g. missing colour; **Fix ›** opens it), already ordered on a placed order, or on another order whose supplier PDF was exported. The line "Takeoff N · on this order N · already ordered · on other orders · not on this order" lets you check it at a glance.
+4. **Two or more out-of-date lines** can be cleared at once with **Remove all N out-of-date lines**.
+5. **Order history** lists every other draft. **Open draft** opens that same draft (same number, never a copy) to change quantities or add and remove flashings. **Discard draft** (with a confirm) removes a draft you don't need. A discarded draft with exported PDFs keeps them in the history, marked Discarded. **Placed orders are locked:** for more pieces, start a new order.
+
+
 
 1. If a measurement, product, stock or rule changed after the draft was saved, the line shows in a warning box "… — needs updating" with the reason (e.g. "This line is no longer in the takeoff (its measurements, product or stock changed) — update or remove it.") and what the takeoff needs now. **Export supplier PDF** stays disabled while any stale line has a quantity.
 2. Choose explicitly:
@@ -422,6 +433,18 @@ Next review date: 2027-04-14
 2. Worker app as an office login (UI Review: `/worker/takeoff/carpentry/cjb-1?section=flashings&takeoffWorker=office`) → **New order** → **Add supplier** → "Fielders Wingfield". Expected: selected; adding "other steel supplies" selects the existing "Other Steel Supplies" (no copy).
 3. Worker app as a plain leading hand (`/worker/takeoff/carpentry/cjb-1?section=flashings`). Expected: no **Add supplier**; a direct `POST /api/worker/takeoff/suppliers` returns 403.
 4. Live stack: a new order created by a staff user with a linked employee phone. Expected: **Site contact** and **Contact phone** are that person's.
+- [ ] Pass  [ ] Fail
+
+**TC-20 — The Flashings draft follows the takeoff (HUB 013, UI Review + API)**
+1. Default job → **Flashings** → **Review & export order**. Expected: "Draft FO-…" opens by itself; groups "P1 — Apron flashing", "P2 — Barge flashing"; every Qty above 0; "Takeoff N · on this order N · already ordered 0 · on other orders 0 · not on this order 0".
+2. **Remove** the Barge group. Expected: "Barge flashing — N pieces left off this order" with **Add**; **Add** puts it back.
+3. API (scripts/tests/takeoff-api.test.mjs "HUB 013 / HUB 020"): an old 34-piece draft (Axon 5 + Corner 29) on a 79-piece takeoff opens as the same draft with 79 (16 / 23 / 29 / 11). A second open writes nothing, and the preview groups read P1–P4 in the same order.
+- [ ] Pass  [ ] Fail
+
+**TC-21 — Reopen, revise, discard (HUB 020, UI Review)**
+1. Remove the Barge group → **Save order details** → **Back** → **Review & export order**. Expected: the same draft number, Barge still off and listed as left off; no **New order** button.
+2. With an older draft in Order history: **Open draft** opens it (same number); **Discard draft** → confirm. Expected: it leaves the history (no PDFs) and the API shows it cancelled.
+3. API: a placed order can't be reopened ("Placed orders are locked — start a new order for more pieces.").
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

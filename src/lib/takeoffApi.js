@@ -42,6 +42,9 @@ function makeApi(base, send, fetcher, extras = {}) {
     suppliers: () => get("/suppliers"),
     // HUB 008: office staff add a supplier from the order — Hub and Worker app (the server checks who may)
     createSupplier: (body) => post("/suppliers", body),
+    // HUB 013 / HUB 020: open (and for Flashings, bring up to date) the section's working draft; discard a draft
+    openOrder: (wsId, body) => post(`/workspaces/${wsId}/orders/open`, body),
+    discardOrder: (orderId, body) => post(`/orders/${orderId}/discard`, body),
     orders: (wsId) => get(`/workspaces/${wsId}/orders`),
     createOrder: (wsId, body) => post(`/workspaces/${wsId}/orders`, body),
     saveOrder: (orderId, body) => patch(`/orders/${orderId}`, body),
