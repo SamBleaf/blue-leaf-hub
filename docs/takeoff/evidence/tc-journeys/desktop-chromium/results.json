@@ -10,11 +10,11 @@
       "id": "S0",
       "title": "Start takeoff + plan setup + scale (12,000 / 8,000 / check 3,000)",
       "status": "PASS",
-      "seconds": 9,
+      "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "7ed8f5d8-fabe-4449-840d-45a5a1afad96",
-          "documentId": "953bc0ce-382a-4381-8db9-f7ea89ea5d62",
+          "id": "fe4aa204-6aa1-4ee5-8779-bb36eb34eca5",
+          "documentId": "4ac7ff74-d8a8-494d-b649-0151c3a8a6c4",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-21 07:52:14.991411+10:30"
+          "createdAt": "2026-10-21 09:09:58.420122+10:30"
         }
       }
     },
@@ -179,5 +179,5 @@
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-20T21:23:03.222Z"
+  "at": "2026-10-20T22:40:46.714Z"
 }

@@ -1149,6 +1149,49 @@ await t("HUB 022: a Line run's walls keep runId + seq on the REAL server (reload
   assert.deepEqual([...new Set(lines.map((l) => l.follower || "sheets"))], ["sheets", "battens", "tape"]);
 });
 
+await t("wall-by-wall step 5: walls saved in ONE commit (one save time) come back in id order on every load, so two runs saved together stay Run 1, Run 2 and the review order never changes after an edit", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { orderedId } = await import("../../src/lib/orderedId.js");
+  const { reviewWalls, wallRuns } = await import("../../src/components/takeoff/measure/tools.js");
+  const axon = productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth");
+  const w = id(), cal = id(), clad = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "STEP5-order-plan.pdf");
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "STEP5 order" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  // traced offline: Run A (two walls), then Run B (two walls), then a wall by numbers — the ids are made in that order
+  const runA = orderedId(), a = [orderedId(), orderedId()], runB = orderedId(), b = [orderedId(), orderedId()], loose = orderedId();
+  const rec = (mid, runId, seq, y) => ({ id: mid, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(0, y), c(3000, y)], inputs: { kind: "rect", heightMm: 2700, name: `W ${mid.slice(-4)}`, runId, seq } });
+  // sent with Run B FIRST, so the rows sit in the table B before A — only the id can bring A back first
+  const send = [rec(b[1], runB, 2, 4000), rec(b[0], runB, 1, 3000), { id: loose, kind: "wall", inputs: { kind: "rect", widthMm: 2400, heightMm: 2700, name: "By numbers" } }, rec(a[1], runA, 2, 1000), rec(a[0], runA, 1, 0)];
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: clad, name: "Axon 400 smooth", methodKey: "sheet_layout", methodVersion: 2, spec: specFromGroup(axon), rules: {} }] },
+    measurements: { upsert: send },
+    contributions: { upsert: send.map((x) => ({ id: id(), measurementId: x.id, jobMaterialId: clad, role: "wall" })) } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const rows = (await q("SELECT created_at FROM takeoff_measurements WHERE workspace_id=$1 AND kind='wall'", [w])).rows;
+  assert.equal(new Set(rows.map((row) => String(row.created_at))).size, 1, "one save time for all five walls");
+  const check = async (when) => {
+    const snap = (await S(`/workspaces/${w}`)).data.snapshot;
+    const walls = snap.measurements.filter((m) => m.kind === "wall");
+    assert.deepEqual(walls.map((m) => m.id), [a[0], a[1], b[0], b[1], loose], `${when}: in the order made`);
+    const runs = wallRuns(snap.measurements);
+    assert.deepEqual([runs.get(runA).n, runs.get(runB).n], [1, 2], `${when}: Run A is Run 1`);
+    assert.deepEqual(reviewWalls(snap.measurements, snap.contributions, clad).map((m) => m.id), [a[0], a[1], b[0], b[1], loose], `${when}: review order`);
+    return snap;
+  };
+  const snap = await check("first load");
+  await check("second load");
+  // an edit rewrites one row of Run A (the finding: its new row version sits after Run B's) — the order holds
+  const a0 = snap.measurements.find((m) => m.id === a[0]);
+  const r2 = await SP(`/workspaces/${w}/commit`, { expectedRevision: snap.workspace.revision, changes: { measurements: { upsert: [{ ...a0, inputs: { ...a0.inputs, heightMm: 3600 } }] } } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  await check("after an edit");
+  // the commit's own reply (the snapshot the app keeps until the next load) is in the same order
+  assert.deepEqual(r2.data.snapshot.measurements.filter((m) => m.kind === "wall").map((m) => m.id), [a[0], a[1], b[0], b[1], loose]);
+});
+
 await t("HUB 022 step 2: + Window / + Door on the plan saves an elevation opening the REAL server keeps unchanged (no plan points, no new fields); deducted for every material on the wall", async () => {
   const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
   const { methodFor } = await import("../../shared/takeoff/index.js");

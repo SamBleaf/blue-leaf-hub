@@ -13,8 +13,8 @@
       "seconds": 10,
       "observed": {
         "calibration": {
-          "id": "c86ffc92-000b-4d70-b3a4-789085179f92",
-          "documentId": "86ef6a9b-973e-4890-b9e6-d80e58b79384",
+          "id": "1d88f9a0-46a8-4866-bd86-4d98b7a665c5",
+          "documentId": "cb4da1b6-55cb-4c41-ab74-a3da6a401fd3",
           "pageIndex": 0,
           "pageMeta": {
             "rotate": 0,
@@ -76,7 +76,7 @@
           },
           "status": "ready",
           "contentSha256": "d31b6ea9c0ff609a8f690fe019aee97427928c37d30c6d17258a4f14d3c012de",
-          "createdAt": "2026-10-21 07:53:17.616477+10:30"
+          "createdAt": "2026-10-21 09:11:01.027494+10:30"
         }
       }
     },
@@ -84,7 +84,7 @@
       "id": "J1",
       "title": "Timber rafters: 4,500 projected @ 30° + 10,000 run → 18 × 5,400; true length → 18 × 4,800",
       "status": "PASS",
-      "seconds": 13,
+      "seconds": 12,
       "observed": {
         "projected": [
           "18 piece · 90 × 45 MGP10 H3 — 5,400 mm length"
@@ -138,7 +138,7 @@
       "id": "FL",
       "title": "Flashing paths (300 mm step): four 750 legs → ONE 3,300; 10,000 path → red overflow → split at limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400",
       "status": "PASS",
-      "seconds": 17,
+      "seconds": 18,
       "observed": {
         "pathA": {
           "tight": 2999.9999999999973
@@ -179,5 +179,5 @@
   ],
   "findings": [],
   "consoleErrors": [],
-  "at": "2026-10-20T21:24:04.684Z"
+  "at": "2026-10-20T22:41:48.064Z"
 }

@@ -13,25 +13,34 @@
 //           Setout datum is per WALL (rules.datumByWall); "every wall" is an explicit choice with a job-wide preview.
 //           Sheet joint rows: height + gap + detail or a draft (rules.jointRowsDraft) — the Setup card's rule.
 //           Stud walls: each opening's framing detail (opening.inputs.detail) is entered in its sheet.
+//   Review  (wall-by-wall step 5) Review walls opens the material's first wall in run order; every wall page has
+//           ‹ Previous wall / Next wall › at the bottom (n of N) and, on the last wall, Review order ›. Tapping a
+//           sheet, batten or joint shows its details (no stepping through parts any more). Each wall page leads with
+//           its cladding quantities in one short line. Status chips, provenance and notes (the drawing's explanations
+//           too) fold under More on the wall screens and rows; anything that blocks the order stays out with its fix,
+//           including a problem with the material itself (missing product sizes …) with its Setup button. The
+//           buttons step aside while an opening's or a joint row's sheet is open.
 // Every valid edit applies at once (ws.edit) and is undoable; invalid input stays in its field as a draft.
 //
 // Props contract (fixed):
 //   ws          useTakeoffWorkspace() result (view, computed, edit, capabilities, status)
 //   materialId  the job material being set up (cladding / batten / accessory / timber studs, plates, noggins)
 //   wallId      wall measurement open in the editor (null = list)
-//   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose()
+//   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose(),
+//   onReviewOrder() (the last wall's Review order ›: the Timber and cladding order), orderReady (false = nothing to
+//   order yet: Review order › is greyed, as the overview's Review & export order)
 // =============================================================================
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { followerRule } from "../../../shared/takeoff/engine/followers.js";
 import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
-import { newId } from "../../lib/takeoffApi.js";
+import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { nextOpeningLabel, openingRecord, runIdOf, runLabel, toolsFor, wallListItems, wallRuns } from "./measure/tools.js";
+import { nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallListItems, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
 const SNAP_MM = 10;
@@ -317,10 +326,6 @@ function attributeProblems(view, material, result) {
   return { byWall, general: dedupe(general) };
 }
 
-function problemsForWall(view, material, result, wall) {
-  return attributeProblems(view, material, result).byWall.get(wall.id) || [];
-}
-
 /** demandId → the stock piece it is cut from (the ONE allocator's plan). */
 function allocationMap(result) {
   const map = new Map();
@@ -553,7 +558,7 @@ function spanAtX(polygon, x) {
 }
 
 function supportElements(entries, bbox, polygon) {
-  const items = [], notes = [];
+  const items = [], notes = [], about = [];
   for (const e of entries) {
     const l = e.layout;
     if (!l) continue;
@@ -593,14 +598,16 @@ function supportElements(entries, bbox, polygon) {
           },
         });
       }
-      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed").length, "stud")} at ${fmtMm(l.studLengthMm)} mm — ${l.scope}.`);
+      // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More
+      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed").length, "stud")} at ${fmtMm(l.studLengthMm)} mm.`);
+      if (l.scope) about.push(`${e.material.name}: ${l.scope}.`);
     } else if (l.kind === "plates") {
       notes.push(`${e.material.name}: ${(l.layers || []).map((x) => `${x.tag} plate ${x.piecesMm.map((p) => fmtMm(p)).join(" + ")} mm`).join("; ")}.`);
     } else if (Array.isArray(l.bays)) {
       notes.push(`${e.material.name}: noggins — see the schedule for each bay's cut length.`);
     }
   }
-  return { items, notes };
+  return { items, notes, about };
 }
 
 /**
@@ -608,7 +615,7 @@ function supportElements(entries, bbox, polygon) {
  * tab — one line per batten piece, plus one plain note per cladding (or why there are none here).
  */
 function followerElements(claddingEntries) {
-  const items = [], notes = [];
+  const items = [], notes = [], about = [];
   for (const e of claddingEntries) {
     const f = e.layout?.followers;
     if (!f) continue;
@@ -627,11 +634,12 @@ function followerElements(claddingEntries) {
           },
         });
       });
-      notes.push(`Battens worked out from ${e.material.name}: ${plural(b.lines.length, "piece")}, ${(b.totalMm / 1000).toFixed(2)} m on this wall. Nothing to set up. Fixings to the studs are not counted.`);
-    } else if (b.state === "hand-made") notes.push(`The battens on this wall come from ${(b.by || []).join(", ")} (set up by hand), so ${e.material.name} doesn't add its own here. To use the automatic battens instead, remove ${(b.by || []).join(", ")} from this wall in Materials on this wall.`);
+      // wall-by-wall step 5: the explanations fold under More (the wall's short line at the top has the batten count)
+      about.push(`Battens worked out from ${e.material.name}: ${plural(b.lines.length, "piece")}, ${(b.totalMm / 1000).toFixed(2)} m on this wall. Nothing to set up. Fixings to the studs are not counted.`);
+    } else if (b.state === "hand-made") about.push(`The battens on this wall come from ${(b.by || []).join(", ")} (set up by hand), so ${e.material.name} doesn't add its own here. To use the automatic battens instead, remove ${(b.by || []).join(", ")} from this wall in Materials on this wall.`);
     else if (b.state === "direct") notes.push(`${e.material.name} is direct fixed, so it has no battens.`);
   }
-  return { items, notes };
+  return { items, notes, about };
 }
 
 function accessoryElements(polygon, openings, claddingEntries) {
@@ -730,6 +738,21 @@ function StatusChip({ group, value }) {
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${TONE[tone]}`} data-status={group} data-value={value || ""}>{text}</span>;
 }
 
+/**
+ * Wall-by-wall step 5 (Sam's answer 3): the status chips and notes on the wall screens fold away under More. They
+ * still show on the schedule and the order; anything that blocks the order stays out here with its fix.
+ */
+function More({ children, className = "", ...rest }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className={`rounded-lg border border-hairline bg-white ${className}`} open={open} onToggle={(e) => setOpen(e.currentTarget.open)} {...rest}>
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+        <span className="flex-1">More</span><span aria-hidden="true" className="text-muted">{open ? "▾" : "▸"}</span></summary>
+      <div className="space-y-2 px-3 pb-3">{children}</div>
+    </details>
+  );
+}
+
 function StatusSummary({ view, material, result, computedError, canEdit, onSetup, readable }) {
   const [all, setAll] = useState(false);
   // joint-row problems name the walls the row doesn't fit (the engine's own message names none)
@@ -750,14 +773,6 @@ function StatusSummary({ view, material, result, computedError, canEdit, onSetup
         </div>
         {canEdit && onSetup && <Btn onClick={() => onSetup(material)}>Setup</Btn>}
       </div>
-      <dl className="grid grid-cols-[6.5rem_1fr] items-center gap-x-2 gap-y-1 text-xs">
-        <dt className="text-muted">Quantity</dt><dd><StatusChip group="quantity" value={st.quantity} /></dd>
-        <dt className="text-muted">Installation</dt><dd><StatusChip group="installation" value={st.installation} /></dd>
-        <dt className="text-muted">Ordering</dt><dd><StatusChip group="procurement" value={st.procurement} /></dd>
-      </dl>
-      {st.installation !== "supported-by-selected-rule" && st.installation !== "project-detail-supplied" && (
-        <p className="text-[11px] text-muted">The app has not verified installation (supports, fixings, wind zones). Quantities are for ordering only.</p>
-      )}
       {computedError && <Banner tone="error">The calculation stopped: {computedError}</Banner>}
       {blocking.length > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" data-problems="blocking">
@@ -766,12 +781,23 @@ function StatusSummary({ view, material, result, computedError, canEdit, onSetup
           {blocking.length > 4 && <Btn kind="ghost" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${blocking.length}`}</Btn>}
         </div>
       )}
-      {notes.length > 0 && (
-        <details className="rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900">
-          <summary className="min-h-[44px] cursor-pointer py-3">{plural(notes.length, "note")} (not blocking)</summary>
-          <ul className="list-disc space-y-0.5 pb-2 pl-4">{notes.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
-        </details>
-      )}
+      {/* wall-by-wall step 5: the statuses and notes fold away (they stay on the schedule and the order) */}
+      <More data-status-more="">
+        <dl className="grid grid-cols-[6.5rem_1fr] items-center gap-x-2 gap-y-1 text-xs">
+          <dt className="text-muted">Quantity</dt><dd><StatusChip group="quantity" value={st.quantity} /></dd>
+          <dt className="text-muted">Installation</dt><dd><StatusChip group="installation" value={st.installation} /></dd>
+          <dt className="text-muted">Ordering</dt><dd><StatusChip group="procurement" value={st.procurement} /></dd>
+        </dl>
+        {st.installation !== "supported-by-selected-rule" && st.installation !== "project-detail-supplied" && (
+          <p className="text-[11px] text-muted">The app has not verified installation (supports, fixings, wind zones). Quantities are for ordering only.</p>
+        )}
+        {notes.length > 0 && (
+          <div className="text-sm text-amber-900" data-notes="">
+            <p className="text-xs font-semibold">{plural(notes.length, "note")} (not blocking)</p>
+            <ul className="list-disc space-y-0.5 pl-4">{notes.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
+          </div>
+        )}
+      </More>
     </section>
   );
 }
@@ -983,10 +1009,12 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   );
 }
 
-function ElementSheet({ item, index, total, onStep, onClose, onAction, canEdit }) {
+// wall-by-wall step 5: ‹ Previous / Next › now go wall to wall (the wall page's footer); tap a sheet, batten or joint
+// for its details
+function ElementSheet({ item, onClose, onAction, canEdit, footerBelow = false }) {
   const info = item.info || {};
   return (
-    <Sheet title={info.title || "Selected"} onClose={onClose} initialFocus={false}>
+    <Sheet title={info.title || "Selected"} onClose={onClose} initialFocus={false} safeBottom={!footerBelow}>
       <dl className="space-y-1 text-sm" data-element-info={item.id}>
         {(info.rows || []).map(([k, v]) => (
           <div key={k} className="flex gap-2"><dt className="w-24 shrink-0 text-muted">{k}</dt><dd className="min-w-0 flex-1 font-medium text-ink">{v}</dd></div>
@@ -994,13 +1022,6 @@ function ElementSheet({ item, index, total, onStep, onClose, onAction, canEdit }
       </dl>
       {info.note && <p className={`mt-2 text-xs ${info.tone === "error" ? "text-red-700" : info.tone === "warn" ? "text-amber-800" : "text-muted"}`}>{info.note}</p>}
       {info.action === "jointRow" && canEdit && <Btn kind="primary" className="mt-2" onClick={() => onAction("jointRow")}>Add a joint row</Btn>}
-      {total > 1 && (
-        <div className="mt-2 flex items-center gap-2">
-          <Btn onClick={() => onStep(-1)} aria-label="Previous element">‹ Previous</Btn>
-          <span className="flex-1 text-center text-xs text-muted">{index + 1} of {total}</span>
-          <Btn onClick={() => onStep(1)} aria-label="Next element">Next ›</Btn>
-        </div>
-      )}
     </Sheet>
   );
 }
@@ -1208,7 +1229,7 @@ function heightsText(inp = {}) {
 
 // ── the screen ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export default function WallsScreen({ ws, materialId, wallId, wallTab = null, onOpenWall, onTrace, onSetup, onClose }) {
+export default function WallsScreen({ ws, materialId, wallId, wallTab = null, onOpenWall, onTrace, onSetup, onClose, onReviewOrder = null, orderReady = true }) {
   const view = ws.view;
   const canEdit = !!ws.capabilities?.edit;
   const material = view.materials.find((m) => m.id === materialId) || null;
@@ -1231,6 +1252,15 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
   // "Other walls": open by itself while this material has no walls of its own (battens, accessories … are put on the
   // cladding's walls from there); once opened, or a wall in it is opened, it stays open for this visit
   const [othersOpen, setOthersOpen] = useState(null);
+  // wall-by-wall step 5: the wall rows' chips fold under More (Heights needed / Needs attention stay out)
+  const [rowMore, setRowMore] = useState(false);
+  // stepping wall to wall keeps the view you are on (Cladding / Supports / Accessories) — for the wall stepped TO only,
+  // so a wall opened any other way (the list, Wall by numbers) starts on its own view
+  const tabRef = useRef(null);
+  const [stepTab, setStepTab] = useState(null);   // { id, tab }
+  const openFromList = (id) => { setStepTab(null); onOpenWall?.(id); };
+  // an opening's or a joint row's sheet is open: the wall-to-wall buttons step aside so the drawing keeps its room
+  const [editingSheet, setEditingSheet] = useState(false);
 
   // A typed number counts once the page is hidden (app switch, reload, the phone locking): blur the field so it
   // commits — and is written to device recovery — instead of being lost. Invalid text stays as it is.
@@ -1280,12 +1310,13 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
   latestView.current = view;
   const act = {
     createWall({ name, kind, widthMm }) {
-      const id = newId(), cid = newId();
+      const id = orderedId(), cid = newId();   // walls saved together come back in the order made (step 5)
       const meas = { id, kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, inputs: { kind, widthMm, name } };
       const con = material ? [{ id: cid, measurementId: id, jobMaterialId: material.id, role: "wall" }] : [];
       record({ redo: partial({ measurements: [meas], contributions: con }), undo: partial({ archive: { measurements: [id], contributions: con.map((c) => c.id) } }) });
       setAdding(false);
       setNotice(null);
+      setStepTab(null);
       onOpenWall?.(id);
     },
     updateWall(w, patch) {
@@ -1355,12 +1386,34 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     </Banner>
   ) : null;
 
+  // wall-by-wall step 5: the walls of this material in review order (runs by number, walls in tap order, then the rest)
+  const order = material ? reviewWalls(view.measurements, view.contributions, material.id) : [];
   if (wall) {
+    const at = order.findIndex((w) => w.id === wall.id);
+    const go = (w) => { if (!w) return; setStepTab({ id: w.id, tab: tabRef.current }); onOpenWall?.(w.id); };
+    const last = at === order.length - 1;
+    // ‹ Previous wall / Next wall › at the bottom of every wall in the order; the last wall goes on to the order (only
+    // once there is something to order, as the overview's Review & export order). A wall this material doesn't use
+    // (opened from Other walls) has none until you tap Use here; they step aside while an opening or joint row is edited.
+    const nav = at >= 0 && !editingSheet ? (
+      <nav aria-label="Wall to wall" data-wall-nav="" className="flex shrink-0 items-center gap-2 border-t border-hairline bg-white px-2 pt-1"
+        style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom))" }}>
+        <Btn onClick={() => go(order[at - 1])} disabled={at === 0}>‹ Previous wall</Btn>
+        <span className="min-w-0 flex-1 text-center text-xs text-muted">
+          <span className="block" data-wall-nav-count="">{at + 1} of {order.length}</span>
+          {last && onReviewOrder && !orderReady && <span className="block text-[11px] font-medium text-amber-800" data-wall-nav-note="">Nothing to order yet</span>}
+        </span>
+        {!last
+          ? <Btn kind="primary" onClick={() => go(order[at + 1])}>Next wall ›</Btn>
+          : onReviewOrder && <Btn kind="primary" onClick={onReviewOrder} disabled={!orderReady}>Review order ›</Btn>}
+      </nav>
+    ) : null;
     return (
-      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => onOpenWall?.(null)} closeLabel="‹ Walls" actions={headerActions}>
+      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => { setStepTab(null); onOpenWall?.(null); }} closeLabel="‹ Walls" actions={headerActions} footer={nav}>
         <div ref={rootRef} className="contents">
-          <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} saveBanner={saveBanner} initialTab={wallTab}
-            draftReset={draftReset} clearDraftRef={clearDraftRef} />
+          <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} onSetup={onSetup} saveBanner={saveBanner}
+            initialTab={wallTab || (stepTab?.id === wall.id ? stepTab.tab : null)} footerBelow={at >= 0} onEditingSheet={setEditingSheet}
+            tabRef={tabRef} draftReset={draftReset} clearDraftRef={clearDraftRef} />
         </div>
       </FocusedWindow>
     );
@@ -1391,17 +1444,20 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     const q = attached ? qtyChips(wallQuantities(result, w.id, tag)) : [];
     return (
       <li key={w.id} className="py-2" data-wall-row={w.id}>
-        <button type="button" onClick={() => { if (material && !attached) setOthersOpen(true); onOpenWall?.(w.id); }}
+        <button type="button" onClick={() => { if (material && !attached) setOthersOpen(true); openFromList(w.id); }}
           className="flex min-h-[48px] w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-page" aria-label={`Open ${wallName(w)}`}>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold text-ink">{wallName(w)}</span>
             <span className="block text-[11px] text-muted">{SHAPE_LABEL[k]} · {fmtMm(Math.round((len || 0) * 10) / 10)} mm long{hText ? ` · ${hText}` : ""}{nOpen ? ` · ${plural(nOpen, "opening")}` : ""}</span>
-            <span className="mt-1 flex flex-wrap gap-1">
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTracedOutline(w) ? "Traced elevation" : isTraced(w) ? "From plan" : "Entered"}</span>
+            <span className={`flex flex-wrap gap-1 ${needsHeights || blocked || rowMore ? "mt-1" : ""}`}>
+              {/* what blocks the order stays out; the rest folds under the list's More (wall-by-wall step 5) */}
               {needsHeights && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Heights needed</span>}
               {blocked && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-wall-blocked="">Needs attention</span>}
-              {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
-              {q.map((t) => <span key={t} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">{t}</span>)}
+              <span className={rowMore ? "contents" : "hidden"} data-row-more="">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{isTracedOutline(w) ? "Traced elevation" : isTraced(w) ? "From plan" : "Entered"}</span>
+                {users.map((m) => <span key={m.id} className={`rounded-full px-2 py-0.5 text-[11px] ${material && m.id === material.id ? "bg-primary/10 font-semibold text-primary" : "bg-page text-muted"}`}>{m.name}</span>)}
+                {q.map((t) => <span key={t} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">{t}</span>)}
+              </span>
             </span>
           </span>
           <span aria-hidden="true" className="text-muted">›</span>
@@ -1446,6 +1502,9 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
           <section aria-label="Walls" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="flex-1 text-sm font-semibold text-ink">Walls <span className="font-normal text-muted">({mine.length})</span></h2>
+              {walls.length > 0 && <Btn kind="ghost" aria-expanded={rowMore} onClick={() => setRowMore((v) => !v)} data-rows-more="">More <span aria-hidden="true">{rowMore ? "▾" : "▸"}</span></Btn>}
+              {/* wall-by-wall step 5: review every wall of this material in run order, then the order */}
+              {order.length > 0 && <Btn onClick={() => openFromList(order[0].id)} data-review-walls="">Review walls</Btn>}
             </div>
             {canEdit && material && (
               <div className="grid grid-cols-2 gap-2">
@@ -1501,9 +1560,11 @@ function setoutFor(material) {
   return null;
 }
 
-function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, saveBanner, draftReset, clearDraftRef, initialTab = null }) {
+function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, onSetup = null, saveBanner, draftReset, clearDraftRef, initialTab = null, tabRef = null,
+  footerBelow = false, onEditingSheet = null }) {
   const fam = material?.spec?.family;
   const [tab, setTab] = useState(initialTab || (fam === "batten" || fam === "timber" ? "supports" : fam === "accessory" ? "accessories" : "cladding"));
+  useEffect(() => { if (tabRef) tabRef.current = tab; }, [tab, tabRef]);
   const [pick, setPick] = useState(null);
   const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
   const [placing, setPlacing] = useState(false);
@@ -1546,7 +1607,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   };
   const drawnOpenings = openings.map((o) => ({ ...o, issue: openingIssue(o.id) === "invalid" ? null : openingIssue(o.id) }));
 
-  const wallProblemsByMat = new Map(entries.map((e) => [e.material.id, problemsForWall(view, e.material, e.result, wall)]));
+  const attributed = new Map(entries.map((e) => [e.material.id, attributeProblems(view, e.material, e.result)]));
+  const wallProblemsByMat = new Map(entries.map((e) => [e.material.id, attributed.get(e.material.id).byWall.get(wall.id) || []]));
   const cladEntries = entries.filter((e) => CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey));
   const shownClad = cladEntries.find((e) => e.material.id === pick) || cladEntries[0] || null;
   const autoJointsHere = (shownClad?.layout?.joints || []).filter((j) => j.source === "auto");
@@ -1555,14 +1617,15 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const studEntry = entries.find((e) => (e.result?.methodKey || e.material.methodKey) === "wall_frame") || null;
 
   // elements of the ONE view shown
-  let elements = { items: [], guides: [], notes: [], totals: null, sheetInfo: null };
-  if (polygon && tab === "cladding" && shownClad) elements = { ...claddingElements(shownClad, bbox, wallProblemsByMat.get(shownClad.material.id) || []), totals: null };
+  // (notes = counts shown by the drawing; about = the explanations, folded under More — wall-by-wall step 5)
+  let elements = { items: [], guides: [], notes: [], about: [], totals: null, sheetInfo: null };
+  if (polygon && tab === "cladding" && shownClad) elements = { about: [], ...claddingElements(shownClad, bbox, wallProblemsByMat.get(shownClad.material.id) || []), totals: null };
   if (polygon && tab === "supports") {
     const s = supportElements(entries.filter((e) => !CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey) && e.material.spec?.family !== "accessory"), bbox, polygon);
     const f = followerElements(cladEntries);
-    elements = { items: [...f.items, ...s.items], guides: [], notes: [...f.notes, ...s.notes], totals: null };
+    elements = { items: [...f.items, ...s.items], guides: [], notes: [...f.notes, ...s.notes], about: [...f.about, ...s.about], totals: null };
   }
-  if (polygon && tab === "accessories") { const a = accessoryElements(polygon, openings, cladEntries); elements = { items: a.items, guides: [], notes: [], totals: a.totals }; }
+  if (polygon && tab === "accessories") { const a = accessoryElements(polygon, openings, cladEntries); elements = { items: a.items, guides: [], notes: [], about: [], totals: a.totals }; }
   const hitItems = elements.items.filter((it) => it.hit !== false);
   const selItem = sel?.kind === "item" ? hitItems.find((it) => it.id === sel.id) || null : null;
   const selOpening = sel?.kind === "opening" ? openings.find((o) => o.id === sel.id) || null : null;
@@ -1586,7 +1649,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const readable = readableFor(view);
   const inPlace = entries.flatMap((e) => (wallProblemsByMat.get(e.material.id) || []).filter((p) => p.code !== "opening_clipped")
     .map((p) => ({ ...readable(p), materialName: OPENING_GEOMETRY.has(p.code) ? null : e.material.name, materialId: e.material.id })));
-  const blockingHere = dedupe(inPlace.filter((p) => p.blocking !== false));
+  // wall-by-wall step 5: a problem with the material itself (no wall named: missing product sizes, an unfinished setup)
+  // blocks the order for every wall, so it shows here too, with the material's Setup — the review never walks past it
+  const materialBlocking = entries.flatMap((e) => (attributed.get(e.material.id)?.general || []).filter((p) => p.blocking !== false)
+    .map((p) => ({ ...readable(p), materialName: e.material.name, materialId: e.material.id, material: e.material, general: true })));
+  const seenMat = new Set();
+  const blockingHere = [...dedupe(inPlace.filter((p) => p.blocking !== false)),
+    ...materialBlocking.filter((p) => { const key = `${p.materialId}|${p.message}`; return seenMat.has(key) ? false : (seenMat.add(key), true); })];
   const notesHere = dedupe(inPlace.filter((p) => p.blocking === false));
   const blockingFor = (id) => blockingHere.some((p) => p.materialId === id);
   const openingProblem = (id) => {
@@ -1633,6 +1702,11 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const mine = material ? entries.find((e) => e.material.id === material.id) : null;
   const mineQty = mine ? qtyChips(wallQuantities(mine.result, wall.id, mine.tag)) : [];
   const resultLine = areas ? `Net ${fmtM2(areas.netM2)} m² of ${fmtM2(areas.grossM2)} m²${mine ? ` · ${mine.material.name}: ${blockingFor(mine.material.id) ? "needs attention (see problems)" : mineQty.length ? mineQty.join(", ") : "nothing calculated yet"}` : ""}` : null;
+  // wall-by-wall step 5: one short line per cladding on this wall (its sheets, battens, foam tape and H-flashing)
+  const wallLines = cladEntries.map((e) => {
+    const text = wallCladdingText(wallCladdingTotals(e.result, wall.id, e.tag));
+    return { id: e.material.id, name: e.material.name, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet") };
+  });
 
   // ── handlers ──
   // W1, D1 … per wall — the same rule as + Window / + Door on the plan (HUB 022 step 2)
@@ -1693,18 +1767,37 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm });
   }
   const selectOpening = (id) => { setPlacing(false); setDraft(null); setSel({ kind: "opening", id }); showDrawing(); };
-  const step = (dir) => {
-    if (!selItem) return;
-    const i = hitItems.findIndex((it) => it.id === selItem.id);
-    setSel({ kind: "item", id: hitItems[(i + dir + hitItems.length) % hitItems.length].id });
-  };
 
   const sheetOpen = !!sel;
+  // an opening's or a joint row's sheet (tall, with the keypad) takes the wall-to-wall buttons' room while it is open
+  const editingSheet = (sel?.kind === "opening" && !!selOpening) || sel?.kind === "newOpening" || (sel?.kind === "jointRow" && !!material);
+  useEffect(() => { onEditingSheet?.(editingSheet); }, [editingSheet, onEditingSheet]);
+  useEffect(() => () => onEditingSheet?.(false), [onEditingSheet]);
   const maxH = Math.round(Math.min((typeof window !== "undefined" ? window.innerHeight : 800) * (sheetOpen ? 0.3 : 0.42), 380));
   const dv = sel?.kind === "newOpening" ? draftValues(draft) : null;
   const shownDraft = dv && draft ? { ...dv, tapX: draft.tapX, tapY: draft.tapY } : null;
   const shownLayoutEmpty = !!shownClad && !layoutHasParts(shownClad.layout, shownClad.result?.methodKey || shownClad.material.methodKey);
   const si = elements.sheetInfo;
+  // wall-by-wall step 5 (Sam's answer 3): the drawing's explanations fold under More with the chips and notes; the
+  // counts, the share switch and the offcut list stay by the drawing
+  const aboutDrawing = [
+    ...(si ? [
+      <p key="cut">A cut strip still uses a whole sheet.</p>,
+      Number.isFinite(si.layoutCutM2) && <p key="m2">Layout cut {fmtM2(si.layoutCutM2)} m² · sheet stock {fmtM2(si.stockM2)} m² (spares are added in the schedule).</p>,
+      si.acrossWalls ? (
+        <p key="shared" data-sheet-shared="walls">Sheets and offcuts are shared across {(() => {
+          // a wall of this cladding whose quantity is blocked isn't in the shared plan until it is fixed
+          const all = shownClad?.material ? sharedWallsOf(shownClad.material) : si.acrossWalls.walls.length;
+          return all > si.acrossWalls.walls.length ? `${si.acrossWalls.walls.length} of the ${all} walls` : `all ${si.acrossWalls.walls.length} walls`;
+        })()} of {shownClad?.material?.name || "this cladding"}: {plural(si.acrossWalls.totalPieces, "piece")} from {plural(si.acrossWalls.totalSheets, "sheet")} in all, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.{si.acrossWalls.fromOtherWalls ? ` ${plural(si.acrossWalls.fromOtherWalls, "piece")} on this wall come${si.acrossWalls.fromOtherWalls === 1 ? "s" : ""} from another wall's sheet or offcut — tap a piece to see which.` : ""}</p>
+      ) : si.shared && si.pieces > si.sheets && <p key="shared" data-sheet-shared="">{si.pieces} pieces cut from {plural(si.sheets, "sheet")}: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.</p>,
+    ] : []),
+    ...(elements.about || []).map((n) => <p key={n} data-elevation-about="">{n}</p>),
+    polygon && tab === "accessories" && elements.totals && <p key="routes">Route lengths only. Accessory quantities come from the accessory material and its reviewed details.</p>,
+    ...(tab === "accessories" ? accessoryEntries.map((e) => (
+      <p key={`scope-${e.material.id}`} data-accessory-about={e.material.id}>{e.material.name}: {Array.isArray(e.layout?.groups) ? "each group follows this wall's own routes." : "no accessory routes are calculated for this material yet. Quantities come from a reviewed detail."} “Not decided” is not the same as excluded.</p>
+    )) : []),
+  ].filter(Boolean);
 
   const dims = (
     // one DOM position (no remount → focus/keyboard kept); shown first until the elevation can be generated
@@ -1725,6 +1818,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             <div data-use-here=""><Banner tone="info" action={<Btn kind="primary" onClick={() => act.setAttached(wall, true)} aria-label={`Use ${material.name} on this wall`}>Use here</Btn>}>
               {material.name} isn&apos;t on this wall yet.</Banner></div>
           )}
+          {/* wall-by-wall step 5: this wall's cladding quantities from the layout (sheets, battens, tape, H-flashing) in
+              one short line, before spares — the same numbers the order adds up */}
+          {wallLines.length > 0 && (
+            <div className="space-y-0.5 rounded-card border border-hairline bg-white px-3 py-2 text-sm" data-wall-lines="">
+              {wallLines.map((l) => <p key={l.id} data-wall-line={l.id}><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>)}
+            </div>
+          )}
           {measProblems.map((t) => <Banner key={t} tone="warn">{t}</Banner>)}
           <section ref={elevRef} aria-label="Elevation" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div role="radiogroup" aria-label="Elevation view" className="flex rounded-lg border border-hairline p-0.5">
@@ -1733,10 +1833,6 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                   className={`min-h-[44px] flex-1 rounded-md px-2 text-sm font-medium ${tab === k ? "bg-primary text-white" : "text-ink"}`}>{label}</button>
               ))}
             </div>
-            <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted">
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" data-provenance="">{provenanceText(wall)}</span>
-              <span>Setout aid — not a surveyed elevation.</span>
-            </p>
             {tab === "cladding" && cladEntries.length > 1 && (
               <Chips label="Show" value={shownClad?.material.id} options={cladEntries.map((e) => [e.material.id, e.material.name])} onChange={(id) => { setPick(id); setSel(null); }} />
             )}
@@ -1769,15 +1865,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <div className="space-y-1 text-xs text-ink" data-sheet-summary="">
                 <p>{plural(si.strips, "strip")}{si.cutWidths.length ? ` (${si.cutWidths.length} cut: ${si.cutWidths.map((w) => `${fmtMm(Math.round(w * 10) / 10)} mm`).join(", ")} wide)` : ""} × {plural(si.courses, "course")} → {si.acrossWalls
                   ? <><b>{plural(si.pieces, "piece")}</b> from {plural(si.acrossWalls.usedSheets ?? si.sheets, "sheet")}, {plural(si.sheets, "sheet")} counted on this wall</>
-                  : <b>{plural(si.sheets, "sheet")}</b>}{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}. A cut strip still uses a whole sheet.</p>
-                {Number.isFinite(si.layoutCutM2) && <p className="text-muted">Layout cut {fmtM2(si.layoutCutM2)} m² · sheet stock {fmtM2(si.stockM2)} m² (spares are added in the schedule).</p>}
-                {si.acrossWalls ? (
-                  <p data-sheet-shared="walls">Sheets and offcuts are shared across {(() => {
-                    // a wall of this cladding whose quantity is blocked isn't in the shared plan until it is fixed
-                    const all = shownClad?.material ? sharedWallsOf(shownClad.material) : si.acrossWalls.walls.length;
-                    return all > si.acrossWalls.walls.length ? `${si.acrossWalls.walls.length} of the ${all} walls` : `all ${si.acrossWalls.walls.length} walls`;
-                  })()} of {shownClad?.material?.name || "this cladding"}: {plural(si.acrossWalls.totalPieces, "piece")} from {plural(si.acrossWalls.totalSheets, "sheet")} in all, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.{si.acrossWalls.fromOtherWalls ? ` ${plural(si.acrossWalls.fromOtherWalls, "piece")} on this wall come${si.acrossWalls.fromOtherWalls === 1 ? "s" : ""} from another wall's sheet or offcut — tap a piece to see which.` : ""}</p>
-                ) : si.shared && si.pieces > si.sheets && <p data-sheet-shared="">{si.pieces} pieces cut from {plural(si.sheets, "sheet")}: sheets are shared across the wall, cut across their length only (the long factory edges stay), allowing {fmtMm(si.kerfMm)} mm per saw cut.</p>}
+                  : <b>{plural(si.sheets, "sheet")}</b>}{si.empty ? ` · ${plural(si.empty, "empty cell")} use none` : ""}.</p>
                 {si.shared && canEdit && shownClad?.material && shownClad.material.id === material?.id && material.methodKey === "sheet_layout" && sharedWallsOf(material) > 1 && (() => {
                   // HUB 016b: one switch per cladding — keep offcuts for the other walls, or plan each wall on its own (walls clad separately)
                   const on = material.rules?.shareSheetsAcrossWalls !== false;
@@ -1809,7 +1897,6 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             {polygon && tab === "accessories" && elements.totals && (
               <dl className="grid grid-cols-[1fr_auto] gap-x-3 text-xs" aria-label="Accessory routes">
                 {elements.totals.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="text-right font-semibold text-ink">{fmtMm(Math.round(v))} mm</dd></div>)}
-                <p className="col-span-2 mt-1 text-[11px] text-muted">Route lengths only. Accessory quantities come from the accessory material and its reviewed details.</p>
               </dl>
             )}
             {tab === "accessories" && accessoryEntries.map((e) => {
@@ -1825,7 +1912,6 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                       <div key={k} className="contents"><dt className="text-muted">{ACCESSORY_SCOPE_LABEL[k]}</dt><dd className="text-right font-medium text-ink" data-scope={k}>{SCOPE_TEXT[scope[k] || "unresolved"]}</dd></div>
                     ))}
                   </dl>
-                  <p className="text-[11px] text-muted">{groups ? "Each group follows this wall's own routes." : "No accessory routes are calculated for this material yet — quantities come from a reviewed detail."} “Not decided” is not the same as excluded.</p>
                 </div>
               );
             })}
@@ -1838,25 +1924,20 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             )}
           </section>
 
-          {(blockingHere.length > 0 || notesHere.length > 0) && (
+          {blockingHere.length > 0 && (
             <section aria-label="Problems on this wall" className="space-y-2" data-wall-problems="">
               {blockingHere.map((p) => (
-                <Banner key={p.message} tone="error" action={p.code === "sheet_too_tall" && canEdit && p.materialId === material?.id ? (
+                <Banner key={`${p.materialId}|${p.message}`} tone="error" action={p.general ? (canEdit && onSetup ? <Btn onClick={() => onSetup(p.material)} aria-label={`Set up ${p.materialName}`}>Setup</Btn> : null)
+                  : p.code === "sheet_too_tall" && canEdit && p.materialId === material?.id ? (
                   <div className="flex flex-wrap gap-1">
                     {/* HUB 015: one tap — Blue Leaf's joint; the engine then places the joints wherever a wall is taller than the sheet */}
                     <Btn kind="primary" onClick={() => act.updateRules({ jointRows: { atMm: [], ...BLUE_LEAF_SHEET_JOINT } }, ["jointRowsDraft"], ["jointRows"])}>Use a {BLUE_LEAF_SHEET_JOINT.gapMm} mm joint with an {BLUE_LEAF_SHEET_JOINT.detailRef}</Btn>
                     <Btn onClick={() => setSel({ kind: "jointRow" })}>Other joint…</Btn>
                   </div>)
                   : p.code === "joint_rows_invalid" && canEdit && p.materialId === material?.id ? <Btn onClick={() => setSel({ kind: "jointRow" })}>Edit joint row</Btn> : null}>
-                  {onWall.length > 1 && p.materialName ? <b>{p.materialName}: </b> : null}{p.message}
+                  {(p.general || onWall.length > 1) && p.materialName ? <b>{p.materialName}: </b> : null}{p.message}
                 </Banner>
               ))}
-              {notesHere.length > 0 && (
-                <details className="rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900">
-                  <summary className="min-h-[44px] cursor-pointer py-3">{plural(notesHere.length, "note")} for this wall (not blocking)</summary>
-                  <ul className="list-disc space-y-0.5 pb-2 pl-4">{notesHere.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
-                </details>
-              )}
             </section>
           )}
 
@@ -1906,20 +1987,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                 return (
                   <div key={e.material.id} data-wall-qty={e.material.id} className="space-y-1">
                     <p className="text-xs font-semibold text-ink">{e.material.name}</p>
-                    {e.result?.status && (
-                      <p className="flex flex-wrap gap-1" aria-label={`${e.material.name} statuses`}>
-                        <StatusChip group="quantity" value={e.result.status.quantity} />
-                        <StatusChip group="installation" value={e.result.status.installation} />
-                        <StatusChip group="procurement" value={e.result.status.procurement} />
-                      </p>
-                    )}
                     {rows.length ? (
                       <ul className="text-sm">{rows.map((r) => <li key={r.key} className="flex gap-2"><span className="min-w-0 flex-1 text-muted">{r.text}</span><b className="shrink-0 text-ink" data-qty-unit={r.unit}>{r.qtyText}</b></li>)}</ul>
                     ) : <p className="text-sm text-muted">{blockingFor(e.material.id) ? "No quantities until the problems above are fixed." : "Nothing calculated for this wall yet."}</p>}
                   </div>
                 );
               })}
-              <p className="text-[11px] text-muted">Layout quantities before spares and pack rounding — the schedule adds those.</p>
             </section>
           )}
 
@@ -1960,6 +2033,33 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               </div>
             )}
           </section>
+
+          {/* wall-by-wall step 5: where the wall came from, the statuses and the notes fold away here (they stay on
+              the schedule and the order); anything that blocks the order is shown above with its fix */}
+          <More aria-label="More about this wall" data-wall-more="">
+            <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" data-provenance="">{provenanceText(wall)}</span>
+              <span>Setout aid — not a surveyed elevation.</span>
+            </p>
+            {aboutDrawing.length > 0 && <div className="space-y-1 text-xs text-muted" data-wall-about="">{aboutDrawing}</div>}
+            {entries.filter((e) => e.result?.status).map((e) => (
+              <div key={e.material.id} className="space-y-1" data-wall-status={e.material.id}>
+                <p className="text-xs font-semibold text-ink">{e.material.name}</p>
+                <p className="flex flex-wrap gap-1" aria-label={`${e.material.name} statuses`}>
+                  <StatusChip group="quantity" value={e.result.status.quantity} />
+                  <StatusChip group="installation" value={e.result.status.installation} />
+                  <StatusChip group="procurement" value={e.result.status.procurement} />
+                </p>
+              </div>
+            ))}
+            {notesHere.length > 0 && (
+              <div className="text-sm text-amber-900" data-wall-notes="">
+                <p className="text-xs font-semibold">{plural(notesHere.length, "note")} for this wall (not blocking)</p>
+                <ul className="list-disc space-y-0.5 pl-4">{notesHere.map((p) => <li key={p.message}>{p.message}</li>)}</ul>
+              </div>
+            )}
+            {entries.length > 0 && <p className="text-[11px] text-muted">The quantities on this wall are layout quantities before spares and pack rounding. The schedule adds those.</p>}
+          </More>
           {saveBanner}
         </div>
       </KeyboardSafe>
@@ -1985,7 +2085,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
           </KeyboardSafe>
         </Sheet>
       ) : null}
-      {selItem && <ElementSheet item={selItem} index={hitItems.findIndex((it) => it.id === selItem.id)} total={hitItems.length} onStep={step} onClose={() => setSel(null)} onAction={(a) => a === "jointRow" && setSel({ kind: "jointRow" })} canEdit={canEdit} />}
+      {selItem && <ElementSheet item={selItem} onClose={() => setSel(null)} onAction={(a) => a === "jointRow" && setSel({ kind: "jointRow" })} canEdit={canEdit} footerBelow={footerBelow} />}
       {sel?.kind === "jointRow" && material && (
         <JointRowSheet key={`joint-row-${draftReset}`} view={view} material={material} suggestionMm={tooTall?.suggestedJointAtMm} onClose={() => setSel(null)}
           onApply={(jr) => act.updateRules({ jointRows: jr }, ["jointRowsDraft"], ["jointRows"])}

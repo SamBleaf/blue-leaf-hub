@@ -1,4 +1,4 @@
-<!-- Planning only (21 Oct 2026). Nothing built. Replaces WALL_BY_WALL_PLAN.md with Sam's answers, HUB 022 and HUB 023. -->
+<!-- Planned 21 Oct 2026; steps 1–5 built the same day (see each step's Built note). Replaces WALL_BY_WALL_PLAN.md with Sam's answers, HUB 022 and HUB 023. -->
 
 # Wall-by-wall takeoff: revised plan (HUB 022 + HUB 023)
 
@@ -120,6 +120,8 @@ Files: measure/tools.js, measure/geometry.js, MeasureScreen.jsx, WallsScreen.jsx
 
 iPhone: checks 1–6.
 
+**Built (9f4818d):** Line with the cladding and Wall height together; the height at each tap goes on the walls after it, and a straight wall splits where it changes. A run saves in one go with runId + seq (the real server keeps them) and stays on the plan with one run card and its Undo. The list shows a run as one line; Use / Remove moved into the wall. Select has a Height box for one wall, and a shared corner drags both walls with one Undo. Timber keeps Wall.
+
 **2. + Window / + Door on the plan (M)**
 
 Today:
@@ -141,6 +143,8 @@ Adds:
 Files: MeasureScreen.jsx, measure/geometry.js, measure/Overlays.jsx, measure/tools.js, WallsScreen.jsx (shared W/D labels), tc-measure.spec.js.
 
 iPhone: check 7.
+
+**Built (57314d5):** + Window / + Door in the Line panel and on the run card. Height and Sill remember the last window; a door asks Height only and sits on the floor. Two taps snap to the nearest traced wall and save an ordinary opening (W1, D1), so the server didn't change. Openings are drawn on the plan; a cut-back past a wall end or round a corner says so on the card.
 
 **3. Rectangle, Area and pages: HUB 023 (M)**
 
@@ -164,6 +168,8 @@ Adds:
 Files: measure/tools.js, measure/geometry.js, MeasureScreen.jsx, measure/Overlays.jsx, TakeoffApp.jsx, PlanSetup.jsx, tc-measure.spec.js, takeoff-api.test.mjs, SOP 20-02.
 
 iPhone: checks 8–9.
+
+**Built (d9acb34):** Rectangle and Area beside Line on every page, saved as outline walls on the cladding, with real sheets. Live m², outlines drawn closed and picked by any side, corner drags, and openings that stay put. + Window on an outline is two corners. The Page chip goes straight back to measuring, and an unscaled page asks for a scale first.
 
 **4. Automatic battens and extras (L)**
 
@@ -191,6 +197,8 @@ Files: cladding.js, wall.js, supports.js, accessories.js, dispatch.js, companyDe
 
 iPhone: check 10.
 
+**Built (2e37dae):** Battens worked out from the cladding (Axon: bottom, top, H joints, sheet joins, 600 centres and round openings; Linea and Stria at 600; timber at 450; Hardie Cavity Batten 405307), foam tape 304560 in 25 m rolls once per job, and H-flashing 305613 in 3,000 lengths, with shared offcuts. No nails (4c dropped). Battens set up by hand are never doubled. No migration.
+
 **5. Review at the end (M)**
 
 Today:
@@ -208,6 +216,8 @@ Adds:
 Files: WallsScreen.jsx, MeasureScreen.jsx (Review walls), TakeoffApp.jsx, tc-walls.spec.js.
 
 iPhone: checks 11–12.
+
+**Built (step 5, this change):** Review walls on the run card, the Line, Rectangle and Area panels, the window and door panel and the walls list opens the cladding's first wall. Each wall has ‹ Previous wall · n of N · Next wall › at the bottom in run order, and Review order › on the last one once there is something to order. Select → Open elevation gets the same buttons, under the wall's own cladding. The old ‹ › through a wall's sheets is gone: tap each one, even a 1 mm strip. Each wall leads with its sheets, battens, tape and H-flashing in one line, adding up to the order before spares. Chips and notes fold under More; anything that blocks the order stays out with its fix, a problem with the cladding itself too.
 
 ## Acceptance checks
 1. Line shows Axon 400 smooth and Wall height together, starting at the last height used.

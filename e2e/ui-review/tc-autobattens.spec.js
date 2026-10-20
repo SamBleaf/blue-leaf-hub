@@ -64,7 +64,13 @@ test("step 4 / acceptance 10: Axon 400 smooth from the Blue Leaf defaults works 
   // batten (3,000 + 600); the bottom, the top and the H-joint batten (3,000 + 1,000 each) → 22 pieces, 40.80 m
   await page.getByRole("radio", { name: "Supports" }).click();
   await expect(supports(page)).toHaveCount(22);
-  await expect(page.locator("[data-elevation-note]").first()).toHaveText("Battens worked out from Axon 400 smooth: 22 pieces, 40.80 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+  // the explanation folds under More (wall-by-wall step 5); the wall's short line at the top has the count
+  await expect(page.locator("[data-elevation-note]")).toHaveCount(0);
+  await expect(page.locator("[data-wall-line-text]")).toContainText("22 batten pieces");
+  await page.locator("[data-wall-more] summary").click();
+  await expect(page.locator("[data-wall-more] [data-elevation-about]").first()).toHaveText("Battens worked out from Axon 400 smooth: 22 pieces, 40.80 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+  await expect(page.locator("[data-wall-more] [data-elevation-about]").first()).toBeVisible();
+  await page.locator("[data-wall-more] summary").click();
   await expect(page.locator("[data-supports-empty]")).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/supports-axon-defaults-390x844.png` });
   // tap a batten: what it is and what it is cut from
@@ -121,8 +127,11 @@ test("step 4, the check job (?takeoffSeed=battens): each wall shows its own batt
   await openWallsOf(page, "Axon 400 smooth");
   // the wall rows: sheets and battens — tape and H-flashing are on each wall's page
   const row = (name) => page.getByRole("button", { name: `Open ${name}` });
-  await expect(row("Wall 2")).toContainText("14 batten pieces");
-  await expect(row("Gable")).toContainText("23 batten pieces");
+  // the row chips fold under the list's More (wall-by-wall step 5): hidden first, shown once More is tapped
+  await expect(row("Wall 2").getByText("14 batten pieces", { exact: true })).toBeHidden();
+  await page.locator("[data-rows-more]").click();
+  await expect(row("Wall 2").getByText("14 batten pieces", { exact: true })).toBeVisible();
+  await expect(row("Gable").getByText("23 batten pieces", { exact: true })).toBeVisible();
   await row("Gable").click();
   await page.getByRole("radio", { name: "Supports" }).click();
   await expect(supports(page)).toHaveCount(23);
@@ -225,7 +234,10 @@ test("step 4, an older job: battens set up by hand on a wall stay as they were �
   await page.getByRole("radio", { name: "Supports" }).click();
   // only the hand-made layer's battens are drawn — the Axon adds none of its own here
   await expect(supports(page)).toHaveCount(handLines);
-  // and says how to switch to the automatic battens
-  await expect(page.locator("[data-elevation-note]").first()).toHaveText("The battens on this wall come from Cavity battens (set up by hand), so Axon cladding doesn't add its own here. To use the automatic battens instead, remove Cavity battens from this wall in Materials on this wall.");
+  // and says how to switch to the automatic battens (a note: under More, wall-by-wall step 5)
+  await page.locator("[data-wall-more] summary").click();
+  const about = page.locator("[data-wall-more] [data-elevation-about]").first();
+  await expect(about).toHaveText("The battens on this wall come from Cavity battens (set up by hand), so Axon cladding doesn't add its own here. To use the automatic battens instead, remove Cavity battens from this wall in Materials on this wall.");
+  await expect(about).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/supports-hand-made-390x844.png` });
 });

@@ -10,9 +10,10 @@
 // Only the selected opening captures touch (touch-action: none); everywhere else a one-finger swipe scrolls the
 // page and two fingers zoom, so drawing/selecting and navigating never conflict.
 // Zoom: when the fitted drawing makes cells / courses smaller than a finger (< 44 px), − / + buttons enlarge the
-// drawing INSIDE its own scroll box (one finger pans it; the page never scrolls sideways). Taps, Previous/Next
-// and the selected opening's drag work the same at every zoom; a NEW selection is brought into view (the user's
-// own panning is never undone by an unrelated re-render).
+// drawing INSIDE its own scroll box (one finger pans it; the page never scrolls sideways). Taps and the selected
+// opening's drag work the same at every zoom; a NEW selection is brought into view (the user's own panning is never
+// undone by an unrelated re-render). A piece too thin to hit (a 1 mm cut strip) takes a tap centred on it
+// (RECT_MIN_HIT_PX), since every sheet is reached by tapping it (wall-by-wall step 5: no stepping through the parts).
 // Openings: the part on the wall is drawn white (deducted once, as a union); any part past the wall edge is
 // red-hatched (not deducted), and an opening wholly outside the wall is outlined red (opening.issue).
 // =============================================================================
@@ -22,6 +23,7 @@ const SNAP_MM = 10;
 const TAP_SLOP_PX = 8;
 const DRAG_START_PX = 3;
 const LINE_HIT_PX = 18;
+const RECT_MIN_HIT_PX = 12;
 const PAD = { l: 14, r: 14, t: 22, b: 30 };
 const ZOOMS = [1, 2, 4, 8, 16];
 const TARGET_PX = 44;
@@ -179,7 +181,10 @@ export default function WallElevation({
     for (const it of items) {
       if (it.kind !== "rect" || it.hit === false) continue;
       const r = rectPx(it.rect);
-      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h && (!rect || r.w * r.h < rect.area)) rect = { id: it.id, area: r.w * r.h };
+      // a piece thinner than a fingertip (a 1 mm cut strip) still takes a tap centred on it: its box grows to
+      // RECT_MIN_HIT_PX, and the smallest piece under the finger wins, so it never hides behind its neighbour
+      const gx = Math.max(0, (RECT_MIN_HIT_PX - r.w) / 2), gy = Math.max(0, (RECT_MIN_HIT_PX - r.h) / 2);
+      if (p.x >= r.x - gx && p.x <= r.x + r.w + gx && p.y >= r.y - gy && p.y <= r.y + r.h + gy && (!rect || r.w * r.h < rect.area)) rect = { id: it.id, area: r.w * r.h };
     }
     if (rect) return { kind: "item", id: rect.id };
     return line ? { kind: "item", id: line.id } : null;
@@ -266,7 +271,7 @@ export default function WallElevation({
   }, [hasFrame]);
 
   const selItem = items.find((it) => it.id === selectedId) || null;
-  // zoomed in: bring a NEW selection (Previous / Next, list taps, zoom change) into the scroll box — once, so the
+  // zoomed in: bring a NEW selection (a tap, a list tap, a zoom change) into the scroll box — once, so the
   // user's own panning isn't snapped back by unrelated re-renders (autosave status, recalculation)
   const shownSel = useRef(null);
   useLayoutEffect(() => {

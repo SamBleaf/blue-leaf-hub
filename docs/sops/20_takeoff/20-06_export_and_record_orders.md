@@ -1,5 +1,5 @@
 ---
-sop_version: 2.5
+sop_version: 2.6
 last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: needs_replacement
@@ -64,7 +64,7 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 
 ### A. Open Orders and start a draft
 
-1. On the overview, in **Length schedule**, tap **Review & export order** (view-only users see **Orders**).
+1. On the overview, in **Length schedule**, tap **Review & export order** (view-only users see **Orders**). After checking a cladding's walls with **Review walls** (SOP 20-09 Section C4), **Review order ›** on the last wall opens the same **Timber and cladding** order. Like **Review & export order**, it is greyed out ("Nothing to order yet") until the takeoff has something to order.
 2. The **Orders** window shows: "Exporting makes a PDF for you to send — it doesn't send or place anything. Send it to the supplier yourself, then record it as placed."
 3. If you see "Saving your latest takeoff changes… orders use the saved version.", wait for it to clear.
 4. Tap **New order**. A draft called **Draft FO-00xxxx** appears with:
@@ -470,6 +470,12 @@ Next review date: 2027-04-14
 1. `?reviewRole=admin&takeoffDefaults=1` → **Timber and cladding** → **Add cladding** → **Axon 400 smooth** → **Walls** → **Wall by numbers** 4,000 × 3,600 → **‹ Walls** → **Back** → **Review & export order** → **New order**.
 2. Expected: the Axon block lists the sheets, then "… · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length" (pieces), "… · Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces) and "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" with **Order quantity (rolls)** 1. Each starts at what the schedule shows.
 3. API (scripts/tests/takeoff-api.test.mjs "wall-by-wall step 4"): an order with every Axon line stores the codes 405307, 305613 and 304560 (the tape as unit "roll"); the exported snapshot has ONE material block holding them (units piece, piece, roll); the supplier PDF is served. Engine (scripts/tests/takeoff-tc-autobattens.test.mjs): the snapshot rows and the supplier PDF text read "N × piece Hardie Cavity Batten 70 × 19 …", "2 × roll Hardie™ 50mm Foam Back Sealing Tape, 25 m roll …", "2 × piece Hardie™ 9mm Alum Horizontal H Flashing …" with the codes; a hand-made batten material on a wall never adds a second batten line.
+- [ ] Pass  [ ] Fail
+
+**TC-24 — Review order › from the last wall (wall-by-wall step 5, UI Review)**
+1. `?takeoffSeed=mixed` → Timber and cladding → **Measure** → **Axon cladding** → trace a run of four walls → **Review walls** → **Next wall ›** until "5 of 5" (North wall).
+2. Expected: **Review order ›** at the bottom instead of **Next wall ›**. Tap it → **New order**. Expected: the **Orders** window, the same as **Review & export order**; the Axon sheet quantities are the walls' sheets (the lines at the top of each wall) plus the schedule's spares. **Back** returns to the overview.
+3. Nothing to order: a job whose only cladding wall is 4,000 × 4,200 Axon 400 smooth with no joint row. Expected: on the overview **Review & export order** is greyed out; **Review walls** → "1 of 1" → **Review order ›** is greyed with "Nothing to order yet", so no empty draft (and no order number) is made. Tap **Use a 10 mm joint with an H-flashing** on the wall: **Review order ›** works and opens **Orders**. Screens: e2e/ui-review/tc-review.spec.js.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

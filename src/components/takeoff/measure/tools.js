@@ -15,6 +15,8 @@
 //                      HUB 022 step 2: + Window / + Door in the Line panel put openings into the traced walls
 //                      HUB 023: Rectangle (two opposite corners) and Area (each corner, then Finish) draw a wall straight
 //                      onto a scaled elevation, saved as a traced outline wall (inputs.kind "polygon")
+//                      Wall-by-wall step 5: reviewWalls (the order Review walls steps through) + each wall's cladding
+//                      quantities in one short line (wallCladdingTotals / wallCladdingText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
 
@@ -316,6 +318,72 @@ export function wallListItems(walls, runs) {
     out.push({ run, walls: ws });
   }
   return out;
+}
+
+// ── review at the end (wall-by-wall step 5) ───────────────────────────────────────────────────────────────────
+
+/**
+ * The walls of ONE material in the order they are reviewed (Sam, 21 Oct 2026: "review all walls at the end"): its
+ * traced runs by run number, each run's walls in tap order (seq), then its other walls in takeoff order. The wall
+ * pages' ‹ Previous wall / Next wall › step through exactly this list; archived walls and walls that only other
+ * materials use are left out. @returns {object[]} wall measurements
+ */
+export function reviewWalls(measurements, contributions, materialId) {
+  if (!materialId) return [];
+  const on = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId).map((c) => c.measurementId));
+  const mine = (measurements || []).filter((m) => m.kind === "wall" && !m.archived && on.has(m.id));
+  const runs = [...wallRuns(measurements).values()].sort((a, b) => a.n - b.n);
+  const inRuns = runs.flatMap((r) => r.walls.filter((w) => on.has(w.id)));
+  const seen = new Set(inRuns.map((w) => w.id));
+  return [...inRuns, ...mine.filter((w) => !seen.has(w.id))];
+}
+
+const CLADDING_ROLE = { sheet: "sheets", panel: "panels", "aac-panel": "panels", "course-board": "boards", "vertical-board": "boards", "board-lm": "lm" };
+
+/**
+ * One wall's cladding quantities from the layout, before spares (wall-by-wall step 5): sheets (each counted on the wall
+ * it is ordered on, HUB 016b), panels, boards or random-length LM, the pieces cut from other walls' sheets or offcuts,
+ * and the cladding's own battens, foam tape and H-flashing (step 4). Added up over a material's walls these are the
+ * order's quantities before spares; the tape is rounded into rolls, and the battens and H-flashing into whole lengths,
+ * once for the job. Null when nothing is laid out on the wall.
+ * @param {string|null} tag the engine's name for the wall on this material (wallTagOn)
+ */
+export function wallCladdingTotals(result, wallId, tag = null) {
+  const onWall = (r) => !!r && (r.measurementId === wallId || r.wallId === wallId || (!!tag && r.wallId === tag));
+  const t = { sheets: 0, panels: 0, boards: 0, lm: 0, borrowed: 0, battens: 0, battenMm: 0, tapeMm: 0, hFlashingMm: 0 };
+  let any = false;
+  for (const d of result?.demands || []) {
+    const refs = d.sourceRefs || [];
+    const sheet = d.unit === "sheet" || d.kind === "sheet";
+    // a sheet shared across walls names every wall it serves: it counts on the wall it is ordered on (its first piece)
+    if (!(sheet && !d.follower ? onWall(refs[0]) : refs.some(onWall))) continue;
+    const q = d.quantity || 0;
+    if (d.follower === "battens") { t.battens += q; t.battenMm += (d.lengthMm || 0) * q; any = true; }
+    else if (d.follower === "tape") { t.tapeMm += d.tapeMm || 0; any = true; }
+    else if (d.follower === "hflashing") { t.hFlashingMm += (d.lengthMm || 0) * q; any = true; }
+    else if (CLADDING_ROLE[d.role]) { t[CLADDING_ROLE[d.role]] += q; any = true; }
+  }
+  const lay = (result?.layouts || []).find((l) => l?.wallMeasurementId === wallId || l?.wallId === wallId);
+  t.borrowed = lay?.cutPlan?.fromOtherWalls || 0;
+  return any || t.borrowed ? t : null;
+}
+
+/** "5 sheets · 18 batten pieces · 8.1 m foam tape · 2.95 m H-flashing" — one short line (wall-by-wall step 5). */
+export function wallCladdingText(t) {
+  if (!t) return "";
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const count = (v, one, many) => `${n(v)} ${Math.round(v) === 1 ? one : many}`;
+  const m = (mm, d = 1) => `${(mm / 1000).toFixed(d)} m`;   // as each wall's own list: tape to 0.1 m, H-flashing to 0.01 m
+  const parts = [];
+  if (t.sheets) parts.push(count(t.sheets, "sheet", "sheets"));
+  if (t.panels) parts.push(count(t.panels, "panel", "panels"));
+  if (t.boards) parts.push(count(t.boards, "board", "boards"));
+  if (t.lm) parts.push(`${t.lm.toFixed(1)} LM (estimate)`);
+  if (t.borrowed) parts.push(`${count(t.borrowed, "piece", "pieces")} from other walls`);
+  if (t.battens) parts.push(count(t.battens, "batten piece", "batten pieces"));
+  if (t.tapeMm) parts.push(`${m(t.tapeMm)} foam tape`);
+  if (t.hFlashingMm) parts.push(`${m(t.hFlashingMm, 2)} H-flashing`);
+  return parts.join(" · ");
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────

@@ -134,7 +134,9 @@ export async function loadSnapshot(sb, wsRow) {
   const wsId = wsRow.id;
   const [cals, meas, mats, contribs] = await Promise.all([
     q(sb.from("takeoff_calibrations").select("*").eq("workspace_id", wsId).order("created_at", { ascending: true })),
-    q(sb.from("takeoff_measurements").select("*").eq("workspace_id", wsId).is("archived_at", null).order("created_at", { ascending: true })),
+    // records saved together share one save time: the id breaks the tie, so the order never changes between loads
+    // (wall-by-wall step 5 — walls and runs get time-ordered ids, so this is the order they were traced)
+    q(sb.from("takeoff_measurements").select("*").eq("workspace_id", wsId).is("archived_at", null).order("created_at", { ascending: true }).order("id", { ascending: true })),
     q(sb.from("takeoff_job_materials").select("*").eq("workspace_id", wsId).is("archived_at", null).order("created_at", { ascending: true })),
     q(sb.from("takeoff_contributions").select("*").eq("workspace_id", wsId).is("archived_at", null).order("created_at", { ascending: true })),
   ]);

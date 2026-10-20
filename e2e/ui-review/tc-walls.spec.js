@@ -76,6 +76,16 @@ async function openWalls(page, key = "axon", { walls = [], also = [], extraMater
   await expect(page.getByRole("region", { name: "Walls" })).toBeVisible();
 }
 
+/**
+ * Wall-by-wall step 5: a wall row's chips (where it came from, its materials, its quantities) fold under the list's More.
+ * Opens More (once) and returns the chip, so a check proves the chip is SEEN, not just in the page.
+ */
+async function rowChip(page, row, text) {
+  const more = page.locator("[data-rows-more]");
+  if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+  return row.locator("span.rounded-full").filter({ hasText: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) });
+}
+
 /** List → Wall by numbers → (editor) height. */
 async function addWall(page, { name, length, height }) {
   await page.getByRole("button", { name: "Wall by numbers" }).click();
@@ -138,12 +148,14 @@ async function noHorizontalScroll(page) {
 test.describe("TC walls — phone journeys", () => {
   test("wall by numbers → generated elevation with sheet cells, areas and per-wall quantities", async ({ page }) => {
     await openWalls(page, "axon");
-    // material status: three statuses + Setup, with no wall yet
+    // material status: Setup, with the three statuses folded under More (wall-by-wall step 5), no wall yet
     const status = page.getByRole("region", { name: "Material status" });
+    await expect(status.getByRole("button", { name: "Setup" })).toBeVisible();
+    await expect(status.locator('[data-status="quantity"]')).toBeHidden();
+    await status.locator("[data-status-more] summary").click();
     await expect(status.locator('[data-status="quantity"]')).toBeVisible();
     await expect(status.locator('[data-status="installation"]')).toBeVisible();
     await expect(status.locator('[data-status="procurement"]')).toBeVisible();
-    await expect(status.getByRole("button", { name: "Setup" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Trace on plan" })).toBeVisible();
 
     await addWall(page, { name: "North", length: 6000, height: 2700 });
@@ -160,8 +172,13 @@ test.describe("TC walls — phone journeys", () => {
     const qty = page.getByRole("region", { name: "Quantities on this wall" });
     await expect(qty).toContainText("5 sheets");
     await expect(qty).toContainText("2,750 × 1,200 mm"); // shortest listed sheet ≥ 2,700
-    await expect(qty.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
-    await expect(qty.locator('[data-status="installation"]')).not.toHaveAttribute("data-value", "supported-by-selected-rule"); // never claimed
+    // wall-by-wall step 5: the statuses and where the wall came from fold under More
+    const more = page.locator("[data-wall-more]");
+    await expect(more.locator('[data-status="quantity"]')).toBeHidden();
+    await more.locator("summary").click();
+    await expect(more.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
+    await expect(more.locator('[data-status="installation"]')).not.toHaveAttribute("data-value", "supported-by-selected-rule"); // never claimed
+    await expect(more.locator("[data-provenance]")).toBeVisible();
     // scaled to fit the phone width — no horizontal page scroll
     const box = await elevation(page).boundingBox();
     expect(box.width).toBeLessThanOrEqual(390 - 16);
@@ -173,8 +190,8 @@ test.describe("TC walls — phone journeys", () => {
     const row = page.locator("[data-wall-row]").first();
     await expect(row).toContainText("North");
     await expect(row).toContainText("Rectangle · 6,000 mm long · 2,700 high");
-    await expect(row).toContainText("Axon 400 smooth");
-    await expect(row).toContainText("5 sheets");
+    await expect(await rowChip(page, row, "Axon 400 smooth")).toBeVisible();
+    await expect(await rowChip(page, row, "5 sheets")).toBeVisible();
   });
 
   test("HUB 015: a 3,600 wall taller than the 3,000 Axon sheet — one tap uses Blue Leaf's 10 mm H-flashing joint; the joint is placed automatically and the sheets counted", async ({ page }) => {
@@ -209,7 +226,9 @@ test.describe("TC walls — phone journeys", () => {
     await expect(pos).toHaveValue("3287");
     await expect(page.locator('[data-area="gross"]')).toHaveText("25.63 m²");   // 6.573 × 3.6 + ½ × 6.573 × 0.6
     await clickBox(page, page.locator('[data-el-id="c2r0"] rect').first());
-    await page.getByRole("button", { name: "Next element" }).click();
+    // wall-by-wall step 5: no stepping through the parts any more — tap the next sheet for its details
+    await clickBox(page, page.locator('[data-el-id="c3r0"] rect').first());
+    await expect(page.locator("[data-element-info]")).toHaveAttribute("data-element-info", "c3r0");
     await page.getByRole("button", { name: "Close panel" }).click();
     await expect(apex).toHaveValue("4200");
     await expect(pos).toHaveValue("3287");
@@ -231,7 +250,9 @@ test.describe("TC walls — phone journeys", () => {
     await expect(info).toContainText("3,000 × 1,200 mm sheet"); // strip 3 reaches the apex: 3,000 → 3,000 listed
     await expect(info).toContainText("Cut size");
     await expect(info).toContainText("1,200 × 3,000 mm");
-    await page.getByRole("button", { name: "Next element" }).click();
+    // wall-by-wall step 5: ‹ Previous / Next › now go wall to wall — tap the next strip instead
+    await expect(page.getByRole("button", { name: "Next element" })).toHaveCount(0);
+    await clickBox(page, page.locator('[data-el-id="c3r0"] rect').first());
     await expect(page.locator("[data-element-info]")).toHaveAttribute("data-element-info", "c3r0");
     await page.screenshot({ path: `${SHOTS}/tc-walls-gable-cell-390x844.png` });
 
@@ -249,7 +270,12 @@ test.describe("TC walls — phone journeys", () => {
     // wall-by-wall step 4: the Axon's own battens — 11 uprights up to the rakes, the bottom (3,000 + 3,000) and a sloped
     // batten on each rake (√(3,000² + 600²) = 3,059.4, joined over the upright at 2,400 / 3,600) = 17 pieces, 41.52 m
     await expect(page.locator('[data-el-state="support"]')).toHaveCount(17);
-    await expect(page.locator("[data-elevation-note]").first()).toHaveText("Battens worked out from Axon 400 smooth: 17 pieces, 41.52 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+    // the explanation folds under More (wall-by-wall step 5); the wall's short line at the top has the count
+    await expect(page.locator("[data-elevation-note]")).toHaveCount(0);
+    await page.locator("[data-wall-more] summary").click();
+    const about = page.locator("[data-wall-more] [data-elevation-about]");
+    await expect(about.first()).toHaveText("Battens worked out from Axon 400 smooth: 17 pieces, 41.52 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+    await expect(about.first()).toBeVisible();
     await expect(page.locator("[data-supports-empty]")).toHaveCount(0);
     await page.getByRole("radio", { name: "Accessories" }).click();
     await expect(page.locator('[data-el-state="edge"]')).not.toHaveCount(0); // base (a horizontal line has no box height)
@@ -268,10 +294,7 @@ test.describe("TC walls — phone journeys", () => {
     await expect(page.locator('[data-area="gross"]')).toHaveText("16.20 m²"); // 6 × (2.4 + 3.0) / 2
     await clickBox(page, page.locator('[data-el-id="c0r0"] rect').first());
     await expect(page.locator("[data-element-info]")).toContainText("2,750 × 1,200 mm sheet"); // strip 1 tops out at 2,520
-    await page.getByRole("button", { name: "Next element" }).click();
-    await page.getByRole("button", { name: "Next element" }).click();
-    await page.getByRole("button", { name: "Next element" }).click();
-    await page.getByRole("button", { name: "Next element" }).click();
+    await clickBox(page, page.locator('[data-el-id="c4r0"] rect').first());   // strip 5 (tapped: no stepping through parts)
     await expect(page.locator("[data-element-info]")).toHaveAttribute("data-element-info", "c4r0");
     await expect(page.locator("[data-element-info]")).toContainText("3,000 × 1,200 mm sheet"); // strip 5 reaches 3,000
     const qty = page.getByRole("region", { name: "Quantities on this wall" });
@@ -440,7 +463,7 @@ test.describe("TC walls — phone journeys", () => {
     await page.getByRole("button", { name: "Use Axon 400 smooth here" }).click();
     await page.getByRole("button", { name: "‹ Walls" }).click();
     await expect(page.locator("[data-other-walls]")).toHaveCount(0);
-    await expect(page.locator("[data-wall-row]").filter({ hasText: "South" })).toContainText("4 sheets");
+    await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "South" }), "4 sheets")).toBeVisible();
 
     await page.getByRole("button", { name: "Open North" }).click();
     await page.getByRole("button", { name: "Remove wall" }).click();
@@ -489,7 +512,7 @@ test.describe("TC walls — phone journeys", () => {
     const other = page.locator("[data-other-walls]");
     await expect(other.locator("summary")).toHaveText("Other walls (1)▸");      // folded, with its marker
     await other.locator("summary").click();
-    await expect(other.locator("[data-wall-row]").filter({ hasText: "Shed" })).toContainText("Cavity batten 70 × 19");
+    await expect(await rowChip(page, other.locator("[data-wall-row]").filter({ hasText: "Shed" }), "Cavity batten 70 × 19")).toBeVisible();
     // a 375 px phone: every target in the list is at least 44 px
     const small = await page.evaluate(() => [...document.querySelectorAll("[data-takeoff-focus] section[aria-label='Walls'] button, [data-takeoff-focus] section[aria-label='Walls'] summary")]
       .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.height < 43.5; }).map((el) => el.textContent?.trim().slice(0, 30)));
@@ -578,12 +601,19 @@ test.describe("TC walls — phone journeys", () => {
     await expect(page.locator("[data-opening-id]")).toHaveAttribute("data-x-mm", "1000");
     await expect(page.locator('[data-el-state="removed"]')).toHaveCount(2);
     await expect(page.locator('[data-el-state="full"]')).toHaveCount(5);
-    await expect(page.getByRole("region", { name: "Elevation" })).toContainText("base studs only; opening framing incomplete");
-    await expect(page.locator("[data-wall-problems]")).toContainText("W1: base studs only");
+    // the count stays by the drawing; what the studs cover is a note, and notes fold under More (wall-by-wall step 5)
+    await expect(page.getByRole("region", { name: "Elevation" })).toContainText("Studs 90 × 45: 5 studs at 2,400 mm.");
+    await expect(page.getByRole("region", { name: "Elevation" })).not.toContainText("base studs only");
+    await expect(page.locator("[data-wall-more] [data-elevation-about]")).toHaveText("Studs 90 × 45: base studs only; opening framing incomplete.");
+    await expect(page.locator("[data-wall-problems]")).toHaveCount(0);
+    await expect(page.locator("[data-wall-more] [data-wall-notes]")).toContainText("W1: base studs only");
     await page.getByRole("button", { name: "Close panel" }).click();
     await clickBox(page, page.locator('[data-el-state="full"] line').first());
     await expect(page.locator("[data-element-info]")).toContainText("Cut length");
     await expect(page.locator("[data-element-info]")).toContainText("2,400 mm");
+    // timber walls review wall to wall too (wall-by-wall step 5): the only wall is the last one
+    await expect(page.locator("[data-wall-nav-count]")).toHaveText("1 of 1");
+    await expect(page.getByRole("button", { name: "Review order ›" })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/tc-walls-studs-390x844.png` });
   });
 });
@@ -695,7 +725,7 @@ const hidePage = (page) => page.evaluate(() => {
 test.describe("TC walls — adversarial review regressions", () => {
   test("J2 end to end: 4,800 × 2,700 Axon + 900 × 900 window → 4 sheets, net 12.15 m²; 4,801 → 5 (the 1 mm cut strip is named); undo/redo; an offline reload keeps it", async ({ page }) => {
     await openMixedWalls(page);
-    await expect(page.locator("[data-wall-row]").filter({ hasText: "North wall" })).toContainText("4 sheets");
+    await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "North wall" }), "4 sheets")).toBeVisible();
     await page.getByRole("button", { name: "Open North wall" }).click();
     await expect(page.locator('[data-area="gross"]')).toHaveText("12.96 m²");
     await expect(page.locator('[data-area="net"]')).toHaveText("12.15 m²");
@@ -722,7 +752,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await ready(page);
     await page.getByRole("button", { name: "Restore" }).click();
     await (await openRow(page.getByRole("listitem").filter({ hasText: "Axon cladding" }).first())).getByRole("button", { name: "Walls", exact: true }).click();
-    await expect(page.locator("[data-wall-row]").filter({ hasText: "North wall" })).toContainText("5 sheets");
+    await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "North wall" }), "5 sheets")).toBeVisible();
     await page.getByRole("button", { name: "Open North wall" }).click();
     await expect(page.getByLabel("Wall length")).toHaveValue("4801");
     await expect(page.locator('[data-area="net"]')).toHaveText("12.15 m²");
@@ -882,7 +912,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     const traced = { id: "seed-traced-1", kind: "wall", documentId: "doc-plan-c", pageIndex: 0, calibrationId: "cal-1", points: [planPt(0, 1000), planPt(4000, 1000)], parentId: null, label: null, inputs: { kind: "rect", name: "Traced T" } };
     await openWalls(page, "axon", { extraMeasurements: [traced], extraContributions: [{ id: "seed-con-traced", measurementId: traced.id, jobMaterialId: "mat-axon", role: "wall" }] });
     const row = page.locator("[data-wall-row]").filter({ hasText: "Traced T" });
-    await expect(row).toContainText("From plan");
+    await expect(await rowChip(page, row, "From plan")).toBeVisible();
     await expect(row).toContainText("4,000 mm long");
     await expect(row).toContainText("Heights needed");
     await page.getByRole("button", { name: "Open Traced T" }).click();
@@ -917,12 +947,15 @@ test.describe("TC walls — adversarial review regressions", () => {
     await openMixedWalls(page, "Cavity battens");
     await page.getByRole("button", { name: "Open North wall" }).click();
     await expect(page.getByRole("radio", { name: "Supports" })).toHaveAttribute("aria-checked", "true");
-    await clickBox(page, page.locator('[data-wall-elevation] [data-el-state="support"] line').first());
+    // tap each support line in turn (wall-by-wall step 5: no stepping through the parts)
+    const lines = page.locator('[data-wall-elevation] [data-el-state="support"] line');
     const titles = [];
     const info = page.locator("section").filter({ has: page.locator("[data-element-info]") });
-    for (let i = 0; i < 12; i++) {
+    const n = await lines.count();
+    expect(n).toBeGreaterThan(2);
+    for (let i = 0; i < n; i++) {
+      await clickBox(page, lines.nth(i));
       titles.push(await info.getAttribute("aria-label"));
-      await page.getByRole("button", { name: "Next element" }).click();
     }
     expect(titles.some((t) => /— (above|below) W1/.test(t))).toBe(true);
     expect(titles.filter((t) => /m-w1/.test(t))).toEqual([]);
@@ -940,9 +973,14 @@ test.describe("TC walls — adversarial review regressions", () => {
     await expect(sc.locator('[data-scope="corners"]')).toHaveText("By others");
     await expect(sc.locator('[data-scope="tape"]')).toHaveText("Exclude");
     await expect(sc.locator('[data-scope="sealant"]')).toHaveText("Not decided");
-    await expect(sc).toContainText("“Not decided” is not the same as excluded");
     await expect(page.locator('[data-wall-qty="mat-acc"]')).toBeVisible();
-    await expect(page.locator('[data-wall-qty="mat-acc"] [data-status="installation"]')).not.toHaveAttribute("data-value", "supported-by-selected-rule");
+    // its statuses and the scope explanation fold under More (wall-by-wall step 5)
+    await expect(page.locator('[data-wall-more] [data-accessory-about="mat-acc"]')).toBeHidden();
+    await page.locator("[data-wall-more] summary").click();
+    await expect(page.locator('[data-wall-more] [data-accessory-about="mat-acc"]')).toContainText("“Not decided” is not the same as excluded");
+    await expect(page.locator('[data-wall-more] [data-accessory-about="mat-acc"]')).toBeVisible();
+    await expect(page.locator('[data-wall-status="mat-acc"] [data-status="installation"]')).toBeVisible();
+    await expect(page.locator('[data-wall-status="mat-acc"] [data-status="installation"]')).not.toHaveAttribute("data-value", "supported-by-selected-rule");
   });
 
   test("course setout (Linea) is editable: at or below the base, the guide moves and the board count change is shown", async ({ page }) => {
@@ -1028,7 +1066,7 @@ test.describe("TC walls — review additions at 375 px", () => {
     await page.getByRole("button", { name: "Remove wall" }).click();
     await expect(page.getByText(/Removed North wall and its 1 opening\. Also gone from Cavity battens, Window angle 50 × 50 × 3\./)).toBeVisible();
     await page.getByRole("button", { name: "Undo", exact: true }).first().click();
-    await expect(page.locator("[data-wall-row]").filter({ hasText: "North wall" })).toContainText("Cavity battens");
+    await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "North wall" }), "Cavity battens")).toBeVisible();
     expect(errs).toEqual([]);
   });
 });
@@ -1203,8 +1241,8 @@ test.describe("TC walls — phone review round 2", () => {
   test("F14 a datum set on one wall moves only that wall; aligning every wall is an explicit choice with a job-wide preview", async ({ page }) => {
     await openWalls(page, "axon", { walls: [{ name: "Alpha", length: 2400, height: 2700 }, { name: "Bravo", length: 3600, height: 2700 }] });
     const row = (n) => page.locator("[data-wall-row]").filter({ hasText: n });
-    await expect(row("Alpha")).toContainText("2 sheets");
-    await expect(row("Bravo")).toContainText("3 sheets");
+    await expect(await rowChip(page, row("Alpha"), "2 sheets")).toBeVisible();
+    await expect(await rowChip(page, row("Bravo"), "3 sheets")).toBeVisible();
     await page.getByRole("button", { name: "Open Alpha" }).click();
     const setout = page.getByRole("region", { name: "Sheet setout" });
     await expect(setout).toContainText("This wall only");
@@ -1212,8 +1250,8 @@ test.describe("TC walls — phone review round 2", () => {
     // HUB 016b: sheets are shared across walls, so the readout also shows the cladding's total across its walls
     await expect(setout.locator("[data-datum-change]")).toHaveText("Sheets on this wall: 2 → 3 · all walls of Axon 400 smooth: 5 → 6");
     await page.getByRole("button", { name: "‹ Walls" }).click();
-    await expect(row("Alpha")).toContainText("3 sheets");
-    await expect(row("Bravo")).toContainText("3 sheets"); // untouched — before the fix it silently became 4
+    await expect(await rowChip(page, row("Alpha"), "3 sheets")).toBeVisible();
+    await expect(await rowChip(page, row("Bravo"), "3 sheets")).toBeVisible(); // untouched — before the fix it silently became 4
     await page.getByRole("button", { name: "Open Bravo" }).click();
     await expect(page.getByRole("region", { name: "Sheet setout" }).getByLabel(/Setout starts at/)).toHaveValue("0");
     await page.getByRole("button", { name: "‹ Walls" }).click();
@@ -1222,10 +1260,10 @@ test.describe("TC walls — phone review round 2", () => {
     await setout.getByRole("button", { name: "Use this setout on every wall" }).click();
     await expect(setout.locator("[data-datum-all-change]")).toHaveText("Sheets on all 2 walls using Axon 400 smooth: 6 → 7");
     await page.getByRole("button", { name: "‹ Walls" }).click();
-    await expect(row("Bravo")).toContainText("4 sheets");
+    await expect(await rowChip(page, row("Bravo"), "4 sheets")).toBeVisible();
     await page.getByRole("button", { name: "Undo" }).click();
-    await expect(row("Bravo")).toContainText("3 sheets");
-    await expect(row("Alpha")).toContainText("3 sheets");
+    await expect(await rowChip(page, row("Bravo"), "3 sheets")).toBeVisible();
+    await expect(await rowChip(page, row("Alpha"), "3 sheets")).toBeVisible();
   });
 
   test("F17 a traced elevation outline is labelled 'Traced elevation outline' — never 'Derived from plan + entered heights'", async ({ page }) => {
@@ -1246,7 +1284,7 @@ test.describe("TC walls — phone review round 2", () => {
     await openWalls(page, "studs");
     await addWall(page, { name: "Frame A", length: 3600, height: 2400 });
     await addOpeningByNumbers(page, { x: 1000, sill: 900, width: 1200, height: 1200 });
-    await expect(page.locator("[data-wall-problems]")).toContainText("W1: base studs only");
+    await expect(page.locator("[data-wall-more] [data-wall-notes]")).toContainText("W1: base studs only");   // a note: folded under More
     await page.getByRole("button", { name: /^W1/ }).click();
     const fd = page.locator("[data-framing-detail]");
     await expect(fd).toContainText("its framing detail");
@@ -1272,11 +1310,13 @@ test.describe("TC walls — phone review round 2", () => {
     await addMember("Jack stud", 2, "Head level");
     await addMember("Lintel", 1, "Opening width", ["Adjust", 90]);
     await expect(page.locator("[data-wall-problems]")).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Elevation" })).toContainText("studs with explicit opening framing");
+    await expect(page.locator("[data-wall-more] [data-wall-notes]")).toHaveCount(0);   // the framing note has gone too
+    await expect(page.locator("[data-wall-more] [data-elevation-about]")).toHaveText("Studs 90 × 45: studs with explicit opening framing.");   // under More (step 5)
     const qty = page.getByRole("region", { name: "Quantities on this wall" });
     await expect(qty).toContainText("Lintel");
     await expect(qty).toContainText("King");
-    await expect(qty.locator('[data-status="quantity"]')).not.toHaveAttribute("data-value", "incomplete");
+    // the statuses fold under More (wall-by-wall step 5)
+    await expect(page.locator('[data-wall-more] [data-status="quantity"]')).not.toHaveAttribute("data-value", "incomplete");
     await noHorizontalScroll(page);
     const small = await page.evaluate(() => [...document.querySelectorAll("[data-framing-detail] button, [data-framing-detail] input, [data-framing-detail] select")]
       .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 43.5 || r.width < 43.5); }).map((el) => el.outerHTML.slice(0, 80)));
@@ -1311,11 +1351,15 @@ test.describe("TC walls — phone review round 2", () => {
 test("HUB 016b: offcuts are shared across walls — South's end strip is cut from North's offcut; the switch plans each wall on its own", async ({ page }) => {
   await openWalls(page, "axonRip", { walls: [{ name: "North", length: 2800, height: 2400 }, { name: "South", length: 2800, height: 2400 }] });
   // the walls add up to the order (5): a shared sheet counts on the wall it is ordered on
-  await expect(page.locator("[data-wall-row]").filter({ hasText: "North" })).toContainText("3 sheets");
-  await expect(page.locator("[data-wall-row]").filter({ hasText: "South" })).toContainText("2 sheets");
-  await expect(page.locator("[data-wall-row]").filter({ hasText: "South" })).toContainText("1 piece from other walls");
+  await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "North" }), "3 sheets")).toBeVisible();
+  await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "South" }), "2 sheets")).toBeVisible();
+  await expect(await rowChip(page, page.locator("[data-wall-row]").filter({ hasText: "South" }), "1 piece from other walls")).toBeVisible();
   await page.getByRole("button", { name: "Open South" }).click();
+  // the explanation folds under More (wall-by-wall step 5); the counts and the switch stay by the drawing
   const shared = page.locator('[data-sheet-shared="walls"]');
+  await expect(shared).toBeHidden();
+  await page.locator("[data-wall-more] summary").click();
+  await expect(shared).toBeVisible();
   await expect(shared).toContainText("Sheets and offcuts are shared across all 2 walls of Axon 400 smooth: 6 pieces from 5 sheets in all");
   await expect(shared).toContainText("1 piece on this wall comes from another wall's sheet or offcut");
   await expect(page.locator("[data-sheet-summary]")).toContainText("3 pieces from 3 sheets, 2 sheets counted on this wall");

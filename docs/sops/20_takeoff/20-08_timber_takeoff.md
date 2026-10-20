@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
@@ -105,7 +105,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 2. Make sure the wall uses this timber: open it and check **Materials on this wall** shows **✓ Uses …** (tap **Use … here** if not). The wall rows no longer carry these buttons (HUB 022), and walls on other materials are folded under **Other walls**.
    - Timber keeps the **Wall** tool. Cladding traces with **Line** instead, which sets the height before you trace and keeps you on the plan (SOP 20-09 Section 5C).
 3. **Studs** — in the setup card: **Stud cut length (or frame height)** and **That is: Stud cut / Frame height**. Frame height needs **Bottom plate(s) thickness** and **Top plate(s) thickness** (never assumed). Blank uses the wall height as the stud cut length. On the wall, the **Supports** view shows a line per stud (e.g. a 3,600 mm wall at 600 centres → 7 studs).
-4. Openings (add them on the wall — SOP 20-09 Section 5C): studs strictly inside an opening are **removed** (greyed "Removed stud"). The wall then says "W1: base studs only; opening framing incomplete — needs its framing detail." **Kings, jacks, trimmers, sills and lintels are never guessed** — add them as their own timber material or entered lengths (Section 5E) from the framing detail.
+4. Openings (add them on the wall — SOP 20-09 Section 5C): studs strictly inside an opening are **removed** (greyed "Removed stud"). The **Supports** view counts the studs ("Studs 90 × 45: 5 studs at 2,400 mm."). **More**, at the bottom of the wall, says what they cover ("Studs 90 × 45: base studs only; opening framing incomplete.") and holds the wall's note "W1: base studs only; opening framing incomplete — needs its framing detail." (notes, statuses and the drawing's explanations are folded there, as on cladding walls: SOP 20-09 Section C4). Tapping a stud shows its cut length; there is no stepping through the studs, and **‹ Previous wall** / **Next wall ›** at the bottom go wall to wall. **Kings, jacks, trimmers, sills and lintels are never guessed** — add them as their own timber material or entered lengths (Section 5E) from the framing detail.
 5. **Plates** — **Plates per wall: Bottom + top** or **Bottom + double top**; each wall gives one piece per layer at the wall length (e.g. 3,600 wall → 2 × 3,600). Plates can also be measured with **Run** or counted with **Count** on the plan.
 6. **Noggins** — **Stud centres** and **Noggin rows** (from the framing detail — "never inferred"). Each clear bay (centres − stud width) is one noggin per row, ordered on the stock grid (600 centres, 45 wide → 555 mm cuts from 1,200 mm stock). Without rows you will see "Enter the number of noggin rows or select it from a reviewed framing detail…".
 
@@ -305,7 +305,7 @@ Next review date: 2027-04-14
 1. Overview → **Add timber** → Purpose **Studs**, section 90 × 45, grade MGP10, treatment H2 → **Measure members**.
 2. **Wall by numbers**: name "Frame A", length 3600 (Enter), **Wall height** 2400 (Enter).
 3. **Add opening** → Offset from wall start 1000, Sill height 900, Width 1200, Height 1200.
-4. Expected result: step 2 — the **Supports** view is selected and shows 7 stud lines; tap one → "Cut length 2,400 mm"; step 3 — 2 studs show "Removed stud" (inside the opening), 5 remain; problems show "W1: base studs only; opening framing incomplete — needs its framing detail."; Quantity is not "Calculated" (shows Incomplete) and Ordering is not "Ready".
+4. Expected result: step 2 — the **Supports** view is selected and shows 7 stud lines; tap one → "Cut length 2,400 mm"; step 3 — 2 studs show "Removed stud" (inside the opening), 5 remain; the Supports view reads "Studs 90 × 45: 5 studs at 2,400 mm."; **More** at the bottom of the wall (closed until tapped) shows "Studs 90 × 45: base studs only; opening framing incomplete." and the note "W1: base studs only; opening framing incomplete — needs its framing detail." and Quantity is not "Calculated" (shows Incomplete) and Ordering is not "Ready"; at the bottom "1 of 1" with **Review order ›**.
 5. Expected record: wall measurement `inputs` { kind "rect", widthMm 3600, heightMm 2400, name "Frame A" } with contribution role "wall"; opening with `parentId` = the wall.
 - [ ] Pass  [ ] Fail
 

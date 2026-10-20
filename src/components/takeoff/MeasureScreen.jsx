@@ -39,6 +39,10 @@
 //                  corners, one at a time; its openings stay where they are on the page. On an outline,
 //                  + Window / + Door take two opposite corners of the opening (no sizes to type; a door sits on the
 //                  floor). On a page with no scale they ask for one first, then come back here.
+//   Review walls (wall-by-wall step 5, on the run card, the Line / Rectangle / Area panels and the window and door
+//                  panel once this material has walls)  opens its first wall in run order; each wall page steps
+//                  wall to wall from there, and the last one goes on to the order. Select → Open elevation opens a
+//                  wall's page with the same wall-to-wall buttons (under the wall's own cladding: TakeoffApp).
 //   Page           the chip (when there is another page or plan) opens the page picker; choosing a page comes straight
 //                  back here. The takeoff's main plan page stays as it is, nothing is saved, and an unfinished drawing
 //                  waits on its own page (kept on this device) until you come back to it.
@@ -61,7 +65,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
 import { addSplit, appendVertex, computeFlashingPath, finishPath, moveSplit, moveSplitToCorner, resolvePathTap, splitAtLimit } from "../../../shared/takeoff/engine/flashingPath.js";
 import { repeatedPositions } from "../../../shared/takeoff/engine/timber.js";
-import { newId } from "../../lib/takeoffApi.js";
+import { newId, orderedId } from "../../lib/takeoffApi.js";
 import PdfViewport from "./PdfViewport.jsx";
 import { DOUBLE_TAP_MS, DOUBLE_TAP_SLOP_PX } from "./gestures.js";
 import { PointHandlesLayer } from "./PointHandles.jsx";
@@ -99,7 +103,7 @@ const BURST_MS = DOUBLE_TAP_MS + 150;
 /** "W1", "W1 and D1", "W1, W2 and D1". */
 const listNames = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
-export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, displayRotation, materialId, onChangeMaterial, onScale, onPage, onClose, onOpenWall, highlightIds = null, initialTool = null }) {
+export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, displayRotation, materialId, onChangeMaterial, onScale, onPage, onClose, onOpenWall, onReviewWalls = null, highlightIds = null, initialTool = null }) {
   const vpRef = useRef(null);
   const view = ws.view;
   const material = view.materials.find((m) => m.id === materialId) || null;
@@ -459,7 +463,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         : "That outline has no area. Tap the corners round the wall.");
       return false;
     }
-    const mid = newId(), cid = newId();
+    const mid = orderedId(), cid = newId();   // walls saved together come back in the order drawn (step 5)
     const meas = { id: mid, kind: "wall", documentId: planDoc.id, pageIndex, calibrationId: cal.id, points, inputs: outlineWallInputs(view.measurements) };
     const op = { redo: partial({ measurements: [meas], contributions: [{ id: cid, measurementId: mid, jobMaterialId: material.id, role: "wall" }] }),
       undo: partial({ archive: { measurements: [mid], contributions: [cid] } }), draftBefore: d, draftAfter: null };
@@ -536,11 +540,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       // HUB 022: one wall per straight leg, each with the height in force when it was traced, the material, its run
       // and its place in the run — all in ONE save (one Undo). Stays on the plan: the run card says what was made.
       const legs = runLegs(r.points, (d.heights || []).slice(0, r.points.length));
-      const runId = newId();
+      const runId = orderedId();   // time-ordered: runs saved together stay Run 1, Run 2 … (step 5)
       const meas = [], cons = [];
       let known = view.measurements;
       legs.forEach((leg, i) => {
-        const mid = newId();
+        const mid = orderedId();
         const inputs = lineWallInputs(known, { heightMm: leg.heightMm, runId, seq: i + 1 });
         known = [...known, { kind: "wall", inputs }];
         meas.push({ id: mid, kind: "wall", documentId: planDoc.id, pageIndex, calibrationId: cal.id, points: [leg.a, leg.b], inputs });
@@ -562,7 +566,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       const meas = [], cons = [];
       let known = view.measurements;
       for (const [a, b] of legs) {
-        const mid = newId();
+        const mid = orderedId();
         if (d.tool === "wall") {
           const inputs = nextWallInputs(known);
           known = [...known, { kind: "wall", inputs }];
@@ -1197,6 +1201,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
 
   const close = () => { settleDraft({ navigate: true }); onClose?.(); };
   const changeMaterial = () => { settleDraft({ navigate: false }); setOpenMode(null); setOpenStart(null); onChangeMaterial?.(); };
+  // wall-by-wall step 5: once this material has walls, Review walls opens its first wall in run order (wall to wall from there)
+  const reviewable = !!onReviewWalls && !!material && view.measurements.some((m) => m.kind === "wall" && !m.archived && (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === material.id));
+  const reviewNow = () => { settleDraft({ navigate: false }); setOpenMode(null); setOpenStart(null); onReviewWalls?.(); };
+  const reviewButton = reviewable ? <Btn kind="primary" onClick={reviewNow} data-review-walls="">Review walls</Btn> : null;
   // HUB 023: another page to measure on (the takeoff's main plan page stays); this tool carries on there
   // An unfinished drawing waits on its own page (it is kept on this device) and comes back with it; only a device
   // that can't keep it finishes it first, as leaving does, so nothing tapped is lost.
@@ -1570,6 +1578,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 <div className="flex flex-wrap gap-2">
                   <Btn onClick={stopOpening}>{mode === "line" ? "Trace more walls" : "Draw more walls"}</Btn>
                   <Btn kind="ghost" onClick={() => startOpening(win ? "door" : "window")}>{win ? "+ Door" : "+ Window"}</Btn>
+                  {reviewButton}
                 </div>
               </div>
             );
@@ -1580,10 +1589,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             const run = !draft && lastDone?.runId && hist.past[hist.past.length - 1] === lastDone.op ? runs.get(lastDone.runId) : null;
             const drawing = draft?.points.length > 0;
             // HUB 022 step 2: windows and doors go into the walls once they are traced (on the run card right after a run)
-            const openingButtons = canEdit && !drawing && (
-              <div className="flex flex-wrap gap-2" data-opening-buttons="">
-                <Btn onClick={() => startOpening("window")}>+ Window</Btn>
-                <Btn onClick={() => startOpening("door")}>+ Door</Btn>
+            // wall-by-wall step 5: Review walls beside them once this cladding has walls (the walls are done)
+            const openingButtons = !drawing && (canEdit || reviewButton) && (
+              <div className="flex flex-wrap gap-2" data-opening-buttons={canEdit ? "" : undefined}>
+                {canEdit && <Btn onClick={() => startOpening("window")}>+ Window</Btn>}
+                {canEdit && <Btn onClick={() => startOpening("door")}>+ Door</Btn>}
+                {reviewButton}
               </div>
             );
             return (
@@ -1633,10 +1644,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             const n = drawing ? draft.points.length : 0;
             const live = !rect && n >= 3 && cal ? outlineAreaM2(draft.points, cal) : null;
             // + Window / + Door only once there is a wall of this material here to put them in
-            const openingButtons = canEdit && !drawing && cal && (materialOutlines().length > 0 || materialWalls().length > 0) && (
-              <div className="flex flex-wrap gap-2" data-opening-buttons="">
-                <Btn onClick={() => startOpening("window")}>+ Window</Btn>
-                <Btn onClick={() => startOpening("door")}>+ Door</Btn>
+            const canOpen = canEdit && cal && (materialOutlines().length > 0 || materialWalls().length > 0);
+            const openingButtons = !drawing && (canOpen || reviewButton) && (
+              <div className="flex flex-wrap gap-2" data-opening-buttons={canOpen ? "" : undefined}>
+                {canOpen && <Btn onClick={() => startOpening("window")}>+ Window</Btn>}
+                {canOpen && <Btn onClick={() => startOpening("door")}>+ Door</Btn>}
+                {reviewButton}
               </div>
             );
             const shapeInfo = shape ? (() => {

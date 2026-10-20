@@ -27,6 +27,7 @@ import ProfileEditor from "./ProfileEditor.jsx";
 import { AluminiumSetup, CladdingSetup, TimberSetup } from "./FamilySetup.jsx";
 import ScheduleScreen from "./ScheduleScreen.jsx";
 import WallsScreen from "./WallsScreen.jsx";
+import { reviewWalls } from "./measure/tools.js";
 import AluminiumScreen from "./AluminiumScreen.jsx";
 import OrdersScreen from "./OrdersScreen.jsx";
 import PlanSetup from "./PlanSetup.jsx";
@@ -42,6 +43,7 @@ const isReload = () => { try { return performance.getEntriesByType("navigation")
 // materials measured as walls (+ openings) rather than plan lines
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
 const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.family === "timber" && ["studs", "plates", "noggins"].includes(m?.spec?.purpose));
+const CLADDING_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding"]);
 
 const SECTION_HELP = {
   flashings: "Flashing profiles and lengths — ordered from the flashing supplier.",
@@ -684,8 +686,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       onSave={(rec, rot) => { setRotation(rot); ws.edit(partial({ calibrations: [rec] })); setWin("measure"); }} />;
   }
   if (win === "walls") {
+    // the last wall's Review order › follows the overview's Review & export order: only once this section has lines
+    const orderReady = (ws.computed?.scheduleLines || []).some((l) => (section === SECTIONS.FLASHINGS ? !l.generic : !!l.generic));
     return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} wallTab={openWallTab} onOpenWall={(id) => { setOpenWallTab(null); setOpenWall(id); }}
-      onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }} />;
+      onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }}
+      onReviewOrder={() => { setOpenWall(null); setOpenWallTab(null); setWin("orders"); }} orderReady={orderReady} />;
   }
   if (win === "aluminium") {
     return <AluminiumScreen ws={ws} materialId={activeMaterial} onSetup={(m) => { setSetupFrom("aluminium"); setEditing({ material: m, stage: "family" }); }}
@@ -697,7 +702,21 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       onScale={caps.edit ? (tool) => { setMeasureTool(tool || null); setScaleFrom("measure"); setWin("calibrate"); } : null}
       onPage={plans.length > 1 || plan.numPages > 1 ? (tool) => { setMeasureTool(tool || null); setHighlightIds(null); setPageFrom({ docId, pageIndex }); setWin("pages"); } : null}
       initialTool={measureTool}
-      onOpenWall={(id) => { setHighlightIds(null); setOpenWall(id); setWin("walls"); }}
+      onOpenWall={(id) => {
+        // wall-by-wall step 5: Select → Open elevation on a wall the material you are measuring with isn't on opens it
+        // under its own material (a cladding first), so it has that material's wall-to-wall buttons — never an offer
+        // to put the wrong cladding on it
+        const on = view.contributions.filter((c) => c.measurementId === id && !c.archived).map((c) => view.materials.find((m) => m.id === c.jobMaterialId))
+          .filter((m) => m && usesWalls(m) && materialSection(m) === section);
+        if (on.length && !on.some((m) => m.id === activeMaterial)) setActiveMaterial((on.find((m) => CLADDING_FAMILIES.has(m.spec?.family)) || on[0]).id);
+        setHighlightIds(null); setOpenWallTab(null); setOpenWall(id); setWin("walls");
+      }}
+      onReviewWalls={() => {
+        // wall-by-wall step 5: the first wall of this material in run order; each wall page steps on from there
+        const first = reviewWalls(view.measurements, view.contributions, activeMaterial)[0];
+        if (!first) return;
+        setHighlightIds(null); setOpenWallTab(null); setOpenWall(first.id); setWin("walls");
+      }}
       highlightIds={highlightIds}
       onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(orderFocus ? "orders" : usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
   }

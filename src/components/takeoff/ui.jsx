@@ -31,8 +31,11 @@ export function FocusedWindow({ title, subtitle, onClose, closeLabel = "Close", 
   );
 }
 
-/** Bottom sheet on phone, right panel on desktop. Use inside FocusedWindow's body. */
-export function Sheet({ title, children, onClose, className = "", initialFocus = true }) {
+/**
+ * Bottom sheet on phone, right panel on desktop. Use inside FocusedWindow's body. safeBottom=false when the window has
+ * a footer under the sheet (the footer keeps clear of the iPhone home bar, so the sheet needs no room for it).
+ */
+export function Sheet({ title, children, onClose, className = "", initialFocus = true, safeBottom = true }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!initialFocus) return;
@@ -44,7 +47,7 @@ export function Sheet({ title, children, onClose, className = "", initialFocus =
       ref={ref}
       aria-label={title}
       className={`z-10 max-h-[60vh] overflow-y-auto rounded-t-2xl border-t border-hairline bg-white px-4 pb-4 pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)] landscape:max-h-none landscape:w-[min(360px,42vw)] landscape:shrink-0 landscape:rounded-none landscape:border-l landscape:border-t-0 landscape:shadow-none lg:max-h-none lg:w-[360px] lg:shrink-0 lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${className}`}
-      style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+      style={{ paddingBottom: safeBottom ? "max(1rem, env(safe-area-inset-bottom))" : "1rem" }}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>

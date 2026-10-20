@@ -78,6 +78,9 @@ export function createWorkerTakeoffApi() {
   return makeApi("/api/worker/takeoff", workerJson, (url, opts) => workerFetch(url, opts), { shell: "worker" });
 }
 
+// wall-by-wall step 5: walls and runs use a time-ordered id, so walls saved together come back in the order traced
+export { orderedId } from "./orderedId.js";
+
 /** Random id for client-generated records (idempotent create/retry). */
 export function newId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
