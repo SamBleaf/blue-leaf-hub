@@ -1,4 +1,4 @@
-// Hub review follow-up HUB 022 (Sam, 20 Oct 2026: "share offcuts across walls") — one cut plan for every wall of a
+// HUB 016 follow-up (HUB 016b) (Sam, 20 Oct 2026: "share offcuts across walls") — one cut plan for every wall of a
 // fibre-cement material: one wall's spare slices and ripped-strip offcuts serve pieces on another wall. Same rules as
 // HUB 016 (long factory edges kept, nothing turned over, 5 mm per cut, an offcut only for a piece needing its edge).
 // Drives the REAL engine through computeWorkspace (dispatch → sheetLayout → shareSheetsAcrossWalls → purchase lines).
@@ -182,5 +182,5 @@ t("review (recheck) LOW: one rule for every listed length — a single piece tak
   }
 });
 
-console.log(`takeoff-tc-hub022: ${pass} passed, ${fail} failed`);
+console.log(`takeoff-tc-hub016b: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

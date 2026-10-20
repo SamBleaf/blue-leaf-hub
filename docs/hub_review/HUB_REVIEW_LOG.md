@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 21 October 2026)
+## Current state (updated 21 October 2026, after deploy)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -23,16 +23,18 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 010 Fix an order warning in place | Implemented, live | 6edcc9f | Live 3,000 mm line |
 | HUB 011 Takeoffs ▾ show / hide list | Implemented, live | 1f06680, 7bcc090 | iPhone check |
 | HUB 012 Lengths inside a flashing | Implemented, live | 1f06680 | Flashing 5 check |
-| HUB 013 Flashing order matches the takeoff | Implemented, awaiting deploy | 463aab0 | Deploy |
-| HUB 014 Company cladding defaults | Implemented, awaiting deploy | b56ff14 | Migration 211 + deploy |
-| HUB 015 Automatic sheet joint | Implemented, awaiting deploy | af660b3 | Deploy |
-| HUB 016 Shared sheets (8, not 7) | Implemented, awaiting deploy | f802d67 | Deploy + Sam confirms 8 |
-| HUB 017 Gable values kept | Implemented, awaiting deploy | fbbcfe6 | Deploy |
-| HUB 018 Drawing recovery cards | Implemented, awaiting deploy | 2cde077 | Deploy |
-| HUB 019 Supplier address + edit | Implemented, awaiting deploy | 1934643 | Migration 210 + deploy |
-| HUB 020 Reopen / revise a draft | Implemented, awaiting deploy | 463aab0 | Deploy |
-| HUB 021 Plan kept on the phone | Implemented, awaiting deploy | b361b95 | Deploy |
-| HUB 022 Offcuts shared across walls (follow-up to 016) | Implemented, awaiting deploy | c220c90 | Deploy + two-wall iPhone check |
+| HUB 013 Flashing order matches the takeoff | Implemented, live | 463aab0 | iPhone check |
+| HUB 014 Company cladding defaults | Implemented, live | b56ff14 | Migration 211 |
+| HUB 015 Automatic sheet joint | Implemented, live | af660b3 | iPhone check |
+| HUB 016 Shared sheets (8, not 7) | Implemented, live | f802d67 | Sam confirms 8 |
+| HUB 017 Gable values kept | Implemented, live | fbbcfe6 | iPhone check |
+| HUB 018 Drawing recovery cards | Implemented, live | 2cde077 | iPhone check |
+| HUB 019 Supplier address + edit | Implemented, live | 1934643 | Migration 210 |
+| HUB 020 Reopen / revise a draft | Implemented, live | 463aab0 | iPhone check |
+| HUB 021 Plan kept on the phone | Implemented, live | b361b95 | iPhone check |
+| HUB 016 follow-up: offcuts shared across walls | Implemented, live | c220c90 | Two-wall iPhone check |
+| HUB 022 Height first, trace the whole run | Planned with Sam (not built) | — | Sam's OK + 4 questions |
+| HUB 023 Rectangle and Area on elevations | Planned with Sam (not built) | — | Sam's OK + 4 questions |
 
 **Migrations for Sam to paste (Supabase SQL editor, in order):**
 `supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
@@ -44,8 +46,20 @@ his OK and six questions before anything is built.
 
 ## Log
 
-### 2026-10-21 — HUB 022 (offcuts across walls) + wall-by-wall plan
-- Sam asked for offcuts to be shared through the whole takeoff, not just within a wall. Built as HUB 022 (c220c90, local):
+### 2026-10-21 (later) — deployed; new review items HUB 022–023; revised wall plan
+- Deployed main a8e5b22 (HUB 013–021 + HUB 016 follow-up). Live bundle checked; /api/takeoff/company-defaults answers 401.
+  Review doc statuses and verdicts set to live. Migrations 210 and 211 still to paste.
+- The doc's new HUB 022 (height first, trace the run) and HUB 023 (Rectangle / Area on elevations) arrived. The offcut
+  follow-up had been called "HUB 022" here; relabelled "HUB 016 follow-up" (code HUB 016b) everywhere. The 5am run skips
+  HUB 022/023 and the wall-flow work.
+- Sam answered the wall plan: wall-to-wall ‹ › for the end review only; line tool with a height set first (changeable
+  mid-run); windows and doors drawn on the plan into the traced wall; no "Same as W1"; battens worked out from each
+  product's fixing rules (Axon: perimeter, top, bottom, behind H joints, uprights at 600; Linea/Stria/timber one way at
+  450 or 600), Axon H-flashing and black foam tape behind sheet joins counted. Revised plan (3 readers, 1 planner, 1 skeptic):
+  docs/hub_review/WALL_BY_WALL_PLAN.md. About 70 → 35 taps for the 4-wall Axon job. Waiting on Sam's OK and 4 questions.
+
+### 2026-10-21 — HUB 016 follow-up (offcuts across walls) + wall-by-wall plan
+- Sam asked for offcuts to be shared through the whole takeoff, not just within a wall. Built as HUB 016 follow-up (c220c90, local):
   one cut plan for every wall of a fibre-cement material under the HUB 016 rules; a shared sheet is counted on the wall of
   its first piece and the cut list names every wall; "Plan each wall on its own" switches it off; the shared plan is used
   only when it is no worse than the walls' own plans. Two recorded 6,573 × 3,600 walls: 16 → 15 sheets.
@@ -53,7 +67,7 @@ his OK and six questions before anything is built.
   (from HUB 016, ordering short) — now takes the sheet whole, and an unplaceable piece blocks the order; one single-piece
   rule for every listed length; either-edge offcut for a piece needing no edge; wall counts add up to the order; the
   switch only for editors and on the screen's own material; a shared plan never costs more than per-wall plans.
-- Tests: 14 HUB 022 engine tests; all node suites; 220 screen tests; real-server journeys pass in Chromium and WebKit
+- Tests: 14 HUB 016 follow-up engine tests; all node suites; 220 screen tests; real-server journeys pass in Chromium and WebKit
   iPhone 13 (desktop needed one re-run after a Playwright response-body error, not an app fault). SOP 20-09 v1.5 TC-17.
 - Google Doc: follow-up verdict under HUB 016.
 - Sam asked for a plan for a seamless wall-by-wall takeoff. Planned only (3 readers, 3 designs, 1 judge):

@@ -323,7 +323,7 @@ function productVariants(n) {
   }));
 }
 
-/** HUB 022: fibre-cement sheets are shared across every wall of the material unless it is switched off. */
+/** HUB 016b: fibre-cement sheets are shared across every wall of the material unless it is switched off. */
 export const sharesAcrossWalls = (mat) => mat?.rules?.shareSheetsAcrossWalls !== false;
 
 function runWallMethod(mat, n, items, ctx, sink) {
@@ -377,7 +377,7 @@ function runWallMethod(mat, n, items, ctx, sink) {
     results.push(r);
   }
   if (!results.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Add a wall for this material.", blocking: false });
-  // HUB 022: one cut plan for ALL the walls of a sheet material — offcuts from one wall serve another (off = per wall)
+  // HUB 016b: one cut plan for ALL the walls of a sheet material — offcuts from one wall serve another (off = per wall)
   if (mat.methodKey === "sheet_layout" && sharesAcrossWalls(mat)) sink.sharedAcrossWalls = !!shareSheetsAcrossWalls(results);
   return results;
 }
@@ -666,7 +666,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const wallsOf = items.filter((x) => x.m.kind === "wall").map((x) => x.m.id);
     const depKey = dependencyKey(mat, items, ctx, openingsByWall, offcuts, mat.spec?.family === "accessory" ? wallsOf.map((id) => jointsByWall.get(id) || [])
       : mat.spec?.family === "batten" ? wallsOf.map((id) => sheetJointsByWall.get(id) || [])
-      : mat.methodKey === "sheet_layout" ? { sheetPlan: sink.sharedAcrossWalls ? 2 : 1 } : null);   // HUB 016/022: plan 2 = shared across walls; lines saved under the other plan are reviewed
+      : mat.methodKey === "sheet_layout" ? { sheetPlan: sink.sharedAcrossWalls ? 2 : 1 } : null);   // HUB 016/016b: plan 2 = shared across walls; lines saved under the other plan are reviewed
     let pl = { lines: [], allocation: null, appendix: { aluminium: [], timber: [], layouts: [] }, omitted: [] };
     if (n) {
       try { pl = purchaseLines(mat, n, demands, matKey, sink); } catch (e) {

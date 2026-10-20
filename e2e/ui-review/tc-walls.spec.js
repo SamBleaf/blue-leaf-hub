@@ -32,7 +32,7 @@ const group = (family, name, widthMm) => productGroups({ family }).find((g) => g
 const mat = (id, name, spec, rules = {}) => ({ id, name, methodKey: methodFor(spec).key, methodVersion: methodFor(spec).version, spec, rules, profile: null });
 const MATERIALS = {
   axon: mat("mat-axon", "Axon 400 smooth", axonSpec),
-  // HUB 022: North starts with a 400 mm part strip, so its rip offcut keeps the left factory edge South's end strip needs
+  // HUB 016b: North starts with a 400 mm part strip, so its rip offcut keeps the left factory edge South's end strip needs
   axonRip: mat("mat-axon", "Axon 400 smooth", axonSpec, { datumByWall: { "seed-wall-1": 400 } }),
   studs: mat("mat-studs", "Studs 90 × 45", studSpec, { centresMm: 600 }),
   linea: mat("mat-linea", "Linea 150", specFromGroup(group("cladding", "Linea", 150))),
@@ -1105,7 +1105,7 @@ test.describe("TC walls — phone review round 2", () => {
     const setout = page.getByRole("region", { name: "Sheet setout" });
     await expect(setout).toContainText("This wall only");
     await setout.getByLabel(/Setout starts at/).fill("600"); await setout.getByLabel(/Setout starts at/).press("Enter");
-    // HUB 022: sheets are shared across walls, so the readout also shows the cladding's total across its walls
+    // HUB 016b: sheets are shared across walls, so the readout also shows the cladding's total across its walls
     await expect(setout.locator("[data-datum-change]")).toHaveText("Sheets on this wall: 2 → 3 · all walls of Axon 400 smooth: 5 → 6");
     await page.getByRole("button", { name: "‹ Walls" }).click();
     await expect(row("Alpha")).toContainText("3 sheets");
@@ -1204,7 +1204,7 @@ test.describe("TC walls — phone review round 2", () => {
   });
 });
 
-test("HUB 022: offcuts are shared across walls — South's end strip is cut from North's offcut; the switch plans each wall on its own", async ({ page }) => {
+test("HUB 016b: offcuts are shared across walls — South's end strip is cut from North's offcut; the switch plans each wall on its own", async ({ page }) => {
   await openWalls(page, "axonRip", { walls: [{ name: "North", length: 2800, height: 2400 }, { name: "South", length: 2800, height: 2400 }] });
   // the walls add up to the order (5): a shared sheet counts on the wall it is ordered on
   await expect(page.locator("[data-wall-row]").filter({ hasText: "North" })).toContainText("3 sheets");

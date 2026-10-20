@@ -59,10 +59,10 @@ a { color: var(--primary); }
 <div class="wrap">
   <header>
     <h1>Hub Review Plan</h1>
-    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026, after the deploy. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
     <div class="counts" aria-label="Totals">
-      <div class="count"><b>11</b> live</div>
-      <div class="count"><b>10</b> built, awaiting deploy</div>
+      <div class="count"><b>21</b> live</div>
+      <div class="count"><b>2</b> being planned with you</div>
       <div class="count"><b>1</b> not started</div>
       <div class="count"><b>0</b> verified by you</div>
     </div>
@@ -71,20 +71,19 @@ a { color: var(--primary); }
   <section class="steps" aria-labelledby="next">
     <h2 id="next">Your next steps</h2>
     <ol>
-      <li>Paste <span class="mono">210_takeoff_supplier_address.sql</span> in the Supabase SQL editor. <span class="sub">Adds the supplier pickup address (HUB 019). One statement, safe to re-run.</span></li>
-      <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Seeds your James Hardie defaults (HUB 014).</span></li>
-      <li>Say <b>deploy</b>. <span class="sub">Puts HUB 013–022 live.</span></li>
+      <li>Paste <span class="mono">210_takeoff_supplier_address.sql</span> in the Supabase SQL editor. <span class="sub">Saves the supplier pickup address (HUB 019). One statement, safe to re-run.</span></li>
+      <li>Paste <span class="mono">211_takeoff_company_cladding_defaults.sql</span>. <span class="sub">Turns on your James Hardie defaults (HUB 014).</span></li>
       <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
-      <li>Read the wall-by-wall plan below and answer its six questions. <span class="sub">Nothing is built until you say go.</span></li>
+      <li>Answer the four questions on the wall-by-wall plan below and say go. <span class="sub">Nothing is built until you do.</span></li>
     </ol>
   </section>
 
   <section aria-labelledby="board-h">
     <h2 id="board-h">Faults</h2>
     <div class="filters" role="group" aria-label="Show">
-      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 22</button>
-      <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 24</button>
+      <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Being planned</button>
       <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
       <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
     </div>
@@ -92,27 +91,24 @@ a { color: var(--primary); }
   </section>
 
   <section class="card" aria-labelledby="walk">
-    <h2 id="walk">Next: wall-by-wall takeoff (planned, awaiting your OK)</h2>
-    <p>You asked for a takeoff you can move through wall by wall, quickly, always knowing what to do next. This is the plan; nothing is built yet.</p>
+    <h2 id="walk">Next: wall-by-wall takeoff with HUB 022 and 023 (revised plan, awaiting your OK)</h2>
+    <p>Revised with your answers and the doc's HUB 022 and 023. Nothing is built yet.</p>
     <ul>
-      <li>A big button at the bottom of every wall shows the next step: "Next: Wall 3 ›", "+ Next wall" or "Walls done ✓". No trips back to the wall list.</li>
-      <li>"+ Window" and "+ Door" sit in the same bar. A door never asks for a sill.</li>
-      <li>A new wall starts with the last wall's height and shape, so you type the length only.</li>
-      <li>Or trace the house once on the plan, type the height once, and walk round in the order you tapped.</li>
-      <li>The top card on the takeoff says what's next: "Add cladding", "Carry on: Wall 3" or "Review order".</li>
-      <li>After the last wall, one screen shows every wall, anything missing and the sheet total, which matches the order.</li>
-      <li>Status chips and explanations fold away under "More". The calculation doesn't change.</li>
+      <li>The Line tool shows the cladding and its Wall height together. Trace the whole run point to point; change the height partway and only the walls after that change.</li>
+      <li>Finish keeps you on the plan with one card, e.g. "Run 1 · 4 walls · 2,700". Each wall keeps its own elevation and sheets.</li>
+      <li>+ Window / + Door: set the size once, then tap both ends of the opening on the wall you traced. It lands inside that wall.</li>
+      <li>Rectangle and Area draw cladding straight onto a scaled elevation, with real sheet sizes, laps and offcuts.</li>
+      <li>Battens, H-flashing and foam tape are worked out from the cladding's fixing rules, with nothing to set up.</li>
+      <li>At the end, ‹ › steps wall to wall to review, or tap any wall with Select to change it.</li>
     </ul>
-    <p><b>A 4-wall Axon extension with 3 windows and a door:</b> about 60 taps today → about 36 by numbers (about 58 → 38 traced), with no scrolling.</p>
-    <p><b>Built in 5 steps:</b> 1 walk the walls (bottom bar, compact wall page) · 2 quick walls and openings (height carried over, keypad opens straight away, "Same as W1") · 3 tracing hand-off · 4 start card and finish summary · 5 battens and accessories follow the walls. You check each step on your iPhone before the next.</p>
-    <p><b>Your six questions:</b></p>
+    <p><b>A 4-wall Axon extension with 3 windows and a door, traced:</b> about 70 taps and 21 numbers today (including adding battens) → about 35 taps and 4 numbers.</p>
+    <p><b>Built in 5 steps:</b> 1 line, height and runs (HUB 022) · 2 windows and doors on the plan · 3 Rectangle, Area and page switching (HUB 023) · 4 automatic battens and extras · 5 the end review. You check each on your iPhone before the next.</p>
+    <p><b>Your four questions:</b></p>
     <ol>
-      <li>Your keep list says "Previous/Next wall", but today's ‹ › steps through the sheets on one wall; there is no wall-to-wall button. Is that the one you meant? <span class="sub">Suggested: keep it and add the wall buttons separately.</span></li>
-      <li>New walls start with the last wall's height and shape, and walls traced together share one height? <span class="sub">Suggested: yes, shown and easy to change.</span></li>
-      <li>Fold the status chips and notes away on the wall screens? <span class="sub">Suggested: yes; they stay on the schedule and the order.</span></li>
-      <li>Show a walls summary before the order? <span class="sub">Suggested: yes; it catches a missed window.</span></li>
-      <li>Add a "Same as W1" button for repeat windows? <span class="sub">Suggested: yes; it saves three numbers each time.</span></li>
-      <li>New walls also go on battens and accessories automatically (never on a second cladding)? <span class="sub">Suggested: yes, in step 5, once the walk works on your phone.</span></li>
+      <li>How is a window's height and sill set when drawn on the plan? <span class="sub">Suggested: Height and Sill boxes that remember the last window; doors ask Height only; on an elevation, tap two opposite corners instead.</span></li>
+      <li>Linea, Stria and timber: which board direction gets 450 and which 600, and which timber batten do you buy? <span class="sub">Suggested: flat boards on upright battens at 600; standing boards on horizontal battens at 450; timber 70×35 H3 pine.</span></li>
+      <li>Count the Axon 150 mm fixings as nails, and batten round windows and doors? <span class="sub">Suggested: yes to both.</span></li>
+      <li>Foam tape and H-flashing: where, which products, how bought? <span class="sub">Suggested: tape behind the vertical sheet joins only, full height; H-flashing by the metre. Which products?</span></li>
     </ol>
     <p class="sub">Full plan in the repo: <span class="mono">docs/hub_review/WALL_BY_WALL_PLAN.md</span></p>
   </section>
@@ -131,8 +127,13 @@ a { color: var(--primary); }
   <section aria-labelledby="log-h">
     <h2 id="log-h">Log</h2>
     <div class="log">
+      <div class="entry"><time datetime="2026-10-21">21 Oct, later</time><ul>
+        <li>Deployed HUB 013–021 and the offcut sharing across walls. Migrations 210 and 211 are still to paste.</li>
+        <li>The doc's new HUB 022 and 023 are part of the revised wall-by-wall plan. The offcut work is now called "follow-up to HUB 016".</li>
+        <li>Revised the plan with your answers; four questions left.</li>
+      </ul></div>
       <div class="entry"><time datetime="2026-10-21">21 Oct</time><ul>
-        <li>Built HUB 022 at your request: sheets and offcuts are shared across all the walls of a cladding (two recorded walls: 16 → 15 sheets), with "Plan each wall on its own" to turn it off. Not deployed.</li>
+        <li>Built HUB 016 follow-up at your request: sheets and offcuts are shared across all the walls of a cladding (two recorded walls: 16 → 15 sheets), with "Plan each wall on its own" to turn it off. Not deployed.</li>
         <li>Two independent reviews of it found and fixed a fault from HUB 016: a piece within one saw cut of a sheet length was left off the order. It now takes the sheet whole.</li>
         <li>Wrote the wall-by-wall plan (above). Nothing built from it yet.</li>
       </ul></div>
@@ -168,21 +169,23 @@ const FAULTS = [
   ["HUB 010", "Tap an order warning to fix it", "P1", "live", "Live", "The 3,000 mm bottom flashing line"],
   ["HUB 011", "Show or hide each takeoff on the plan", "P1", "live", "Live", "iPhone check"],
   ["HUB 012", "Lengths list inside a flashing", "P1", "live", "Live", "Flashing 5 totals"],
-  ["HUB 013", "Flashing order matches the takeoff", "P0", "wait", "Awaiting deploy", "Deploy, then 16 / 23 / 29 / 11 on the recorded job"],
-  ["HUB 014", "Company cladding defaults, one summary with Edit", "P1", "wait", "Awaiting deploy", "Migration 211, deploy, add Axon 400 Smooth"],
-  ["HUB 015", "Sheet joint added automatically", "P0", "wait", "Awaiting deploy", "Deploy, then the 3,600 mm wall"],
-  ["HUB 016", "Sheets shared across the wall", "P0", "dec", "Awaiting deploy", "8 sheets, not 7: your call"],
-  ["HUB 017", "Gable values kept while editing", "P1", "wait", "Awaiting deploy", "Enter the recorded gable and reload"],
-  ["HUB 018", "Drawing recovery cards you can trust", "P1", "wait", "Awaiting deploy", "Old cards gone after deploy"],
-  ["HUB 019", "Supplier with pickup address, editable", "P0", "wait", "Awaiting deploy", "Migration 210, deploy, add Fielders"],
-  ["HUB 020", "Reopen and revise an unplaced draft", "P0", "wait", "Awaiting deploy", "Reopen FO-001003 and revise it"],
-  ["HUB 021", "Plan reopens without downloading", "P2", "wait", "Awaiting deploy", "Reopen a plan in Aeroplane Mode"],
-  ["HUB 022", "Offcuts shared across walls", "P1", "wait", "Awaiting deploy", "Two Axon walls: check the cut list names each wall"],
+  ["HUB 013", "Flashing order matches the takeoff", "P0", "live", "Live", "16 / 23 / 29 / 11 on the recorded job"],
+  ["HUB 014", "Company cladding defaults, one summary with Edit", "P1", "live", "Live", "Migration 211, then add Axon 400 Smooth"],
+  ["HUB 015", "Sheet joint added automatically", "P0", "live", "Live", "the 3,600 mm wall"],
+  ["HUB 016", "Sheets shared across the wall", "P0", "dec", "Live", "8 sheets, not 7: your call"],
+  ["HUB 017", "Gable values kept while editing", "P1", "live", "Live", "Enter the recorded gable and reload"],
+  ["HUB 018", "Drawing recovery cards you can trust", "P1", "live", "Live", "Old cards gone after deploy"],
+  ["HUB 019", "Supplier with pickup address, editable", "P0", "live", "Live", "Migration 210, then add Fielders"],
+  ["HUB 020", "Reopen and revise an unplaced draft", "P0", "live", "Live", "Reopen FO-001003 and revise it"],
+  ["HUB 021", "Plan reopens without downloading", "P2", "live", "Live", "Reopen a plan in Aeroplane Mode"],
+  ["HUB 016 follow-up", "Offcuts shared across walls", "P1", "live", "Live", "Two Axon walls: check the cut list names each wall"],
+  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Being planned", "Answer the 4 questions below"],
+  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Being planned", "Answer the 4 questions below"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");
 function render(f) {
-  board.replaceChildren(...FAULTS.filter((x) => f === "all" || x[3] === f || (f === "wait" && x[3] === "dec")).map(([id, t, p, s, label, w]) => {
+  board.replaceChildren(...FAULTS.filter((x) => f === "all" || x[3] === f || (f === "live" && x[3] === "dec")).map(([id, t, p, s, label, w]) => {
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `<span class="id"></span><span class="t"></span><span class="pill ${PILL[s]}"></span><span class="w"></span>`;

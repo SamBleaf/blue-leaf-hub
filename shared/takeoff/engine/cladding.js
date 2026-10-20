@@ -449,7 +449,7 @@ function coatingDemand(res, ctx, { materialId, role, system, panelM2 }) {
 
 // ── C1 / Rendex: sheet layout ────────────────────────────────────────────────
 
-// ── HUB 016 / HUB 022: plan the sheets — one wall, or every wall of a material together ──────────────────────
+// ── HUB 016 / 016b: plan the sheets — one wall, or every wall of a material together ──────────────────────
 // What a wall's layout keeps aside for the material-level re-plan; never part of the layout payload sent anywhere.
 const SHEET_SHARE = new WeakMap();
 
@@ -556,7 +556,7 @@ function applySheetPlan(entries, { crossWall, planned = null }) {
 }
 
 /**
- * HUB 022 (Sam, 20 Oct 2026): share sheets AND offcuts across every wall of one fibre-cement material, not just within a
+ * HUB 016b (Sam, 20 Oct 2026): share sheets AND offcuts across every wall of one fibre-cement material, not just within a
  * wall — e.g. one wall's spare upper slices or a ripped strip's offcut serve a piece on another wall. Same rules as
  * HUB 016: one product, long factory edges kept, nothing turned over, an offcut only for a piece needing its edge.
  * `results` are that material's per-wall sheetLayout results; walls whose quantity is blocked keep nothing to share.
@@ -730,7 +730,7 @@ export function sheetLayout(wall, openings, product, rawOpts) {
 
   // HUB 016: fibre-cement sheets are SHARED across the wall — cut across their length only, long factory edges kept —
   // so the order is the planned stock sheets, never one sheet per cell (a foam system keeps one per cell). What the
-  // plan needs is kept aside so the material can re-plan ALL its walls together (HUB 022, shareSheetsAcrossWalls).
+  // plan needs is kept aside so the material can re-plan ALL its walls together (HUB 016b, shareSheetsAcrossWalls).
   let share = null;
   const cellSheets = res.demands.filter((d) => d.role === "sheet");
   if (base.family === "cladding" && cellSheets.length) {

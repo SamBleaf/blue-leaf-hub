@@ -34,7 +34,7 @@ export function planSheets({ pieces, lengthsMm, sheetWidthMm, coverMm, kerfMm = 
     const room = (l) => l.lengthMm - l.usedMm - (l.cellIds.length ? kerf : 0);
     const fitsSize = (l) => l.widthMm >= p.widthMm - EPS_MM && room(l) >= p.lengthMm - EPS_MM;
     // a lane ripped for a piece that needed NO factory edge can keep either edge (the piece came off whichever side) —
-    // it takes the edge of the first edged piece cut from it (HUB 022 review)
+    // it takes the edge of the first edged piece cut from it (HUB 016b review)
     const edgeOk = (l) => p.keep === "none" || l.edge === p.keep || l.edge === "both";
     const ok = lanes.filter((l) => fitsSize(l) && edgeOk(l)).sort((a, b) => a.widthMm - b.widthMm || room(a) - room(b) || (a.fromCellId < b.fromCellId ? -1 : 1));
     if (ok.length) {
@@ -62,7 +62,7 @@ export function planSheets({ pieces, lengthsMm, sheetWidthMm, coverMm, kerfMm = 
     const r = allocateLinear(slices.map((s) => ({ id: s.cellId, kind: "linear", unit: "piece", lengthMm: s.lengthMm, lengthKind: "cut", quantity: 1, identity, stockPolicy: policy, label: s.cellId })), { nodeBudget });
     const bars = (r.groups[0]?.bars || []).map((b) => ({ stockLengthMm: b.stockLengthMm, cellIds: b.cuts.map((c) => c.demandId).sort(), residualMm: b.residualMm }));
     // a slice within one saw cut of a stock length (e.g. 2,996 on a 3,000 sheet) takes that sheet whole: its trim cut
-    // falls in the waste at the end. Never dropped from the order (HUB 022 review: it used to be left off, ordering short).
+    // falls in the waste at the end. Never dropped from the order (HUB 016b review: it used to be left off, ordering short).
     const stock = [...lengthsMm].sort((a, b) => a - b);
     for (const u of r.groups[0]?.unavailable || []) {
       const L = stock.find((x) => x >= u.lengthMm - EPS_MM);
